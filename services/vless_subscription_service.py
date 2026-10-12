@@ -31,6 +31,8 @@ _FQDN_REGEX = re.compile(
 class VlessSubscriptionService:
     """Business logic for standard VLESS subscriptions."""
 
+    _ACTIVE_SERVER_SYNCS: set[int] = set()
+
     @staticmethod
     def generate_vless_links(
         subscription: VlessSubscription,
@@ -513,10 +515,16 @@ class VlessSubscriptionService:
         from database.repositories.servers_repo import is_vless_capable_server
         from services.subscription import SubscriptionService
 
+        srv_id = int(server_id)
+        if srv_id in cls._ACTIVE_SERVER_SYNCS:
+            logger.info("Server %s is already being synchronized; skipping duplicate invocation", srv_id)
+            return 0
+        cls._ACTIVE_SERVER_SYNCS.add(srv_id)
+
         synced_count = 0
         try:
             async with session_scope() as session:
-                server = await session.get(Server, server_id)
+                server = await session.get(Server, srv_id)
                 if not server or not server.is_active or not is_vless_capable_server(server):
                     return 0
                 target = cls._extract_node_targets([server])
@@ -547,18 +555,18 @@ class VlessSubscriptionService:
                     res_map = await cls._execute_sync_to_nodes(
                         target, sub.uuid, True, version=sub_ver, user_id=user.id, sub_id=sub.id
                     )
-                    if res_map.get(server_id) is True:
+                    if res_map.get(srv_id) is True:
                         synced_count += 1
                     else:
                         has_failures = True
                 except Exception as e:
                     has_failures = True
-                    logger.warning("Failed to provision sub_id=%s on new server %s: %s", sub.id, server_id, e)
+                    logger.warning("Failed to provision sub_id=%s on new server %s: %s", sub.id, srv_id, e)
 
             # Record synchronized epoch in server extra_data ONLY if all eligible subscriptions succeeded without failures
             if not has_failures and synced_count == total_eligible:
                 async with session_scope() as session:
-                    server = await session.get(Server, server_id)
+                    server = await session.get(Server, srv_id)
                     if server and server.xray_instance_epoch:
                         extra = dict(server.extra_data or {})
                         extra["vless_synced_epoch"] = server.xray_instance_epoch
@@ -567,13 +575,15 @@ class VlessSubscriptionService:
             else:
                 logger.warning(
                     "Bootstrap partial for server %s: synced %d of %d eligible (failures=%s). Will retry on next sweep.",
-                    server_id,
+                    srv_id,
                     synced_count,
                     total_eligible,
                     has_failures,
                 )
         except Exception as e:
-            logger.error("Error in sync_all_active_to_server for server %s: %s", server_id, e)
+            logger.error("Error in sync_all_active_to_server for server %s: %s", srv_id, e)
+        finally:
+            cls._ACTIVE_SERVER_SYNCS.discard(srv_id)
 
-        logger.info("Provisioned %d active VLESS subscriptions on new server %s", synced_count, server_id)
+        logger.info("Provisioned %d active VLESS subscriptions on new server %s", synced_count, srv_id)
         return synced_count

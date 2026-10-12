@@ -233,6 +233,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             self.assertEqual(resp.status, 200)
             self.assertEqual(resp.headers.get("Device-Limit-Exceeded"), "1")
             self.assertEqual(resp.headers.get("x-hwid-max-devices-reached"), "true")
+            self.assertEqual(resp.headers.get("x-hwid-limit"), "true")
             body = await resp.text()
             decoded = base64.b64decode(body).decode("utf-8")
             self.assertIn("127.0.0.1:443", decoded)
@@ -267,6 +268,9 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             self.assertIn("#🇳🇱 NL-Node-1", decoded)
             self.assertNotIn("?serverDescription=", decoded)
             self.assertNotIn("%F0%9F", decoded)
+            self.assertEqual(resp.headers.get("Content-Disposition"), 'inline; filename="Just1k.txt"; filename*=UTF-8\'\'Just1k.txt')
+            self.assertEqual(resp.headers.get("Sort-Order"), "none")
+            self.assertEqual(resp.headers.get("x-hwid-active"), "true")
             self.assertEqual(resp.headers.get("Device-Limit"), "3")
             self.assertEqual(resp.headers.get("Device-Active-Count"), "1")
             self.assertEqual(resp.headers.get("Hide-Url"), "1")
@@ -296,6 +300,77 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             self.assertEqual(resp.headers.get("Retry-After"), "60")
             mock_register.assert_not_called()
             self.assertEqual(self.default_sub.active_hwids, {})
+
+    async def test_empty_links_generation_returns_503_without_registering_hwid(self):
+        """If eligible servers exist but link generation produces empty list, return 503 without consuming quota."""
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        bad_server = Server(
+            id=2,
+            name="Broken Node",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            protocol="vless",
+            capabilities=["vless"],
+            extra_data={},  # No domain!
+        )
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=3),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 3)) as mock_register,
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[bad_server]),
+        ):
+            headers = {"X-Hwid": "test-client-hwid-99"}
+            resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
+            self.assertEqual(resp.status, 503)
+            self.assertEqual(resp.headers.get("Retry-After"), "60")
+            mock_register.assert_not_called()
+            self.assertEqual(self.default_sub.active_hwids, {})
+
+    async def test_device_metadata_os_version_and_device_hwid_header(self):
+        """X-Ver-OS is appended to os metadata and X-Device-Hwid is recognized."""
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        captured_meta = {}
+
+        async def fake_register_hwid(session, sub_id, hwid, effective_limit=None, ttl_hours=48, device_info=None):
+            nonlocal captured_meta
+            captured_meta = device_info or {}
+            return True, 1, 3
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=3),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", side_effect=fake_register_hwid),
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
+        ):
+            headers = {
+                "X-Device-Hwid": "test-alt-hwid-ios-123",
+                "X-Device-Os": "iOS",
+                "X-Ver-OS": "18.1",
+                "X-Device-Model": "iPhone15,2",
+            }
+            resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
+            self.assertEqual(resp.status, 200)
+            self.assertEqual(captured_meta.get("os"), "iOS 18.1")
+            self.assertEqual(captured_meta.get("model"), "iPhone15,2")
 
     async def test_financial_hold_user_returns_notice_200(self):
         mock_session = AsyncMock()
@@ -1009,6 +1084,15 @@ class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
         links = VlessSubscriptionService.generate_vless_links(sub, [srv])
         self.assertEqual(len(links), 1)
         self.assertTrue(links[0].startswith("vless://12345678-1234-5678-1234-567812345678@relay.example.com:443"))
+
+    async def test_sync_all_active_to_server_concurrency_guard(self):
+        """sync_all_active_to_server must reject concurrent execution for the same server_id."""
+        VlessSubscriptionService._ACTIVE_SERVER_SYNCS.add(99)
+        try:
+            res = await VlessSubscriptionService.sync_all_active_to_server(99)
+            self.assertEqual(res, 0)
+        finally:
+            VlessSubscriptionService._ACTIVE_SERVER_SYNCS.discard(99)
 
 
 class TestConnectionsScreenLayout(unittest.IsolatedAsyncioTestCase):

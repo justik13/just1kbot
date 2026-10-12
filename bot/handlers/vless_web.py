@@ -35,17 +35,41 @@ HWID_PATTERN = re.compile(r"^[a-zA-Z0-9_\-:]{3,128}$")
 
 def _extract_device_metadata(request: web.Request) -> dict[str, str]:
     headers = request.headers
-    raw_os = headers.get("X-Device-Os") or headers.get("X-OS") or headers.get("x-device-os") or ""
-    raw_model = headers.get("X-Device-Model") or headers.get("X-Model") or headers.get("x-device-model") or ""
+    raw_os = (
+        headers.get("X-Device-Os")
+        or headers.get("X-Device-OS")
+        or headers.get("X-OS")
+        or headers.get("x-device-os")
+        or ""
+    )
+    raw_ver = (
+        headers.get("X-Ver-Os")
+        or headers.get("X-Ver-OS")
+        or headers.get("x-ver-os")
+        or ""
+    )
+    raw_model = (
+        headers.get("X-Device-Model")
+        or headers.get("X-Device-MODEL")
+        or headers.get("X-Model")
+        or headers.get("x-device-model")
+        or ""
+    )
     ua = headers.get("User-Agent") or ""
 
     clean_os = re.sub(r"[^\w\s\.\-]", "", raw_os).strip()[:32]
+    clean_ver = re.sub(r"[^\w\s\.\-]", "", raw_ver).strip()[:16]
     clean_model = re.sub(r"[^\w\s\.\-]", "", raw_model).strip()[:48]
     clean_ua = re.sub(r"[\r\n]", " ", ua).strip()[:64]
 
     meta: dict[str, str] = {}
-    if clean_os:
+    if clean_os and clean_ver:
+        meta["os"] = f"{clean_os} {clean_ver}"[:32]
+    elif clean_os:
         meta["os"] = clean_os
+    elif clean_ver:
+        meta["os"] = clean_ver[:32]
+
     if clean_model:
         meta["model"] = clean_model
     if clean_ua:
@@ -123,6 +147,8 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
     raw_hwid = (
         request.headers.get("X-Hwid")
         or request.headers.get("X-HWID")
+        or request.headers.get("X-Device-Hwid")
+        or request.headers.get("X-Device-HWID")
         or request.headers.get("X-Device-Id")
         or request.headers.get("X-Device-ID")
         or ""
@@ -203,9 +229,14 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             headers["x-hwid-required"] = "true"
             return web.Response(status=403, text="HWID required", headers=headers)
 
-        # Pre-flight check: ensure eligible VLESS servers exist before mutating HWID quota
+        # Pre-flight check: ensure eligible VLESS servers exist and valid links can be generated
         servers = await VlessSubscriptionService.get_eligible_vless_servers(session)
         if not servers:
+            retry_headers = {**common_headers, "Retry-After": "60"}
+            return web.Response(status=503, text="No servers available", headers=retry_headers)
+
+        links = VlessSubscriptionService.generate_vless_links(sub, servers)
+        if not links:
             retry_headers = {**common_headers, "Retry-After": "60"}
             return web.Response(status=503, text="No servers available", headers=retry_headers)
 
@@ -241,7 +272,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                 "Device-Limit": str(effective_vless_limit),
                 "Device-Active-Count": str(active_hwid_count),
                 "x-hwid-max-devices-reached": "true",
-                "x-hwid-limit": str(effective_vless_limit),
+                "x-hwid-limit": "true",
                 "x-hwid-active": str(active_hwid_count),
                 "Hide-Url": "1",
                 "No-Limit-Enabled": "1",
@@ -250,10 +281,6 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             return web.Response(status=200, text=b64_payload, headers=headers)
 
         await session.refresh(sub)
-        links = VlessSubscriptionService.generate_vless_links(sub, servers)
-        if not links:
-            retry_headers = {**common_headers, "Retry-After": "60"}
-            return web.Response(status=503, text="No servers available", headers=retry_headers)
 
         # Trigger background sync with debouncing (300s) unless version is out of sync or pending revocations exist
         now = now_utc()
@@ -308,11 +335,14 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         response_headers = {
             **common_headers,
             "Content-Type": "text/plain; charset=utf-8",
+            "Content-Disposition": 'inline; filename="Just1k.txt"; filename*=UTF-8\'\'Just1k.txt',
             "Profile-Update-Interval": _get_vless_update_interval(),
             "Subscription-Userinfo": f"upload=0; download=0; total=0; expire={expire_ts}",
             "Device-Limit": str(effective_vless_limit),
             "Device-Active-Count": str(active_hwid_count),
             "Profile-Title": f"base64:{b64_title}",
+            "Sort-Order": "none",
+            "x-hwid-active": "true",
             "Hide-Url": "1",
             "No-Limit-Enabled": "1",
             "Support-Url": support_url,
