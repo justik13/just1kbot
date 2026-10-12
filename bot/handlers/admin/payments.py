@@ -30,7 +30,7 @@ from utils.text_limits import truncate_button_text
 router = Router()
 logger = logging.getLogger(__name__)
 
-PAYMENTS_PER_PAGE = 20
+PAYMENTS_PER_PAGE = 10
 
 
 def _normalize_dt(dt: datetime | None) -> datetime:
