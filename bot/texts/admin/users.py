@@ -447,7 +447,7 @@ ADMIN_USER_CARD_WHITE_INTERNET_BLOCK = """🌐 <b>Белый Интернет:</
 • <b>Сервер:</b> {origin_name}"""
 
 ADMIN_BTN_SUB_WI = "🌐 Белый Интернет"
-ADMIN_BTN_USER_PAYMENTS = "🧾 Платежи"
+ADMIN_BTN_USER_PAYMENTS = "💳 Операции и баланс"
 
 ADMIN_BAN_REASON_BTN_SPAM = "🚫 Спам / Абуз"
 ADMIN_BAN_REASON_BTN_FRAUD = "💳 Чарджбэк / Фрод"

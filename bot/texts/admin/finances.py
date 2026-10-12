@@ -3,7 +3,7 @@ from __future__ import annotations
 
 # --- Navigation buttons --------------------------------------------------
 ADMIN_BTN_BACK_TO_PAYMENTS = "← К списку платежей"
-ADMIN_BTN_BACK_TO_USER_PAYMENTS = "← К платежам пользователя"
+ADMIN_BTN_BACK_TO_USER_PAYMENTS = "← К операциям пользователя"
 ADMIN_BTN_PAGINATION_NEXT = "➡️"
 ADMIN_BTN_PAGINATION_PREV = "⬅️"
 
@@ -53,8 +53,11 @@ ADMIN_PAYMENTS_LIST_TITLE = """🛠 Админка › 💳 <b>Платежи ч
 ADMIN_PAYMENTS_LIST_EMPTY = """<i>Платежей пока нет</i>
 """
 ADMIN_PAYMENTS_USER_TITLE = """🛠 Админка › 💳 <b>Платежи пользователя</b> @{user_label}
-Страница {page} из {total_pages} (всего: {total_count})"""
-ADMIN_PAYMENTS_USER_EMPTY = "<i>Платежи пользователя не найдены.</i>"
+Страница {page} из {total_pages} (всего: {total_count})
+💰 <b>Баланс:</b> {balance_rub} ₽"""
+ADMIN_PAYMENTS_USER_EMPTY = "<i>Операции пользователя не найдены.</i>"
+ADMIN_PAYMENTS_USER_REGISTRY_TITLE = "<b>История операций:</b>"
+ADMIN_PAYMENTS_USER_REGISTRY_ROW = "• {status_icon} <b>{sign}{amount_rub} ₽</b> · <i>{created_at}</i>\n  └ {method_icon} {method_label} · {service_label}"
 ADMIN_PAYMENTS_ROW_ENTRY = "{status_icon} #{payment_id} · {user_label} · {amount_rub}₽"
 ADMIN_PAYMENT_STATUS_FALLBACK_ICON = "❓"
 ADMIN_PAYMENTS_GATEWAY_YOOKASSA = "ЮKassa"

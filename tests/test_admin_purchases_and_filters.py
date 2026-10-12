@@ -545,7 +545,8 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
         state = AsyncMock()
 
         with patch("bot.handlers.admin.payments.is_admin", return_value=True), \
-             patch("database.repositories.users_repo.get_user_by_telegram_id", return_value=user):
+             patch("database.repositories.users_repo.get_user_by_telegram_id", return_value=user), \
+             patch("database.repositories.account_ledger_repo.get_account_balance", return_value=MagicMock(available=Decimal("250.00"))):
             await show_user_payments_list(callback, state, session)
 
         # Verify that both count and order queries do not filter by payment_method in whereclause
@@ -559,11 +560,21 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
         rendered_text = callback.message.edit_text.call_args[0][0]
         self.assertIn("Платежи пользователя", rendered_text)
         self.assertNotIn("через ЮKassa", rendered_text)
+        self.assertIn("Баланс:</b> 250 ₽", rendered_text)
+        self.assertIn("История операций:", rendered_text)
+        self.assertIn("+300 ₽", rendered_text)
+        self.assertIn("-150 ₽", rendered_text)
+        self.assertIn("ЮKassa", rendered_text)
+        self.assertIn("Внутренний баланс", rendered_text)
 
         reply_markup = callback.message.edit_text.call_args[1]["reply_markup"]
         cb_datas = [btn.callback_data for row in reply_markup.inline_keyboard for btn in row]
         self.assertIn(f"admin_order_card:{order_yoo.id}", cb_datas)
         self.assertIn(f"admin_order_card:{order_wallet.id}", cb_datas)
+
+        btn_texts = [btn.text for row in reply_markup.inline_keyboard for btn in row]
+        self.assertTrue(any("+300 ₽ • ЮKassa" in t for t in btn_texts))
+        self.assertTrue(any("-150 ₽ • Баланс" in t for t in btn_texts))
 
 
 if __name__ == "__main__":

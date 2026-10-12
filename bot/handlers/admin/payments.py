@@ -335,7 +335,7 @@ async def show_user_payments_list(
     order_stmt = (
         select(Order)
         .where(Order.user_id == user.id)
-        .options(selectinload(Order.user))
+        .options(selectinload(Order.user), selectinload(Order.tariff))
         .order_by(Order.created_at.desc())
         .limit(needed)
     )
@@ -355,19 +355,29 @@ async def show_user_payments_list(
     )
     page_items = combined[offset : offset + PAYMENTS_PER_PAGE]
 
+    balance_rub = 0
+    try:
+        from database.repositories.account_ledger_repo import get_account_balance
+        balance_snap = await get_account_balance(session, user_id=user.id)
+        if balance_snap and hasattr(balance_snap, "available"):
+            balance_rub = int(balance_snap.available)
+    except Exception as exc:
+        logger.debug("Failed to get user balance: %s", exc)
+
     user_label = user.username or str(user.telegram_id)
     header = texts.ADMIN_PAYMENTS_USER_TITLE.format(
         user_label=user_label,
         page=page,
         total_pages=total_pages,
         total_count=total_payments,
-    ) + "\n\n"
+        balance_rub=balance_rub,
+    )
 
     builder = InlineKeyboardBuilder()
     if not page_items:
-        rendered = header + texts.ADMIN_PAYMENTS_USER_EMPTY
+        rendered = header + "\n\n" + texts.ADMIN_PAYMENTS_USER_EMPTY
     else:
-        rendered = header
+        registry_lines = []
         for item in page_items:
             if isinstance(item, Order):
                 display_status = order_display_status(item)
@@ -375,8 +385,66 @@ async def show_user_payments_list(
                     display_status,
                     texts.ADMIN_PAYMENT_STATUS_FALLBACK_ICON,
                 )
+                amount = int(item.amount_rub)
+                meta = item.metadata_ if isinstance(item.metadata_, dict) else {}
+                op = meta.get("operation")
+
+                if item.service_type == "topup":
+                    sign = "+"
+                    service_label = texts.ADMIN_ORDER_SERVICE_TOPUP
+                else:
+                    sign = "-"
+                    if item.tariff and getattr(item.tariff, "name", None):
+                        service_label = item.tariff.name
+                    elif item.service_type == "white_internet":
+                        if op == "add_device_slot":
+                            service_label = "Белый Интернет (+1 слот)"
+                        elif op == "renew":
+                            service_label = "Белый Интернет (Продление)"
+                        else:
+                            service_label = "Белый Интернет"
+                    elif item.service_type in ("standard", "awg"):
+                        service_label = "AWG"
+                    elif item.service_type == "vless":
+                        service_label = "VLESS"
+                    else:
+                        service_label = item.service_type
+
+                if item.payment_method == "yookassa":
+                    method_label = texts.ADMIN_PAYMENTS_GATEWAY_YOOKASSA
+                    method_btn = "ЮKassa"
+                    method_icon = "💳"
+                elif item.payment_method == "wallet":
+                    method_label = texts.ADMIN_PURCHASES_METHOD_WALLET
+                    method_btn = "Баланс"
+                    method_icon = "👛"
+                elif item.payment_method == "sbp":
+                    method_label = texts.ADMIN_PURCHASES_METHOD_SBP
+                    method_btn = "СБП"
+                    method_icon = "⚡"
+                elif item.payment_method in ("admin", "manual"):
+                    method_label = texts.ADMIN_PURCHASES_METHOD_ADMIN
+                    method_btn = "Админ"
+                    method_icon = "👤"
+                else:
+                    method_label = item.payment_method or texts.ADMIN_PURCHASES_METHOD_OTHER
+                    method_btn = method_label
+                    method_icon = "💳"
+
+                dt_str = format_datetime(item.created_at)
+                registry_lines.append(
+                    texts.ADMIN_PAYMENTS_USER_REGISTRY_ROW.format(
+                        status_icon=status_icon,
+                        sign=sign,
+                        amount_rub=amount,
+                        created_at=dt_str,
+                        method_icon=method_icon,
+                        method_label=method_label,
+                        service_label=service_label,
+                    )
+                )
                 button_text = truncate_button_text(
-                    f"{status_icon} #{str(item.id)[:8]} • {int(item.amount_rub)} ₽ ({format_datetime(item.created_at)})"
+                    f"{status_icon} #{str(item.id)[:8]} • {sign}{amount} ₽ • {method_btn}"
                 )
                 builder.button(
                     text=button_text,
@@ -388,13 +456,40 @@ async def show_user_payments_list(
                     display_status,
                     texts.ADMIN_PAYMENT_STATUS_FALLBACK_ICON,
                 )
+                amount = int(item.amount)
+                sign = "+"
+                method_label = texts.ADMIN_PAYMENTS_GATEWAY_YOOKASSA
+                method_btn = "ЮKassa"
+                method_icon = "💳"
+                service_label = texts.ADMIN_ORDER_SERVICE_TOPUP
+                dt_str = format_datetime(item.created_at)
+
+                registry_lines.append(
+                    texts.ADMIN_PAYMENTS_USER_REGISTRY_ROW.format(
+                        status_icon=status_icon,
+                        sign=sign,
+                        amount_rub=amount,
+                        created_at=dt_str,
+                        method_icon=method_icon,
+                        method_label=method_label,
+                        service_label=service_label,
+                    )
+                )
                 button_text = truncate_button_text(
-                    f"{status_icon} #{item.id} • {item.amount} ₽ ({format_datetime(item.created_at)})"
+                    f"{status_icon} #{item.id} • {sign}{amount} ₽ • {method_btn}"
                 )
                 builder.button(
                     text=button_text,
                     callback_data=f"admin_payment_card:{item.id}",
                 )
+
+        rendered = (
+            header
+            + "\n\n"
+            + texts.ADMIN_PAYMENTS_USER_REGISTRY_TITLE
+            + "\n"
+            + "\n".join(registry_lines)
+        )
 
     if page > 1:
         builder.button(
