@@ -2202,6 +2202,7 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
         session = AsyncMock(spec=AsyncSession)
         user = User(id=10, financial_hold=False)
         session.get.return_value = user
+        session.scalar = AsyncMock(return_value=user)
 
         with patch("services.order_service.get_account_balance") as mock_bal:
             mock_bal.return_value = MagicMock(debt=Decimal("0"), available=Decimal("500"))

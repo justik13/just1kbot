@@ -10,7 +10,6 @@ the notification debt for the credit-notify worker.
 
 from __future__ import annotations
 
-import inspect
 import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -66,23 +65,7 @@ async def notify_referrer_bonus(
         debt = dict(raw_debt)
         if "bonus_balance" not in debt and debt.get("user_id"):
             try:
-                begin_nested = getattr(session, "begin_nested", None)
-                if callable(begin_nested):
-                    savepoint = begin_nested()
-                    if hasattr(savepoint, "__aenter__"):
-                        async with savepoint:
-                            ref_balance = await get_account_balance(
-                                session, user_id=debt["user_id"]
-                            )
-                            debt["bonus_balance"] = int(ref_balance.bonus_available)
-                    else:
-                        if inspect.iscoroutine(savepoint):
-                            savepoint.close()
-                        ref_balance = await get_account_balance(
-                            session, user_id=debt["user_id"]
-                        )
-                        debt["bonus_balance"] = int(ref_balance.bonus_available)
-                else:
+                async with session.begin_nested():
                     ref_balance = await get_account_balance(
                         session, user_id=debt["user_id"]
                     )
@@ -135,8 +118,6 @@ async def notify_order_credited(
                 force_new=True,
                 custom_keyboard=kb,
             )
-            if (order.metadata_ or {}).get("referrer_notify_pending"):
-                await notify_referrer_bonus(bot, session, order)
         else:
             from database.repositories.account_ledger_repo import get_account_balance
             from utils.telegram import render_hub

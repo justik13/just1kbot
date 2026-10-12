@@ -1237,6 +1237,7 @@ class TestReferralFirstOrderDiscount(unittest.TestCase):
 
         session = AsyncMock()
         session.get = fake_get
+        session.scalar = AsyncMock(return_value=user)
         session.add = MagicMock()
         session.flush = AsyncMock()
 

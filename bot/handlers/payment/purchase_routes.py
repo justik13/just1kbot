@@ -22,7 +22,7 @@ from integrations.payment_gateways.base import PaymentCreationAmbiguousError
 from integrations.payment_gateways.factory import get_payment_gateway
 from services.maintenance_service import MaintenanceService
 from services.order_notifications import mark_notified
-from .credit_notify import build_tariff_success_card, notify_referrer_bonus
+from .credit_notify import build_tariff_success_card
 from services.order_service import (
     AccountDebtBlockedError,
     FinancialHoldBlockedError,
@@ -335,8 +335,6 @@ async def handle_order_check(
             # Push delivered straight to the user looking at the screen:
             # clear the debt so the credit-notify worker does not duplicate it.
             mark_notified(order)
-            if (order.metadata_ or {}).get("referrer_notify_pending"):
-                await notify_referrer_bonus(callback.bot, session, order)
             await safe_callback_answer(callback)
             return
 
@@ -401,8 +399,6 @@ async def handle_order_check(
                     custom_keyboard=kb,
                 )
                 mark_notified(paid_order)
-                if (paid_order.metadata_ or {}).get("referrer_notify_pending"):
-                    await notify_referrer_bonus(callback.bot, session, paid_order)
                 await safe_callback_answer(callback)
                 return
 
