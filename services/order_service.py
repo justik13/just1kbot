@@ -57,7 +57,10 @@ class OrderService:
     ) -> User | None:
         """Authoritative user read with row lock for the settlement boundary."""
         res = await session.scalar(
-            select(User).where(User.id == user_id).with_for_update()
+            select(User)
+            .where(User.id == user_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if isinstance(res, User):
             return res
@@ -87,10 +90,18 @@ class OrderService:
         mark_notify_pending(order)
         # Ledger records: ONLY topup credits user's bot wallet
         if order.service_type == "topup":
+            from decimal import ROUND_HALF_UP
+
             refunded_so_far = Decimal(
                 str((order.metadata_ or {}).get("refunded_amount_rub", "0"))
             )
-            net_topup = max(Decimal("0.00"), order.amount_rub - refunded_so_far)
+            effective_refunded = refunded_so_far.quantize(
+                Decimal("1"), rounding=ROUND_HALF_UP
+            )
+            order_amount = order.amount_rub.quantize(
+                Decimal("1"), rounding=ROUND_HALF_UP
+            )
+            net_topup = max(Decimal("0"), order_amount - effective_refunded)
             if net_topup > 0:
                 credit_meta = {"source": f"{order.payment_method}_topup"}
                 if was_canceled:

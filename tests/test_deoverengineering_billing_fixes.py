@@ -510,6 +510,7 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
         stmt = str(call_args.args[0].compile(compile_kwargs={"literal_binds": True}))
         self.assertIn("users.id = 10", stmt)
         self.assertIn("FOR UPDATE", stmt)
+        self.assertTrue(call_args.args[0]._execution_options.get("populate_existing"))
 
     async def test_handle_order_check_held_order_answers_blocked_notice(self):
         """handle_order_check for paid held order answers with PAYMENT_DISPUTE_BLOCKED_NOTICE."""
@@ -630,7 +631,7 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
         mock_revoke.assert_not_awaited()
 
     async def test_settle_benefits_net_topup_after_partial_refund_under_hold(self):
-        """_settle_benefits credits only net_topup if partially refunded while held."""
+        """_settle_benefits credits whole rubles net_topup even if partial refund had kopecks."""
         session = AsyncMock()
         order_uuid = uuid.uuid4()
         partially_refunded_order = Order(
@@ -640,7 +641,7 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
             amount_rub=Decimal("500.00"),
             status="paid",
             payment_method="yookassa",
-            metadata_={"refunded_amount_rub": "200.00"},
+            metadata_={"refunded_amount_rub": "150.50"},
         )
 
         with patch("services.order_service.create_order_credit", new=AsyncMock()) as mock_credit, \
@@ -651,7 +652,7 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
         mock_credit.assert_awaited_once_with(
             session,
             user_id=60,
-            amount_rub=Decimal("300.00"),
+            amount_rub=Decimal("349"),
             order_id=order_uuid,
             metadata={"source": "yookassa_topup"},
         )
@@ -659,7 +660,7 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
             session,
             purchaser_user_id=60,
             order_id=str(order_uuid),
-            topup_amount=Decimal("300.00"),
+            topup_amount=Decimal("349"),
         )
 
     async def test_notify_referrer_bonus_populates_bonus_balance(self):
@@ -695,6 +696,31 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(debt_arg["bonus_balance"], 150)
         self.assertEqual(debt_arg["bonus"], "50")
         mock_mark.assert_called_once_with(order)
+
+    async def test_notify_referrer_bonus_survives_db_error(self):
+        """notify_referrer_bonus catches DB exceptions safely and returns False without raising."""
+        session = AsyncMock()
+        order_uuid = uuid.uuid4()
+        order = Order(
+            id=order_uuid,
+            user_id=10,
+            service_type="topup",
+            amount_rub=Decimal("500.00"),
+            status="paid",
+            metadata_={
+                "referrer_notify_pending": {
+                    "user_id": 99,
+                    "telegram_id": 999111,
+                    "bonus": "50",
+                }
+            },
+        )
+        bot = AsyncMock()
+
+        with patch("database.repositories.account_ledger_repo.get_account_balance", new=AsyncMock(side_effect=RuntimeError("DB query timeout"))):
+            sent = await notify_referrer_bonus(bot, session, order)
+
+        self.assertFalse(sent)
 
 
 if __name__ == "__main__":

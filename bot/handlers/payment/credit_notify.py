@@ -61,12 +61,12 @@ async def notify_referrer_bonus(
     raw_debt = (order.metadata_ or {}).get("referrer_notify_pending")
     if not isinstance(raw_debt, dict) or not raw_debt.get("telegram_id"):
         return False
-    debt = dict(raw_debt)
-    if "bonus_balance" not in debt and debt.get("user_id"):
-        ref_balance = await get_account_balance(session, user_id=debt["user_id"])
-        debt["bonus_balance"] = int(ref_balance.bonus_available)
-
     try:
+        debt = dict(raw_debt)
+        if "bonus_balance" not in debt and debt.get("user_id"):
+            ref_balance = await get_account_balance(session, user_id=debt["user_id"])
+            debt["bonus_balance"] = int(ref_balance.bonus_available)
+
         sent = await _send_referrer_push(bot, debt)
         if sent:
             mark_referrer_notified(order)
