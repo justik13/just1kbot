@@ -6,6 +6,7 @@ import base64
 import html
 import logging
 import os
+from pathlib import Path
 import re
 
 from aiohttp import web
@@ -21,10 +22,15 @@ from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
 
 logger = logging.getLogger(__name__)
 
+_TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
+_LANDING_ACTIVE_HTML = (_TEMPLATES_DIR / "vless_landing_active.html").read_text(encoding="utf-8")
+_LANDING_INACTIVE_HTML = (_TEMPLATES_DIR / "vless_landing_inactive.html").read_text(encoding="utf-8")
+
 _ip_rate_limiter = HttpRateLimiter(rate_per_minute=60.0, burst=15)
 _token_rate_limiter = HttpRateLimiter(rate_per_minute=30.0, burst=10)
 
 HWID_PATTERN = re.compile(r"^[a-zA-Z0-9_\-:]{3,128}$")
+
 
 
 def _extract_device_metadata(request: web.Request) -> dict[str, str]:
@@ -69,11 +75,9 @@ def _render_vless_landing_html(bot_username: str = "just1kbot", is_active: bool 
     bot_link = f"https://t.me/{clean_bot}"
 
     if not is_active:
-        return texts.VLESS_LANDING_INACTIVE_HTML.format(
-            clean_bot=clean_bot,
-            bot_link=bot_link,
-        )
-    return texts.VLESS_LANDING_ACTIVE_HTML
+        return _LANDING_INACTIVE_HTML.replace("{clean_bot}", clean_bot).replace("{bot_link}", bot_link)
+    return _LANDING_ACTIVE_HTML
+
 
 
 

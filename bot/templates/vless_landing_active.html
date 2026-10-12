@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Подключение к сервису</title>
+    <style>
+        :root {
+            --bg-color: #0b0f19;
+            --card-bg: #151d30;
+            --text-main: #f8fafc;
+            --text-sub: #94a3b8;
+            --accent: #2563eb;
+            --accent-hover: #1d4ed8;
+            --btn-sec-bg: #1e293b;
+            --btn-sec-border: #334155;
+            --btn-sec-hover: #293548;
+            --success: #10b981;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+        }
+        .card {
+            width: 100%;
+            max-width: 440px;
+            background-color: var(--card-bg);
+            border: 1px solid var(--btn-sec-border);
+            border-radius: 20px;
+            padding: 28px 24px;
+            text-align: center;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+        }
+        .icon { font-size: 48px; margin-bottom: 16px; }
+        h1 { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
+        p.subtitle { font-size: 14px; color: var(--text-sub); margin-bottom: 24px; line-height: 1.5; }
+        .btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            width: 100%;
+            padding: 14px 18px;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            margin-bottom: 12px;
+            border: none;
+        }
+        .btn-primary { background-color: var(--accent); color: #ffffff; }
+        .btn-primary:hover { background-color: var(--accent-hover); }
+        .btn-secondary { background-color: var(--btn-sec-bg); color: var(--text-main); border: 1px solid var(--btn-sec-border); }
+        .btn-secondary:hover { background-color: var(--btn-sec-hover); }
+        .divider { height: 1px; background-color: var(--btn-sec-border); margin: 24px 0; }
+        .section-title { font-size: 13px; font-weight: 600; color: var(--text-sub); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; }
+        .store-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+        .store-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 10px;
+            border-radius: 10px;
+            background-color: var(--btn-sec-bg);
+            border: 1px solid var(--btn-sec-border);
+            color: var(--text-main);
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }
+        .store-btn:hover { background-color: var(--btn-sec-hover); }
+        .steps {
+            text-align: left;
+            background-color: rgba(0, 0, 0, 0.2);
+            border-radius: 12px;
+            padding: 14px 16px;
+            font-size: 13px;
+            color: var(--text-sub);
+            line-height: 1.6;
+        }
+        .steps ol { padding-left: 18px; }
+        .steps li { margin-bottom: 4px; }
+        .steps strong { color: var(--text-main); }
+        .copy-toast { display: none; margin-top: 8px; font-size: 13px; color: var(--success); font-weight: 500; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="icon">⚡️</div>
+        <h1>Подключение к сервису</h1>
+        <p class="subtitle">Открытие приложения для автоматической настройки доступа.</p>
+
+        <a id="deepLinkBtn" href="#" class="btn btn-primary">
+            <span>🚀 Открыть в приложении INCY</span>
+        </a>
+
+        <button id="copyBtn" class="btn btn-secondary" onclick="copyLink()">
+            <span>📋 Скопировать ссылку</span>
+        </button>
+        <div id="copyToast" class="copy-toast">Ссылка скопирована в буфер!</div>
+
+        <div class="divider"></div>
+
+        <div class="section-title">Приложение еще не установлено?</div>
+        <div class="store-buttons">
+            <a href="https://apps.apple.com/app/incy/id6756943388" target="_blank" rel="noopener" class="store-btn">🍏 App Store</a>
+            <a href="https://play.google.com/store/apps/details?id=llc.itdev.incy" target="_blank" rel="noopener" class="store-btn">🤖 Google Play</a>
+        </div>
+        <a href="https://github.com/INCY-DEV/incy-platforms/releases" target="_blank" rel="noopener" class="store-btn" style="margin-bottom: 16px;">💻 Скачать для ПК / APK (GitHub)</a>
+
+        <div class="steps">
+            <strong>Как подключить:</strong>
+            <ol>
+                <li>Установите приложение <strong>INCY</strong> по ссылкам выше.</li>
+                <li>Нажмите кнопку <strong>«Открыть в приложении INCY»</strong>.</li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        const subUrl = window.location.href;
+        const deepLink = "incy://add/" + subUrl;
+        const btn = document.getElementById("deepLinkBtn");
+        if (btn) {
+            btn.href = deepLink;
+        }
+
+        // Auto-redirect to INCY
+        try {
+            window.location.href = deepLink;
+        } catch (e) {}
+
+        function copyLink() {
+            navigator.clipboard.writeText(subUrl).then(function() {
+                const toast = document.getElementById("copyToast");
+                if (toast) {
+                    toast.textContent = "Ссылка скопирована в буфер!";
+                    toast.style.display = "block";
+                    setTimeout(function() { toast.style.display = "none"; }, 2500);
+                }
+            }).catch(function() {
+                const toast = document.getElementById("copyToast");
+                if (toast) {
+                    toast.textContent = "Не удалось скопировать";
+                    toast.style.display = "block";
+                }
+            });
+        }
+    </script>
+</body>
+</html>
