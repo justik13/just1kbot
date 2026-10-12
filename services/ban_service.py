@@ -270,6 +270,7 @@ class BanService:
         if locked_user is None or locked_user.is_deleted:
             return False, BanStatus.USER_NOT_FOUND
 
+        locked_user.is_banned = False
         await update_user(session, locked_user, is_banned=False)
 
         from database.repositories import vless_subscription_repo

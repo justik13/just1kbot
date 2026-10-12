@@ -2214,6 +2214,10 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
         with (
             patch("database.connection.session_scope", fake_session_scope),
             patch("services.subscription.SubscriptionService.check_vpn_access", return_value=True),
+            patch(
+                "services.xray_node_client.XrayNodeClient.check_health",
+                new=AsyncMock(return_value=(True, None, None)),
+            ),
             patch.object(VlessSubscriptionService, "_execute_sync_to_nodes") as mock_exec,
         ):
             # First sub succeeds, second fails
@@ -2252,6 +2256,10 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
         with (
             patch("database.connection.session_scope", fake_session_scope),
             patch("services.subscription.SubscriptionService.check_vpn_access", return_value=True),
+            patch(
+                "services.xray_node_client.XrayNodeClient.check_health",
+                new=AsyncMock(return_value=(True, None, None)),
+            ),
             patch.object(VlessSubscriptionService, "_execute_sync_to_nodes", return_value={56: True}),
         ):
             synced = await VlessSubscriptionService.sync_all_active_to_server(56)
@@ -2671,6 +2679,7 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
         with (
             patch("services.ban_service.update_user", new_callable=AsyncMock),
             patch("services.ban_service.AuditService.log_action", new_callable=AsyncMock),
+            patch("services.subscription.SubscriptionService.check_vpn_access", return_value=True),
             patch(
                 "database.repositories.vless_subscription_repo.get_subscription_by_user_id",
                 new_callable=AsyncMock,
