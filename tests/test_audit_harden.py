@@ -643,6 +643,8 @@ class AdminHeldCardTests(unittest.IsolatedAsyncioTestCase):
 
         held = MagicMock(status="paid", metadata_={"settlement_held": True})
         self.assertEqual(order_display_status(held), "requires_manual_review")
+        refunded_held = MagicMock(status="refunded", metadata_={"settlement_held": True})
+        self.assertEqual(order_display_status(refunded_held), "refunded")
         clean = MagicMock(status="paid", metadata_={})
         self.assertEqual(order_display_status(clean), "completed")
 

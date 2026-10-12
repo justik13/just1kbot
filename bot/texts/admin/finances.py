@@ -52,12 +52,24 @@ ADMIN_PAYMENTS_LIST_TITLE = """🛠 Админка › 💳 <b>Платежи ч
 """
 ADMIN_PAYMENTS_LIST_EMPTY = """<i>Платежей пока нет</i>
 """
-ADMIN_PAYMENTS_USER_TITLE = """🛠 Админка › 💳 <b>Платежи пользователя</b> @{user_label}
+ADMIN_PAYMENTS_USER_TITLE = """🛠 Админка › 💳 <b>Платежи и покупки</b> @{user_label}
 Страница {page} из {total_pages} (всего: {total_count})"""
-ADMIN_PAYMENTS_USER_EMPTY = "<i>Платежи пользователя не найдены.</i>"
+ADMIN_PAYMENTS_USER_EMPTY = "<i>Заказы и платежи пользователя не найдены.</i>"
+ADMIN_PAYMENTS_USER_REGISTRY_TITLE = "<b>Список заказов и платежей:</b>"
+ADMIN_PAYMENTS_USER_REGISTRY_ROW = "• {status_icon} <b>{sign}{amount_rub} ₽</b>{status_note} · <i>{created_at}</i>\n  └ {method_icon} {method_label} · {service_label}"
 ADMIN_PAYMENTS_ROW_ENTRY = "{status_icon} #{payment_id} · {user_label} · {amount_rub}₽"
 ADMIN_PAYMENT_STATUS_FALLBACK_ICON = "❓"
 ADMIN_PAYMENTS_GATEWAY_YOOKASSA = "ЮKassa"
+ADMIN_PAYMENT_SERVICE_WI_SLOT = "Белый Интернет (+1 слот)"
+ADMIN_PAYMENT_SERVICE_WI_QUOTA = "Белый Интернет (Докупка трафика)"
+ADMIN_PAYMENT_SERVICE_WI_RENEW = "Белый Интернет (Продление)"
+ADMIN_PAYMENT_SERVICE_WI_TRIAL = "Белый Интернет (Триал)"
+ADMIN_PAYMENT_SERVICE_WI_DEFAULT = "Белый Интернет"
+ADMIN_PAYMENT_SERVICE_RENEW_FMT = "{name} (Продление)"
+ADMIN_PAYMENT_SERVICE_CHANGE_FMT = "{name} (Смена тарифа)"
+ADMIN_PAYMENT_PARTIAL_REFUND_NOTE = " (возврат {refunded_rub} ₽)"
+ADMIN_PAYMENT_STATUS_NOTE = " ({status_name})"
+ADMIN_PAYMENT_METHOD_BTN_ADMIN = "Админ"
 ADMIN_PURCHASES_ROW_BUTTON_TEMPLATE = "🛒 #{numeric_id} | {user_label} | {amount}"
 
 # --- Payment card ----------------------------------------------------------

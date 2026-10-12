@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 import logging
 import math
 import uuid
@@ -30,7 +31,7 @@ from utils.text_limits import truncate_button_text
 router = Router()
 logger = logging.getLogger(__name__)
 
-PAYMENTS_PER_PAGE = 20
+PAYMENTS_PER_PAGE = 10
 
 
 def _normalize_dt(dt: datetime | None) -> datetime:
@@ -74,14 +75,14 @@ def payment_display_status(payment) -> str:
 
 
 def order_display_status(order: Order) -> str:
+    if order.status == "refunded":
+        return "refunded"
     if (order.metadata_ or {}).get("settlement_held"):
         return "requires_manual_review"
     if order.status == "paid":
         return "completed"
     if order.status == "canceled":
         return "cancelled"
-    if order.status == "refunded":
-        return "refunded"
     if order.status == "pending":
         return "pending"
     return "failed"
@@ -335,7 +336,7 @@ async def show_user_payments_list(
     order_stmt = (
         select(Order)
         .where(Order.user_id == user.id)
-        .options(selectinload(Order.user))
+        .options(selectinload(Order.user), selectinload(Order.tariff))
         .order_by(Order.created_at.desc())
         .limit(needed)
     )
@@ -361,13 +362,13 @@ async def show_user_payments_list(
         page=page,
         total_pages=total_pages,
         total_count=total_payments,
-    ) + "\n\n"
+    )
 
     builder = InlineKeyboardBuilder()
     if not page_items:
-        rendered = header + texts.ADMIN_PAYMENTS_USER_EMPTY
+        rendered = header + "\n\n" + texts.ADMIN_PAYMENTS_USER_EMPTY
     else:
-        rendered = header
+        registry_lines = []
         for item in page_items:
             if isinstance(item, Order):
                 display_status = order_display_status(item)
@@ -375,8 +376,130 @@ async def show_user_payments_list(
                     display_status,
                     texts.ADMIN_PAYMENT_STATUS_FALLBACK_ICON,
                 )
+                status_name = texts.PAYMENT_STATUS_NAMES.get(
+                    display_status,
+                    display_status,
+                )
+                amount = int(item.amount_rub)
+                meta = item.metadata_ if isinstance(item.metadata_, dict) else {}
+                op = meta.get("operation")
+
+                refunded_rub = 0
+                refunded_raw = meta.get("refunded_amount_rub")
+                if refunded_raw is not None:
+                    try:
+                        refunded_rub = int(Decimal(str(refunded_raw)))
+                    except (InvalidOperation, ValueError, TypeError):
+                        refunded_rub = 0
+
+                if display_status == "completed":
+                    if amount == 0:
+                        sign = ""
+                    else:
+                        sign = "+" if item.service_type == "topup" else "-"
+                    if 0 < refunded_rub < amount:
+                        status_note = texts.ADMIN_PAYMENT_PARTIAL_REFUND_NOTE.format(
+                            refunded_rub=refunded_rub
+                        )
+                    else:
+                        status_note = ""
+                else:
+                    sign = ""
+                    status_note = texts.ADMIN_PAYMENT_STATUS_NOTE.format(
+                        status_name=status_name
+                    )
+
+                if item.service_type == "topup":
+                    service_label = texts.ADMIN_ORDER_SERVICE_TOPUP
+                elif item.service_type == "white_internet":
+                    t_bytes = (
+                        item.traffic_bytes
+                        if isinstance(getattr(item, "traffic_bytes", None), (int, float))
+                        else 0
+                    )
+                    d_days = (
+                        item.duration_days
+                        if isinstance(getattr(item, "duration_days", None), (int, float))
+                        else 0
+                    )
+                    d_limit = (
+                        item.device_limit
+                        if isinstance(getattr(item, "device_limit", None), (int, float))
+                        else 0
+                    )
+                    if op == "add_device_slot" or (
+                        op == "topup_or_device_slot" and d_limit and not t_bytes and d_days == 0
+                    ):
+                        service_label = texts.ADMIN_PAYMENT_SERVICE_WI_SLOT
+                    elif op in ("topup", "topup_quota") or (
+                        op == "topup_or_device_slot" and t_bytes > 0 and d_days == 0
+                    ):
+                        service_label = texts.ADMIN_PAYMENT_SERVICE_WI_QUOTA
+                    elif op == "renew":
+                        service_label = texts.ADMIN_PAYMENT_SERVICE_WI_RENEW
+                    elif op == "trial":
+                        service_label = texts.ADMIN_PAYMENT_SERVICE_WI_TRIAL
+                    else:
+                        service_label = texts.ADMIN_PAYMENT_SERVICE_WI_DEFAULT
+                else:
+                    if item.tariff and getattr(item.tariff, "name", None):
+                        base_service_name = item.tariff.name
+                    elif meta.get("tariff_name"):
+                        base_service_name = str(meta["tariff_name"])
+                    elif item.service_type in ("standard", "awg"):
+                        base_service_name = "AWG"
+                    elif item.service_type == "vless":
+                        base_service_name = "VLESS"
+                    else:
+                        base_service_name = item.service_type
+
+                    if op == "change" or meta.get("is_tariff_change"):
+                        service_label = texts.ADMIN_PAYMENT_SERVICE_CHANGE_FMT.format(
+                            name=base_service_name
+                        )
+                    elif op == "renew" or meta.get("is_renewal"):
+                        service_label = texts.ADMIN_PAYMENT_SERVICE_RENEW_FMT.format(
+                            name=base_service_name
+                        )
+                    else:
+                        service_label = base_service_name
+
+                if item.payment_method == "yookassa":
+                    method_label = texts.ADMIN_PAYMENTS_GATEWAY_YOOKASSA
+                    method_btn = texts.ADMIN_PAYMENTS_GATEWAY_YOOKASSA
+                    method_icon = "💳"
+                elif item.payment_method == "wallet":
+                    method_label = texts.ADMIN_PURCHASES_METHOD_WALLET
+                    method_btn = texts.ADMIN_USERS_BALANCE_BALANCE
+                    method_icon = "👛"
+                elif item.payment_method == "sbp":
+                    method_label = texts.ADMIN_PURCHASES_METHOD_SBP
+                    method_btn = texts.ADMIN_PURCHASES_METHOD_SBP
+                    method_icon = "⚡"
+                elif item.payment_method in ("admin", "manual"):
+                    method_label = texts.ADMIN_PURCHASES_METHOD_ADMIN
+                    method_btn = texts.ADMIN_PAYMENT_METHOD_BTN_ADMIN
+                    method_icon = "👤"
+                else:
+                    method_label = item.payment_method or texts.ADMIN_PURCHASES_METHOD_OTHER
+                    method_btn = method_label
+                    method_icon = "💳"
+
+                dt_str = format_datetime(item.created_at)
+                registry_lines.append(
+                    texts.ADMIN_PAYMENTS_USER_REGISTRY_ROW.format(
+                        status_icon=status_icon,
+                        sign=sign,
+                        amount_rub=amount,
+                        status_note=status_note,
+                        created_at=dt_str,
+                        method_icon=method_icon,
+                        method_label=method_label,
+                        service_label=service_label,
+                    )
+                )
                 button_text = truncate_button_text(
-                    f"{status_icon} #{str(item.id)[:8]} • {int(item.amount_rub)} ₽ ({format_datetime(item.created_at)})"
+                    f"{status_icon} #{str(item.id)[:8]} • {sign}{amount} ₽{status_note} • {method_btn}"
                 )
                 builder.button(
                     text=button_text,
@@ -388,13 +511,52 @@ async def show_user_payments_list(
                     display_status,
                     texts.ADMIN_PAYMENT_STATUS_FALLBACK_ICON,
                 )
+                status_name = texts.PAYMENT_STATUS_NAMES.get(
+                    display_status,
+                    display_status,
+                )
+                amount = int(item.amount)
+                if display_status == "completed":
+                    sign = "+"
+                    status_note = ""
+                else:
+                    sign = ""
+                    status_note = texts.ADMIN_PAYMENT_STATUS_NOTE.format(
+                        status_name=status_name
+                    )
+                method_label = texts.ADMIN_PAYMENTS_GATEWAY_YOOKASSA
+                method_btn = texts.ADMIN_PAYMENTS_GATEWAY_YOOKASSA
+                method_icon = "💳"
+                service_label = texts.ADMIN_ORDER_SERVICE_TOPUP
+                dt_str = format_datetime(item.created_at)
+
+                registry_lines.append(
+                    texts.ADMIN_PAYMENTS_USER_REGISTRY_ROW.format(
+                        status_icon=status_icon,
+                        sign=sign,
+                        amount_rub=amount,
+                        status_note=status_note,
+                        created_at=dt_str,
+                        method_icon=method_icon,
+                        method_label=method_label,
+                        service_label=service_label,
+                    )
+                )
                 button_text = truncate_button_text(
-                    f"{status_icon} #{item.id} • {item.amount} ₽ ({format_datetime(item.created_at)})"
+                    f"{status_icon} #{item.id} • {sign}{amount} ₽{status_note} • {method_btn}"
                 )
                 builder.button(
                     text=button_text,
                     callback_data=f"admin_payment_card:{item.id}",
                 )
+
+        rendered = (
+            header
+            + "\n\n"
+            + texts.ADMIN_PAYMENTS_USER_REGISTRY_TITLE
+            + "\n"
+            + "\n".join(registry_lines)
+        )
 
     if page > 1:
         builder.button(
