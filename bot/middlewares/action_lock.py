@@ -63,6 +63,8 @@ LOCKED_ACTION_PREFIXES = (
     "wl_add_device_confirm",
     # Подключение по ссылке (VLESS).
     "vless_sub_reset",
+    "admin_vless_hwid_reset:",
+    "admin_vless_token_rotate:",
     # Админские действия Белый Интернет.
     "admin_wi_traffic_add:",
     "admin_wi_traffic_reset_apply:",

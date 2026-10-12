@@ -279,6 +279,10 @@ class BanService:
         if vless_sub and SubscriptionService.check_vpn_access(locked_user):
             vless_sub.is_active = True
             vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1
+            if vless_sub.uuid and vless_sub.pending_revoked_uuids:
+                vless_sub.pending_revoked_uuids = [
+                    u for u in vless_sub.pending_revoked_uuids if u != vless_sub.uuid
+                ]
             session.add(vless_sub)
             VlessSubscriptionService.ensure_synced_background(user.id, is_active=True, session=session)
 

@@ -531,6 +531,28 @@ class VlessSubscriptionService:
                 if not target:
                     return 0
 
+            # Pre-flight health check to avoid sequential timeout storms on unreachable nodes
+            srv_tuple = target[0]
+            try:
+                from services.xray_node_client import XrayNodeClient
+                async with XrayNodeClient(timeout=3.0, max_retries=1) as client:
+                    is_healthy, err, _ = await client.check_health(srv_tuple[1], srv_tuple[2])
+                    if not is_healthy:
+                        logger.warning(
+                            "Server %s is unhealthy during bootstrap pre-flight (%s); deferring sweep",
+                            srv_id,
+                            err,
+                        )
+                        return 0
+            except Exception as e:
+                logger.warning(
+                    "Server %s is unreachable during bootstrap pre-flight (%s); deferring sweep",
+                    srv_id,
+                    e,
+                )
+                return 0
+
+            async with session_scope() as session:
                 stmt = (
                     select(VlessSubscription, User)
                     .join(User, User.id == VlessSubscription.user_id)

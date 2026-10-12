@@ -2643,5 +2643,51 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
             self.assertGreater(sub.updated_at, old_time)
             mock_session.flush.assert_called()
 
+    async def test_unban_removes_current_uuid_from_pending_revocations(self):
+        from database.models import User, VlessSubscription
+        from services.ban_service import BanService
+        from datetime import datetime, timezone, timedelta
+
+        user = User(
+            id=42,
+            telegram_id=999,
+            is_banned=True,
+            is_deleted=False,
+            subscription_end=datetime.now(timezone.utc) + timedelta(days=10),
+        )
+        sub = VlessSubscription(
+            id=1,
+            user_id=42,
+            token="token1234567890123456",
+            uuid="active-uuid-to-keep",
+            is_active=False,
+            version=1,
+            pending_revoked_uuids=["active-uuid-to-keep", "old-uuid-to-revoke"],
+        )
+
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = user
+
+        with (
+            patch("services.ban_service.update_user", new_callable=AsyncMock),
+            patch("services.ban_service.AuditService.log_action", new_callable=AsyncMock),
+            patch(
+                "database.repositories.vless_subscription_repo.get_subscription_by_user_id",
+                new_callable=AsyncMock,
+                return_value=sub,
+            ),
+            patch(
+                "services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"
+            ),
+        ):
+            success, status = await BanService._unban_user(
+                session=mock_session, admin_id=1, user=user, telegram_id=999
+            )
+            self.assertTrue(success)
+            self.assertTrue(sub.is_active)
+            self.assertEqual(sub.version, 2)
+            self.assertEqual(sub.pending_revoked_uuids, ["old-uuid-to-revoke"])
+            self.assertNotIn("active-uuid-to-keep", sub.pending_revoked_uuids)
+
 
 

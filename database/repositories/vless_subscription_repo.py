@@ -170,9 +170,14 @@ async def register_hwid_atomic(
         return False, 0, max(0, effective_limit or 0)
     sub_user_id = getattr(raw_sub_user_id, "user_id", raw_sub_user_id)
 
-    # 1. Fetch User row (populate_existing=True guarantees fresh attributes in Identity Map)
+    # 1. Lock User row FIRST (populate_existing=True guarantees fresh attributes in Identity Map)
     from database.models import User
-    user_stmt = select(User).where(User.id == sub_user_id).execution_options(populate_existing=True)
+    user_stmt = (
+        select(User)
+        .where(User.id == sub_user_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     user = await _execute_scalar_one_or_none(session, user_stmt)
 
     # 2. Lock VlessSubscription row SECOND (populate_existing=True guarantees fresh attributes)
@@ -207,14 +212,9 @@ async def register_hwid_atomic(
             VPNProfile.user_id == getattr(sub, "user_id", None),
             VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
         )
-        awg_res = session.execute(awg_stmt)
-        if inspect.isawaitable(awg_res):
-            awg_res = await awg_res
-        awg_scalar = getattr(awg_res, "scalar_one", None) or getattr(awg_res, "scalar", None) or getattr(awg_res, "scalar_one_or_none", None)
-        awg_val = awg_scalar() if callable(awg_scalar) else 0
-        if inspect.isawaitable(awg_val):
-            awg_val = await awg_val
-        awg_count = awg_val if isinstance(awg_val, int) else 0
+        awg_count = (await _execute_scalar_one_or_none(session, awg_stmt)) or 0
+        if not isinstance(awg_count, int):
+            awg_count = 0
 
         user_limit = (
             await SubscriptionService.get_effective_device_limit(session, user)
@@ -295,7 +295,12 @@ async def reset_hwids(
     Returns:
         tuple[old_uuid, new_uuid] or (None, None) if subscription not found.
     """
-    stmt = select(VlessSubscription).where(VlessSubscription.id == subscription_id).with_for_update()
+    stmt = (
+        select(VlessSubscription)
+        .where(VlessSubscription.id == subscription_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     sub = await _execute_scalar_one_or_none(session, stmt)
     if isinstance(sub, VlessSubscription):
         if not sub.active_hwids:
@@ -325,7 +330,12 @@ async def rotate_token(
     Returns:
         tuple[new_token, old_uuid, new_uuid]
     """
-    stmt = select(VlessSubscription).where(VlessSubscription.id == subscription_id).with_for_update()
+    stmt = (
+        select(VlessSubscription)
+        .where(VlessSubscription.id == subscription_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     sub = await _execute_scalar_one_or_none(session, stmt)
     if not isinstance(sub, VlessSubscription):
         raise ValueError(f"VlessSubscription {subscription_id} not found")
@@ -352,7 +362,12 @@ async def pop_pending_revoked_uuid(
     uuid_to_remove: str,
 ) -> None:
     """Removes a successfully deprovisioned UUID from pending_revoked_uuids under row lock."""
-    stmt = select(VlessSubscription).where(VlessSubscription.id == subscription_id).with_for_update()
+    stmt = (
+        select(VlessSubscription)
+        .where(VlessSubscription.id == subscription_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     sub = await _execute_scalar_one_or_none(session, stmt)
     if isinstance(sub, VlessSubscription) and sub.pending_revoked_uuids:
         sub.pending_revoked_uuids = [u for u in sub.pending_revoked_uuids if u != uuid_to_remove]
@@ -394,18 +409,9 @@ async def bump_subscription_version(
         select(VlessSubscription)
         .where(VlessSubscription.id == subscription_id)
         .with_for_update()
+        .execution_options(populate_existing=True)
     )
-    res = session.execute(stmt)
-    if inspect.isawaitable(res):
-        res = await res
-    scalar = getattr(res, "scalar_one_or_none", None)
-    if callable(scalar):
-        val = scalar()
-        if inspect.isawaitable(val):
-            val = await val
-        sub = val if isinstance(val, VlessSubscription) else None
-    else:
-        sub = None
+    sub = await _execute_scalar_one_or_none(session, stmt)
     if sub:
         sub.version = (sub.version or 1) + 1
         await session.flush()
