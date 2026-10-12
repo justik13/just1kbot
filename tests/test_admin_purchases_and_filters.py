@@ -617,7 +617,7 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
                 payment_method="yookassa",
                 created_at=base_dt - timedelta(minutes=2),
                 user=user,
-                metadata_={"refunded_amount_rub": "150.00"},
+                metadata_={},
             ),
             Order(
                 id=uuid.uuid4(),
@@ -628,7 +628,7 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
                 payment_method="yookassa",
                 created_at=base_dt - timedelta(minutes=3),
                 user=user,
-                metadata_={"settlement_held": True, "refunded_amount_rub": "300.00"},
+                metadata_={"settlement_held": True},
             ),
             Order(
                 id=uuid.uuid4(),
@@ -723,8 +723,8 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
         # Zero-cost paid orders must NOT show -0 ₽
         self.assertIn("<b>0 ₽</b>", rendered_text)
         self.assertNotIn("-0 ₽", rendered_text)
-        # Partial refund on paid order shows both sign and refunded amount note
-        self.assertIn("<b>+500 ₽</b> (возврат 150 ₽)", rendered_text)
+        # Paid order shows sign
+        self.assertIn("<b>+500 ₽</b>", rendered_text)
         # Service labels prioritize operation even when tariff is attached
         self.assertIn("Белый Интернет (Продление)", rendered_text)
         self.assertIn("Белый Интернет (Докупка трафика)", rendered_text)

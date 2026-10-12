@@ -635,29 +635,29 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(order.status, "refunded")
         mock_revoke.assert_not_awaited()
 
-    async def test_settle_benefits_net_topup_after_partial_refund_under_hold(self):
-        """_settle_benefits credits whole rubles net_topup even if partial refund had kopecks."""
+    async def test_settle_benefits_credits_full_topup_amount(self):
+        """_settle_benefits credits full order amount on settlement."""
         session = AsyncMock()
         order_uuid = uuid.uuid4()
-        partially_refunded_order = Order(
+        topup_order = Order(
             id=order_uuid,
             user_id=60,
             service_type="topup",
             amount_rub=Decimal("500.00"),
             status="paid",
             payment_method="yookassa",
-            metadata_={"refunded_amount_rub": "150.50"},
+            metadata_={},
         )
 
         with patch("services.order_service.create_order_credit", new=AsyncMock()) as mock_credit, \
              patch("services.order_service.FulfillmentService.fulfill_order", new=AsyncMock()), \
              patch("services.referral_bonus.grant_referral_bonus_for_topup", new=AsyncMock(return_value=MagicMock(referrer_bonus=Decimal("0"), referrer_user_id=None))) as mock_bonus:
-            await OrderService._settle_benefits(session, partially_refunded_order, was_canceled=False)
+            await OrderService._settle_benefits(session, topup_order, was_canceled=False)
 
         mock_credit.assert_awaited_once_with(
             session,
             user_id=60,
-            amount_rub=Decimal("349"),
+            amount_rub=Decimal("500.00"),
             order_id=order_uuid,
             metadata={"source": "yookassa_topup"},
         )
@@ -665,7 +665,7 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
             session,
             purchaser_user_id=60,
             order_id=str(order_uuid),
-            topup_amount=Decimal("349"),
+            topup_amount=Decimal("500.00"),
         )
 
 

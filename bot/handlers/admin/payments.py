@@ -1,5 +1,4 @@
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
 import logging
 import math
 import uuid
@@ -383,25 +382,12 @@ async def show_user_payments_list(
                 meta = item.metadata_ if isinstance(item.metadata_, dict) else {}
                 op = meta.get("operation")
 
-                refunded_rub = 0
-                refunded_raw = meta.get("refunded_amount_rub")
-                if refunded_raw is not None:
-                    try:
-                        refunded_rub = int(Decimal(str(refunded_raw)))
-                    except (InvalidOperation, ValueError, TypeError):
-                        refunded_rub = 0
-
                 if display_status == "completed":
                     if amount == 0:
                         sign = ""
                     else:
                         sign = "+" if item.service_type == "topup" else "-"
-                    if 0 < refunded_rub < amount:
-                        status_note = texts.ADMIN_PAYMENT_PARTIAL_REFUND_NOTE.format(
-                            refunded_rub=refunded_rub
-                        )
-                    else:
-                        status_note = ""
+                    status_note = ""
                 else:
                     sign = ""
                     status_note = texts.ADMIN_PAYMENT_STATUS_NOTE.format(

@@ -75,57 +75,45 @@ class OrderService:
         mark_notify_pending(order)
         # Ledger records: ONLY topup credits user's bot wallet
         if order.service_type == "topup":
-            from decimal import ROUND_HALF_UP
-
-            refunded_so_far = Decimal(
-                str((order.metadata_ or {}).get("refunded_amount_rub", "0"))
+            credit_meta = {"source": f"{order.payment_method}_topup"}
+            if was_canceled:
+                credit_meta["revived"] = True
+            await create_order_credit(
+                session,
+                user_id=order.user_id,
+                amount_rub=order.amount_rub,
+                order_id=order.id,
+                metadata=credit_meta,
             )
-            effective_refunded = refunded_so_far.quantize(
-                Decimal("1"), rounding=ROUND_HALF_UP
-            )
-            order_amount = order.amount_rub.quantize(
-                Decimal("1"), rounding=ROUND_HALF_UP
-            )
-            net_topup = max(Decimal("0"), order_amount - effective_refunded)
-            if net_topup > 0:
-                credit_meta = {"source": f"{order.payment_method}_topup"}
-                if was_canceled:
-                    credit_meta["revived"] = True
-                await create_order_credit(
-                    session,
-                    user_id=order.user_id,
-                    amount_rub=net_topup,
-                    order_id=order.id,
-                    metadata=credit_meta,
-                )
 
-                from services.referral_bonus import grant_referral_bonus_for_topup
+            from services.referral_bonus import grant_referral_bonus_for_topup
 
-                grant_result = await grant_referral_bonus_for_topup(
-                    session,
-                    purchaser_user_id=order.user_id,
-                    order_id=str(order.id),
-                    topup_amount=net_topup,
-                )
-                if (
-                    grant_result.referrer_bonus > 0
-                    and grant_result.referrer_user_id is not None
-                ):
-                    referrer_meta = dict(order.metadata_ or {})
-                    referrer_meta["referrer_notify_pending"] = {
-                        "user_id": grant_result.referrer_user_id,
-                        "telegram_id": grant_result.referrer_telegram_id,
-                        "bonus": str(grant_result.referrer_bonus),
-                        "bonus_rate_pct": grant_result.bonus_rate_pct,
-                        "tier_upgraded": grant_result.tier_upgraded,
-                        "new_tier_name": grant_result.new_tier_name,
-                        "new_rate_pct": grant_result.new_rate_pct,
-                    }
-                    order.metadata_ = referrer_meta
+            grant_result = await grant_referral_bonus_for_topup(
+                session,
+                purchaser_user_id=order.user_id,
+                order_id=str(order.id),
+                topup_amount=order.amount_rub,
+            )
+            if (
+                grant_result.referrer_bonus > 0
+                and grant_result.referrer_user_id is not None
+            ):
+                referrer_meta = dict(order.metadata_ or {})
+                referrer_meta["referrer_notify_pending"] = {
+                    "user_id": grant_result.referrer_user_id,
+                    "telegram_id": grant_result.referrer_telegram_id,
+                    "bonus": str(grant_result.referrer_bonus),
+                    "bonus_rate_pct": grant_result.bonus_rate_pct,
+                    "tier_upgraded": grant_result.tier_upgraded,
+                    "new_tier_name": grant_result.new_tier_name,
+                    "new_rate_pct": grant_result.new_rate_pct,
+                }
+                order.metadata_ = referrer_meta
         # Fulfill benefits linearly
         if order.status != "refunded":
             await FulfillmentService.fulfill_order(session, order)
         await session.flush()
+
     @staticmethod
     def calculate_tariff_change(
         current_tariff: Tariff | None,
@@ -718,7 +706,14 @@ class OrderService:
             return order
 
         if result.is_refunded:
-            if order.status not in ("paid", "refunded"):
+            if order.status == "refunded":
+                logger.info(
+                    "Order %s already marked refunded, ignoring duplicate webhook",
+                    order.id,
+                )
+                return order
+
+            if order.status != "paid":
                 logger.warning(
                     "Refund received for non-paid order %s (status=%s), deferring to retry",
                     order.id,
@@ -726,50 +721,12 @@ class OrderService:
                 )
                 return None
 
-            order_meta = dict(order.metadata_ or {})
-            refunded_so_far = Decimal(str(order_meta.get("refunded_amount_rub", "0")))
-            processed_refund_ids = list(order_meta.get("processed_refund_ids", []))
-
-            if result.amount_rub is not None and result.amount_rub > 0:
-                refund_amount = result.amount_rub
-            else:
-                logger.error(
-                    "Refund %s for order %s has no amount in payload: deferring to retry",
-                    result.external_id,
-                    order.id,
-                )
-                order_meta["refund_amount_missing"] = str(
-                    result.external_id or "unknown"
-                )
-                order.metadata_ = order_meta
-                await session.flush()
-                return None
-
-            if result.external_id and result.external_id in processed_refund_ids:
-                logger.info(
-                    "Refund %s for order %s already processed, ignoring duplicate webhook",
-                    result.external_id,
-                    order.id,
-                )
-                return order
-
-            if order.status == "refunded" and refunded_so_far >= order.amount_rub:
-                logger.info(
-                    "Order %s already marked fully refunded, ignoring duplicate webhook",
-                    order.id,
-                )
-                return order
-
-            new_total_refunded = refunded_so_far + refund_amount
-            order_meta["refunded_amount_rub"] = str(new_total_refunded)
-            if result.external_id:
-                processed_refund_ids.append(result.external_id)
-            order_meta["processed_refund_ids"] = processed_refund_ids
-            order.metadata_ = order_meta
-
-            if new_total_refunded >= order.amount_rub:
-                order.status = "refunded"
+            order.status = "refunded"
             order.refunded_at = now_utc()
+            if result.external_id:
+                order_meta = dict(order.metadata_ or {})
+                order_meta["refund_external_id"] = result.external_id
+                order.metadata_ = order_meta
 
             if order.service_type == "topup":
                 has_credit = bool(
@@ -784,33 +741,19 @@ class OrderService:
                 if has_credit:
                     refund_ref = (
                         (result.external_id or "").strip()
-                        or f"refund_{len(processed_refund_ids)}"
+                        or f"refund_{order.id}"
                     )
-                    from decimal import ROUND_HALF_UP
-
-                    target_cumulative = new_total_refunded.quantize(
-                        Decimal("1"), rounding=ROUND_HALF_UP
+                    await create_order_refund_debit(
+                        session,
+                        user_id=order.user_id,
+                        amount_rub=order.amount_rub,
+                        order_id=order.id,
+                        refund_id=refund_ref,
+                        metadata={"source": "yookassa_refund"},
                     )
-                    prev_cumulative = refunded_so_far.quantize(
-                        Decimal("1"), rounding=ROUND_HALF_UP
-                    )
-                    ledger_delta = target_cumulative - prev_cumulative
-
-                    if ledger_delta > 0:
-                        await create_order_refund_debit(
-                            session,
-                            user_id=order.user_id,
-                            amount_rub=ledger_delta,
-                            order_id=order.id,
-                            refund_id=refund_ref,
-                            metadata={"source": "yookassa_refund"},
-                        )
                     await reverse_referral_bonus_for_topup(
                         session,
                         order_id=order.id,
-                        refund_amount=refund_amount,
-                        original_topup_amount=order.amount_rub,
-                        total_refunded_amount=new_total_refunded,
                         refund_id=refund_ref,
                     )
                 else:
@@ -818,15 +761,12 @@ class OrderService:
                         "Order %s topup has no payment_credit in ledger; skipping refund debit",
                         order.id,
                     )
-
-            is_fully_refunded = (new_total_refunded >= order.amount_rub or order.status == "refunded")
-            if is_fully_refunded:
+            else:
                 if not (order.metadata_ or {}).get("settlement_held"):
                     await FulfillmentService.revoke_order(session, order)
                     logger.info(
-                        "Order %s fully refunded (total %s / %s) and revoked",
+                        "Order %s fully refunded (%s RUB) and revoked",
                         order.id,
-                        new_total_refunded,
                         order.amount_rub,
                     )
                 else:
@@ -834,14 +774,6 @@ class OrderService:
                         "Order %s fully refunded but benefits were withheld (settlement_held); skipping revocation",
                         order.id,
                     )
-            else:
-                logger.info(
-                    "Order %s partially refunded %s RUB (total %s / %s), revocation deferred until full refund",
-                    order.id,
-                    refund_amount,
-                    new_total_refunded,
-                    order.amount_rub,
-                )
             await session.flush()
             return order
         logger.info(

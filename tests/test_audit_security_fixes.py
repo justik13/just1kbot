@@ -10,10 +10,43 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database.models import Order, User, WhiteInternetSubscription
 from services.fulfillment_service import FulfillmentService
 from services.order_service import OrderService
+from services.white_internet_service import WhiteInternetService
 from utils.datetime_helpers import now_utc
 
 
 class TestAuditSecurityFixes(unittest.IsolatedAsyncioTestCase):
+    async def test_h1_white_internet_checkout_wallet_order_blocks_financial_hold_and_topup_blocked(self):
+        """H1: _checkout_wallet_order must block users with financial_hold or topup_blocked."""
+        session = AsyncMock(spec=AsyncSession)
+        user_hold = User(id=1, financial_hold=True, topup_blocked=False)
+        user_blocked = User(id=2, financial_hold=False, topup_blocked=True)
+
+        order_hold, failure_hold = await WhiteInternetService._checkout_wallet_order(
+            session,
+            user=user_hold,
+            service_type="white_internet",
+            tariff_id=1,
+            amount_due=Decimal("100.00"),
+            duration_days=30,
+            operation="purchase",
+        )
+        self.assertIsNone(order_hold)
+        self.assertIsNotNone(failure_hold)
+        self.assertFalse(failure_hold[0])
+
+        order_blocked, failure_blocked = await WhiteInternetService._checkout_wallet_order(
+            session,
+            user=user_blocked,
+            service_type="white_internet",
+            tariff_id=1,
+            amount_due=Decimal("100.00"),
+            duration_days=30,
+            operation="purchase",
+        )
+        self.assertIsNone(order_blocked)
+        self.assertIsNotNone(failure_blocked)
+        self.assertFalse(failure_blocked[0])
+
     async def test_h2_awg_tariff_change_refund_restores_previous_subscription_end(self):
         """H2: Revoking an AWG tariff change order restores previous_subscription_end."""
         session = AsyncMock(spec=AsyncSession)
