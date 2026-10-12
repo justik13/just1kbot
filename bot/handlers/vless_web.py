@@ -59,7 +59,7 @@ def _extract_device_metadata(request: web.Request) -> dict[str, str]:
 
     clean_os = re.sub(r"[^\w\s\.\-]", "", raw_os).strip()[:32]
     clean_ver = re.sub(r"[^\w\s\.\-]", "", raw_ver).strip()[:16]
-    clean_model = re.sub(r"[^\w\s\.\-]", "", raw_model).strip()[:48]
+    clean_model = re.sub(r"[^\w\s\.\-,]", "", raw_model).strip()[:48]
     clean_ua = re.sub(r"[\r\n]", " ", ua).strip()[:64]
 
     meta: dict[str, str] = {}
@@ -281,6 +281,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             return web.Response(status=200, text=b64_payload, headers=headers)
 
         await session.refresh(sub)
+        links = VlessSubscriptionService.generate_vless_links(sub, servers)
 
         # Trigger background sync with debouncing (300s) unless version is out of sync or pending revocations exist
         now = now_utc()
