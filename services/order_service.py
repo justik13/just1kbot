@@ -125,6 +125,7 @@ class OrderService:
                         "new_tier_name": grant_result.new_tier_name,
                         "new_rate_pct": grant_result.new_rate_pct,
                     }
+                    order.metadata_ = referrer_meta
         # Fulfill benefits linearly
         if order.status != "refunded":
             await FulfillmentService.fulfill_order(session, order)
