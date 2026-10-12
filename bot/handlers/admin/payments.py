@@ -74,10 +74,10 @@ def payment_display_status(payment) -> str:
 
 
 def order_display_status(order: Order) -> str:
-    if (order.metadata_ or {}).get("settlement_held"):
-        return "requires_manual_review"
     if order.status == "refunded":
         return "refunded"
+    if (order.metadata_ or {}).get("settlement_held"):
+        return "requires_manual_review"
     if order.status == "paid":
         return "completed"
     if order.status == "canceled":
