@@ -7,6 +7,7 @@ from decimal import Decimal, InvalidOperation
 from config.settings import get_settings
 from integrations.payment_gateways.base import (
     BasePaymentGateway,
+    PaymentCreationAmbiguousError,
     PaymentInvoice,
     PaymentStatusResult,
     WebhookResult,
@@ -94,6 +95,10 @@ class YooKassaGateway(BasePaymentGateway):
                 result.status_code,
                 result.ambiguous,
             )
+            if result.ambiguous:
+                raise PaymentCreationAmbiguousError(
+                    f"YooKassa payment creation ambiguous: {result.error_kind or 'unknown'}"
+                )
             raise RuntimeError(
                 f"YooKassa payment creation error: {result.error_kind or 'unknown'}"
             )

@@ -30,6 +30,7 @@ from database.repositories.account_ledger_repo import (
     get_account_history_count,
 )
 from database.repositories.tariffs_repo import get_active_tariffs
+from integrations.payment_gateways.base import PaymentCreationAmbiguousError
 from services.maintenance_service import MaintenanceService
 from services.order_service import OrderService
 from utils.callbacks import parse_callback_id
@@ -264,6 +265,14 @@ async def _create_and_render_topup(
             metadata=order_meta,
             bot_username=bot_username,
         )
+    except PaymentCreationAmbiguousError:
+        await render_hub(
+            bot,
+            chat_id,
+            texts.PAYMENT_CREATION_STATUS_UNKNOWN,
+            get_back_button(back_to),
+        )
+        return
     except Exception as exc:
         logger.exception("Failed to create topup order for user %s: %s", user_id, exc)
         await render_hub(

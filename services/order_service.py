@@ -23,9 +23,10 @@ from database.repositories.account_ledger_repo import (
     create_order_refund_debit,
     get_account_balance,
 )
-from services.order_notifications import mark_notify_pending
+from integrations.payment_gateways.base import PaymentCreationAmbiguousError
 from integrations.payment_gateways.factory import get_payment_gateway
 from services.fulfillment_service import FulfillmentService
+from services.order_notifications import mark_notify_pending
 from services.referral_bonus import reverse_referral_bonus_for_topup
 from utils.datetime_helpers import now_utc
 
@@ -42,6 +43,10 @@ class InsufficientBalanceError(Exception):
 
 
 class AccountDebtBlockedError(Exception):
+    pass
+
+
+class FinancialHoldBlockedError(Exception):
     pass
 
 
@@ -344,6 +349,21 @@ class OrderService:
                 )
                 order.external_id = invoice.external_id
                 order.payment_url = invoice.payment_url
+            except PaymentCreationAmbiguousError:
+                # The provider may have created the payment (timeout, 5xx,
+                # unreadable response). Rolling back would destroy the
+                # order together with the only reference to it, and the
+                # incoming `payment.canceled` or `payment.succeeded` webhook
+                # would then find nothing and be retried by YooKassa for 24h.
+                # Keep the order so the webhook can still settle or cancel it.
+                held_meta = dict(order.metadata_ or {})
+                held_meta["payment_creation_ambiguous"] = True
+                order.metadata_ = held_meta
+                await session.flush()
+                # Commit here, not at the end of the request: ensure durability
+                # before handler raises and safe alert is shown to user.
+                await session.commit()
+                raise
             except Exception as exc:
                 order_id = order.id
                 logger.exception(
@@ -384,6 +404,8 @@ class OrderService:
         except Exception:
             pass
         user = await session.get(User, user_id, with_for_update=True)
+        if user and getattr(user, "financial_hold", False):
+            raise FinancialHoldBlockedError("Financial hold active on user")
 
         order_meta: dict = dict(metadata) if metadata else {}
         amount_rub, duration_days, device_limit, description = (
@@ -477,6 +499,19 @@ class OrderService:
 
         if order.status == "paid":
             order._newly_paid = False
+            if (order.metadata_ or {}).get("settlement_held"):
+                cleared_meta = dict(order.metadata_ or {})
+                cleared_meta.pop("settlement_held", None)
+                cleared_meta.pop("settlement_hold_reason", None)
+                order.metadata_ = cleared_meta
+                order._newly_paid = True
+                await OrderService._settle_benefits(
+                    session, order, was_canceled=False
+                )
+                logger.info(
+                    "Order %s released from settlement hold and fulfilled",
+                    order.id,
+                )
             return order
 
         if order.status == "refunded":

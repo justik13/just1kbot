@@ -38,6 +38,17 @@ class PaymentStatusResult:
     is_temporary_error: bool = False
 
 
+class PaymentCreationAmbiguousError(RuntimeError):
+    """The provider may have created the payment, but the result is unknown.
+
+    Network timeout, 5xx or an unreadable response. YooKassa documents HTTP
+    500 as "result unknown, check first" and keeps an Idempotence-Key valid
+    for 24 hours, so a payment object may exist while the local order state
+    is undefined. Callers must NOT discard the order in this case: a
+    `payment.canceled` or `payment.succeeded` webhook may still arrive for it.
+    """
+
+
 class BasePaymentGateway(ABC):
     """Abstract contract for payment providers (YooKassa, CryptoBot, Telegram Stars)."""
 

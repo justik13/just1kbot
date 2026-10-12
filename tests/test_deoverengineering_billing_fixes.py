@@ -11,10 +11,17 @@ from database.repositories.payments_repo import (
     has_successful_topup,
 )
 from database.repositories.users_repo import search_user_flexible
-from bot.handlers.referral import payment_display_status, show_history
+from bot import texts
 from bot.handlers.payment.credit_notify import notify_referrer_bonus
-from services.order_service import OrderService
-from integrations.payment_gateways.base import WebhookResult
+from bot.handlers.payment.purchase_routes import handle_order_pay_card
+from bot.handlers.referral import payment_display_status, show_history
+from integrations.payment_gateways.base import (
+    PaymentCreationAmbiguousError,
+    WebhookResult,
+)
+from integrations.payment_gateways.yookassa import YooKassaGateway
+from services.order_service import FinancialHoldBlockedError, OrderService
+from services.yookassa_service import YooKassaResult
 
 
 class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
@@ -218,6 +225,7 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
     async def test_order_service_create_order_failure_rolls_back_and_raises(self):
         """OrderService.create_order rolls back transaction and re-raises on gateway error."""
         session = AsyncMock()
+        session.add = MagicMock()
         session.rollback = AsyncMock()
         session.scalar = AsyncMock(return_value=None)
 
@@ -283,6 +291,98 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
             metadata={"source": "yookassa_refund"},
         )
         mock_rev_bonus.assert_awaited_once()
+
+    async def test_order_service_create_order_ambiguous_failure_persists_order(self):
+        """PaymentCreationAmbiguousError commits order in pending status with flag."""
+        session = AsyncMock()
+        session.commit = AsyncMock()
+        session.rollback = AsyncMock()
+        session.scalar = AsyncMock(return_value=None)
+        added_orders = []
+        session.add = MagicMock(side_effect=lambda o: added_orders.append(o))
+
+        with patch("services.order_service.get_payment_gateway") as mock_gw:
+            gw = AsyncMock()
+            gw.create_payment_url.side_effect = PaymentCreationAmbiguousError("YooKassa timeout")
+            mock_gw.return_value = gw
+
+            with self.assertRaises(PaymentCreationAmbiguousError):
+                await OrderService.create_order(
+                    session,
+                    user_id=1,
+                    service_type="topup",
+                    amount_rub=Decimal("300"),
+                    payment_method="yookassa",
+                )
+
+        session.commit.assert_awaited_once()
+        session.rollback.assert_not_awaited()
+        self.assertEqual(len(added_orders), 1)
+        self.assertEqual(added_orders[0].status, "pending")
+        self.assertTrue(added_orders[0].metadata_.get("payment_creation_ambiguous"))
+
+    async def test_yookassa_gateway_raises_ambiguous_error_on_result_ambiguous(self):
+        """YooKassaGateway raises PaymentCreationAmbiguousError when ambiguous=True."""
+        gw = YooKassaGateway()
+        fake_res = YooKassaResult(
+            ok=False,
+            ambiguous=True,
+            error_kind="timeout",
+            status_code=504,
+        )
+        with patch("services.yookassa_service.YooKassaService.create_payment_result", new=AsyncMock(return_value=fake_res)):
+            with self.assertRaises(PaymentCreationAmbiguousError):
+                await gw.create_payment_url(
+                    order_id=str(uuid.uuid4()),
+                    amount_rub=Decimal("100"),
+                    description="test",
+                    return_url="https://t.me/testbot",
+                    bot_username="testbot",
+                )
+
+    async def test_mark_order_paid_releases_legacy_settlement_held(self):
+        """mark_order_paid releases settlement_held and invokes _settle_benefits."""
+        session = AsyncMock()
+        order_uuid = uuid.uuid4()
+        held_order = Order(
+            id=order_uuid,
+            user_id=22,
+            service_type="awg",
+            amount_rub=Decimal("180.00"),
+            status="paid",
+            metadata_={"settlement_held": True, "settlement_hold_reason": "hold"},
+        )
+        session.scalar = AsyncMock(return_value=held_order)
+
+        with patch.object(OrderService, "_settle_benefits", new=AsyncMock()) as mock_settle:
+            res = await OrderService.mark_order_paid(session, order_uuid)
+
+        self.assertIsNotNone(res)
+        self.assertNotIn("settlement_held", res.metadata_ or {})
+        mock_settle.assert_awaited_once_with(session, held_order, was_canceled=False)
+        self.assertTrue(res._newly_paid)
+
+    async def test_pay_from_wallet_blocks_financial_hold(self):
+        """pay_from_wallet raises FinancialHoldBlockedError if user.financial_hold is True."""
+        session = AsyncMock()
+        user = User(id=5, telegram_id=555, financial_hold=True)
+        session.get = AsyncMock(return_value=user)
+
+        with self.assertRaises(FinancialHoldBlockedError):
+            await OrderService.pay_from_wallet(session, user_id=5)
+
+    async def test_handle_order_pay_card_blocks_financial_hold(self):
+        """handle_order_pay_card answers with PAYMENT_DISPUTE_BLOCKED_NOTICE if financial_hold."""
+        cb = AsyncMock()
+        cb.from_user = MagicMock(id=999)
+        cb.data = "order_pay_card:2"
+        session = AsyncMock()
+        db_user = User(id=99, telegram_id=999, financial_hold=True)
+
+        with patch("bot.handlers.payment.purchase_routes.MaintenanceService.can_user_perform_action", new=AsyncMock(return_value=True)):
+            await handle_order_pay_card(cb, session, db_user=db_user)
+
+        cb.answer.assert_awaited_once_with(texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, show_alert=True)
 
 
 if __name__ == "__main__":

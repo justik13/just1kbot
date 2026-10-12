@@ -74,6 +74,8 @@ def payment_display_status(payment) -> str:
 
 
 def order_display_status(order: Order) -> str:
+    if (order.metadata_ or {}).get("settlement_held"):
+        return "requires_manual_review"
     if order.status == "refunded":
         return "refunded"
     if order.status == "paid":
@@ -755,6 +757,9 @@ async def show_order_card(
         else ""
     )
     held_line = ""
+    if (order.metadata_ or {}).get("settlement_held"):
+        reason = (order.metadata_ or {}).get("settlement_hold_reason") or "hold"
+        held_line = texts.ADMIN_ORDER_HELD_LINE.format(reason=safe(reason))
     payment_url_line = (
         texts.ADMIN_ORDER_PAYMENT_URL_LINE.format(payment_url=safe(order.payment_url))
         if (order.payment_url and order.status == "pending")

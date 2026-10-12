@@ -18,12 +18,14 @@ from bot.keyboards import (
 from database.models import Order, User
 from database.repositories.account_ledger_repo import get_account_balance
 from database.repositories.tariffs_repo import get_tariff_by_id
+from integrations.payment_gateways.base import PaymentCreationAmbiguousError
 from integrations.payment_gateways.factory import get_payment_gateway
 from services.maintenance_service import MaintenanceService
 from services.order_notifications import mark_notified
 from .credit_notify import build_tariff_success_card, notify_referrer_bonus
 from services.order_service import (
     AccountDebtBlockedError,
+    FinancialHoldBlockedError,
     InsufficientBalanceError,
     OrderService,
 )
@@ -81,6 +83,9 @@ async def handle_order_pay_wallet(
         )
     except (AccountDebtBlockedError, InsufficientBalanceError):
         await safe_callback_answer(callback, texts.PAYMENT_INSUFFICIENT_FUNDS_ALERT, show_alert=True)
+        return
+    except FinancialHoldBlockedError:
+        await safe_callback_answer(callback, texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, show_alert=True)
         return
     except Exception as exc:
         # pay_from_wallet() may have flushed a partial paid order before
@@ -140,6 +145,10 @@ async def handle_order_pay_card(
         await _render_maintenance(callback, session, back_to="payment_showcase")
         return
 
+    if getattr(db_user, "financial_hold", False):
+        await safe_callback_answer(callback, texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, show_alert=True)
+        return
+
     try:
         tariff_id = int(callback.data.split(":")[1])
     except (IndexError, ValueError):
@@ -177,6 +186,9 @@ async def handle_order_pay_card(
                     service_type="awg",
                     tariff_id=tariff.id,
                 )
+            except FinancialHoldBlockedError:
+                await callback.answer(texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, show_alert=True)
+                return
             except (AccountDebtBlockedError, InsufficientBalanceError):
                 await callback.answer(texts.PAYMENT_INSUFFICIENT_FUNDS_ALERT, show_alert=True)
                 return
@@ -222,6 +234,14 @@ async def handle_order_pay_card(
             payment_method="yookassa",
             bot_username=bot_username,
         )
+    except PaymentCreationAmbiguousError:
+        # The provider may still create the payment; the order is kept so a
+        # webhook can settle it. Tell the user to wait instead of claiming
+        # the purchase failed.
+        await safe_callback_answer(
+            callback, texts.PAYMENT_CREATION_STATUS_UNKNOWN, show_alert=True
+        )
+        return
     except Exception as exc:
         logger.exception(
             "Failed to create YooKassa order for user %s: %s", db_user_id, exc
