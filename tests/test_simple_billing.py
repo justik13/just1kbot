@@ -407,7 +407,10 @@ class TestOrderService(unittest.IsolatedAsyncioTestCase):
             amount_rub=Decimal("200.00"),
             status="pending",
         )
-        session.scalar.return_value = order
+        session.scalar.side_effect = [
+            order,
+            User(id=10, telegram_id=10010, is_banned=False, financial_hold=False, topup_blocked=False),
+        ]
         session.get.return_value = order
 
         success = await OrderService.process_webhook_event(session, {"some": "payload"})
@@ -782,7 +785,10 @@ class TestSimpleBillingEnhancements(unittest.IsolatedAsyncioTestCase):
             payment_method="yookassa",
             status="pending",
         )
-        session.scalar.return_value = order
+        session.scalar.side_effect = [
+            order,
+            User(id=55, telegram_id=5555, is_banned=False, financial_hold=False, topup_blocked=False),
+        ]
         session.get.return_value = order
 
         paid_order = await OrderService.mark_order_paid(session, order_uuid)
@@ -1298,7 +1304,10 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             status="canceled",
             metadata_={},
         )
-        session.scalar.return_value = order
+        session.scalar.side_effect = [
+            order,
+            User(id=25, telegram_id=2525, is_banned=False, financial_hold=False, topup_blocked=False),
+        ]
         session.get.return_value = order
 
         paid_order = await OrderService.mark_order_paid(session, order_uuid)

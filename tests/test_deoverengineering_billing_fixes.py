@@ -800,15 +800,17 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
         }
 
         res = await OrderService.process_webhook_event(session, payload)
-        self.assertIsNotNone(res)
-        self.assertTrue(getattr(res, "_retry_deferred", False))
+        self.assertIsNone(res)
 
     async def test_yookassa_raises_on_empty_id_or_confirmation_url(self):
         """create_payment_url raises PaymentCreationAmbiguousError when id or url is missing/empty."""
         from integrations.payment_gateways.yookassa import YooKassaGateway
 
         gw = YooKassaGateway()
-        with patch.object(gw, "_post", return_value=MagicMock(success=True, value={"id": "", "confirmation": {}})):
+        with patch(
+            "integrations.payment_gateways.yookassa.YooKassaService.create_payment_result",
+            return_value=YooKassaResult(ok=True, value={"id": "", "confirmation": {}}),
+        ):
             with self.assertRaises(PaymentCreationAmbiguousError):
                 await gw.create_payment_url(order_id="test", amount_rub=Decimal("100"))
 
@@ -871,9 +873,6 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
         from config.enums import WebhookInboxStatus
         from database.models import WebhookInbox
 
-        deferred_order = Order(id=uuid.uuid4(), user_id=1, status="pending")
-        deferred_order._retry_deferred = True
-
         existing = WebhookInbox(
             id=2,
             provider="yookassa",
@@ -885,7 +884,7 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
         with patch("bot.handlers.webhook.session_scope") as mock_scope, \
              patch("bot.handlers.webhook._get_real_ip", return_value="185.71.76.1"), \
              patch("bot.handlers.webhook._is_yookassa_ip", return_value=True), \
-             patch("services.order_service.OrderService.process_webhook_event", return_value=deferred_order):
+             patch("services.order_service.OrderService.process_webhook_event", return_value=None):
             mock_scope.return_value.__aenter__.return_value = session
             req = AsyncMock()
             req.content_length = 200

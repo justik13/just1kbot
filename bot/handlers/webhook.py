@@ -148,12 +148,12 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
 
             order = await OrderService.process_webhook_event(session, payload)
             if not order:
-                if existing_event:
+                if event == "refund.succeeded":
+                    inbox_status = WebhookInboxStatus.PENDING.value
+                elif existing_event:
                     inbox_status = WebhookInboxStatus.DEAD.value
                 else:
                     inbox_status = WebhookInboxStatus.PENDING.value
-            elif getattr(order, "_retry_deferred", False):
-                inbox_status = WebhookInboxStatus.PENDING.value
             else:
                 inbox_status = WebhookInboxStatus.SUCCEEDED.value
 

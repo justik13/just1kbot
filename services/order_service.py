@@ -729,8 +729,7 @@ class OrderService:
                     order.id,
                     order.status,
                 )
-                order._retry_deferred = True
-                return order
+                return None
 
             if result.amount_rub is None or result.amount_rub != order.amount_rub:
                 logger.warning(
