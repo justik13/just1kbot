@@ -412,15 +412,15 @@ async def show_user_payments_list(
 
                 if item.payment_method == "yookassa":
                     method_label = texts.ADMIN_PAYMENTS_GATEWAY_YOOKASSA
-                    method_btn = texts.ADMIN_PAYMENT_METHOD_BTN_YOOKASSA
+                    method_btn = texts.ADMIN_PAYMENTS_GATEWAY_YOOKASSA
                     method_icon = "💳"
                 elif item.payment_method == "wallet":
                     method_label = texts.ADMIN_PURCHASES_METHOD_WALLET
-                    method_btn = texts.ADMIN_PAYMENT_METHOD_BTN_WALLET
+                    method_btn = texts.ADMIN_USERS_BALANCE_BALANCE
                     method_icon = "👛"
                 elif item.payment_method == "sbp":
                     method_label = texts.ADMIN_PURCHASES_METHOD_SBP
-                    method_btn = texts.ADMIN_PAYMENT_METHOD_BTN_SBP
+                    method_btn = texts.ADMIN_PURCHASES_METHOD_SBP
                     method_icon = "⚡"
                 elif item.payment_method in ("admin", "manual"):
                     method_label = texts.ADMIN_PURCHASES_METHOD_ADMIN
@@ -459,7 +459,7 @@ async def show_user_payments_list(
                 amount = int(item.amount)
                 sign = "+"
                 method_label = texts.ADMIN_PAYMENTS_GATEWAY_YOOKASSA
-                method_btn = texts.ADMIN_PAYMENT_METHOD_BTN_YOOKASSA
+                method_btn = texts.ADMIN_PAYMENTS_GATEWAY_YOOKASSA
                 method_icon = "💳"
                 service_label = texts.ADMIN_ORDER_SERVICE_TOPUP
                 dt_str = format_datetime(item.created_at)
