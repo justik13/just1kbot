@@ -68,6 +68,8 @@ class VlessSubscriptionService:
                     port = 443
             except (ValueError, TypeError):
                 port = 443
+            if port == 10443:
+                port = 443
             if extra.get("origin_hidden"):
                 continue
 

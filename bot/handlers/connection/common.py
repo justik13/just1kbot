@@ -154,14 +154,12 @@ async def _build_connections_screen(
 
     builder = InlineKeyboardBuilder()
 
-    has_copy_btn = bool(sub_url and 1 <= len(sub_url) <= 256)
+    has_sub_btn = bool(sub_url and 1 <= len(sub_url) <= 256)
     if not read_only:
-        from aiogram.types import CopyTextButton
-
-        if has_copy_btn:
+        if has_sub_btn:
             builder.button(
-                text=texts.BTN_SUB_COPY_LINK,
-                copy_text=CopyTextButton(text=sub_url),
+                text=texts.BTN_SUB_CONNECT_INCY,
+                url=sub_url,
             )
         builder.button(
             text=texts.BTN_INCY_INSTRUCTIONS,
@@ -198,7 +196,7 @@ async def _build_connections_screen(
 
     if not read_only:
         device_count = len(profiles)
-        link_btn_count = (1 if has_copy_btn else 0) + 1 + (1 if vless_hwid_count > 0 else 0)
+        link_btn_count = (1 if has_sub_btn else 0) + 1 + (1 if vless_hwid_count > 0 else 0)
         sizes: list[int] = [1] * link_btn_count
         if device_count > 0:
             sizes.extend([2] * (device_count // 2))

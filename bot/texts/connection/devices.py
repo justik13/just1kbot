@@ -196,6 +196,7 @@ CONNECTION_HUB_EXPIRED_TEXT = """🌐 <b>Подключение</b>
 {grace_notice}
 <i>Для возобновления доступа продлите подписку.</i>"""
 
+BTN_SUB_CONNECT_INCY = "🚀 Подключить в INCY"
 BTN_SUB_COPY_LINK = "📋 Скопировать ссылку"
 BTN_INCY_INSTRUCTIONS = "📱 Инструкция для INCY"
 VLESS_WEB_TOO_MANY_REQUESTS = "Слишком много запросов к подписке. Попробуйте позже."

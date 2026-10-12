@@ -188,6 +188,30 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             self.assertEqual(resp.status, 403)
             self.assertEqual(resp.headers.get("x-hwid-required"), "true")
 
+    async def test_browser_request_without_hwid_returns_html_landing_page(self):
+        mock_session = AsyncMock()
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
+        ):
+            headers = {
+                "Accept": "text/html,application/xhtml+xml",
+                "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X)",
+            }
+            resp = await self.client.get("/sub/vless/test-token-valid-length-12345678", headers=headers)
+            self.assertEqual(resp.status, 200)
+            self.assertIn("text/html", resp.headers.get("Content-Type", ""))
+            body = await resp.text()
+            self.assertIn("incy://add/", body)
+            self.assertIn("Подключение к сервису", body)
+            self.assertIn("apps.apple.com/app/incy", body)
+
     async def test_exceeded_device_limit_returns_notice_200(self):
         mock_session = AsyncMock()
         mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=2)))
@@ -943,6 +967,29 @@ class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
         self.assertIn("#🇩🇪 DE Server", links[0])
         self.assertNotIn("?serverDescription=", links[0])
         self.assertNotIn("%F0%9F", links[0])
+
+    def test_generate_vless_links_forces_client_port_443_when_relay_port_configured(self):
+        sub = VlessSubscription(
+            id=1,
+            user_id=100,
+            token="tok",
+            uuid="12345678-1234-5678-1234-567812345678",
+            is_active=True,
+        )
+        srv = Server(
+            id=1,
+            name="Relay Node",
+            country_flag="🇩🇪",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            protocol="vless",
+            capabilities=["vless"],
+            api_url="https://relay.example.com:8443",
+            extra_data={"domain": "relay.example.com", "vless_port": 10443},
+        )
+        links = VlessSubscriptionService.generate_vless_links(sub, [srv])
+        self.assertEqual(len(links), 1)
+        self.assertTrue(links[0].startswith("vless://12345678-1234-5678-1234-567812345678@relay.example.com:443"))
 
 
 class TestConnectionsScreenLayout(unittest.IsolatedAsyncioTestCase):
