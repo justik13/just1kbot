@@ -96,22 +96,22 @@ class YooKassaGateway(BasePaymentGateway):
                 result.ambiguous,
             )
             if result.ambiguous:
-                # Timeout / 5xx / unreadable response: YooKassa may have
-                # created the payment anyway. Report it as unknown so the
-                # caller keeps the order and can still be settled by webhook.
-                # Machine-readable token (no prose): full diagnostics are in
-                # the log line above, and user wording lives in bot/texts.
                 raise PaymentCreationAmbiguousError(
-                    f"payment_creation_ambiguous:{result.error_kind or 'unknown'}"
+                    f"YooKassa payment creation ambiguous: {result.error_kind or 'unknown'}"
                 )
             raise RuntimeError(
                 f"YooKassa payment creation error: {result.error_kind or 'unknown'}"
             )
 
-        data = result.value
-        external_id = data.get("id", "")
-        confirmation = data.get("confirmation", {})
-        confirmation_url = confirmation.get("confirmation_url", "")
+        data = result.value or {}
+        external_id = (data.get("id") or "").strip()
+        confirmation = data.get("confirmation") or {}
+        confirmation_url = (confirmation.get("confirmation_url") or "").strip()
+
+        if not external_id or not confirmation_url:
+            raise PaymentCreationAmbiguousError(
+                f"YooKassa payment response missing required id or confirmation_url: external_id={external_id!r}, url={confirmation_url!r}"
+            )
 
         return PaymentInvoice(
             payment_url=confirmation_url,
@@ -229,7 +229,7 @@ class YooKassaGateway(BasePaymentGateway):
         )
         return PaymentStatusResult(
             is_paid=(status == "succeeded" and amount_rub is not None and amount_rub > 0),
-            is_refunded=(status == "refunded"),
+            is_refunded=False,
             is_canceled=(status == "canceled"),
             status_str=status,
             amount_rub=amount_rub,

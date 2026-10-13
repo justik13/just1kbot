@@ -19,7 +19,6 @@ from config.constants import (
 from config.enums import AdminAuditAction
 from database.models import AccountLedgerEntry, User
 from database.repositories.account_ledger_repo import (
-    _credit_capacity,  # noqa: F401
     get_account_balance,
 )
 
@@ -409,14 +408,9 @@ async def reverse_referral_bonus_for_topup(
     *,
     payment_id: int | None = None,
     order_id: str | uuid.UUID | None = None,
-    refund_amount: Decimal | None = None,
-    original_topup_amount: Decimal | None = None,
-    total_refunded_amount: Decimal | None = None,
     refund_id: str | None = None,
 ) -> Decimal:
     """Debit/reverse the referral bonus previously credited for a top-up if the top-up is refunded."""
-    from decimal import ROUND_HALF_UP
-
     if payment_id is None and order_id is None:
         return Decimal(0)
 
@@ -513,22 +507,7 @@ async def reverse_referral_bonus_for_topup(
             )
             continue
 
-        # Cumulative calculation prevents rounding abuse across series of partial refunds
-        if total_refunded_amount is not None and original_topup_amount and original_topup_amount > 0:
-            ratio = min(Decimal(1), max(Decimal(0), Decimal(str(total_refunded_amount)) / Decimal(str(original_topup_amount))))
-            target_cumulative = (Decimal(credit.amount) * ratio).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
-            reversal_val = min(max_can_reverse, max(Decimal(0), target_cumulative - already_reversed))
-        elif refund_amount is not None:
-            credit_rate = None
-            if getattr(credit, "metadata_", None) and "bonus_rate" in credit.metadata_:
-                try:
-                    credit_rate = Decimal(str(credit.metadata_["bonus_rate"]))
-                except Exception:
-                    credit_rate = None
-            reversal_val = min(max_can_reverse, calculate_referral_bonus(refund_amount, rate=credit_rate))
-        else:
-            reversal_val = max_can_reverse
-
+        reversal_val = max_can_reverse
         if reversal_val <= Decimal(0):
             continue
 
@@ -551,8 +530,6 @@ async def reverse_referral_bonus_for_topup(
                 "topup_order_id": meta_order_id,
                 "original_credit_id": credit.id,
                 "refund_id": refund_id,
-                "refund_amount": str(refund_amount) if refund_amount is not None else None,
-                "total_refunded_amount": str(total_refunded_amount) if total_refunded_amount is not None else None,
             },
         )
         session.add(reversal_entry)

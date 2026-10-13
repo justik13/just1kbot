@@ -24,13 +24,13 @@ from bot.keyboards import (
 from bot.states import BalanceStates
 from config.settings import get_settings
 from database.models import Order, User
-from integrations.payment_gateways.base import PaymentCreationAmbiguousError
 from database.repositories.account_ledger_repo import (
     get_account_balance,
     get_account_history,
     get_account_history_count,
 )
 from database.repositories.tariffs_repo import get_active_tariffs
+from integrations.payment_gateways.base import PaymentCreationAmbiguousError
 from services.maintenance_service import MaintenanceService
 from services.order_service import OrderService
 from utils.callbacks import parse_callback_id
@@ -233,9 +233,6 @@ async def _create_and_render_topup(
         else "menu_balance"
     )
 
-    # Funnel guards: choose_topup_amount() checks topup_blocked, but preset
-    # callbacks and custom-amount messages arrive here directly, so enforce
-    # here to close the bypass.
     if getattr(user, "topup_blocked", False):
         await render_hub(
             bot,
@@ -278,8 +275,6 @@ async def _create_and_render_topup(
             bot_username=bot_username,
         )
     except PaymentCreationAmbiguousError:
-        # Order is kept on purpose (webhook may still settle it) — tell the
-        # user to wait rather than reporting a failed top-up.
         await render_hub(
             bot,
             chat_id,
@@ -403,7 +398,8 @@ async def choose_topup_amount(
             get_back_button("menu_balance"),
         )
         return
-    if getattr(db_user, "financial_hold", False):
+
+    if db_user.financial_hold:
         await render_hub(
             callback.bot,
             callback.message.chat.id,
@@ -649,9 +645,6 @@ async def resume_topup(
     await callback.answer(show_alert=False)
     if db_user is None:
         return
-    # Same funnel policy as creation: blocked/held users must not be
-    # handed a live invoice. Settlement holds the credit anyway
-    # (mark_order_paid), this is the UX-layer reject.
     if getattr(db_user, "topup_blocked", False):
         await render_hub(
             callback.bot,
@@ -660,6 +653,7 @@ async def resume_topup(
             get_back_button("menu_balance"),
         )
         return
+
     if getattr(db_user, "financial_hold", False):
         await render_hub(
             callback.bot,

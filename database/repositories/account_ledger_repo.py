@@ -10,17 +10,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
-from sqlalchemy import case, func, select, text
+from sqlalchemy import case, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import (
     AccountLedgerAllocation,
     AccountLedgerEntry,
-    Payment,
     User,
 )
-from utils.datetime_helpers import now_utc
 
 ZERO = Decimal(0)
 
@@ -104,77 +102,64 @@ async def get_account_balance(
         or ZERO
     )
     debt = max(ZERO, -position)
+    if position <= ZERO:
+        return AccountBalanceSnapshot(
+            accounting_position=position,
+            available=ZERO,
+            debt=debt,
+            real_position=ZERO,
+            bonus_position=ZERO,
+            real_available=ZERO,
+            bonus_available=ZERO,
+        )
 
-    credits = (
-        await session.scalars(
-            select(AccountLedgerEntry).where(
+    bonus_credited = Decimal(
+        await session.scalar(
+            select(func.coalesce(func.sum(AccountLedgerEntry.amount), 0)).where(
                 AccountLedgerEntry.user_id == user_id,
+                AccountLedgerEntry.entry_type == "admin_adjustment",
                 AccountLedgerEntry.amount > 0,
-                AccountLedgerEntry.entry_type.in_(
-                    ("payment_credit", "admin_adjustment")
-                ),
             )
         )
-    ).all()
+        or ZERO
+    )
 
-    real_available = ZERO
-    bonus_available = ZERO
-    real_negative = ZERO
-    bonus_negative = ZERO
+    if bonus_credited <= ZERO:
+        return AccountBalanceSnapshot(
+            accounting_position=position,
+            available=position,
+            debt=debt,
+            real_position=position,
+            bonus_position=ZERO,
+            real_available=position,
+            bonus_available=ZERO,
+        )
 
-    capacities = await _batch_credit_capacities(session, list(credits))
-    for credit in credits:
-        cap = capacities.get(credit.id, ZERO)
-        if cap < ZERO:
-            if credit.entry_type == "payment_credit":
-                real_negative += -cap
-            elif credit.entry_type == "admin_adjustment":
-                bonus_negative += -cap
-        else:
-            if credit.entry_type == "payment_credit":
-                real_available += cap
-            elif credit.entry_type == "admin_adjustment":
-                bonus_available += cap
+    bonus_spent = Decimal(
+        await session.scalar(
+            select(func.coalesce(func.sum(AccountLedgerAllocation.amount), 0))
+            .join(
+                AccountLedgerEntry,
+                AccountLedgerEntry.id == AccountLedgerAllocation.credit_entry_id,
+            )
+            .where(
+                AccountLedgerAllocation.user_id == user_id,
+                AccountLedgerEntry.entry_type == "admin_adjustment",
+            )
+        )
+        or ZERO
+    )
 
-    # Deduct real_negative from real_available, then bonus_available
-    if real_negative > ZERO:
-        if real_available >= real_negative:
-            real_available -= real_negative
-        else:
-            rem = real_negative - real_available
-            real_available = ZERO
-            bonus_available = max(ZERO, bonus_available - rem)
-            
-    # Deduct bonus_negative from bonus_available, then real_available
-    if bonus_negative > ZERO:
-        if bonus_available >= bonus_negative:
-            bonus_available -= bonus_negative
-        else:
-            rem = bonus_negative - bonus_available
-            bonus_available = ZERO
-            real_available = max(ZERO, real_available - rem)
-
-    real_position = real_available
-    bonus_position = bonus_available
-
-    available = max(ZERO, real_available + bonus_available)
-    accounting_available = max(ZERO, position)
-    if available > accounting_available:
-        reduction = available - accounting_available
-        if bonus_available >= reduction:
-            bonus_available -= reduction
-        else:
-            reduction -= bonus_available
-            bonus_available = ZERO
-            real_available = max(ZERO, real_available - reduction)
-        available = accounting_available
+    unspent_bonus = max(ZERO, bonus_credited - bonus_spent)
+    bonus_available = min(position, unspent_bonus)
+    real_available = position - bonus_available
 
     return AccountBalanceSnapshot(
         accounting_position=position,
-        available=available,
+        available=position,
         debt=debt,
-        real_position=real_position,
-        bonus_position=bonus_position,
+        real_position=real_available,
+        bonus_position=bonus_available,
         real_available=real_available,
         bonus_available=bonus_available,
     )
@@ -390,60 +375,6 @@ async def create_order_refund_debit(
     )
 
 
-async def credit_succeeded_topup(
-    session: AsyncSession,
-    *,
-    payment_id: int | None = None,
-    locked_payment: Payment | None = None,
-    metadata: dict | None = None,
-) -> tuple[AccountLedgerEntry, bool]:
-    if locked_payment is None and payment_id is None:
-        raise ValueError("payment_id or locked_payment is required")
-
-    payment = locked_payment or await session.scalar(
-        select(Payment).where(Payment.id == payment_id).with_for_update()
-    )
-    if payment is None:
-        raise LookupError("topup_payment_not_found")
-    user = await lock_account_user(session, payment.user_id)
-    # Provider and webhook finalizers already own the Payment lock. Keep their
-    # documented Payment -> User order so concurrent confirmations serialize.
-    if payment.user_id != user.id:
-        raise AccountLedgerConflictError("topup_owner_changed")
-    if (
-        payment.fulfillment_status in ("manual_review", "reversed")
-        or payment.reconciliation_status in ("manual_review", "mismatch")
-    ):
-        raise AccountLedgerConflictError("topup_in_manual_review_cannot_be_credited")
-    if payment.provider_status != "succeeded":
-        raise AccountLedgerConflictError("topup_provider_not_succeeded")
-    if payment.currency != "RUB":
-        raise AccountLedgerConflictError("topup_currency_mismatch")
-    amount = whole_rubles(payment.amount)
-    values = {
-        "user_id": user.id,
-        "entry_type": "payment_credit",
-        "amount": amount,
-        "currency": "RUB",
-        "payment_id": payment.id,
-        "quote_id": None,
-        "reversal_of_id": None,
-        "idempotency_key": f"payment-credit:{payment.id}",
-        "metadata_": metadata or {},
-    }
-    entry, created = await _insert_or_get_entry(
-        session,
-        values=values,
-        economic_lookup=(
-            (AccountLedgerEntry.entry_type == "payment_credit")
-            & (AccountLedgerEntry.payment_id == payment.id)
-        ),
-    )
-    if created:
-        payment.credited_at = payment.credited_at or now_utc()
-    return entry, created
-
-
 async def create_admin_adjustment(
     session: AsyncSession,
     *,
@@ -491,8 +422,8 @@ async def _batch_credit_capacities(
         return {}
 
     credit_ids = [c.id for c in credits]
+    order_ids = [c.order_id for c in credits if c.order_id is not None]
     payment_ids = [c.payment_id for c in credits if c.payment_id is not None]
-    order_ids = [c.order_id for c in credits if getattr(c, "order_id", None) is not None]
 
     allocations = (
         await session.scalars(
@@ -502,84 +433,59 @@ async def _batch_credit_capacities(
         )
     ).all()
 
-    debit_ids = {a.debit_entry_id for a in allocations}
-    reversed_debit_ids: set[int] = set()
-    if debit_ids:
-        reversed_debit_ids = set(
-            (
-                await session.scalars(
-                    select(AccountLedgerEntry.reversal_of_id).where(
-                        AccountLedgerEntry.entry_type == "purchase_reversal",
-                        AccountLedgerEntry.reversal_of_id.in_(debit_ids),
-                    )
-                )
-            ).all()
+    used_by_credit: dict[int, Decimal] = {}
+    for alloc in allocations:
+        used_by_credit[alloc.credit_entry_id] = (
+            used_by_credit.get(alloc.credit_entry_id, ZERO)
+            + Decimal(alloc.amount)
         )
 
-    external_debits_by_payment: dict[int, Decimal] = {}
-    if payment_ids:
-        rows = (
-            await session.execute(
-                select(
-                    AccountLedgerEntry.payment_id,
-                    func.coalesce(func.sum(AccountLedgerEntry.amount), 0),
-                ).where(
-                    AccountLedgerEntry.payment_id.in_(payment_ids),
-                    AccountLedgerEntry.entry_type.in_(
-                        ("refund_debit", "chargeback_debit")
-                    ),
-                ).group_by(AccountLedgerEntry.payment_id)
-            )
-        ).all()
-        for p_id, sum_amt in rows:
-            if p_id is not None:
-                external_debits_by_payment[p_id] = abs(Decimal(sum_amt))
+    refund_by_order: dict[object, Decimal] = {}
+    refund_by_payment: dict[int, Decimal] = {}
 
-    external_debits_by_order: dict[object, Decimal] = {}
-    if order_ids:
+    if order_ids or payment_ids:
+        conds = []
+        if order_ids:
+            conds.append(AccountLedgerEntry.order_id.in_(order_ids))
+        if payment_ids:
+            conds.append(AccountLedgerEntry.payment_id.in_(payment_ids))
         rows = (
             await session.execute(
                 select(
                     AccountLedgerEntry.order_id,
+                    AccountLedgerEntry.payment_id,
                     func.coalesce(func.sum(AccountLedgerEntry.amount), 0),
-                ).where(
-                    AccountLedgerEntry.order_id.in_(order_ids),
+                )
+                .where(
                     AccountLedgerEntry.entry_type.in_(
                         ("refund_debit", "chargeback_debit")
                     ),
-                ).group_by(AccountLedgerEntry.order_id)
+                    or_(*conds),
+                )
+                .group_by(AccountLedgerEntry.order_id, AccountLedgerEntry.payment_id)
             )
         ).all()
-        for o_id, sum_amt in rows:
+        for o_id, p_id, sum_amt in rows:
             if o_id is not None:
-                external_debits_by_order[o_id] = abs(Decimal(sum_amt))
-
-    used_by_credit: dict[int, Decimal] = {}
-    for alloc in allocations:
-        if alloc.debit_entry_id not in reversed_debit_ids:
-            used_by_credit[alloc.credit_entry_id] = (
-                used_by_credit.get(alloc.credit_entry_id, ZERO)
-                + Decimal(alloc.amount)
-            )
+                refund_by_order[o_id] = (
+                    refund_by_order.get(o_id, ZERO) + abs(Decimal(sum_amt))
+                )
+            if p_id is not None:
+                refund_by_payment[p_id] = (
+                    refund_by_payment.get(p_id, ZERO) + abs(Decimal(sum_amt))
+                )
 
     capacities: dict[int, Decimal] = {}
     for credit in credits:
         used = used_by_credit.get(credit.id, ZERO)
         ext_debit = ZERO
+        if credit.order_id is not None:
+            ext_debit += refund_by_order.get(credit.order_id, ZERO)
         if credit.payment_id is not None:
-            ext_debit += external_debits_by_payment.get(credit.payment_id, ZERO)
-        if getattr(credit, "order_id", None) is not None:
-            ext_debit += external_debits_by_order.get(credit.order_id, ZERO)
+            ext_debit += refund_by_payment.get(credit.payment_id, ZERO)
         capacities[credit.id] = Decimal(credit.amount) - used - ext_debit
 
     return capacities
-
-
-async def _credit_capacity(
-    session: AsyncSession, credit: AccountLedgerEntry
-) -> Decimal:
-    res = await _batch_credit_capacities(session, [credit])
-    return max(ZERO, res.get(credit.id, ZERO))
 
 
 async def _allocate_fifo(
@@ -639,31 +545,6 @@ async def _allocate_fifo(
     if remaining:
         raise AccountLedgerInvariantError("available_balance_has_no_credit_lots")
     return created
-
-
-async def get_payment_refundable_amount(
-    session: AsyncSession,
-    *,
-    payment_id: int,
-    for_update: bool = False,
-) -> Decimal:
-    payment = await session.scalar(
-        select(Payment).where(Payment.id == payment_id)
-    )
-    if payment is None:
-        raise LookupError("topup_payment_not_found")
-    if for_update:
-        await lock_account_user(session, payment.user_id)
-    credit = await session.scalar(
-        select(AccountLedgerEntry).where(
-            AccountLedgerEntry.entry_type == "payment_credit",
-            AccountLedgerEntry.payment_id == payment.id,
-        )
-    )
-    if credit is None:
-        return ZERO
-    capacity = await _credit_capacity(session, credit)
-    return max(ZERO, capacity)
 
 
 async def get_account_history(

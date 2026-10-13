@@ -370,7 +370,7 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
             created_at=old_created,
             user=user,
             tariff=None,
-            metadata_={"payment_creation_ambiguous": True},
+            metadata_={},
         )
         session.scalar.return_value = order
 
@@ -389,7 +389,6 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Заказ #", rendered_text)
         self.assertIn("Пополнение баланса (topup)", rendered_text)
         self.assertIn("Ожидает завершения оплаты клиентом", rendered_text)
-        self.assertIn("Тайм-аут шлюза при создании", rendered_text)
         self.assertIn("https://yookassa.ru/checkout/12345", rendered_text)
 
     async def test_show_order_card_displays_wallet_order(self):
@@ -557,13 +556,181 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
 
         callback.message.edit_text.assert_called_once()
         rendered_text = callback.message.edit_text.call_args[0][0]
-        self.assertIn("Платежи пользователя", rendered_text)
+        self.assertIn("Платежи и покупки", rendered_text)
         self.assertNotIn("через ЮKassa", rendered_text)
+        self.assertIn("Список заказов и платежей:", rendered_text)
+        self.assertIn("+300 ₽", rendered_text)
+        self.assertIn("-150 ₽", rendered_text)
+        self.assertIn("ЮKassa", rendered_text)
+        self.assertIn("Внутренний баланс", rendered_text)
 
         reply_markup = callback.message.edit_text.call_args[1]["reply_markup"]
         cb_datas = [btn.callback_data for row in reply_markup.inline_keyboard for btn in row]
         self.assertIn(f"admin_order_card:{order_yoo.id}", cb_datas)
         self.assertIn(f"admin_order_card:{order_wallet.id}", cb_datas)
+
+        btn_texts = [btn.text for row in reply_markup.inline_keyboard for btn in row]
+        self.assertTrue(any("+300 ₽ • ЮKassa" in t for t in btn_texts))
+        self.assertTrue(any("-150 ₽ • Баланс" in t for t in btn_texts))
+
+    async def test_show_user_payments_list_handles_unpaid_refunded_and_operation_labels(self):
+        import uuid
+        from datetime import timedelta
+        from bot.handlers.admin.payments import show_user_payments_list
+        from database.models import Order, Tariff
+
+        session = AsyncMock()
+        user = User(id=25, telegram_id=999000, username="edge_case_user")
+        wi_tariff = Tariff(id=10, name="Белый Интернет")
+        awg_tariff = Tariff(id=11, name="Базовый 30 дней")
+        base_dt = now_utc()
+
+        orders_list = [
+            Order(
+                id=uuid.uuid4(),
+                user_id=25,
+                service_type="topup",
+                amount_rub=Decimal("400.00"),
+                status="pending",
+                payment_method="yookassa",
+                created_at=base_dt,
+                user=user,
+            ),
+            Order(
+                id=uuid.uuid4(),
+                user_id=25,
+                service_type="white_internet",
+                amount_rub=Decimal("450.00"),
+                status="canceled",
+                payment_method="wallet",
+                created_at=base_dt - timedelta(minutes=1),
+                user=user,
+                tariff=wi_tariff,
+                metadata_={"operation": "renew"},
+            ),
+            Order(
+                id=uuid.uuid4(),
+                user_id=25,
+                service_type="topup",
+                amount_rub=Decimal("500.00"),
+                status="paid",
+                payment_method="yookassa",
+                created_at=base_dt - timedelta(minutes=2),
+                user=user,
+                metadata_={},
+            ),
+            Order(
+                id=uuid.uuid4(),
+                user_id=25,
+                service_type="topup",
+                amount_rub=Decimal("300.00"),
+                status="refunded",
+                payment_method="yookassa",
+                created_at=base_dt - timedelta(minutes=3),
+                user=user,
+                metadata_={"settlement_held": True},
+            ),
+            Order(
+                id=uuid.uuid4(),
+                user_id=25,
+                service_type="white_internet",
+                amount_rub=Decimal("200.00"),
+                status="paid",
+                payment_method="wallet",
+                created_at=base_dt - timedelta(minutes=4),
+                user=user,
+                tariff=wi_tariff,
+                metadata_={"operation": "renew"},
+            ),
+            Order(
+                id=uuid.uuid4(),
+                user_id=25,
+                service_type="white_internet",
+                amount_rub=Decimal("100.00"),
+                status="paid",
+                payment_method="wallet",
+                created_at=base_dt - timedelta(minutes=5),
+                user=user,
+                tariff=wi_tariff,
+                metadata_={"operation": "topup"},
+            ),
+            Order(
+                id=uuid.uuid4(),
+                user_id=25,
+                service_type="white_internet",
+                amount_rub=Decimal("0.00"),
+                status="paid",
+                payment_method="wallet",
+                created_at=base_dt - timedelta(minutes=6),
+                user=user,
+                tariff=wi_tariff,
+                metadata_={"operation": "trial"},
+            ),
+            Order(
+                id=uuid.uuid4(),
+                user_id=25,
+                service_type="white_internet",
+                amount_rub=Decimal("100.00"),
+                status="paid",
+                payment_method="wallet",
+                device_limit=3,
+                traffic_bytes=0,
+                duration_days=0,
+                created_at=base_dt - timedelta(minutes=7),
+                user=user,
+                tariff=wi_tariff,
+                metadata_={"operation": "topup_or_device_slot"},
+            ),
+            Order(
+                id=uuid.uuid4(),
+                user_id=25,
+                service_type="awg",
+                amount_rub=Decimal("150.00"),
+                status="paid",
+                payment_method="wallet",
+                created_at=base_dt - timedelta(minutes=8),
+                user=user,
+                tariff=awg_tariff,
+                metadata_={"operation": "renew", "is_renewal": True},
+            ),
+        ]
+
+        session.scalar.side_effect = [len(orders_list), 0]
+        res_orders = MagicMock()
+        res_orders.scalars().all.return_value = orders_list
+        res_legacy = MagicMock()
+        res_legacy.scalars().all.return_value = []
+        session.execute.side_effect = [res_orders, res_legacy]
+
+        callback = AsyncMock()
+        callback.data = f"admin_payments_filter:user:{user.telegram_id}:1"
+        callback.from_user.id = 12345
+        callback.message = AsyncMock()
+        state = AsyncMock()
+
+        with patch("bot.handlers.admin.payments.is_admin", return_value=True), \
+             patch("database.repositories.users_repo.get_user_by_telegram_id", return_value=user):
+            await show_user_payments_list(callback, state, session)
+
+        rendered_text = callback.message.edit_text.call_args[0][0]
+        # Non-completed orders must NOT have +/- signs and must show status note
+        self.assertIn("<b>400 ₽</b> (Ожидание)", rendered_text)
+        self.assertNotIn("+400 ₽", rendered_text)
+        self.assertIn("<b>450 ₽</b> (Отменен)", rendered_text)
+        self.assertNotIn("-450 ₽", rendered_text)
+        self.assertIn("<b>300 ₽</b> (Возврат)", rendered_text)
+        self.assertNotIn("+300 ₽", rendered_text)
+        # Zero-cost paid orders must NOT show -0 ₽
+        self.assertIn("<b>0 ₽</b>", rendered_text)
+        self.assertNotIn("-0 ₽", rendered_text)
+        # Paid order shows sign
+        self.assertIn("<b>+500 ₽</b>", rendered_text)
+        # Service labels prioritize operation even when tariff is attached
+        self.assertIn("Белый Интернет (Продление)", rendered_text)
+        self.assertIn("Белый Интернет (Докупка трафика)", rendered_text)
+        self.assertIn("Белый Интернет (Триал)", rendered_text)
+        self.assertIn("Белый Интернет (+1 слот)", rendered_text)
+        self.assertIn("Базовый 30 дней (Продление)", rendered_text)
 
 
 if __name__ == "__main__":

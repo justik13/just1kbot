@@ -45,7 +45,7 @@ class PaymentCreationAmbiguousError(RuntimeError):
     500 as "result unknown, check first" and keeps an Idempotence-Key valid
     for 24 hours, so a payment object may exist while the local order state
     is undefined. Callers must NOT discard the order in this case: a
-    `payment.succeeded` webhook may still arrive for it.
+    `payment.canceled` or `payment.succeeded` webhook may still arrive for it.
     """
 
 

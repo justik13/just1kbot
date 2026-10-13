@@ -918,8 +918,8 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
             # Should be clamped to 40
             assert bonus == Decimal(40)
 
-    def test_reverse_referral_bonus_proportional_partial_refunds(self):
-        """Verify partial refunds reverse proportional bonus and track idempotency per refund_id."""
+    def test_reverse_referral_bonus_full_refund_and_idempotency(self):
+        """Verify full refund reverses entire bonus and tracks idempotency per refund_id."""
         import asyncio
         import uuid
         from services.referral_bonus import reverse_referral_bonus_for_topup
@@ -935,8 +935,7 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
             "bonus_rate": "0.20",
         }
 
-        # 1. First partial refund: 100 RUB of 1000 RUB top-up (10%)
-        # Expected bonus reversal: 200 * 0.10 = 20 RUB
+        # 1. Full refund reversal: reverses all 200 RUB bonus
         session1 = AsyncMock()
         credits_mock1 = MagicMock()
         credits_mock1.all.return_value = [credit]
@@ -952,27 +951,21 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
             reverse_referral_bonus_for_topup(
                 session1,
                 order_id=order_uuid,
-                refund_amount=Decimal("100.00"),
-                original_topup_amount=Decimal("1000.00"),
                 refund_id="ref_1",
             )
         )
-        self.assertEqual(rev1, Decimal("20.00"))
+        self.assertEqual(rev1, Decimal("200.00"))
         self.assertEqual(len(added_entries1), 1)
-        self.assertEqual(added_entries1[0].amount, Decimal("-20.00"))
+        self.assertEqual(added_entries1[0].amount, Decimal("-200.00"))
         self.assertIn("ref_1", added_entries1[0].idempotency_key)
 
-        # 2. Second partial refund: 200 RUB of 1000 RUB top-up (20%)
-        # First reversal is now in DB (-20 RUB)
+        # 2. Duplicate delivery of ref_1 -> must return existing and not add new entry
         session2 = AsyncMock()
         credits_mock2 = MagicMock()
         credits_mock2.all.return_value = [credit]
-        prev_rev_mock2 = MagicMock()
-        prev_rev_entry = MagicMock(amount=Decimal("-20.00"))
-        prev_rev_mock2.all.return_value = [prev_rev_entry]
-
-        session2.scalars.side_effect = [credits_mock2, prev_rev_mock2]
-        session2.scalar.return_value = None  # no existing reversal for ref_2
+        session2.scalars.side_effect = [credits_mock2]
+        existing_ref1 = MagicMock(entry_type="admin_adjustment", amount=Decimal("-200.00"))
+        session2.scalar.return_value = existing_ref1
         added_entries2 = []
         session2.add = lambda entry: added_entries2.append(entry)
 
@@ -980,37 +973,11 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
             reverse_referral_bonus_for_topup(
                 session2,
                 order_id=order_uuid,
-                refund_amount=Decimal("200.00"),
-                original_topup_amount=Decimal("1000.00"),
-                refund_id="ref_2",
-            )
-        )
-        self.assertEqual(rev2, Decimal("40.00"))
-        self.assertEqual(len(added_entries2), 1)
-        self.assertEqual(added_entries2[0].amount, Decimal("-40.00"))
-        self.assertIn("ref_2", added_entries2[0].idempotency_key)
-
-        # 3. Duplicate delivery of ref_1 -> must return existing and not add new entry
-        session3 = AsyncMock()
-        credits_mock3 = MagicMock()
-        credits_mock3.all.return_value = [credit]
-        session3.scalars.side_effect = [credits_mock3]
-        existing_ref1 = MagicMock(entry_type="admin_adjustment", amount=Decimal("-20.00"))
-        session3.scalar.return_value = existing_ref1
-        added_entries3 = []
-        session3.add = lambda entry: added_entries3.append(entry)
-
-        rev3 = asyncio.run(
-            reverse_referral_bonus_for_topup(
-                session3,
-                order_id=order_uuid,
-                refund_amount=Decimal("100.00"),
-                original_topup_amount=Decimal("1000.00"),
                 refund_id="ref_1",
             )
         )
-        self.assertEqual(rev3, Decimal("20.00"))
-        self.assertEqual(len(added_entries3), 0)
+        self.assertEqual(rev2, Decimal("200.00"))
+        self.assertEqual(len(added_entries2), 0)
 
     def test_grant_referral_bonus_purchaser_locked_with_for_update(self):
         """Verify purchaser query in grant_referral_bonus_for_topup uses row-level locking."""
@@ -1049,8 +1016,8 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
         purchaser_query = captured_queries[0]
         self.assertIsNotNone(purchaser_query._for_update_arg)
 
-    def test_reverse_referral_bonus_series_of_small_refunds_cumulative_no_abuse(self):
-        """Verify that 100 x 1 RUB refunds on 1000 RUB top-up reverse exactly 20 RUB referral bonus cumulatively."""
+    def test_reverse_referral_bonus_capacity_guard_prevents_over_reversal(self):
+        """Verify that attempting to reverse already fully reversed bonus yields 0."""
         import asyncio
         import uuid
         from services.referral_bonus import reverse_referral_bonus_for_topup
@@ -1066,7 +1033,7 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
         }
 
         session = AsyncMock()
-        reversal_entries = []
+        existing_reversal = MagicMock(amount=Decimal("-200.00"))
 
         async def mock_scalars(query):
             m = MagicMock()
@@ -1074,33 +1041,27 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
             if "amount > 0" in q_str or "amount > :amount_1" in q_str:
                 m.all.return_value = [credit]
             else:
-                m.all.return_value = list(reversal_entries)
+                m.all.return_value = [existing_reversal]
             return m
 
         session.scalars = mock_scalars
         session.scalar = AsyncMock(return_value=None)
+        reversal_entries = []
         session.add = lambda entry: reversal_entries.append(entry)
         session.flush = AsyncMock()
 
-        cumulative_refunded = Decimal("0.00")
-        for i in range(1, 101):
-            cumulative_refunded += Decimal("1.00")
-            asyncio.run(
-                reverse_referral_bonus_for_topup(
-                    session,
-                    order_id=order_uuid,
-                    refund_amount=Decimal("1.00"),
-                    original_topup_amount=Decimal("1000.00"),
-                    total_refunded_amount=cumulative_refunded,
-                    refund_id=f"small_ref_{i}",
-                )
+        total_reversed = asyncio.run(
+            reverse_referral_bonus_for_topup(
+                session,
+                order_id=order_uuid,
+                refund_id="new_refund_attempt",
             )
+        )
+        self.assertEqual(total_reversed, Decimal("0"))
+        self.assertEqual(len(reversal_entries), 0)
 
-        total_reversed = sum((abs(e.amount) for e in reversal_entries), Decimal("0"))
-        self.assertEqual(total_reversed, Decimal("20.00"))
-
-    def test_get_referral_bonus_balance_with_partial_refund(self):
-        """Verify get_referral_bonus_balance subtracts partial reversals rather than zeroing the whole credit."""
+    def test_get_referral_bonus_balance_with_reversals(self):
+        """Verify get_referral_bonus_balance correctly accounts for ledger reversal adjustments."""
         import asyncio
         from database.repositories.account_ledger_repo import AccountBalanceSnapshot
         from services.referral_bonus import get_referral_bonus_balance
@@ -1116,7 +1077,6 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
         )
         with patch("services.referral_bonus.get_account_balance", return_value=balance_snap):
             bonus = asyncio.run(get_referral_bonus_balance(session, user_id=10))
-            # 40 - 16 = 24 RUB
             self.assertEqual(bonus, Decimal("24.00"))
 
 
@@ -1237,6 +1197,7 @@ class TestReferralFirstOrderDiscount(unittest.TestCase):
 
         session = AsyncMock()
         session.get = fake_get
+        session.scalar = AsyncMock(return_value=user)
         session.add = MagicMock()
         session.flush = AsyncMock()
 

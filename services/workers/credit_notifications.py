@@ -263,8 +263,6 @@ async def _deliver_one(bot: Bot, order_id) -> bool:
     owner, ref = snap["owner"], snap["referrer"]
     if owner is None and ref is None:
         return False
-    if owner is not None and owner["kind"] == "wait":
-        return False
     if owner is not None and owner["kind"] == "anomaly":
         await _finalize_attempt(order_id)
         return False
@@ -310,26 +308,24 @@ async def _snapshot(order_id) -> dict | None:
             # early drop here avoids wasting a send on a refunded order.
             if order.status != "paid":
                 owner = {"kind": "drop"}
-            elif meta.get("settlement_held"):
-                # Still held (no release yet): money has not moved, stay
-                # silent and do not consume attempts — the release re-arms.
-                owner = {"kind": "wait"}
             else:
-                # Never notify without an actual credit in the ledger.
-                has_credit = await session.scalar(
-                    select(func.count(AccountLedgerEntry.id)).where(
-                        AccountLedgerEntry.order_id == order.id,
-                        AccountLedgerEntry.entry_type == "payment_credit",
+                if order.service_type == "topup":
+                    # Never notify topup without an actual credit in the ledger.
+                    has_credit = await session.scalar(
+                        select(func.count(AccountLedgerEntry.id)).where(
+                            AccountLedgerEntry.order_id == order.id,
+                            AccountLedgerEntry.entry_type == "payment_credit",
+                        )
                     )
-                )
-                if not has_credit:
-                    logger.warning(
-                        "Credit-notify skips order %s: paid but no "
-                        "payment_credit (pre-flight 3B owns this anomaly)",
-                        order.id,
-                    )
-                    owner = {"kind": "anomaly"}
-                else:
+                    if not has_credit:
+                        logger.warning(
+                            "Credit-notify skips order %s: paid topup but no "
+                            "payment_credit (pre-flight 3B owns this anomaly)",
+                            order.id,
+                        )
+                        owner = {"kind": "anomaly"}
+
+                if owner is None:
                     user = await session.get(User, order.user_id)
                     # Already synced as blocked by another path (broadcast,
                     # WI traffic, expiry notifications): do not burn attempts

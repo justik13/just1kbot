@@ -18,8 +18,10 @@ DB = os.getenv("TEST_DATABASE_URL")
 @unittest.skipUnless(DB, "TEST_DATABASE_URL is not set")
 class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        from database.connection import close_db
         from utils.telegram import _hub_cache, _hub_render_locks
 
+        await close_db()
         _hub_cache.clear()
         _hub_render_locks.clear()
         self.engine = create_async_engine(DB)
@@ -43,7 +45,6 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
                 is_active=True,
             )
             session.add_all((self.admin_user_db, self.target_user_db, self.tariff))
-            await session.commit()
 
         self.env_patcher = patch.dict(
             os.environ,
@@ -65,6 +66,15 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.env_patcher.start()
+
+        async def mock_throttle(handler, event, data):
+            return await handler(event, data)
+
+        self.throttle_patcher = patch(
+            "bot.middlewares.throttling.ThrottlingMiddleware.__call__",
+            side_effect=mock_throttle,
+        )
+        self.throttle_patcher.start()
 
         from config.settings import get_settings
 
@@ -94,6 +104,7 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
         await close_db()
         await stop_clean_chat_worker()
         self.env_patcher.stop()
+        self.throttle_patcher.stop()
         get_settings.cache_clear()
         _hub_cache.clear()
         _hub_render_locks.clear()

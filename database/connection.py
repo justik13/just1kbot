@@ -20,14 +20,21 @@ logger = logging.getLogger(__name__)
 
 _engine = None
 _sessionmaker = None
+_engine_loop: asyncio.AbstractEventLoop | None = None
 _db_lock: asyncio.Lock | None = None
+_db_lock_loop: asyncio.AbstractEventLoop | None = None
 _post_commit_background_tasks: set[asyncio.Task[None]] = set()
 
 
 def _get_db_lock() -> asyncio.Lock:
-    global _db_lock
-    if _db_lock is None:
+    global _db_lock, _db_lock_loop
+    try:
+        current_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        current_loop = None
+    if _db_lock is None or _db_lock_loop is not current_loop:
         _db_lock = asyncio.Lock()
+        _db_lock_loop = current_loop
     return _db_lock
 
 
@@ -42,11 +49,20 @@ def _asyncpg_connect_args() -> dict:
 
 
 async def init_db():
-    global _engine, _sessionmaker
+    global _engine, _sessionmaker, _engine_loop
     lock = _get_db_lock()
     async with lock:
-        if _engine is not None and _sessionmaker is not None:
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        if _engine is not None and _sessionmaker is not None and _engine_loop is current_loop:
             return _engine, _sessionmaker
+
+        if _engine is not None and _engine_loop is not current_loop:
+            _engine = None
+            _sessionmaker = None
 
         settings = get_settings()
         # P1 #8: Reduced pool_size from 50 to 10 for single-process deployment
@@ -66,6 +82,7 @@ async def init_db():
             connect_args=_asyncpg_connect_args(),
         )
         _sessionmaker = async_sessionmaker(_engine, expire_on_commit=False)
+        _engine_loop = current_loop
 
         # Seed default tariffs and maintenance mode (migrations are executed by docker-entrypoint.sh or alembic CLI)
         await _seed_default_data()
@@ -135,7 +152,11 @@ async def _seed_default_data() -> None:
 
 
 async def get_session() -> AsyncSession:
-    if _sessionmaker is None:
+    try:
+        current_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        current_loop = None
+    if _sessionmaker is None or (_engine_loop is not None and _engine_loop is not current_loop):
         await init_db()
     return _sessionmaker()
 
@@ -218,7 +239,7 @@ async def cancel_post_commit_tasks() -> None:
 
 
 async def close_db():
-    global _engine, _sessionmaker
+    global _engine, _sessionmaker, _engine_loop, _db_lock, _db_lock_loop
     # Cancel post-commit tasks BEFORE acquiring the lock.
     # Post-commit tasks may call session_scope() -> get_session() -> init_db(),
     # which would try to acquire _db_lock. If close_db() held the lock while
@@ -227,6 +248,12 @@ async def close_db():
     lock = _get_db_lock()
     async with lock:
         if _engine:
-            await _engine.dispose()
+            try:
+                await _engine.dispose()
+            except Exception:
+                pass
             _engine = None
             _sessionmaker = None
+            _engine_loop = None
+    _db_lock = None
+    _db_lock_loop = None
