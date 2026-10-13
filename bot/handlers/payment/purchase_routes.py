@@ -291,7 +291,7 @@ async def handle_order_check(
         await safe_callback_answer(callback, texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
-    order = await session.get(Order, order_id, with_for_update=True)
+    order = await session.get(Order, order_id)
     if not order or order.user_id != db_user.id:
         await safe_callback_answer(callback, texts.PAYMENT_PURCHASE_INVALID_OPERATION, show_alert=True)
         return

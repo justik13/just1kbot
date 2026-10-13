@@ -1,6 +1,6 @@
 import unittest
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -414,6 +414,30 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(res._newly_paid)
         mock_settle.assert_not_awaited()
 
+    async def test_mark_order_paid_withholds_settlement_if_user_banned(self):
+        """mark_order_paid sets settlement_held and user_banned if user is banned."""
+        session = AsyncMock()
+        order_uuid = uuid.uuid4()
+        fresh_order = Order(
+            id=order_uuid,
+            user_id=44,
+            service_type="awg",
+            amount_rub=Decimal("200.00"),
+            status="pending",
+        )
+        user = User(id=44, is_banned=True)
+        session.scalar = AsyncMock(side_effect=[fresh_order, user])
+
+        with patch.object(OrderService, "_settle_benefits", new=AsyncMock()) as mock_settle:
+            res = await OrderService.mark_order_paid(session, order_uuid)
+
+        self.assertIsNotNone(res)
+        self.assertEqual(res.status, "paid")
+        self.assertTrue((res.metadata_ or {}).get("settlement_held"))
+        self.assertEqual((res.metadata_ or {}).get("settlement_hold_reason"), "user_banned")
+        self.assertFalse(res._newly_paid)
+        mock_settle.assert_not_awaited()
+
     async def test_pay_from_wallet_blocks_financial_hold(self):
         """pay_from_wallet raises FinancialHoldBlockedError if user.financial_hold is True."""
         session = AsyncMock()
@@ -668,7 +692,219 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
             topup_amount=Decimal("500.00"),
         )
 
+    async def test_process_webhook_event_underpaid_returns_order_with_not_newly_paid(self):
+        """process_webhook_event returns order with _newly_paid=False on underpayment so webhook returns 200 OK."""
+        session = AsyncMock()
+        order_uuid = uuid.uuid4()
+        order = Order(
+            id=order_uuid,
+            user_id=70,
+            service_type="awg",
+            amount_rub=Decimal("300.00"),
+            status="pending",
+            external_id="pay_under_1",
+        )
+        session.scalar = AsyncMock(return_value=order)
+
+        payload = {
+            "event": "payment.succeeded",
+            "object": {
+                "id": "pay_under_1",
+                "status": "succeeded",
+                "amount": {"value": "150.00", "currency": "RUB"},
+                "metadata": {"order_id": str(order_uuid)},
+            },
+        }
+
+        res = await OrderService.process_webhook_event(session, payload)
+        self.assertIsNotNone(res)
+        self.assertFalse(getattr(res, "_newly_paid", True))
+        self.assertTrue((res.metadata_ or {}).get("underpaid"))
+        self.assertTrue((res.metadata_ or {}).get("manual_review"))
+
+    async def test_cleanup_expires_ambiguous_orders_over_30m(self):
+        """Cleanup worker cancels pending orders without external_id older than 30m."""
+        from services.workers.cleanup import _reconcile_stale_pending_orders
+        from contextlib import asynccontextmanager
+
+        mock_session = AsyncMock()
+        old_ambiguous_order = Order(
+            id=uuid.uuid4(),
+            user_id=80,
+            status="pending",
+            external_id=None,
+            created_at=datetime.now(timezone.utc) - timedelta(minutes=45),
+            metadata_={"payment_creation_ambiguous": True},
+        )
+        scalars_mock = MagicMock()
+        scalars_mock.all.return_value = [old_ambiguous_order]
+        exec_mock = MagicMock()
+        exec_mock.scalars.return_value = scalars_mock
+        exec_mock.all.return_value = []
+        mock_session.execute = AsyncMock(return_value=exec_mock)
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch("services.workers.cleanup.session_scope", fake_session_scope):
+            await _reconcile_stale_pending_orders()
+
+        self.assertEqual(old_ambiguous_order.status, "canceled")
+        self.assertEqual((old_ambiguous_order.metadata_ or {}).get("cancellation_reason"), "ambiguous_creation_timeout")
+
+    async def test_mark_order_paid_keeps_settlement_held_if_user_banned_on_recheck(self):
+        """mark_order_paid retains settlement_held and does not settle benefits if user is banned."""
+        session = AsyncMock()
+        order_uuid = uuid.uuid4()
+        held_order = Order(
+            id=order_uuid,
+            user_id=45,
+            service_type="awg",
+            status="paid",
+            metadata_={"settlement_held": True, "settlement_hold_reason": "user_banned"},
+        )
+        user = User(id=45, is_banned=True, financial_hold=False, topup_blocked=False)
+        session.scalar = AsyncMock(side_effect=[held_order, user])
+
+        with patch.object(OrderService, "_settle_benefits", new=AsyncMock()) as mock_settle:
+            res = await OrderService.mark_order_paid(session, order_uuid)
+
+        self.assertIsNotNone(res)
+        self.assertTrue((res.metadata_ or {}).get("settlement_held"))
+        self.assertEqual((res.metadata_ or {}).get("settlement_hold_reason"), "user_banned")
+        mock_settle.assert_not_awaited()
+
+    async def test_process_webhook_event_defers_refund_for_unpaid_order(self):
+        """process_webhook_event returns order with _retry_deferred=True when refund arrives before paid."""
+        session = AsyncMock()
+        order_uuid = uuid.uuid4()
+        order = Order(
+            id=order_uuid,
+            user_id=75,
+            service_type="awg",
+            amount_rub=Decimal("300.00"),
+            status="pending",
+            external_id="pay_ref_pending",
+        )
+        session.scalar = AsyncMock(return_value=order)
+
+        payload = {
+            "event": "refund.succeeded",
+            "object": {
+                "id": "ref_1",
+                "payment_id": "pay_ref_pending",
+                "status": "succeeded",
+                "amount": {"value": "300.00", "currency": "RUB"},
+            },
+        }
+
+        res = await OrderService.process_webhook_event(session, payload)
+        self.assertIsNone(res)
+
+    async def test_yookassa_raises_on_empty_id_or_confirmation_url(self):
+        """create_payment_url raises PaymentCreationAmbiguousError when id or url is missing/empty."""
+        from integrations.payment_gateways.yookassa import YooKassaGateway
+
+        gw = YooKassaGateway()
+        with patch(
+            "integrations.payment_gateways.yookassa.YooKassaService.create_payment_result",
+            return_value=YooKassaResult(ok=True, value={"id": "", "confirmation": {}}),
+        ):
+            with self.assertRaises(PaymentCreationAmbiguousError):
+                await gw.create_payment_url(
+                    order_id="test",
+                    amount_rub=Decimal("100"),
+                    description="Test payment",
+                )
+
+    async def test_webhook_missing_order_lifecycle(self):
+        """First delivery without order sets PENDING and 503; redelivery sets DEAD and 200."""
+        from bot.handlers.webhook import yookassa_webhook_handler
+        from config.enums import WebhookInboxStatus
+        from database.models import WebhookInbox
+
+        payload = {
+            "type": "notification",
+            "event": "payment.succeeded",
+            "object": {"id": "missing_pay_1", "status": "succeeded"},
+        }
+
+        # 1. First delivery: no existing event, order not found -> inbox_status PENDING, 503
+        session1 = AsyncMock()
+        session1.scalar = AsyncMock(return_value=None)
+        with patch("bot.handlers.webhook.session_scope") as mock_scope, \
+             patch("bot.handlers.webhook._get_real_ip", return_value="185.71.76.1"), \
+             patch("bot.handlers.webhook._is_yookassa_ip", return_value=True), \
+             patch("services.order_service.OrderService.process_webhook_event", return_value=None):
+            mock_scope.return_value.__aenter__.return_value = session1
+            req1 = AsyncMock()
+            req1.content_length = 200
+            req1.app = {}
+            req1.json.return_value = payload
+
+            resp1 = await yookassa_webhook_handler(req1)
+            self.assertEqual(resp1.status, 503)
+            self.assertEqual(resp1.text, "order_pending_retry")
+            session1.execute.assert_called_once()
+
+        # 2. Redelivery: existing event in pending, order still not found -> inbox_status DEAD, 200
+        existing = WebhookInbox(
+            id=1,
+            provider="yookassa",
+            event_key="payment.succeeded:missing_pay_1",
+            status=WebhookInboxStatus.PENDING.value,
+        )
+        session2 = AsyncMock()
+        session2.scalar = AsyncMock(return_value=existing)
+        with patch("bot.handlers.webhook.session_scope") as mock_scope, \
+             patch("bot.handlers.webhook._get_real_ip", return_value="185.71.76.1"), \
+             patch("bot.handlers.webhook._is_yookassa_ip", return_value=True), \
+             patch("services.order_service.OrderService.process_webhook_event", return_value=None):
+            mock_scope.return_value.__aenter__.return_value = session2
+            req2 = AsyncMock()
+            req2.content_length = 200
+            req2.app = {}
+            req2.json.return_value = payload
+
+            resp2 = await yookassa_webhook_handler(req2)
+            self.assertEqual(resp2.status, 200)
+            self.assertEqual(existing.status, WebhookInboxStatus.DEAD.value)
+
+    async def test_webhook_deferred_refund_returns_503(self):
+        """Deferred refund for unfinalized order keeps PENDING and returns 503."""
+        from bot.handlers.webhook import yookassa_webhook_handler
+        from config.enums import WebhookInboxStatus
+        from database.models import WebhookInbox
+
+        existing = WebhookInbox(
+            id=2,
+            provider="yookassa",
+            event_key="refund.succeeded:ref_1",
+            status=WebhookInboxStatus.PENDING.value,
+        )
+        session = AsyncMock()
+        session.scalar = AsyncMock(return_value=existing)
+        with patch("bot.handlers.webhook.session_scope") as mock_scope, \
+             patch("bot.handlers.webhook._get_real_ip", return_value="185.71.76.1"), \
+             patch("bot.handlers.webhook._is_yookassa_ip", return_value=True), \
+             patch("services.order_service.OrderService.process_webhook_event", return_value=None):
+            mock_scope.return_value.__aenter__.return_value = session
+            req = AsyncMock()
+            req.content_length = 200
+            req.app = {}
+            req.json.return_value = {
+                "type": "notification",
+                "event": "refund.succeeded",
+                "object": {"id": "ref_1", "payment_id": "pay_1", "status": "succeeded"},
+            }
+
+            resp = await yookassa_webhook_handler(req)
+            self.assertEqual(resp.status, 503)
+            self.assertEqual(existing.status, WebhookInboxStatus.PENDING.value)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

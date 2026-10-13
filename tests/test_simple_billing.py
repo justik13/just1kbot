@@ -407,7 +407,11 @@ class TestOrderService(unittest.IsolatedAsyncioTestCase):
             amount_rub=Decimal("200.00"),
             status="pending",
         )
-        session.scalar.return_value = order
+        session.scalar.side_effect = [
+            order,
+            order,
+            User(id=10, telegram_id=10010, is_banned=False, financial_hold=False, topup_blocked=False),
+        ]
         session.get.return_value = order
 
         success = await OrderService.process_webhook_event(session, {"some": "payload"})
@@ -782,7 +786,10 @@ class TestSimpleBillingEnhancements(unittest.IsolatedAsyncioTestCase):
             payment_method="yookassa",
             status="pending",
         )
-        session.scalar.return_value = order
+        session.scalar.side_effect = [
+            order,
+            User(id=55, telegram_id=5555, is_banned=False, financial_hold=False, topup_blocked=False),
+        ]
         session.get.return_value = order
 
         paid_order = await OrderService.mark_order_paid(session, order_uuid)
@@ -1298,7 +1305,10 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             status="canceled",
             metadata_={},
         )
-        session.scalar.return_value = order
+        session.scalar.side_effect = [
+            order,
+            User(id=25, telegram_id=2525, is_banned=False, financial_hold=False, topup_blocked=False),
+        ]
         session.get.return_value = order
 
         paid_order = await OrderService.mark_order_paid(session, order_uuid)
@@ -2762,7 +2772,7 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(inbox.status, WebhookInboxStatus.SUCCEEDED.value)
 
     async def test_handle_order_check_locks_order_with_for_update(self):
-        """Verify handle_order_check locks order with with_for_update=True."""
+        """Verify handle_order_check reads order without holding row lock before external HTTP."""
         from bot.handlers.payment.purchase_routes import handle_order_check
 
         session = AsyncMock(spec=AsyncSession)
@@ -2777,7 +2787,7 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
 
         await handle_order_check(callback, session, db_user=user)
 
-        session.get.assert_called_with(Order, order_uuid, with_for_update=True)
+        session.get.assert_called_with(Order, order_uuid)
 
     async def test_handle_order_cancel_locks_with_for_update_and_preserves_paid_order(self):
         """Verify handle_order_cancel locks with with_for_update and does not overwrite paid order."""
