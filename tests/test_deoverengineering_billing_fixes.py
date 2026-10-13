@@ -922,11 +922,12 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
         session.execute = AsyncMock()
         session.get = AsyncMock(return_value=None)
 
-        with patch("services.ban_service.ProfileDeletionService.delete_profiles_for_user", new=AsyncMock(return_value=0)), \
+        with patch("services.ban_service.get_user_by_telegram_id", new=AsyncMock(return_value=user)), \
+             patch("services.ban_service.ProfileDeletionService.delete_profiles_for_user", new=AsyncMock(return_value=0)), \
              patch("services.ban_service.WhiteInternetService.deactivate_user_subscriptions", new=AsyncMock(return_value=[])), \
              patch("services.ban_service.AuditService.log_action", new=AsyncMock()), \
              patch("services.ban_service.update_user", new=AsyncMock()):
-            ok, _ = await BanService.ban_user(session, admin_id, user, user.telegram_id, reason="audit_test")
+            ok, _ = await BanService.ban_user(session, admin_id, user.telegram_id, reason="audit_test")
 
         self.assertTrue(ok)
         self.assertEqual(order.status, "canceled")
@@ -964,7 +965,7 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
     async def test_try_inline_sync_flushes_without_committing(self):
         """_try_inline_sync flushes changes and returns True on confirmed sync without calling session.commit()."""
         from services.white_internet_service import WhiteInternetService
-        from config.enums import SyncResult
+        from services.xray_node_client import SyncResult
 
         session = AsyncMock()
         sub = MagicMock()
