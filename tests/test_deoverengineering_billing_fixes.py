@@ -934,8 +934,7 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((order.metadata_ or {}).get("cancellation_reason"), "user_banned")
 
     async def test_get_account_balance_fast_paths(self):
-        """get_account_balance returns fast-path when position <= 0 or user has only real money."""
-        from database.models import AccountLedgerEntry
+        """get_account_balance computes balances directly via aggregates for real, bonus, or debt positions."""
         from database.repositories.account_ledger_repo import get_account_balance
 
         session = AsyncMock()
@@ -949,18 +948,24 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bal_neg.bonus_available, Decimal("0"))
 
         # Case 2: position > 0 and only real money (no admin_adjustment)
-        session.scalar = AsyncMock(return_value=Decimal("500.00"))
-        credit_entry = AccountLedgerEntry(id=1, user_id=99, entry_type="payment_credit", amount=Decimal("500.00"))
-        scalars_mock = MagicMock()
-        scalars_mock.all.return_value = [credit_entry]
-        session.scalars = AsyncMock(return_value=scalars_mock)
-
+        session.scalar = AsyncMock(side_effect=[Decimal("500.00"), Decimal("0")])
         bal_real = await get_account_balance(session, user_id=99)
         self.assertEqual(bal_real.accounting_position, Decimal("500.00"))
         self.assertEqual(bal_real.available, Decimal("500.00"))
         self.assertEqual(bal_real.debt, Decimal("0"))
         self.assertEqual(bal_real.real_available, Decimal("500.00"))
         self.assertEqual(bal_real.bonus_available, Decimal("0"))
+
+        # Case 3: position > 0 with unspent bonus funds
+        session.scalar = AsyncMock(
+            side_effect=[Decimal("600.00"), Decimal("100.00"), Decimal("20.00")]
+        )
+        bal_bonus = await get_account_balance(session, user_id=99)
+        self.assertEqual(bal_bonus.accounting_position, Decimal("600.00"))
+        self.assertEqual(bal_bonus.available, Decimal("600.00"))
+        self.assertEqual(bal_bonus.debt, Decimal("0"))
+        self.assertEqual(bal_bonus.real_available, Decimal("520.00"))
+        self.assertEqual(bal_bonus.bonus_available, Decimal("80.00"))
 
     async def test_try_inline_sync_flushes_without_committing(self):
         """_try_inline_sync flushes changes and returns True on confirmed sync without calling session.commit()."""
