@@ -254,7 +254,9 @@ class WhiteInternetService:
                 metadata={"operation": operation},
             )
         except InsufficientAccountBalanceError:
-            order.status = "canceled"
+            from services.order_service import OrderService
+
+            OrderService.mark_order_canceled(order, reason="insufficient_balance")
             await session.flush()
             balance_snap = await get_account_balance(session, user_id=user.id)
             # Coerce once: shortage arithmetic must not depend on the input type.
@@ -269,11 +271,11 @@ class WhiteInternetService:
                 None,
             )
         except (AccountLedgerInvariantError, AccountLedgerConflictError):
-            order.status = "canceled"
-            await session.flush()
             raise
         except AccountLedgerError as exc:
-            order.status = "canceled"
+            from services.order_service import OrderService
+
+            OrderService.mark_order_canceled(order, reason="ledger_error")
             await session.flush()
             return order, (False, f"{texts.WL_DEBIT_FAILED}: {exc}", None)
         order.status = "paid"
@@ -1079,14 +1081,6 @@ class WhiteInternetService:
                     sub.last_reconciled_node_epoch = verified_epoch
                     sub.last_synced_at = now_utc()
                     await session.flush()
-                    try:
-                        await session.commit()
-                    except Exception as exc:
-                        await session.rollback()
-                        logger.warning(
-                            "Session commit after inline sync failed, leaving PENDING_CREATE: %s", exc
-                        )
-                        return False
                     return True
                 else:
                     logger.warning(
