@@ -267,16 +267,18 @@ class OrderDebitAllocationPostgresTests(unittest.IsolatedAsyncioTestCase):
             get_account_balance,
         )
 
-        topup_order = await self._make_order(
-            self.sessions(), service_type="topup", amount=Decimal("100"), payment_method="yookassa"
-        )
+        topup_order_id: uuid.UUID
         async with self.sessions.begin() as session:
+            topup_order = await self._make_order(
+                session, service_type="topup", amount=Decimal("100"), payment_method="yookassa"
+            )
+            topup_order_id = topup_order.id
             # 1. 100 RUB real + 50 RUB bonus
             await create_order_credit(
                 session,
                 user_id=self.user_id,
                 amount_rub=Decimal("100"),
-                order_id=topup_order.id,
+                order_id=topup_order_id,
             )
             await create_admin_adjustment(
                 session,
@@ -294,10 +296,10 @@ class OrderDebitAllocationPostgresTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(bal.bonus_available, Decimal("50"))
 
         # 2. Spend 30 RUB (should consume bonus first)
-        purchase = await self._make_order(
-            self.sessions(), service_type="awg", amount=Decimal("30")
-        )
         async with self.sessions.begin() as session:
+            purchase = await self._make_order(
+                session, service_type="awg", amount=Decimal("30")
+            )
             await create_order_debit(
                 session,
                 user_id=self.user_id,
@@ -336,7 +338,7 @@ class OrderDebitAllocationPostgresTests(unittest.IsolatedAsyncioTestCase):
                 session,
                 user_id=self.user_id,
                 amount_rub=Decimal("100"),
-                order_id=topup_order.id,
+                order_id=topup_order_id,
                 refund_id=f"ref_{uuid.uuid4().hex[:8]}",
             )
 
