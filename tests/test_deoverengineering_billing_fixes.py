@@ -994,6 +994,68 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
         session.flush.assert_awaited()
         session.commit.assert_not_called()
 
+    async def test_checkout_wallet_order_marks_canceled_with_reason_on_insufficient_balance(self):
+        """WhiteInternetService._checkout_wallet_order marks order canceled with insufficient_balance reason."""
+        from database.repositories.account_ledger_repo import InsufficientAccountBalanceError
+        from services.white_internet_service import WhiteInternetService
+
+        session = AsyncMock()
+        user = User(id=77, telegram_id=999888, financial_hold=False, topup_blocked=False)
+        snapshot = MagicMock(available=Decimal("20.00"))
+
+        with patch("services.white_internet_service.create_order_debit", side_effect=InsufficientAccountBalanceError("nope")), \
+             patch("services.white_internet_service.get_account_balance", new=AsyncMock(return_value=snapshot)):
+            order, failure = await WhiteInternetService._checkout_wallet_order(
+                session,
+                user=user,
+                service_type="white_internet",
+                tariff_id=1,
+                amount_due=Decimal("100.00"),
+                duration_days=30,
+                operation="purchase",
+                insufficient_text="need {price}, got {balance}, short {shortage}",
+            )
+
+        self.assertIsNotNone(order)
+        self.assertEqual(order.status, "canceled")
+        self.assertEqual((order.metadata_ or {}).get("cancellation_reason"), "insufficient_balance")
+        self.assertIsNotNone(failure)
+        self.assertFalse(failure[0])
+        self.assertIn("short 80", failure[1])
+
+    async def test_purchase_funds_splits_fallback_without_allocations(self):
+        """_purchase_funds_splits attributes whole debit amount to real funds if allocations are absent."""
+        from database.models import AccountLedgerEntry
+        from database.repositories.purchases_repo import _purchase_funds_splits
+
+        session = AsyncMock()
+        target_uuid = uuid.uuid4()
+        debit_entry = AccountLedgerEntry(
+            id=555,
+            user_id=10,
+            entry_type="purchase_debit",
+            amount=Decimal("-300.00"),
+            order_id=target_uuid,
+        )
+
+        scalars_mock_debits = MagicMock()
+        scalars_mock_debits.all.return_value = [debit_entry]
+
+        # First query: debit_rows
+        exec_mock_debit = MagicMock()
+        exec_mock_debit.scalars.return_value = scalars_mock_debits
+        # Second query: agg_rows (empty allocations)
+        exec_mock_agg = MagicMock()
+        exec_mock_agg.all.return_value = []
+
+        session.execute = AsyncMock(side_effect=[exec_mock_debit, exec_mock_agg])
+
+        res = await _purchase_funds_splits(session, order_ids={target_uuid})
+        self.assertIn(target_uuid, res)
+        real_amt, bonus_amt = res[target_uuid]
+        self.assertEqual(real_amt, Decimal("300.00"))
+        self.assertEqual(bonus_amt, Decimal("0"))
+
 
 if __name__ == "__main__":
     unittest.main()

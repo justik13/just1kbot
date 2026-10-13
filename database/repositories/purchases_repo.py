@@ -251,6 +251,8 @@ async def _purchase_funds_splits(
     for debit in debit_rows:
         parts = per_debit.get(debit.id)
         if not parts:
+            if debit.order_id is not None and debit.order_id in order_ids:
+                by_order[debit.order_id] = (abs(Decimal(debit.amount)), Decimal(0))
             continue
         if debit.order_id is not None and debit.order_id in order_ids:
             by_order[debit.order_id] = (
