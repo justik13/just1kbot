@@ -806,6 +806,7 @@ class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
         )
 
         mock_session = AsyncMock()
+        mock_session.scalar = AsyncMock(return_value=sub)
         mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=sub)))
 
         device_info = {"os": "iOS 17.5", "model": "iPhone15,2", "ua": "IncyClient/1.2"}
@@ -859,6 +860,7 @@ class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
 
         mock_session = AsyncMock()
         mock_session.flush = AsyncMock()
+        mock_session.scalar = AsyncMock(return_value=sub)
         mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=sub)))
 
         device_info = {"os": "iOS 17.5", "model": "iPhone15,2"}
@@ -888,6 +890,7 @@ class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
         )
 
         mock_session = AsyncMock()
+        mock_session.scalar = AsyncMock(return_value=sub)
         mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=sub)))
 
         # Effective limit is 1, so registering a new hwid-2 must be rejected
@@ -940,6 +943,7 @@ class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
         )
 
         mock_session = AsyncMock()
+        mock_session.scalar = AsyncMock(side_effect=[100, user_2h_expired, sub])
         mock_session.execute = AsyncMock(side_effect=[
             MagicMock(scalar_one_or_none=MagicMock(return_value=100)),
             MagicMock(scalar_one_or_none=MagicMock(return_value=user_2h_expired)),
@@ -970,6 +974,7 @@ class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
             MagicMock(scalar_one_or_none=MagicMock(return_value=user_10h_expired)),
             MagicMock(scalar_one_or_none=MagicMock(return_value=sub)),
         ])
+        mock_session.scalar = AsyncMock(side_effect=[100, user_10h_expired, sub])
         allowed, count, limit = await vless_subscription_repo.register_hwid_atomic(
             mock_session,
             subscription_id=sub.id,
@@ -990,6 +995,7 @@ class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
             active_hwids={"dev1": now.isoformat()},
         )
         mock_session = AsyncMock()
+        mock_session.scalar = AsyncMock(return_value=sub)
         mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=sub)))
 
         old_uuid, new_uuid = await vless_subscription_repo.reset_hwids(mock_session, sub.id)
@@ -1011,6 +1017,7 @@ class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
             active_hwids={},
         )
         mock_session = AsyncMock()
+        mock_session.scalar = AsyncMock(return_value=sub)
         mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=sub)))
 
         old_uuid, new_uuid = await vless_subscription_repo.reset_hwids(mock_session, sub.id)
@@ -1166,6 +1173,7 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
         )
 
         mock_session = AsyncMock()
+        mock_session.scalar.return_value = sub
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = sub
         mock_session.execute.return_value = mock_result
@@ -1249,6 +1257,7 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
         mock_session = AsyncMock()
         mock_session.add = MagicMock()
         mock_session.begin_nested = fake_nested
+        mock_session.scalar = AsyncMock(side_effect=[None, existing_sub])
         mock_session.execute = AsyncMock(side_effect=[
             MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
             MagicMock(scalar_one_or_none=MagicMock(return_value=existing_sub)),
@@ -2384,6 +2393,7 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
 
         sub = VlessSubscription(id=99, user_id=1, uuid="test-uuid", version=3)
         session = AsyncMock()
+        session.scalar = AsyncMock(return_value=sub)
         mock_res = MagicMock()
         mock_res.scalar_one_or_none = MagicMock(return_value=sub)
         session.execute = AsyncMock(return_value=mock_res)
