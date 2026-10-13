@@ -1079,14 +1079,6 @@ class WhiteInternetService:
                     sub.last_reconciled_node_epoch = verified_epoch
                     sub.last_synced_at = now_utc()
                     await session.flush()
-                    try:
-                        await session.commit()
-                    except Exception as exc:
-                        await session.rollback()
-                        logger.warning(
-                            "Session commit after inline sync failed, leaving PENDING_CREATE: %s", exc
-                        )
-                        return False
                     return True
                 else:
                     logger.warning(

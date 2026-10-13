@@ -102,18 +102,53 @@ async def get_account_balance(
         or ZERO
     )
     debt = max(ZERO, -position)
-
-    credits = (
-        await session.scalars(
-            select(AccountLedgerEntry).where(
-                AccountLedgerEntry.user_id == user_id,
-                AccountLedgerEntry.amount > 0,
-                AccountLedgerEntry.entry_type.in_(
-                    ("payment_credit", "admin_adjustment")
-                ),
-            )
+    if position <= ZERO:
+        return AccountBalanceSnapshot(
+            accounting_position=position,
+            available=ZERO,
+            debt=debt,
+            real_position=ZERO,
+            bonus_position=ZERO,
+            real_available=ZERO,
+            bonus_available=ZERO,
         )
-    ).all()
+
+    credits = list(
+        (
+            await session.scalars(
+                select(AccountLedgerEntry).where(
+                    AccountLedgerEntry.user_id == user_id,
+                    AccountLedgerEntry.amount > 0,
+                    AccountLedgerEntry.entry_type.in_(
+                        ("payment_credit", "admin_adjustment")
+                    ),
+                )
+            )
+        ).all()
+    )
+    if not credits:
+        return AccountBalanceSnapshot(
+            accounting_position=position,
+            available=ZERO,
+            debt=debt,
+            real_position=ZERO,
+            bonus_position=ZERO,
+            real_available=ZERO,
+            bonus_available=ZERO,
+        )
+
+    has_bonus = any(c.entry_type == "admin_adjustment" for c in credits)
+    if not has_bonus:
+        real_avail = max(ZERO, position)
+        return AccountBalanceSnapshot(
+            accounting_position=position,
+            available=real_avail,
+            debt=debt,
+            real_position=real_avail,
+            bonus_position=ZERO,
+            real_available=real_avail,
+            bonus_available=ZERO,
+        )
 
     real_available = ZERO
     bonus_available = ZERO

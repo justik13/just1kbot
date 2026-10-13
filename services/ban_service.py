@@ -12,6 +12,7 @@ from database.repositories.users_repo import (
     update_user,
 )
 from services.audit_service import AuditService
+from services.order_service import OrderService
 from services.profile_deletion_service import ProfileDeletionService
 from services.white_internet_service import WhiteInternetService
 from utils.datetime_helpers import now_utc
@@ -113,14 +114,13 @@ class BanService:
         telegram_id: int,
         reason: str | None = None,
     ) -> tuple:
-        # Global lock order Payment -> advisory -> User for transactional consistency.
+        # Read legacy payment IDs without redundant row locks; lock per-user advisory and locked_user.
         payment_ids = list(
             (
                 await session.scalars(
                     select(Payment.id)
                     .where(Payment.user_id == user.id)
                     .order_by(Payment.id)
-                    .with_for_update()
                 )
             ).all()
         )
@@ -165,7 +165,7 @@ class BanService:
             )
         ).all()
         for ord_item in orders:
-            ord_item.status = "canceled"
+            OrderService.mark_order_canceled(ord_item, reason="user_banned")
             payments_closed += 1
 
         await update_user(

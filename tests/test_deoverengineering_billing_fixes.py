@@ -903,6 +903,96 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(resp.status, 503)
             self.assertEqual(existing.status, WebhookInboxStatus.PENDING.value)
 
+    async def test_ban_user_cancels_pending_orders_with_user_banned_reason(self):
+        """BanService.ban_user cancels pending orders with user_banned reason."""
+        from services.ban_service import BanService
+
+        session = AsyncMock()
+        admin_id = 1
+        user = User(id=10, telegram_id=123456, is_banned=False, is_deleted=False)
+        order = Order(id=uuid.uuid4(), user_id=10, status="pending", metadata_={})
+
+        scalars_mock_orders = MagicMock()
+        scalars_mock_orders.all.return_value = [order]
+        scalars_mock_payments = MagicMock()
+        scalars_mock_payments.all.return_value = []
+
+        session.scalars = AsyncMock(side_effect=[scalars_mock_payments, scalars_mock_orders])
+        session.scalar = AsyncMock(return_value=user)
+        session.execute = AsyncMock()
+        session.get = AsyncMock(return_value=None)
+
+        with patch("services.ban_service.ProfileDeletionService.delete_profiles_for_user", new=AsyncMock(return_value=0)), \
+             patch("services.ban_service.WhiteInternetService.deactivate_user_subscriptions", new=AsyncMock(return_value=[])), \
+             patch("services.ban_service.AuditService.log_action", new=AsyncMock()), \
+             patch("services.ban_service.update_user", new=AsyncMock()):
+            ok, _ = await BanService.ban_user(session, admin_id, user, user.telegram_id, reason="audit_test")
+
+        self.assertTrue(ok)
+        self.assertEqual(order.status, "canceled")
+        self.assertEqual((order.metadata_ or {}).get("cancellation_reason"), "user_banned")
+
+    async def test_get_account_balance_fast_paths(self):
+        """get_account_balance returns fast-path when position <= 0 or user has only real money."""
+        from database.models import AccountLedgerEntry
+        from database.repositories.account_ledger_repo import get_account_balance
+
+        session = AsyncMock()
+        # Case 1: position <= 0
+        session.scalar = AsyncMock(return_value=Decimal("-150.00"))
+        bal_neg = await get_account_balance(session, user_id=99)
+        self.assertEqual(bal_neg.accounting_position, Decimal("-150.00"))
+        self.assertEqual(bal_neg.available, Decimal("0"))
+        self.assertEqual(bal_neg.debt, Decimal("150.00"))
+        self.assertEqual(bal_neg.real_available, Decimal("0"))
+        self.assertEqual(bal_neg.bonus_available, Decimal("0"))
+
+        # Case 2: position > 0 and only real money (no admin_adjustment)
+        session.scalar = AsyncMock(return_value=Decimal("500.00"))
+        credit_entry = AccountLedgerEntry(id=1, user_id=99, entry_type="payment_credit", amount=Decimal("500.00"))
+        scalars_mock = MagicMock()
+        scalars_mock.all.return_value = [credit_entry]
+        session.scalars = AsyncMock(return_value=scalars_mock)
+
+        bal_real = await get_account_balance(session, user_id=99)
+        self.assertEqual(bal_real.accounting_position, Decimal("500.00"))
+        self.assertEqual(bal_real.available, Decimal("500.00"))
+        self.assertEqual(bal_real.debt, Decimal("0"))
+        self.assertEqual(bal_real.real_available, Decimal("500.00"))
+        self.assertEqual(bal_real.bonus_available, Decimal("0"))
+
+    async def test_try_inline_sync_flushes_without_committing(self):
+        """_try_inline_sync flushes changes and returns True on confirmed sync without calling session.commit()."""
+        from services.white_internet_service import WhiteInternetService
+        from config.enums import SyncResult
+
+        session = AsyncMock()
+        sub = MagicMock()
+        sub.uuid = "client-uuid-1"
+        sub.desired_version = 1
+        origin_node = MagicMock()
+        origin_node.api_url = "http://node.local:8080"
+        origin_node.api_key = "key123"
+        origin_node.xray_instance_epoch = 42
+        origin_node.extra_data = {}
+
+        mock_resp = MagicMock()
+        mock_resp.result = SyncResult.APPLIED
+        mock_resp.verified_epoch = 42
+        mock_resp.verified_inbounds = ["just1k-wl-default"]
+
+        mock_xray = AsyncMock()
+        mock_xray.sync_client.return_value = mock_resp
+        mock_xray.__aenter__.return_value = mock_xray
+        mock_xray.__aexit__.return_value = False
+
+        with patch("services.white_internet_service.XrayNodeClient", return_value=mock_xray):
+            res = await WhiteInternetService._try_inline_sync(session, sub, origin_node, "test-key")
+
+        self.assertTrue(res)
+        session.flush.assert_awaited()
+        session.commit.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
