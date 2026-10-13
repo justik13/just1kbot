@@ -812,7 +812,11 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
             return_value=YooKassaResult(ok=True, value={"id": "", "confirmation": {}}),
         ):
             with self.assertRaises(PaymentCreationAmbiguousError):
-                await gw.create_payment_url(order_id="test", amount_rub=Decimal("100"))
+                await gw.create_payment_url(
+                    order_id="test",
+                    amount_rub=Decimal("100"),
+                    description="Test payment",
+                )
 
     async def test_webhook_missing_order_lifecycle(self):
         """First delivery without order sets PENDING and 503; redelivery sets DEAD and 200."""

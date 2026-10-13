@@ -409,6 +409,7 @@ class TestOrderService(unittest.IsolatedAsyncioTestCase):
         )
         session.scalar.side_effect = [
             order,
+            order,
             User(id=10, telegram_id=10010, is_banned=False, financial_hold=False, topup_blocked=False),
         ]
         session.get.return_value = order
