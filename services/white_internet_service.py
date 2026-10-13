@@ -271,10 +271,6 @@ class WhiteInternetService:
                 None,
             )
         except (AccountLedgerInvariantError, AccountLedgerConflictError):
-            from services.order_service import OrderService
-
-            OrderService.mark_order_canceled(order, reason="ledger_invariant_error")
-            await session.flush()
             raise
         except AccountLedgerError as exc:
             from services.order_service import OrderService

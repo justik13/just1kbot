@@ -422,8 +422,8 @@ async def _batch_credit_capacities(
         return {}
 
     credit_ids = [c.id for c in credits]
-    order_ids = [c.order_id for c in credits if getattr(c, "order_id", None) is not None]
-    payment_ids = [c.payment_id for c in credits if getattr(c, "payment_id", None) is not None]
+    order_ids = [c.order_id for c in credits if c.order_id is not None]
+    payment_ids = [c.payment_id for c in credits if c.payment_id is not None]
 
     allocations = (
         await session.scalars(
@@ -465,12 +465,7 @@ async def _batch_credit_capacities(
                 .group_by(AccountLedgerEntry.order_id, AccountLedgerEntry.payment_id)
             )
         ).all()
-        for row in rows:
-            if len(row) == 2:
-                o_id, sum_amt = row
-                p_id = None
-            else:
-                o_id, p_id, sum_amt = row
+        for o_id, p_id, sum_amt in rows:
             if o_id is not None:
                 refund_by_order[o_id] = (
                     refund_by_order.get(o_id, ZERO) + abs(Decimal(sum_amt))
@@ -484,9 +479,9 @@ async def _batch_credit_capacities(
     for credit in credits:
         used = used_by_credit.get(credit.id, ZERO)
         ext_debit = ZERO
-        if getattr(credit, "order_id", None) is not None:
+        if credit.order_id is not None:
             ext_debit += refund_by_order.get(credit.order_id, ZERO)
-        if getattr(credit, "payment_id", None) is not None:
+        if credit.payment_id is not None:
             ext_debit += refund_by_payment.get(credit.payment_id, ZERO)
         capacities[credit.id] = Decimal(credit.amount) - used - ext_debit
 

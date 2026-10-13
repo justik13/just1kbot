@@ -1028,8 +1028,8 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(failure[0])
         self.assertIn("short 80", failure[1])
 
-    async def test_purchase_funds_splits_fallback_without_allocations(self):
-        """_purchase_funds_splits attributes whole debit amount to real funds if allocations are absent."""
+    async def test_purchase_funds_splits_omits_order_when_allocations_absent(self):
+        """_purchase_funds_splits omits order from result when allocations are absent to avoid fake attribution."""
         from database.models import AccountLedgerEntry
         from database.repositories.purchases_repo import _purchase_funds_splits
 
@@ -1056,10 +1056,7 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
         session.execute = AsyncMock(side_effect=[exec_mock_debit, exec_mock_agg])
 
         res = await _purchase_funds_splits(session, order_ids={target_uuid})
-        self.assertIn(target_uuid, res)
-        real_amt, bonus_amt = res[target_uuid]
-        self.assertEqual(real_amt, Decimal("300.00"))
-        self.assertEqual(bonus_amt, Decimal("0"))
+        self.assertNotIn(target_uuid, res)
 
 
 if __name__ == "__main__":

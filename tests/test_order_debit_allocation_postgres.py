@@ -255,6 +255,99 @@ class OrderDebitAllocationPostgresTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(leftover or 0, 0)
 
+    async def test_mixed_balance_lifecycle_with_bonuses_refund_and_admin_adjustment(self):
+        """Integration test on PostgreSQL verifying get_account_balance across full lifecycle:
+        credits, partial spending, admin deduction, and refund.
+        """
+        from database.repositories.account_ledger_repo import (
+            create_admin_adjustment,
+            create_order_credit,
+            create_order_debit,
+            create_order_refund_debit,
+            get_account_balance,
+        )
+
+        topup_order = await self._make_order(
+            self.sessions(), service_type="topup", amount=Decimal("100"), payment_method="yookassa"
+        )
+        async with self.sessions.begin() as session:
+            # 1. 100 RUB real + 50 RUB bonus
+            await create_order_credit(
+                session,
+                user_id=self.user_id,
+                amount_rub=Decimal("100"),
+                order_id=topup_order.id,
+            )
+            await create_admin_adjustment(
+                session,
+                user_id=self.user_id,
+                signed_amount=Decimal("50"),
+                idempotency_key=f"bonus_seed:{uuid.uuid4().hex}",
+                metadata={},
+            )
+
+        async with self.sessions() as session:
+            bal = await get_account_balance(session, user_id=self.user_id)
+            self.assertEqual(bal.accounting_position, Decimal("150"))
+            self.assertEqual(bal.available, Decimal("150"))
+            self.assertEqual(bal.real_available, Decimal("100"))
+            self.assertEqual(bal.bonus_available, Decimal("50"))
+
+        # 2. Spend 30 RUB (should consume bonus first)
+        purchase = await self._make_order(
+            self.sessions(), service_type="awg", amount=Decimal("30")
+        )
+        async with self.sessions.begin() as session:
+            await create_order_debit(
+                session,
+                user_id=self.user_id,
+                amount_rub=Decimal("30"),
+                order_id=purchase.id,
+                metadata={},
+            )
+
+        async with self.sessions() as session:
+            bal = await get_account_balance(session, user_id=self.user_id)
+            self.assertEqual(bal.accounting_position, Decimal("120"))
+            self.assertEqual(bal.available, Decimal("120"))
+            self.assertEqual(bal.real_available, Decimal("100"))
+            self.assertEqual(bal.bonus_available, Decimal("20"))
+
+        # 3. Admin deducts 10 RUB bonus
+        async with self.sessions.begin() as session:
+            await create_admin_adjustment(
+                session,
+                user_id=self.user_id,
+                signed_amount=Decimal("-10"),
+                idempotency_key=f"bonus_deduct:{uuid.uuid4().hex}",
+                metadata={},
+            )
+
+        async with self.sessions() as session:
+            bal = await get_account_balance(session, user_id=self.user_id)
+            self.assertEqual(bal.accounting_position, Decimal("110"))
+            self.assertEqual(bal.available, Decimal("110"))
+            self.assertEqual(bal.real_available, Decimal("100"))
+            self.assertEqual(bal.bonus_available, Decimal("10"))
+
+        # 4. Refund the 100 RUB topup
+        async with self.sessions.begin() as session:
+            await create_order_refund_debit(
+                session,
+                user_id=self.user_id,
+                amount_rub=Decimal("100"),
+                order_id=topup_order.id,
+                refund_id=f"ref_{uuid.uuid4().hex[:8]}",
+            )
+
+        async with self.sessions() as session:
+            bal = await get_account_balance(session, user_id=self.user_id)
+            self.assertEqual(bal.accounting_position, Decimal("10"))
+            self.assertEqual(bal.available, Decimal("10"))
+            self.assertEqual(bal.real_available, Decimal("0"))
+            self.assertEqual(bal.bonus_available, Decimal("10"))
+            self.assertEqual(bal.debt, Decimal("0"))
+
 
 if __name__ == "__main__":
     unittest.main()

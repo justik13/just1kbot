@@ -2284,7 +2284,7 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
 
         # Return 200 RUB refunded for this order
         mock_order_refund_rows = MagicMock()
-        mock_order_refund_rows.all.return_value = [(order_uuid, 200)]
+        mock_order_refund_rows.all.return_value = [(order_uuid, None, 200)]
         session.execute.return_value = mock_order_refund_rows
 
         capacities = await _batch_credit_capacities(session, [credit])
