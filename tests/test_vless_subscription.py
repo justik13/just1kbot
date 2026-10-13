@@ -1065,6 +1065,7 @@ class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
         self.assertIn("flow=xtls-rprx-vision", links[0])
         self.assertIn("security=tls", links[0])
         self.assertIn("alpn=http%2F1.1", links[0])
+        self.assertIn("fp=chrome", links[0])
         self.assertIn("#🇩🇪 DE Server", links[0])
         self.assertNotIn("?serverDescription=", links[0])
         self.assertNotIn("%F0%9F", links[0])
