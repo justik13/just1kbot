@@ -3,6 +3,8 @@
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import aiohttp
+
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery
 
@@ -64,9 +66,22 @@ class TestSafeCallbackAnswer(unittest.IsolatedAsyncioTestCase):
 
 class TestYooKassaServiceTimeouts(unittest.IsolatedAsyncioTestCase):
     def test_timeout_presets(self):
-        self.assertLessEqual(CHECK_STATUS_TIMEOUT.total, 7.0)
-        self.assertLessEqual(CHECK_STATUS_TIMEOUT.connect, 3.0)
-        self.assertLessEqual(CREATE_PAYMENT_TIMEOUT.total, 10.0)
+        self.assertEqual(CHECK_STATUS_TIMEOUT.total, 7.0)
+        self.assertEqual(CHECK_STATUS_TIMEOUT.connect, 3.0)
+        self.assertEqual(CHECK_STATUS_TIMEOUT.sock_read, 5.0)
+        self.assertEqual(CREATE_PAYMENT_TIMEOUT.total, 10.0)
+        self.assertEqual(CREATE_PAYMENT_TIMEOUT.connect, 5.0)
+        self.assertEqual(CREATE_PAYMENT_TIMEOUT.sock_read, 7.0)
+
+    async def test_connector_configuration(self):
+        import socket
+        from services.yookassa_service import _create_tcp_connector
+
+        connector = _create_tcp_connector()
+        self.assertIsInstance(connector, aiohttp.TCPConnector)
+        self.assertEqual(connector.family, socket.AF_INET)
+        self.assertTrue(connector.use_dns_cache)
+        await connector.close()
 
     @patch("services.yookassa_service.YooKassaService._request")
     async def test_create_payment_uses_create_timeout(self, mock_req):
@@ -93,6 +108,39 @@ class TestYooKassaServiceTimeouts(unittest.IsolatedAsyncioTestCase):
             "/payments/pay-1",
             timeout=CHECK_STATUS_TIMEOUT,
         )
+
+    @patch("bot.handlers.payment.balance_routes.render_hub", new_callable=AsyncMock)
+    @patch("bot.handlers.payment.balance_routes.OrderService.create_order")
+    @patch("bot.handlers.payment.balance_routes.safe_callback_answer", new_callable=AsyncMock)
+    async def test_balance_topup_answers_callback_on_ambiguous_error(
+        self, mock_safe_answer, mock_create_order, mock_render_hub
+    ):
+        from aiogram.types import CallbackQuery
+        from bot.handlers.payment.balance_routes import _create_and_render_topup
+        from integrations.payment_gateways.base import PaymentCreationAmbiguousError
+
+        mock_create_order.side_effect = PaymentCreationAmbiguousError("Ambiguous status")
+
+        cb = MagicMock(spec=CallbackQuery)
+        cb.bot = MagicMock()
+        cb.message = MagicMock(chat=MagicMock(id=12345))
+        cb.from_user = MagicMock(id=12345)
+
+        user = MagicMock()
+        user.id = 1
+        user.telegram_id = 12345
+        user.topup_blocked = False
+        user.financial_hold = False
+
+        session = AsyncMock()
+
+        with patch("bot.handlers.payment.balance_routes.MaintenanceService.can_user_perform_action", new=AsyncMock(return_value=True)), \
+             patch("bot.handlers.payment.balance_routes._count_pending_topup_orders", new=AsyncMock(return_value=0)), \
+             patch("bot.handlers.payment.balance_routes.get_settings", return_value=MagicMock(BALANCE_MAX_UNFINISHED_TOPUPS=3)):
+            await _create_and_render_topup(cb, session, user, 100)
+
+        mock_safe_answer.assert_awaited_once_with(cb)
+        mock_render_hub.assert_awaited_once()
 
 
 class TestPeerIdLoggingNotCorrupted(unittest.TestCase):
