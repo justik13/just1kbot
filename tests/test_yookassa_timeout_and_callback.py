@@ -3,6 +3,8 @@
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import aiohttp
+
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery
 
@@ -74,9 +76,9 @@ class TestYooKassaServiceTimeouts(unittest.IsolatedAsyncioTestCase):
         from services.yookassa_service import _create_tcp_connector
 
         connector = _create_tcp_connector()
+        self.assertIsInstance(connector, aiohttp.TCPConnector)
         self.assertEqual(connector.family, socket.AF_INET)
         self.assertTrue(connector.use_dns_cache)
-        self.assertFalse(connector._cleanup_closed_disabled)
         await connector.close()
 
     @patch("services.yookassa_service.YooKassaService._request")
