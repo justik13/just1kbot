@@ -27,18 +27,16 @@ _client_session_lock = asyncio.Lock()
 # Timeout presets:
 # Status checks fit comfortably within Telegram's callback budget while
 # allowing enough time for DNS resolution, TLS handshake, and network transit.
-CHECK_STATUS_TIMEOUT = aiohttp.ClientTimeout(total=8.0, connect=4.0, sock_read=5.0)
+CHECK_STATUS_TIMEOUT = aiohttp.ClientTimeout(total=7.0, connect=3.0, sock_read=5.0)
 
 # Payment creation involves upstream merchant invoice generation and cross-border TLS handshake:
-CREATE_PAYMENT_TIMEOUT = aiohttp.ClientTimeout(total=15.0, connect=8.0, sock_read=10.0)
+CREATE_PAYMENT_TIMEOUT = aiohttp.ClientTimeout(total=10.0, connect=5.0, sock_read=7.0)
 
 
 def _create_tcp_connector() -> aiohttp.TCPConnector:
     return aiohttp.TCPConnector(
         family=socket.AF_INET,
-        enable_cleanup_closed=True,
-        keepalive_timeout=30.0,
-        ttl_dns_cache=300,
+        ttl_dns_cache=10,
     )
 
 
@@ -149,7 +147,6 @@ class YooKassaService:
                         code,
                         (time.monotonic() - start) * 1000,
                     )
-                    await close_yookassa_client()
                     return YooKassaResult(
                         False,
                         error_kind=YooKassaErrorKind.TIMEOUT,
@@ -166,7 +163,6 @@ class YooKassaService:
                         exc,
                         (time.monotonic() - start) * 1000,
                     )
-                    await close_yookassa_client()
                     return YooKassaResult(
                         False,
                         error_kind=YooKassaErrorKind.NETWORK_ERROR,
@@ -266,7 +262,6 @@ class YooKassaService:
                 path,
                 (time.monotonic() - start) * 1000,
             )
-            await close_yookassa_client()
             return YooKassaResult(
                 False,
                 error_kind=YooKassaErrorKind.TIMEOUT,
@@ -281,7 +276,6 @@ class YooKassaService:
                 exc,
                 (time.monotonic() - start) * 1000,
             )
-            await close_yookassa_client()
             return YooKassaResult(
                 False,
                 error_kind=YooKassaErrorKind.NETWORK_ERROR,
