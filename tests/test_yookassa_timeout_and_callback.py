@@ -123,9 +123,8 @@ class TestYooKassaServiceTimeouts(unittest.IsolatedAsyncioTestCase):
 
         cb = MagicMock(spec=CallbackQuery)
         cb.bot = MagicMock()
-        cb.message = MagicMock()
-        cb.message.chat.id = 12345
-        cb.from_user.id = 12345
+        cb.message = MagicMock(chat=MagicMock(id=12345))
+        cb.from_user = MagicMock(id=12345)
 
         user = MagicMock()
         user.id = 1
@@ -136,7 +135,8 @@ class TestYooKassaServiceTimeouts(unittest.IsolatedAsyncioTestCase):
         session = AsyncMock()
 
         with patch("bot.handlers.payment.balance_routes.MaintenanceService.can_user_perform_action", new=AsyncMock(return_value=True)), \
-             patch("bot.handlers.payment.balance_routes._count_pending_topup_orders", new=AsyncMock(return_value=0)):
+             patch("bot.handlers.payment.balance_routes._count_pending_topup_orders", new=AsyncMock(return_value=0)), \
+             patch("bot.handlers.payment.balance_routes.get_settings", return_value=MagicMock(BALANCE_MAX_UNFINISHED_TOPUPS=3)):
             await _create_and_render_topup(cb, session, user, 100)
 
         mock_safe_answer.assert_awaited_once_with(cb)
