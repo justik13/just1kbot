@@ -117,7 +117,7 @@ class TestYooKassaServiceTimeouts(unittest.IsolatedAsyncioTestCase):
     ):
         from aiogram.types import CallbackQuery
         from bot.handlers.payment.balance_routes import _create_and_render_topup
-        from integrations.payment_gateways.exceptions import PaymentCreationAmbiguousError
+        from integrations.payment_gateways.base import PaymentCreationAmbiguousError
 
         mock_create_order.side_effect = PaymentCreationAmbiguousError("Ambiguous status")
 
