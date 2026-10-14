@@ -14,6 +14,34 @@ class TestAdminRefactorFeatures(unittest.IsolatedAsyncioTestCase):
         self.assertIn("🏠 Админка ➔ 🖥 Серверы ➔ Node #1", res)
         self.assertTrue(res.startswith("📌 <b>"))
 
+    def test_format_admin_breadcrumbs_escapes_html(self):
+        res = format_admin_breadcrumbs("👥 Пользователи", "Фильтр: ⏳ < 3 дней")
+        self.assertIn("&lt; 3 дней", res)
+        self.assertNotIn("< 3", res)
+        self.assertTrue(res.startswith("📌 <b>"))
+
+    def test_user_filter_labels_no_duplicate_emojis(self):
+        from bot import texts
+        self.assertEqual(
+            texts.ADMIN_USER_FILTER_EXPIRING_COUNT.format(f_name=texts.COMMON_3_DAYS, count=3),
+            "⏳ < 3 дней (3)",
+        )
+        self.assertEqual(
+            texts.ADMIN_USER_FILTER_NEW_7D_COUNT.format(f_name=texts.COMMON_NOVYE_7D, count=5),
+            "🆕 Новые (7д) (5)",
+        )
+        self.assertEqual(
+            texts.ADMIN_USER_FILTER_EXPIRED_COUNT.format(f_name=texts.COMMON_BEZ_SUBSCRIPTION, count=2),
+            "🔴 Без подписки (2)",
+        )
+
+    def test_get_effective_expiring_3d_condition_null_safe(self):
+        from database.repositories.users_repo import get_effective_expiring_3d_condition
+        from sqlalchemy.dialects import postgresql
+        cond = get_effective_expiring_3d_condition()
+        compiled = str(cond.compile(dialect=postgresql.dialect()))
+        self.assertIn("users.subscription_end IS NULL", compiled)
+
     async def test_system_settings_repo(self):
         session = AsyncMock()
         session.add = MagicMock()

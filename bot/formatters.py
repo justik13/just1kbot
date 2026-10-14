@@ -64,7 +64,9 @@ def format_audit_details(details: str | None) -> str:
 
 def format_admin_breadcrumbs(*crumbs: str) -> str:
     """Format breadcrumbs string for admin menus."""
-    items = [texts.ADMIN_BREADCRUMB_HOME] + [c for c in crumbs if c]
+    from utils.telegram import safe
+
+    items = [safe(texts.ADMIN_BREADCRUMB_HOME)] + [safe(c) for c in crumbs if c]
     path = texts.ADMIN_BREADCRUMB_SEPARATOR.join(items)
     return texts.ADMIN_BREADCRUMB_TEMPLATE.format(path=path)
 

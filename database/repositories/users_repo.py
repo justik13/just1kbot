@@ -628,7 +628,6 @@ def get_effective_expiring_3d_condition(now=None):
             WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
         )
     )
-    awg_longer = User.subscription_end > limit_3d
     xray_longer = User.id.in_(
         select(WhiteInternetSubscription.user_id).where(
             WhiteInternetSubscription.status.in_([
@@ -642,7 +641,7 @@ def get_effective_expiring_3d_condition(now=None):
     )
     return and_(
         or_(awg_expiring, xray_expiring),
-        ~awg_longer,
+        or_(User.subscription_end.is_(None), User.subscription_end <= limit_3d),
         ~xray_longer,
     )
 
@@ -776,7 +775,21 @@ async def get_filtered_users_paginated(
     stmt = _apply_user_filters(stmt, filter_type, filter_param)
 
     if filter_type == "expiring_3d":
-        order_clause = User.subscription_end.asc()
+        wi_expiry_subq = (
+            select(WhiteInternetSubscription.expires_at)
+            .where(
+                WhiteInternetSubscription.user_id == User.id,
+                WhiteInternetSubscription.status.in_([
+                    WhiteInternetStatus.ACTIVE,
+                    WhiteInternetStatus.PENDING,
+                    WhiteInternetStatus.EXHAUSTED,
+                ]),
+                WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
+            )
+            .limit(1)
+            .scalar_subquery()
+        )
+        order_clause = func.coalesce(User.subscription_end, wi_expiry_subq).asc()
     else:
         order_clause = User.created_at.desc()
 
