@@ -6,6 +6,7 @@ never invents idempotency keys or logs credentials/payloads.
 
 import asyncio
 import logging
+import socket
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -24,13 +25,21 @@ _client_session_lock = asyncio.Lock()
 
 
 # Timeout presets:
-# Status checks must be fast to fit strictly within Telegram's 10-12s callback budget.
-# With connect=2.5s, if the first IP (109.235.165.99) is unreachable, aiohttp fails fast
-# and allows fallback or clean reporting well before Telegram's callback expires.
-CHECK_STATUS_TIMEOUT = aiohttp.ClientTimeout(total=6.5, connect=2.5, sock_read=3.5)
+# Status checks fit comfortably within Telegram's callback budget while
+# allowing enough time for DNS resolution, TLS handshake, and network transit.
+CHECK_STATUS_TIMEOUT = aiohttp.ClientTimeout(total=8.0, connect=4.0, sock_read=5.0)
 
-# Payment creation involves upstream merchant invoice generation:
-CREATE_PAYMENT_TIMEOUT = aiohttp.ClientTimeout(total=10.0, connect=3.0, sock_read=6.0)
+# Payment creation involves upstream merchant invoice generation and cross-border TLS handshake:
+CREATE_PAYMENT_TIMEOUT = aiohttp.ClientTimeout(total=15.0, connect=8.0, sock_read=10.0)
+
+
+def _create_tcp_connector() -> aiohttp.TCPConnector:
+    return aiohttp.TCPConnector(
+        family=socket.AF_INET,
+        enable_cleanup_closed=True,
+        keepalive_timeout=30.0,
+        ttl_dns_cache=300,
+    )
 
 
 async def _get_client_session() -> aiohttp.ClientSession:
@@ -54,7 +63,8 @@ async def _get_client_session() -> aiohttp.ClientSession:
                     if close is not None:
                         await close()
                 timeout = CREATE_PAYMENT_TIMEOUT
-                _client_session = session_factory(timeout=timeout)
+                connector = _create_tcp_connector()
+                _client_session = session_factory(connector=connector, timeout=timeout)
                 _client_session_factory = session_factory
     return _client_session
 
@@ -139,6 +149,7 @@ class YooKassaService:
                         code,
                         (time.monotonic() - start) * 1000,
                     )
+                    await close_yookassa_client()
                     return YooKassaResult(
                         False,
                         error_kind=YooKassaErrorKind.TIMEOUT,
@@ -155,6 +166,7 @@ class YooKassaService:
                         exc,
                         (time.monotonic() - start) * 1000,
                     )
+                    await close_yookassa_client()
                     return YooKassaResult(
                         False,
                         error_kind=YooKassaErrorKind.NETWORK_ERROR,
@@ -254,6 +266,7 @@ class YooKassaService:
                 path,
                 (time.monotonic() - start) * 1000,
             )
+            await close_yookassa_client()
             return YooKassaResult(
                 False,
                 error_kind=YooKassaErrorKind.TIMEOUT,
@@ -268,6 +281,7 @@ class YooKassaService:
                 exc,
                 (time.monotonic() - start) * 1000,
             )
+            await close_yookassa_client()
             return YooKassaResult(
                 False,
                 error_kind=YooKassaErrorKind.NETWORK_ERROR,
