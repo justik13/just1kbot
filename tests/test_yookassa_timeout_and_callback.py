@@ -69,14 +69,15 @@ class TestYooKassaServiceTimeouts(unittest.IsolatedAsyncioTestCase):
         self.assertLessEqual(CREATE_PAYMENT_TIMEOUT.total, 20.0)
         self.assertLessEqual(CREATE_PAYMENT_TIMEOUT.connect, 10.0)
 
-    def test_connector_configuration(self):
+    async def test_connector_configuration(self):
         import socket
         from services.yookassa_service import _create_tcp_connector
 
         connector = _create_tcp_connector()
-        self.assertEqual(connector._family, socket.AF_INET)
-        self.assertTrue(connector._cleanup_closed)
-        self.assertEqual(connector._ttl_dns_cache, 300)
+        self.assertEqual(connector.family, socket.AF_INET)
+        self.assertTrue(connector.use_dns_cache)
+        self.assertFalse(connector._cleanup_closed_disabled)
+        await connector.close()
 
     @patch("services.yookassa_service.YooKassaService._request")
     async def test_create_payment_uses_create_timeout(self, mock_req):
