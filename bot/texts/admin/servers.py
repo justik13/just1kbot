@@ -156,6 +156,8 @@ ADMIN_SERVER_SLOTS_BREAKDOWN_NOTE = " <i>(на узле: {cached_used}, в БД:
 
 ADMIN_SERVER_SLOTS_VALUE = "<b>{used_clients} / {max_clients}</b>"
 
+ADMIN_SERVER_SLOTS_VLESS = "<b>Без ограничений</b> <i>(активных: {vless_sub_count})</i>"
+
 ADMIN_SERVER_BTN_PEERS = "👥 Пиры на узле ({used}/{total})"
 ADMIN_SERVER_BTN_PEERS_NO_COUNT = "👥 Пиры на узле"
 ADMIN_SERVER_BTN_SERVER_USERS = "👥 Все пользователи этого сервера"

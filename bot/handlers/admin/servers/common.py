@@ -231,7 +231,7 @@ async def _show_server_card(
                 select(func.count(VlessSubscription.id)).where(VlessSubscription.is_active.is_(True))
             )
         ).scalar_one_or_none() or 0
-        slots_text = f"Без ограничений (активных: {vless_sub_count})"
+        slots_text = texts.ADMIN_SERVER_SLOTS_VLESS.format(vless_sub_count=vless_sub_count)
     elif cached_used is not None and cached_used != db_used:
         slots_text = texts.ADMIN_SERVER_SLOTS_VALUE.format(
             used_clients=effective_capacity, max_clients=max_clients

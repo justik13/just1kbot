@@ -483,10 +483,13 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
              patch("services.workers.node_monitor.AmneziaClient") as mock_client_cls, \
-             patch("services.workers.node_monitor.XrayNodeClient") as mock_xray_cls:
+             patch("services.xray_node_client.XrayNodeClient") as mock_xray_cls:
 
             mock_client_cls.return_value.healthcheck = AsyncMock(return_value=True)
-            mock_xray_cls.return_value.check_health = AsyncMock(return_value=(False, None, "Connection refused"))
+            mock_xray_client = AsyncMock()
+            mock_xray_client.check_health = AsyncMock(return_value=(False, None, "Connection refused"))
+            mock_xray_cls.return_value.__aenter__.return_value = mock_xray_client
+            mock_xray_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
             st = get_server_monitor_state(201, server)
             await check_node_resources_and_alerts(self.mock_bot)
@@ -513,10 +516,13 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
              patch("services.workers.node_monitor.AmneziaClient") as mock_client_cls, \
-             patch("services.workers.node_monitor.XrayNodeClient") as mock_xray_cls:
+             patch("services.xray_node_client.XrayNodeClient") as mock_xray_cls:
 
             mock_client_cls.return_value.healthcheck = AsyncMock(return_value=False)
-            mock_xray_cls.return_value.check_health = AsyncMock(return_value=(True, "epoch-1", {}))
+            mock_xray_client = AsyncMock()
+            mock_xray_client.check_health = AsyncMock(return_value=(True, "epoch-1", {}))
+            mock_xray_cls.return_value.__aenter__.return_value = mock_xray_client
+            mock_xray_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
             st = get_server_monitor_state(202, server)
             await check_node_resources_and_alerts(self.mock_bot)
