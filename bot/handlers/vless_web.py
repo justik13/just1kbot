@@ -409,7 +409,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         if not tariff_name:
             tariff_name = get_tariff_display_name(effective_vless_limit)
         # Strip decorative emoji prefixes (e.g., '📱 Базовый' -> 'Базовый') for clean header display
-        tariff_clean = re.sub(r"^[^\wа-яА-ЯёЁa-zA-Z0-9]+", "", str(tariff_name)).strip()
+        tariff_clean = re.sub(r"^[^\w\u0400-\u04ffa-zA-Z0-9]+", "", str(tariff_name)).strip()
 
         profile_desc = await get_system_setting(session, "vless_profile_description", None)
         if not isinstance(profile_desc, str) or not profile_desc.strip():
