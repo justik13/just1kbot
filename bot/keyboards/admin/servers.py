@@ -100,7 +100,7 @@ def get_admin_server_card_keyboard(
     )
 
     if is_xray:
-        builder.adjust(1, 2, 2, 2, 2, 2, 1)
+        builder.adjust(1, 2, 2, 2, 2, 2, 2, 1)
     elif has_awg and has_vless:
         builder.adjust(2, 2, 2, 2, 2, 2, 1)
     elif has_awg:
