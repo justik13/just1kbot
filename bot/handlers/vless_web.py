@@ -12,6 +12,7 @@ import re
 from aiohttp import web
 
 from bot import texts
+from config.constants import WHITE_INTERNET_CHANNEL_URL, WHITE_INTERNET_SUPPORT_URL
 from database.connection import session_scope
 from database.repositories import users_repo, vless_subscription_repo
 from database.repositories.system_settings_repo import get_system_setting
@@ -93,9 +94,66 @@ def _is_browser_request(request: web.Request) -> bool:
     return any(b in ua for b in browser_tokens) and not any(a in ua for a in api_tokens)
 
 
-def _render_vless_landing_html(bot_username: str = "just1kbot", is_active: bool = True) -> str:
+async def _resolve_bot_username(request: web.Request) -> str:
+    """Resolve current Telegram bot username dynamically without manual env setup."""
+    cached = request.app.get("bot_username")
+    if cached and isinstance(cached, str):
+        return cached
+
+    bot = request.app.get("bot")
+    if bot is not None and hasattr(bot, "get_me"):
+        try:
+            me = await bot.get_me()
+            if me and getattr(me, "username", None):
+                username = str(me.username).lstrip("@")
+                request.app["bot_username"] = username
+                return username
+        except Exception:
+            pass
+
+    try:
+        from config.settings import get_settings
+        settings_supp = getattr(get_settings(), "SUPPORT_USERNAME", None)
+        if settings_supp:
+            fallback = str(settings_supp).lstrip("@")
+            request.app["bot_username"] = fallback
+            return fallback
+    except Exception:
+        pass
+
+    fallback = os.getenv("BOT_USERNAME", "").lstrip("@") or "just1k13bot"
+    request.app["bot_username"] = fallback
+    return fallback
+
+
+def _resolve_support_url(first_extra: dict | None, default_bot_url: str) -> str:
+    extra = first_extra if isinstance(first_extra, dict) else {}
+    if extra.get("support_url"):
+        return str(extra["support_url"])
+    if WHITE_INTERNET_SUPPORT_URL:
+        return WHITE_INTERNET_SUPPORT_URL
+    try:
+        from config.settings import get_settings
+        supp = getattr(get_settings(), "SUPPORT_USERNAME", None)
+        if supp:
+            return f"https://t.me/{str(supp).lstrip('@')}"
+    except Exception:
+        pass
+    return default_bot_url
+
+
+def _resolve_channel_url(first_extra: dict | None, default_bot_url: str) -> str:
+    extra = first_extra if isinstance(first_extra, dict) else {}
+    if extra.get("channel_url"):
+        return str(extra["channel_url"])
+    if WHITE_INTERNET_CHANNEL_URL:
+        return WHITE_INTERNET_CHANNEL_URL
+    return default_bot_url
+
+
+def _render_vless_landing_html(bot_username: str = "", is_active: bool = True) -> str:
     """Render universal landing page for INCY 1-click import and installation guidance."""
-    clean_bot = html.escape(bot_username.strip().lstrip("@"))
+    clean_bot = html.escape(bot_username.strip().lstrip("@")) if bot_username else "just1k13bot"
     bot_link = f"https://t.me/{clean_bot}"
 
     if not is_active:
@@ -183,7 +241,10 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                 session.add(sub)
                 VlessSubscriptionService.ensure_synced_background(user.id, session=session)
 
-            bot_username = os.getenv("BOT_USERNAME", "just1kbot").lstrip("@")
+            bot_username = await _resolve_bot_username(request)
+            default_bot_url = f"https://t.me/{bot_username}"
+            support_url = _resolve_support_url({}, default_bot_url)
+            channel_url = _resolve_channel_url({}, default_bot_url)
             if _is_browser_request(request):
                 html_body = _render_vless_landing_html(bot_username=bot_username, is_active=False)
                 landing_headers = {
@@ -209,13 +270,15 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                 "Profile-Title": f"base64:{b64_title}",
                 "Hide-Url": "1",
                 "No-Limit-Enabled": "1",
-                "Support-Url": f"https://t.me/{bot_username}",
+                "Support-Url": support_url,
+                "Profile-Web-Page-Url": channel_url,
+                "Channel-Url": channel_url,
             }
             return web.Response(status=200, text=b64_payload, headers=response_headers)
 
         # Strict HWID validation for active/emergency subscription requests
         if not raw_hwid:
-            bot_username = os.getenv("BOT_USERNAME", "just1kbot").lstrip("@")
+            bot_username = await _resolve_bot_username(request)
             if _is_browser_request(request):
                 html_body = _render_vless_landing_html(bot_username=bot_username, is_active=True)
                 landing_headers = {
@@ -249,7 +312,10 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         )
 
         if not allowed_hwid:
-            bot_username = os.getenv("BOT_USERNAME", "just1kbot").lstrip("@")
+            bot_username = await _resolve_bot_username(request)
+            default_bot_url = f"https://t.me/{bot_username}"
+            support_url = _resolve_support_url({}, default_bot_url)
+            channel_url = _resolve_channel_url({}, default_bot_url)
             limit_msg = texts.VLESS_FEED_DEVICE_LIMIT_NOTICE.format(
                 active=active_hwid_count,
                 limit=effective_vless_limit,
@@ -276,7 +342,9 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                 "x-hwid-active": str(active_hwid_count),
                 "Hide-Url": "1",
                 "No-Limit-Enabled": "1",
-                "Support-Url": f"https://t.me/{bot_username}",
+                "Support-Url": support_url,
+                "Profile-Web-Page-Url": channel_url,
+                "Channel-Url": channel_url,
             })
             return web.Response(status=200, text=b64_payload, headers=headers)
 
@@ -300,7 +368,8 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         b64_payload = base64.b64encode(payload.encode("utf-8")).decode("utf-8")
 
         expire_ts = int(user.subscription_end.timestamp()) if user.subscription_end else 0
-        bot_username = os.getenv("BOT_USERNAME", "just1kbot").lstrip("@")
+        bot_username = await _resolve_bot_username(request)
+        default_bot_url = f"https://t.me/{bot_username}"
 
         profile_title = await get_system_setting(session, "vless_profile_title", os.getenv("VLESS_PROFILE_TITLE", "✦ Just1k"))
         if not isinstance(profile_title, str) or not profile_title.strip():
@@ -321,16 +390,15 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             announce_url = None
         elif any(c in announce_url for c in (" ", "\n", "\r", "\t")):
             announce_url = None
-        support_url = f"https://t.me/{bot_username}"
-        channel_url = None
 
+        first_extra = {}
         if servers:
             first_srv = servers[0]
-            first_extra = first_srv.extra_data if isinstance(first_srv.extra_data, dict) else {}
-            if first_extra.get("support_url"):
-                support_url = first_extra["support_url"]
-            if first_extra.get("channel_url"):
-                channel_url = first_extra["channel_url"]
+            if isinstance(first_srv.extra_data, dict):
+                first_extra = first_srv.extra_data
+
+        support_url = _resolve_support_url(first_extra, default_bot_url)
+        channel_url = _resolve_channel_url(first_extra, default_bot_url)
 
         b64_title = base64.b64encode(str(profile_title).strip()[:25].encode("utf-8")).decode("ascii")
         response_headers = {
@@ -347,13 +415,12 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             "Hide-Url": "1",
             "No-Limit-Enabled": "1",
             "Support-Url": support_url,
+            "Profile-Web-Page-Url": channel_url,
+            "Channel-Url": channel_url,
         }
         if profile_desc:
             b64_desc = base64.b64encode(str(profile_desc).strip()[:100].encode("utf-8")).decode("ascii")
             response_headers["Profile-Description"] = f"base64:{b64_desc}"
-        if channel_url:
-            response_headers["Profile-Web-Page-Url"] = channel_url
-            response_headers["Channel-Url"] = channel_url
         if announce:
             b64_ann = base64.b64encode(str(announce).strip()[:200].encode("utf-8")).decode("ascii")
             response_headers["Announce"] = f"base64:{b64_ann}"

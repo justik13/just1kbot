@@ -645,6 +645,28 @@ async def process_edit_server_url(
     old_url = server.api_url
 
     update_kwargs = {"api_url": new_url}
+    from urllib.parse import urlsplit
+    parsed_new = urlsplit(new_url)
+    new_hostname = parsed_new.hostname
+    if new_hostname:
+        current_extra = dict(server.extra_data) if isinstance(server.extra_data, dict) else {}
+        extra_changed = False
+        if "domain" in current_extra and current_extra["domain"] != new_hostname:
+            current_extra["domain"] = new_hostname
+            extra_changed = True
+        if "vless_domain" in current_extra and current_extra["vless_domain"] != new_hostname:
+            current_extra["vless_domain"] = new_hostname
+            extra_changed = True
+        if "xray_api_url" in current_extra and current_extra["xray_api_url"]:
+            parsed_xray = urlsplit(str(current_extra["xray_api_url"]))
+            port = parsed_xray.port or (8444 if server.protocol in AMNEZIA_PROTOCOLS else (parsed_new.port or 8444))
+            new_xray_url = f"{parsed_xray.scheme or 'https'}://{new_hostname}:{port}"
+            if current_extra["xray_api_url"] != new_xray_url:
+                current_extra["xray_api_url"] = new_xray_url
+                extra_changed = True
+        if extra_changed:
+            update_kwargs["extra_data"] = current_extra
+
     if server.protocol in AMNEZIA_PROTOCOLS and server_info:
         detected_proto = server_info.get_protocol()
         if detected_proto and detected_proto != server.protocol:

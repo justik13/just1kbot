@@ -54,6 +54,38 @@ def _safe_format_device_template(template: str, *, devices: int, active: int) ->
     return pattern.sub(lambda m: mapping.get(m.group(1), m.group(0)), template)
 
 
+async def _resolve_bot_username(request: web.Request) -> str:
+    """Resolve current Telegram bot username dynamically without manual env setup."""
+    cached = request.app.get("bot_username")
+    if cached and isinstance(cached, str):
+        return cached
+
+    bot = request.app.get("bot")
+    if bot is not None and hasattr(bot, "get_me"):
+        try:
+            me = await bot.get_me()
+            if me and getattr(me, "username", None):
+                username = str(me.username).lstrip("@")
+                request.app["bot_username"] = username
+                return username
+        except Exception:
+            pass
+
+    try:
+        from config.settings import get_settings
+        settings_supp = getattr(get_settings(), "SUPPORT_USERNAME", None)
+        if settings_supp:
+            fallback = str(settings_supp).lstrip("@")
+            request.app["bot_username"] = fallback
+            return fallback
+    except Exception:
+        pass
+
+    fallback = os.getenv("BOT_USERNAME", "").lstrip("@") or "just1k13bot"
+    request.app["bot_username"] = fallback
+    return fallback
+
+
 async def white_internet_subscription_feed_handler(request: web.Request) -> web.Response:
     """Serve the no-store Base64 subscription feed only after runtime reconciliation."""
     client_ip = get_trusted_client_ip(request)
@@ -261,7 +293,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             headers["x-hwid-max-devices-reached"] = "true"
             headers["x-hwid-limit"] = str(max_devs)
             headers["x-hwid-active"] = str(active_count)
-            bot_username = os.getenv("BOT_USERNAME", "just1kbot").lstrip("@")
+            bot_username = await _resolve_bot_username(request)
             limit_msg = texts.WL_WEB_DEVICE_LIMIT_EXCEEDED.format(
                 active=active_count,
                 limit=max_devs,
@@ -317,9 +349,13 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         profile_title_str = str(profile_title).strip()[:25]
         profile_title_b64 = base64.b64encode(profile_title_str.encode("utf-8")).decode("ascii")
 
-        bot_user = os.getenv("BOT_USERNAME", "just1kbot").lstrip("@")
+        bot_user = await _resolve_bot_username(request)
         default_bot_url = f"https://t.me/{bot_user}"
-        support_user = (os.getenv("SUPPORT_USERNAME") or os.getenv("SUPPORT_BOT_USERNAME") or "").lstrip("@")
+        try:
+            from config.settings import get_settings
+            support_user = (getattr(get_settings(), "SUPPORT_USERNAME", None) or os.getenv("SUPPORT_BOT_USERNAME") or "").lstrip("@")
+        except Exception:
+            support_user = (os.getenv("SUPPORT_USERNAME") or os.getenv("SUPPORT_BOT_USERNAME") or "").lstrip("@")
         default_support_url = f"https://t.me/{support_user}" if support_user else default_bot_url
 
         channel_url = (

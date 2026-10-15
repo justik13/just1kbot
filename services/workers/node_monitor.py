@@ -32,6 +32,7 @@ from config.constants import (
     AMNEZIA_PROTOCOLS,
     ServerHealthState,
     WHITE_INTERNET_SUB_PATH_PREFIX,
+    VLESS_PROTOCOL,
     XRAY_PROTOCOL,
 )
 from config.settings import get_settings
@@ -322,7 +323,11 @@ async def check_node_resources_and_alerts(bot: Bot):
                 from services.xray_node_client import XrayNodeClient
 
                 extra = getattr(server, "extra_data", None) or {}
-                xray_url = extra.get("xray_api_url")
+                xray_url = None
+                if server_proto in (XRAY_PROTOCOL, VLESS_PROTOCOL):
+                    xray_url = server.api_url
+                if not xray_url:
+                    xray_url = extra.get("xray_api_url")
                 if not xray_url and server.api_url:
                     parsed = urlsplit(server.api_url)
                     if parsed.hostname and (server_proto in AMNEZIA_PROTOCOLS or "awg" in caps):
@@ -342,7 +347,7 @@ async def check_node_resources_and_alerts(bot: Bot):
 
         if server_proto in AMNEZIA_PROTOCOLS:
             is_healthy = awg_ok
-        elif server_proto in (XRAY_PROTOCOL, "vless"):
+        elif server_proto in (XRAY_PROTOCOL, VLESS_PROTOCOL):
             is_healthy = xray_ok
         elif has_amnezia and has_xray:
             is_healthy = awg_ok and xray_ok
