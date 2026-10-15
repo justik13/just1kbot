@@ -12,7 +12,6 @@ import urllib.parse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.constants import AMNEZIA_PROTOCOLS, VLESS_PROTOCOL, XRAY_PROTOCOL
 from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.models import Server, User, VlessSubscription, VPNProfile
 from database.repositories import vless_subscription_repo
@@ -146,7 +145,12 @@ class VlessSubscriptionService:
                             sub_ver = getattr(sub, "version", 1) or 1
                             for rev_uuid in list(sub.pending_revoked_uuids):
                                 deprov_res = await cls._execute_deprovision_on_nodes(targets, rev_uuid, version=sub_ver)
-                                if all(deprov_res.values()) and len(deprov_res) == len(targets):
+                                if (
+                                    servers
+                                    and len(targets) == len(servers)
+                                    and all(deprov_res.values())
+                                    and len(deprov_res) == len(targets)
+                                ):
                                     await vless_subscription_repo.pop_pending_revoked_uuid(scoped_session, sub.id, rev_uuid)
             except Exception as e:
                 logger.warning("Background sync of VLESS user %s failed: %s", user_id, e)
@@ -181,7 +185,13 @@ class VlessSubscriptionService:
 
                 if targets:
                     results = await cls._execute_deprovision_on_nodes(targets, old_uuid, version=version)
-                    if sub_id and all(results.values()) and len(results) == len(targets):
+                    if (
+                        sub_id
+                        and servers
+                        and len(targets) == len(servers)
+                        and all(results.values())
+                        and len(results) == len(targets)
+                    ):
                         async with session_scope() as scoped_session:
                             await vless_subscription_repo.pop_pending_revoked_uuid(scoped_session, sub_id, old_uuid)
                             sub = await scoped_session.get(VlessSubscription, sub_id)
@@ -285,28 +295,27 @@ class VlessSubscriptionService:
 
     @staticmethod
     def _extract_node_targets(servers: list[Server]) -> list[tuple[int, str, str]]:
+        from database.repositories.servers_repo import get_server_xray_api_url
+
         targets: list[tuple[int, str, str]] = []
         for srv in servers:
-            extra = srv.extra_data if isinstance(srv.extra_data, dict) else {}
-            api_url = None
-            if srv.protocol in (XRAY_PROTOCOL, VLESS_PROTOCOL):
-                api_url = srv.api_url
-            if not api_url:
-                api_url = extra.get("xray_api_url")
+            api_url = get_server_xray_api_url(srv)
             api_key = srv.api_key
-
-            # Fallback to resolving from srv.api_url
-            if not api_url and srv.api_url:
-                parsed = urllib.parse.urlsplit(srv.api_url)
-                if parsed.hostname:
-                    # If this is a dual AWG+Xray server, Xray API is hosted on port 8444
-                    if srv.protocol in AMNEZIA_PROTOCOLS or "awg" in (srv.capabilities or []):
-                        api_url = f"{parsed.scheme or 'https'}://{parsed.hostname}:8444"
-                    else:
-                        api_url = srv.api_url
-
-            if api_url and api_key:
-                targets.append((srv.id, api_url, api_key))
+            if not api_url:
+                logger.warning(
+                    "Skipping server %s (%s) for VLESS sync: missing explicit Xray API endpoint",
+                    srv.id,
+                    srv.name,
+                )
+                continue
+            if not api_key:
+                logger.warning(
+                    "Skipping server %s (%s) for VLESS sync: missing API key",
+                    srv.id,
+                    srv.name,
+                )
+                continue
+            targets.append((srv.id, api_url, api_key))
         return targets
 
     @staticmethod
@@ -494,7 +503,12 @@ class VlessSubscriptionService:
                 targets, sub.uuid, desired_active, version=sub_version, user_id=user_id, sub_id=sub.id
             )
 
-        if targets and all(results.values()) and len(results) == len(targets):
+        if (
+            targets
+            and len(targets) == len(servers)
+            and all(results.values())
+            and len(results) == len(targets)
+        ):
             sub.last_synced_at = now_utc()
             sub.last_synced_version = sub_version
             await session.flush()

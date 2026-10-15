@@ -331,7 +331,12 @@ async def _sweep_vless_pending_revocations() -> None:
                     cleared_this = False
                     try:
                         res = await VlessSubscriptionService._execute_deprovision_on_nodes(targets, rev_uuid, version=ver)
-                        if all(res.values()) and len(res) == len(targets):
+                        if (
+                            servers
+                            and len(targets) == len(servers)
+                            and all(res.values())
+                            and len(res) == len(targets)
+                        ):
                             async with session_scope() as session:
                                 await vless_subscription_repo.pop_pending_revoked_uuid(session, sub_id, rev_uuid)
                                 logger.info("Durable deprovision cleared revoked UUID for sub_id=%s", sub_id)

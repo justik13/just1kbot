@@ -1719,6 +1719,35 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
             # Must NOT pop when any configured node fails!
             mock_pop.assert_not_called()
 
+    async def test_sweep_does_not_pop_uuid_when_node_unconfigured_or_skipped(self):
+        from database.models import Server
+        from services.workers.cleanup import _sweep_vless_pending_revocations
+
+        sub = VlessSubscription(id=77, user_id=77, is_active=True, version=1, pending_revoked_uuids=["old-rev-uuid"])
+        # Node 1 is valid
+        srv1 = Server(id=1, name="Node-1", is_active=True, capabilities=["vless"], api_url="https://n1.com:8444", api_key="k1")
+        # Node 2 is unconfigured (AWG mixed without xray_api_url)
+        srv2 = Server(id=2, name="Node-2", is_active=True, protocol="amneziawg3.1", capabilities=["awg", "vless"], api_url="https://n2.com:8443", api_key="k2", extra_data={})
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))))
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with (
+            patch("services.workers.cleanup.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscriptions_with_pending_revocations", new=AsyncMock(return_value=[sub])),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_revocation_target_servers", new=AsyncMock(return_value=[srv1, srv2])),
+            patch.object(VlessSubscriptionService, "_execute_deprovision_on_nodes", new=AsyncMock(return_value={1: True})),
+            patch("database.repositories.vless_subscription_repo.pop_pending_revoked_uuid", new=AsyncMock()) as mock_pop,
+        ):
+            await _sweep_vless_pending_revocations()
+            # Node 2 was skipped because of missing Xray endpoint, so targets had only Node 1.
+            # Must NOT pop UUID because len(targets) != len(servers)!
+            mock_pop.assert_not_called()
+
     async def test_sync_validates_actual_state_on_already_newer_response(self):
         from services.vless_subscription_service import VlessSubscriptionService
         from services.xray_node_client import SyncResponse, SyncResult
@@ -2164,6 +2193,74 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
             assert sub.version == 2
             assert mock_sync_status.call_count == 2
             assert sub.last_synced_version == 2
+
+    async def test_sync_user_to_nodes_does_not_bump_version_when_node_skipped(self):
+        session = AsyncMock()
+        user = User(
+            id=10,
+            telegram_id=12345,
+            is_banned=False,
+            subscription_end=None,
+        )
+        sub = VlessSubscription(id=20, user_id=10, uuid="test-uuid", is_active=True, version=2, last_synced_version=1)
+        srv1 = Server(id=1, api_url="https://node1.com:8444", api_key="secret1", capabilities=["vless"])
+        srv2 = Server(id=2, protocol="amneziawg3.1", api_url="https://node2.com:8443", api_key="secret2", capabilities=["awg", "vless"], extra_data={})
+
+        session.get = AsyncMock(return_value=user)
+
+        with (
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_configured_vless_servers", new=AsyncMock(return_value=[srv1, srv2])),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_revocation_target_servers", new=AsyncMock(return_value=[srv1, srv2])),
+            patch.object(VlessSubscriptionService, "_execute_sync_to_nodes_with_status", new=AsyncMock(return_value=({1: True}, False))),
+        ):
+            res = await VlessSubscriptionService.sync_user_to_nodes(session, 10, is_active=True)
+            self.assertEqual(res, {1: True})
+            # Crucial: last_synced_version must NOT be bumped because srv2 was skipped!
+            self.assertEqual(sub.last_synced_version, 1)
+
+    async def test_deprovision_background_does_not_pop_uuid_when_node_skipped(self):
+        srv1 = Server(id=1, api_url="https://node1.com:8444", api_key="secret1", capabilities=["vless"])
+        srv2 = Server(id=2, protocol="amneziawg3.1", api_url="https://node2.com:8443", api_key="secret2", capabilities=["awg", "vless"], extra_data={})
+
+        mock_session = AsyncMock()
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with (
+            patch("database.connection.session_scope", fake_session_scope),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_revocation_target_servers", new=AsyncMock(return_value=[srv1, srv2])),
+            patch.object(VlessSubscriptionService, "_execute_deprovision_on_nodes", new=AsyncMock(return_value={1: True})),
+            patch("database.repositories.vless_subscription_repo.pop_pending_revoked_uuid", new=AsyncMock()) as mock_pop,
+        ):
+            task = VlessSubscriptionService.deprovision_background("old-uuid", version=1, sub_id=50)
+            if task:
+                await task
+            mock_pop.assert_not_called()
+
+    async def test_ensure_synced_background_does_not_pop_uuid_when_node_skipped(self):
+        sub = VlessSubscription(id=50, user_id=10, uuid="cur-uuid", pending_revoked_uuids=["old-uuid"], is_active=True, version=2)
+        srv1 = Server(id=1, api_url="https://node1.com:8444", api_key="secret1", capabilities=["vless"])
+        srv2 = Server(id=2, protocol="amneziawg3.1", api_url="https://node2.com:8443", api_key="secret2", capabilities=["awg", "vless"], extra_data={})
+
+        mock_session = AsyncMock()
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with (
+            patch("database.connection.session_scope", fake_session_scope),
+            patch.object(VlessSubscriptionService, "sync_user_to_nodes", new=AsyncMock()),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_revocation_target_servers", new=AsyncMock(return_value=[srv1, srv2])),
+            patch.object(VlessSubscriptionService, "_execute_deprovision_on_nodes", new=AsyncMock(return_value={1: True})),
+            patch("database.repositories.vless_subscription_repo.pop_pending_revoked_uuid", new=AsyncMock()) as mock_pop,
+        ):
+            task = VlessSubscriptionService.ensure_synced_background(10)
+            if task:
+                await task
+            mock_pop.assert_not_called()
 
     async def test_sweep_converges_unsynced_server_epochs(self):
         from database.models import Server
@@ -2754,6 +2851,53 @@ class TestVlessSubscriptionDomainAndBotResolution(unittest.TestCase):
         self.assertEqual(srv_id, 12)
         self.assertEqual(api_url, "https://nl.just1k.pro:8444")
         self.assertEqual(api_key, "secret-key-123")
+
+    def test_extract_node_targets_uses_xray_api_url_for_mixed_awg_server(self):
+        server = Server(
+            id=6,
+            name="Польша",
+            country_flag="🇵🇱",
+            is_active=True,
+            protocol="amneziawg3.1",
+            capabilities=["awg", "vless"],
+            api_key="secret-key-456",
+            api_url="https://pl.just1k.pro:8443",
+            extra_data={"xray_api_url": "https://pl.just1k.pro:8444"},
+        )
+        targets = VlessSubscriptionService._extract_node_targets([server])
+        self.assertEqual(len(targets), 1)
+        srv_id, api_url, api_key = targets[0]
+        self.assertEqual(srv_id, 6)
+        self.assertEqual(api_url, "https://pl.just1k.pro:8444")
+        self.assertEqual(api_key, "secret-key-456")
+
+    def test_extract_node_targets_skips_mixed_server_without_xray_api_url(self):
+        server = Server(
+            id=6,
+            name="Польша",
+            country_flag="🇵🇱",
+            is_active=True,
+            protocol="amneziawg3.1",
+            capabilities=["awg", "vless"],
+            api_key="secret-key-456",
+            api_url="https://pl.just1k.pro:8443",
+            extra_data={},
+        )
+        targets = VlessSubscriptionService._extract_node_targets([server])
+        self.assertEqual(len(targets), 0)
+
+    def test_extract_node_targets_skips_when_api_key_missing(self):
+        server = Server(
+            id=12,
+            name="Нидерланды",
+            country_flag="🇳🇱",
+            is_active=True,
+            protocol="vless",
+            api_key="",
+            api_url="https://nl.just1k.pro:8444",
+        )
+        targets = VlessSubscriptionService._extract_node_targets([server])
+        self.assertEqual(len(targets), 0)
 
 
 class TestVlessFeedDynamicBotUrls(AioHTTPTestCase):

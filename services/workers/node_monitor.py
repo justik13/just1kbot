@@ -41,6 +41,7 @@ from database.models import Server
 from database.repositories.servers_repo import (
     get_all_servers,
     get_server_by_id,
+    get_server_xray_api_url,
     update_server,
     update_server_health_snapshot,
     update_server_xray_epoch_cas,
@@ -318,26 +319,21 @@ async def check_node_resources_and_alerts(bot: Bot):
 
         if has_xray:
             try:
-                from urllib.parse import urlsplit
-
                 from services.xray_node_client import XrayNodeClient
 
-                extra = getattr(server, "extra_data", None) or {}
-                xray_url = None
-                if server_proto in (XRAY_PROTOCOL, VLESS_PROTOCOL):
-                    xray_url = server.api_url
+                xray_url = get_server_xray_api_url(server)
                 if not xray_url:
-                    xray_url = extra.get("xray_api_url")
-                if not xray_url and server.api_url:
-                    parsed = urlsplit(server.api_url)
-                    if parsed.hostname and (server_proto in AMNEZIA_PROTOCOLS or "awg" in caps):
-                        xray_url = f"{parsed.scheme or 'https'}://{parsed.hostname}:8444"
-                    else:
-                        xray_url = server.api_url
-                async with XrayNodeClient(timeout=10.0) as xray_client:
-                    xray_ok, xray_epoch, xray_data = await xray_client.check_health(
-                        xray_url, server.api_key
+                    logger.warning(
+                        "Xray capability advertised but no valid Xray API URL for server %s (%s)",
+                        server.id,
+                        server.name,
                     )
+                    xray_ok = False
+                else:
+                    async with XrayNodeClient(timeout=10.0) as xray_client:
+                        xray_ok, xray_epoch, xray_data = await xray_client.check_health(
+                            xray_url, server.api_key
+                        )
             except Exception as exc:
                 logger.warning(
                     "Xray healthcheck exception for server %s (%s): %s",

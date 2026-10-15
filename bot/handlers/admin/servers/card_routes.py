@@ -25,6 +25,7 @@ from database.models import Server, WhiteInternetSubscription
 from database.repositories.servers_repo import (
     capacity_consuming_wl_condition,
     get_server_by_id,
+    get_server_xray_api_url,
     migrate_origin_subscriptions,
     update_server,
 )
@@ -285,26 +286,20 @@ async def ping_server(
                     awg_ok = False
 
         if has_xray_or_vless:
-            from urllib.parse import urlsplit
-
             from services.xray_node_client import XrayNodeClient
 
-            extra = getattr(server, "extra_data", None) or {}
-            xray_url = None
-            if proto in (XRAY_PROTOCOL, VLESS_PROTOCOL):
-                xray_url = server.api_url
+            xray_url = get_server_xray_api_url(server)
             if not xray_url:
-                xray_url = extra.get("xray_api_url")
-            if not xray_url and server.api_url:
-                parsed = urlsplit(server.api_url)
-                if parsed.hostname and (proto in AMNEZIA_PROTOCOLS or has_awg):
-                    xray_url = f"{parsed.scheme or 'https'}://{parsed.hostname}:8444"
-                else:
-                    xray_url = server.api_url
-
-            async with XrayNodeClient(timeout=4.0, max_retries=0) as xclient:
-                x_ok, _epoch, _detail = await xclient.check_health(xray_url, server.api_key)
-                xray_ok = x_ok
+                logger.warning(
+                    "Xray capability advertised but no valid Xray API URL for server %s (%s)",
+                    server.id,
+                    server.name,
+                )
+                x_ok = False
+            else:
+                async with XrayNodeClient(timeout=4.0, max_retries=0) as xclient:
+                    x_ok, _epoch, _detail = await xclient.check_health(xray_url, server.api_key)
+            xray_ok = x_ok
 
         if proto in AMNEZIA_PROTOCOLS:
             is_healthy = awg_ok

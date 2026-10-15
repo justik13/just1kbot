@@ -657,9 +657,13 @@ async def process_edit_server_url(
         if "vless_domain" in current_extra and current_extra["vless_domain"] != new_hostname:
             current_extra["vless_domain"] = new_hostname
             extra_changed = True
-        if "xray_api_url" in current_extra and current_extra["xray_api_url"]:
+        if server.protocol in (XRAY_PROTOCOL, VLESS_PROTOCOL):
+            if "xray_api_url" in current_extra:
+                current_extra.pop("xray_api_url", None)
+                extra_changed = True
+        elif "xray_api_url" in current_extra and current_extra["xray_api_url"]:
             parsed_xray = urlsplit(str(current_extra["xray_api_url"]))
-            port = parsed_xray.port or (8444 if server.protocol in AMNEZIA_PROTOCOLS else (parsed_new.port or 8444))
+            port = parsed_xray.port or 8444
             new_xray_url = f"{parsed_xray.scheme or 'https'}://{new_hostname}:{port}"
             if current_extra["xray_api_url"] != new_xray_url:
                 current_extra["xray_api_url"] = new_xray_url

@@ -493,7 +493,42 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
 
             st = get_server_monitor_state(201, server)
             await check_node_resources_and_alerts(self.mock_bot)
-            mock_xray_client.check_health.assert_called_once()
+            mock_xray_client.check_health.assert_called_once_with(
+                "https://pl.example.com:8444", "secret"
+            )
+            self.assertEqual(st.health_state, ServerHealthState.ONLINE)
+
+    async def test_awg_server_without_xray_url_does_not_call_xray_client(self):
+        server = MagicMock(spec=Server)
+        server.id = 204
+        server.name = "Poland-AWG-NoXrayUrl"
+        server.protocol = "amneziawg3.1"
+        server.capabilities = ["awg", "vless"]
+        server.extra_data = {}
+        server.api_url = "https://pl.example.com:8443"
+        server.api_key = "secret"
+        server.is_active = True
+        server.disabled_reason = None
+        server.health_state = "ONLINE"
+        server.consecutive_fails = 0
+        server.consecutive_successes = 0
+        server.problem_started_at = None
+        server.next_check_at = None
+        server.recovery_notice_sent = False
+        server.last_alert_sent_state = None
+
+        with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
+             patch("services.workers.node_monitor.AmneziaClient") as mock_client_cls, \
+             patch("services.xray_node_client.XrayNodeClient") as mock_xray_cls:
+
+            mock_client_cls.return_value.healthcheck = AsyncMock(return_value=True)
+            mock_xray_client = AsyncMock()
+            mock_xray_cls.return_value.__aenter__.return_value = mock_xray_client
+            mock_xray_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            st = get_server_monitor_state(204, server)
+            await check_node_resources_and_alerts(self.mock_bot)
+            mock_xray_client.check_health.assert_not_called()
             self.assertEqual(st.health_state, ServerHealthState.ONLINE)
 
     async def test_awg_server_health_ignores_xray_exception(self):

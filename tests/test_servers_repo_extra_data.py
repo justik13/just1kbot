@@ -129,6 +129,38 @@ class TestExtraDataAndCapacityInvariants(unittest.IsolatedAsyncioTestCase):
         ) or []
         self.assertEqual(relays, [])
 
+    def test_get_server_xray_api_url_resolution(self):
+        """Verify get_server_xray_api_url resolution for native, mixed, and AWG servers."""
+        from database.repositories.servers_repo import get_server_xray_api_url
+
+        # Native VLESS server with api_url
+        vless_srv = MagicMock(spec=Server)
+        vless_srv.protocol = "vless"
+        vless_srv.api_url = "https://nl.just1k.pro:8444"
+        vless_srv.extra_data = {"xray_api_url": "https://nl.just1k.old:8444"}
+        self.assertEqual(get_server_xray_api_url(vless_srv), "https://nl.just1k.pro:8444")
+
+        # Native Xray server
+        xray_srv = MagicMock(spec=Server)
+        xray_srv.protocol = "xray"
+        xray_srv.api_url = "https://origin.just1k.pro:8444"
+        xray_srv.extra_data = {}
+        self.assertEqual(get_server_xray_api_url(xray_srv), "https://origin.just1k.pro:8444")
+
+        # Mixed AWG+VLESS server with separate Xray endpoint
+        mixed_srv = MagicMock(spec=Server)
+        mixed_srv.protocol = "amneziawg3.1"
+        mixed_srv.api_url = "https://pl.just1k.pro:8443"
+        mixed_srv.extra_data = {"xray_api_url": "https://pl.just1k.pro:8444"}
+        self.assertEqual(get_server_xray_api_url(mixed_srv), "https://pl.just1k.pro:8444")
+
+        # Pure AWG server without Xray endpoint must NEVER return AWG api_url
+        awg_srv = MagicMock(spec=Server)
+        awg_srv.protocol = "amneziawg2"
+        awg_srv.api_url = "https://nl.just1k.pro:8443"
+        awg_srv.extra_data = {}
+        self.assertIsNone(get_server_xray_api_url(awg_srv))
+
 
 if __name__ == "__main__":
     unittest.main()
