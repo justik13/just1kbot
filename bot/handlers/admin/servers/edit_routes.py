@@ -3,6 +3,8 @@ import logging
 from config.constants import (
     AMNEZIA_PROTOCOLS,
     AdminAuditAction,
+    VLESS_PROTOCOL,
+    XRAY_PROTOCOL,
 )
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
@@ -520,7 +522,7 @@ async def process_edit_server_url(
             )
             await state.clear()
             return
-    elif server.protocol == "xray":
+    elif server.protocol in (XRAY_PROTOCOL, VLESS_PROTOCOL):
         from services.xray_node_client import XrayNodeClient
 
         async with XrayNodeClient(timeout=10.0) as xclient:
@@ -832,7 +834,7 @@ async def process_edit_server_key(
             )
             await state.clear()
             return
-    elif server.protocol == "xray":
+    elif server.protocol in (XRAY_PROTOCOL, VLESS_PROTOCOL):
         from services.xray_node_client import XrayNodeClient
 
         async with XrayNodeClient(timeout=10.0) as xclient:

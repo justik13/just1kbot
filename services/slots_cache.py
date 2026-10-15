@@ -9,6 +9,7 @@ from cachetools import TTLCache
 from config.constants import (
     AMNEZIA_PROTOCOL,
     AMNEZIA_PROTOCOLS,
+    VLESS_PROTOCOL,
     XRAY_ORIGIN_CAPABILITY,
     XRAY_PROTOCOL,
 )
@@ -35,7 +36,7 @@ async def capture_server_peer_snapshot(server_id: int) -> ServerPeerSnapshot:
         if not server_proto:
             caps = getattr(server, "capabilities", None) or []
             server_proto = XRAY_PROTOCOL if XRAY_ORIGIN_CAPABILITY in caps else AMNEZIA_PROTOCOL
-        is_xray = server_proto == XRAY_PROTOCOL
+        is_xray = server_proto in (XRAY_PROTOCOL, VLESS_PROTOCOL)
         if is_xray:
             return ServerPeerSnapshot(
                 server_id,
@@ -165,8 +166,7 @@ async def get_real_peer_count(server: Server, force_refresh: bool = False) -> in
         if not server_proto:
             caps = getattr(server, "capabilities", None) or []
             server_proto = XRAY_PROTOCOL if XRAY_ORIGIN_CAPABILITY in caps else AMNEZIA_PROTOCOL
-        is_xray = server_proto == XRAY_PROTOCOL
-        if is_xray:
+        if server_proto == XRAY_PROTOCOL:
             from database.connection import session_scope
             from database.models import WhiteInternetSubscription
             from database.repositories.servers_repo import capacity_consuming_wl_condition
@@ -182,6 +182,24 @@ async def get_real_peer_count(server: Server, force_refresh: bool = False) -> in
             update_cached_peer_count(server.id, count, timestamp=t_done, generation=gen)
             logger.info(
                 "Cached real peer count for Xray server %s (%s): %s/%s",
+                server.id, server.name, count, server.max_clients,
+            )
+            return count
+
+        elif server_proto == VLESS_PROTOCOL:
+            from database.connection import session_scope
+            from database.models import VlessSubscription
+            from sqlalchemy import func, select
+
+            t_done = time.monotonic()
+            async with session_scope() as session:
+                count_stmt = select(func.count(VlessSubscription.id)).where(
+                    VlessSubscription.is_active.is_(True),
+                )
+                count = (await session.execute(count_stmt)).scalar() or 0
+            update_cached_peer_count(server.id, count, timestamp=t_done, generation=gen)
+            logger.info(
+                "Cached real peer count for VLESS server %s (%s): %s/%s",
                 server.id, server.name, count, server.max_clients,
             )
             return count
