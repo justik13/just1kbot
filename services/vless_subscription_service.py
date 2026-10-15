@@ -145,7 +145,12 @@ class VlessSubscriptionService:
                             sub_ver = getattr(sub, "version", 1) or 1
                             for rev_uuid in list(sub.pending_revoked_uuids):
                                 deprov_res = await cls._execute_deprovision_on_nodes(targets, rev_uuid, version=sub_ver)
-                                if all(deprov_res.values()) and len(deprov_res) == len(targets):
+                                if (
+                                    servers
+                                    and len(targets) == len(servers)
+                                    and all(deprov_res.values())
+                                    and len(deprov_res) == len(targets)
+                                ):
                                     await vless_subscription_repo.pop_pending_revoked_uuid(scoped_session, sub.id, rev_uuid)
             except Exception as e:
                 logger.warning("Background sync of VLESS user %s failed: %s", user_id, e)
@@ -180,7 +185,13 @@ class VlessSubscriptionService:
 
                 if targets:
                     results = await cls._execute_deprovision_on_nodes(targets, old_uuid, version=version)
-                    if sub_id and all(results.values()) and len(results) == len(targets):
+                    if (
+                        sub_id
+                        and servers
+                        and len(targets) == len(servers)
+                        and all(results.values())
+                        and len(results) == len(targets)
+                    ):
                         async with session_scope() as scoped_session:
                             await vless_subscription_repo.pop_pending_revoked_uuid(scoped_session, sub_id, old_uuid)
                             sub = await scoped_session.get(VlessSubscription, sub_id)
@@ -297,8 +308,14 @@ class VlessSubscriptionService:
                     srv.name,
                 )
                 continue
-            if api_url and api_key:
-                targets.append((srv.id, api_url, api_key))
+            if not api_key:
+                logger.warning(
+                    "Skipping server %s (%s) for VLESS sync: missing API key",
+                    srv.id,
+                    srv.name,
+                )
+                continue
+            targets.append((srv.id, api_url, api_key))
         return targets
 
     @staticmethod
@@ -486,7 +503,12 @@ class VlessSubscriptionService:
                 targets, sub.uuid, desired_active, version=sub_version, user_id=user_id, sub_id=sub.id
             )
 
-        if targets and all(results.values()) and len(results) == len(targets):
+        if (
+            targets
+            and len(targets) == len(servers)
+            and all(results.values())
+            and len(results) == len(targets)
+        ):
             sub.last_synced_at = now_utc()
             sub.last_synced_version = sub_version
             await session.flush()
