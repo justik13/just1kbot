@@ -1482,8 +1482,8 @@ check_bot_update_on_entry
         return (refs, head_content)
 
     @unittest.skipUnless(shutil.which("git"), "Git is required for update-check test")
-    def test_update_check_on_entry_silent_when_local_ahead(self):
-        """No notice when remote is behind local (local hotfix state)."""
+    def test_update_check_on_entry_reports_when_local_and_remote_differ(self):
+        """Notice is shown when remote origin/main SHA differs from local commit."""
         git_env = self._git_check_env()
         self._init_local_git_project(git_env)
         base_sha = subprocess.run(
@@ -1498,7 +1498,7 @@ check_bot_update_on_entry
         self._mock_git_ls_remote(base_sha)
         proc = self._run_update_check_snippet()
         self.assertEqual(proc.returncode, 0)
-        self.assertEqual(proc.stdout.strip(), "")
+        self.assertIn("Безопасное обновление", proc.stdout)
 
     @unittest.skipUnless(shutil.which("git"), "Git is required for update-check test")
     def test_update_check_on_entry_detects_behind_from_detached(self):
