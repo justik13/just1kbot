@@ -170,17 +170,13 @@ async def _build_connections_screen(
                 text=texts.BTN_VLESS_RESET_HWID,
                 callback_data="vless_sub_reset",
             )
-        for profile in profiles:
-            server = profile.server
-            flag = server.country_flag if server else texts.EMOJI_GLOBE
-            raw_device_name = profile.device_name or texts.DEVICE_DEFAULT_NAME_TEMPLATE.format(slot=1)
-            btn_text = f"{flag} {raw_device_name}"
-            builder.button(
-                text=btn_text,
-                callback_data=f"manage_device:{profile.id}",
-            )
+        amnezia_btn_text = (
+            texts.BTN_AMNEZIA_DEVICES_COUNT.format(count=quota_profiles_count)
+            if quota_profiles_count > 0
+            else texts.BTN_AMNEZIA_DEVICES
+        )
         builder.button(
-            text=texts.BTN_AMNEZIA_DEVICES,
+            text=amnezia_btn_text,
             callback_data="amnezia_devices",
             style="success",
         )
@@ -194,18 +190,7 @@ async def _build_connections_screen(
         callback_data="back_to_main_menu",
     )
 
-    if not read_only:
-        device_count = len(profiles)
-        link_btn_count = (1 if has_sub_btn else 0) + 1 + (1 if vless_hwid_count > 0 else 0)
-        sizes: list[int] = [1] * link_btn_count
-        if device_count > 0:
-            sizes.extend([2] * (device_count // 2))
-            if device_count % 2 == 1:
-                sizes.append(1)
-        sizes.extend([1, 1, 1])
-        builder.adjust(*sizes)
-    else:
-        builder.adjust(1)
+    builder.adjust(1)
     return rendered, builder
 
 
