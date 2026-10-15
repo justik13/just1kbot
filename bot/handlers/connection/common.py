@@ -137,14 +137,24 @@ async def _build_connections_screen(
             grace_notice=grace_notice,
         )
     else:
-        from bot.formatters import format_subscription_date
+        from bot.formatters import format_subscription_date, get_tariff_display_name
         expiry_str = (
             format_subscription_date(user.subscription_end)
             if user.subscription_end
             else texts.TIME_FOREVER
         )
+        tariff_name = None
+        if getattr(user, "current_tariff_id", None):
+            from database.repositories import tariffs_repo
+            user_tariff = await tariffs_repo.get_tariff_by_id(session, user.current_tariff_id)
+            if user_tariff and getattr(user_tariff, "name", None):
+                tariff_name = user_tariff.name
+        if not tariff_name:
+            tariff_name = get_tariff_display_name(device_limit)
+
         rendered = texts.CONNECTION_HUB_ACTIVE_TEXT.format(
             expiry=expiry_str,
+            tariff=tariff_name,
             active=total_active_devices,
             limit=device_limit,
             vless_count=vless_hwid_count,

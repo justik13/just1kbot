@@ -12,9 +12,15 @@ import re
 from aiohttp import web
 
 from bot import texts
-from config.constants import WHITE_INTERNET_CHANNEL_URL, WHITE_INTERNET_SUPPORT_URL
+from bot.formatters import get_tariff_display_name
+from config.constants import (
+    DEFAULT_VLESS_PROFILE_DESCRIPTION,
+    VLESS_PROFILE_DESCRIPTION,
+    WHITE_INTERNET_CHANNEL_URL,
+    WHITE_INTERNET_SUPPORT_URL,
+)
 from database.connection import session_scope
-from database.repositories import users_repo, vless_subscription_repo
+from database.repositories import tariffs_repo, users_repo, vless_subscription_repo
 from database.repositories.system_settings_repo import get_system_setting
 from services.subscription import SubscriptionService
 from services.vless_subscription_service import VlessSubscriptionService
@@ -31,6 +37,27 @@ _ip_rate_limiter = HttpRateLimiter(rate_per_minute=60.0, burst=15)
 _token_rate_limiter = HttpRateLimiter(rate_per_minute=30.0, burst=10)
 
 HWID_PATTERN = re.compile(r"^[a-zA-Z0-9_\-:]{3,128}$")
+
+
+def _safe_format_vless_template(
+    template: str,
+    *,
+    tariff: str,
+    devices: int,
+    active: int,
+) -> str:
+    """Safely format {tariff}, {tariff_name}, {devices}, {limit}, {active}, {active_devices} placeholders."""
+    mapping = {
+        "tariff": str(tariff),
+        "tariff_name": str(tariff),
+        "devices": str(devices),
+        "device_limit": str(devices),
+        "limit": str(devices),
+        "active": str(active),
+        "active_devices": str(active),
+    }
+    pattern = re.compile(r"\{(" + "|".join(re.escape(k) for k in mapping.keys()) + r")\}")
+    return pattern.sub(lambda m: mapping.get(m.group(1), m.group(0)), template)
 
 
 
@@ -375,11 +402,19 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         if not isinstance(profile_title, str) or not profile_title.strip():
             profile_title = os.getenv("VLESS_PROFILE_TITLE", "✦ Just1k") or "✦ Just1k"
 
+        tariff_name = None
+        if getattr(user, "current_tariff_id", None):
+            user_tariff = await tariffs_repo.get_tariff_by_id(session, user.current_tariff_id)
+            if user_tariff and getattr(user_tariff, "name", None):
+                tariff_name = user_tariff.name
+        if not tariff_name:
+            tariff_name = get_tariff_display_name(effective_vless_limit)
+
         profile_desc = await get_system_setting(session, "vless_profile_description", None)
         if not isinstance(profile_desc, str) or not profile_desc.strip():
             profile_desc = await get_system_setting(session, "vless_profile_desc", None)
         if not isinstance(profile_desc, str) or not profile_desc.strip():
-            profile_desc = None
+            profile_desc = VLESS_PROFILE_DESCRIPTION or DEFAULT_VLESS_PROFILE_DESCRIPTION
 
         announce = await get_system_setting(session, "vless_announce", None)
         if not isinstance(announce, str) or not announce.strip():
@@ -419,10 +454,22 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             "Channel-Url": channel_url,
         }
         if profile_desc:
-            b64_desc = base64.b64encode(str(profile_desc).strip()[:100].encode("utf-8")).decode("ascii")
+            formatted_desc = _safe_format_vless_template(
+                str(profile_desc).strip(),
+                tariff=tariff_name,
+                devices=effective_vless_limit,
+                active=active_hwid_count,
+            )[:100]
+            b64_desc = base64.b64encode(formatted_desc.encode("utf-8")).decode("ascii")
             response_headers["Profile-Description"] = f"base64:{b64_desc}"
         if announce:
-            b64_ann = base64.b64encode(str(announce).strip()[:200].encode("utf-8")).decode("ascii")
+            formatted_ann = _safe_format_vless_template(
+                str(announce).strip(),
+                tariff=tariff_name,
+                devices=effective_vless_limit,
+                active=active_hwid_count,
+            )[:200]
+            b64_ann = base64.b64encode(formatted_ann.encode("utf-8")).decode("ascii")
             response_headers["Announce"] = f"base64:{b64_ann}"
         if announce_url:
             response_headers["Announce-Url"] = announce_url

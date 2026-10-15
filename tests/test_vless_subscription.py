@@ -662,6 +662,104 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             # Announce-Url with spaces must NOT be injected into headers
             self.assertNotIn("Announce-Url", resp.headers)
 
+    async def test_feed_dynamic_tariff_and_devices_formatting(self):
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        from database.models import Tariff
+        custom_tariff = Tariff(id=5, name="Супер-Тариф", device_limit=5)
+        user_with_tariff = User(
+            id=42,
+            telegram_id=999,
+            is_banned=False,
+            is_deleted=False,
+            device_limit=5,
+            current_tariff_id=5,
+            subscription_end=datetime.now(timezone.utc) + timedelta(days=30),
+        )
+
+        settings_dict = {
+            "vless_profile_description": "Тариф: {tariff} • Устройств: {active} из {devices}",
+            "vless_announce": "📢 {tariff_name} | {active_devices}/{limit}",
+        }
+
+        async def fake_get_setting(session, key, default=None):
+            return settings_dict.get(key, default)
+
+        async def fake_get_tariff(session, tariff_id):
+            if tariff_id == 5:
+                return custom_tariff
+            return None
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=user_with_tariff),
+            patch("database.repositories.tariffs_repo.get_tariff_by_id", side_effect=fake_get_tariff),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=5),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 2, 5)),
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
+            patch("bot.handlers.vless_web.get_system_setting", side_effect=fake_get_setting),
+        ):
+            headers = {"X-Hwid": "test-client-hwid-dynamic"}
+            resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
+            self.assertEqual(resp.status, 200)
+
+            # Profile-Description check
+            raw_desc = resp.headers.get("Profile-Description", "")
+            desc_b64 = raw_desc.removeprefix("base64:")
+            desc = base64.b64decode(desc_b64).decode("utf-8")
+            self.assertEqual(desc, "Тариф: Супер-Тариф • Устройств: 2 из 5")
+
+            # Announce check
+            raw_ann = resp.headers.get("Announce", "")
+            ann_b64 = raw_ann.removeprefix("base64:")
+            ann = base64.b64decode(ann_b64).decode("utf-8")
+            self.assertEqual(ann, "📢 Супер-Тариф | 2/5")
+
+    async def test_feed_default_description_when_not_set_in_db(self):
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        user_without_tariff = User(
+            id=42,
+            telegram_id=999,
+            is_banned=False,
+            is_deleted=False,
+            device_limit=2,
+            current_tariff_id=None,
+            subscription_end=datetime.now(timezone.utc) + timedelta(days=30),
+        )
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=user_without_tariff),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=2),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 2)),
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
+            patch("bot.handlers.vless_web.get_system_setting", return_value=None),
+        ):
+            headers = {"X-Hwid": "test-client-hwid-default"}
+            resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
+            self.assertEqual(resp.status, 200)
+
+            # Profile-Description should be default formatted
+            raw_desc = resp.headers.get("Profile-Description", "")
+            desc_b64 = raw_desc.removeprefix("base64:")
+            desc = base64.b64decode(desc_b64).decode("utf-8")
+            self.assertEqual(desc, "Тариф: Базовый • Устройств: 1 из 2")
+
     async def test_device_metadata_extracted_from_headers(self):
         mock_session = AsyncMock()
         mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))

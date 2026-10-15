@@ -178,6 +178,7 @@ CONNECTION_HUB_ACTIVE_TEXT = """🌐 <b>Подключение</b>
 
 <b>Статус:</b> 🟢 Активна
 <b>Срок действия:</b> до {expiry}
+<b>Тариф:</b> {tariff}
 
 📱 <b>Устройства:</b> {active} из {limit}
 <i>(по ссылке: {vless_count} • Amnezia: {amnezia_count})</i>

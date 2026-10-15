@@ -23,6 +23,7 @@ from bot.keyboards.admin.servers import (
 )
 from bot.states import AdminStates
 from config.constants import (
+    DEFAULT_VLESS_PROFILE_DESCRIPTION,
     WHITE_INTERNET_CHANNEL_URL,
     WHITE_INTERNET_PROFILE_DESCRIPTION,
     WHITE_INTERNET_PROFILE_TITLE,
@@ -107,7 +108,7 @@ async def _build_std_sub_incy_card(session: AsyncSession) -> tuple[str, Any]:
 
     card_text = texts.ADMIN_STD_SUB_INCY_CONFIG_CARD.format(
         title=safe(title or "✦ Just1k"),
-        description=safe(desc or texts.ADMIN_SERVER_INCY_VALUE_NONE),
+        description=safe(desc or f"{DEFAULT_VLESS_PROFILE_DESCRIPTION} (по умолчанию)"),
         announce=safe(announce or texts.ADMIN_SERVER_INCY_VALUE_NONE),
         announce_url=safe(announce_url or texts.ADMIN_SERVER_INCY_VALUE_NONE),
     )
