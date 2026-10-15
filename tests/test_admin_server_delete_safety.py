@@ -12,6 +12,7 @@ from config.enums import (
     WhiteInternetProvisioningStatus,
     WhiteInternetStatus,
 )
+from database.models import Server
 
 
 class AdminServerDeleteSafetyTests(unittest.IsolatedAsyncioTestCase):
@@ -210,6 +211,87 @@ class AdminServerDeleteSafetyTests(unittest.IsolatedAsyncioTestCase):
             text = mock_render.call_args[0][2]
             self.assertIn("Связанных устройств: <b>3</b>", text)
             state.clear.assert_called_once()
+
+    async def test_process_edit_server_url_extra_data_handling(self):
+        from bot.handlers.admin.servers.edit_routes import process_edit_server_url
+
+        # Test 1: VLESS server removes duplicate xray_api_url
+        vless_server = Server(
+            id=12,
+            name="vless-node",
+            api_url="https://old-nl.just1k.pro:8444",
+            api_key="secret",
+            protocol="vless",
+            extra_data={"domain": "old-nl.just1k.pro", "xray_api_url": "https://old-nl.just1k.pro:8444"},
+        )
+        message = AsyncMock()
+        message.from_user.id = 1
+        message.text = "https://new-nl.just1k.pro:8444"
+        message.chat.id = 100
+
+        state = AsyncMock(spec=FSMContext)
+        state.get_data.return_value = {"server_id": 12}
+        session = AsyncMock()
+        exec_res = MagicMock()
+        exec_res.scalar_one.return_value = 0
+        session.execute.return_value = exec_res
+        session.scalar.return_value = 0
+
+        with patch("bot.handlers.admin.servers.edit_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.servers.edit_routes.get_server_by_id", return_value=vless_server), \
+             patch("bot.handlers.admin.servers.edit_routes.get_server_by_api_url", return_value=None), \
+             patch("bot.handlers.admin.servers.edit_routes.is_safe_url", return_value=True), \
+             patch("services.xray_node_client.XrayNodeClient.check_health", return_value=(True, 1, {})), \
+             patch("bot.handlers.admin.servers.edit_routes.update_server") as mock_update_server, \
+             patch("bot.handlers.admin.servers.edit_routes.render_hub"), \
+             patch("bot.handlers.admin.servers.edit_routes.AuditService.log_action"):
+
+            await process_edit_server_url(message, state, session)
+            mock_update_server.assert_called_once()
+            extra = mock_update_server.call_args[1].get("extra_data")
+            self.assertNotIn("xray_api_url", extra)
+            self.assertEqual(extra["domain"], "new-nl.just1k.pro")
+
+        # Test 2: AWG server preserves and updates xray_api_url hostname
+        awg_server = Server(
+            id=6,
+            name="awg-node",
+            api_url="https://old-pl.just1k.pro:8443",
+            api_key="secret",
+            protocol="amneziawg3.1",
+            extra_data={"domain": "old-pl.just1k.pro", "xray_api_url": "https://old-pl.just1k.pro:8444"},
+        )
+        message.text = "https://new-pl.just1k.pro:8443"
+        state.get_data.return_value = {"server_id": 6}
+
+        session_awg = AsyncMock()
+        exec_res_awg = MagicMock()
+        exec_res_awg.scalar_one.return_value = 0
+        session_awg.execute.return_value = exec_res_awg
+        session_awg.scalar.return_value = 0
+
+        server_info = MagicMock()
+        server_info.protocols = ["amneziawg3.1"]
+        server_info.get_protocol.return_value = "amneziawg3.1"
+
+        with patch("bot.handlers.admin.servers.edit_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.servers.edit_routes.get_server_by_id", return_value=awg_server), \
+             patch("bot.handlers.admin.servers.edit_routes.get_server_by_api_url", return_value=None), \
+             patch("bot.handlers.admin.servers.edit_routes.is_safe_url", return_value=True), \
+             patch("bot.handlers.admin.servers.edit_routes.AmneziaClient") as mock_amnezia_cls, \
+             patch("bot.handlers.admin.servers.edit_routes.update_server") as mock_update_server_awg, \
+             patch("bot.handlers.admin.servers.edit_routes.render_hub"), \
+             patch("bot.handlers.admin.servers.edit_routes.AuditService.log_action"):
+
+            mock_amnezia_cls.return_value.healthcheck = AsyncMock(return_value=True)
+            mock_amnezia_cls.return_value.get_server_info = AsyncMock(return_value=server_info)
+
+            await process_edit_server_url(message, state, session_awg)
+            mock_update_server_awg.assert_called_once()
+            extra = mock_update_server_awg.call_args[1].get("extra_data")
+            self.assertIn("xray_api_url", extra)
+            self.assertEqual(extra["xray_api_url"], "https://new-pl.just1k.pro:8444")
+            self.assertEqual(extra["domain"], "new-pl.just1k.pro")
 
 
     async def test_confirm_delete_server_phased_execution_and_traffic_archiving(self):

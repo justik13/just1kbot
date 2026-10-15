@@ -284,11 +284,19 @@ class VlessSubscriptionService:
 
     @staticmethod
     def _extract_node_targets(servers: list[Server]) -> list[tuple[int, str, str]]:
+        from database.repositories.servers_repo import get_server_xray_api_url
+
         targets: list[tuple[int, str, str]] = []
         for srv in servers:
-            extra = srv.extra_data if isinstance(srv.extra_data, dict) else {}
-            api_url = srv.api_url or extra.get("xray_api_url")
+            api_url = get_server_xray_api_url(srv)
             api_key = srv.api_key
+            if not api_url:
+                logger.warning(
+                    "Skipping server %s (%s) for VLESS sync: missing explicit Xray API endpoint",
+                    srv.id,
+                    srv.name,
+                )
+                continue
             if api_url and api_key:
                 targets.append((srv.id, api_url, api_key))
         return targets

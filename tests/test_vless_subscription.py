@@ -2755,6 +2755,40 @@ class TestVlessSubscriptionDomainAndBotResolution(unittest.TestCase):
         self.assertEqual(api_url, "https://nl.just1k.pro:8444")
         self.assertEqual(api_key, "secret-key-123")
 
+    def test_extract_node_targets_uses_xray_api_url_for_mixed_awg_server(self):
+        server = Server(
+            id=6,
+            name="Польша",
+            country_flag="🇵🇱",
+            is_active=True,
+            protocol="amneziawg3.1",
+            capabilities=["awg", "vless"],
+            api_key="secret-key-456",
+            api_url="https://pl.just1k.pro:8443",
+            extra_data={"xray_api_url": "https://pl.just1k.pro:8444"},
+        )
+        targets = VlessSubscriptionService._extract_node_targets([server])
+        self.assertEqual(len(targets), 1)
+        srv_id, api_url, api_key = targets[0]
+        self.assertEqual(srv_id, 6)
+        self.assertEqual(api_url, "https://pl.just1k.pro:8444")
+        self.assertEqual(api_key, "secret-key-456")
+
+    def test_extract_node_targets_skips_mixed_server_without_xray_api_url(self):
+        server = Server(
+            id=6,
+            name="Польша",
+            country_flag="🇵🇱",
+            is_active=True,
+            protocol="amneziawg3.1",
+            capabilities=["awg", "vless"],
+            api_key="secret-key-456",
+            api_url="https://pl.just1k.pro:8443",
+            extra_data={},
+        )
+        targets = VlessSubscriptionService._extract_node_targets([server])
+        self.assertEqual(len(targets), 0)
+
 
 class TestVlessFeedDynamicBotUrls(AioHTTPTestCase):
     """Test dynamic bot username and support URLs in feed responses."""

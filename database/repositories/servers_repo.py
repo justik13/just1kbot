@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config.constants import (
     AMNEZIA_PROTOCOL,
     AMNEZIA_PROTOCOLS,
+    VLESS_PROTOCOL,
     XRAY_ORIGIN_CAPABILITY,
     XRAY_PROTOCOL,
 )
@@ -47,6 +48,20 @@ def is_vless_capable_server(server) -> bool:
     proto = str(getattr(server, "protocol", "") or "").lower()
     caps = getattr(server, "capabilities", None) or []
     return "vless" in caps or "xray_vless" in caps or proto == "vless"
+
+
+def get_server_xray_api_url(server) -> str | None:
+    """Return explicit Xray API URL for the server.
+
+    For native Xray/VLESS servers, returns server.api_url (falling back to extra_data['xray_api_url']).
+    For mixed or AWG servers, returns ONLY extra_data['xray_api_url'] to prevent sending
+    Xray requests to the AmneziaWG API port.
+    """
+    proto = str(getattr(server, "protocol", "") or "").lower()
+    extra = getattr(server, "extra_data", None) if isinstance(getattr(server, "extra_data", None), dict) else {}
+    if proto in (XRAY_PROTOCOL, VLESS_PROTOCOL):
+        return getattr(server, "api_url", None) or extra.get("xray_api_url")
+    return extra.get("xray_api_url")
 
 
 
