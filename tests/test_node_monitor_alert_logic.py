@@ -516,8 +516,10 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
              patch("services.workers.node_monitor.AmneziaClient") as mock_client_cls, \
-             patch("services.xray_node_client.XrayNodeClient") as mock_xray_cls:
+             patch("services.xray_node_client.XrayNodeClient") as mock_xray_cls, \
+             patch("services.workers.node_monitor.update_server_xray_epoch_cas", new_callable=AsyncMock) as mock_cas:
 
+            mock_cas.return_value = (True, server)
             mock_client_cls.return_value.healthcheck = AsyncMock(return_value=False)
             mock_xray_client = AsyncMock()
             mock_xray_client.check_health = AsyncMock(return_value=(True, "epoch-1", {}))
