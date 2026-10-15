@@ -292,7 +292,11 @@ async def ping_server(
                 x_ok, _epoch, _detail = await xclient.check_health(xray_url, server.api_key)
                 xray_ok = x_ok
 
-        if has_awg and has_xray_or_vless:
+        if proto in AMNEZIA_PROTOCOLS:
+            is_healthy = awg_ok
+        elif proto in (XRAY_PROTOCOL, "vless"):
+            is_healthy = xray_ok
+        elif has_awg and has_xray_or_vless:
             is_healthy = awg_ok and xray_ok
         elif has_awg:
             is_healthy = awg_ok

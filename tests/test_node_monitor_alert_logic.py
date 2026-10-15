@@ -462,6 +462,66 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(st.last_alert_sent_state, ServerHealthState.PROBLEM)
             self.assertEqual(server.last_alert_sent_state, ServerHealthState.PROBLEM)
 
+    async def test_awg_server_health_ignores_xray_failure(self):
+        server = MagicMock(spec=Server)
+        server.id = 201
+        server.name = "Poland-AWG"
+        server.protocol = "amneziawg3.1"
+        server.capabilities = ["awg"]
+        server.extra_data = {"xray_api_url": "https://pl.example.com:8444"}
+        server.api_url = "https://pl.example.com:8443"
+        server.api_key = "secret"
+        server.is_active = True
+        server.disabled_reason = None
+        server.health_state = "ONLINE"
+        server.consecutive_fails = 0
+        server.consecutive_successes = 0
+        server.problem_started_at = None
+        server.next_check_at = None
+        server.recovery_notice_sent = False
+        server.last_alert_sent_state = None
+
+        with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
+             patch("services.workers.node_monitor.AmneziaClient") as mock_client_cls, \
+             patch("services.workers.node_monitor.XrayNodeClient") as mock_xray_cls:
+
+            mock_client_cls.return_value.healthcheck = AsyncMock(return_value=True)
+            mock_xray_cls.return_value.check_health = AsyncMock(return_value=(False, None, "Connection refused"))
+
+            st = get_server_monitor_state(201, server)
+            await check_node_resources_and_alerts(self.mock_bot)
+            self.assertEqual(st.health_state, ServerHealthState.ONLINE)
+
+    async def test_vless_server_health_ignores_awg_failure(self):
+        server = MagicMock(spec=Server)
+        server.id = 202
+        server.name = "Russia-VLESS"
+        server.protocol = "vless"
+        server.capabilities = ["vless"]
+        server.extra_data = {}
+        server.api_url = "https://ru.example.com:8444"
+        server.api_key = "secret"
+        server.is_active = True
+        server.disabled_reason = None
+        server.health_state = "ONLINE"
+        server.consecutive_fails = 0
+        server.consecutive_successes = 0
+        server.problem_started_at = None
+        server.next_check_at = None
+        server.recovery_notice_sent = False
+        server.last_alert_sent_state = None
+
+        with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
+             patch("services.workers.node_monitor.AmneziaClient") as mock_client_cls, \
+             patch("services.workers.node_monitor.XrayNodeClient") as mock_xray_cls:
+
+            mock_client_cls.return_value.healthcheck = AsyncMock(return_value=False)
+            mock_xray_cls.return_value.check_health = AsyncMock(return_value=(True, "epoch-1", {}))
+
+            st = get_server_monitor_state(202, server)
+            await check_node_resources_and_alerts(self.mock_bot)
+            self.assertEqual(st.health_state, ServerHealthState.ONLINE)
+
 
 if __name__ == "__main__":
     unittest.main()

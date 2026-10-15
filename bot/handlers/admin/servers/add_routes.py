@@ -1,7 +1,5 @@
 import asyncio
 import logging
-import re
-import urllib.parse
 
 from config.constants import (
     AMNEZIA_PROTOCOL,
@@ -556,65 +554,16 @@ async def process_add_server(
         server_protocol = server_info.get_protocol()
 
         capabilities = ["awg"]
-        extra_info = None
-        xray_check_failed = False
-        # Modular node: check if Xray VLESS API is also available on this node
-        try:
-            from services.xray_node_client import XrayNodeClient
-
-            async with XrayNodeClient(timeout=3.0) as xray_client:
-                x_ok, _, x_data = await xray_client.check_health(all_data["api_url"], api_key)
-                if x_ok and x_data:
-                    reported_services = [s.lower() for s in x_data.get("services", [])]
-                    reported_caps = [c.lower() for c in x_data.get("capabilities", [])]
-                    inbounds = x_data.get("inbounds", [])
-                    has_vless = (
-                        "vless" in reported_services
-                        or "vless" in reported_caps
-                        or any(
-                            "vless" in (ib if isinstance(ib, str) else str(ib.get("tag", ""))).lower()
-                            for ib in inbounds
-                            if isinstance(ib, (str, dict))
-                        )
-                    )
-                    if has_vless:
-                        capabilities.append("vless")
-                        domain = x_data.get("vless_domain") or all_data.get("vless_domain")
-                        if not domain:
-                            parsed = urllib.parse.urlsplit(all_data["api_url"])
-                            cand = parsed.hostname or ""
-                            if cand and not re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", cand):
-                                domain = cand
-                            else:
-                                domain = None
-                        extra_info = {
-                            "vless_port": 443,
-                            "xray_api_url": all_data["api_url"],
-                        }
-                        if domain and isinstance(domain, str):
-                            domain_clean = domain.strip().lower()
-                            if "." in domain_clean and not any(c in domain_clean for c in (" ", "/", ":")):
-                                extra_info["domain"] = domain_clean
-                elif not x_ok:
-                    xray_check_failed = True
-        except Exception:
-            xray_check_failed = True
 
         if existing_server_id:
             server = await session.get(Server, existing_server_id)
             if server:
                 server.api_key = api_key
-                # If Xray health check failed due to transient timeout/error, do not drop previously verified vless
-                if xray_check_failed and "vless" in (server.capabilities or []) and "vless" not in capabilities:
-                    capabilities.append("vless")
-                # Purge stale vless only if check succeeded and confirmed absence
-                kept_caps = [c for c in (server.capabilities or []) if c not in ("awg", "vless")]
+                kept_caps = [c for c in (server.capabilities or []) if c not in ("awg", "amnezia")]
                 for cap in capabilities:
                     if cap not in kept_caps:
                         kept_caps.append(cap)
                 server.capabilities = kept_caps
-                if extra_info:
-                    server.extra_data = {**(server.extra_data or {}), **extra_info}
                 server.health_state = ServerHealthState.ONLINE
                 await session.flush()
         else:
@@ -633,10 +582,6 @@ async def process_add_server(
                 session,
                 **create_kwargs,
             )
-
-            if extra_info:
-                server.extra_data = {**(server.extra_data or {}), **extra_info}
-                await session.flush()
 
         await AuditService.log_action(
             session,

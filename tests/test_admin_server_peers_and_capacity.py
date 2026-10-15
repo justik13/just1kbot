@@ -127,9 +127,10 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
         texts_list = [b.text for row in kb.inline_keyboard for b in row]
 
         self.assertNotIn("admin_server_peers:11:1", callbacks)
+        self.assertNotIn("admin_users_filter:server:11:1", callbacks)
+        self.assertNotIn("admin_server_edit_max_clients:11", callbacks)
         self.assertIn(texts.ADMIN_SERVER_BTN_INCY, texts_list)
         self.assertIn("admin_server_incy:11", callbacks)
-        self.assertIn("admin_users_filter:server:11:1", callbacks)
 
     async def test_user_card_keyboard_back_callback_navigation(self):
         # Default back callback

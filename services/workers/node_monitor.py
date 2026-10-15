@@ -318,7 +318,11 @@ async def check_node_resources_and_alerts(bot: Bot):
                         xray_url, server.api_key
                     )
 
-            if has_amnezia and has_xray:
+            if server_proto in AMNEZIA_PROTOCOLS:
+                is_healthy = awg_ok
+            elif server_proto in (XRAY_PROTOCOL, "vless"):
+                is_healthy = xray_ok
+            elif has_amnezia and has_xray:
                 is_healthy = awg_ok and xray_ok
             elif has_amnezia:
                 is_healthy = awg_ok

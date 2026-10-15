@@ -12,7 +12,7 @@ from aiogram import Bot
 from sqlalchemy import case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.constants import XRAY_PROTOCOL
+from config.constants import VLESS_PROTOCOL, XRAY_PROTOCOL
 from config.enums import ServerHealthState, ServerLifecycleStatus, WhiteInternetStatus
 from database.connection import session_scope
 from database.models import Server, User, WhiteInternetSubscription
@@ -69,7 +69,7 @@ class WhiteInternetTrafficWorker:
             stmt = (
                 select(Server)
                 .where(
-                    Server.protocol == XRAY_PROTOCOL,
+                    Server.protocol.in_([XRAY_PROTOCOL, VLESS_PROTOCOL]),
                     Server.api_url.is_not(None),
                     Server.api_key.is_not(None),
                     Server.is_active.is_(True),
@@ -92,7 +92,7 @@ class WhiteInternetTrafficWorker:
                 )
                 for s in servers
                 if (
-                    getattr(s, "protocol", None) == XRAY_PROTOCOL
+                    getattr(s, "protocol", None) in (XRAY_PROTOCOL, VLESS_PROTOCOL)
                     or (getattr(s, "protocol", None) is None and "xray_origin" in (s.capabilities or []))
                 )
                 and "xray_origin" in (s.capabilities or [])

@@ -45,10 +45,11 @@ def get_admin_server_card_keyboard(
             text=texts.ADMIN_SERVER_BTN_MIGRATE,
             callback_data=f"admin_server_migrate:{server_id}",
         )
-    builder.button(
-        text=texts.ADMIN_SERVER_BTN_SERVER_USERS,
-        callback_data=f"admin_users_filter:server:{server_id}:1",
-    )
+    if has_awg:
+        builder.button(
+            text=texts.ADMIN_SERVER_BTN_SERVER_USERS,
+            callback_data=f"admin_users_filter:server:{server_id}:1",
+        )
     builder.button(
         text=texts.ADMIN_SERVER_BTN_BROADCAST,
         callback_data=f"admin_server_broadcast:{server_id}",
@@ -73,10 +74,11 @@ def get_admin_server_card_keyboard(
         text=texts.ADMIN_SERVER_BTN_CHANGE_KEY,
         callback_data=f"admin_server_edit_key:{server_id}",
     )
-    builder.button(
-        text=texts.ADMIN_SERVER_BTN_CHANGE_LIMIT,
-        callback_data=f"admin_server_edit_max_clients:{server_id}",
-    )
+    if has_awg:
+        builder.button(
+            text=texts.ADMIN_SERVER_BTN_CHANGE_LIMIT,
+            callback_data=f"admin_server_edit_max_clients:{server_id}",
+        )
 
     if is_active:
         status_text = texts.BTN_DISABLE_SERVER
@@ -101,8 +103,10 @@ def get_admin_server_card_keyboard(
         builder.adjust(1, 2, 2, 2, 2, 2, 2, 1)
     elif has_awg and has_vless:
         builder.adjust(2, 2, 2, 2, 2, 2, 1)
-    else:
+    elif has_awg:
         builder.adjust(2, 2, 2, 2, 1, 2, 1)
+    else:
+        builder.adjust(1, 2, 2, 2, 2, 1)
     return builder.as_markup()
 
 

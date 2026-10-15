@@ -7,7 +7,7 @@ from urllib.parse import urlsplit, urlunsplit
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
@@ -222,7 +222,17 @@ async def _show_server_card(
     section_crumb = texts.BTN_WI_SERVERS if is_origin else texts.BTN_STD_SERVERS
     header = format_admin_breadcrumbs(section_crumb, f"{flag} {server.name}")
 
-    if cached_used is not None and cached_used != db_used:
+    is_pure_vless = has_vless and not has_awg and not is_origin
+    if is_pure_vless:
+        from database.models import VlessSubscription
+
+        vless_sub_count = (
+            await session.execute(
+                select(func.count(VlessSubscription.id)).where(VlessSubscription.is_active.is_(True))
+            )
+        ).scalar_one_or_none() or 0
+        slots_text = f"Без ограничений (активных: {vless_sub_count})"
+    elif cached_used is not None and cached_used != db_used:
         slots_text = texts.ADMIN_SERVER_SLOTS_VALUE.format(
             used_clients=effective_capacity, max_clients=max_clients
         ) + texts.ADMIN_SERVER_SLOTS_BREAKDOWN_NOTE.format(

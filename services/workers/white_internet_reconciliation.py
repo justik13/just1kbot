@@ -11,7 +11,7 @@ from aiogram import Bot
 from sqlalchemy import and_, func, nulls_first, or_, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from config.constants import XRAY_PROTOCOL
+from config.constants import VLESS_PROTOCOL, XRAY_PROTOCOL
 from config.enums import (
     ServerHealthState,
     ServerLifecycleStatus,
@@ -337,7 +337,7 @@ class WhiteInternetReconciliationWorker:
             stmt_servers = (
                 select(Server)
                 .where(
-                    Server.protocol == XRAY_PROTOCOL,
+                    Server.protocol.in_([XRAY_PROTOCOL, VLESS_PROTOCOL]),
                     Server.api_url.is_not(None),
                     Server.api_key.is_not(None),
                     Server.is_active.is_(True),
@@ -365,7 +365,7 @@ class WhiteInternetReconciliationWorker:
                 )
                 for s in servers
                 if (
-                    getattr(s, "protocol", None) == XRAY_PROTOCOL
+                    getattr(s, "protocol", None) in (XRAY_PROTOCOL, VLESS_PROTOCOL)
                     or (getattr(s, "protocol", None) is None and "xray_origin" in (s.capabilities or []))
                 )
                 and "xray_origin" in (s.capabilities or [])
@@ -564,7 +564,7 @@ class WhiteInternetReconciliationWorker:
                         caps = getattr(server, "capabilities", None) or []
                         server_proto = XRAY_PROTOCOL if "xray_origin" in caps else None
                     if (
-                        server_proto != XRAY_PROTOCOL
+                        server_proto not in (XRAY_PROTOCOL, VLESS_PROTOCOL)
                         or not server.is_active
                         or not server.api_url
                         or not server.api_key
