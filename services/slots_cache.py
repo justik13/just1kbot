@@ -9,6 +9,7 @@ from cachetools import TTLCache
 from config.constants import (
     AMNEZIA_PROTOCOL,
     AMNEZIA_PROTOCOLS,
+    VLESS_PROTOCOL,
     XRAY_ORIGIN_CAPABILITY,
     XRAY_PROTOCOL,
 )
@@ -35,7 +36,7 @@ async def capture_server_peer_snapshot(server_id: int) -> ServerPeerSnapshot:
         if not server_proto:
             caps = getattr(server, "capabilities", None) or []
             server_proto = XRAY_PROTOCOL if XRAY_ORIGIN_CAPABILITY in caps else AMNEZIA_PROTOCOL
-        is_xray = server_proto == XRAY_PROTOCOL
+        is_xray = server_proto in (XRAY_PROTOCOL, VLESS_PROTOCOL)
         if is_xray:
             return ServerPeerSnapshot(
                 server_id,
@@ -165,8 +166,7 @@ async def get_real_peer_count(server: Server, force_refresh: bool = False) -> in
         if not server_proto:
             caps = getattr(server, "capabilities", None) or []
             server_proto = XRAY_PROTOCOL if XRAY_ORIGIN_CAPABILITY in caps else AMNEZIA_PROTOCOL
-        is_xray = server_proto == XRAY_PROTOCOL
-        if is_xray:
+        if server_proto == XRAY_PROTOCOL:
             from database.connection import session_scope
             from database.models import WhiteInternetSubscription
             from database.repositories.servers_repo import capacity_consuming_wl_condition

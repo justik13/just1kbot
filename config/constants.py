@@ -42,6 +42,7 @@ AMNEZIA_PROTOCOLS: tuple[str, ...] = (
 )
 AMNEZIA_DOCKER_CONTAINER = "amnezia-awg2"
 XRAY_PROTOCOL = "xray"
+VLESS_PROTOCOL = "vless"
 XRAY_ORIGIN_CAPABILITY = "xray_origin"
 
 # Default AmneziaWG Client Network Settings
@@ -341,6 +342,7 @@ __all__ = [
     "WHITE_INTERNET_TRIAL_DURATION_DAYS",
     "WHITE_INTERNET_TRIAL_MODE_ONLY",
     "WHITE_INTERNET_TRIAL_TRAFFIC_BYTES",
+    "VLESS_PROTOCOL",
     "WebhookInboxStatus",
     "WhiteInternetGrantType",
     "WhiteInternetProvisioningStatus",

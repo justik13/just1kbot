@@ -1,7 +1,5 @@
 import asyncio
 import logging
-import re
-import urllib.parse
 
 from config.constants import (
     AMNEZIA_PROTOCOL,
@@ -16,8 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.keyboards import get_back_button
 from bot.states import AdminStates
-from config.enums import ServerHealthState
-from database.models import Server
 from database.repositories.servers_repo import (
     create_server,
     get_server_by_api_url,
@@ -236,14 +232,20 @@ async def process_add_server(
         existing = await get_server_by_api_url(session, api_url)
 
         if existing:
-            # Allow updating/rediscovering existing server capabilities (e.g. adding VLESS)
-            await state.update_data(
-                api_url=api_url,
-                existing_server_id=existing.id,
-                step="api_key",
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                texts.ERROR_SERVER_DUPLICATE_URL.format(
+                    api_url=safe(api_url),
+                ),
+                get_back_button(back_servers),
+                parse_mode="HTML",
+                trigger_message_id=trigger_msg_id,
             )
-        else:
-            await state.update_data(api_url=api_url, step="api_key")
+            await state.clear()
+            return
+
+        await state.update_data(api_url=api_url, step="api_key")
 
         await render_hub(
             message.bot,
@@ -340,48 +342,30 @@ async def process_add_server(
 
             protocol_name = "vless" if ("vless" in capabilities and "xray_origin" not in capabilities) else "xray"
 
-            existing_server_id = all_data.get("existing_server_id")
-            if existing_server_id:
-                server = await session.get(Server, existing_server_id)
-                if server:
-                    server.api_key = api_key
-                    # Purge stale capabilities: keep existing only if verified or awg
-                    kept_caps = [c for c in (server.capabilities or []) if c not in ("vless", "xray_origin")]
-                    for cap in capabilities:
-                        if cap not in kept_caps:
-                            kept_caps.append(cap)
-                    server.capabilities = kept_caps
-                    if "awg" not in kept_caps:
-                        server.protocol = protocol_name
-                    server.health_state = ServerHealthState.ONLINE
-                else:
-                    existing_server_id = None
-
-            if not existing_server_id:
-                existing_dup = await get_server_by_api_url(session, all_data["api_url"])
-                if existing_dup:
-                    await render_hub(
-                        message.bot,
-                        message.chat.id,
-                        texts.ERROR_SERVER_DUPLICATE_URL.format(
-                            api_url=safe(all_data["api_url"]),
-                        ),
-                        get_back_button(back_servers),
-                        parse_mode="HTML",
-                    )
-                    await state.clear()
-                    return
-
-                server = await create_server(
-                    session,
-                    name=api_server_name,
-                    country_flag=all_data["country_flag"],
-                    api_url=all_data["api_url"],
-                    api_key=api_key,
-                    protocol=protocol_name,
-                    max_clients=api_max_peers,
-                    capabilities=capabilities,
+            existing_dup = await get_server_by_api_url(session, all_data["api_url"])
+            if existing_dup:
+                await render_hub(
+                    message.bot,
+                    message.chat.id,
+                    texts.ERROR_SERVER_DUPLICATE_URL.format(
+                        api_url=safe(all_data["api_url"]),
+                    ),
+                    get_back_button(back_servers),
+                    parse_mode="HTML",
                 )
+                await state.clear()
+                return
+
+            server = await create_server(
+                session,
+                name=api_server_name,
+                country_flag=all_data["country_flag"],
+                api_url=all_data["api_url"],
+                api_key=api_key,
+                protocol=protocol_name,
+                max_clients=api_max_peers,
+                capabilities=capabilities,
+            )
             if xray_epoch:
                 server.xray_instance_epoch = xray_epoch
             if xray_data:
@@ -519,13 +503,12 @@ async def process_add_server(
 
         api_server_name = (all_data.get("name") or server_info.name or "AmneziaWG")[:50]
 
-        existing_server_id = all_data.get("existing_server_id")
         existing = await get_server_by_api_url(
             session,
             all_data["api_url"],
         )
 
-        if existing and not existing_server_id:
+        if existing:
             await render_hub(
                 message.bot,
                 message.chat.id,
@@ -543,87 +526,21 @@ async def process_add_server(
         server_protocol = server_info.get_protocol()
 
         capabilities = ["awg"]
-        extra_info = None
-        xray_check_failed = False
-        # Modular node: check if Xray VLESS API is also available on this node
-        try:
-            from services.xray_node_client import XrayNodeClient
 
-            async with XrayNodeClient(timeout=3.0) as xray_client:
-                x_ok, _, x_data = await xray_client.check_health(all_data["api_url"], api_key)
-                if x_ok and x_data:
-                    reported_services = [s.lower() for s in x_data.get("services", [])]
-                    reported_caps = [c.lower() for c in x_data.get("capabilities", [])]
-                    inbounds = x_data.get("inbounds", [])
-                    has_vless = (
-                        "vless" in reported_services
-                        or "vless" in reported_caps
-                        or any(
-                            "vless" in (ib if isinstance(ib, str) else str(ib.get("tag", ""))).lower()
-                            for ib in inbounds
-                            if isinstance(ib, (str, dict))
-                        )
-                    )
-                    if has_vless:
-                        capabilities.append("vless")
-                        domain = x_data.get("vless_domain") or all_data.get("vless_domain")
-                        if not domain:
-                            parsed = urllib.parse.urlsplit(all_data["api_url"])
-                            cand = parsed.hostname or ""
-                            if cand and not re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", cand):
-                                domain = cand
-                            else:
-                                domain = None
-                        extra_info = {
-                            "vless_port": 443,
-                            "xray_api_url": all_data["api_url"],
-                        }
-                        if domain and isinstance(domain, str):
-                            domain_clean = domain.strip().lower()
-                            if "." in domain_clean and not any(c in domain_clean for c in (" ", "/", ":")):
-                                extra_info["domain"] = domain_clean
-                elif not x_ok:
-                    xray_check_failed = True
-        except Exception:
-            xray_check_failed = True
+        create_kwargs = {
+            "name": api_server_name,
+            "country_flag": all_data["country_flag"],
+            "api_url": all_data["api_url"],
+            "api_key": api_key,
+            "protocol": server_protocol,
+            "max_clients": api_max_peers,
+            "capabilities": capabilities,
+        }
 
-        if existing_server_id:
-            server = await session.get(Server, existing_server_id)
-            if server:
-                server.api_key = api_key
-                # If Xray health check failed due to transient timeout/error, do not drop previously verified vless
-                if xray_check_failed and "vless" in (server.capabilities or []) and "vless" not in capabilities:
-                    capabilities.append("vless")
-                # Purge stale vless only if check succeeded and confirmed absence
-                kept_caps = [c for c in (server.capabilities or []) if c not in ("awg", "vless")]
-                for cap in capabilities:
-                    if cap not in kept_caps:
-                        kept_caps.append(cap)
-                server.capabilities = kept_caps
-                if extra_info:
-                    server.extra_data = {**(server.extra_data or {}), **extra_info}
-                server.health_state = ServerHealthState.ONLINE
-                await session.flush()
-        else:
-            create_kwargs = {
-                "name": api_server_name,
-                "country_flag": all_data["country_flag"],
-                "api_url": all_data["api_url"],
-                "api_key": api_key,
-                "protocol": server_protocol,
-                "max_clients": api_max_peers,
-            }
-            if capabilities:
-                create_kwargs["capabilities"] = capabilities
-
-            server = await create_server(
-                session,
-                **create_kwargs,
-            )
-
-            if extra_info:
-                server.extra_data = {**(server.extra_data or {}), **extra_info}
-                await session.flush()
+        server = await create_server(
+            session,
+            **create_kwargs,
+        )
 
         await AuditService.log_action(
             session,

@@ -44,9 +44,10 @@ def is_vless_capable_server(server) -> bool:
 
     True if 'vless' or 'xray_vless' capability is present, or protocol is 'vless'.
     """
-    caps = getattr(server, "capabilities", None) or []
     proto = str(getattr(server, "protocol", "") or "").lower()
+    caps = getattr(server, "capabilities", None) or []
     return "vless" in caps or "xray_vless" in caps or proto == "vless"
+
 
 
 def is_white_internet_origin_server(server) -> bool:

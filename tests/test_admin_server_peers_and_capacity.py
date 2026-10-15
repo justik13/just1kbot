@@ -112,6 +112,26 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
         self.assertIn("admin_server_broadcast:1", callbacks)
         self.assertTrue(any("23/240" in t for t in texts_list))
 
+    async def test_server_card_keyboard_vless_hides_peers_button(self):
+        from bot import texts
+
+        kb = get_admin_server_card_keyboard(
+            server_id=11,
+            is_active=True,
+            used_clients=0,
+            max_clients=1000,
+            has_awg=False,
+            has_vless=True,
+        )
+        callbacks = [b.callback_data for row in kb.inline_keyboard for b in row]
+        texts_list = [b.text for row in kb.inline_keyboard for b in row]
+
+        self.assertNotIn("admin_server_peers:11:1", callbacks)
+        self.assertNotIn("admin_users_filter:server:11:1", callbacks)
+        self.assertNotIn("admin_server_edit_max_clients:11", callbacks)
+        self.assertIn(texts.ADMIN_SERVER_BTN_INCY, texts_list)
+        self.assertIn("admin_server_incy:11", callbacks)
+
     async def test_user_card_keyboard_back_callback_navigation(self):
         # Default back callback
         kb_default = get_admin_user_card_keyboard(user_id=100, is_banned=False)

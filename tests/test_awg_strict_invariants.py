@@ -228,6 +228,51 @@ class AWGStrictInvariantsTests(unittest.IsolatedAsyncioTestCase):
         for proto in AMNEZIA_PROTOCOLS:
             self.assertEqual(_format_protocol(proto), "AmneziaWG")
 
+    def test_is_vless_capable_server_protocol_and_capabilities(self):
+        """Invariant: pure AWG nodes are excluded from VLESS, while dual AWG+VLESS nodes are supported."""
+        from database.repositories.servers_repo import is_vless_capable_server
+
+        for proto in AMNEZIA_PROTOCOLS:
+            s_pure_awg = Server(
+                id=10,
+                name="pure_awg",
+                api_url="https://awg:8443",
+                api_key="k",
+                protocol=proto,
+                capabilities=["awg"],
+            )
+            self.assertFalse(is_vless_capable_server(s_pure_awg))
+
+            s_awg_mixed = Server(
+                id=11,
+                name="mixed",
+                api_url="https://mixed:8443",
+                api_key="k",
+                protocol=proto,
+                capabilities=["awg", "vless"],
+            )
+            self.assertTrue(is_vless_capable_server(s_awg_mixed))
+
+        s_pure_vless = Server(
+            id=12,
+            name="vless",
+            api_url="https://vless:8444",
+            api_key="k",
+            protocol="vless",
+            capabilities=["vless"],
+        )
+        self.assertTrue(is_vless_capable_server(s_pure_vless))
+
+        s_origin = Server(
+            id=13,
+            name="origin",
+            api_url="https://origin:8444",
+            api_key="k",
+            protocol="xray",
+            capabilities=["origin"],
+        )
+        self.assertFalse(is_vless_capable_server(s_origin))
+
 
 if __name__ == "__main__":
     unittest.main()

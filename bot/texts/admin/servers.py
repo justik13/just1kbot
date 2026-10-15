@@ -11,6 +11,8 @@ ADMIN_SERVER_BTN_PROTO_XRAY = "⚡ Xray (Белый Интернет)"
 
 PROTOCOL_XRAY_ORIGIN = "Xray (Origin)"
 PROTOCOL_VLESS = "VLESS TLS"
+ADMIN_SERVER_PROTO_ORIGIN_BADGE = "[Origin РФ]"
+ADMIN_SERVER_CAP_VLESS_SUBS_TPL = "{count} подп."
 
 ADMIN_BTN_BACK_TO_SERVERS = "← К списку серверов"
 
@@ -155,6 +157,8 @@ ADMIN_SERVER_RENAME_PROMPT = "Введите новое имя сервера:"
 ADMIN_SERVER_SLOTS_BREAKDOWN_NOTE = " <i>(на узле: {cached_used}, в БД: {db_used})</i>"
 
 ADMIN_SERVER_SLOTS_VALUE = "<b>{used_clients} / {max_clients}</b>"
+
+ADMIN_SERVER_SLOTS_VLESS = "<b>Без ограничений</b> <i>(активных: {vless_sub_count})</i>"
 
 ADMIN_SERVER_BTN_PEERS = "👥 Пиры на узле ({used}/{total})"
 ADMIN_SERVER_BTN_PEERS_NO_COUNT = "👥 Пиры на узле"

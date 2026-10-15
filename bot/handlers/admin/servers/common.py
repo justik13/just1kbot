@@ -7,7 +7,7 @@ from urllib.parse import urlsplit, urlunsplit
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
@@ -64,6 +64,18 @@ async def _build_servers_list_text_and_kb(
     else:
         from services.slots_cache import get_cached_peer_count
         db_counts = await get_server_peer_counts(session) if session is not None else {}
+        vless_sub_count: int | None = None
+        if any(
+            (str(getattr(s, "protocol", "") or "").lower() == "vless" or "vless" in (getattr(s, "capabilities", None) or []))
+            for s in servers
+        ) and session is not None:
+            from database.models import VlessSubscription
+            vless_sub_count = (
+                await session.execute(
+                    select(func.count(VlessSubscription.id)).where(VlessSubscription.is_active.is_(True))
+                )
+            ).scalar_one_or_none() or 0
+
         for server in servers:
             flag = server.country_flag or texts.EMOJI_GLOBE
             status = texts.STATUS_ACTIVE_ICON if server.is_active else texts.STATUS_INACTIVE_ICON
@@ -78,14 +90,19 @@ async def _build_servers_list_text_and_kb(
             elif has_vless and not has_wl:
                 proto_badge = "[VLESS]"
             elif has_wl:
-                proto_badge = "[Xray]"
+                proto_badge = texts.ADMIN_SERVER_PROTO_ORIGIN_BADGE
             else:
                 proto_badge = "[AWG]"
-            db_used = db_counts.get(server.id, 0)
-            cached_used = get_cached_peer_count(server.id)
-            total = server.max_clients or 240
-            effective_used = max(cached_used, db_used) if cached_used is not None else db_used
-            cap_str = f"{effective_used}/{total}"
+
+            is_pure_vless = has_vless and not has_awg and not has_wl
+            if is_pure_vless:
+                cap_str = texts.ADMIN_SERVER_CAP_VLESS_SUBS_TPL.format(count=vless_sub_count or 0)
+            else:
+                db_used = db_counts.get(server.id, 0)
+                cached_used = get_cached_peer_count(server.id)
+                total = server.max_clients or 240
+                effective_used = max(cached_used, db_used) if cached_used is not None else db_used
+                cap_str = f"{effective_used}/{total}"
             server_display_name = f"{proto_badge} {server.name}"
             button_text = truncate_button_text(
                 texts.ADMIN_SERVER_LIST_ROW_FORMAT.format(v0=status, v1=flag, v2=server_display_name, v3=cap_str)
@@ -217,11 +234,22 @@ async def _show_server_card(
     caps = getattr(server, "capabilities", None) or []
     proto = str(getattr(server, "protocol", "") or "").lower()
     has_vless = "vless" in caps or "xray_vless" in caps or proto == "vless"
+    has_awg = proto in AMNEZIA_PROTOCOLS or "awg" in caps or "amnezia" in caps
     is_origin = is_white_internet_origin_server(server)
     section_crumb = texts.BTN_WI_SERVERS if is_origin else texts.BTN_STD_SERVERS
     header = format_admin_breadcrumbs(section_crumb, f"{flag} {server.name}")
 
-    if cached_used is not None and cached_used != db_used:
+    is_pure_vless = has_vless and not has_awg and not is_origin
+    if is_pure_vless:
+        from database.models import VlessSubscription
+
+        vless_sub_count = (
+            await session.execute(
+                select(func.count(VlessSubscription.id)).where(VlessSubscription.is_active.is_(True))
+            )
+        ).scalar_one_or_none() or 0
+        slots_text = texts.ADMIN_SERVER_SLOTS_VLESS.format(vless_sub_count=vless_sub_count)
+    elif cached_used is not None and cached_used != db_used:
         slots_text = texts.ADMIN_SERVER_SLOTS_VALUE.format(
             used_clients=effective_capacity, max_clients=max_clients
         ) + texts.ADMIN_SERVER_SLOTS_BREAKDOWN_NOTE.format(
@@ -270,6 +298,7 @@ async def _show_server_card(
                 is_xray=is_origin,
                 has_vless=has_vless,
                 is_origin=is_origin,
+                has_awg=has_awg,
             ),
             parse_mode="HTML",
         )

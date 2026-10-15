@@ -4,6 +4,7 @@ import time
 
 from config.constants import (
     AMNEZIA_PROTOCOLS,
+    VLESS_PROTOCOL,
     XRAY_PROTOCOL,
     AdminAuditAction,
 )
@@ -284,15 +285,28 @@ async def ping_server(
                     awg_ok = False
 
         if has_xray_or_vless:
+            from urllib.parse import urlsplit
+
             from services.xray_node_client import XrayNodeClient
 
             extra = getattr(server, "extra_data", None) or {}
-            xray_url = extra.get("xray_api_url") or server.api_url
+            xray_url = extra.get("xray_api_url")
+            if not xray_url and server.api_url:
+                parsed = urlsplit(server.api_url)
+                if parsed.hostname and (proto in AMNEZIA_PROTOCOLS or has_awg):
+                    xray_url = f"{parsed.scheme or 'https'}://{parsed.hostname}:8444"
+                else:
+                    xray_url = server.api_url
+
             async with XrayNodeClient(timeout=4.0, max_retries=0) as xclient:
                 x_ok, _epoch, _detail = await xclient.check_health(xray_url, server.api_key)
                 xray_ok = x_ok
 
-        if has_awg and has_xray_or_vless:
+        if proto in AMNEZIA_PROTOCOLS:
+            is_healthy = awg_ok
+        elif proto in (XRAY_PROTOCOL, VLESS_PROTOCOL):
+            is_healthy = xray_ok
+        elif has_awg and has_xray_or_vless:
             is_healthy = awg_ok and xray_ok
         elif has_awg:
             is_healthy = awg_ok
