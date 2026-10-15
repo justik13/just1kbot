@@ -192,38 +192,28 @@ bot_version_label() {
 }
 
 # Best-effort проверка новой версии при входе в меню. Строго read-only:
-# опрашивает origin/${branch} через git ls-remote, не меняет .git (нет fetch),
+# опрашивает origin/main через git ls-remote, не меняет .git (нет fetch),
 # не вызывает cmd_update, не расходует rate-limit GitHub REST API.
-# Уведомляет только когда remote строго новее локального HEAD;
-# identical, локальный опережающий (hotfix) и любые ошибки (нет сети/timeout)
-# молча пропускаются (fail-safe).
+# Уведомляет только когда remote SHA отличается от локального HEAD;
+# при совпадении SHA или ошибках (нет сети/timeout) молча пропускается (fail-safe).
 check_bot_update_on_entry() {
     command -v git >/dev/null 2>&1 || return 0
+    command -v timeout >/dev/null 2>&1 || return 0
     git -C "$PROJECT_DIR" rev-parse --git-dir >/dev/null 2>&1 || return 0
+
     local origin_url branch local_sha remote_sha
     origin_url=$(git -C "$PROJECT_DIR" remote get-url origin 2>/dev/null || echo "")
     [[ -n "$origin_url" ]] || return 0
 
-    branch=$(git -C "$PROJECT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
-    if [[ -z "$branch" || "$branch" == "HEAD" ]]; then
-        branch="main"
-    fi
+    branch="main"
     local_sha=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "")
     [[ "$local_sha" =~ ^[0-9a-f]{40}$ ]] || return 0
 
     # 100% read-only сетевой запрос к git-серверу (без лимитов API, без изменения .git)
-    if command -v timeout >/dev/null 2>&1; then
-        remote_sha=$(timeout 5s git -C "$PROJECT_DIR" ls-remote origin "refs/heads/${branch}" 2>/dev/null | awk '{print $1}' || true)
-    else
-        remote_sha=$(git -C "$PROJECT_DIR" ls-remote origin "refs/heads/${branch}" 2>/dev/null | awk '{print $1}' || true)
-    fi
+    remote_sha=$(timeout 5s git -C "$PROJECT_DIR" ls-remote origin "refs/heads/${branch}" 2>/dev/null | awk '{print $1}' || true)
 
     if [[ "$remote_sha" =~ ^[0-9a-f]{40}$ ]] && [[ "$remote_sha" != "$local_sha" ]]; then
-        # Если remote_sha уже есть в истории local_sha (локальный коммит впереди origin) — предупреждение не нужно
-        if git -C "$PROJECT_DIR" merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
-            return 0
-        fi
-        echo -e "  ${YELLOW}⚠️  Доступна новая версия в origin/${branch}: выполните [3] Безопасное обновление${NC}"
+        echo -e "  ${YELLOW}⚠️  Доступны изменения в GitHub origin/${branch}. Выполните: [3] Безопасное обновление${NC}"
     fi
     return 0
 }
