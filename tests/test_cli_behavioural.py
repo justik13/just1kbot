@@ -1313,17 +1313,17 @@ check_bot_update_on_entry
 
     @unittest.skipUnless(shutil.which("git"), "Git is required for update-check test")
     def test_update_check_on_entry_detects_remote_ahead(self):
-        """Notice only when compare API reports remote strictly ahead (mocked, no network)."""
+        """Notice only when remote origin/main has newer commits (ls-remote)."""
         git_env = self._git_check_env()
         self._init_local_git_project(git_env)
-        self._mock_compare_api('{"status":"ahead","ahead_by":2,"behind_by":0}')
+        self._mock_git_ls_remote("a" * 40)
         proc = self._run_update_check_snippet()
         self.assertEqual(proc.returncode, 0)
         self.assertIn("Безопасное обновление", proc.stdout)
 
     @unittest.skipUnless(shutil.which("git"), "Git is required for update-check test")
-    def test_update_check_builds_clean_compare_url(self):
-        """Origin URL variants (.git suffix, trailing slash, SSH) map to one API path."""
+    def test_update_check_supports_various_origin_urls(self):
+        """Origin URL variants (.git suffix, trailing slash, SSH) work cleanly with git ls-remote."""
         git_env = self._git_check_env()
         self._init_local_git_project(git_env)
         for origin_url in [
@@ -1339,48 +1339,49 @@ check_bot_update_on_entry
                 check=True,
                 capture_output=True,
             )
-            self._mock_compare_api('{"status":"ahead","ahead_by":1,"behind_by":0}')
+            self._mock_git_ls_remote("b" * 40)
             proc = self._run_update_check_snippet()
             self.assertEqual(proc.returncode, 0, f"failed for origin={origin_url}")
             self.assertIn("Безопасное обновление", proc.stdout, f"no notice for origin={origin_url}")
-            argv = self._curl_argv()
-            self.assertIn(
-                "repos/justik13/just1kbot/compare/", argv, f"bad API URL for origin={origin_url}"
-            )
-            self.assertNotIn("just1kbot.git/compare", argv, f".git leaked for origin={origin_url}")
 
     @unittest.skipUnless(shutil.which("git"), "Git is required for update-check test")
-    def test_update_check_on_entry_silent_unless_remote_ahead(self):
-        """behind/identical/diverged compare statuses stay silent (no false positives)."""
+    def test_update_check_on_entry_silent_when_identical(self):
+        """Identical remote and local SHAs stay silent (no false positives)."""
         git_env = self._git_check_env()
         self._init_local_git_project(git_env)
-        for status in ["behind", "identical", "diverged"]:
-            self._mock_compare_api(f'{{"status":"{status}","ahead_by":0,"behind_by":1}}')
-            proc = self._run_update_check_snippet()
-            self.assertEqual(proc.returncode, 0, f"failed for status={status}")
-            self.assertEqual(proc.stdout.strip(), "", f"notice shown for status={status}")
-
-    @unittest.skipUnless(shutil.which("git"), "Git is required for update-check test")
-    def test_update_check_on_entry_silent_for_invalid_api_response(self):
-        """Garbage/empty/error API payloads never produce a notice."""
-        git_env = self._git_check_env()
-        self._init_local_git_project(git_env)
-        for payload in ["not json", "", '{"message":"Not Found"}']:
-            self._mock_compare_api(payload)
-            proc = self._run_update_check_snippet()
-            self.assertEqual(proc.returncode, 0, f"failed for payload={payload!r}")
-            self.assertEqual(proc.stdout.strip(), "", f"notice shown for payload={payload!r}")
-
-    @unittest.skipUnless(shutil.which("git"), "Git is required for update-check test")
-    def test_update_check_makes_no_request_for_non_github_origin(self):
-        """Custom (non-github) origins are skipped without any network call."""
-        git_env = self._git_check_env()
-        self._init_local_git_project(git_env, origin_url="file:///tmp/custom.git")
-        marker = self._mock_compare_api('{"status":"ahead"}')
+        local_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(self.project_dir),
+            env=git_env,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        self._mock_git_ls_remote(local_sha)
         proc = self._run_update_check_snippet()
         self.assertEqual(proc.returncode, 0)
         self.assertEqual(proc.stdout.strip(), "")
-        self.assertFalse(marker.exists(), "curl must not be called for non-github origin")
+
+    @unittest.skipUnless(shutil.which("git"), "Git is required for update-check test")
+    def test_update_check_on_entry_silent_for_invalid_remote_sha(self):
+        """Garbage/empty/error ls-remote output never produces a notice."""
+        git_env = self._git_check_env()
+        self._init_local_git_project(git_env)
+        for bad_sha in ["not_a_sha", "", "fatal: remote error"]:
+            self._mock_git_ls_remote(bad_sha)
+            proc = self._run_update_check_snippet()
+            self.assertEqual(proc.returncode, 0, f"failed for bad_sha={bad_sha!r}")
+            self.assertEqual(proc.stdout.strip(), "", f"notice shown for bad_sha={bad_sha!r}")
+
+    @unittest.skipUnless(shutil.which("git"), "Git is required for update-check test")
+    def test_update_check_silent_on_ls_remote_network_failure(self):
+        """When ls-remote network query fails (offline/timeout), check exits 0 silently."""
+        git_env = self._git_check_env()
+        self._init_local_git_project(git_env)
+        self._mock_git_ls_remote(None)  # exits 1
+        proc = self._run_update_check_snippet()
+        self.assertEqual(proc.returncode, 0)
+        self.assertEqual(proc.stdout.strip(), "")
 
     def _git_check_env(self):
         """Env with git identity and passthrough `timeout` stub (no real waiting)."""
@@ -1397,7 +1398,7 @@ check_bot_update_on_entry
         }
 
     def _init_local_git_project(self, git_env, origin_url="https://github.com/justik13/just1kbot.git"):
-        """Init project_dir on main with one commit; origin URL is never contacted (curl mocked)."""
+        """Init project_dir on main with one commit."""
         subprocess.run(
             ["git", "init", "-b", "main"],
             cwd=str(self.project_dir),
@@ -1414,27 +1415,27 @@ check_bot_update_on_entry
             capture_output=True,
         )
 
-    def _mock_compare_api(self, payload):
-        """Stub curl: record the call (marker + argv log), print canned compare-API payload."""
-        marker = self.bin_dir / "curl.called"
-        argv_log = self.bin_dir / "curl.argv"
-        stub = self.bin_dir / "curl"
-        stub.write_text(
-            f"#!/bin/bash\ntouch \"{marker.as_posix()}\"\n"
-            f"printf '%s\\n' \"$@\" > \"{argv_log.as_posix()}\"\n"
-            f"printf '%s' '{payload}'\n",
-            encoding="utf-8",
-        )
+    def _mock_git_ls_remote(self, remote_sha):
+        """Stub git ls-remote while passing through all other git commands to system git."""
+        real_git = shutil.which("git")
+        stub = self.bin_dir / "git"
+        if remote_sha is None:
+            script = f"""#!/bin/bash
+if [[ "$*" =~ "ls-remote" ]]; then
+    exit 1
+fi
+exec "{real_git}" "$@"
+"""
+        else:
+            script = f"""#!/bin/bash
+if [[ "$*" =~ "ls-remote" ]]; then
+    printf '%s\\trefs/heads/main\\n' "{remote_sha}"
+    exit 0
+fi
+exec "{real_git}" "$@"
+"""
+        stub.write_text(script, encoding="utf-8")
         stub.chmod(0o755)
-        if marker.exists():
-            marker.unlink()
-        if argv_log.exists():
-            argv_log.unlink()
-        return marker
-
-    def _curl_argv(self):
-        argv_log = self.bin_dir / "curl.argv"
-        return argv_log.read_text(encoding="utf-8") if argv_log.exists() else ""
 
     def _git_commit_in(self, path, text, message, git_env):
         (path / "probe.txt").write_text(text, encoding="utf-8")
@@ -1481,26 +1482,23 @@ check_bot_update_on_entry
         return (refs, head_content)
 
     @unittest.skipUnless(shutil.which("git"), "Git is required for update-check test")
-    def test_update_check_on_entry_silent_when_local_ahead(self):
-        """No notice when compare API says remote is behind local (hotfix state)."""
+    def test_update_check_on_entry_reports_when_local_and_remote_differ(self):
+        """Notice is shown when remote origin/main SHA differs from local commit."""
         git_env = self._git_check_env()
         self._init_local_git_project(git_env)
+        base_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(self.project_dir),
+            env=git_env,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
         self._git_commit_in(self.project_dir, "2", "local-hotfix", git_env)
-        self._mock_compare_api('{"status":"behind","ahead_by":0,"behind_by":1}')
+        self._mock_git_ls_remote(base_sha)
         proc = self._run_update_check_snippet()
         self.assertEqual(proc.returncode, 0)
-        self.assertEqual(proc.stdout.strip(), "")
-
-    @unittest.skipUnless(shutil.which("git"), "Git is required for update-check test")
-    def test_update_check_on_entry_silent_when_diverged(self):
-        """No notice when histories diverged (updater handles it, not the indicator)."""
-        git_env = self._git_check_env()
-        self._init_local_git_project(git_env)
-        self._git_commit_in(self.project_dir, "2", "local-change", git_env)
-        self._mock_compare_api('{"status":"diverged","ahead_by":1,"behind_by":1}')
-        proc = self._run_update_check_snippet()
-        self.assertEqual(proc.returncode, 0)
-        self.assertEqual(proc.stdout.strip(), "")
+        self.assertIn("Безопасное обновление", proc.stdout)
 
     @unittest.skipUnless(shutil.which("git"), "Git is required for update-check test")
     def test_update_check_on_entry_detects_behind_from_detached(self):
@@ -1523,17 +1521,17 @@ check_bot_update_on_entry
             check=True,
             capture_output=True,
         )
-        self._mock_compare_api('{"status":"ahead","ahead_by":1,"behind_by":0}')
+        self._mock_git_ls_remote("c" * 40)
         proc = self._run_update_check_snippet()
         self.assertEqual(proc.returncode, 0)
         self.assertIn("Безопасное обновление", proc.stdout)
 
     @unittest.skipUnless(shutil.which("git"), "Git is required for update-check test")
     def test_update_check_does_not_modify_git_state(self):
-        """Entry check is read-only: refs and FETCH_HEAD unchanged (compare API, no fetch)."""
+        """Entry check is read-only: refs and FETCH_HEAD unchanged (ls-remote, no fetch)."""
         git_env = self._git_check_env()
         self._init_local_git_project(git_env)
-        self._mock_compare_api('{"status":"ahead","ahead_by":1,"behind_by":0}')
+        self._mock_git_ls_remote("d" * 40)
         before = self._git_state_snapshot(git_env)
         proc = self._run_update_check_snippet()
         self.assertEqual(proc.returncode, 0)
