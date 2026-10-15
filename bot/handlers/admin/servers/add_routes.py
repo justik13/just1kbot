@@ -393,7 +393,6 @@ async def process_add_server(
                         ):
                             extra["domain"] = vless_domain_str
                     extra.setdefault("vless_port", 443)
-                    extra.setdefault("xray_api_url", all_data["api_url"])
                 server.extra_data = extra
             await session.flush()
 

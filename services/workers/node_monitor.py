@@ -318,22 +318,14 @@ async def check_node_resources_and_alerts(bot: Bot):
 
         if has_xray:
             try:
-                from urllib.parse import urlsplit
-
                 from services.xray_node_client import XrayNodeClient
 
                 extra = getattr(server, "extra_data", None) or {}
-                xray_url = None
-                if server_proto in (XRAY_PROTOCOL, VLESS_PROTOCOL):
-                    xray_url = server.api_url
-                if not xray_url:
+                xray_url = server.api_url or extra.get("xray_api_url")
+                if not xray_url and extra.get("xray_api_url"):
                     xray_url = extra.get("xray_api_url")
-                if not xray_url and server.api_url:
-                    parsed = urlsplit(server.api_url)
-                    if parsed.hostname and (server_proto in AMNEZIA_PROTOCOLS or "awg" in caps):
-                        xray_url = f"{parsed.scheme or 'https'}://{parsed.hostname}:8444"
-                    else:
-                        xray_url = server.api_url
+                elif server_proto in AMNEZIA_PROTOCOLS and extra.get("xray_api_url"):
+                    xray_url = extra.get("xray_api_url")
                 async with XrayNodeClient(timeout=10.0) as xray_client:
                     xray_ok, xray_epoch, xray_data = await xray_client.check_health(
                         xray_url, server.api_key
@@ -347,14 +339,10 @@ async def check_node_resources_and_alerts(bot: Bot):
 
         if server_proto in AMNEZIA_PROTOCOLS:
             is_healthy = awg_ok
-        elif server_proto in (XRAY_PROTOCOL, VLESS_PROTOCOL):
+        elif server_proto in (XRAY_PROTOCOL, VLESS_PROTOCOL) or has_xray:
             is_healthy = xray_ok
-        elif has_amnezia and has_xray:
-            is_healthy = awg_ok and xray_ok
         elif has_amnezia:
             is_healthy = awg_ok
-        elif has_xray:
-            is_healthy = xray_ok
         else:
             is_healthy = False
 
