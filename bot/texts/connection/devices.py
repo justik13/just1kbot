@@ -169,7 +169,8 @@ VLESS_RESET_SUCCESS = "✅ Привязка устройств по ссылке
 VLESS_RESET_EMPTY = "ℹ️ У вас нет привязанных устройств по ссылке."
 VLESS_DEFAULT_SERVER_DESCRIPTION = "Прямой доступ"
 
-BTN_AMNEZIA_DEVICES = "🛡 Amnezia"
+BTN_AMNEZIA_DEVICES = "🛡 Устройства Amnezia"
+BTN_AMNEZIA_DEVICES_COUNT = "🛡 Устройства Amnezia ({count})"
 BTN_BACK_TO_CONNECTION = "◀️ Назад к подключению"
 BTN_ADD_DEVICE = "➕ Добавить устройство"
 
@@ -189,7 +190,7 @@ CONNECTION_HUB_ACTIVE_TEXT = """🌐 <b>Подключение</b>
 <i>(нажмите на ссылку для копирования)</i>
 
 🛡 <b>Устройства Amnezia:</b>
-<i>Нажмите на устройство ниже для управления или перейдите в общий раздел Amnezia.</i>"""
+<i>Для приложений Amnezia или роутеров перейдите в раздел ниже.</i>"""
 
 CONNECTION_HUB_EXPIRED_TEXT = """🌐 <b>Подключение</b>
 

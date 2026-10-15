@@ -1143,9 +1143,10 @@ class TestConnectionsScreenLayout(unittest.IsolatedAsyncioTestCase):
             markup = builder.as_markup()
             buttons = [btn for row in markup.inline_keyboard for btn in row]
             self.assertTrue(any(btn.callback_data == "amnezia_devices" for btn in buttons))
+            self.assertTrue(any("Устройства Amnezia (1)" in (btn.text or "") for btn in buttons))
             self.assertTrue(any(btn.callback_data == "vless_sub_feed_info" for btn in buttons))
             self.assertTrue(any(btn.callback_data == "vless_sub_reset" for btn in buttons))
-            self.assertTrue(any(btn.callback_data == "manage_device:10" for btn in buttons))
+            self.assertFalse(any(btn.callback_data == "manage_device:10" for btn in buttons))
 
             # 2. Amnezia devices screen
             amnezia_rendered, amnezia_builder = await _build_amnezia_screen(user, session, [profile])
