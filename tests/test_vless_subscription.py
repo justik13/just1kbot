@@ -2731,12 +2731,11 @@ class TestVlessSubscriptionDomainAndBotResolution(unittest.TestCase):
             health_state=ServerHealthState.ONLINE,
             protocol="vless",
             api_url="https://nl.just1k.pro:8444",
-            extra_data={"domain": "nl.just1k.best", "vless_port": 443},
+            extra_data={"vless_port": 443},
         )
         links = VlessSubscriptionService.generate_vless_links(sub, [server])
         self.assertEqual(len(links), 1)
         self.assertIn("@nl.just1k.pro:443", links[0])
-        self.assertNotIn("nl.just1k.best", links[0])
 
     def test_extract_node_targets_prefers_server_api_url_for_vless(self):
         server = Server(

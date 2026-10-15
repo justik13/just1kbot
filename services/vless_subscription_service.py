@@ -50,14 +50,12 @@ class VlessSubscriptionService:
                 continue
 
             extra = srv.extra_data if isinstance(srv.extra_data, dict) else {}
-            domain = None
-            if srv.api_url:
+            domain = extra.get("domain") or extra.get("vless_domain")
+            if not domain and srv.api_url:
                 try:
                     domain = urllib.parse.urlsplit(srv.api_url).hostname
                 except Exception:
                     domain = None
-            if not domain:
-                domain = extra.get("domain") or extra.get("vless_domain")
             if not domain:
                 logger.warning(
                     "Skipping server %s (%s) in VLESS links: no public TLS client domain configured",
