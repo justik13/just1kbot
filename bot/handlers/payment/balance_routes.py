@@ -221,94 +221,96 @@ async def _create_and_render_topup(
     user_id = user.id
     telegram_id = user.telegram_id
 
-    if not await MaintenanceService.can_user_perform_action(
-        session, telegram_id
-    ):
-        await _render_maintenance(target, session, back_to="menu_balance")
-        return
-
-    back_to = (
-        "white_internet"
-        if (context or {}).get("source") == "white_internet"
-        else "menu_balance"
-    )
-
-    if getattr(user, "topup_blocked", False):
-        await render_hub(
-            bot,
-            chat_id,
-            _topup_errors()["topup_blocked"],
-            get_back_button(back_to),
-        )
-        return
-
-    if getattr(user, "financial_hold", False):
-        await render_hub(
-            bot,
-            chat_id,
-            texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
-            get_back_button(back_to),
-        )
-        return
-
-    pending_count = await _count_pending_topup_orders(session, user_id)
-    if pending_count >= get_settings().BALANCE_MAX_UNFINISHED_TOPUPS:
-        await render_hub(
-            bot,
-            chat_id,
-            _topup_errors()["too_many_unfinished_topups"],
-            get_back_button(back_to),
-        )
-        return
-
     try:
-        bot_username = getattr(getattr(bot, "_me", None), "username", None)
-        order_meta = {"context": context} if context else None
-        order = await OrderService.create_order(
-            session,
-            user_id=user_id,
-            service_type="topup",
-            amount_rub=Decimal(amount),
-            payment_method="yookassa",
-            description=texts.CHECKOUT_DESCRIPTION_DEFAULT,
-            metadata=order_meta,
-            bot_username=bot_username,
-        )
-    except PaymentCreationAmbiguousError:
-        await render_hub(
-            bot,
-            chat_id,
-            texts.PAYMENT_CREATION_STATUS_UNKNOWN,
-            get_back_button(back_to),
-        )
-        return
-    except Exception as exc:
-        logger.exception("Failed to create topup order for user %s: %s", user_id, exc)
-        await render_hub(
-            bot,
-            chat_id,
-            texts.ERROR_PAYMENT_SERVICE,
-            get_back_button(back_to),
-        )
-        return
+        if not await MaintenanceService.can_user_perform_action(
+            session, telegram_id
+        ):
+            await _render_maintenance(target, session, back_to="menu_balance")
+            return
 
-    balance = await get_account_balance(session, user_id=user_id)
-    text = texts.BALANCE_TOPUP_CARD.format(
-        value_0=int(order.amount_rub), value_1=int(balance.available)
-    )
-    await render_hub(
-        bot,
-        chat_id,
-        text,
-        get_order_invoice_keyboard(
-            payment_url=order.payment_url or "",
-            order_id=str(order.id),
-            price=int(order.amount_rub),
-            back_callback=back_to,
-        ),
-    )
-    if isinstance(target, CallbackQuery):
-        await safe_callback_answer(target)
+        back_to = (
+            "white_internet"
+            if (context or {}).get("source") == "white_internet"
+            else "menu_balance"
+        )
+
+        if getattr(user, "topup_blocked", False):
+            await render_hub(
+                bot,
+                chat_id,
+                _topup_errors()["topup_blocked"],
+                get_back_button(back_to),
+            )
+            return
+
+        if getattr(user, "financial_hold", False):
+            await render_hub(
+                bot,
+                chat_id,
+                texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
+                get_back_button(back_to),
+            )
+            return
+
+        pending_count = await _count_pending_topup_orders(session, user_id)
+        if pending_count >= get_settings().BALANCE_MAX_UNFINISHED_TOPUPS:
+            await render_hub(
+                bot,
+                chat_id,
+                _topup_errors()["too_many_unfinished_topups"],
+                get_back_button(back_to),
+            )
+            return
+
+        try:
+            bot_username = getattr(getattr(bot, "_me", None), "username", None)
+            order_meta = {"context": context} if context else None
+            order = await OrderService.create_order(
+                session,
+                user_id=user_id,
+                service_type="topup",
+                amount_rub=Decimal(amount),
+                payment_method="yookassa",
+                description=texts.CHECKOUT_DESCRIPTION_DEFAULT,
+                metadata=order_meta,
+                bot_username=bot_username,
+            )
+        except PaymentCreationAmbiguousError:
+            await render_hub(
+                bot,
+                chat_id,
+                texts.PAYMENT_CREATION_STATUS_UNKNOWN,
+                get_back_button(back_to),
+            )
+            return
+        except Exception as exc:
+            logger.exception("Failed to create topup order for user %s: %s", user_id, exc)
+            await render_hub(
+                bot,
+                chat_id,
+                texts.ERROR_PAYMENT_SERVICE,
+                get_back_button(back_to),
+            )
+            return
+
+        balance = await get_account_balance(session, user_id=user_id)
+        text = texts.BALANCE_TOPUP_CARD.format(
+            value_0=int(order.amount_rub), value_1=int(balance.available)
+        )
+        await render_hub(
+            bot,
+            chat_id,
+            text,
+            get_order_invoice_keyboard(
+                payment_url=order.payment_url or "",
+                order_id=str(order.id),
+                price=int(order.amount_rub),
+                back_callback=back_to,
+            ),
+        )
+    finally:
+        if isinstance(target, CallbackQuery):
+            await safe_callback_answer(target)
 
 
 @router.callback_query(F.data == "menu_balance")
