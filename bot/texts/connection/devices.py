@@ -168,6 +168,7 @@ BTN_VLESS_RESET_HWID = "🔄 Сбросить привязку устройст�
 VLESS_RESET_SUCCESS = "✅ Привязка устройств по ссылке сброшена."
 VLESS_RESET_EMPTY = "ℹ️ У вас нет привязанных устройств по ссылке."
 VLESS_DEFAULT_SERVER_DESCRIPTION = "Прямой доступ"
+DEFAULT_VLESS_PROFILE_DESCRIPTION = "Тариф: {tariff} • Устройств: {active} из {devices}"
 
 BTN_AMNEZIA_DEVICES = "🛡 Устройства Amnezia"
 BTN_AMNEZIA_DEVICES_COUNT = "🛡 Устройства Amnezia ({count})"

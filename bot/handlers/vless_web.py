@@ -14,7 +14,6 @@ from aiohttp import web
 from bot import texts
 from bot.formatters import get_tariff_display_name
 from config.constants import (
-    DEFAULT_VLESS_PROFILE_DESCRIPTION,
     VLESS_PROFILE_DESCRIPTION,
     WHITE_INTERNET_CHANNEL_URL,
     WHITE_INTERNET_SUPPORT_URL,
@@ -409,12 +408,14 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                 tariff_name = user_tariff.name
         if not tariff_name:
             tariff_name = get_tariff_display_name(effective_vless_limit)
+        # Strip decorative emoji prefixes (e.g., '📱 Базовый' -> 'Базовый') for clean header display
+        tariff_clean = re.sub(r"^[^\wа-яА-ЯёЁa-zA-Z0-9]+", "", str(tariff_name)).strip()
 
         profile_desc = await get_system_setting(session, "vless_profile_description", None)
         if not isinstance(profile_desc, str) or not profile_desc.strip():
             profile_desc = await get_system_setting(session, "vless_profile_desc", None)
         if not isinstance(profile_desc, str) or not profile_desc.strip():
-            profile_desc = VLESS_PROFILE_DESCRIPTION or DEFAULT_VLESS_PROFILE_DESCRIPTION
+            profile_desc = VLESS_PROFILE_DESCRIPTION or texts.DEFAULT_VLESS_PROFILE_DESCRIPTION
 
         announce = await get_system_setting(session, "vless_announce", None)
         if not isinstance(announce, str) or not announce.strip():
@@ -456,7 +457,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         if profile_desc:
             formatted_desc = _safe_format_vless_template(
                 str(profile_desc).strip(),
-                tariff=tariff_name,
+                tariff=tariff_clean,
                 devices=effective_vless_limit,
                 active=active_hwid_count,
             )[:100]
@@ -465,7 +466,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         if announce:
             formatted_ann = _safe_format_vless_template(
                 str(announce).strip(),
-                tariff=tariff_name,
+                tariff=tariff_clean,
                 devices=effective_vless_limit,
                 active=active_hwid_count,
             )[:200]
