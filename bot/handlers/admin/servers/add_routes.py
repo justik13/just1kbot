@@ -236,14 +236,20 @@ async def process_add_server(
         existing = await get_server_by_api_url(session, api_url)
 
         if existing:
-            # Allow updating/rediscovering existing server capabilities (e.g. adding VLESS)
-            await state.update_data(
-                api_url=api_url,
-                existing_server_id=existing.id,
-                step="api_key",
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                texts.ERROR_SERVER_DUPLICATE_URL.format(
+                    api_url=safe(api_url),
+                ),
+                get_back_button(back_servers),
+                parse_mode="HTML",
+                trigger_message_id=trigger_msg_id,
             )
-        else:
-            await state.update_data(api_url=api_url, step="api_key")
+            await state.clear()
+            return
+
+        await state.update_data(api_url=api_url, step="api_key")
 
         await render_hub(
             message.bot,
@@ -350,9 +356,16 @@ async def process_add_server(
                     for cap in capabilities:
                         if cap not in kept_caps:
                             kept_caps.append(cap)
-                    server.capabilities = kept_caps
-                    if "awg" not in kept_caps:
+                    is_existing_awg = (
+                        server.protocol in AMNEZIA_PROTOCOLS
+                        or "awg" in kept_caps
+                        or "amnezia" in (server.capabilities or [])
+                    )
+                    if not is_existing_awg:
                         server.protocol = protocol_name
+                    elif "awg" not in kept_caps:
+                        kept_caps.append("awg")
+                        server.capabilities = kept_caps
                     server.health_state = ServerHealthState.ONLINE
                 else:
                     existing_server_id = None

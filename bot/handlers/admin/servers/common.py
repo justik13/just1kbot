@@ -217,6 +217,7 @@ async def _show_server_card(
     caps = getattr(server, "capabilities", None) or []
     proto = str(getattr(server, "protocol", "") or "").lower()
     has_vless = "vless" in caps or "xray_vless" in caps or proto == "vless"
+    has_awg = proto in AMNEZIA_PROTOCOLS or "awg" in caps or "amnezia" in caps
     is_origin = is_white_internet_origin_server(server)
     section_crumb = texts.BTN_WI_SERVERS if is_origin else texts.BTN_STD_SERVERS
     header = format_admin_breadcrumbs(section_crumb, f"{flag} {server.name}")
@@ -270,6 +271,7 @@ async def _show_server_card(
                 is_xray=is_origin,
                 has_vless=has_vless,
                 is_origin=is_origin,
+                has_awg=has_awg,
             ),
             parse_mode="HTML",
         )

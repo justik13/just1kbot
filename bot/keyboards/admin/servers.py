@@ -12,19 +12,21 @@ def get_admin_server_card_keyboard(
     is_xray: bool = False,
     has_vless: bool = False,
     is_origin: bool = False,
+    has_awg: bool = True,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
     if not is_xray:
-        if used_clients is not None and max_clients is not None:
-            peers_btn_text = texts.ADMIN_SERVER_BTN_PEERS.format(used=used_clients, total=max_clients)
-        else:
-            peers_btn_text = texts.ADMIN_SERVER_BTN_PEERS_NO_COUNT
+        if has_awg:
+            if used_clients is not None and max_clients is not None:
+                peers_btn_text = texts.ADMIN_SERVER_BTN_PEERS.format(used=used_clients, total=max_clients)
+            else:
+                peers_btn_text = texts.ADMIN_SERVER_BTN_PEERS_NO_COUNT
 
-        builder.button(
-            text=peers_btn_text,
-            callback_data=f"admin_server_peers:{server_id}:1",
-        )
+            builder.button(
+                text=peers_btn_text,
+                callback_data=f"admin_server_peers:{server_id}:1",
+            )
         if has_vless:
             builder.button(
                 text=texts.ADMIN_SERVER_BTN_INCY,
@@ -97,8 +99,8 @@ def get_admin_server_card_keyboard(
 
     if is_xray:
         builder.adjust(1, 2, 2, 2, 2, 2, 2, 1)
-    elif has_vless:
-        builder.adjust(2, 2, 2, 2, 2, 1, 1)
+    elif has_awg and has_vless:
+        builder.adjust(2, 2, 2, 2, 2, 2, 1)
     else:
         builder.adjust(2, 2, 2, 2, 1, 2, 1)
     return builder.as_markup()
