@@ -12,7 +12,7 @@ import urllib.parse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.constants import AMNEZIA_PROTOCOLS
+from config.constants import AMNEZIA_PROTOCOLS, VLESS_PROTOCOL, XRAY_PROTOCOL
 from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.models import Server, User, VlessSubscription, VPNProfile
 from database.repositories import vless_subscription_repo
@@ -50,7 +50,14 @@ class VlessSubscriptionService:
                 continue
 
             extra = srv.extra_data if isinstance(srv.extra_data, dict) else {}
-            domain = extra.get("domain")
+            domain = None
+            if srv.api_url:
+                try:
+                    domain = urllib.parse.urlsplit(srv.api_url).hostname
+                except Exception:
+                    domain = None
+            if not domain:
+                domain = extra.get("domain") or extra.get("vless_domain")
             if not domain:
                 logger.warning(
                     "Skipping server %s (%s) in VLESS links: no public TLS client domain configured",
@@ -283,7 +290,11 @@ class VlessSubscriptionService:
         targets: list[tuple[int, str, str]] = []
         for srv in servers:
             extra = srv.extra_data if isinstance(srv.extra_data, dict) else {}
-            api_url = extra.get("xray_api_url")
+            api_url = None
+            if srv.protocol in (XRAY_PROTOCOL, VLESS_PROTOCOL):
+                api_url = srv.api_url
+            if not api_url:
+                api_url = extra.get("xray_api_url")
             api_key = srv.api_key
 
             # Fallback to resolving from srv.api_url

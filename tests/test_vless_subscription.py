@@ -2711,4 +2711,140 @@ class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("active-uuid-to-keep", sub.pending_revoked_uuids)
 
 
+class TestVlessSubscriptionDomainAndBotResolution(unittest.TestCase):
+    """Verify dynamic bot username discovery, support URLs, and SSOT domain extraction."""
+
+    def test_vless_links_use_api_url_hostname_as_ssot(self):
+        sub = VlessSubscription(
+            id=1,
+            user_id=10,
+            token="token1234567890123456",
+            uuid="11111111-2222-3333-4444-555555555555",
+            is_active=True,
+        )
+        # Server has api_url with 'nl.just1k.pro' and legacy extra_data domain with 'nl.just1k.best'
+        server = Server(
+            id=12,
+            name="Нидерланды",
+            country_flag="🇳🇱",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            protocol="vless",
+            api_url="https://nl.just1k.pro:8444",
+            extra_data={"domain": "nl.just1k.best", "vless_port": 443},
+        )
+        links = VlessSubscriptionService.generate_vless_links(sub, [server])
+        self.assertEqual(len(links), 1)
+        self.assertIn("@nl.just1k.pro:443", links[0])
+        self.assertNotIn("nl.just1k.best", links[0])
+
+    def test_extract_node_targets_prefers_server_api_url_for_vless(self):
+        server = Server(
+            id=12,
+            name="Нидерланды",
+            country_flag="🇳🇱",
+            is_active=True,
+            protocol="vless",
+            api_key="secret-key-123",
+            api_url="https://nl.just1k.pro:8444",
+            extra_data={"xray_api_url": "https://nl.just1k.best:8444"},
+        )
+        targets = VlessSubscriptionService._extract_node_targets([server])
+        self.assertEqual(len(targets), 1)
+        srv_id, api_url, api_key = targets[0]
+        self.assertEqual(srv_id, 12)
+        self.assertEqual(api_url, "https://nl.just1k.pro:8444")
+        self.assertEqual(api_key, "secret-key-123")
+
+
+class TestVlessFeedDynamicBotUrls(AioHTTPTestCase):
+    """Test dynamic bot username and support URLs in feed responses."""
+
+    def setUp(self):
+        super().setUp()
+        from bot.handlers import vless_web
+        vless_web._ip_rate_limiter.buckets.clear()
+        vless_web._token_rate_limiter.buckets.clear()
+        from database.repositories import system_settings_repo
+        system_settings_repo._SETTINGS_CACHE.clear()
+
+        now = datetime.now(timezone.utc)
+        self.default_user = User(
+            id=42,
+            telegram_id=999,
+            is_banned=False,
+            is_deleted=False,
+            device_limit=3,
+            subscription_end=now + timedelta(days=30),
+        )
+        self.default_sub = VlessSubscription(
+            id=10,
+            user_id=42,
+            token="test-token-valid-length-12345678",
+            uuid="11111111-2222-3333-4444-555555555555",
+            is_active=True,
+            active_hwids={},
+        )
+        self.default_server = Server(
+            id=1,
+            name="NL-Node-1",
+            country_flag="🇳🇱",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            protocol="vless",
+            api_url="https://nl.just1k.pro:8444",
+            extra_data={"domain": "nl.just1k.pro", "vless_port": 443},
+        )
+
+    def tearDown(self):
+        from bot.handlers import vless_web
+        vless_web._ip_rate_limiter.buckets.clear()
+        vless_web._token_rate_limiter.buckets.clear()
+        super().tearDown()
+
+    async def get_application(self):
+        app = web.Application()
+        mock_bot = AsyncMock()
+        mock_me = MagicMock()
+        mock_me.username = "just1k13bot"
+        mock_bot.get_me.return_value = mock_me
+        app["bot"] = mock_bot
+        setup_vless_web_routes(app)
+        return app
+
+    async def test_feed_resolves_bot_username_and_support_urls(self):
+        mock_session = AsyncMock()
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
+            patch("services.subscription.SubscriptionService.check_vpn_access", return_value=True),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=3),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 3)),
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
+            patch("config.settings.get_settings") as mock_settings,
+        ):
+            mock_s = MagicMock()
+            mock_s.SUPPORT_USERNAME = "my_support_contact"
+            mock_settings.return_value = mock_s
+
+            headers = {"X-Hwid": "test-client-hwid-88"}
+            resp = await self.client.get("/sub/vless/test-token-valid-length-12345678", headers=headers)
+            self.assertEqual(resp.status, 200)
+
+            # Support-Url must point to project support, not just1kbot
+            self.assertEqual(resp.headers.get("Support-Url"), "https://t.me/my_support_contact")
+            # Profile-Web-Page-Url must point to the dynamically resolved bot username
+            self.assertEqual(resp.headers.get("Profile-Web-Page-Url"), "https://t.me/just1k13bot")
+            self.assertNotIn("just1kbot", resp.headers.get("Support-Url", ""))
+            self.assertNotIn("just1kbot", resp.headers.get("Profile-Web-Page-Url", ""))
+
+
+
 

@@ -290,7 +290,11 @@ async def ping_server(
             from services.xray_node_client import XrayNodeClient
 
             extra = getattr(server, "extra_data", None) or {}
-            xray_url = extra.get("xray_api_url")
+            xray_url = None
+            if proto in (XRAY_PROTOCOL, VLESS_PROTOCOL):
+                xray_url = server.api_url
+            if not xray_url:
+                xray_url = extra.get("xray_api_url")
             if not xray_url and server.api_url:
                 parsed = urlsplit(server.api_url)
                 if parsed.hostname and (proto in AMNEZIA_PROTOCOLS or has_awg):
