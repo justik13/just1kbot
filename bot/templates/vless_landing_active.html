@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#050505">
+    <meta name="color-scheme" content="dark">
+    <title>Подключение к сервису</title>
+    <style>
+        :root {
+            --bg-color: #050505;
+            --card-bg: #0c0c0e;
+            --surface-elevated: #141417;
+            --surface-hover: #1c1c21;
+            --surface-subtle: rgba(255, 255, 255, 0.025);
+            --border-subtle: rgba(255, 255, 255, 0.08);
+            --border-strong: rgba(255, 255, 255, 0.14);
+            --text-main: #fafafa;
+            --text-sub: #a1a1aa;
+            --text-muted: #71717a;
+            --cta-bg: #fafafa;
+            --cta-hover: #e4e4e7;
+            --cta-text: #09090b;
+            --success: #10b981;
+            --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+            --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+        }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        body {
+            background-color: var(--bg-color);
+            background-image: radial-gradient(ellipse 90% 50% at 50% -10%, rgba(255, 255, 255, 0.07), transparent 70%);
+            color: var(--text-main);
+            min-height: 100vh;
+            min-height: 100dvh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+        }
+        .card {
+            position: relative;
+            width: 100%;
+            max-width: 420px;
+            background-color: var(--card-bg);
+            border-radius: 24px;
+            padding: 28px 24px 24px;
+            text-align: center;
+            box-shadow:
+                0 24px 48px -12px rgba(0, 0, 0, 0.9),
+                0 0 0 1px var(--border-subtle),
+                inset 0 1px 0 rgba(255, 255, 255, 0.08);
+            animation: cardEnter 280ms var(--ease-out) both;
+        }
+        @keyframes cardEnter {
+            from {
+                opacity: 0;
+                transform: translateY(8px) scale(0.98);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+        @keyframes itemEnter {
+            from {
+                opacity: 0;
+                transform: translateY(6px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        .stagger-1 { animation: itemEnter 260ms var(--ease-out) 35ms both; }
+        .stagger-2 { animation: itemEnter 260ms var(--ease-out) 70ms both; }
+        .stagger-3 { animation: itemEnter 260ms var(--ease-out) 105ms both; }
+        .stagger-4 { animation: itemEnter 260ms var(--ease-out) 140ms both; }
+
+        .header-top {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 14px;
+        }
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 11px;
+            border-radius: 999px;
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px solid rgba(16, 185, 129, 0.22);
+            color: #34d399;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
+        }
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background-color: var(--success);
+            box-shadow: 0 0 8px var(--success);
+        }
+        .icon-badge {
+            width: 52px;
+            height: 52px;
+            border-radius: 15px;
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.02) 100%);
+            box-shadow:
+                inset 0 1px 0 rgba(255, 255, 255, 0.16),
+                0 0 0 1px var(--border-subtle),
+                0 8px 20px rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-main);
+        }
+        .icon-badge svg {
+            width: 24px;
+            height: 24px;
+        }
+        h1 {
+            font-size: clamp(20px, 5vw, 23px);
+            font-weight: 600;
+            letter-spacing: -0.025em;
+            color: var(--text-main);
+            margin-bottom: 6px;
+        }
+        p.subtitle {
+            font-size: 14px;
+            color: var(--text-sub);
+            margin-bottom: 22px;
+            line-height: 1.5;
+        }
+        .btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            width: 100%;
+            min-height: 52px;
+            padding: 14px 18px;
+            border-radius: 14px;
+            font-size: 15px;
+            font-weight: 600;
+            letter-spacing: -0.01em;
+            text-decoration: none;
+            cursor: pointer;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            transition:
+                transform 160ms var(--ease-out),
+                background-color 150ms ease,
+                border-color 150ms ease,
+                color 150ms ease;
+            margin-bottom: 10px;
+            border: none;
+        }
+        .btn svg, .store-btn svg {
+            width: 18px;
+            height: 18px;
+            flex-shrink: 0;
+        }
+        .btn:active, .store-btn:active {
+            transform: scale(0.97);
+        }
+        .btn-primary {
+            background-color: var(--cta-bg);
+            color: var(--cta-text);
+            box-shadow:
+                0 1px 2px rgba(0, 0, 0, 0.5),
+                inset 0 1px 0 #ffffff;
+        }
+        .btn-secondary {
+            min-height: 48px;
+            background-color: var(--surface-elevated);
+            color: var(--text-main);
+            border: 1px solid var(--border-subtle);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+            margin-bottom: 0;
+        }
+        .btn-secondary.copied {
+            border-color: rgba(16, 185, 129, 0.4);
+            background-color: rgba(16, 185, 129, 0.08);
+            color: #34d399;
+        }
+        #copyBtnContent {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition:
+                opacity 150ms var(--ease-out),
+                transform 150ms var(--ease-out),
+                filter 150ms var(--ease-out);
+        }
+        #copyBtnContent.morphing {
+            opacity: 0;
+            transform: scale(0.96);
+            filter: blur(2px);
+        }
+        .copy-toast {
+            position: fixed;
+            left: 50%;
+            bottom: max(20px, env(safe-area-inset-bottom));
+            z-index: 50;
+            padding: 9px 16px;
+            border-radius: 999px;
+            background: rgba(20, 20, 23, 0.94);
+            border: 1px solid rgba(16, 185, 129, 0.35);
+            box-shadow: 0 12px 28px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            font-size: 13px;
+            color: #34d399;
+            font-weight: 500;
+            white-space: nowrap;
+            opacity: 0;
+            transform: translateX(-50%) translateY(10px) scale(0.95);
+            pointer-events: none;
+            transition: opacity 180ms var(--ease-out), transform 180ms var(--ease-out);
+        }
+        .copy-toast.visible {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0) scale(1);
+        }
+        .divider {
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--border-subtle) 15%, var(--border-subtle) 85%, transparent);
+            margin: 20px 0 18px;
+        }
+        .section-title {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 10px;
+        }
+        .store-buttons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .store-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            min-height: 46px;
+            padding: 10px 12px;
+            border-radius: 12px;
+            background-color: var(--surface-elevated);
+            border: 1px solid var(--border-subtle);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+            color: var(--text-main);
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 500;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            transition:
+                transform 160ms var(--ease-out),
+                background-color 150ms ease,
+                border-color 150ms ease;
+        }
+        .store-btn-full {
+            margin-bottom: 16px;
+            color: var(--text-sub);
+        }
+        @media (hover: hover) and (pointer: fine) {
+            .btn-primary:hover {
+                background-color: var(--cta-hover);
+            }
+            .btn-secondary:hover {
+                background-color: var(--surface-hover);
+                border-color: var(--border-strong);
+            }
+            .store-btn:hover {
+                background-color: var(--surface-hover);
+                border-color: var(--border-strong);
+                color: var(--text-main);
+            }
+        }
+        .steps {
+            text-align: left;
+            background-color: var(--surface-subtle);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 14px;
+            padding: 14px 16px;
+            font-size: 13px;
+            color: var(--text-sub);
+            line-height: 1.5;
+        }
+        .steps-title {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-main);
+            margin-bottom: 10px;
+            letter-spacing: -0.01em;
+        }
+        .steps ol {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .steps li {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+        }
+        .step-num {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 20px;
+            height: 20px;
+            border-radius: 6px;
+            background-color: var(--surface-elevated);
+            border: 1px solid var(--border-subtle);
+            color: var(--text-main);
+            font-size: 11px;
+            font-weight: 600;
+            flex-shrink: 0;
+            margin-top: 1px;
+        }
+        .steps strong {
+            color: var(--text-main);
+            font-weight: 600;
+        }
+        @media (max-width: 480px) {
+            body {
+                padding: max(12px, env(safe-area-inset-top)) 12px max(16px, env(safe-area-inset-bottom)) 12px;
+            }
+            .card {
+                padding: 24px 18px 20px;
+                border-radius: 22px;
+            }
+            .btn {
+                min-height: 52px;
+                font-size: 15px;
+            }
+            .store-btn {
+                min-height: 46px;
+                font-size: 13px;
+            }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                animation-delay: 0ms !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="stagger-1">
+            <div class="header-top">
+                <div class="status-pill">
+                    <span class="status-dot"></span>
+                    <span>Активный доступ</span>
+                </div>
+                <div class="icon-badge" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+                    </svg>
+                </div>
+            </div>
+            <h1>Подключение к сервису</h1>
+            <p class="subtitle">Открытие приложения для автоматической настройки доступа.</p>
+        </div>
+
+        <div class="stagger-2">
+            <a id="deepLinkBtn" href="#" class="btn btn-primary">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M15 3h6v6"/>
+                    <path d="M10 14L21 3"/>
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                </svg>
+                <span>Открыть в приложении INCY</span>
+            </a>
+
+            <button id="copyBtn" type="button" class="btn btn-secondary" onclick="copyLink()">
+                <span id="copyBtnContent">
+                    <svg id="copyIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                    </svg>
+                    <span id="copyBtnText">Скопировать ссылку</span>
+                </span>
+            </button>
+        </div>
+
+        <div class="divider stagger-3"></div>
+
+        <div class="stagger-3">
+            <div class="section-title">Приложение еще не установлено?</div>
+            <div class="store-buttons">
+                <a href="https://apps.apple.com/app/incy/id6756943388" target="_blank" rel="noopener" class="store-btn">
+                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.33c.64-.78 1.08-1.86.96-2.94-.93.04-2.06.62-2.72 1.4-.58.68-1.1 1.79-.96 2.84 1.04.08 2.08-.52 2.72-1.3"/>
+                    </svg>
+                    <span>App Store</span>
+                </a>
+                <a href="https://play.google.com/store/apps/details?id=llc.itdev.incy" target="_blank" rel="noopener" class="store-btn">
+                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path d="M3.61 1.814L13.793 12 3.61 22.186a1.05 1.05 0 0 1-.61-.959V2.773c0-.419.246-.785.61-.959zm10.89 10.893l2.302 2.302-10.937 6.333 8.635-8.635zm3.199-3.198l2.807 1.626a1 1 0 0 1 0 1.73l-2.808 1.626L15.206 12l2.493-2.491zM5.864 2.658L16.8 8.99l-2.302 2.302-8.634-8.634z"/>
+                    </svg>
+                    <span>Google Play</span>
+                </a>
+            </div>
+            <a href="https://github.com/INCY-DEV/incy-platforms/releases" target="_blank" rel="noopener" class="store-btn store-btn-full">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                    <line x1="8" y1="21" x2="16" y2="21"/>
+                    <line x1="12" y1="17" x2="12" y2="21"/>
+                </svg>
+                <span>Скачать для ПК / APK (GitHub)</span>
+            </a>
+        </div>
+
+        <div class="steps stagger-4">
+            <span class="steps-title">Как подключить:</span>
+            <ol>
+                <li>
+                    <span class="step-num">1</span>
+                    <span>Установите приложение <strong>INCY</strong> по ссылкам выше.</span>
+                </li>
+                <li>
+                    <span class="step-num">2</span>
+                    <span>Нажмите кнопку <strong>«Открыть в приложении INCY»</strong>.</span>
+                </li>
+            </ol>
+        </div>
+    </div>
+    <div id="copyToast" class="copy-toast" aria-live="polite">Ссылка скопирована в буфер!</div>
+
+    <script>
+        const subUrl = window.location.href;
+        const deepLink = "incy://add/" + subUrl;
+        const btn = document.getElementById("deepLinkBtn");
+        if (btn) {
+            btn.href = deepLink;
+        }
+
+        // Auto-redirect to INCY
+        try {
+            window.location.href = deepLink;
+        } catch (e) {}
+
+        const COPY_ICON_PATH = '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>';
+        const CHECK_ICON_PATH = '<polyline points="20 6 9 17 4 12"/>';
+
+        let copyResetTimer = null;
+        function setCopyButtonState(newText, isCopied) {
+            const copyBtn = document.getElementById("copyBtn");
+            const copyBtnContent = document.getElementById("copyBtnContent");
+            const copyBtnText = document.getElementById("copyBtnText");
+            const copyIcon = document.getElementById("copyIcon");
+            if (!copyBtn || !copyBtnContent || !copyBtnText) return;
+            copyBtnContent.classList.add("morphing");
+            setTimeout(function() {
+                copyBtnText.textContent = newText;
+                if (copyIcon) {
+                    copyIcon.innerHTML = isCopied ? CHECK_ICON_PATH : COPY_ICON_PATH;
+                }
+                if (isCopied) {
+                    copyBtn.classList.add("copied");
+                } else {
+                    copyBtn.classList.remove("copied");
+                }
+                copyBtnContent.classList.remove("morphing");
+            }, 130);
+        }
+
+        function copyLink() {
+            navigator.clipboard.writeText(subUrl).then(function() {
+                const toast = document.getElementById("copyToast");
+                setCopyButtonState("Ссылка скопирована", true);
+                if (toast) {
+                    toast.textContent = "Ссылка скопирована в буфер!";
+                    toast.classList.add("visible");
+                }
+                if (copyResetTimer) clearTimeout(copyResetTimer);
+                copyResetTimer = setTimeout(function() {
+                    if (toast) toast.classList.remove("visible");
+                    setCopyButtonState("Скопировать ссылку", false);
+                }, 2200);
+            }).catch(function() {
+                const toast = document.getElementById("copyToast");
+                if (toast) {
+                    toast.textContent = "Не удалось скопировать";
+                    toast.classList.add("visible");
+                }
+            });
+        }
+    </script>
+</body>
+</html>

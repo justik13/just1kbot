@@ -558,8 +558,8 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
 
         # Keep non-country names as is
         self.assertEqual(
-            WhiteInternetService._ensure_country_flag("⚪️ Белый Интернет (XHTTP)", ""),
-            "⚪️ Белый Интернет (XHTTP)",
+            WhiteInternetService._ensure_country_flag("⚪️ Белый Интернет", ""),
+            "⚪️ Белый Интернет",
         )
 
     def test_generate_vless_links_origin_default_is_russia_without_parentheses(self):

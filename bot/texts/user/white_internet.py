@@ -234,7 +234,8 @@ WL_ANNOUNCE_MAINTENANCE = "⚠️ Сервер на техническом об�
 
 
 
-WL_VLESS_TAG = "⚪️ Белый Интернет (XHTTP)"
+
+WL_VLESS_TAG = "⚪️ Белый Интернет"
 WL_ORIGIN_VLESS_TAG = "🇷🇺 Россия"
 WL_COUNTRY_KEYWORD_FLAGS: dict[str, str] = {
     "германия": "🇩🇪",

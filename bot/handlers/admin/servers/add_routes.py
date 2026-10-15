@@ -1,4 +1,7 @@
+import asyncio
 import logging
+import re
+import urllib.parse
 
 from config.constants import (
     AMNEZIA_PROTOCOL,
@@ -13,6 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.keyboards import get_back_button
 from bot.states import AdminStates
+from config.enums import ServerHealthState
+from database.models import Server
 from database.repositories.servers_repo import (
     create_server,
     get_server_by_api_url,
@@ -33,7 +38,7 @@ logger = logging.getLogger(__name__)
 SAFE_DEFAULT_MAX_PEERS = 200
 
 
-@router.callback_query(F.data == "admin_server_add")
+@router.callback_query(F.data.in_(["admin_server_add", "admin_server_add:std", "admin_server_add:wi"]))
 async def start_add_server(
     callback: CallbackQuery,
     state: FSMContext,
@@ -48,11 +53,25 @@ async def start_add_server(
     await callback.answer(show_alert=False)
     await state.clear()
 
+    filter_type = callback.data.split(":", 1)[1] if ":" in callback.data else None
+    back_target = f"admin_servers:{filter_type}" if filter_type else "admin_servers"
+
     builder = InlineKeyboardBuilder()
-    builder.button(text=texts.ADMIN_SERVER_BTN_PROTO_AWG, callback_data="admin_server_add_proto:amneziawg2")
-    builder.button(text=texts.ADMIN_SERVER_BTN_PROTO_XRAY, callback_data="admin_server_add_proto:xray")
-    builder.button(text=texts.ADMIN_BTN_BACK_TO_SERVERS, callback_data="admin_servers")
-    builder.adjust(1, 1, 1)
+    if filter_type == "std":
+        builder.button(text=texts.ADMIN_SERVER_BTN_PROTO_AWG, callback_data="admin_server_add_proto:amneziawg2:std")
+        builder.button(text=texts.ADMIN_SERVER_BTN_PROTO_VLESS, callback_data="admin_server_add_proto:vless:std")
+        builder.button(text=texts.ADMIN_BTN_BACK_TO_SERVERS, callback_data=back_target)
+        builder.adjust(1, 1, 1)
+    elif filter_type == "wi":
+        builder.button(text=texts.ADMIN_SERVER_BTN_PROTO_XRAY, callback_data="admin_server_add_proto:xray:wi")
+        builder.button(text=texts.ADMIN_BTN_BACK_TO_SERVERS, callback_data=back_target)
+        builder.adjust(1, 1)
+    else:
+        builder.button(text=texts.ADMIN_SERVER_BTN_PROTO_AWG, callback_data="admin_server_add_proto:amneziawg2")
+        builder.button(text=texts.ADMIN_SERVER_BTN_PROTO_VLESS, callback_data="admin_server_add_proto:vless")
+        builder.button(text=texts.ADMIN_SERVER_BTN_PROTO_XRAY, callback_data="admin_server_add_proto:xray")
+        builder.button(text=texts.ADMIN_BTN_BACK_TO_SERVERS, callback_data=back_target)
+        builder.adjust(1, 1, 1, 1)
 
     await callback.message.edit_text(
         texts.ADMIN_SERVER_SELECT_PROTO_PROMPT,
@@ -70,14 +89,18 @@ async def select_add_server_protocol(
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
 
-    protocol = callback.data.split(":")[1]
+    parts = callback.data.split(":")
+    protocol = parts[1]
+    filter_type = parts[2] if len(parts) > 2 else None
+
     await callback.answer(show_alert=False)
     await state.set_state(AdminStates.adding_server)
-    await state.update_data(protocol=protocol, step="name")
+    await state.update_data(protocol=protocol, step="name", filter_type=filter_type)
 
+    back_target = f"admin_server_add:{filter_type}" if filter_type else "admin_server_add"
     await callback.message.edit_text(
         texts.ADMIN_SERVER_NAME_PROMPT,
-        reply_markup=get_back_button("admin_server_add"),
+        reply_markup=get_back_button(back_target),
         parse_mode="HTML",
     )
 
@@ -98,13 +121,16 @@ async def process_add_server(
         return
 
     trigger_msg_id = getattr(message, "message_id", None)
+    data = await state.get_data()
+    filter_type = data.get("filter_type")
+    back_servers = f"admin_servers:{filter_type}" if filter_type else "admin_servers"
 
     if not message.text:
         await render_hub(
             message.bot,
             message.chat.id,
             texts.ERROR_TEXT_REQUIRED,
-            get_back_button("admin_servers"),
+            get_back_button(back_servers),
             trigger_message_id=trigger_msg_id,
         )
         return
@@ -116,12 +142,11 @@ async def process_add_server(
             message.bot,
             message.chat.id,
             texts.ERROR_OPERATION_CANCELLED,
-            get_back_button("admin_servers"),
+            get_back_button(back_servers),
             trigger_message_id=trigger_msg_id,
         )
         return
 
-    data = await state.get_data()
     step = data.get("step")
 
     if step == "name":
@@ -132,7 +157,7 @@ async def process_add_server(
                 message.bot,
                 message.chat.id,
                 texts.ERROR_NAME_TOO_LONG.format(max=50),
-                get_back_button("admin_servers"),
+                get_back_button(back_servers),
                 trigger_message_id=trigger_msg_id,
             )
             return
@@ -143,7 +168,7 @@ async def process_add_server(
             message.bot,
             message.chat.id,
             texts.ADMIN_SERVER_FLAG_PROMPT,
-            get_back_button("admin_servers"),
+            get_back_button(back_servers),
             trigger_message_id=trigger_msg_id,
         )
 
@@ -155,7 +180,7 @@ async def process_add_server(
                 message.bot,
                 message.chat.id,
                 texts.ADMIN_SERVER_FLAG_TOO_LONG,
-                get_back_button("admin_servers"),
+                get_back_button(back_servers),
                 trigger_message_id=trigger_msg_id,
             )
             return
@@ -169,7 +194,7 @@ async def process_add_server(
             message.bot,
             message.chat.id,
             texts.ADMIN_SERVER_URL_PROMPT,
-            get_back_button("admin_servers"),
+            get_back_button(back_servers),
             trigger_message_id=trigger_msg_id,
         )
 
@@ -181,7 +206,7 @@ async def process_add_server(
                 message.bot,
                 message.chat.id,
                 texts.ERROR_URL_TOO_LONG.format(max=500),
-                get_back_button("admin_servers"),
+                get_back_button(back_servers),
                 trigger_message_id=trigger_msg_id,
             )
             return
@@ -191,7 +216,7 @@ async def process_add_server(
                 message.bot,
                 message.chat.id,
                 texts.ERROR_INVALID_URL,
-                get_back_button("admin_servers"),
+                get_back_button(back_servers),
                 parse_mode="HTML",
                 trigger_message_id=trigger_msg_id,
             )
@@ -202,7 +227,7 @@ async def process_add_server(
                 message.bot,
                 message.chat.id,
                 texts.ADMIN_SERVER_URL_FORBIDDEN,
-                get_back_button("admin_servers"),
+                get_back_button(back_servers),
                 parse_mode="HTML",
                 trigger_message_id=trigger_msg_id,
             )
@@ -211,28 +236,20 @@ async def process_add_server(
         existing = await get_server_by_api_url(session, api_url)
 
         if existing:
-            await render_hub(
-                message.bot,
-                message.chat.id,
-                texts.ERROR_SERVER_DUPLICATE_URL.format(
-                    api_url=safe(api_url),
-                ),
-                get_back_button("admin_servers"),
-                parse_mode="HTML",
-                trigger_message_id=trigger_msg_id,
+            # Allow updating/rediscovering existing server capabilities (e.g. adding VLESS)
+            await state.update_data(
+                api_url=api_url,
+                existing_server_id=existing.id,
+                step="api_key",
             )
-
-            await state.clear()
-
-            return
-
-        await state.update_data(api_url=api_url, step="api_key")
+        else:
+            await state.update_data(api_url=api_url, step="api_key")
 
         await render_hub(
             message.bot,
             message.chat.id,
             texts.ADMIN_SERVER_KEY_PROMPT,
-            get_back_button("admin_servers"),
+            get_back_button(back_servers),
             trigger_message_id=trigger_msg_id,
         )
 
@@ -244,7 +261,7 @@ async def process_add_server(
                 message.bot,
                 message.chat.id,
                 texts.ERROR_API_KEY_SHORT.format(min=8),
-                get_back_button("admin_servers"),
+                get_back_button(back_servers),
                 trigger_message_id=trigger_msg_id,
             )
             return
@@ -255,14 +272,14 @@ async def process_add_server(
             message.bot,
             message.chat.id,
             texts.ADMIN_SERVER_CHECKING,
-            get_back_button("admin_servers"),
+            get_back_button(back_servers),
             parse_mode="HTML",
             trigger_message_id=trigger_msg_id,
         )
 
         protocol = all_data.get("protocol", AMNEZIA_PROTOCOL)
 
-        if protocol == "xray":
+        if protocol in ("xray", "vless"):
             from services.xray_node_client import XrayNodeClient
 
             xray_ok = False
@@ -282,7 +299,7 @@ async def process_add_server(
                     message.bot,
                     message.chat.id,
                     texts.ERROR_SERVER_UNREACHABLE,
-                    get_back_button("admin_servers"),
+                    get_back_button(back_servers),
                     parse_mode="HTML",
                 )
                 await state.clear()
@@ -290,18 +307,81 @@ async def process_add_server(
             from config.constants import DEFAULT_XRAY_ORIGIN_MAX_CLIENTS
             api_server_name = all_data["name"]
             api_max_peers = DEFAULT_XRAY_ORIGIN_MAX_CLIENTS
-            protocol_name = "xray"
-            capabilities = ["xray_origin"]
-            server = await create_server(
-                session,
-                name=api_server_name,
-                country_flag=all_data["country_flag"],
-                api_url=all_data["api_url"],
-                api_key=api_key,
-                protocol=protocol_name,
-                max_clients=api_max_peers,
-                capabilities=capabilities,
+            capabilities = []
+            reported_services = [s.lower() for s in (xray_data or {}).get("services", [])] if xray_data else []
+            reported_caps = [c.lower() for c in (xray_data or {}).get("capabilities", [])] if xray_data else []
+            inbounds = (xray_data or {}).get("inbounds", [])
+
+            has_vless = (
+                "vless" in reported_services
+                or "vless" in reported_caps
+                or any(
+                    "vless" in (ib if isinstance(ib, str) else str(ib.get("tag", ""))).lower()
+                    for ib in inbounds
+                    if isinstance(ib, (str, dict))
+                )
             )
+            has_wl = (
+                "white_internet" in reported_services
+                or "xray_origin" in reported_caps
+                or any(
+                    "wl" in (ib if isinstance(ib, str) else str(ib.get("tag", ""))).lower()
+                    for ib in inbounds
+                    if isinstance(ib, (str, dict))
+                )
+                or bool((xray_data or {}).get("relays"))
+            )
+            if has_vless:
+                capabilities.append("vless")
+            if has_wl:
+                capabilities.append("xray_origin")
+            if not capabilities:
+                capabilities = ["vless"] if protocol == "vless" else ["xray_origin"]
+
+            protocol_name = "vless" if ("vless" in capabilities and "xray_origin" not in capabilities) else "xray"
+
+            existing_server_id = all_data.get("existing_server_id")
+            if existing_server_id:
+                server = await session.get(Server, existing_server_id)
+                if server:
+                    server.api_key = api_key
+                    # Purge stale capabilities: keep existing only if verified or awg
+                    kept_caps = [c for c in (server.capabilities or []) if c not in ("vless", "xray_origin")]
+                    for cap in capabilities:
+                        if cap not in kept_caps:
+                            kept_caps.append(cap)
+                    server.capabilities = kept_caps
+                    if "awg" not in kept_caps:
+                        server.protocol = protocol_name
+                    server.health_state = ServerHealthState.ONLINE
+                else:
+                    existing_server_id = None
+
+            if not existing_server_id:
+                existing_dup = await get_server_by_api_url(session, all_data["api_url"])
+                if existing_dup:
+                    await render_hub(
+                        message.bot,
+                        message.chat.id,
+                        texts.ERROR_SERVER_DUPLICATE_URL.format(
+                            api_url=safe(all_data["api_url"]),
+                        ),
+                        get_back_button(back_servers),
+                        parse_mode="HTML",
+                    )
+                    await state.clear()
+                    return
+
+                server = await create_server(
+                    session,
+                    name=api_server_name,
+                    country_flag=all_data["country_flag"],
+                    api_url=all_data["api_url"],
+                    api_key=api_key,
+                    protocol=protocol_name,
+                    max_clients=api_max_peers,
+                    capabilities=capabilities,
+                )
             if xray_epoch:
                 server.xray_instance_epoch = xray_epoch
             if xray_data:
@@ -316,7 +396,22 @@ async def process_add_server(
                     extra["cdn_domain"] = xray_data["cdn_domain"]
                 if "sub_path_prefix" in xray_data and xray_data["sub_path_prefix"]:
                     extra["sub_path_prefix"] = xray_data["sub_path_prefix"]
+                if has_vless:
+                    vless_domain = xray_data.get("vless_domain")
+                    if vless_domain:
+                        vless_domain_str = str(vless_domain).strip().lower()
+                        if (
+                            vless_domain_str
+                            and "." in vless_domain_str
+                            and " " not in vless_domain_str
+                            and "/" not in vless_domain_str
+                            and ":" not in vless_domain_str
+                        ):
+                            extra["domain"] = vless_domain_str
+                    extra.setdefault("vless_port", 443)
+                    extra.setdefault("xray_api_url", all_data["api_url"])
                 server.extra_data = extra
+            await session.flush()
 
             await AuditService.log_action(
                 session,
@@ -327,27 +422,33 @@ async def process_add_server(
                 api_server_name,
             )
 
+            proto_label = texts.PROTOCOL_VLESS if "vless" in capabilities and "xray_origin" not in capabilities else texts.PROTOCOL_XRAY_ORIGIN
             msg_text = texts.ADMIN_SERVER_ADDED.format(
                 flag=all_data["country_flag"],
                 name=safe(api_server_name),
-                protocol=texts.PROTOCOL_XRAY_ORIGIN,
+                protocol=proto_label,
                 max_clients=api_max_peers,
                 api_url=safe(all_data["api_url"]),
             )
             relays = (server.extra_data or {}).get("relays", [])
-            if not relays:
+            if "xray_origin" in capabilities and not relays:
                 msg_text += texts.ADMIN_SERVER_ADDED_NO_RELAYS_WARNING
 
             await render_hub(
                 message.bot,
                 message.chat.id,
                 msg_text,
-                get_back_button("admin_servers"),
+                get_back_button(back_servers),
                 parse_mode="HTML",
             )
             logger.info(
                 f"Admin {message.from_user.id} added Xray server: {server.id}"
             )
+            from database.repositories.servers_repo import is_vless_capable_server
+            if is_vless_capable_server(server):
+                from services.vless_subscription_service import VlessSubscriptionService
+                asyncio.create_task(VlessSubscriptionService.sync_all_active_to_server(server.id))
+
             await state.clear()
             return
 
@@ -361,7 +462,7 @@ async def process_add_server(
                 message.bot,
                 message.chat.id,
                 texts.ERROR_SERVER_UNREACHABLE,
-                get_back_button("admin_servers"),
+                get_back_button(back_servers),
                 parse_mode="HTML",
             )
 
@@ -376,7 +477,7 @@ async def process_add_server(
                 message.bot,
                 message.chat.id,
                 texts.ERROR_SERVER_API_INFO_FAILED,
-                get_back_button("admin_servers"),
+                get_back_button(back_servers),
                 parse_mode="HTML",
             )
 
@@ -395,7 +496,7 @@ async def process_add_server(
                         ", ".join(protocols) if protocols else texts.LABEL_UNKNOWN_LOWER
                     ),
                 ),
-                get_back_button("admin_servers"),
+                get_back_button(back_servers),
                 parse_mode="HTML",
             )
 
@@ -418,19 +519,20 @@ async def process_add_server(
 
         api_server_name = (all_data.get("name") or server_info.name or "AmneziaWG")[:50]
 
+        existing_server_id = all_data.get("existing_server_id")
         existing = await get_server_by_api_url(
             session,
             all_data["api_url"],
         )
 
-        if existing:
+        if existing and not existing_server_id:
             await render_hub(
                 message.bot,
                 message.chat.id,
                 texts.ERROR_SERVER_DUPLICATE_URL.format(
                     api_url=safe(all_data["api_url"]),
                 ),
-                get_back_button("admin_servers"),
+                get_back_button(back_servers),
                 parse_mode="HTML",
             )
 
@@ -440,15 +542,88 @@ async def process_add_server(
 
         server_protocol = server_info.get_protocol()
 
-        server = await create_server(
-            session,
-            name=api_server_name,
-            country_flag=all_data["country_flag"],
-            api_url=all_data["api_url"],
-            api_key=api_key,
-            protocol=server_protocol,
-            max_clients=api_max_peers,
-        )
+        capabilities = ["awg"]
+        extra_info = None
+        xray_check_failed = False
+        # Modular node: check if Xray VLESS API is also available on this node
+        try:
+            from services.xray_node_client import XrayNodeClient
+
+            async with XrayNodeClient(timeout=3.0) as xray_client:
+                x_ok, _, x_data = await xray_client.check_health(all_data["api_url"], api_key)
+                if x_ok and x_data:
+                    reported_services = [s.lower() for s in x_data.get("services", [])]
+                    reported_caps = [c.lower() for c in x_data.get("capabilities", [])]
+                    inbounds = x_data.get("inbounds", [])
+                    has_vless = (
+                        "vless" in reported_services
+                        or "vless" in reported_caps
+                        or any(
+                            "vless" in (ib if isinstance(ib, str) else str(ib.get("tag", ""))).lower()
+                            for ib in inbounds
+                            if isinstance(ib, (str, dict))
+                        )
+                    )
+                    if has_vless:
+                        capabilities.append("vless")
+                        domain = x_data.get("vless_domain") or all_data.get("vless_domain")
+                        if not domain:
+                            parsed = urllib.parse.urlsplit(all_data["api_url"])
+                            cand = parsed.hostname or ""
+                            if cand and not re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", cand):
+                                domain = cand
+                            else:
+                                domain = None
+                        extra_info = {
+                            "vless_port": 443,
+                            "xray_api_url": all_data["api_url"],
+                        }
+                        if domain and isinstance(domain, str):
+                            domain_clean = domain.strip().lower()
+                            if "." in domain_clean and not any(c in domain_clean for c in (" ", "/", ":")):
+                                extra_info["domain"] = domain_clean
+                elif not x_ok:
+                    xray_check_failed = True
+        except Exception:
+            xray_check_failed = True
+
+        if existing_server_id:
+            server = await session.get(Server, existing_server_id)
+            if server:
+                server.api_key = api_key
+                # If Xray health check failed due to transient timeout/error, do not drop previously verified vless
+                if xray_check_failed and "vless" in (server.capabilities or []) and "vless" not in capabilities:
+                    capabilities.append("vless")
+                # Purge stale vless only if check succeeded and confirmed absence
+                kept_caps = [c for c in (server.capabilities or []) if c not in ("awg", "vless")]
+                for cap in capabilities:
+                    if cap not in kept_caps:
+                        kept_caps.append(cap)
+                server.capabilities = kept_caps
+                if extra_info:
+                    server.extra_data = {**(server.extra_data or {}), **extra_info}
+                server.health_state = ServerHealthState.ONLINE
+                await session.flush()
+        else:
+            create_kwargs = {
+                "name": api_server_name,
+                "country_flag": all_data["country_flag"],
+                "api_url": all_data["api_url"],
+                "api_key": api_key,
+                "protocol": server_protocol,
+                "max_clients": api_max_peers,
+            }
+            if capabilities:
+                create_kwargs["capabilities"] = capabilities
+
+            server = await create_server(
+                session,
+                **create_kwargs,
+            )
+
+            if extra_info:
+                server.extra_data = {**(server.extra_data or {}), **extra_info}
+                await session.flush()
 
         await AuditService.log_action(
             session,
@@ -469,12 +644,17 @@ async def process_add_server(
                 max_clients=api_max_peers,
                 api_url=safe(all_data["api_url"]),
             ),
-            get_back_button("admin_servers"),
+            get_back_button(back_servers),
             parse_mode="HTML",
         )
 
         logger.info(
             f"Admin {message.from_user.id} added server: {server.id}"
         )
+
+        from database.repositories.servers_repo import is_vless_capable_server
+        if is_vless_capable_server(server):
+            from services.vless_subscription_service import VlessSubscriptionService
+            asyncio.create_task(VlessSubscriptionService.sync_all_active_to_server(server.id))
 
         await state.clear()

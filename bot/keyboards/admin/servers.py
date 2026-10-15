@@ -10,6 +10,8 @@ def get_admin_server_card_keyboard(
     used_clients: int | None = None,
     max_clients: int | None = None,
     is_xray: bool = False,
+    has_vless: bool = False,
+    is_origin: bool = False,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
@@ -23,6 +25,11 @@ def get_admin_server_card_keyboard(
             text=peers_btn_text,
             callback_data=f"admin_server_peers:{server_id}:1",
         )
+        if has_vless:
+            builder.button(
+                text=texts.ADMIN_SERVER_BTN_INCY,
+                callback_data=f"admin_server_incy:{server_id}",
+            )
     else:
         builder.button(
             text=texts.ADMIN_SERVER_BTN_INCY,
@@ -82,13 +89,16 @@ def get_admin_server_card_keyboard(
         text=texts.ADMIN_SERVER_BTN_DELETE,
         callback_data=f"admin_server_delete:{server_id}",
     )
+    back_cb = "admin_servers:wi" if is_origin else "admin_servers:std"
     builder.button(
         text=texts.ADMIN_BTN_BACK_TO_SERVERS,
-        callback_data="admin_servers",
+        callback_data=back_cb,
     )
 
     if is_xray:
         builder.adjust(1, 2, 2, 2, 2, 2, 2, 1)
+    elif has_vless:
+        builder.adjust(2, 2, 2, 2, 2, 1, 1)
     else:
         builder.adjust(2, 2, 2, 2, 1, 2, 1)
     return builder.as_markup()
@@ -199,50 +209,91 @@ def get_admin_server_relays_keyboard(server_id: int) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def get_admin_server_incy_keyboard(server_id: int, origin_hidden: bool = False) -> InlineKeyboardMarkup:
+def get_admin_std_sub_incy_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(
-        text=texts.ADMIN_SERVER_INCY_BTN_TITLE,
-        callback_data=f"admin_server_incy_edit:{server_id}:title",
-    )
-    builder.button(
-        text=texts.ADMIN_SERVER_INCY_BTN_DESC,
-        callback_data=f"admin_server_incy_edit:{server_id}:desc",
-    )
-    builder.button(
-        text=texts.ADMIN_SERVER_INCY_BTN_ANNOUNCE,
-        callback_data=f"admin_server_incy_edit:{server_id}:announce",
-    )
-    builder.button(
-        text=texts.ADMIN_SERVER_INCY_BTN_ANNOUNCE_URL,
-        callback_data=f"admin_server_incy_edit:{server_id}:announce_url",
-    )
-    builder.button(
-        text=texts.ADMIN_SERVER_INCY_BTN_ORIGIN_NAME,
-        callback_data=f"admin_server_incy_edit:{server_id}:origin_name",
-    )
-    builder.button(
-        text=texts.ADMIN_SERVER_INCY_BTN_ORIGIN_BADGE,
-        callback_data=f"admin_server_incy_edit:{server_id}:origin_badge",
-    )
-    origin_status = texts.ADMIN_SERVER_INCY_STATUS_HIDDEN if origin_hidden else texts.ADMIN_SERVER_INCY_STATUS_ACTIVE
-    builder.button(
-        text=texts.ADMIN_SERVER_INCY_BTN_ORIGIN_TOGGLE.format(status=origin_status),
-        callback_data=f"admin_server_incy_toggle_origin:{server_id}",
-    )
-    builder.button(
-        text=texts.ADMIN_SERVER_INCY_BTN_RELAYS,
-        callback_data=f"admin_server_incy_relays:{server_id}",
-    )
-    builder.button(
-        text=texts.ADMIN_SERVER_INCY_BTN_RESET,
-        callback_data=f"admin_server_incy_reset:{server_id}",
-    )
-    builder.button(
-        text=texts.ADMIN_SERVER_BTN_BACK_TO_SERVER,
-        callback_data=f"admin_server_card:{server_id}",
-    )
-    builder.adjust(2, 2, 2, 1, 1, 1, 1)
+    builder.button(text=texts.ADMIN_SERVER_INCY_BTN_TITLE, callback_data="admin_std_incy_edit:title")
+    builder.button(text=texts.ADMIN_SERVER_INCY_BTN_DESC, callback_data="admin_std_incy_edit:desc")
+    builder.button(text=texts.ADMIN_SERVER_INCY_BTN_ANNOUNCE, callback_data="admin_std_incy_edit:announce")
+    builder.button(text=texts.ADMIN_SERVER_INCY_BTN_ANNOUNCE_URL, callback_data="admin_std_incy_edit:announce_url")
+    builder.button(text=texts.ADMIN_SERVER_INCY_BTN_RESET, callback_data="admin_std_incy_reset")
+    builder.button(text=texts.BTN_BACK, callback_data="admin_cat_std_sub")
+    builder.adjust(2, 2, 1, 1)
+    return builder.as_markup()
+
+
+def get_admin_server_incy_keyboard(
+    server_id: int,
+    origin_hidden: bool = False,
+    is_xray: bool = True,
+    is_origin: bool = False,
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    if is_origin:
+        builder.button(
+            text=texts.ADMIN_SERVER_INCY_BTN_TITLE,
+            callback_data=f"admin_server_incy_edit:{server_id}:title",
+        )
+        builder.button(
+            text=texts.ADMIN_SERVER_INCY_BTN_DESC,
+            callback_data=f"admin_server_incy_edit:{server_id}:desc",
+        )
+        builder.button(
+            text=texts.ADMIN_SERVER_INCY_BTN_ANNOUNCE,
+            callback_data=f"admin_server_incy_edit:{server_id}:announce",
+        )
+        builder.button(
+            text=texts.ADMIN_SERVER_INCY_BTN_ANNOUNCE_URL,
+            callback_data=f"admin_server_incy_edit:{server_id}:announce_url",
+        )
+        builder.button(
+            text=texts.ADMIN_SERVER_INCY_BTN_ORIGIN_NAME,
+            callback_data=f"admin_server_incy_edit:{server_id}:origin_name",
+        )
+        builder.button(
+            text=texts.ADMIN_SERVER_INCY_BTN_ORIGIN_BADGE,
+            callback_data=f"admin_server_incy_edit:{server_id}:origin_badge",
+        )
+        origin_status = texts.ADMIN_SERVER_INCY_STATUS_HIDDEN if origin_hidden else texts.ADMIN_SERVER_INCY_STATUS_ACTIVE
+        builder.button(
+            text=texts.ADMIN_SERVER_INCY_BTN_ORIGIN_TOGGLE.format(status=origin_status),
+            callback_data=f"admin_server_incy_toggle_origin:{server_id}",
+        )
+        builder.button(
+            text=texts.ADMIN_SERVER_INCY_BTN_RELAYS,
+            callback_data=f"admin_server_incy_relays:{server_id}",
+        )
+        builder.button(
+            text=texts.ADMIN_SERVER_INCY_BTN_RESET,
+            callback_data=f"admin_server_incy_reset:{server_id}",
+        )
+        builder.button(
+            text=texts.ADMIN_SERVER_BTN_BACK_TO_SERVER,
+            callback_data=f"admin_server_card:{server_id}",
+        )
+        builder.adjust(2, 2, 2, 1, 1, 1, 1)
+    else:
+        builder.button(
+            text=texts.ADMIN_SERVER_INCY_BTN_NODE_NAME,
+            callback_data=f"admin_server_incy_edit:{server_id}:origin_name",
+        )
+        builder.button(
+            text=texts.ADMIN_SERVER_INCY_BTN_NODE_BADGE,
+            callback_data=f"admin_server_incy_edit:{server_id}:origin_badge",
+        )
+        origin_status = texts.ADMIN_SERVER_INCY_STATUS_HIDDEN if origin_hidden else texts.ADMIN_SERVER_INCY_STATUS_ACTIVE
+        builder.button(
+            text=texts.ADMIN_SERVER_INCY_BTN_NODE_TOGGLE.format(status=origin_status),
+            callback_data=f"admin_server_incy_toggle_origin:{server_id}",
+        )
+        builder.button(
+            text=texts.ADMIN_SERVER_INCY_BTN_RESET,
+            callback_data=f"admin_server_incy_reset:{server_id}",
+        )
+        builder.button(
+            text=texts.ADMIN_SERVER_BTN_BACK_TO_SERVER,
+            callback_data=f"admin_server_card:{server_id}",
+        )
+        builder.adjust(2, 1, 1, 1)
     return builder.as_markup()
 
 

@@ -263,22 +263,41 @@ async def ping_server(
 
     start_t = time.monotonic()
     try:
-        if server.protocol in AMNEZIA_PROTOCOLS:
+        caps = getattr(server, "capabilities", None) or []
+        proto = str(getattr(server, "protocol", "") or "").lower()
+        has_awg = proto in AMNEZIA_PROTOCOLS or "awg" in caps
+        has_xray_or_vless = proto in (XRAY_PROTOCOL, "vless") or "vless" in caps or "xray_origin" in caps
+
+        awg_ok = True
+        xray_ok = True
+
+        if has_awg:
             from services.amnezia_client import AmneziaClient, is_server_circuit_available
 
             if not await is_server_circuit_available(server.api_url):
-                is_healthy = False
+                awg_ok = False
             else:
                 client = AmneziaClient(server.api_url, server.api_key)
                 try:
-                    is_healthy = await asyncio.wait_for(client.healthcheck(), timeout=4.0)
+                    awg_ok = await asyncio.wait_for(client.healthcheck(), timeout=4.0)
                 except Exception:
-                    is_healthy = False
-        elif server.protocol == XRAY_PROTOCOL:
+                    awg_ok = False
+
+        if has_xray_or_vless:
             from services.xray_node_client import XrayNodeClient
 
+            extra = getattr(server, "extra_data", None) or {}
+            xray_url = extra.get("xray_api_url") or server.api_url
             async with XrayNodeClient(timeout=4.0, max_retries=0) as xclient:
-                is_healthy, _epoch, _detail = await xclient.check_health(server.api_url, server.api_key)
+                x_ok, _epoch, _detail = await xclient.check_health(xray_url, server.api_key)
+                xray_ok = x_ok
+
+        if has_awg and has_xray_or_vless:
+            is_healthy = awg_ok and xray_ok
+        elif has_awg:
+            is_healthy = awg_ok
+        elif has_xray_or_vless:
+            is_healthy = xray_ok
         else:
             is_healthy = False
 

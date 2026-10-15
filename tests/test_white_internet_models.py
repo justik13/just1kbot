@@ -44,7 +44,7 @@ class WhiteInternetModelsTests(unittest.TestCase):
         rev_0026 = scripts.get_revision("0026_wi_trial_semantics")
         self.assertIsNotNone(rev_0026)
         self.assertEqual(rev_0026.down_revision, "0025_admin_qol_and_idempotency")
-        self.assertEqual(scripts.get_heads(), ["0036_unique_orders_external_id"])
+        self.assertEqual(scripts.get_heads(), ["0038_rename_awg_to_standard"])
 
     def test_server_lifecycle_status_field_and_constraints(self):
         self.assertEqual(ServerLifecycleStatus.ACTIVE, "ACTIVE")
@@ -80,8 +80,8 @@ class WhiteInternetModelsTests(unittest.TestCase):
         self.assertIn("service_type", table.columns)
         self.assertEqual(table.columns["service_type"].type.length, 30)
         self.assertFalse(table.columns["service_type"].nullable)
-        self.assertEqual(table.columns["service_type"].default.arg, "awg")
-        self.assertEqual(table.columns["service_type"].server_default.arg, "awg")
+        self.assertEqual(table.columns["service_type"].default.arg, "standard")
+        self.assertEqual(table.columns["service_type"].server_default.arg, "standard")
 
         constraint_names = {c.name for c in table.constraints if c.name}
         self.assertIn("uq_tariffs_service_device_duration", constraint_names)

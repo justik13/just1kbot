@@ -595,3 +595,50 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
                     state_after = await self.state.get_state()
                     self.assertIsNone(state_after)
                     msg.delete.assert_awaited_once()
+
+    async def test_show_server_incy_card_standard_server(self):
+        cb = MagicMock(spec=CallbackQuery)
+        cb.from_user = self.admin_user
+        cb.data = "admin_server_incy:2"
+        cb.answer = AsyncMock()
+        cb.message = MagicMock()
+        cb.message.edit_text = AsyncMock()
+
+        # Standard VLESS server (not origin)
+        server = Server(
+            id=2,
+            name="NL-Server",
+            protocol="vless",
+            capabilities=["vless"],
+            is_active=True,
+            extra_data={"vless_name": "NL Fast Node"},
+        )
+
+        with patch("bot.handlers.admin.servers.incy_routes.is_admin", return_value=True):
+            with patch("bot.handlers.admin.servers.incy_routes.get_server_by_id", return_value=server):
+                await show_server_incy_card(cb, self.state, self.mock_session)
+                cb.message.edit_text.assert_awaited_once()
+                call_args = cb.message.edit_text.call_args[0][0]
+                kb = cb.message.edit_text.call_args[1]["reply_markup"]
+
+                # Card text should have standard labels, NOT origin labels or global incy profile settings
+                self.assertIn("Имя узла в клиенте", call_args)
+                self.assertIn("Бейдж узла", call_args)
+                self.assertIn("Статус в подписке", call_args)
+                self.assertNotIn("Шлюз РФ", call_args)
+                self.assertNotIn("Имя профиля", call_args)
+                self.assertNotIn("Подзаголовок", call_args)
+                self.assertNotIn("Баннер (объявление)", call_args)
+                self.assertNotIn("Ссылка баннера", call_args)
+
+                # Keyboard should have standard buttons, NOT origin or relays or global incy settings
+                kb_btns = [b.text for row in kb.inline_keyboard for b in row]
+                self.assertIn(texts.ADMIN_SERVER_INCY_BTN_NODE_NAME, kb_btns)
+                self.assertIn(texts.ADMIN_SERVER_INCY_BTN_NODE_BADGE, kb_btns)
+                self.assertNotIn(texts.ADMIN_SERVER_INCY_BTN_ORIGIN_NAME, kb_btns)
+                self.assertNotIn(texts.ADMIN_SERVER_INCY_BTN_RELAYS, kb_btns)
+                self.assertNotIn(texts.ADMIN_SERVER_INCY_BTN_TITLE, kb_btns)
+                self.assertNotIn(texts.ADMIN_SERVER_INCY_BTN_DESC, kb_btns)
+                self.assertNotIn(texts.ADMIN_SERVER_INCY_BTN_ANNOUNCE, kb_btns)
+                self.assertNotIn(texts.ADMIN_SERVER_INCY_BTN_ANNOUNCE_URL, kb_btns)
+

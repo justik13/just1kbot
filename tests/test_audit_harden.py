@@ -151,7 +151,7 @@ class SyncDeletedTests(unittest.IsolatedAsyncioTestCase):
             desired_expires_at=None,
             is_active=True,
         )
-        session = MagicMock()
+        session = AsyncMock()
         session.flush = AsyncMock()
         with (
             patch(

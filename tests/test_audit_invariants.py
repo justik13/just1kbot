@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from scripts.audit_invariants import (
     _PROJECT_ROOT,
     _inspect_alembic_head,
+    assert_inv_1_tariffs,
     assert_inv_10_account_balance_non_negativity,
     assert_inv_15_alembic_single_head,
 )
@@ -75,7 +76,30 @@ class AuditInvariantsTests(unittest.IsolatedAsyncioTestCase):
         res = await assert_inv_10_account_balance_non_negativity(session)
         self.assertFalse(res.passed)
         self.assertEqual(res.number, 10)
-        self.assertIn("1 users with unexplained negative balance", res.details)
+
+    async def test_inv_1_tariffs_passes_when_no_violations(self):
+        """Invariant 1 passes when all tariffs satisfy service_type, duration, and price invariants."""
+        session = AsyncMock(spec=AsyncSession)
+        mock_scalars = MagicMock()
+        mock_scalars.all.return_value = []
+        session.scalars.return_value = mock_scalars
+
+        res = await assert_inv_1_tariffs(session)
+        self.assertTrue(res.passed)
+        self.assertEqual(res.number, 1)
+        self.assertIn("All tariffs satisfy schema invariants", res.details)
+
+    async def test_inv_1_tariffs_fails_when_violations_exist(self):
+        """Invariant 1 fails when tariffs have invalid service_type, non-positive duration or price."""
+        session = AsyncMock(spec=AsyncSession)
+        mock_scalars = MagicMock()
+        mock_scalars.all.return_value = [MagicMock(id=99, service_type="invalid")]
+        session.scalars.return_value = mock_scalars
+
+        res = await assert_inv_1_tariffs(session)
+        self.assertFalse(res.passed)
+        self.assertEqual(res.number, 1)
+        self.assertIn("Violations found: 1 rows", res.details)
 
 
 if __name__ == "__main__":

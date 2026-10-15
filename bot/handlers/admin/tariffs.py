@@ -42,6 +42,7 @@ async def _build_tariffs_list_text_and_kb(
     page: int,
     total_pages: int,
     total: int,
+    service_type: str | None = None,
 ) -> tuple[str, InlineKeyboardBuilder]:
     rendered = (
         texts.ADMIN_TARIFF_LIST_TITLE.format(page=page, total_pages=total_pages, total=total)
@@ -63,21 +64,40 @@ async def _build_tariffs_list_text_and_kb(
             )
 
     if page > 1:
+        prev_cb = f"admin_tariffs_page:{service_type}:{page - 1}" if service_type else f"admin_tariffs_page:{page - 1}"
         builder.button(
             text=texts.ADMIN_BTN_PAGINATION_PREV,
-            callback_data=f"admin_tariffs_page:{page - 1}",
+            callback_data=prev_cb,
         )
     if page < total_pages:
+        next_cb = f"admin_tariffs_page:{service_type}:{page + 1}" if service_type else f"admin_tariffs_page:{page + 1}"
         builder.button(
             text=texts.ADMIN_BTN_PAGINATION_NEXT,
-            callback_data=f"admin_tariffs_page:{page + 1}",
+            callback_data=next_cb,
         )
 
+    if service_type in ("standard", "awg"):
+        back_text = texts.BTN_BACK
+        back_cb = "admin_cat_std_sub"
+    elif service_type == "white_internet":
+        back_text = texts.BTN_BACK
+        back_cb = "admin_cat_wi_sub"
+    else:
+        back_text = texts.ADMIN_BTN_BACK_TO_ADMIN
+        back_cb = "admin_menu"
+
     builder.button(
-        text=texts.ADMIN_BTN_BACK_TO_ADMIN,
-        callback_data="admin_menu",
+        text=back_text,
+        callback_data=back_cb,
     )
-    builder.adjust(1)
+
+    item_count = len(tariffs) if tariffs else 0
+    adjust_pattern = [1] * item_count
+    nav_buttons = (1 if page > 1 else 0) + (1 if page < total_pages else 0)
+    if nav_buttons > 0:
+        adjust_pattern.append(nav_buttons)
+    adjust_pattern.append(1)
+    builder.adjust(*adjust_pattern)
 
     return rendered, builder
 
@@ -86,8 +106,9 @@ async def _show_tariffs_list(
     callback: CallbackQuery,
     session: AsyncSession,
     page: int = 1,
+    service_type: str | None = None,
 ):
-    total_tariffs = await get_tariff_count(session)
+    total_tariffs = await get_tariff_count(session, service_type=service_type)
     total_pages = max(
         1,
         math.ceil(total_tariffs / TARIFFS_PER_PAGE),
@@ -99,6 +120,7 @@ async def _show_tariffs_list(
         session,
         page=page,
         per_page=TARIFFS_PER_PAGE,
+        service_type=service_type,
     )
 
     rendered, kb = await _build_tariffs_list_text_and_kb(
@@ -106,6 +128,7 @@ async def _show_tariffs_list(
         page,
         total_pages,
         total_tariffs,
+        service_type=service_type,
     )
 
     try:
@@ -121,7 +144,7 @@ async def _show_tariffs_list(
 
 
 
-@router.callback_query(F.data == "admin_tariffs")
+@router.callback_query(F.data.in_(["admin_tariffs", "admin_tariffs:standard", "admin_tariffs:awg", "admin_tariffs:white_internet"]))
 async def show_tariffs_list(
     callback: CallbackQuery,
     state: FSMContext,
@@ -135,11 +158,14 @@ async def show_tariffs_list(
         return
 
     await state.clear()
-    await _show_tariffs_list(callback, session, page=1)
+    service_type = callback.data.split(":", 1)[1] if ":" in callback.data else None
+    if service_type == "awg":
+        service_type = "standard"
+    await _show_tariffs_list(callback, session, page=1, service_type=service_type)
     await callback.answer(show_alert=False)
 
 
-@router.callback_query(F.data.startswith("admin_tariffs_page:"))
+@router.callback_query(F.data.startswith("admin_tariffs_page"))
 async def tariffs_pagination(
     callback: CallbackQuery,
     state: FSMContext,
@@ -152,8 +178,27 @@ async def tariffs_pagination(
         )
         return
 
-    page = parse_callback_id(callback.data, 1)
-    if page is None or page < 1:
+    parts = callback.data.split(":")
+    service_type = None
+    page = 1
+    if len(parts) == 2:
+        try:
+            page = int(parts[1])
+        except ValueError:
+            page = 1
+    elif len(parts) >= 3:
+        service_type = parts[1]
+        if service_type == "awg":
+            service_type = "standard"
+        try:
+            page = int(parts[2])
+        except ValueError:
+            page = 1
+
+    if service_type not in ("standard", "white_internet"):
+        service_type = None
+
+    if page < 1:
         await callback.answer(
             texts.ERROR_INVALID_REQUEST,
             show_alert=True,
@@ -161,7 +206,7 @@ async def tariffs_pagination(
         return
 
     await state.clear()
-    await _show_tariffs_list(callback, session, page=page)
+    await _show_tariffs_list(callback, session, page=page, service_type=service_type)
     await callback.answer(show_alert=False)
 
 
@@ -204,9 +249,13 @@ async def _show_tariff_card(
             callback_data=f"admin_tariff_toggle:{tariff.id}",
         )
 
+    stype = getattr(tariff, "service_type", None)
+    if stype == "awg":
+        stype = "standard"
+    back_cb = f"admin_tariffs:{stype}" if stype else "admin_tariffs"
     builder.button(
         text=texts.ADMIN_TARIFF_BTN_BACK_TO_LIST,
-        callback_data="admin_tariffs",
+        callback_data=back_cb,
     )
     builder.adjust(1)
 
@@ -453,12 +502,20 @@ async def process_edit_tariff_rub(
         await state.clear()
         return
 
+    data = await state.get_data()
+    tariff_id = data.get("tariff_id")
+    back_button = (
+        get_back_button(f"admin_tariff_card:{tariff_id}")
+        if tariff_id
+        else get_back_button("admin_tariffs")
+    )
+
     if not message.text:
         await render_hub(
             message.bot,
             message.chat.id,
             texts.ERROR_POSITIVE_NUMBER,
-            get_back_button("admin_tariffs"),
+            back_button,
         )
         return
 
@@ -468,7 +525,7 @@ async def process_edit_tariff_rub(
             message.bot,
             message.chat.id,
             texts.ERROR_OPERATION_CANCELLED,
-            get_back_button("admin_tariffs"),
+            back_button,
         )
         return
 
@@ -479,7 +536,7 @@ async def process_edit_tariff_rub(
             message.bot,
             message.chat.id,
             texts.ERROR_POSITIVE_NUMBER,
-            get_back_button("admin_tariffs"),
+            back_button,
         )
         return
 
@@ -488,12 +545,13 @@ async def process_edit_tariff_rub(
             message.bot,
             message.chat.id,
             texts.ADMIN_TARIFF_ERR_PRICE_RANGE.format(max_price=MAX_TARIFF_PRICE),
-            get_back_button("admin_tariffs"),
+            back_button,
         )
         return
 
-    data = await state.get_data()
-    tariff_id = data["tariff_id"]
+    if not tariff_id:
+        await state.clear()
+        return
 
     tariff = await get_tariff_by_id(session, tariff_id)
     if not tariff:
@@ -523,13 +581,17 @@ async def process_edit_tariff_rub(
         texts.ADMIN_AUDIT_LOG_DETAILS_TARIFF_EDIT_RUB.format(old_value=old_value, new_value=new_value),
     )
 
+    stype = getattr(tariff, "service_type", None)
+    if stype == "awg":
+        stype = "standard"
+    back_cb = f"admin_tariffs:{stype}" if stype else "admin_tariffs"
     await render_hub(
         message.bot,
         message.chat.id,
         texts.ADMIN_TARIFF_EDIT_PRICE_SUCCESS.format(
             price_rub=new_value
         ),
-        get_back_button("admin_tariffs"),
+        get_back_button(back_cb),
     )
 
     logger.info(

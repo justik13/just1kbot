@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import secrets
 import uuid
 from datetime import timedelta
 from decimal import Decimal
@@ -17,6 +18,7 @@ from database.models import (
     Server,
     Tariff,
     User,
+    VlessSubscription,
     VPNProfile,
 )
 from scripts.simulate.service_mocks import generate_mock_amnezia_vpn_uri
@@ -90,6 +92,17 @@ class SimulationAutoSeedMiddleware:
                     )
                     session.add(db_user)
                     await session.flush()
+
+                    # Seed standard VLESS subscription
+                    vless_sub = VlessSubscription(
+                        user_id=db_user.id,
+                        token=secrets.token_urlsafe(32),
+                        uuid=str(uuid.uuid4()),
+                        is_active=True,
+                        active_hwids={},
+                        created_at=now_utc() - timedelta(days=2),
+                    )
+                    session.add(vless_sub)
 
                     # Seed initial payment & ledger entries
                     seed_pay = Payment(

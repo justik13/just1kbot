@@ -271,36 +271,59 @@ async def check_node_resources_and_alerts(bot: Bot):
         expected_consecutive_successes = st.consecutive_successes
 
         st.last_check_monotonic = now_m
-        server_proto = getattr(server, "protocol", None)
-        if not isinstance(server_proto, str):
-            caps = getattr(server, "capabilities", None) or []
-            server_proto = XRAY_PROTOCOL if "xray_origin" in caps else AMNEZIA_PROTOCOL
+        caps = getattr(server, "capabilities", None) or []
+        raw_proto = getattr(server, "protocol", None)
+        if not isinstance(raw_proto, str) or not raw_proto.strip():
+            raw_proto = XRAY_PROTOCOL if "xray_origin" in caps else AMNEZIA_PROTOCOL
+        server_proto = raw_proto.strip().lower()
 
-        is_xray_node = server_proto == XRAY_PROTOCOL
-        is_amnezia_node = server_proto in AMNEZIA_PROTOCOLS
+        has_amnezia = server_proto in AMNEZIA_PROTOCOLS or "awg" in caps
+        has_xray = (
+            server_proto in (XRAY_PROTOCOL, "vless")
+            or "vless" in caps
+            or "xray_vless" in caps
+            or (server_proto not in AMNEZIA_PROTOCOLS and "xray_origin" in caps)
+        )
 
-        if not is_xray_node and not is_amnezia_node:
+        if not has_amnezia and not has_xray:
             logger.warning(
                 "Server %s (%s) has unsupported or unassigned protocol '%s', skipping healthcheck",
                 server.id, server.name, server.protocol,
             )
             return
 
+        is_xray_node = has_xray
+        is_amnezia_node = has_amnezia
+
         # 4a. Исполнение проверки Core Node API с гарантированным отловом любых сетевых ошибок/таймаутов
         is_healthy = False
         xray_epoch = None
         xray_data = None
         client = None
+
+        awg_ok = True
+        xray_ok = True
+
         try:
-            if is_xray_node:
-                from services.xray_node_client import XrayNodeClient
-                async with XrayNodeClient(timeout=10.0) as xray_client:
-                    is_healthy, xray_epoch, xray_data = await xray_client.check_health(
-                        server.api_url, server.api_key
-                    )
-            elif is_amnezia_node:
+            if has_amnezia:
                 client = AmneziaClient(server.api_url, server.api_key)
-                is_healthy = await client.healthcheck()
+                awg_ok = await client.healthcheck()
+
+            if has_xray:
+                from services.xray_node_client import XrayNodeClient
+                extra = getattr(server, "extra_data", None) or {}
+                xray_url = extra.get("xray_api_url") or server.api_url
+                async with XrayNodeClient(timeout=10.0) as xray_client:
+                    xray_ok, xray_epoch, xray_data = await xray_client.check_health(
+                        xray_url, server.api_key
+                    )
+
+            if has_amnezia and has_xray:
+                is_healthy = awg_ok and xray_ok
+            elif has_amnezia:
+                is_healthy = awg_ok
+            elif has_xray:
+                is_healthy = xray_ok
         except Exception as exc:
             logger.warning("Healthcheck exception for server %s (%s): %s", server.id, server.name, exc)
             is_healthy = False
@@ -755,6 +778,7 @@ async def check_node_resources_and_alerts(bot: Bot):
         async with session_scope() as session:
             # Monotonic CAS update for Xray generation
             if is_healthy and is_xray_node and xray_epoch:
+                prev_epoch = server.xray_instance_epoch
                 boot_id = xray_data.get("boot_id") if xray_data else None
                 starttime = xray_data.get("starttime") if xray_data else None
                 cas_ok, updated_srv = await update_server_xray_epoch_cas(
@@ -785,6 +809,14 @@ async def check_node_resources_and_alerts(bot: Bot):
                             updated_srv.extra_data = extra
                             server.extra_data = extra
                             await session.flush()
+
+                    # Trigger VLESS re-provisioning only if epoch changed or is unsynced on a VLESS capable server
+                    from database.repositories.servers_repo import is_vless_capable_server
+                    if is_vless_capable_server(updated_srv):
+                        cur_synced = (dict(updated_srv.extra_data or {})).get("vless_synced_epoch")
+                        if prev_epoch != updated_srv.xray_instance_epoch or cur_synced != updated_srv.xray_instance_epoch:
+                            from services.vless_subscription_service import VlessSubscriptionService
+                            asyncio.create_task(VlessSubscriptionService.sync_all_active_to_server(updated_srv.id))
 
             db_server, applied = await update_server_health_snapshot(
                 session,

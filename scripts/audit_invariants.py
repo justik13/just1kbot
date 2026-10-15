@@ -67,7 +67,9 @@ async def assert_inv_1_tariffs(session: AsyncSession) -> InvariantResult:
     violations = await session.scalars(
         select(Tariff).where(
             or_(
-                ~Tariff.service_type.in_([ServiceType.AWG, ServiceType.WHITE_INTERNET]),
+                ~Tariff.service_type.in_(
+                    [ServiceType.STANDARD, ServiceType.WHITE_INTERNET, ServiceType.AWG]
+                ),
                 Tariff.duration_days <= 0,
                 Tariff.price_rub <= 0,
             )

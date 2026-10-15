@@ -309,7 +309,7 @@ class TestPr160Regressions(unittest.IsolatedAsyncioTestCase):
         callback.from_user.id = 780425805
         callback.answer = AsyncMock()
 
-        session = MagicMock()
+        session = AsyncMock()
         db_user = SimpleNamespace(id=1, current_tariff_id=None)
 
         tariff_30d = SimpleNamespace(id=1, device_limit=2, duration_days=30, price_rub=150, is_active=True)

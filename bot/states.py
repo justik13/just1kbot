@@ -42,5 +42,6 @@ class AdminStates(StatesGroup):
     editing_server_incy_param = State()
     editing_server_incy_relay_badge = State()
     editing_server_incy_relay_name = State()
+    editing_std_incy_param = State()
 
 

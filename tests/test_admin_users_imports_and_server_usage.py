@@ -262,7 +262,7 @@ class TestAdminUsersImportsAndServerUsage(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(params_wi["expires_at_1"], datetime.datetime)
 
         params_awg = stmt_awg.compile().params
-        self.assertEqual(params_awg["service_type_1"], "awg")
+        self.assertEqual(params_awg["service_type_1"], "standard")
         self.assertEqual(params_awg["device_limit_1"], 2)
 
     async def test_users_filter_pagination_accepts_white_internet(self):

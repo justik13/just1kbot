@@ -60,6 +60,7 @@ os.environ.setdefault("SSL_EMAIL", "sim@just1k.net")
 os.environ.setdefault("CHANNEL_URL", "https://t.me/just1k_channel")
 os.environ.setdefault("RULES_URL", "https://just1k.net/rules")
 os.environ.setdefault("FAQ_URL", "https://just1k.net/faq")
+os.environ.setdefault("JUST1KBOT_HEARTBEAT_FILE", str(PROJECT_ROOT / ".heartbeat_sim"))
 
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -74,6 +75,7 @@ from sqlalchemy import (
     Integer,
     select,
 )
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
@@ -88,6 +90,7 @@ from bot.middlewares.correlation import CorrelationMiddleware
 from bot.middlewares.throttling import ThrottlingMiddleware
 from bot.middlewares.user_context import UserContextMiddleware
 from config.constants import AMNEZIA_PROTOCOL, XRAY_PROTOCOL
+from config.enums import ServerHealthState
 from config.settings import Settings
 from config.tariffs import DEFAULT_TARIFFS_SEEDS
 import database.connection as db_conn
@@ -98,7 +101,7 @@ from database.models import (
     Tariff,
 )
 from scripts.simulate import service_mocks  # noqa: F401 (applies mock patching on import)
-from scripts.simulate.db_shims import UTCDateTime
+from scripts.simulate.db_shims import SQLiteUUID, UTCDateTime
 from scripts.simulate.db_targets import is_local_db_url
 from scripts.simulate.seeding import SimulationAutoSeedMiddleware
 
@@ -198,7 +201,9 @@ async def run_simulation(args: argparse.Namespace):
             for col in table.columns:
                 if isinstance(col.type, DateTime):
                     col.type = UTCDateTime()
-                if col.primary_key:
+                if isinstance(col.type, UUID) or type(col.type).__name__ in ("UUID", "Uuid"):
+                    col.type = SQLiteUUID()
+                elif col.primary_key:
                     col.type = Integer()
                     col.autoincrement = is_single_pk
                 if col.server_default is not None:
@@ -246,8 +251,15 @@ async def run_simulation(args: argparse.Namespace):
                 api_url="http://nl1.just1k.net:8080",
                 api_key="enc_key_nl",
                 protocol=AMNEZIA_PROTOCOL,
+                capabilities=["awg", "vless"],
+                health_state=ServerHealthState.ONLINE,
                 is_active=True,
                 max_clients=100,
+                extra_data={
+                    "domain": "nl1.just1k.net",
+                    "vless_port": 443,
+                    "server_description": "Прямой доступ",
+                },
             ),
             Server(
                 id=2,
@@ -256,8 +268,15 @@ async def run_simulation(args: argparse.Namespace):
                 api_url="http://de1.just1k.net:8080",
                 api_key="enc_key_de",
                 protocol=AMNEZIA_PROTOCOL,
+                capabilities=["awg", "vless"],
+                health_state=ServerHealthState.ONLINE,
                 is_active=True,
                 max_clients=100,
+                extra_data={
+                    "domain": "de1.just1k.net",
+                    "vless_port": 443,
+                    "server_description": "Прямой доступ",
+                },
             ),
             Server(
                 id=3,
@@ -266,6 +285,7 @@ async def run_simulation(args: argparse.Namespace):
                 api_url="http://se1.just1k.net:8080",
                 api_key="enc_key_se",
                 protocol=AMNEZIA_PROTOCOL,
+                health_state=ServerHealthState.ONLINE,
                 is_active=True,
                 max_clients=100,
             ),
@@ -276,6 +296,7 @@ async def run_simulation(args: argparse.Namespace):
                 api_url="http://fi1.just1k.net:8080",
                 api_key="enc_key_fi",
                 protocol=AMNEZIA_PROTOCOL,
+                health_state=ServerHealthState.ONLINE,
                 is_active=True,
                 max_clients=100,
             ),
@@ -287,6 +308,7 @@ async def run_simulation(args: argparse.Namespace):
                 api_key="enc_key_xray",
                 protocol=XRAY_PROTOCOL,
                 capabilities=["xray_origin"],
+                health_state=ServerHealthState.ONLINE,
                 xray_instance_epoch="sim_epoch_1",
                 extra_data={
                     "relays": [
@@ -333,6 +355,7 @@ async def run_simulation(args: argparse.Namespace):
                 existing_s.country_flag = s.country_flag
                 existing_s.api_url = s.api_url
                 existing_s.protocol = s.protocol
+                existing_s.health_state = s.health_state
                 if s.capabilities:
                     existing_s.capabilities = s.capabilities
                 if s.xray_instance_epoch:

@@ -29,9 +29,10 @@ FORBIDDEN_USER_WORDING = (
 
 def _effective_user_text_values() -> list[str]:
     from bot.texts import connection, payment, user
+    from bot.texts.runtime import notifications
 
     values: list[str] = []
-    for mod in (user, connection, payment):
+    for mod in (user, connection, payment, notifications):
         for name in dir(mod):
             if name.isupper() and not name.startswith("_"):
                 value = getattr(mod, name)
@@ -51,6 +52,12 @@ class TestUserTextAudit(unittest.TestCase):
         clean_text = effective_text.replace(".vpn", "").replace("vpn://", "")
         assert re.search(r"(?<![A-Za-zА-Яа-я])VPN(?![A-Za-zА-Яа-я])", clean_text) is None
         assert "ВПН" not in effective_text.upper()
+
+    def test_protocol_terms_are_not_exposed_to_users(self):
+        effective_text = "\n".join(_effective_user_text_values())
+        clean_text = re.sub(r"\{[a-zA-Z0-9_]+\}", "", effective_text).lower()
+        assert "vless" not in clean_text
+        assert "wireguard" not in clean_text
 
     def test_technical_connection_identifiers_are_preserved(self):
         faq = texts.FAQ_TEXT
@@ -88,3 +95,20 @@ class TestUserTextAudit(unittest.TestCase):
             assert "ВПН" not in desc.upper()
             assert "прокси" not in desc.lower()
             assert "обход" not in desc.lower()
+
+    def test_html_templates_do_not_contain_forbidden_words(self):
+        from pathlib import Path
+        templates_dir = Path("bot/templates")
+        if not templates_dir.exists():
+            return
+        for html_file in templates_dir.glob("*.html"):
+            content = html_file.read_text(encoding="utf-8")
+            clean_text = content.replace(".vpn", "").replace("vpn://", "")
+            assert re.search(r"(?<![A-Za-zА-Яа-я])VPN(?![A-Za-zА-Яа-я])", clean_text) is None, f"Forbidden 'VPN' found in {html_file}"
+            assert "ВПН" not in content.upper(), f"Forbidden 'ВПН' found in {html_file}"
+            assert re.search(r"(?<![A-Za-z0-9])LTE(?![A-Za-z0-9])", content, re.IGNORECASE) is None, f"Forbidden 'LTE' found in {html_file}"
+            for forbidden in FORBIDDEN_USER_WORDING:
+                if forbidden == "LTE":
+                    continue
+                assert forbidden.casefold() not in content.casefold(), f"Forbidden wording '{forbidden}' in {html_file}"
+

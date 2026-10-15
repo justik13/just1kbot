@@ -19,6 +19,7 @@ from bot.keyboards.admin.servers import (
     get_admin_server_incy_relay_actions_keyboard,
     get_admin_server_incy_relays_keyboard,
     get_admin_server_incy_reset_confirm_keyboard,
+    get_admin_std_sub_incy_keyboard,
 )
 from bot.states import AdminStates
 from config.constants import (
@@ -27,7 +28,16 @@ from config.constants import (
     WHITE_INTERNET_PROFILE_TITLE,
     WHITE_INTERNET_SUPPORT_URL,
 )
-from database.repositories.servers_repo import get_server_by_id, update_server
+from database.repositories.servers_repo import (
+    get_server_by_id,
+    is_white_internet_origin_server,
+    is_xray_server,
+    update_server,
+)
+from database.repositories.system_settings_repo import (
+    get_system_setting,
+    set_system_setting,
+)
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
 from utils.telegram import render_hub, safe
@@ -42,13 +52,20 @@ def _get_server_incy_details(server: Any) -> dict[str, Any]:
     bot_user = os.getenv("BOT_USERNAME", "just1kbot").lstrip("@")
     default_bot_url = f"https://t.me/{bot_user}"
 
-    title = extra.get("profile_title") or WHITE_INTERNET_PROFILE_TITLE or texts.WL_PROFILE_NAME
-    description = extra.get("profile_description") or WHITE_INTERNET_PROFILE_DESCRIPTION
+    is_origin = is_white_internet_origin_server(server)
+    default_title = (
+        WHITE_INTERNET_PROFILE_TITLE or texts.WL_PROFILE_NAME
+        if is_origin
+        else os.getenv("VLESS_PROFILE_TITLE", "✦ Just1k")
+    )
+    title = extra.get("profile_title") or default_title
+    description = extra.get("profile_description") or (WHITE_INTERNET_PROFILE_DESCRIPTION if is_origin else None)
     announce = extra.get("announce")
     announce_url = extra.get("announce_url")
 
-    origin_name = extra.get("origin_tag") or texts.WL_ORIGIN_VLESS_TAG
-    origin_badge_raw = extra.get("origin_badge")
+    default_origin_name = texts.WL_ORIGIN_VLESS_TAG if is_origin else (getattr(server, "name", None) or "Server")
+    origin_name = extra.get("origin_tag") or extra.get("vless_name") or default_origin_name
+    origin_badge_raw = extra.get("origin_badge") if "origin_badge" in extra else extra.get("server_description")
     if origin_badge_raw and origin_badge_raw.strip().lower() == "none":
         origin_badge = texts.ADMIN_SERVER_INCY_VALUE_DISABLED
     elif origin_badge_raw and origin_badge_raw.strip():
@@ -57,8 +74,8 @@ def _get_server_incy_details(server: Any) -> dict[str, Any]:
         origin_badge = texts.ADMIN_SERVER_INCY_VALUE_NONE
     origin_hidden = bool(extra.get("origin_hidden", False))
 
-    channel_url = extra.get("channel_url") or WHITE_INTERNET_CHANNEL_URL or default_bot_url
-    support_url = extra.get("support_url") or WHITE_INTERNET_SUPPORT_URL or default_bot_url
+    channel_url = extra.get("channel_url") or (WHITE_INTERNET_CHANNEL_URL if is_origin else None) or default_bot_url
+    support_url = extra.get("support_url") or (WHITE_INTERNET_SUPPORT_URL if is_origin else None) or default_bot_url
 
     origin_status = (
         texts.ADMIN_SERVER_INCY_STATUS_HIDDEN
@@ -78,6 +95,249 @@ def _get_server_incy_details(server: Any) -> dict[str, Any]:
         "channel_url": channel_url,
         "support_url": support_url,
     }
+
+
+async def _build_std_sub_incy_card(session: AsyncSession) -> tuple[str, Any]:
+    title = await get_system_setting(session, "vless_profile_title", os.getenv("VLESS_PROFILE_TITLE", "✦ Just1k"))
+    desc = await get_system_setting(session, "vless_profile_description", None)
+    if desc is None:
+        desc = await get_system_setting(session, "vless_profile_desc", None)
+    announce = await get_system_setting(session, "vless_announce", None)
+    announce_url = await get_system_setting(session, "vless_announce_url", None)
+
+    card_text = texts.ADMIN_STD_SUB_INCY_CONFIG_CARD.format(
+        title=safe(title or "✦ Just1k"),
+        description=safe(desc or texts.ADMIN_SERVER_INCY_VALUE_NONE),
+        announce=safe(announce or texts.ADMIN_SERVER_INCY_VALUE_NONE),
+        announce_url=safe(announce_url or texts.ADMIN_SERVER_INCY_VALUE_NONE),
+    )
+    keyboard = get_admin_std_sub_incy_keyboard()
+    return card_text, keyboard
+
+
+def _build_server_incy_card(server: Any, details: dict[str, Any]) -> tuple[str, Any]:
+    """Build formatted text and keyboard for server INCY configuration card."""
+    flag = server.country_flag or texts.EMOJI_GLOBE
+    is_origin = is_white_internet_origin_server(server)
+    if is_origin:
+        card_text = texts.ADMIN_SERVER_INCY_CARD.format(
+            flag=flag,
+            name=safe(server.name),
+            title=safe(details["title"]),
+            description=safe(details["description"]),
+            announce=safe(details["announce"]),
+            announce_url=safe(details["announce_url"]),
+            origin_name=safe(details["origin_name"]),
+            origin_badge=safe(details["origin_badge"]),
+            origin_status=safe(details["origin_status"]),
+        )
+    else:
+        card_text = texts.ADMIN_SERVER_INCY_STANDARD_CARD.format(
+            flag=flag,
+            name=safe(server.name),
+            origin_name=safe(details["origin_name"]),
+            origin_badge=safe(details["origin_badge"]),
+            origin_status=safe(details["origin_status"]),
+        )
+    keyboard = get_admin_server_incy_keyboard(
+        server.id,
+        origin_hidden=details["origin_hidden"],
+        is_xray=is_xray_server(server),
+        is_origin=is_origin,
+    )
+    return card_text, keyboard
+
+
+@router.callback_query(F.data == "admin_std_incy")
+async def show_std_sub_incy_card(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    await callback.answer(show_alert=False)
+    await state.clear()
+
+    card_text, reply_markup = await _build_std_sub_incy_card(session)
+    try:
+        await callback.message.edit_text(
+            card_text,
+            reply_markup=reply_markup,
+            parse_mode="HTML",
+        )
+    except TelegramBadRequest as e:
+        logger.debug(f"show_std_sub_incy_card edit_text failed: {e}")
+
+
+@router.callback_query(F.data.startswith("admin_std_incy_edit:"))
+async def start_edit_std_incy_param(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    field = callback.data.split(":")[1]
+    title = await get_system_setting(session, "vless_profile_title", os.getenv("VLESS_PROFILE_TITLE", "✦ Just1k"))
+    desc = await get_system_setting(session, "vless_profile_description", None)
+    if desc is None:
+        desc = await get_system_setting(session, "vless_profile_desc", None)
+    announce = await get_system_setting(session, "vless_announce", None)
+    announce_url = await get_system_setting(session, "vless_announce_url", None)
+
+    prompt_map = {
+        "title": (texts.ADMIN_SERVER_INCY_PROMPT_TITLE, title or "✦ Just1k"),
+        "desc": (texts.ADMIN_SERVER_INCY_PROMPT_DESC, desc or texts.ADMIN_SERVER_INCY_VALUE_NONE),
+        "announce": (texts.ADMIN_SERVER_INCY_PROMPT_ANNOUNCE, announce or texts.ADMIN_SERVER_INCY_VALUE_NONE),
+        "announce_url": (texts.ADMIN_SERVER_INCY_PROMPT_ANNOUNCE_URL, announce_url or texts.ADMIN_SERVER_INCY_VALUE_NONE),
+    }
+
+    if field not in prompt_map:
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        return
+
+    prompt_tpl, cur_val = prompt_map[field]
+    prompt_text = prompt_tpl.format(current=safe(cur_val))
+
+    await state.update_data(field=field)
+    await state.set_state(AdminStates.editing_std_incy_param)
+
+    try:
+        await callback.message.edit_text(
+            prompt_text,
+            reply_markup=get_back_button("admin_std_incy"),
+            parse_mode="HTML",
+        )
+    except TelegramBadRequest as e:
+        logger.debug(f"start_edit_std_incy_param edit_text failed: {e}")
+
+
+@router.message(AdminStates.editing_std_incy_param)
+async def process_std_incy_param_input(
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+    if not is_admin(message.from_user.id):
+        await state.clear()
+        return
+
+    data = await state.get_data()
+    field = data.get("field")
+    if not field:
+        await state.clear()
+        return
+
+    if not message.text:
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            texts.ERROR_TEXT_REQUIRED,
+            get_back_button("admin_std_incy"),
+            trigger_message_id=getattr(message, "message_id", None),
+        )
+        return
+
+    text = message.text.strip()
+    if text.startswith("/"):
+        await state.clear()
+        card_text, reply_markup = await _build_std_sub_incy_card(session)
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            card_text,
+            reply_markup,
+            parse_mode="HTML",
+            trigger_message_id=getattr(message, "message_id", None),
+        )
+        return
+
+    is_clear = text in ("-", "—", "–")
+    is_none = text.lower() == "none"
+
+    if field == "title":
+        if is_clear or is_none or not text:
+            new_val = os.getenv("VLESS_PROFILE_TITLE", "✦ Just1k") or "✦ Just1k"
+        else:
+            new_val = text[:25]
+        await set_system_setting(session, "vless_profile_title", new_val, updated_by=message.from_user.id)
+    elif field == "desc":
+        new_val = None if (is_clear or is_none or not text) else text[:100]
+        await set_system_setting(session, "vless_profile_description", new_val, updated_by=message.from_user.id)
+    elif field == "announce":
+        new_val = None if (is_clear or is_none or not text) else text[:200]
+        await set_system_setting(session, "vless_announce", new_val, updated_by=message.from_user.id)
+    elif field == "announce_url":
+        if is_clear or is_none or not text:
+            new_val = None
+        else:
+            if any(c in text for c in (" ", "\n", "\r", "\t")) or not (
+                text.startswith("https://") or text.startswith("http://") or text.startswith("tg://")
+            ):
+                await render_hub(
+                    message.bot,
+                    message.chat.id,
+                    texts.ADMIN_SERVER_INCY_ERR_INVALID_URL,
+                    get_back_button("admin_std_incy"),
+                    trigger_message_id=getattr(message, "message_id", None),
+                )
+                return
+            new_val = text
+        await set_system_setting(session, "vless_announce_url", new_val, updated_by=message.from_user.id)
+
+    await session.commit()
+    await state.clear()
+
+    card_text, reply_markup = await _build_std_sub_incy_card(session)
+    await render_hub(
+        message.bot,
+        message.chat.id,
+        card_text,
+        reply_markup,
+        parse_mode="HTML",
+        trigger_message_id=getattr(message, "message_id", None),
+    )
+
+
+@router.callback_query(F.data == "admin_std_incy_reset")
+async def reset_std_sub_incy_to_defaults(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    await state.clear()
+    default_title = os.getenv("VLESS_PROFILE_TITLE", "✦ Just1k") or "✦ Just1k"
+    await set_system_setting(session, "vless_profile_title", default_title, updated_by=callback.from_user.id)
+    await set_system_setting(session, "vless_profile_description", None, updated_by=callback.from_user.id)
+    await set_system_setting(session, "vless_profile_desc", None, updated_by=callback.from_user.id)
+    await set_system_setting(session, "vless_announce", None, updated_by=callback.from_user.id)
+    await set_system_setting(session, "vless_announce_url", None, updated_by=callback.from_user.id)
+    await session.commit()
+
+    await callback.answer(texts.ADMIN_SERVER_INCY_RESET_SUCCESS, show_alert=False)
+    card_text, reply_markup = await _build_std_sub_incy_card(session)
+    try:
+        await callback.message.edit_text(
+            card_text,
+            reply_markup=reply_markup,
+            parse_mode="HTML",
+        )
+    except TelegramBadRequest as e:
+        logger.debug(f"reset_std_sub_incy_to_defaults edit_text failed: {e}")
 
 
 @router.callback_query(F.data.startswith("admin_server_incy:"))
@@ -104,23 +364,12 @@ async def show_server_incy_card(
         return
 
     details = _get_server_incy_details(server)
-    flag = server.country_flag or texts.EMOJI_GLOBE
-    card_text = texts.ADMIN_SERVER_INCY_CARD.format(
-        flag=flag,
-        name=safe(server.name),
-        title=safe(details["title"]),
-        description=safe(details["description"]),
-        announce=safe(details["announce"]),
-        announce_url=safe(details["announce_url"]),
-        origin_name=safe(details["origin_name"]),
-        origin_badge=safe(details["origin_badge"]),
-        origin_status=safe(details["origin_status"]),
-    )
+    card_text, reply_markup = _build_server_incy_card(server, details)
 
     try:
         await callback.message.edit_text(
             card_text,
-            reply_markup=get_admin_server_incy_keyboard(server_id, origin_hidden=details["origin_hidden"]),
+            reply_markup=reply_markup,
             parse_mode="HTML",
         )
     except TelegramBadRequest as e:
@@ -158,13 +407,24 @@ async def start_edit_server_incy_param(
     await state.clear()
 
     details = _get_server_incy_details(server)
+    is_origin = is_white_internet_origin_server(server)
+    name_prompt = (
+        texts.ADMIN_SERVER_INCY_PROMPT_ORIGIN_NAME
+        if is_origin
+        else texts.ADMIN_SERVER_INCY_PROMPT_STANDARD_NAME
+    )
+    badge_prompt = (
+        texts.ADMIN_SERVER_INCY_PROMPT_ORIGIN_BADGE
+        if is_origin
+        else texts.ADMIN_SERVER_INCY_PROMPT_STANDARD_BADGE
+    )
     prompt_map = {
         "title": (texts.ADMIN_SERVER_INCY_PROMPT_TITLE, details["title"]),
         "desc": (texts.ADMIN_SERVER_INCY_PROMPT_DESC, details["description"]),
         "announce": (texts.ADMIN_SERVER_INCY_PROMPT_ANNOUNCE, details["announce"]),
         "announce_url": (texts.ADMIN_SERVER_INCY_PROMPT_ANNOUNCE_URL, details["announce_url"]),
-        "origin_name": (texts.ADMIN_SERVER_INCY_PROMPT_ORIGIN_NAME, details["origin_name"]),
-        "origin_badge": (texts.ADMIN_SERVER_INCY_PROMPT_ORIGIN_BADGE, details["origin_badge"]),
+        "origin_name": (name_prompt, details["origin_name"]),
+        "origin_badge": (badge_prompt, details["origin_badge"]),
     }
 
     if param not in prompt_map:
@@ -285,24 +545,14 @@ async def process_server_incy_param_input(
     await session.refresh(server)
 
     details = _get_server_incy_details(server)
-    flag = server.country_flag or texts.EMOJI_GLOBE
-    card_text = f"{texts.ADMIN_SERVER_INCY_SAVED}\n\n" + texts.ADMIN_SERVER_INCY_CARD.format(
-        flag=flag,
-        name=safe(server.name),
-        title=safe(details["title"]),
-        description=safe(details["description"]),
-        announce=safe(details["announce"]),
-        announce_url=safe(details["announce_url"]),
-        origin_name=safe(details["origin_name"]),
-        origin_badge=safe(details["origin_badge"]),
-        origin_status=safe(details["origin_status"]),
-    )
+    card_text, reply_markup = _build_server_incy_card(server, details)
+    full_text = f"{texts.ADMIN_SERVER_INCY_SAVED}\n\n{card_text}"
 
     await render_hub(
         message.bot,
         message.chat.id,
-        card_text,
-        reply_markup=get_admin_server_incy_keyboard(server_id, origin_hidden=details["origin_hidden"]),
+        full_text,
+        reply_markup=reply_markup,
         parse_mode="HTML",
         trigger_message_id=getattr(message, "message_id", None),
     )
@@ -335,23 +585,12 @@ async def toggle_server_incy_origin_visibility(
     await callback.answer(texts.ADMIN_SERVER_INCY_SAVED, show_alert=False)
 
     details = _get_server_incy_details(server)
-    flag = server.country_flag or texts.EMOJI_GLOBE
-    card_text = texts.ADMIN_SERVER_INCY_CARD.format(
-        flag=flag,
-        name=safe(server.name),
-        title=safe(details["title"]),
-        description=safe(details["description"]),
-        announce=safe(details["announce"]),
-        announce_url=safe(details["announce_url"]),
-        origin_name=safe(details["origin_name"]),
-        origin_badge=safe(details["origin_badge"]),
-        origin_status=safe(details["origin_status"]),
-    )
+    card_text, reply_markup = _build_server_incy_card(server, details)
 
     try:
         await callback.message.edit_text(
             card_text,
-            reply_markup=get_admin_server_incy_keyboard(server_id, origin_hidden=details["origin_hidden"]),
+            reply_markup=reply_markup,
             parse_mode="HTML",
         )
     except TelegramBadRequest as e:
@@ -959,23 +1198,12 @@ async def reset_server_incy_to_defaults(
     await callback.answer(texts.ADMIN_SERVER_INCY_RESET_SUCCESS, show_alert=True)
 
     details = _get_server_incy_details(server)
-    flag = server.country_flag or texts.EMOJI_GLOBE
-    card_text = texts.ADMIN_SERVER_INCY_CARD.format(
-        flag=flag,
-        name=safe(server.name),
-        title=safe(details["title"]),
-        description=safe(details["description"]),
-        announce=safe(details["announce"]),
-        announce_url=safe(details["announce_url"]),
-        origin_name=safe(details["origin_name"]),
-        origin_badge=safe(details["origin_badge"]),
-        origin_status=safe(details["origin_status"]),
-    )
+    card_text, reply_markup = _build_server_incy_card(server, details)
 
     try:
         await callback.message.edit_text(
             card_text,
-            reply_markup=get_admin_server_incy_keyboard(server_id, origin_hidden=details["origin_hidden"]),
+            reply_markup=reply_markup,
             parse_mode="HTML",
         )
     except TelegramBadRequest as e:

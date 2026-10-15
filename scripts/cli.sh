@@ -134,15 +134,23 @@ get_env_var() {
     local default_val="${2:-}"
     local env_file="${PROJECT_DIR}/.env"
     if [[ -f "$env_file" ]]; then
-        local val
-        val=$(grep -E "^${key}=" "$env_file" 2>/dev/null | head -n1 | cut -d'=' -f2- | tr -d " '\"" || echo "")
-        if [[ -n "$val" ]]; then
-            echo "$val"
+        local raw_val
+        raw_val=$(grep -E "^${key}=" "$env_file" 2>/dev/null | head -n1 | cut -d'=' -f2- || echo "")
+        if [[ -n "$raw_val" ]]; then
+            raw_val="${raw_val%$'\r'}"
+            raw_val="$(echo "$raw_val" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+            if [[ "$raw_val" =~ ^\"(.*)\"$ ]]; then
+                raw_val="${BASH_REMATCH[1]}"
+            elif [[ "$raw_val" =~ ^\'(.*)\'$ ]]; then
+                raw_val="${BASH_REMATCH[1]}"
+            fi
+            echo "$raw_val"
             return 0
         fi
     fi
     echo "$default_val"
 }
+
 
 set_env_var() {
     local key="$1"
@@ -420,7 +428,7 @@ cmd_preflight() {
         local port_conflict=""
         for p in 80 443; do
             local p_proc
-            p_proc=$(run_privileged ss -tlnp 2>/dev/null | grep -E ":${p}\b" || netstat -tlnp 2>/dev/null | grep -E ":${p}\b" || true)
+            p_proc=$(run_privileged ss -tlnp 2>/dev/null | grep -E "[:\s]${p}[[:space:]]" || netstat -tlnp 2>/dev/null | grep -E "[:\s]${p}[[:space:]]" || true)
             if [[ -n "$p_proc" ]] && echo "$p_proc" | grep -qvE "docker|docker-proxy"; then
                 port_conflict="${p}:Занят сторонним процессом хоста: ${p_proc}"
                 break
@@ -569,9 +577,7 @@ apply_sysctl_hardening() {
         echo "net.ipv6.conf.all.disable_ipv6 = 1" >> "$tmp_sysctl"
         echo "net.ipv6.conf.default.disable_ipv6 = 1" >> "$tmp_sysctl"
         echo "net.ipv6.conf.lo.disable_ipv6 = 1" >> "$tmp_sysctl"
-        run_privileged mkdir -p "$(dirname "$sysctl_file")" 2>/dev/null || true
-        run_privileged cp "$tmp_sysctl" "$sysctl_file" 2>/dev/null || true
-        run_privileged chmod 644 "$sysctl_file" 2>/dev/null || true
+        run_privileged install -D -m 644 "$tmp_sysctl" "$sysctl_file" 2>/dev/null || true
         rm -f "$tmp_sysctl" 2>/dev/null || true
     fi
 
@@ -639,7 +645,7 @@ cmd_update() {
             stash_confirm="n"
         fi
         if [[ "$stash_confirm" =~ ^[Yy]$ ]]; then
-            git stash
+            git stash -u
             did_stash=true
             log "Локальные изменения сохранены в git stash."
         else
@@ -1039,7 +1045,7 @@ rotate_backups() {
     local backups=()
     while IFS= read -r f; do
         [[ -n "$f" ]] && backups+=("$f")
-    done < <(find backups/ -maxdepth 1 -name "*.sql.gz.age" -type f -exec stat -c "%Y %n" {} + 2>/dev/null | sort -rn | awk '{print $2}' || find backups/ -maxdepth 1 -name "*.sql.gz.age" -type f 2>/dev/null | sort -r)
+    done < <(find backups/ -maxdepth 1 -name "*.sql.gz.age" -type f 2>/dev/null | sort -r)
 
     local total="${#backups[@]}"
     if (( total > keep_count )); then
@@ -1081,10 +1087,8 @@ cmd_backup() {
             local dump_err="${tmp_backup_dir}/backup.err"
 
             local pg_user pg_db
-            pg_user=$(grep -E "^POSTGRES_USER=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
-            pg_db=$(grep -E "^POSTGRES_DB=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
-            pg_user="${pg_user:-just1kbot}"
-            pg_db="${pg_db:-just1kbot_bot}"
+            pg_user="$(get_env_var "POSTGRES_USER" "just1kbot")"
+            pg_db="$(get_env_var "POSTGRES_DB" "just1kbot_bot")"
 
             docker compose exec -T db pg_dump -U "$pg_user" -d "$pg_db" 2>"$dump_err" | gzip > "$tmp_gz"
             local dump_status=("${PIPESTATUS[@]}")
@@ -1119,7 +1123,7 @@ cmd_backup() {
     # Способ 2: Через отдельный контейнер backup (compose profile tools)
     if docker compose --profile tools run --rm backup; then
         local latest_backup
-        latest_backup=$(find backups/ -maxdepth 1 -name "*.sql.gz.age" -type f -exec stat -c "%Y %n" {} + 2>/dev/null | sort -rn | awk '{print $2}' | head -1 || find backups/ -maxdepth 1 -name "*.sql.gz.age" 2>/dev/null | sort -r | head -1 || echo "")
+        latest_backup=$(find backups/ -maxdepth 1 -name "*.sql.gz.age" -type f 2>/dev/null | sort -r | head -1 || echo "")
         if [[ -n "$latest_backup" ]] && [[ -f "$latest_backup" ]] && [[ -s "$latest_backup" ]]; then
             chmod 600 "$latest_backup" 2>/dev/null || true
             log "Бэкап успешно создан: ${BOLD}${latest_backup}${NC}"
@@ -1217,18 +1221,42 @@ cmd_restore() {
     # pg_user/pg_db were previously resolved as `local` inside cmd_backup and
     # therefore undefined here (crash under `set -u`). Resolve them locally.
     local pg_user pg_db
-    pg_user=$(grep -E "^POSTGRES_USER=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
-    pg_db=$(grep -E "^POSTGRES_DB=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
-    pg_user="${pg_user:-just1kbot}"
-    pg_db="${pg_db:-just1kbot_bot}"
+    pg_user="$(get_env_var "POSTGRES_USER" "just1kbot")"
+    pg_db="$(get_env_var "POSTGRES_DB" "just1kbot_bot")"
+
+    local restore_success=0
+    local old_umask
+    old_umask="$(umask)"
+
+    cleanup_restore() {
+        umask "$old_umask"
+        [[ -n "$tmp_dir" && -d "$tmp_dir" ]] && rm -rf "$tmp_dir" || true
+        if [[ "$restore_success" -eq 0 ]]; then
+            docker compose start bot >/dev/null 2>&1 || true
+        fi
+        trap - EXIT INT TERM
+    }
+
+    on_restore_interrupt() {
+        cleanup_restore
+        exit 130
+    }
+
+    on_restore_terminate() {
+        cleanup_restore
+        exit 143
+    }
 
     # Гарантируем запуск бота и удаление временных файлов при любых ошибках
     # shellcheck disable=SC2064
-    trap "rm -rf '$tmp_dir'; docker compose start bot >/dev/null 2>&1 || true" EXIT INT TERM
+    trap cleanup_restore EXIT
+    trap on_restore_interrupt INT
+    trap on_restore_terminate TERM
 
     info "1/5. Расшифровка бэкапа ключом age..."
     if ! age -d -i "$age_key_file" "$selected_backup" > "$tmp_gz"; then
         error "Ошибка расшифровки: неверный приватный ключ age."
+        cleanup_restore
         return 1
     fi
 
@@ -1253,12 +1281,12 @@ cmd_restore() {
     umask 077
     if ! docker compose exec -T db pg_dump -U "$pg_user" -d "$pg_db" 2>/dev/null | gzip -c > "$pre_restore_backup_file"; then
         error "Не удалось создать страховочный дамп текущей БД. Восстановление отменено — база НЕ изменена."
-        docker compose start bot >/dev/null 2>&1 || true
+        cleanup_restore
         return 1
     fi
     if ! gzip -t "$pre_restore_backup_file" 2>/dev/null || [[ ! -s "$pre_restore_backup_file" ]]; then
         error "Страховочный дамп пуст или повреждён. Восстановление отменено — база НЕ изменена."
-        docker compose start bot >/dev/null 2>&1 || true
+        cleanup_restore
         return 1
     fi
 
@@ -1267,12 +1295,12 @@ cmd_restore() {
     # the database is left in a partially reinitialized state.
     if ! docker compose exec -T db dropdb -U "$pg_user" --if-exists "$pg_db" >/dev/null 2>&1; then
         error "Не удалось удалить текущую базу данных '$pg_db'. Восстановление отменено."
-        docker compose start bot >/dev/null 2>&1 || true
+        cleanup_restore
         return 1
     fi
     if ! docker compose exec -T db createdb -U "$pg_user" "$pg_db"; then
         error "Не удалось создать базу данных '$pg_db' после удаления. Автоматический откат невозможен — восстановите исходное состояние вручную из: $pre_restore_backup_file"
-        docker compose start bot >/dev/null 2>&1 || true
+        cleanup_restore
         return 1
     fi
 
@@ -1290,12 +1318,12 @@ cmd_restore() {
                 warn "Автоматический откат не удался. Страховочный дамп сохранён: $pre_restore_backup_file — восстановите его вручную."
             fi
         fi
-        docker compose start bot >/dev/null 2>&1 || true
+        cleanup_restore
         return 1
     fi
 
-    rm -rf "$tmp_dir"
-    trap - EXIT INT TERM
+    restore_success=1
+    cleanup_restore
 
     # Страховочный дамп сохранён в ./backups/ и переживает restore; храним
     # ограниченное окно последних дампов, чтобы каталог не рос бесконечно.
@@ -1625,9 +1653,9 @@ cmd_doctor() {
         local k_major="${BASH_REMATCH[1]}"
         local k_minor="${BASH_REMATCH[2]}"
         if (( k_major > 5 || (k_major == 5 && k_minor >= 6) )); then
-            log "Ядро Linux ($kernel_ver): поддержка AmneziaWG на уровне ядра (OK)."
+            log "Ядро Linux ($kernel_ver): версия ядра актуальна (OK)."
         else
-            warn "Ядро Linux ($kernel_ver) старше 5.6. Для оптимальной работы AmneziaWG рекомендуется ядро >= 5.6."
+            warn "Ядро Linux ($kernel_ver) старше 5.6. Рекомендуется ядро >= 5.6 для стабильной работы современных подсистем Docker."
         fi
     else
         info "Версия ядра Linux: $kernel_ver"
@@ -1673,7 +1701,7 @@ cmd_doctor() {
     caddy_running=$(docker inspect --format='{{.State.Status}}' just1kbot_caddy 2>/dev/null || echo "")
     for port in 80 443; do
         local proc=""
-        proc=$(run_privileged ss -tlnp 2>/dev/null | grep -E ":${port}\b" || netstat -tlnp 2>/dev/null | grep -E ":${port}\b" || true)
+        proc=$(run_privileged ss -tlnp 2>/dev/null | grep -E "[:\s]${port}[[:space:]]" || netstat -tlnp 2>/dev/null | grep -E "[:\s]${port}[[:space:]]" || true)
         if [[ -n "$proc" ]]; then
             if echo "$proc" | grep -qE "docker|docker-proxy"; then
                 if [ "$caddy_running" = "running" ]; then
@@ -1849,9 +1877,9 @@ cmd_doctor() {
     # 3. Чтение .env параметров
     if [[ -f "${PROJECT_DIR}/.env" ]]; then
         local domain
-        domain=$(grep -E "^DOMAIN=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+        domain="$(get_env_var "DOMAIN" "")"
         local bot_token
-        bot_token=$(grep -E "^BOT_TOKEN=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+        bot_token="$(get_env_var "BOT_TOKEN" "")"
 
         # 4. Проверка DNS домена
         if [[ -n "$domain" ]]; then
@@ -2133,8 +2161,10 @@ cmd_uninstall() {
             (cd "$PROJECT_DIR" && docker compose down -v --remove-orphans 2>/dev/null) || true
         fi
         local containers=(just1kbot_app just1kbot_db just1kbot_redis just1kbot_caddy just1kbot_migrate just1kbot_backup)
+        local existing_containers
+        existing_containers="$(docker ps -a --format '{{.Names}}' 2>/dev/null || true)"
         for c in "${containers[@]}"; do
-            if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$c"; then
+            if echo "$existing_containers" | grep -qx "$c"; then
                 docker rm -f "$c" 2>/dev/null || cleanup_errors+=("Не удалось удалить контейнер: $c")
             fi
         done

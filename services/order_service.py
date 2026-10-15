@@ -258,7 +258,7 @@ class OrderService:
         session: AsyncSession,
         *,
         user_id: int,
-        service_type: str = "awg",
+        service_type: str = "standard",
         tariff_id: int | None = None,
         amount_rub: Decimal | None = None,
         duration_days: int | None = None,
@@ -271,6 +271,8 @@ class OrderService:
         bot_username: str | None = None,
     ) -> Order:
         """Create a new commercial order and obtain payment link if external gateway."""
+        if service_type == "awg":
+            service_type = "standard"
         user = await session.get(User, user_id)
         order_meta: dict = dict(metadata) if metadata else {}
         amount_rub, duration_days, device_limit, description = (
@@ -390,7 +392,7 @@ class OrderService:
         session: AsyncSession,
         *,
         user_id: int,
-        service_type: str = "awg",
+        service_type: str = "standard",
         tariff_id: int | None = None,
         amount_rub: Decimal | None = None,
         duration_days: int | None = None,
@@ -399,6 +401,8 @@ class OrderService:
         description: str | None = None,
         metadata: dict | None = None,
     ) -> Order:
+        if service_type == "awg":
+            service_type = "standard"
         # Acquire advisory lock then row lock to avoid lock inversion deadlock
         try:
             await session.execute(

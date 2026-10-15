@@ -680,7 +680,7 @@ async def _send_broadcast_to_users_with_resume(
                     texts.BROADCAST_RESULT.format(
                         success_count=final_progress.success_count,
                         fail_count=final_progress.fail_count,
-                        label=final_progress.label,
+                        label=safe(final_progress.label),
                         total_count=final_progress.total_count,
                     ),
                     reply_markup=get_broadcast_result_keyboard(),

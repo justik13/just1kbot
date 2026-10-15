@@ -45,6 +45,8 @@ def format_user_card_text(
     white_internet_info: str | None = None,
     ban_reason: str | None = None,
     wi_sub: WhiteInternetSubscription | None = None,
+    vless_hwid_count: int = 0,
+    effective_device_limit: int | None = None,
 ) -> str:
     from datetime import timezone
     from config.enums import WhiteInternetStatus
@@ -69,11 +71,20 @@ def format_user_card_text(
     else:
         ban_str = texts.STATUS_NOT_BANNED_BADGE
 
+    from database.repositories.profiles_repo import PROFILE_QUOTA_EXCLUDED_STATUSES
+    amnezia_count = len([
+        p for p in profiles
+        if getattr(p, "provisioning_status", "") not in PROFILE_QUOTA_EXCLUDED_STATUSES
+    ])
+
+    resolved_limit = effective_device_limit if effective_device_limit is not None else (user.device_limit or 0)
+
     if has_awg:
         valid_until_str = format_datetime(user.subscription_end)
         days_left_str = format_days_left(user.subscription_end)
-        devices_count = len(profiles)
-        device_limit = user.device_limit or 0
+        total_dev = amnezia_count + vless_hwid_count
+        devices_count = f"{total_dev} (VLESS: {vless_hwid_count}, Amnezia: {amnezia_count})"
+        device_limit = resolved_limit
     elif has_wi and wi_sub:
         valid_until_str = format_datetime(wi_sub.expires_at) if wi_sub.expires_at else "—"
         days_left_str = format_days_left(wi_sub.expires_at) if wi_sub.expires_at else texts.ZERO_DAYS_LABEL
@@ -82,8 +93,9 @@ def format_user_card_text(
     else:
         valid_until_str = format_datetime(user.subscription_end)
         days_left_str = format_days_left(user.subscription_end)
-        devices_count = len(profiles)
-        device_limit = user.device_limit or 0
+        total_dev = amnezia_count + vless_hwid_count
+        devices_count = f"{total_dev} (VLESS: {vless_hwid_count}, Amnezia: {amnezia_count})"
+        device_limit = resolved_limit
 
     awg_total = getattr(user, "total_traffic_bytes", 0) or 0
     wi_total = getattr(user, "total_wi_traffic_bytes", 0) or 0
@@ -205,7 +217,7 @@ def _format_time_left(subscription_end) -> str:
 async def _get_active_tariffs(session: AsyncSession) -> list[Tariff]:
     result = await session.execute(
         select(Tariff)
-        .where(Tariff.is_active.is_(True), Tariff.service_type == "awg")
+        .where(Tariff.is_active.is_(True), Tariff.service_type == "standard")
         .order_by(Tariff.device_limit)
     )
 
@@ -579,6 +591,17 @@ async def _render_user_card(
 
     current_time = now_utc()
 
+    from database.repositories import vless_subscription_repo
+    from services.subscription import SubscriptionService
+    try:
+        vless_hwid_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
+        if not isinstance(vless_hwid_count, int):
+            vless_hwid_count = 0
+    except Exception:
+        vless_hwid_count = 0
+
+    effective_device_limit = await SubscriptionService.get_effective_device_limit(session, user)
+
     rendered = format_user_card_text(
         user,
         profiles,
@@ -591,6 +614,8 @@ async def _render_user_card(
         white_internet_info=wl_info,
         ban_reason=ban_reason,
         wi_sub=wi_sub,
+        vless_hwid_count=vless_hwid_count,
+        effective_device_limit=effective_device_limit,
     )
 
     try:
@@ -628,6 +653,17 @@ async def _show_user_card_edit(
 
     current_time = now_utc()
 
+    from database.repositories import vless_subscription_repo
+    from services.subscription import SubscriptionService
+    try:
+        vless_hwid_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
+        if not isinstance(vless_hwid_count, int):
+            vless_hwid_count = 0
+    except Exception:
+        vless_hwid_count = 0
+
+    effective_device_limit = await SubscriptionService.get_effective_device_limit(session, user)
+
     rendered = format_user_card_text(
         user,
         profiles,
@@ -640,6 +676,8 @@ async def _show_user_card_edit(
         white_internet_info=wl_info,
         ban_reason=ban_reason,
         wi_sub=wi_sub,
+        vless_hwid_count=vless_hwid_count,
+        effective_device_limit=effective_device_limit,
     )
 
     if notice:

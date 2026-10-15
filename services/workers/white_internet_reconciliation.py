@@ -191,7 +191,9 @@ class WhiteInternetReconciliationWorker:
                             return True
                         elif sync_result == SyncResult.ALREADY_NEWER:
                             # Check real observed runtime inventory before trusting ALREADY_NEWER
-                            inv_ok, inv_data, _ = await self.client.get_inventory(api_url, api_key, client_ids=[sub_uuid])
+                            inv_ok, inv_data, _ = await self.client.get_inventory(
+                                api_url, api_key, client_ids=[sub_uuid], service="white_internet"
+                            )
                             if inv_ok and inv_data and "inventory" in inv_data:
                                 client_inv = inv_data["inventory"].get(sub_uuid)
                                 if client_inv:
@@ -597,7 +599,10 @@ class WhiteInternetReconciliationWorker:
                         )
                     elif sync_result == SyncResult.ALREADY_NEWER:
                         inv_ok, inv_data, _ = await self.client.get_inventory(
-                            server.api_url, server.api_key, client_ids=[row.client_uuid]
+                            server.api_url,
+                            server.api_key,
+                            client_ids=[row.client_uuid],
+                            service="white_internet",
                         )
                         observed = None
                         if inv_ok and inv_data and "inventory" in inv_data:

@@ -167,11 +167,14 @@ class AdminAuditAction(StrEnum):
     WHITE_INTERNET_TRAFFIC_ADDED = "WHITE_INTERNET_TRAFFIC_ADDED"
     WHITE_INTERNET_TRAFFIC_RESET = "WHITE_INTERNET_TRAFFIC_RESET"
     SERVER_FORCE_PURGE = "SERVER_FORCE_PURGE"
+    VLESS_HWID_RESET = "VLESS_HWID_RESET"
+    VLESS_TOKEN_RESET = "VLESS_TOKEN_RESET"
 
 
 class ServiceType(StrEnum):
-    AWG = "awg"
+    STANDARD = "standard"
     WHITE_INTERNET = "white_internet"
+    AWG = "awg"
 
 
 class WhiteInternetStatus(StrEnum):
@@ -204,9 +207,10 @@ class OrderStatus(StrEnum):
 
 
 class OrderServiceType(StrEnum):
-    AWG = "awg"
+    STANDARD = "standard"
     WHITE_INTERNET = "white_internet"
     TOPUP = "topup"
+    AWG = "awg"
 
 
 __all__ = [

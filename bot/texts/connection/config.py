@@ -17,7 +17,7 @@ CONNECTION_CONFIG_DEVICE_VIEW_1_SOKHRANITE_PRIKREPLENNYY_FAY = """1. Сохра�
 
 CONNECTION_CONFIG_DEVICE_VIEW_2_OTKROYTE_PRILOZHENIE_I_VYBER = "2. Откройте приложение и выберите <b>«Импорт файла / Добавить туннель»</b>."
 
-CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_NAZHMITE = "📁 <i>Нужен файл .vpn / .conf для роутера или ПК? Нажмите кнопку ниже:</i>"
+CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_NAZHMITE = "📁 <i>Нужен файл конфигурации (.vpn / .conf)? Нажмите кнопку ниже:</i>"
 
 CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_SKOPIRUY = """<b>1. Скопируйте ключ</b> — нажмите на блок с ключом выше.
 <b>2. Откройте приложение:</b>
@@ -113,9 +113,15 @@ CONNECTION_CONFIG_ESTIMATED_TIME_HOURS = "{v0} дн. {v1} ч."
 
 CONNECTION_CONFIG_PROTOCOL_FORMAT = "{v0} ч. {v1} мин."
 
-CONNECTION_CONFIG_UNKNOWN_PROTOCOL = "➕ Добавить устройство"
+CONNECTION_CONFIG_UNKNOWN_PROTOCOL = "Неизвестный протокол"
 
-CONNECTION_EMPTY = "<i>У вас пока нет подключённых устройств.</i>"
+CONNECTION_EMPTY = """<i>У вас пока нет активных подключений.</i>
+
+💡 <b>Рекомендуем:</b> подключитесь по единой ссылке выше — вы получите доступ сразу ко всем серверам в приложении INCY."""
+
+CONNECTION_DETAILS_VLESS_COUNT = "• 📱 Подключение по ссылке: <b>{count}</b>"
+CONNECTION_DETAILS_MANUAL_COUNT = "• 🛠 Ручные профили: <b>{count}</b>"
+CONNECTION_MANUAL_PROFILES_HEADER = "<b>Ручные профили (роутеры/ПК):</b>"
 
 CONNECTION_EXPIRED_NO_GRACE = """
 ⚠️ <b>Подписка истекла</b>

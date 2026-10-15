@@ -3,6 +3,9 @@ from .broadcast import (
     get_broadcast_result_keyboard,
 )
 from .dashboard import (
+    get_admin_cat_infra_keyboard,
+    get_admin_cat_std_sub_keyboard,
+    get_admin_cat_wi_sub_keyboard,
     get_admin_menu,
     get_audit_keyboard,
     get_maintenance_confirm_keyboard,
@@ -15,6 +18,7 @@ from .servers import (
     get_admin_server_peers_keyboard,
     get_admin_server_relays_keyboard,
     get_admin_server_incy_reset_confirm_keyboard,
+    get_admin_std_sub_incy_keyboard,
     get_server_delete_confirm_keyboard,
 )
 from .tariffs import get_admin_tariff_card_keyboard
@@ -34,6 +38,9 @@ from .users import (
 __all__ = [
     # dashboard
     "get_admin_menu",
+    "get_admin_cat_std_sub_keyboard",
+    "get_admin_cat_wi_sub_keyboard",
+    "get_admin_cat_infra_keyboard",
     "get_audit_keyboard",
     "get_maintenance_confirm_keyboard",
     # users
@@ -55,6 +62,7 @@ __all__ = [
     "get_admin_server_peers_keyboard",
     "get_admin_server_relays_keyboard",
     "get_admin_server_incy_reset_confirm_keyboard",
+    "get_admin_std_sub_incy_keyboard",
     "get_server_delete_confirm_keyboard",
     # tariffs
     "get_admin_tariff_card_keyboard",
