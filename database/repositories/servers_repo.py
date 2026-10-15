@@ -43,10 +43,14 @@ def is_vless_capable_server(server) -> bool:
     """Whether a server can serve direct VLESS TLS clients.
 
     True if 'vless' or 'xray_vless' capability is present, or protocol is 'vless'.
+    Strictly excludes servers whose protocol belongs to AMNEZIA_PROTOCOLS.
     """
-    caps = getattr(server, "capabilities", None) or []
     proto = str(getattr(server, "protocol", "") or "").lower()
+    if proto in AMNEZIA_PROTOCOLS:
+        return False
+    caps = getattr(server, "capabilities", None) or []
     return "vless" in caps or "xray_vless" in caps or proto == "vless"
+
 
 
 def is_white_internet_origin_server(server) -> bool:

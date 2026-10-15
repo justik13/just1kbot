@@ -304,12 +304,19 @@ async def check_node_resources_and_alerts(bot: Bot):
         awg_ok = True
         xray_ok = True
 
-        try:
-            if has_amnezia:
+        if has_amnezia:
+            try:
                 client = AmneziaClient(server.api_url, server.api_key)
                 awg_ok = await client.healthcheck()
+            except Exception as exc:
+                logger.warning(
+                    "AWG healthcheck exception for server %s (%s): %s",
+                    server.id, server.name, exc,
+                )
+                awg_ok = False
 
-            if has_xray:
+        if has_xray:
+            try:
                 from services.xray_node_client import XrayNodeClient
                 extra = getattr(server, "extra_data", None) or {}
                 xray_url = extra.get("xray_api_url") or server.api_url
@@ -317,19 +324,24 @@ async def check_node_resources_and_alerts(bot: Bot):
                     xray_ok, xray_epoch, xray_data = await xray_client.check_health(
                         xray_url, server.api_key
                     )
+            except Exception as exc:
+                logger.warning(
+                    "Xray healthcheck exception for server %s (%s): %s",
+                    server.id, server.name, exc,
+                )
+                xray_ok = False
 
-            if server_proto in AMNEZIA_PROTOCOLS:
-                is_healthy = awg_ok
-            elif server_proto in (XRAY_PROTOCOL, "vless"):
-                is_healthy = xray_ok
-            elif has_amnezia and has_xray:
-                is_healthy = awg_ok and xray_ok
-            elif has_amnezia:
-                is_healthy = awg_ok
-            elif has_xray:
-                is_healthy = xray_ok
-        except Exception as exc:
-            logger.warning("Healthcheck exception for server %s (%s): %s", server.id, server.name, exc)
+        if server_proto in AMNEZIA_PROTOCOLS:
+            is_healthy = awg_ok
+        elif server_proto in (XRAY_PROTOCOL, "vless"):
+            is_healthy = xray_ok
+        elif has_amnezia and has_xray:
+            is_healthy = awg_ok and xray_ok
+        elif has_amnezia:
+            is_healthy = awg_ok
+        elif has_xray:
+            is_healthy = xray_ok
+        else:
             is_healthy = False
 
         # 4b. Изолированная синтетическая проверка Ingress (публичный CDN / Nginx Origin)

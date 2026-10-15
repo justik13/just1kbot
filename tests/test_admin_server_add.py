@@ -292,8 +292,8 @@ class TestAdminServerAdd(unittest.IsolatedAsyncioTestCase):
             # Must render duplicate url error
             self.assertTrue(any("уже зарегистрирован" in str(call.args[2]) for call in mock_render.call_args_list))
 
-    async def test_awg_server_preserves_vless_capability_when_xray_check_fails(self):
-        """Updating an existing server with 'vless' preserves 'vless' capability if Xray check throws/fails."""
+    async def test_awg_server_add_rejects_duplicate_url(self):
+        """Adding a server with an already existing api_url renders duplicate error and clears FSM."""
         from bot.handlers.admin.servers.add_routes import process_add_server
 
         msg = MagicMock()
@@ -309,25 +309,23 @@ class TestAdminServerAdd(unittest.IsolatedAsyncioTestCase):
             return_value={
                 "step": "api_key",
                 "protocol": "amneziawg2",
-                "existing_server_id": 42,
-                "name": "Mixed Node",
+                "name": "Duplicate Node",
                 "country_flag": "🇩🇪",
                 "api_url": "https://mixed.example.com:8443",
             }
         )
         server = Server(
             id=42,
-            name="Mixed Node",
-            protocol="awg",
-            capabilities=["awg", "vless"],
+            name="Existing Node",
+            protocol="amneziawg2",
+            capabilities=["awg"],
             api_url="https://mixed.example.com:8443",
             api_key="old-key",
         )
         session = AsyncMock()
-        session.get = AsyncMock(return_value=server)
 
         mock_server_info = MagicMock()
-        mock_server_info.name = "Mixed Node"
+        mock_server_info.name = "Existing Node"
         mock_server_info.protocols = ["amneziawg2"]
         mock_server_info.get_effective_max_peers.return_value = 100
         mock_server_info.get_protocol.return_value = "amneziawg2"
@@ -337,23 +335,13 @@ class TestAdminServerAdd(unittest.IsolatedAsyncioTestCase):
         mock_client.healthcheck = AsyncMock(return_value=True)
         mock_client.get_server_info = AsyncMock(return_value=mock_server_info)
 
-        mock_xray = AsyncMock()
-        # Xray API check times out or fails
-        mock_xray.check_health = AsyncMock(side_effect=TimeoutError("Xray timed out"))
-
-        @asynccontextmanager
-        async def fake_xray_client(*args, **kwargs):
-            yield mock_xray
-
         with (
             patch("bot.handlers.admin.servers.add_routes.is_admin", return_value=True),
-            patch("bot.handlers.admin.servers.add_routes.render_hub", new_callable=AsyncMock),
+            patch("bot.handlers.admin.servers.add_routes.render_hub", new_callable=AsyncMock) as mock_render,
             patch("bot.handlers.admin.servers.add_routes.AmneziaClient", return_value=mock_client),
             patch("bot.handlers.admin.servers.add_routes.get_server_by_api_url", new_callable=AsyncMock, return_value=server),
-            patch("services.xray_node_client.XrayNodeClient", fake_xray_client),
             patch("bot.handlers.admin.servers.add_routes.AuditService.log_action", new_callable=AsyncMock),
         ):
             await process_add_server(msg, state, session)
-            # vless capability must NOT be dropped!
-            self.assertIn("vless", server.capabilities)
-            self.assertIn("awg", server.capabilities)
+            state.clear.assert_called_once()
+            self.assertTrue(any("уже зарегистрирован" in str(call.args[2]) for call in mock_render.call_args_list))

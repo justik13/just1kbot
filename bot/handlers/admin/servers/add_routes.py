@@ -14,8 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.keyboards import get_back_button
 from bot.states import AdminStates
-from config.enums import ServerHealthState
-from database.models import Server
 from database.repositories.servers_repo import (
     create_server,
     get_server_by_api_url,
@@ -344,55 +342,30 @@ async def process_add_server(
 
             protocol_name = "vless" if ("vless" in capabilities and "xray_origin" not in capabilities) else "xray"
 
-            existing_server_id = all_data.get("existing_server_id")
-            if existing_server_id:
-                server = await session.get(Server, existing_server_id)
-                if server:
-                    server.api_key = api_key
-                    # Purge stale capabilities: keep existing only if verified or awg
-                    kept_caps = [c for c in (server.capabilities or []) if c not in ("vless", "xray_origin")]
-                    for cap in capabilities:
-                        if cap not in kept_caps:
-                            kept_caps.append(cap)
-                    is_existing_awg = (
-                        server.protocol in AMNEZIA_PROTOCOLS
-                        or "awg" in kept_caps
-                        or "amnezia" in (server.capabilities or [])
-                    )
-                    if not is_existing_awg:
-                        server.protocol = protocol_name
-                    elif "awg" not in kept_caps:
-                        kept_caps.append("awg")
-                        server.capabilities = kept_caps
-                    server.health_state = ServerHealthState.ONLINE
-                else:
-                    existing_server_id = None
-
-            if not existing_server_id:
-                existing_dup = await get_server_by_api_url(session, all_data["api_url"])
-                if existing_dup:
-                    await render_hub(
-                        message.bot,
-                        message.chat.id,
-                        texts.ERROR_SERVER_DUPLICATE_URL.format(
-                            api_url=safe(all_data["api_url"]),
-                        ),
-                        get_back_button(back_servers),
-                        parse_mode="HTML",
-                    )
-                    await state.clear()
-                    return
-
-                server = await create_server(
-                    session,
-                    name=api_server_name,
-                    country_flag=all_data["country_flag"],
-                    api_url=all_data["api_url"],
-                    api_key=api_key,
-                    protocol=protocol_name,
-                    max_clients=api_max_peers,
-                    capabilities=capabilities,
+            existing_dup = await get_server_by_api_url(session, all_data["api_url"])
+            if existing_dup:
+                await render_hub(
+                    message.bot,
+                    message.chat.id,
+                    texts.ERROR_SERVER_DUPLICATE_URL.format(
+                        api_url=safe(all_data["api_url"]),
+                    ),
+                    get_back_button(back_servers),
+                    parse_mode="HTML",
                 )
+                await state.clear()
+                return
+
+            server = await create_server(
+                session,
+                name=api_server_name,
+                country_flag=all_data["country_flag"],
+                api_url=all_data["api_url"],
+                api_key=api_key,
+                protocol=protocol_name,
+                max_clients=api_max_peers,
+                capabilities=capabilities,
+            )
             if xray_epoch:
                 server.xray_instance_epoch = xray_epoch
             if xray_data:
@@ -530,13 +503,12 @@ async def process_add_server(
 
         api_server_name = (all_data.get("name") or server_info.name or "AmneziaWG")[:50]
 
-        existing_server_id = all_data.get("existing_server_id")
         existing = await get_server_by_api_url(
             session,
             all_data["api_url"],
         )
 
-        if existing and not existing_server_id:
+        if existing:
             await render_hub(
                 message.bot,
                 message.chat.id,
@@ -555,33 +527,20 @@ async def process_add_server(
 
         capabilities = ["awg"]
 
-        if existing_server_id:
-            server = await session.get(Server, existing_server_id)
-            if server:
-                server.api_key = api_key
-                kept_caps = [c for c in (server.capabilities or []) if c not in ("awg", "amnezia")]
-                for cap in capabilities:
-                    if cap not in kept_caps:
-                        kept_caps.append(cap)
-                server.capabilities = kept_caps
-                server.health_state = ServerHealthState.ONLINE
-                await session.flush()
-        else:
-            create_kwargs = {
-                "name": api_server_name,
-                "country_flag": all_data["country_flag"],
-                "api_url": all_data["api_url"],
-                "api_key": api_key,
-                "protocol": server_protocol,
-                "max_clients": api_max_peers,
-            }
-            if capabilities:
-                create_kwargs["capabilities"] = capabilities
+        create_kwargs = {
+            "name": api_server_name,
+            "country_flag": all_data["country_flag"],
+            "api_url": all_data["api_url"],
+            "api_key": api_key,
+            "protocol": server_protocol,
+            "max_clients": api_max_peers,
+            "capabilities": capabilities,
+        }
 
-            server = await create_server(
-                session,
-                **create_kwargs,
-            )
+        server = await create_server(
+            session,
+            **create_kwargs,
+        )
 
         await AuditService.log_action(
             session,

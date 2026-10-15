@@ -186,24 +186,6 @@ async def get_real_peer_count(server: Server, force_refresh: bool = False) -> in
             )
             return count
 
-        elif server_proto == VLESS_PROTOCOL:
-            from database.connection import session_scope
-            from database.models import VlessSubscription
-            from sqlalchemy import func, select
-
-            t_done = time.monotonic()
-            async with session_scope() as session:
-                count_stmt = select(func.count(VlessSubscription.id)).where(
-                    VlessSubscription.is_active.is_(True),
-                )
-                count = (await session.execute(count_stmt)).scalar() or 0
-            update_cached_peer_count(server.id, count, timestamp=t_done, generation=gen)
-            logger.info(
-                "Cached real peer count for VLESS server %s (%s): %s/%s",
-                server.id, server.name, count, server.max_clients,
-            )
-            return count
-
         elif server_proto in AMNEZIA_PROTOCOLS:
             client = AmneziaClient(server.api_url, server.api_key)
             try:

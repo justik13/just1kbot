@@ -64,6 +64,18 @@ async def _build_servers_list_text_and_kb(
     else:
         from services.slots_cache import get_cached_peer_count
         db_counts = await get_server_peer_counts(session) if session is not None else {}
+        vless_sub_count: int | None = None
+        if any(
+            (str(getattr(s, "protocol", "") or "").lower() == "vless" or "vless" in (getattr(s, "capabilities", None) or []))
+            for s in servers
+        ) and session is not None:
+            from database.models import VlessSubscription
+            vless_sub_count = (
+                await session.execute(
+                    select(func.count(VlessSubscription.id)).where(VlessSubscription.is_active.is_(True))
+                )
+            ).scalar_one_or_none() or 0
+
         for server in servers:
             flag = server.country_flag or texts.EMOJI_GLOBE
             status = texts.STATUS_ACTIVE_ICON if server.is_active else texts.STATUS_INACTIVE_ICON
@@ -78,14 +90,19 @@ async def _build_servers_list_text_and_kb(
             elif has_vless and not has_wl:
                 proto_badge = "[VLESS]"
             elif has_wl:
-                proto_badge = "[Xray]"
+                proto_badge = "[Origin РФ]"
             else:
                 proto_badge = "[AWG]"
-            db_used = db_counts.get(server.id, 0)
-            cached_used = get_cached_peer_count(server.id)
-            total = server.max_clients or 240
-            effective_used = max(cached_used, db_used) if cached_used is not None else db_used
-            cap_str = f"{effective_used}/{total}"
+
+            is_pure_vless = has_vless and not has_awg and not has_wl
+            if is_pure_vless:
+                cap_str = f"{vless_sub_count or 0} подп."
+            else:
+                db_used = db_counts.get(server.id, 0)
+                cached_used = get_cached_peer_count(server.id)
+                total = server.max_clients or 240
+                effective_used = max(cached_used, db_used) if cached_used is not None else db_used
+                cap_str = f"{effective_used}/{total}"
             server_display_name = f"{proto_badge} {server.name}"
             button_text = truncate_button_text(
                 texts.ADMIN_SERVER_LIST_ROW_FORMAT.format(v0=status, v1=flag, v2=server_display_name, v3=cap_str)

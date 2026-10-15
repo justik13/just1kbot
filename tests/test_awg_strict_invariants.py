@@ -228,6 +228,31 @@ class AWGStrictInvariantsTests(unittest.IsolatedAsyncioTestCase):
         for proto in AMNEZIA_PROTOCOLS:
             self.assertEqual(_format_protocol(proto), "AmneziaWG")
 
+    def test_is_vless_capable_server_strictly_excludes_awg_servers(self):
+        """Invariant: is_vless_capable_server rejects servers with AMNEZIA_PROTOCOLS even if vless is in caps."""
+        from database.repositories.servers_repo import is_vless_capable_server
+
+        for proto in AMNEZIA_PROTOCOLS:
+            s_awg_mixed = Server(
+                id=10,
+                name="mixed",
+                api_url="https://mixed:8443",
+                api_key="k",
+                protocol=proto,
+                capabilities=["awg", "vless"],
+            )
+            self.assertFalse(is_vless_capable_server(s_awg_mixed))
+
+        s_pure_vless = Server(
+            id=11,
+            name="vless",
+            api_url="https://vless:8444",
+            api_key="k",
+            protocol="vless",
+            capabilities=["vless"],
+        )
+        self.assertTrue(is_vless_capable_server(s_pure_vless))
+
 
 if __name__ == "__main__":
     unittest.main()

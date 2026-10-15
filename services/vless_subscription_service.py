@@ -285,15 +285,11 @@ class VlessSubscriptionService:
             api_url = extra.get("xray_api_url")
             api_key = srv.api_key
 
-            # Fallback to resolving from srv.api_url (8443 on dual/AWG nodes, 8444 on standalone VLESS)
+            # Fallback to resolving from srv.api_url: Xray API is hosted on port 8444
             if not api_url and srv.api_url:
                 parsed = urllib.parse.urlsplit(srv.api_url)
                 if parsed.hostname:
-                    caps = getattr(srv, "capabilities", None) or []
-                    proto = getattr(srv, "protocol", None) or ""
-                    is_awg = "awg" in caps or "amnezia" in caps or proto in ("awg", "amneziawg2")
-                    default_port = 8443 if is_awg else 8444
-                    port = parsed.port or default_port
+                    port = parsed.port if (parsed.port and parsed.port != 8443) else 8444
                     api_url = f"{parsed.scheme or 'https'}://{parsed.hostname}:{port}"
 
             if api_url and api_key:

@@ -116,6 +116,13 @@ class AuditInvariantsTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("All servers strictly use", res.details)
         self.assertIn("VLESS (vless)", res.details)
 
+        # Verify compiled SQL contains the expected protocols
+        stmt = session.scalars.call_args[0][0]
+        compiled_sql = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+        self.assertIn("'vless'", compiled_sql)
+        self.assertIn("'amneziawg2'", compiled_sql)
+        self.assertIn("'xray'", compiled_sql)
+
     async def test_inv_13_vpn_protocol_fails_invalid_protocol(self):
         """Invariant 13 fails when violations (such as pure WireGuard 'wg') are found."""
         from scripts.audit_invariants import assert_inv_13_vpn_protocol
