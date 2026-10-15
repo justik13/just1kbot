@@ -11,6 +11,8 @@ ADMIN_SERVER_BTN_PROTO_XRAY = "⚡ Xray (Белый Интернет)"
 
 PROTOCOL_XRAY_ORIGIN = "Xray (Origin)"
 PROTOCOL_VLESS = "VLESS TLS"
+ADMIN_SERVER_PROTO_ORIGIN_BADGE = "[Origin РФ]"
+ADMIN_SERVER_CAP_VLESS_SUBS_TPL = "{count} подп."
 
 ADMIN_BTN_BACK_TO_SERVERS = "← К списку серверов"
 

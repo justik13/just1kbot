@@ -12,6 +12,7 @@ import urllib.parse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config.constants import AMNEZIA_PROTOCOLS
 from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.models import Server, User, VlessSubscription, VPNProfile
 from database.repositories import vless_subscription_repo
@@ -285,12 +286,15 @@ class VlessSubscriptionService:
             api_url = extra.get("xray_api_url")
             api_key = srv.api_key
 
-            # Fallback to resolving from srv.api_url: Xray API is hosted on port 8444
+            # Fallback to resolving from srv.api_url
             if not api_url and srv.api_url:
                 parsed = urllib.parse.urlsplit(srv.api_url)
                 if parsed.hostname:
-                    port = parsed.port if (parsed.port and parsed.port != 8443) else 8444
-                    api_url = f"{parsed.scheme or 'https'}://{parsed.hostname}:{port}"
+                    # If this is a dual AWG+Xray server, Xray API is hosted on port 8444
+                    if srv.protocol in AMNEZIA_PROTOCOLS or "awg" in (srv.capabilities or []):
+                        api_url = f"{parsed.scheme or 'https'}://{parsed.hostname}:8444"
+                    else:
+                        api_url = srv.api_url
 
             if api_url and api_key:
                 targets.append((srv.id, api_url, api_key))

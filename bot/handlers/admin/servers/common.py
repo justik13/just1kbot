@@ -90,13 +90,13 @@ async def _build_servers_list_text_and_kb(
             elif has_vless and not has_wl:
                 proto_badge = "[VLESS]"
             elif has_wl:
-                proto_badge = "[Origin РФ]"
+                proto_badge = texts.ADMIN_SERVER_PROTO_ORIGIN_BADGE
             else:
                 proto_badge = "[AWG]"
 
             is_pure_vless = has_vless and not has_awg and not has_wl
             if is_pure_vless:
-                cap_str = f"{vless_sub_count or 0} подп."
+                cap_str = texts.ADMIN_SERVER_CAP_VLESS_SUBS_TPL.format(count=vless_sub_count or 0)
             else:
                 db_used = db_counts.get(server.id, 0)
                 cached_used = get_cached_peer_count(server.id)
