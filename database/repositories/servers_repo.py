@@ -53,15 +53,23 @@ def is_vless_capable_server(server) -> bool:
 def get_server_xray_api_url(server) -> str | None:
     """Return explicit Xray API URL for the server.
 
-    For native Xray/VLESS servers, returns server.api_url (falling back to extra_data['xray_api_url']).
-    For mixed or AWG servers, returns ONLY extra_data['xray_api_url'] to prevent sending
+    For native Xray/VLESS servers (protocol is xray/vless, or non-AWG server with vless capability),
+    returns server.api_url (falling back to extra_data['xray_api_url']).
+    For servers whose primary protocol is AmneziaWG (protocol in AMNEZIA_PROTOCOLS, or awg in capabilities
+    without xray/vless protocol), returns ONLY extra_data['xray_api_url'] to prevent sending
     Xray requests to the AmneziaWG API port.
     """
     proto = str(getattr(server, "protocol", "") or "").lower()
+    caps = getattr(server, "capabilities", None) or []
     extra = getattr(server, "extra_data", None) if isinstance(getattr(server, "extra_data", None), dict) else {}
+
     if proto in (XRAY_PROTOCOL, VLESS_PROTOCOL):
         return getattr(server, "api_url", None) or extra.get("xray_api_url")
-    return extra.get("xray_api_url")
+
+    if proto in AMNEZIA_PROTOCOLS or "awg" in caps:
+        return extra.get("xray_api_url")
+
+    return getattr(server, "api_url", None) or extra.get("xray_api_url")
 
 
 
