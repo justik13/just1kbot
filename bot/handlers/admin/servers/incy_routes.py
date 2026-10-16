@@ -105,9 +105,12 @@ async def _build_std_sub_incy_card(session: AsyncSession) -> tuple[str, Any]:
     announce = await get_system_setting(session, "vless_announce", None)
     announce_url = await get_system_setting(session, "vless_announce_url", None)
 
+    default_desc_display = texts.ADMIN_SERVER_INCY_VALUE_DEFAULT.format(
+        value=texts.DEFAULT_VLESS_PROFILE_DESCRIPTION
+    )
     card_text = texts.ADMIN_STD_SUB_INCY_CONFIG_CARD.format(
         title=safe(title or "✦ Just1k"),
-        description=safe(desc or texts.ADMIN_SERVER_INCY_VALUE_NONE),
+        description=safe(desc or default_desc_display),
         announce=safe(announce or texts.ADMIN_SERVER_INCY_VALUE_NONE),
         announce_url=safe(announce_url or texts.ADMIN_SERVER_INCY_VALUE_NONE),
     )
@@ -274,6 +277,8 @@ async def process_std_incy_param_input(
     elif field == "desc":
         new_val = None if (is_clear or is_none or not text) else text[:100]
         await set_system_setting(session, "vless_profile_description", new_val, updated_by=message.from_user.id)
+        if is_clear or is_none or not text:
+            await set_system_setting(session, "vless_profile_desc", None, updated_by=message.from_user.id)
     elif field == "announce":
         new_val = None if (is_clear or is_none or not text) else text[:200]
         await set_system_setting(session, "vless_announce", new_val, updated_by=message.from_user.id)

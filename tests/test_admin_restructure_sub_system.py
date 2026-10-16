@@ -428,6 +428,21 @@ class TestAdminStandardIncySettings(unittest.IsolatedAsyncioTestCase):
                         self.mock_session, "vless_profile_title", "✦ Just1k", updated_by=111
                     )
 
+    async def test_process_std_incy_param_input_desc_dash_clears_both_keys(self):
+        await self.state.set_state(AdminStates.editing_std_incy_param)
+        await self.state.update_data(field="desc")
+        msg = self._create_msg("-")
+        with patch("bot.handlers.admin.servers.incy_routes.is_admin", return_value=True):
+            with patch("bot.handlers.admin.servers.incy_routes.set_system_setting", new_callable=AsyncMock) as mock_set:
+                await process_std_incy_param_input(msg, self.state, self.mock_session)
+                self.assertEqual(mock_set.await_count, 2)
+                mock_set.assert_any_await(
+                    self.mock_session, "vless_profile_description", None, updated_by=111
+                )
+                mock_set.assert_any_await(
+                    self.mock_session, "vless_profile_desc", None, updated_by=111
+                )
+
     async def test_reset_std_sub_incy_to_defaults(self):
         cb = MagicMock(spec=CallbackQuery)
         cb.from_user = self.admin_user

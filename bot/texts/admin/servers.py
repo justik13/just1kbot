@@ -310,18 +310,20 @@ ADMIN_SERVER_INCY_PROMPT_DESC = """🎨 <b>Изменение подзаголо
 Текущее значение: <code>{current}</code>
 
 💡 <i>Поддерживаются плейсхолдеры:</i>
+• <code>{{tariff}}</code> — название текущего тарифа (например, Базовый)
 • <code>{{devices}}</code> или <code>{{limit}}</code> — лимит устройств подписки
 • <code>{{active}}</code> — число активных устройств
 
 ⚠️ <i>Примечание: в некоторых мобильных клиентах подзаголовок отображается в карточке подписки, а в INCY — «Объявление».</i>
 
-Отправьте подзаголовок (до 100 символов) или дефис «-» для отключения:"""
+Отправьте подзаголовок (до 100 символов) или дефис «-» для сброса к умолчанию:"""
 
 ADMIN_SERVER_INCY_PROMPT_ANNOUNCE = """🎨 <b>Изменение объявления (баннера) в INCY</b>
 
 Текущее значение: <code>{current}</code>
 
 💡 <i>Поддерживаются плейсхолдеры:</i>
+• <code>{{tariff}}</code> — название текущего тарифа (например, Базовый)
 • <code>{{devices}}</code> или <code>{{limit}}</code> — лимит устройств подписки
 • <code>{{active}}</code> — число активных устройств
 
@@ -415,6 +417,7 @@ ADMIN_SERVER_INCY_ACTION_HIDE = "Скрыть"
 ADMIN_SERVER_INCY_ACTION_SHOW = "Показать"
 
 ADMIN_SERVER_INCY_VALUE_NONE = "— (не задан)"
+ADMIN_SERVER_INCY_VALUE_DEFAULT = "{value} (по умолчанию)"
 ADMIN_SERVER_INCY_VALUE_DISABLED = "Отключен"
 ADMIN_SERVER_INCY_NO_RELAYS = "На сервере нет подключенных Relay-узлов."
 ADMIN_SERVER_INCY_RELAY_BTN = "🌐 {name}{badge_part}{status_part}"
