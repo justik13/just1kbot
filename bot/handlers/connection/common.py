@@ -147,7 +147,11 @@ async def _build_connections_screen(
         if getattr(user, "current_tariff_id", None):
             from database.repositories import tariffs_repo
             user_tariff = await tariffs_repo.get_tariff_by_id(session, user.current_tariff_id)
-            if user_tariff and getattr(user_tariff, "name", None):
+            if (
+                user_tariff
+                and getattr(user_tariff, "name", None)
+                and getattr(user_tariff, "service_type", "standard") in ("standard", "awg")
+            ):
                 tariff_name = user_tariff.name
         if not tariff_name:
             tariff_name = get_tariff_display_name(device_limit)

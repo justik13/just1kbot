@@ -701,6 +701,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             patch("database.repositories.users_repo.get_user_by_id", return_value=user_with_tariff),
             patch("database.repositories.tariffs_repo.get_tariff_by_id", side_effect=fake_get_tariff),
             patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=5),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_combined_quota", return_value=(2, 1, 1)),
             patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 2, 5)),
             patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
             patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
@@ -745,6 +746,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
             patch("database.repositories.users_repo.get_user_by_id", return_value=user_without_tariff),
             patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=2),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_combined_quota", return_value=(1, 0, 1)),
             patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 2)),
             patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
             patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
@@ -759,6 +761,90 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             desc_b64 = raw_desc.removeprefix("base64:")
             desc = base64.b64decode(desc_b64).decode("utf-8")
             self.assertEqual(desc, "Тариф: Базовый • Устройств: 1 из 2")
+
+    async def test_feed_white_internet_tariff_isolation(self):
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        from database.models import Tariff
+        wi_tariff = Tariff(id=10, name="Белый Интернет 50 ГБ", service_type="white_internet", device_limit=1)
+        user_with_wi = User(
+            id=42,
+            telegram_id=999,
+            is_banned=False,
+            is_deleted=False,
+            device_limit=5,
+            current_tariff_id=10,
+            subscription_end=datetime.now(timezone.utc) + timedelta(days=30),
+        )
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=user_with_wi),
+            patch("database.repositories.tariffs_repo.get_tariff_by_id", return_value=wi_tariff),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=5),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_combined_quota", return_value=(3, 1, 2)),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 2, 4)),
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
+            patch("bot.handlers.vless_web.get_system_setting", return_value=None),
+        ):
+            headers = {"X-Hwid": "test-client-hwid-wi"}
+            resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
+            self.assertEqual(resp.status, 200)
+
+            raw_desc = resp.headers.get("Profile-Description", "")
+            desc_b64 = raw_desc.removeprefix("base64:")
+            desc = base64.b64decode(desc_b64).decode("utf-8")
+            self.assertEqual(desc, "Тариф: Семейный • Устройств: 3 из 5")
+
+    async def test_feed_long_tariff_name_truncation(self):
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        from database.models import Tariff
+        long_name = "Очень Длинный Эксклюзивный Премиум Тариф С Лимитом Больше Сорока Символов"
+        long_tariff = Tariff(id=11, name=long_name, service_type="standard", device_limit=5)
+        user_with_tariff = User(
+            id=42,
+            telegram_id=999,
+            is_banned=False,
+            is_deleted=False,
+            device_limit=5,
+            current_tariff_id=11,
+            subscription_end=datetime.now(timezone.utc) + timedelta(days=30),
+        )
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=user_with_tariff),
+            patch("database.repositories.tariffs_repo.get_tariff_by_id", return_value=long_tariff),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=5),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_combined_quota", return_value=(4, 2, 2)),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 2, 3)),
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
+            patch("bot.handlers.vless_web.get_system_setting", return_value=None),
+        ):
+            headers = {"X-Hwid": "test-client-hwid-long"}
+            resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
+            self.assertEqual(resp.status, 200)
+
+            raw_desc = resp.headers.get("Profile-Description", "")
+            desc_b64 = raw_desc.removeprefix("base64:")
+            desc = base64.b64decode(desc_b64).decode("utf-8")
+            self.assertTrue(desc.endswith("• Устройств: 4 из 5"))
+            self.assertIn(long_name[:40], desc)
 
     async def test_device_metadata_extracted_from_headers(self):
         mock_session = AsyncMock()
@@ -1254,6 +1340,39 @@ class TestConnectionsScreenLayout(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(any(btn.callback_data == "manage_device:10" for btn in amnezia_buttons))
             self.assertTrue(any(btn.callback_data == "add_device" for btn in amnezia_buttons))
             self.assertTrue(any(btn.callback_data == "back_to_connections" for btn in amnezia_buttons))
+
+    async def test_build_connections_screen_white_internet_tariff_isolation(self):
+        from types import SimpleNamespace
+        from bot.handlers.connection.common import _build_connections_screen
+        from database.models import Tariff
+
+        wi_tariff = Tariff(id=99, name="Белый Интернет 50 ГБ", service_type="white_internet", device_limit=1)
+        user = SimpleNamespace(id=1, telegram_id=123, subscription_end=None, current_tariff_id=99)
+        session = AsyncMock()
+
+        mock_server = SimpleNamespace(country_flag="🇳🇱", name="Netherlands")
+        profile = SimpleNamespace(
+            id=10,
+            user_id=1,
+            server_id=1,
+            device_name="Keenetic",
+            provisioning_status="active",
+            server=mock_server,
+            last_connected=None,
+            traffic_down=0,
+            traffic_up=0,
+        )
+        mock_sub = SimpleNamespace(token="sim_token_12345678", uuid="some-uuid")
+
+        with (
+            patch("database.repositories.vless_subscription_repo.get_or_create_subscription", new=AsyncMock(return_value=mock_sub)),
+            patch("database.repositories.vless_subscription_repo.get_active_hwid_count", new=AsyncMock(return_value=1)),
+            patch("bot.handlers.connection.common._get_effective_device_limit", new=AsyncMock(return_value=5)),
+            patch("database.repositories.tariffs_repo.get_tariff_by_id", new=AsyncMock(return_value=wi_tariff)),
+        ):
+            rendered, _builder = await _build_connections_screen(user, session, [profile])
+            self.assertNotIn("Белый Интернет", rendered)
+            self.assertIn("Семейный", rendered)
 
 
 class TestAdminVlessManagement(unittest.IsolatedAsyncioTestCase):
