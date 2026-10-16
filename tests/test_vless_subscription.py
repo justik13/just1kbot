@@ -550,12 +550,14 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             self.assertNotIn("Routing", resp.headers)
             self.assertNotIn("Announce", resp.headers)
 
-            # Profile-Title must indicate standard profile title
+            # Profile-Title must indicate standard profile title and dynamic description
             self.assertIn("Profile-Title", resp.headers)
             raw_title_hdr = resp.headers["Profile-Title"]
             b64_title_val = raw_title_hdr.removeprefix("base64:") if raw_title_hdr.startswith("base64:") else raw_title_hdr
-            profile_title = base64.b64decode(b64_title_val).decode("utf-8")
-            self.assertEqual("✦ Just1k", profile_title)
+            profile_title_lines = base64.b64decode(b64_title_val).decode("utf-8").split("\n")
+            self.assertEqual("✦ Just1k", profile_title_lines[0])
+            self.assertEqual("Тариф: Базовый • Устройств: 1 из 3", profile_title_lines[1])
+            self.assertNotIn("Profile-Description", resp.headers)
 
             # Server link must be present in body
             body = await resp.text()
@@ -594,17 +596,15 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
             self.assertEqual(resp.status, 200)
 
-            # Check Profile-Title
+            # Check Profile-Title (multiline: title + description)
             raw_title = resp.headers.get("Profile-Title", "")
             title_b64 = raw_title.removeprefix("base64:")
-            title = base64.b64decode(title_b64).decode("utf-8")
-            self.assertEqual(title, "✦ MySpecialVPN")
+            title_lines = base64.b64decode(title_b64).decode("utf-8").split("\n")
+            self.assertEqual(title_lines[0], "✦ MySpecialVPN")
+            self.assertEqual(title_lines[1], "High-Speed Encrypted")
 
-            # Check Profile-Description
-            raw_desc = resp.headers.get("Profile-Description", "")
-            desc_b64 = raw_desc.removeprefix("base64:")
-            desc = base64.b64decode(desc_b64).decode("utf-8")
-            self.assertEqual(desc, "High-Speed Encrypted")
+            # Profile-Description header must NOT be present
+            self.assertNotIn("Profile-Description", resp.headers)
 
             # Check Announce
             raw_ann = resp.headers.get("Announce", "")
@@ -647,17 +647,15 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
             self.assertEqual(resp.status, 200)
 
-            # Profile-Title should fall back to default "✦ Just1k"
+            # Profile-Title should fall back to default "✦ Just1k" and multiline description from fallback key
             raw_title = resp.headers.get("Profile-Title", "")
             title_b64 = raw_title.removeprefix("base64:")
-            title = base64.b64decode(title_b64).decode("utf-8")
-            self.assertEqual(title, "✦ Just1k")
+            title_lines = base64.b64decode(title_b64).decode("utf-8").split("\n")
+            self.assertEqual(title_lines[0], "✦ Just1k")
+            self.assertEqual(title_lines[1], "Fallback Description Used")
 
-            # Profile-Description should pick up fallback key
-            raw_desc = resp.headers.get("Profile-Description", "")
-            desc_b64 = raw_desc.removeprefix("base64:")
-            desc = base64.b64decode(desc_b64).decode("utf-8")
-            self.assertEqual(desc, "Fallback Description Used")
+            # Profile-Description header must NOT be present
+            self.assertNotIn("Profile-Description", resp.headers)
 
             # Announce-Url with spaces must NOT be injected into headers
             self.assertNotIn("Announce-Url", resp.headers)
@@ -711,11 +709,15 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
             self.assertEqual(resp.status, 200)
 
-            # Profile-Description check
-            raw_desc = resp.headers.get("Profile-Description", "")
-            desc_b64 = raw_desc.removeprefix("base64:")
-            desc = base64.b64decode(desc_b64).decode("utf-8")
-            self.assertEqual(desc, "Тариф: Супер-Тариф • Устройств: 2 из 5")
+            # Profile-Title check (multiline: title + dynamic description)
+            raw_title = resp.headers.get("Profile-Title", "")
+            title_b64 = raw_title.removeprefix("base64:")
+            title_lines = base64.b64decode(title_b64).decode("utf-8").split("\n")
+            self.assertEqual(title_lines[0], "✦ Just1k")
+            self.assertEqual(title_lines[1], "Тариф: Супер-Тариф • Устройств: 2 из 5")
+
+            # Profile-Description header must NOT be present
+            self.assertNotIn("Profile-Description", resp.headers)
 
             # Announce check
             raw_ann = resp.headers.get("Announce", "")
@@ -756,11 +758,15 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
             self.assertEqual(resp.status, 200)
 
-            # Profile-Description should be default formatted
-            raw_desc = resp.headers.get("Profile-Description", "")
-            desc_b64 = raw_desc.removeprefix("base64:")
-            desc = base64.b64decode(desc_b64).decode("utf-8")
-            self.assertEqual(desc, "Тариф: Базовый • Устройств: 1 из 2")
+            # Profile-Title should contain default dynamic formatted description in line 2
+            raw_title = resp.headers.get("Profile-Title", "")
+            title_b64 = raw_title.removeprefix("base64:")
+            title_lines = base64.b64decode(title_b64).decode("utf-8").split("\n")
+            self.assertEqual(title_lines[0], "✦ Just1k")
+            self.assertEqual(title_lines[1], "Тариф: Базовый • Устройств: 1 из 2")
+
+            # Profile-Description header must NOT be present
+            self.assertNotIn("Profile-Description", resp.headers)
 
     async def test_feed_white_internet_tariff_isolation(self):
         mock_session = AsyncMock()
@@ -798,10 +804,12 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
             self.assertEqual(resp.status, 200)
 
-            raw_desc = resp.headers.get("Profile-Description", "")
-            desc_b64 = raw_desc.removeprefix("base64:")
-            desc = base64.b64decode(desc_b64).decode("utf-8")
-            self.assertEqual(desc, "Тариф: Семейный • Устройств: 3 из 5")
+            raw_title = resp.headers.get("Profile-Title", "")
+            title_b64 = raw_title.removeprefix("base64:")
+            title_lines = base64.b64decode(title_b64).decode("utf-8").split("\n")
+            self.assertEqual(title_lines[0], "✦ Just1k")
+            self.assertEqual(title_lines[1], "Тариф: Семейный • Устройств: 3 из 5")
+            self.assertNotIn("Profile-Description", resp.headers)
 
     async def test_feed_long_tariff_name_truncation(self):
         mock_session = AsyncMock()
@@ -840,11 +848,14 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
             self.assertEqual(resp.status, 200)
 
-            raw_desc = resp.headers.get("Profile-Description", "")
-            desc_b64 = raw_desc.removeprefix("base64:")
-            desc = base64.b64decode(desc_b64).decode("utf-8")
+            raw_title = resp.headers.get("Profile-Title", "")
+            title_b64 = raw_title.removeprefix("base64:")
+            title_lines = base64.b64decode(title_b64).decode("utf-8").split("\n")
+            self.assertEqual(title_lines[0], "✦ Just1k")
+            desc = title_lines[1]
             self.assertTrue(desc.endswith("• Устройств: 4 из 5"))
             self.assertIn(long_name[:40], desc)
+            self.assertNotIn("Profile-Description", resp.headers)
 
     async def test_device_metadata_extracted_from_headers(self):
         mock_session = AsyncMock()
