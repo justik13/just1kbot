@@ -277,6 +277,8 @@ async def process_std_incy_param_input(
     elif field == "desc":
         new_val = None if (is_clear or is_none or not text) else text[:100]
         await set_system_setting(session, "vless_profile_description", new_val, updated_by=message.from_user.id)
+        if is_clear or is_none or not text:
+            await set_system_setting(session, "vless_profile_desc", None, updated_by=message.from_user.id)
     elif field == "announce":
         new_val = None if (is_clear or is_none or not text) else text[:200]
         await set_system_setting(session, "vless_announce", new_val, updated_by=message.from_user.id)
