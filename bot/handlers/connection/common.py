@@ -150,7 +150,7 @@ async def _build_connections_screen(
             if (
                 user_tariff
                 and getattr(user_tariff, "name", None)
-                and getattr(user_tariff, "service_type", "standard") in ("standard", "awg")
+                and (getattr(user_tariff, "service_type", None) or "standard") in ("standard", "awg")
             ):
                 tariff_name = user_tariff.name
         if not tariff_name:

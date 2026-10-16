@@ -671,7 +671,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             yield mock_session
 
         from database.models import Tariff
-        custom_tariff = Tariff(id=5, name="Супер-Тариф", device_limit=5)
+        custom_tariff = Tariff(id=5, name="Супер-Тариф", service_type="standard", device_limit=5)
         user_with_tariff = User(
             id=42,
             telegram_id=999,
@@ -913,6 +913,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
         async def fake_refresh(instance):
             pass
 
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))
         mock_session.refresh = AsyncMock(side_effect=fake_refresh)
 
         with (
@@ -3174,6 +3175,7 @@ class TestVlessFeedDynamicBotUrls(AioHTTPTestCase):
 
     async def test_feed_resolves_bot_username_and_support_urls(self):
         mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))
 
         @asynccontextmanager
         async def fake_session_scope():
