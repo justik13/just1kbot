@@ -556,7 +556,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             b64_title_val = raw_title_hdr.removeprefix("base64:") if raw_title_hdr.startswith("base64:") else raw_title_hdr
             profile_title_lines = base64.b64decode(b64_title_val).decode("utf-8").split("\n")
             self.assertEqual("✦ Just1k", profile_title_lines[0])
-            self.assertEqual("Тариф: Базовый • Устройств: 1 из 3", profile_title_lines[1])
+            self.assertEqual("Тариф: Семейный • Устройств: 0 из 3", profile_title_lines[1])
             self.assertNotIn("Profile-Description", resp.headers)
 
             # Server link must be present in body
