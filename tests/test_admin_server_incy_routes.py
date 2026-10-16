@@ -627,6 +627,7 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("Статус в подписке", call_args)
                 self.assertNotIn("Шлюз РФ", call_args)
                 self.assertNotIn("Имя профиля", call_args)
+                self.assertNotIn("Описание профиля", call_args)
                 self.assertNotIn("Подзаголовок", call_args)
                 self.assertNotIn("Баннер (объявление)", call_args)
                 self.assertNotIn("Ссылка баннера", call_args)

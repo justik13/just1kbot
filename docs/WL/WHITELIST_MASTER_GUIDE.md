@@ -2217,8 +2217,7 @@ HTTP/1.1 200 OK
 Content-Type: text/plain; charset=utf-8
 Cache-Control: no-store, private, no-cache, must-revalidate
 CDN-Cache-Control: no-store
-Profile-Title: base64:0JHQtdC70YvQtSBT0L/QuNGB0LrQuCDQoNCk
-Profile-Description: base64:VkxFU1MgWEhUVFAgWcOhbmRleCBDRE4=
+Profile-Title: base64:0JHQtdC70YvQtSBT0L/QuNGB0LrQuCDQoNCKCldMRVNTIFhIVFRQIFlhbmRleCBQcmVtaXVt
 Subscription-Userinfo: upload=0; download=1073741824; total=107374182400; expire=1788000000
 Profile-Update-Interval: 6
 Support-URL: https://t.me/your_support_bot
@@ -2228,8 +2227,7 @@ Hide-URL: 1
 <Base64-закодированное тело: либо Full JSON, либо vless:// URI>
 ```
 
-- **`Profile-Title`**: Название профиля в списке серверов INCY (поддерживает UTF-8 через `base64:`).
-- **`Profile-Description`**: Описание профиля / подзаголовок (поддерживается спецификацией в `base64:`, однако в проверенных мобильных версиях INCY в карточке подписки не отображается; для вывода текстовых оповещений пользователям в клиенте рекомендуется использовать `Announce`).
+- **`Profile-Title`**: Название и описание профиля в списке серверов INCY (поддерживает многострочный формат через `base64:`: 1-я строка — имя до 25 символов, 2-я строка — описание/лимиты по спецификации INCY `app-management.md`). Отдельный заголовок `Profile-Description` не отображается клиентами INCY и удалён из выдачи.
 - **`Subscription-Userinfo`**: Виджет трафика и срока действия подписки прямо на главном экране INCY (`upload`, `download`, `total`, `expire`).
 - **`Profile-Update-Interval`**: Интервал автообновления серверов в часах (например, каждые 6 или 12 часов).
 - **`Support-URL`**: Ссылка на бота поддержки или справочный контакт.

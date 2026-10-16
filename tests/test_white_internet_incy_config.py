@@ -301,13 +301,13 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
                     )
                     self.assertEqual(resp.status, 200)
 
-                    # Title
+                    # Title (multiline with description per INCY specification)
                     title_b64 = resp.headers.get("Profile-Title", "").split("base64:")[1]
-                    self.assertEqual(base64.b64decode(title_b64).decode("utf-8"), "★ VIP Just1k")
-
-                    # Description
-                    desc_b64 = resp.headers.get("Profile-Description", "").split("base64:")[1]
-                    self.assertEqual(base64.b64decode(desc_b64).decode("utf-8"), "Премиальный доступ")
+                    self.assertEqual(
+                        base64.b64decode(title_b64).decode("utf-8"),
+                        "★ VIP Just1k\nПремиальный доступ",
+                    )
+                    self.assertNotIn("Profile-Description", resp.headers)
 
                     # Announce banner
                     announce_b64 = resp.headers.get("Announce", "").split("base64:")[1]
@@ -392,8 +392,10 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
                         )
                         self.assertEqual(resp.status, 200)
 
-                        desc_b64 = resp.headers.get("Profile-Description", "").split("base64:")[1]
-                        self.assertEqual(base64.b64decode(desc_b64).decode("utf-8"), "Лимит: 5, активно: 2")
+                        title_b64 = resp.headers.get("Profile-Title", "").split("base64:")[1]
+                        decoded_title = base64.b64decode(title_b64).decode("utf-8")
+                        self.assertIn("Лимит: 5, активно: 2", decoded_title)
+                        self.assertNotIn("Profile-Description", resp.headers)
 
                         announce_b64 = resp.headers.get("Announce", "").split("base64:")[1]
                         self.assertEqual(
