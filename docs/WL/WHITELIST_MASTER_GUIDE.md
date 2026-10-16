@@ -2217,7 +2217,7 @@ HTTP/1.1 200 OK
 Content-Type: text/plain; charset=utf-8
 Cache-Control: no-store, private, no-cache, must-revalidate
 CDN-Cache-Control: no-store
-Profile-Title: base64:0JHQtdC70YvQtSBT0L/QuNGB0LrQuCDQoNCKCldMRVNTIFhIVFRQIFlhbmRleCBQcmVtaXVt
+Profile-Title: base64:0JHQtdC70YvQtSDRgdC/0LjRgdC60Lgg0KDQpApWTEVTUyBYSFRUUCBZYW5kZXggUHJlbWl1bQ==
 Subscription-Userinfo: upload=0; download=1073741824; total=107374182400; expire=1788000000
 Profile-Update-Interval: 6
 Support-URL: https://t.me/your_support_bot

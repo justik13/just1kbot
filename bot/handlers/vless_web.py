@@ -451,7 +451,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                 tariff=tariff_clean,
                 devices=total_device_limit,
                 active=total_active_devices,
-            )[:150]
+            )
             full_title = f"{profile_title_clean}\n{formatted_desc}" if formatted_desc else profile_title_clean
         else:
             full_title = profile_title_clean

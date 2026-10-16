@@ -911,6 +911,58 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             self.assertIn(tariff_name, desc)
             self.assertNotIn("Profile-Description", resp.headers)
 
+    async def test_profile_description_with_repeated_tariff_placeholders_preserves_device_counters(self):
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        # Repeating placeholders expanding beyond 150 chars must not truncate active/devices counter at the end
+        repeated_template = "{tariff} - {tariff} - {tariff} - {tariff} | {active} из {devices}"
+        from database.models import Tariff
+
+        tariff_name = "Ультра Безлимит Премиум 2026"
+        tariff = Tariff(id=12, name=tariff_name, service_type="standard", device_limit=5)
+        user_with_tariff = User(
+            id=101,
+            telegram_id=12345678,
+            device_limit=5,
+            current_tariff_id=12,
+            subscription_end=datetime.now(timezone.utc) + timedelta(days=30),
+        )
+
+        async def fake_get_system_setting(session, key, default=None):
+            if key == "vless_profile_description":
+                return repeated_template
+            return default
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=user_with_tariff),
+            patch("database.repositories.tariffs_repo.get_tariff_by_id", return_value=tariff),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=5),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_combined_quota", return_value=(4, 2, 2)),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 2, 3)),
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
+            patch("bot.handlers.vless_web.get_system_setting", side_effect=fake_get_system_setting),
+        ):
+            headers = {"X-Hwid": "test-client-hwid-template-repeated"}
+            resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
+            self.assertEqual(resp.status, 200)
+
+            raw_title = resp.headers.get("Profile-Title", "")
+            title_b64 = raw_title.removeprefix("base64:")
+            title_lines = base64.b64decode(title_b64).decode("utf-8").split("\n")
+            self.assertEqual(title_lines[0], "✦ Just1k")
+            desc = title_lines[1]
+            self.assertGreater(len(desc), 120)
+            self.assertTrue(desc.endswith("4 из 5"))
+            self.assertNotIn("Profile-Description", resp.headers)
+
     async def test_device_metadata_extracted_from_headers(self):
         mock_session = AsyncMock()
         mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))

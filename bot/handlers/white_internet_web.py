@@ -358,7 +358,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             desc_text = str(profile_desc).strip()
             formatted_desc = _safe_format_device_template(
                 desc_text, devices=max_devs, active=active_count
-            )[:150]
+            )
             full_title = f"{profile_title_clean}\n{formatted_desc}" if formatted_desc else profile_title_clean
         else:
             full_title = profile_title_clean
