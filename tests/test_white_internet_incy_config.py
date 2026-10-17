@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from aiohttp import web
 from aiohttp.test_utils import AioHTTPTestCase
 
+from bot import texts
 from bot.handlers.white_internet_web import setup_white_internet_web_routes
 from config.constants import (
     XRAY_PROTOCOL,
@@ -301,11 +302,11 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
                     )
                     self.assertEqual(resp.status, 200)
 
-                    # Title (multiline with description per INCY specification)
+                    # Title (single-line strictly <= 25 characters)
                     title_b64 = resp.headers.get("Profile-Title", "").split("base64:")[1]
                     self.assertEqual(
                         base64.b64decode(title_b64).decode("utf-8"),
-                        "★ VIP Just1k\nПремиальный доступ",
+                        "★ VIP Just1k",
                     )
                     self.assertNotIn("Profile-Description", resp.headers)
 
@@ -394,7 +395,7 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
 
                         title_b64 = resp.headers.get("Profile-Title", "").split("base64:")[1]
                         decoded_title = base64.b64decode(title_b64).decode("utf-8")
-                        self.assertIn("Лимит: 5, активно: 2", decoded_title)
+                        self.assertEqual(decoded_title, texts.WL_PROFILE_NAME)
                         self.assertNotIn("Profile-Description", resp.headers)
 
                         announce_b64 = resp.headers.get("Announce", "").split("base64:")[1]

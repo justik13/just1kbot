@@ -215,15 +215,16 @@ def get_admin_server_relays_keyboard(server_id: int) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def get_admin_std_sub_incy_keyboard() -> InlineKeyboardMarkup:
+def get_admin_std_sub_incy_keyboard(show_devices: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text=texts.ADMIN_SERVER_INCY_BTN_TITLE, callback_data="admin_std_incy_edit:title")
-    builder.button(text=texts.ADMIN_STD_SUB_INCY_BTN_DESC, callback_data="admin_std_incy_edit:desc")
+    dev_status = "🟢 ВКЛ" if show_devices else "⚪️ ВЫКЛ"
+    builder.button(text=f"📊 Счётчик устройств: {dev_status}", callback_data="admin_std_incy_toggle_devs")
     builder.button(text=texts.ADMIN_SERVER_INCY_BTN_ANNOUNCE, callback_data="admin_std_incy_edit:announce")
     builder.button(text=texts.ADMIN_SERVER_INCY_BTN_ANNOUNCE_URL, callback_data="admin_std_incy_edit:announce_url")
     builder.button(text=texts.ADMIN_SERVER_INCY_BTN_RESET, callback_data="admin_std_incy_reset")
     builder.button(text=texts.BTN_BACK, callback_data="admin_cat_std_sub")
-    builder.adjust(2, 2, 1, 1)
+    builder.adjust(1, 1, 2, 1, 1)
     return builder.as_markup()
 
 
@@ -238,10 +239,6 @@ def get_admin_server_incy_keyboard(
         builder.button(
             text=texts.ADMIN_SERVER_INCY_BTN_TITLE,
             callback_data=f"admin_server_incy_edit:{server_id}:title",
-        )
-        builder.button(
-            text=texts.ADMIN_SERVER_INCY_BTN_DESC,
-            callback_data=f"admin_server_incy_edit:{server_id}:desc",
         )
         builder.button(
             text=texts.ADMIN_SERVER_INCY_BTN_ANNOUNCE,
@@ -276,7 +273,7 @@ def get_admin_server_incy_keyboard(
             text=texts.ADMIN_SERVER_BTN_BACK_TO_SERVER,
             callback_data=f"admin_server_card:{server_id}",
         )
-        builder.adjust(2, 2, 2, 1, 1, 1, 1)
+        builder.adjust(1, 2, 2, 1, 1, 1, 1)
     else:
         builder.button(
             text=texts.ADMIN_SERVER_INCY_BTN_NODE_NAME,

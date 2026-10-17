@@ -24,7 +24,6 @@ from bot.keyboards.admin.servers import (
 from bot.states import AdminStates
 from config.constants import (
     WHITE_INTERNET_CHANNEL_URL,
-    WHITE_INTERNET_PROFILE_DESCRIPTION,
     WHITE_INTERNET_PROFILE_TITLE,
     WHITE_INTERNET_SUPPORT_URL,
 )
@@ -59,7 +58,6 @@ def _get_server_incy_details(server: Any) -> dict[str, Any]:
         else os.getenv("VLESS_PROFILE_TITLE", "✦ Just1k")
     )
     title = extra.get("profile_title") or default_title
-    description = extra.get("profile_description") or (WHITE_INTERNET_PROFILE_DESCRIPTION if is_origin else None)
     announce = extra.get("announce")
     announce_url = extra.get("announce_url")
 
@@ -85,7 +83,6 @@ def _get_server_incy_details(server: Any) -> dict[str, Any]:
 
     return {
         "title": title or texts.WL_PROFILE_NAME,
-        "description": description or texts.ADMIN_SERVER_INCY_VALUE_NONE,
         "announce": announce or texts.ADMIN_SERVER_INCY_VALUE_NONE,
         "announce_url": announce_url or texts.ADMIN_SERVER_INCY_VALUE_NONE,
         "origin_name": origin_name,
@@ -99,22 +96,23 @@ def _get_server_incy_details(server: Any) -> dict[str, Any]:
 
 async def _build_std_sub_incy_card(session: AsyncSession) -> tuple[str, Any]:
     title = await get_system_setting(session, "vless_profile_title", os.getenv("VLESS_PROFILE_TITLE", "✦ Just1k"))
-    desc = await get_system_setting(session, "vless_profile_description", None)
-    if desc is None:
-        desc = await get_system_setting(session, "vless_profile_desc", None)
     announce = await get_system_setting(session, "vless_announce", None)
     announce_url = await get_system_setting(session, "vless_announce_url", None)
 
-    default_desc_display = texts.ADMIN_SERVER_INCY_VALUE_DEFAULT.format(
-        value=texts.DEFAULT_VLESS_PROFILE_DESCRIPTION
-    )
+    show_devs_raw = await get_system_setting(session, "vless_profile_show_devices", False)
+    if isinstance(show_devs_raw, str):
+        show_devices = show_devs_raw.lower() in ("1", "true", "yes", "on")
+    else:
+        show_devices = bool(show_devs_raw)
+
+    show_devs_status = texts.ADMIN_STD_SUB_INCY_STATUS_ON if show_devices else texts.ADMIN_STD_SUB_INCY_STATUS_OFF
     card_text = texts.ADMIN_STD_SUB_INCY_CONFIG_CARD.format(
         title=safe(title or "✦ Just1k"),
-        description=safe(desc or default_desc_display),
+        show_devices_status=show_devs_status,
         announce=safe(announce or texts.ADMIN_SERVER_INCY_VALUE_NONE),
         announce_url=safe(announce_url or texts.ADMIN_SERVER_INCY_VALUE_NONE),
     )
-    keyboard = get_admin_std_sub_incy_keyboard()
+    keyboard = get_admin_std_sub_incy_keyboard(show_devices=show_devices)
     return card_text, keyboard
 
 
@@ -127,7 +125,6 @@ def _build_server_incy_card(server: Any, details: dict[str, Any]) -> tuple[str, 
             flag=flag,
             name=safe(server.name),
             title=safe(details["title"]),
-            description=safe(details["description"]),
             announce=safe(details["announce"]),
             announce_url=safe(details["announce_url"]),
             origin_name=safe(details["origin_name"]),
@@ -187,15 +184,11 @@ async def start_edit_std_incy_param(
 
     field = callback.data.split(":")[1]
     title = await get_system_setting(session, "vless_profile_title", os.getenv("VLESS_PROFILE_TITLE", "✦ Just1k"))
-    desc = await get_system_setting(session, "vless_profile_description", None)
-    if desc is None:
-        desc = await get_system_setting(session, "vless_profile_desc", None)
     announce = await get_system_setting(session, "vless_announce", None)
     announce_url = await get_system_setting(session, "vless_announce_url", None)
 
     prompt_map = {
         "title": (texts.ADMIN_SERVER_INCY_PROMPT_TITLE, title or "✦ Just1k"),
-        "desc": (texts.ADMIN_STD_SUB_INCY_PROMPT_DESC, desc or texts.ADMIN_SERVER_INCY_VALUE_NONE),
         "announce": (texts.ADMIN_SERVER_INCY_PROMPT_ANNOUNCE, announce or texts.ADMIN_SERVER_INCY_VALUE_NONE),
         "announce_url": (texts.ADMIN_SERVER_INCY_PROMPT_ANNOUNCE_URL, announce_url or texts.ADMIN_SERVER_INCY_VALUE_NONE),
     }
@@ -274,11 +267,6 @@ async def process_std_incy_param_input(
         else:
             new_val = text[:25]
         await set_system_setting(session, "vless_profile_title", new_val, updated_by=message.from_user.id)
-    elif field == "desc":
-        new_val = None if (is_clear or is_none or not text) else text[:100]
-        await set_system_setting(session, "vless_profile_description", new_val, updated_by=message.from_user.id)
-        if is_clear or is_none or not text:
-            await set_system_setting(session, "vless_profile_desc", None, updated_by=message.from_user.id)
     elif field == "announce":
         new_val = None if (is_clear or is_none or not text) else text[:200]
         await set_system_setting(session, "vless_announce", new_val, updated_by=message.from_user.id)
@@ -314,6 +302,41 @@ async def process_std_incy_param_input(
     )
 
 
+@router.callback_query(F.data == "admin_std_incy_toggle_devs")
+async def toggle_std_sub_incy_devices(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    await state.clear()
+    current_raw = await get_system_setting(session, "vless_profile_show_devices", False)
+    if isinstance(current_raw, str):
+        current_bool = current_raw.lower() in ("1", "true", "yes", "on")
+    else:
+        current_bool = bool(current_raw)
+    new_val = not current_bool
+
+    await set_system_setting(
+        session, "vless_profile_show_devices", str(new_val).lower(), updated_by=callback.from_user.id
+    )
+    await session.commit()
+
+    card_text, reply_markup = await _build_std_sub_incy_card(session)
+    try:
+        await callback.message.edit_text(
+            card_text,
+            reply_markup=reply_markup,
+            parse_mode="HTML",
+        )
+    except TelegramBadRequest as e:
+        logger.debug(f"toggle_std_sub_incy_devices edit_text failed: {e}")
+    await callback.answer()
+
+
 @router.callback_query(F.data == "admin_std_incy_reset")
 async def reset_std_sub_incy_to_defaults(
     callback: CallbackQuery,
@@ -329,6 +352,7 @@ async def reset_std_sub_incy_to_defaults(
     await set_system_setting(session, "vless_profile_title", default_title, updated_by=callback.from_user.id)
     await set_system_setting(session, "vless_profile_description", None, updated_by=callback.from_user.id)
     await set_system_setting(session, "vless_profile_desc", None, updated_by=callback.from_user.id)
+    await set_system_setting(session, "vless_profile_show_devices", "false", updated_by=callback.from_user.id)
     await set_system_setting(session, "vless_announce", None, updated_by=callback.from_user.id)
     await set_system_setting(session, "vless_announce_url", None, updated_by=callback.from_user.id)
     await session.commit()
@@ -425,7 +449,6 @@ async def start_edit_server_incy_param(
     )
     prompt_map = {
         "title": (texts.ADMIN_SERVER_INCY_PROMPT_TITLE, details["title"]),
-        "desc": (texts.ADMIN_SERVER_INCY_PROMPT_DESC, details["description"]),
         "announce": (texts.ADMIN_SERVER_INCY_PROMPT_ANNOUNCE, details["announce"]),
         "announce_url": (texts.ADMIN_SERVER_INCY_PROMPT_ANNOUNCE_URL, details["announce_url"]),
         "origin_name": (name_prompt, details["origin_name"]),
@@ -517,7 +540,6 @@ async def process_server_incy_param_input(
     extra = dict(server.extra_data or {})
     param_key_map = {
         "title": "profile_title",
-        "desc": "profile_description",
         "announce": "announce",
         "announce_url": "announce_url",
         "origin_name": "origin_tag",
@@ -536,8 +558,6 @@ async def process_server_incy_param_input(
                 val = val[:25]
             elif param in ("origin_name", "origin_badge"):
                 val = val[:30]
-            elif param == "desc":
-                val = val[:100]
             elif param == "announce":
                 val = val[:200]
             elif param == "announce_url":

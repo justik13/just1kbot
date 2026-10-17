@@ -296,6 +296,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                 "Hide-Url": "1",
                 "No-Limit-Enabled": "1",
                 "Support-Url": support_url,
+                "Announce-Url": channel_url,
                 "Profile-Web-Page-Url": channel_url,
                 "Channel-Url": channel_url,
             }
@@ -368,6 +369,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                 "Hide-Url": "1",
                 "No-Limit-Enabled": "1",
                 "Support-Url": support_url,
+                "Announce-Url": channel_url,
                 "Profile-Web-Page-Url": channel_url,
                 "Channel-Url": channel_url,
             })
@@ -419,12 +421,6 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         # Strip decorative emoji prefixes and truncate cleanly to preserve following quota text
         tariff_clean = re.sub(r"^[^\w\u0400-\u04ffa-zA-Z0-9]+", "", str(tariff_name)).strip()[:40]
 
-        profile_desc = await get_system_setting(session, "vless_profile_description", None)
-        if not isinstance(profile_desc, str) or not profile_desc.strip():
-            profile_desc = await get_system_setting(session, "vless_profile_desc", None)
-        if not isinstance(profile_desc, str) or not profile_desc.strip():
-            profile_desc = texts.DEFAULT_VLESS_PROFILE_DESCRIPTION
-
         announce = await get_system_setting(session, "vless_announce", None)
         if not isinstance(announce, str) or not announce.strip():
             announce = None
@@ -444,17 +440,20 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         support_url = _resolve_support_url(first_extra, default_bot_url)
         channel_url = _resolve_channel_url(first_extra, default_bot_url)
 
-        profile_title_clean = str(profile_title).strip().replace("\r\n", " ").replace("\n", " ")[:25]
-        if profile_desc:
-            formatted_desc = _safe_format_vless_template(
-                str(profile_desc).strip(),
-                tariff=tariff_clean,
-                devices=total_device_limit,
-                active=total_active_devices,
-            )
-            full_title = f"{profile_title_clean}\n{formatted_desc}" if formatted_desc else profile_title_clean
+        show_devices_setting = await get_system_setting(session, "vless_profile_show_devices", False)
+        if isinstance(show_devices_setting, str):
+            show_devices = show_devices_setting.lower() in ("1", "true", "yes", "on")
         else:
-            full_title = profile_title_clean
+            show_devices = bool(show_devices_setting)
+
+        profile_title_base = str(profile_title).strip().replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
+        if show_devices:
+            suffix = f" [{total_active_devices}/{total_device_limit}]"
+            max_base_len = max(0, 25 - len(suffix))
+            clean_base = profile_title_base[:max_base_len].rstrip()
+            full_title = f"{clean_base}{suffix}"[:25]
+        else:
+            full_title = profile_title_base[:25]
 
         b64_title = base64.b64encode(full_title.encode("utf-8")).decode("ascii")
         response_headers = {
@@ -483,8 +482,9 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             )[:200]
             b64_ann = base64.b64encode(formatted_ann.encode("utf-8")).decode("ascii")
             response_headers["Announce"] = f"base64:{b64_ann}"
-        if announce_url:
-            response_headers["Announce-Url"] = announce_url
+        effective_announce_url = announce_url or channel_url
+        if effective_announce_url:
+            response_headers["Announce-Url"] = effective_announce_url
         return web.Response(status=200, text=b64_payload, headers=response_headers)
 
 
