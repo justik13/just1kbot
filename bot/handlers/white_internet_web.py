@@ -28,7 +28,7 @@ from config.constants import (
 )
 from config.enums import ServerHealthState, WhiteInternetProvisioningStatus, WhiteInternetStatus
 from database.connection import session_scope
-from database.models import Server, Tariff
+from database.models import Server
 from database.repositories import users_repo, white_internet_repo
 from database.repositories.system_settings_repo import get_system_setting
 from services.white_internet_service import WhiteInternetService
@@ -55,16 +55,14 @@ def _safe_format_device_template(
     *,
     devices: int,
     active: int,
-    tariff: str = "",
 ) -> str:
-    """Safely format {devices}, {device_limit}, {limit}, {active}, {active_devices}, {tariff} placeholders."""
+    """Safely format {devices}, {device_limit}, {limit}, {active}, {active_devices} placeholders."""
     mapping = {
         "devices": str(devices),
         "device_limit": str(devices),
         "limit": str(devices),
         "active": str(active),
         "active_devices": str(active),
-        "tariff": str(tariff),
     }
     pattern = re.compile(r"\{(" + "|".join(re.escape(k) for k in mapping.keys()) + r")\}")
     return pattern.sub(lambda m: mapping.get(m.group(1), m.group(0)), template)
@@ -268,7 +266,22 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         ):
             return web.Response(status=403, text="Forbidden", headers=common_headers)
 
+        server: Server | None = None
+        if getattr(sub, "origin_node_id", None):
+            server = await session.scalar(select(Server).where(Server.id == sub.origin_node_id))
+        extra = server.extra_data if server and isinstance(server.extra_data, dict) else {}
+        channel_url, support_url, effective_announce_url, bot_user = await _resolve_urls_and_bot(request, extra)
+
+        landing_headers = {
+            **common_headers,
+            "Content-Type": "text/html; charset=utf-8",
+            "Content-Security-Policy": "default-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:;",
+        }
+
         if sub.status == WhiteInternetStatus.PENDING:
+            if _is_browser_request(request):
+                html_body = _render_white_internet_landing_html(bot_username=bot_user, is_active=False)
+                return web.Response(status=200, text=html_body, headers=landing_headers)
             headers = dict(common_headers)
             headers["Retry-After"] = "5"
             return web.Response(status=503, text=texts.WL_WEB_PENDING, headers=headers)
@@ -315,20 +328,25 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             else 0
         )
 
-        server: Server | None = None
-        if getattr(sub, "origin_node_id", None):
-            server = await session.scalar(select(Server).where(Server.id == sub.origin_node_id))
-        extra = server.extra_data if server and isinstance(server.extra_data, dict) else {}
-        channel_url, support_url, effective_announce_url, bot_user = await _resolve_urls_and_bot(request, extra)
-
-        landing_headers = {
-            **common_headers,
-            "Content-Type": "text/html; charset=utf-8",
-            "Content-Security-Policy": "default-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:;",
-        }
+        if sub.status == WhiteInternetStatus.DISABLED:
+            if _is_browser_request(request):
+                html_body = _render_white_internet_landing_html(bot_username=bot_user, is_active=False)
+                return web.Response(status=200, text=html_body, headers=landing_headers)
+            return _build_service_notice_response(
+                title_text=texts.WL_FEED_DISABLED_TITLE,
+                notice_text=texts.WL_FEED_DISABLED_NOTICE.format(bot_username=bot_user),
+                common_headers=common_headers,
+                channel_url=channel_url,
+                support_url=support_url,
+                effective_announce_url=effective_announce_url,
+                upload_bytes=upload_bytes,
+                download_bytes=download_bytes,
+                total_quota=total_quota,
+                expire_ts=expire_ts,
+            )
 
         if (
-            sub.status in (WhiteInternetStatus.EXPIRED, WhiteInternetStatus.DISABLED)
+            sub.status == WhiteInternetStatus.EXPIRED
             or (sub.expires_at and sub.expires_at <= now)
         ):
             if _is_browser_request(request):
@@ -363,6 +381,22 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                 total_quota=total_quota,
                 expire_ts=expire_ts,
             )
+
+        # HWID (Device ID) enforcement: browser gets 1-click landing, app must provide HWID
+        hwid = (
+            request.headers.get("X-Hwid")
+            or request.headers.get("X-Device-Hwid")
+            or request.headers.get("X-Device-Id")
+            or ""
+        ).strip()
+        if hwid and not HWID_PATTERN.match(hwid):
+            headers = dict(common_headers)
+            headers["x-hwid-required"] = "true"
+            return web.Response(status=400, text="Invalid HWID format", headers=headers)
+
+        if not hwid and _is_browser_request(request):
+            html_body = _render_white_internet_landing_html(bot_username=bot_user, is_active=True)
+            return web.Response(status=200, text=html_body, headers=landing_headers)
 
         server_proto = getattr(server, "protocol", None)
         if not server_proto and server:
@@ -425,26 +459,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         if not isinstance(relays, list):
             relays = None
 
-        # HWID (Device ID) enforcement: browser gets 1-click landing, app must provide HWID
-        hwid = (
-            request.headers.get("X-Hwid")
-            or request.headers.get("X-HWID")
-            or request.headers.get("X-Device-Hwid")
-            or request.headers.get("X-Device-HWID")
-            or request.headers.get("X-Device-Id")
-            or request.headers.get("X-Device-ID")
-            or ""
-        ).strip()
-        if hwid and not HWID_PATTERN.match(hwid):
-            headers = dict(common_headers)
-            headers["x-hwid-required"] = "true"
-            return web.Response(status=400, text="Invalid HWID format", headers=headers)
-
         if not hwid:
-            if _is_browser_request(request):
-                html_body = _render_white_internet_landing_html(bot_username=bot_user, is_active=True)
-                return web.Response(status=200, text=html_body, headers=landing_headers)
-
             headers = dict(common_headers)
             headers["x-hwid-required"] = "true"
             return web.Response(status=403, text=texts.WL_WEB_HWID_REQUIRED, headers=headers)
@@ -464,7 +479,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                 "Device-Limit": str(max_devs),
                 "Device-Active-Count": str(active_count),
                 "x-hwid-max-devices-reached": "true",
-                "x-hwid-limit": str(max_devs),
+                "x-hwid-limit": "true",
                 "x-hwid-active": str(active_count),
             }
             return _build_service_notice_response(
@@ -570,16 +585,6 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             }
         )
 
-        tariff_name = None
-        user_tariff_id = getattr(user, "current_tariff_id", None) or getattr(sub, "tariff_id", None)
-        if user_tariff_id:
-            t_obj = await session.scalar(select(Tariff).where(Tariff.id == user_tariff_id))
-            if t_obj and getattr(t_obj, "name", None):
-                tariff_name = t_obj.name
-        if not tariff_name:
-            tariff_name = texts.WL_DEFAULT_TARIFF_NAME
-        tariff_clean = re.sub(r"^[^\w\u0400-\u04ffa-zA-Z0-9]+", "", str(tariff_name)).strip()[:40]
-
         announce = extra.get("announce")
         if not announce and not is_server_available:
             announce = texts.WL_ANNOUNCE_MAINTENANCE
@@ -587,7 +592,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         if announce and str(announce).strip():
             clean_announce = str(announce).strip()
             clean_announce = _safe_format_device_template(
-                clean_announce, devices=max_devs, active=active_count, tariff=tariff_clean
+                clean_announce, devices=max_devs, active=active_count
             )[:200]
             announce_b64 = base64.b64encode(clean_announce.encode("utf-8")).decode("ascii")
             response_headers["Announce"] = f"base64:{announce_b64}"

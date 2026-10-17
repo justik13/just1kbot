@@ -397,7 +397,7 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
             else ""
         )
         sub_url_block = (
-            texts.WL_OVERVIEW_SUB_URL_BLOCK.format(sub_url=sub_url)
+            texts.WL_OVERVIEW_SUB_URL_BLOCK.format(sub_url=html.escape(sub_url))
             if sub_url
             else ""
         )

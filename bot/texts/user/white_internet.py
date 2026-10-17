@@ -227,16 +227,15 @@ WL_TRAFFIC_90P_TRIAL_ALERT = (
 
 WL_WEB_TOO_MANY_REQUESTS = "Слишком много запросов. Пожалуйста, подождите минуту."
 WL_WEB_PENDING = "Шлюз настраивается, повторите через несколько секунд."
-WL_WEB_EXHAUSTED = "Лимит трафика исчерпан. Пополните баланс в боте."
-WL_WEB_EXPIRED = "Срок действия подписки истек или доступ приостановлен."
 WL_WEB_UNSYNCED = "Шлюз синхронизируется, повторите через несколько секунд."
 WL_WEB_CDN_UNCONFIGURED = "Сетевой шлюз временно недоступен. Обратитесь к администратору."
-WL_WEB_DEVICE_LIMIT_EXCEEDED = "Лимит устройств ({active}/{limit}). Управление: @{bot_username}"
 WL_WEB_HWID_REQUIRED = "Требуется HWID устройства. Включите отправку HWID в приложении."
 WL_ANNOUNCE_MAINTENANCE = "⚠️ Сервер на техническом обслуживании. Связь скоро восстановится."
 
 WL_FEED_EXHAUSTED_TITLE = "⚠️ Трафик исчерпан"
 WL_FEED_EXHAUSTED_NOTICE = "⚠️ Трафик исчерпан. Докупите пакет в @{bot_username}"
+WL_FEED_DISABLED_TITLE = "🚫 Доступ отключен"
+WL_FEED_DISABLED_NOTICE = "🚫 Доступ отключен администратором. Обратитесь в поддержку: @{bot_username}"
 WL_FEED_DEVICE_LIMIT_NOTICE = "⚠️ Превышен лимит устройств ({active}/{limit}). Управление в @{bot_username}"
 
 

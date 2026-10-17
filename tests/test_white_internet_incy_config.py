@@ -19,18 +19,13 @@ from config.constants import (
     XRAY_PROTOCOL,
 )
 from config.enums import ServerHealthState, WhiteInternetStatus
-from database.models import Server, Tariff, WhiteInternetSubscription
+from database.models import Server, WhiteInternetSubscription
 from services.white_internet_service import WhiteInternetService
 from utils.datetime_helpers import now_utc
 
 
 class TestWhiteInternetIncyConfig(unittest.TestCase):
     """Tests for VLESS tag formatting and ?serverDescription parameter generation."""
-
-    def test_safe_format_device_template_with_tariff(self):
-        tmpl = "Тариф: {tariff}, Устройств: {active}/{devices}"
-        res = _safe_format_device_template(tmpl, devices=3, active=1, tariff="Базовый")
-        self.assertEqual(res, "Тариф: Базовый, Устройств: 1/3")
 
     def test_safe_format_device_template_without_tariff(self):
         tmpl = "Лимит: {limit}, активно: {active_devices}"
@@ -599,15 +594,15 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
                     self.assertEqual(len(decoded_title), 25)
                     self.assertEqual(decoded_title, "A" * 25)
 
-    async def test_feed_headers_tariff_placeholder_and_show_devices_toggle(self):
+    async def test_feed_headers_device_placeholders_and_show_devices_toggle(self):
         now = now_utc()
         from database.models import User
-        test_user = User(id=10, telegram_id=777, is_banned=False, is_deleted=False, current_tariff_id=1)
+        test_user = User(id=10, telegram_id=777, is_banned=False, is_deleted=False)
         sub = WhiteInternetSubscription(
             id=45,
             user_id=10,
             origin_node_id=1,
-            token="valid-token-tariff-test-1234567890abcdef",
+            token="valid-token-dev-test-1234567890abcdef",
             uuid="a2b9d4e1-73c5-4812-b964-f3e7b85a1902",
             status=WhiteInternetStatus.ACTIVE,
             started_at=now,
@@ -632,10 +627,9 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
             is_active=True,
             health_state=ServerHealthState.ONLINE,
             extra_data={
-                "announce": "Тариф: {tariff} | Активно: {active}/{limit}",
+                "announce": "Устройства: {active}/{limit} (всего {devices})",
             },
         )
-        tariff = Tariff(id=1, name="⭐ Премиум", price_rub=500)
 
         mock_session = AsyncMock()
 
@@ -643,8 +637,6 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
             stmt_str = str(stmt).lower()
             if "server" in stmt_str:
                 return server
-            if "tariff" in stmt_str:
-                return tariff
             return None
 
         mock_session.scalar.side_effect = fake_scalar
@@ -663,7 +655,7 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
                             with patch("bot.handlers.white_internet_web.get_system_setting", return_value=True):
                                 resp = await self.client.get(
                                     f"/sub/wl/{sub.token}",
-                                    headers={"X-Hwid": "dev-tariff-1"},
+                                    headers={"X-Hwid": "dev-header-1"},
                                 )
                                 self.assertEqual(resp.status, 200)
                                 self.assertEqual(resp.headers.get("Device-Limit"), "2")
@@ -676,8 +668,7 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
 
                                 announce_b64 = resp.headers.get("Announce", "").split("base64:")[1]
                                 decoded_ann = base64.b64decode(announce_b64).decode("utf-8")
-                                self.assertIn("Тариф: Премиум", decoded_ann)
-                                self.assertIn("Активно: 1/2", decoded_ann)
+                                self.assertIn("Устройства: 1/2 (всего 2)", decoded_ann)
 
     async def test_web_feed_error_headers_have_cdn_cache_control(self):
         # 1. Invalid short token (404)

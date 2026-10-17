@@ -74,6 +74,27 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                 self.assertEqual(resp.status, 503)
                 self.assertEqual(resp.headers.get("Retry-After"), "5")
 
+    async def test_pending_status_browser_returns_landing_html(self):
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.status = WhiteInternetStatus.PENDING
+
+        mock_session = AsyncMock()
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+            with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                resp = await self.client.get(
+                    "/sub/wl/pending-token-1234567890abcdef",
+                    headers={"Accept": "text/html,application/xhtml+xml"},
+                )
+                self.assertEqual(resp.status, 200)
+                self.assertIn("text/html", resp.headers.get("Content-Type", ""))
+                html_text = await resp.text()
+                self.assertIn("Перейти в бота", html_text)
+                self.assertIn("https://t.me/", html_text)
+
     async def test_exhausted_status_returns_200_with_notice(self):
         sub = MagicMock(spec=WhiteInternetSubscription)
         sub.id = 1
@@ -184,6 +205,60 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                 self.assertIn("Перейти в бота", html_text)
                 self.assertIn("https://t.me/", html_text)
 
+    async def test_disabled_status_returns_200_with_notice(self):
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 1
+        sub.origin_node_id = 1
+        sub.status = WhiteInternetStatus.DISABLED
+        sub.traffic_uplink_bytes = 1000
+        sub.traffic_downlink_bytes = 2000
+        sub.traffic_limit_bytes = 53687091200
+        sub.expires_at = datetime.now(timezone.utc) + timedelta(days=10)
+
+        mock_session = AsyncMock()
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+            with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                resp = await self.client.get("/sub/wl/disabled-token-1234567890abcdef")
+                self.assertEqual(resp.status, 200)
+                self.assertIn("Channel-Url", resp.headers)
+                self.assertIn("Support-Url", resp.headers)
+                self.assertIn("Profile-Title", resp.headers)
+                body = await resp.text()
+                decoded = base64.b64decode(body).decode("utf-8")
+                self.assertTrue(decoded.startswith("vless://00000000-0000-0000-0000-000000000000@127.0.0.1:443"))
+                self.assertIn("Доступ отключен", unquote(decoded))
+
+    async def test_disabled_status_browser_returns_landing_html(self):
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 1
+        sub.origin_node_id = 1
+        sub.status = WhiteInternetStatus.DISABLED
+        sub.traffic_uplink_bytes = 1000
+        sub.traffic_downlink_bytes = 2000
+        sub.traffic_limit_bytes = 53687091200
+        sub.expires_at = datetime.now(timezone.utc) + timedelta(days=10)
+
+        mock_session = AsyncMock()
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+            with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                resp = await self.client.get(
+                    "/sub/wl/disabled-token-1234567890abcdef",
+                    headers={"Accept": "text/html,application/xhtml+xml"},
+                )
+                self.assertEqual(resp.status, 200)
+                self.assertIn("text/html", resp.headers.get("Content-Type", ""))
+                html_text = await resp.text()
+                self.assertIn("Перейти в бота", html_text)
+                self.assertIn("https://t.me/", html_text)
+
     async def test_runtime_out_of_sync_returns_503(self):
         now = datetime.now(timezone.utc)
         sub = MagicMock(spec=WhiteInternetSubscription)
@@ -220,6 +295,36 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     resp = await self.client.get("/sub/wl/unsynced-token-1234567890abcdef")
                     self.assertEqual(resp.status, 503)
                     self.assertEqual(resp.headers.get("Retry-After"), "5")
+
+    async def test_browser_returns_active_landing_when_server_unsynced(self):
+        now = datetime.now(timezone.utc)
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 1
+        sub.user_id = 10
+        sub.origin_node_id = 1
+        sub.status = WhiteInternetStatus.ACTIVE
+        sub.expires_at = now + timedelta(days=20)
+        sub.desired_version = 2
+        sub.actual_version = 1  # Not yet synced!
+
+        mock_user = MagicMock(is_banned=False, is_deleted=False)
+        mock_session = AsyncMock()
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+            with patch("database.repositories.users_repo.get_user_by_id", new_callable=AsyncMock, return_value=mock_user):
+                with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                    resp = await self.client.get(
+                        "/sub/wl/unsynced-token-1234567890abcdef",
+                        headers={"Accept": "text/html,application/xhtml+xml"},
+                    )
+                    self.assertEqual(resp.status, 200)
+                    self.assertIn("text/html", resp.headers.get("Content-Type", ""))
+                    html_text = await resp.text()
+                    self.assertIn("Подключить в INCY", html_text)
 
     async def test_epoch_mismatch_returns_503(self):
         now = datetime.now(timezone.utc)

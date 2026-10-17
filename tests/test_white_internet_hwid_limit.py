@@ -305,7 +305,7 @@ class TestWhiteInternetWebHwidEnforcement(AioHTTPTestCase):
                             self.assertEqual(resp.headers.get("Device-Limit"), "2")
                             self.assertEqual(resp.headers.get("Device-Active-Count"), "2")
                             self.assertEqual(resp.headers.get("x-hwid-max-devices-reached"), "true")
-                            self.assertEqual(resp.headers.get("x-hwid-limit"), "2")
+                            self.assertEqual(resp.headers.get("x-hwid-limit"), "true")
                             self.assertEqual(resp.headers.get("x-hwid-active"), "2")
                             self.assertIn("Channel-Url", resp.headers)
                             self.assertIn("Support-Url", resp.headers)
