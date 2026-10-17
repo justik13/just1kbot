@@ -167,7 +167,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             self.assertEqual(resp.status, 200)
             body = await resp.text()
             decoded = base64.b64decode(body).decode("utf-8")
-            self.assertIn("Подписка закончилась", decoded)
+            self.assertIn(urllib.parse.quote("Подписка закончилась"), decoded)
             self.assertIn("127.0.0.1:443", decoded)
             title_b64 = resp.headers.get("Profile-Title", "").replace("base64:", "")
             title = base64.b64decode(title_b64).decode("utf-8")
@@ -238,7 +238,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             body = await resp.text()
             decoded = base64.b64decode(body).decode("utf-8")
             self.assertIn("127.0.0.1:443", decoded)
-            self.assertIn("Превышен лимит устройств", decoded)
+            self.assertIn(urllib.parse.quote("Превышен лимит устройств"), decoded)
 
     async def test_valid_request_returns_200_base64_feed(self):
         mock_session = AsyncMock()
@@ -401,7 +401,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             self.assertEqual(resp.status, 200)
             body = await resp.text()
             decoded = base64.b64decode(body).decode("utf-8")
-            self.assertIn("Подписка закончилась", decoded)
+            self.assertIn(urllib.parse.quote("Подписка закончилась"), decoded)
             self.assertIn("127.0.0.1:443", decoded)
 
     async def test_grace_period_user_returns_200(self):

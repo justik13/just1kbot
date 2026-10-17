@@ -8,6 +8,7 @@ import logging
 import os
 from pathlib import Path
 import re
+import urllib.parse
 
 from aiohttp import web
 
@@ -280,9 +281,10 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                 return web.Response(status=200, text=html_body, headers=landing_headers)
 
             notice_text = texts.VLESS_FEED_EXPIRED_NOTICE.format(bot_username=bot_username)
+            quoted_notice = urllib.parse.quote(notice_text)
             notice_link = (
                 f"vless://00000000-0000-0000-0000-000000000000@127.0.0.1:443"
-                f"?encryption=none&security=none#{notice_text}"
+                f"?encryption=none&security=none#{quoted_notice}"
             )
             b64_payload = base64.b64encode(notice_link.encode("utf-8")).decode("utf-8")
             b64_title = base64.b64encode(texts.VLESS_FEED_EXPIRED_TITLE.encode("utf-8")).decode("utf-8")
@@ -347,9 +349,10 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                 limit=effective_vless_limit,
                 bot_username=bot_username,
             )
+            quoted_limit = urllib.parse.quote(limit_msg)
             notice_link = (
                 f"vless://00000000-0000-0000-0000-000000000000@127.0.0.1:443"
-                f"?encryption=none&security=none#{limit_msg}"
+                f"?encryption=none&security=none#{quoted_limit}"
             )
             b64_payload = base64.b64encode(notice_link.encode("utf-8")).decode("utf-8")
             b64_title = base64.b64encode(texts.VLESS_FEED_DEVICE_LIMIT_TITLE.encode("utf-8")).decode("utf-8")
