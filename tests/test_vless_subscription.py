@@ -550,12 +550,14 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             self.assertNotIn("Routing", resp.headers)
             self.assertNotIn("Announce", resp.headers)
 
-            # Profile-Title must indicate standard profile title
+            # Profile-Title must indicate standard profile title and dynamic description
             self.assertIn("Profile-Title", resp.headers)
             raw_title_hdr = resp.headers["Profile-Title"]
             b64_title_val = raw_title_hdr.removeprefix("base64:") if raw_title_hdr.startswith("base64:") else raw_title_hdr
-            profile_title = base64.b64decode(b64_title_val).decode("utf-8")
-            self.assertEqual("✦ Just1k", profile_title)
+            profile_title_lines = base64.b64decode(b64_title_val).decode("utf-8").split("\n")
+            self.assertEqual("✦ Just1k", profile_title_lines[0])
+            self.assertEqual("Тариф: Семейный • Устройств: 0 из 3", profile_title_lines[1])
+            self.assertNotIn("Profile-Description", resp.headers)
 
             # Server link must be present in body
             body = await resp.text()
@@ -594,17 +596,15 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
             self.assertEqual(resp.status, 200)
 
-            # Check Profile-Title
+            # Check Profile-Title (multiline: title + description)
             raw_title = resp.headers.get("Profile-Title", "")
             title_b64 = raw_title.removeprefix("base64:")
-            title = base64.b64decode(title_b64).decode("utf-8")
-            self.assertEqual(title, "✦ MySpecialVPN")
+            title_lines = base64.b64decode(title_b64).decode("utf-8").split("\n")
+            self.assertEqual(title_lines[0], "✦ MySpecialVPN")
+            self.assertEqual(title_lines[1], "High-Speed Encrypted")
 
-            # Check Profile-Description
-            raw_desc = resp.headers.get("Profile-Description", "")
-            desc_b64 = raw_desc.removeprefix("base64:")
-            desc = base64.b64decode(desc_b64).decode("utf-8")
-            self.assertEqual(desc, "High-Speed Encrypted")
+            # Profile-Description header must NOT be present
+            self.assertNotIn("Profile-Description", resp.headers)
 
             # Check Announce
             raw_ann = resp.headers.get("Announce", "")
@@ -647,17 +647,15 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
             self.assertEqual(resp.status, 200)
 
-            # Profile-Title should fall back to default "✦ Just1k"
+            # Profile-Title should fall back to default "✦ Just1k" and multiline description from fallback key
             raw_title = resp.headers.get("Profile-Title", "")
             title_b64 = raw_title.removeprefix("base64:")
-            title = base64.b64decode(title_b64).decode("utf-8")
-            self.assertEqual(title, "✦ Just1k")
+            title_lines = base64.b64decode(title_b64).decode("utf-8").split("\n")
+            self.assertEqual(title_lines[0], "✦ Just1k")
+            self.assertEqual(title_lines[1], "Fallback Description Used")
 
-            # Profile-Description should pick up fallback key
-            raw_desc = resp.headers.get("Profile-Description", "")
-            desc_b64 = raw_desc.removeprefix("base64:")
-            desc = base64.b64decode(desc_b64).decode("utf-8")
-            self.assertEqual(desc, "Fallback Description Used")
+            # Profile-Description header must NOT be present
+            self.assertNotIn("Profile-Description", resp.headers)
 
             # Announce-Url with spaces must NOT be injected into headers
             self.assertNotIn("Announce-Url", resp.headers)
@@ -711,11 +709,15 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
             self.assertEqual(resp.status, 200)
 
-            # Profile-Description check
-            raw_desc = resp.headers.get("Profile-Description", "")
-            desc_b64 = raw_desc.removeprefix("base64:")
-            desc = base64.b64decode(desc_b64).decode("utf-8")
-            self.assertEqual(desc, "Тариф: Супер-Тариф • Устройств: 2 из 5")
+            # Profile-Title check (multiline: title + dynamic description)
+            raw_title = resp.headers.get("Profile-Title", "")
+            title_b64 = raw_title.removeprefix("base64:")
+            title_lines = base64.b64decode(title_b64).decode("utf-8").split("\n")
+            self.assertEqual(title_lines[0], "✦ Just1k")
+            self.assertEqual(title_lines[1], "Тариф: Супер-Тариф • Устройств: 2 из 5")
+
+            # Profile-Description header must NOT be present
+            self.assertNotIn("Profile-Description", resp.headers)
 
             # Announce check
             raw_ann = resp.headers.get("Announce", "")
@@ -756,11 +758,15 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
             self.assertEqual(resp.status, 200)
 
-            # Profile-Description should be default formatted
-            raw_desc = resp.headers.get("Profile-Description", "")
-            desc_b64 = raw_desc.removeprefix("base64:")
-            desc = base64.b64decode(desc_b64).decode("utf-8")
-            self.assertEqual(desc, "Тариф: Базовый • Устройств: 1 из 2")
+            # Profile-Title should contain default dynamic formatted description in line 2
+            raw_title = resp.headers.get("Profile-Title", "")
+            title_b64 = raw_title.removeprefix("base64:")
+            title_lines = base64.b64decode(title_b64).decode("utf-8").split("\n")
+            self.assertEqual(title_lines[0], "✦ Just1k")
+            self.assertEqual(title_lines[1], "Тариф: Базовый • Устройств: 1 из 2")
+
+            # Profile-Description header must NOT be present
+            self.assertNotIn("Profile-Description", resp.headers)
 
     async def test_feed_white_internet_tariff_isolation(self):
         mock_session = AsyncMock()
@@ -798,10 +804,12 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
             self.assertEqual(resp.status, 200)
 
-            raw_desc = resp.headers.get("Profile-Description", "")
-            desc_b64 = raw_desc.removeprefix("base64:")
-            desc = base64.b64decode(desc_b64).decode("utf-8")
-            self.assertEqual(desc, "Тариф: Семейный • Устройств: 3 из 5")
+            raw_title = resp.headers.get("Profile-Title", "")
+            title_b64 = raw_title.removeprefix("base64:")
+            title_lines = base64.b64decode(title_b64).decode("utf-8").split("\n")
+            self.assertEqual(title_lines[0], "✦ Just1k")
+            self.assertEqual(title_lines[1], "Тариф: Семейный • Устройств: 3 из 5")
+            self.assertNotIn("Profile-Description", resp.headers)
 
     async def test_feed_long_tariff_name_truncation(self):
         mock_session = AsyncMock()
@@ -840,11 +848,120 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
             self.assertEqual(resp.status, 200)
 
-            raw_desc = resp.headers.get("Profile-Description", "")
-            desc_b64 = raw_desc.removeprefix("base64:")
-            desc = base64.b64decode(desc_b64).decode("utf-8")
+            raw_title = resp.headers.get("Profile-Title", "")
+            title_b64 = raw_title.removeprefix("base64:")
+            title_lines = base64.b64decode(title_b64).decode("utf-8").split("\n")
+            self.assertEqual(title_lines[0], "✦ Just1k")
+            desc = title_lines[1]
             self.assertTrue(desc.endswith("• Устройств: 4 из 5"))
             self.assertIn(long_name[:40], desc)
+            self.assertNotIn("Profile-Description", resp.headers)
+
+    async def test_profile_description_with_long_custom_template_and_placeholders_at_end(self):
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        custom_template = "Премиальный скоростной доступ к защищенной сети: тариф {tariff}, подключено {active} из {devices}"
+        from database.models import Tariff
+
+        tariff_name = "Ультра Безлимит Премиум 2026"
+        tariff = Tariff(id=12, name=tariff_name, service_type="standard", device_limit=5)
+        user_with_tariff = User(
+            id=101,
+            telegram_id=12345678,
+            device_limit=5,
+            current_tariff_id=12,
+            subscription_end=datetime.now(timezone.utc) + timedelta(days=30),
+        )
+
+        async def fake_get_system_setting(session, key, default=None):
+            if key == "vless_profile_description":
+                return custom_template
+            return default
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=user_with_tariff),
+            patch("database.repositories.tariffs_repo.get_tariff_by_id", return_value=tariff),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=5),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_combined_quota", return_value=(4, 2, 2)),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 2, 3)),
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
+            patch("bot.handlers.vless_web.get_system_setting", side_effect=fake_get_system_setting),
+        ):
+            headers = {"X-Hwid": "test-client-hwid-template"}
+            resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
+            self.assertEqual(resp.status, 200)
+
+            raw_title = resp.headers.get("Profile-Title", "")
+            title_b64 = raw_title.removeprefix("base64:")
+            title_lines = base64.b64decode(title_b64).decode("utf-8").split("\n")
+            self.assertEqual(title_lines[0], "✦ Just1k")
+            desc = title_lines[1]
+            # Formatted length exceeds 100 characters but stays within 150
+            self.assertGreater(len(desc), 100)
+            self.assertLessEqual(len(desc), 150)
+            self.assertTrue(desc.endswith("подключено 4 из 5"))
+            self.assertIn(tariff_name, desc)
+            self.assertNotIn("Profile-Description", resp.headers)
+
+    async def test_profile_description_with_repeated_tariff_placeholders_preserves_device_counters(self):
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        # Repeating placeholders expanding beyond 150 chars must not truncate active/devices counter at the end
+        repeated_template = "{tariff} - {tariff} - {tariff} - {tariff} | {active} из {devices}"
+        from database.models import Tariff
+
+        tariff_name = "Ультра Безлимит Премиум 2026"
+        tariff = Tariff(id=12, name=tariff_name, service_type="standard", device_limit=5)
+        user_with_tariff = User(
+            id=101,
+            telegram_id=12345678,
+            device_limit=5,
+            current_tariff_id=12,
+            subscription_end=datetime.now(timezone.utc) + timedelta(days=30),
+        )
+
+        async def fake_get_system_setting(session, key, default=None):
+            if key == "vless_profile_description":
+                return repeated_template
+            return default
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=user_with_tariff),
+            patch("database.repositories.tariffs_repo.get_tariff_by_id", return_value=tariff),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=5),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_combined_quota", return_value=(4, 2, 2)),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 2, 3)),
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
+            patch("bot.handlers.vless_web.get_system_setting", side_effect=fake_get_system_setting),
+        ):
+            headers = {"X-Hwid": "test-client-hwid-template-repeated"}
+            resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
+            self.assertEqual(resp.status, 200)
+
+            raw_title = resp.headers.get("Profile-Title", "")
+            title_b64 = raw_title.removeprefix("base64:")
+            title_lines = base64.b64decode(title_b64).decode("utf-8").split("\n")
+            self.assertEqual(title_lines[0], "✦ Just1k")
+            desc = title_lines[1]
+            self.assertGreater(len(desc), 120)
+            self.assertTrue(desc.endswith("4 из 5"))
+            self.assertNotIn("Profile-Description", resp.headers)
 
     async def test_device_metadata_extracted_from_headers(self):
         mock_session = AsyncMock()

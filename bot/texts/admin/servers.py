@@ -269,7 +269,7 @@ ADMIN_SERVER_INCY_CARD = """🛠 Админка › 🖥 <b>{flag} {name}</b> �
 Настройки внешнего вида подписки для приложения INCY:
 
 • <b>Имя профиля:</b> <code>{title}</code>
-• <b>Подзаголовок:</b> <code>{description}</code> <i>(не отображается в проверенных мобильных версиях INCY)</i>
+• <b>Описание профиля:</b> <code>{description}</code>
 • <b>Баннер (объявление):</b> <code>{announce}</code>
 • <b>Ссылка баннера:</b> <code>{announce_url}</code>
 • <b>Шлюз РФ в клиенте:</b> <code>{origin_name}</code>
@@ -283,7 +283,7 @@ ADMIN_STD_SUB_INCY_CONFIG_CARD = """🛠 Админка › 💎 <b>Станда
 Глобальные настройки оформления стандартной подписки для приложения INCY:
 
 • <b>Имя профиля:</b> <code>{title}</code>
-• <b>Подзаголовок:</b> <code>{description}</code> <i>(не отображается в мобильных версиях INCY)</i>
+• <b>Описание профиля:</b> <code>{description}</code>
 • <b>Баннер (объявление):</b> <code>{announce}</code>
 • <b>Ссылка баннера:</b> <code>{announce_url}</code>
 
@@ -305,7 +305,7 @@ ADMIN_SERVER_INCY_PROMPT_TITLE = """🎨 <b>Изменение имени про
 
 Отправьте новое название профиля (до 25 символов) или дефис «-» для сброса:"""
 
-ADMIN_SERVER_INCY_PROMPT_DESC = """🎨 <b>Изменение подзаголовка профиля в INCY</b>
+ADMIN_STD_SUB_INCY_PROMPT_DESC = """🎨 <b>Изменение описания профиля в INCY</b>
 
 Текущее значение: <code>{current}</code>
 
@@ -314,9 +314,21 @@ ADMIN_SERVER_INCY_PROMPT_DESC = """🎨 <b>Изменение подзаголо
 • <code>{{devices}}</code> или <code>{{limit}}</code> — лимит устройств подписки
 • <code>{{active}}</code> — число активных устройств
 
-⚠️ <i>Примечание: в некоторых мобильных клиентах подзаголовок отображается в карточке подписки, а в INCY — «Объявление».</i>
+ℹ️ <i>Передаётся во 2-й строке заголовка профиля (Profile-Title) по спецификации INCY.</i>
 
-Отправьте подзаголовок (до 100 символов) или дефис «-» для сброса к умолчанию:"""
+Отправьте описание (до 100 символов) или дефис «-» для сброса к умолчанию:"""
+
+ADMIN_SERVER_INCY_PROMPT_DESC = """🎨 <b>Изменение описания профиля в INCY</b>
+
+Текущее значение: <code>{current}</code>
+
+💡 <i>Поддерживаются плейсхолдеры:</i>
+• <code>{{devices}}</code> или <code>{{limit}}</code> — лимит устройств подписки
+• <code>{{active}}</code> — число активных устройств
+
+ℹ️ <i>Передаётся во 2-й строке заголовка профиля (Profile-Title) по спецификации INCY.</i>
+
+Отправьте описание (до 100 символов) или дефис «-» для сброса:"""
 
 ADMIN_SERVER_INCY_PROMPT_ANNOUNCE = """🎨 <b>Изменение объявления (баннера) в INCY</b>
 
@@ -393,7 +405,8 @@ ADMIN_SERVER_INCY_BTN_CONFIRM_RESET = "🗑 Да, сбросить к дефол
 ADMIN_SERVER_INCY_RESET_SUCCESS = "✅ Настройки оформления сброшены к исходным значениям!"
 
 ADMIN_SERVER_INCY_BTN_TITLE = "✏️ Имя профиля"
-ADMIN_SERVER_INCY_BTN_DESC = "✏️ Подзаголовок"
+ADMIN_STD_SUB_INCY_BTN_DESC = "✏️ Описание профиля"
+ADMIN_SERVER_INCY_BTN_DESC = ADMIN_STD_SUB_INCY_BTN_DESC
 ADMIN_SERVER_INCY_BTN_ANNOUNCE = "📢 Объявление"
 ADMIN_SERVER_INCY_BTN_ANNOUNCE_URL = "🔗 Ссылка баннера"
 ADMIN_SERVER_INCY_BTN_ORIGIN_NAME = "🇷🇺 Имя шлюза РФ"

@@ -218,7 +218,7 @@ def get_admin_server_relays_keyboard(server_id: int) -> InlineKeyboardMarkup:
 def get_admin_std_sub_incy_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text=texts.ADMIN_SERVER_INCY_BTN_TITLE, callback_data="admin_std_incy_edit:title")
-    builder.button(text=texts.ADMIN_SERVER_INCY_BTN_DESC, callback_data="admin_std_incy_edit:desc")
+    builder.button(text=texts.ADMIN_STD_SUB_INCY_BTN_DESC, callback_data="admin_std_incy_edit:desc")
     builder.button(text=texts.ADMIN_SERVER_INCY_BTN_ANNOUNCE, callback_data="admin_std_incy_edit:announce")
     builder.button(text=texts.ADMIN_SERVER_INCY_BTN_ANNOUNCE_URL, callback_data="admin_std_incy_edit:announce_url")
     builder.button(text=texts.ADMIN_SERVER_INCY_BTN_RESET, callback_data="admin_std_incy_reset")

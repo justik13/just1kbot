@@ -346,8 +346,24 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             or WHITE_INTERNET_PROFILE_TITLE
             or texts.WL_PROFILE_NAME
         )
-        profile_title_str = str(profile_title).strip()[:25]
-        profile_title_b64 = base64.b64encode(profile_title_str.encode("utf-8")).decode("ascii")
+        profile_title_clean = (
+            str(profile_title).strip().replace("\r\n", " ").replace("\n", " ")[:25]
+        )
+
+        profile_desc = extra.get("profile_description")
+        if profile_desc is None:
+            profile_desc = WHITE_INTERNET_PROFILE_DESCRIPTION
+
+        if profile_desc and str(profile_desc).strip():
+            desc_text = str(profile_desc).strip()
+            formatted_desc = _safe_format_device_template(
+                desc_text, devices=max_devs, active=active_count
+            )
+            full_title = f"{profile_title_clean}\n{formatted_desc}" if formatted_desc else profile_title_clean
+        else:
+            full_title = profile_title_clean
+
+        profile_title_b64 = base64.b64encode(full_title.encode("utf-8")).decode("ascii")
 
         bot_user = await _resolve_bot_username(request)
         default_bot_url = f"https://t.me/{bot_user}"
@@ -409,18 +425,6 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             announce_url = extra.get("announce_url")
             if announce_url and str(announce_url).strip():
                 response_headers["Announce-Url"] = str(announce_url).strip()
-
-        profile_desc = extra.get("profile_description")
-        if profile_desc is None:
-            profile_desc = WHITE_INTERNET_PROFILE_DESCRIPTION
-
-        if profile_desc and str(profile_desc).strip():
-            desc_text = str(profile_desc).strip()
-            desc_text = _safe_format_device_template(
-                desc_text, devices=max_devs, active=active_count
-            )[:100]
-            profile_desc_b64 = base64.b64encode(desc_text.encode("utf-8")).decode("ascii")
-            response_headers["Profile-Description"] = f"base64:{profile_desc_b64}"
 
         return web.Response(status=200, text=b64_payload, headers=response_headers)
 

@@ -444,7 +444,19 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         support_url = _resolve_support_url(first_extra, default_bot_url)
         channel_url = _resolve_channel_url(first_extra, default_bot_url)
 
-        b64_title = base64.b64encode(str(profile_title).strip()[:25].encode("utf-8")).decode("ascii")
+        profile_title_clean = str(profile_title).strip().replace("\r\n", " ").replace("\n", " ")[:25]
+        if profile_desc:
+            formatted_desc = _safe_format_vless_template(
+                str(profile_desc).strip(),
+                tariff=tariff_clean,
+                devices=total_device_limit,
+                active=total_active_devices,
+            )
+            full_title = f"{profile_title_clean}\n{formatted_desc}" if formatted_desc else profile_title_clean
+        else:
+            full_title = profile_title_clean
+
+        b64_title = base64.b64encode(full_title.encode("utf-8")).decode("ascii")
         response_headers = {
             **common_headers,
             "Content-Type": "text/plain; charset=utf-8",
@@ -462,15 +474,6 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             "Profile-Web-Page-Url": channel_url,
             "Channel-Url": channel_url,
         }
-        if profile_desc:
-            formatted_desc = _safe_format_vless_template(
-                str(profile_desc).strip(),
-                tariff=tariff_clean,
-                devices=total_device_limit,
-                active=total_active_devices,
-            )[:100]
-            b64_desc = base64.b64encode(formatted_desc.encode("utf-8")).decode("ascii")
-            response_headers["Profile-Description"] = f"base64:{b64_desc}"
         if announce:
             formatted_ann = _safe_format_vless_template(
                 str(announce).strip(),

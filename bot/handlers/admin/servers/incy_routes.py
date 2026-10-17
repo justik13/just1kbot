@@ -195,7 +195,7 @@ async def start_edit_std_incy_param(
 
     prompt_map = {
         "title": (texts.ADMIN_SERVER_INCY_PROMPT_TITLE, title or "✦ Just1k"),
-        "desc": (texts.ADMIN_SERVER_INCY_PROMPT_DESC, desc or texts.ADMIN_SERVER_INCY_VALUE_NONE),
+        "desc": (texts.ADMIN_STD_SUB_INCY_PROMPT_DESC, desc or texts.ADMIN_SERVER_INCY_VALUE_NONE),
         "announce": (texts.ADMIN_SERVER_INCY_PROMPT_ANNOUNCE, announce or texts.ADMIN_SERVER_INCY_VALUE_NONE),
         "announce_url": (texts.ADMIN_SERVER_INCY_PROMPT_ANNOUNCE_URL, announce_url or texts.ADMIN_SERVER_INCY_VALUE_NONE),
     }
