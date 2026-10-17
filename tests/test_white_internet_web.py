@@ -74,7 +74,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                 self.assertEqual(resp.status, 503)
                 self.assertEqual(resp.headers.get("Retry-After"), "5")
 
-    async def test_exhausted_status_returns_403(self):
+    async def test_exhausted_status_returns_200_with_notice(self):
         sub = MagicMock(spec=WhiteInternetSubscription)
         sub.id = 1
         sub.status = WhiteInternetStatus.EXHAUSTED
@@ -91,11 +91,43 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
         with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
             with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
                 resp = await self.client.get("/sub/wl/exhausted-token-1234567890abcdef")
-                self.assertEqual(resp.status, 403)
+                self.assertEqual(resp.status, 200)
                 self.assertIn("upload=1000", resp.headers.get("Subscription-Userinfo", ""))
                 self.assertIn("download=2000", resp.headers.get("Subscription-Userinfo", ""))
+                self.assertIn("Channel-Url", resp.headers)
+                self.assertIn("Support-Url", resp.headers)
+                self.assertIn("Profile-Title", resp.headers)
+                body = await resp.text()
+                decoded = base64.b64decode(body).decode("utf-8")
+                self.assertTrue(decoded.startswith("vless://00000000-0000-0000-0000-000000000000@127.0.0.1:443"))
+                self.assertIn("Трафик исчерпан", unquote(decoded))
 
-    async def test_expired_status_returns_403(self):
+    async def test_exhausted_status_browser_returns_landing_html(self):
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 1
+        sub.status = WhiteInternetStatus.EXHAUSTED
+        sub.traffic_uplink_bytes = 1000
+        sub.traffic_downlink_bytes = 2000
+        sub.traffic_limit_bytes = 53687091200
+        sub.expires_at = datetime.now(timezone.utc) + timedelta(days=30)
+
+        mock_session = AsyncMock()
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+            with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                resp = await self.client.get(
+                    "/sub/wl/exhausted-token-1234567890abcdef",
+                    headers={"Accept": "text/html,application/xhtml+xml"},
+                )
+                self.assertEqual(resp.status, 200)
+                self.assertIn("text/html", resp.headers.get("Content-Type", ""))
+                html_text = await resp.text()
+                self.assertIn("just1k13bot", html_text)
+
+    async def test_expired_status_returns_200_with_notice(self):
         now = datetime.now(timezone.utc)
         sub = MagicMock(spec=WhiteInternetSubscription)
         sub.id = 1
@@ -114,9 +146,41 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
         with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
             with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
                 resp = await self.client.get("/sub/wl/expired-token-1234567890abcdef")
-                self.assertEqual(resp.status, 403)
-                text = await resp.text()
-                self.assertEqual(text, texts.WL_WEB_EXPIRED)
+                self.assertEqual(resp.status, 200)
+                self.assertIn("Channel-Url", resp.headers)
+                self.assertIn("Support-Url", resp.headers)
+                self.assertIn("Profile-Title", resp.headers)
+                body = await resp.text()
+                decoded = base64.b64decode(body).decode("utf-8")
+                self.assertTrue(decoded.startswith("vless://00000000-0000-0000-0000-000000000000@127.0.0.1:443"))
+                self.assertIn("Подписка закончилась", unquote(decoded))
+
+    async def test_expired_status_browser_returns_landing_html(self):
+        now = datetime.now(timezone.utc)
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 1
+        sub.origin_node_id = 1
+        sub.status = WhiteInternetStatus.EXPIRED
+        sub.traffic_uplink_bytes = 1000
+        sub.traffic_downlink_bytes = 2000
+        sub.traffic_limit_bytes = 53687091200
+        sub.expires_at = now - timedelta(days=1)
+
+        mock_session = AsyncMock()
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+            with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                resp = await self.client.get(
+                    "/sub/wl/expired-token-1234567890abcdef",
+                    headers={"Accept": "text/html,application/xhtml+xml"},
+                )
+                self.assertEqual(resp.status, 200)
+                self.assertIn("text/html", resp.headers.get("Content-Type", ""))
+                html_text = await resp.text()
+                self.assertIn("just1k13bot", html_text)
 
     async def test_runtime_out_of_sync_returns_503(self):
         now = datetime.now(timezone.utc)
@@ -251,6 +315,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     self.assertIsNone(resp.headers.get("Profile-Description"))
                     self.assertIn("t.me", resp.headers.get("Support-Url", ""))
                     self.assertIn("t.me", resp.headers.get("Profile-Web-Page-Url", ""))
+                    self.assertIn("t.me", resp.headers.get("Channel-Url", ""))
                     self.assertEqual(resp.headers.get("Profile-Update-Interval"), "6")
                     self.assertEqual(resp.headers.get("hide-url"), "1")
                     self.assertEqual(resp.headers.get("no-limit-enabled"), "1")
@@ -312,6 +377,55 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     self.assertEqual(resp.status, 403)
                     self.assertEqual(resp.headers.get("x-hwid-required"), "true")
                     self.assertEqual(await resp.text(), texts.WL_WEB_HWID_REQUIRED)
+
+    async def test_feed_without_hwid_browser_returns_landing_html(self):
+        now = datetime.now(timezone.utc)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            origin_node_id=1,
+            token="valid-token-1234567890abcdef",
+            uuid="a2b9d4e1-73c5-4812-b964-f3e7b85a1902",
+            status=WhiteInternetStatus.ACTIVE,
+            started_at=now,
+            expires_at=now + timedelta(days=30),
+            traffic_limit_bytes=53687091200,
+            traffic_used_bytes=1000,
+            desired_version=1,
+            actual_version=1,
+            last_reconciled_node_epoch="epoch-xyz",
+        )
+
+        server = Server(
+            id=1,
+            name="Origin-Node",
+            protocol=XRAY_PROTOCOL,
+            api_url="https://cdn.example.com:8444",
+            xray_instance_epoch="epoch-xyz",
+            capabilities=["xray_origin"],
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+        )
+
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = server
+        mock_session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.example.com"}):
+            with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+                with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                    resp = await self.client.get(
+                        "/sub/wl/valid-token-1234567890abcdef",
+                        headers={"Accept": "text/html,application/xhtml+xml"},
+                    )
+                    self.assertEqual(resp.status, 200)
+                    self.assertIn("text/html", resp.headers.get("Content-Type", ""))
+                    html_text = await resp.text()
+                    self.assertIn("incy://add/", html_text)
 
 
     async def test_missing_cdn_domain_returns_503_fail_closed(self):

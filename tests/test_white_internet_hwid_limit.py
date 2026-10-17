@@ -1,8 +1,10 @@
+import base64
 import os
 import unittest
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
+from urllib.parse import unquote
 
 from aiohttp import web
 from aiohttp.test_utils import AioHTTPTestCase
@@ -245,7 +247,7 @@ class TestWhiteInternetWebHwidEnforcement(AioHTTPTestCase):
         return app
 
     async def test_request_with_hwid_limit_exceeded(self):
-        """Verify HTTP 403 when HWID registration indicates limit exceeded."""
+        """Verify HTTP 200 with service notice and limit headers when HWID registration indicates limit exceeded."""
         sub = MagicMock(spec=WhiteInternetSubscription)
         sub.id = 42
         sub.status = WhiteInternetStatus.ACTIVE
@@ -298,19 +300,23 @@ class TestWhiteInternetWebHwidEnforcement(AioHTTPTestCase):
                                 "/sub/wl/test-token-valid-1234567890abcdef",
                                 headers={"X-Hwid": "device-overflow-3"},
                             )
-                            self.assertEqual(resp.status, 403)
+                            self.assertEqual(resp.status, 200)
                             self.assertEqual(resp.headers.get("Device-Limit-Exceeded"), "1")
                             self.assertEqual(resp.headers.get("Device-Limit"), "2")
                             self.assertEqual(resp.headers.get("Device-Active-Count"), "2")
                             self.assertEqual(resp.headers.get("x-hwid-max-devices-reached"), "true")
                             self.assertEqual(resp.headers.get("x-hwid-limit"), "2")
                             self.assertEqual(resp.headers.get("x-hwid-active"), "2")
+                            self.assertIn("Channel-Url", resp.headers)
+                            self.assertIn("Support-Url", resp.headers)
+                            self.assertIn("Profile-Title", resp.headers)
                             body = await resp.text()
-                            self.assertIn("Лимит устройств (2/2)", body)
-                            self.assertIn("@", body)
+                            decoded = base64.b64decode(body).decode("utf-8")
+                            self.assertTrue(decoded.startswith("vless://00000000-0000-0000-0000-000000000000@127.0.0.1:443"))
+                            self.assertIn("Превышен лимит устройств (2/2)", unquote(decoded))
 
     async def test_request_exhausted_quota_does_not_register_hwid(self):
-        """Verify that when quota is exhausted, 403 is returned and HWID is NOT registered."""
+        """Verify that when quota is exhausted, 200 with notice is returned and HWID is NOT registered."""
         sub = MagicMock(spec=WhiteInternetSubscription)
         sub.id = 42
         sub.status = WhiteInternetStatus.EXHAUSTED
@@ -334,7 +340,7 @@ class TestWhiteInternetWebHwidEnforcement(AioHTTPTestCase):
                         "/sub/wl/test-token-valid-1234567890abcdef",
                         headers={"X-Hwid": "device-new"},
                     )
-                    self.assertEqual(resp.status, 403)
+                    self.assertEqual(resp.status, 200)
                     mock_register.assert_not_called()
 
     async def test_request_unhealthy_server_does_not_register_hwid(self):
