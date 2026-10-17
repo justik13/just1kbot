@@ -269,7 +269,6 @@ ADMIN_SERVER_INCY_CARD = """🛠 Админка › 🖥 <b>{flag} {name}</b> �
 Настройки внешнего вида подписки для приложения INCY:
 
 • <b>Имя профиля:</b> <code>{title}</code>
-• <b>Описание профиля:</b> <code>{description}</code>
 • <b>Баннер (объявление):</b> <code>{announce}</code>
 • <b>Ссылка баннера:</b> <code>{announce_url}</code>
 • <b>Шлюз РФ в клиенте:</b> <code>{origin_name}</code>
@@ -283,11 +282,15 @@ ADMIN_STD_SUB_INCY_CONFIG_CARD = """🛠 Админка › 💎 <b>Станда
 Глобальные настройки оформления стандартной подписки для приложения INCY:
 
 • <b>Имя профиля:</b> <code>{title}</code>
-• <b>Описание профиля:</b> <code>{description}</code>
+• <b>Счётчик устройств:</b> <code>{show_devices_status}</code>
 • <b>Баннер (объявление):</b> <code>{announce}</code>
 • <b>Ссылка баннера:</b> <code>{announce_url}</code>
 
 <i>Для изменения выберите нужный пункт ниже:</i>"""
+
+ADMIN_STD_SUB_INCY_STATUS_ON = ADMIN_SERVER_STATE_ENABLED
+ADMIN_STD_SUB_INCY_STATUS_OFF = "⚪️ Выключен"
+ADMIN_STD_SUB_INCY_BTN_DEVICES = "📊 Счётчик устройств: {status}"
 
 ADMIN_SERVER_INCY_STANDARD_CARD = """🛠 Админка › 🖥 <b>{flag} {name}</b> › 🎨 <b>Оформление INCY</b>
 
@@ -304,31 +307,6 @@ ADMIN_SERVER_INCY_PROMPT_TITLE = """🎨 <b>Изменение имени про
 Текущее значение: <code>{current}</code>
 
 Отправьте новое название профиля (до 25 символов) или дефис «-» для сброса:"""
-
-ADMIN_STD_SUB_INCY_PROMPT_DESC = """🎨 <b>Изменение описания профиля в INCY</b>
-
-Текущее значение: <code>{current}</code>
-
-💡 <i>Поддерживаются плейсхолдеры:</i>
-• <code>{{tariff}}</code> — название текущего тарифа (например, Базовый)
-• <code>{{devices}}</code> или <code>{{limit}}</code> — лимит устройств подписки
-• <code>{{active}}</code> — число активных устройств
-
-ℹ️ <i>Передаётся во 2-й строке заголовка профиля (Profile-Title) по спецификации INCY.</i>
-
-Отправьте описание (до 100 символов) или дефис «-» для сброса к умолчанию:"""
-
-ADMIN_SERVER_INCY_PROMPT_DESC = """🎨 <b>Изменение описания профиля в INCY</b>
-
-Текущее значение: <code>{current}</code>
-
-💡 <i>Поддерживаются плейсхолдеры:</i>
-• <code>{{devices}}</code> или <code>{{limit}}</code> — лимит устройств подписки
-• <code>{{active}}</code> — число активных устройств
-
-ℹ️ <i>Передаётся во 2-й строке заголовка профиля (Profile-Title) по спецификации INCY.</i>
-
-Отправьте описание (до 100 символов) или дефис «-» для сброса:"""
 
 ADMIN_SERVER_INCY_PROMPT_ANNOUNCE = """🎨 <b>Изменение объявления (баннера) в INCY</b>
 
@@ -405,8 +383,6 @@ ADMIN_SERVER_INCY_BTN_CONFIRM_RESET = "🗑 Да, сбросить к дефол
 ADMIN_SERVER_INCY_RESET_SUCCESS = "✅ Настройки оформления сброшены к исходным значениям!"
 
 ADMIN_SERVER_INCY_BTN_TITLE = "✏️ Имя профиля"
-ADMIN_STD_SUB_INCY_BTN_DESC = "✏️ Описание профиля"
-ADMIN_SERVER_INCY_BTN_DESC = ADMIN_STD_SUB_INCY_BTN_DESC
 ADMIN_SERVER_INCY_BTN_ANNOUNCE = "📢 Объявление"
 ADMIN_SERVER_INCY_BTN_ANNOUNCE_URL = "🔗 Ссылка баннера"
 ADMIN_SERVER_INCY_BTN_ORIGIN_NAME = "🇷🇺 Имя шлюза РФ"
@@ -430,7 +406,6 @@ ADMIN_SERVER_INCY_ACTION_HIDE = "Скрыть"
 ADMIN_SERVER_INCY_ACTION_SHOW = "Показать"
 
 ADMIN_SERVER_INCY_VALUE_NONE = "— (не задан)"
-ADMIN_SERVER_INCY_VALUE_DEFAULT = "{value} (по умолчанию)"
 ADMIN_SERVER_INCY_VALUE_DISABLED = "Отключен"
 ADMIN_SERVER_INCY_NO_RELAYS = "На сервере нет подключенных Relay-узлов."
 ADMIN_SERVER_INCY_RELAY_BTN = "🌐 {name}{badge_part}{status_part}"

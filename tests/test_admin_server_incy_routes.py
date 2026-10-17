@@ -146,7 +146,7 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
 
     async def test_process_server_incy_param_input_clear(self):
         await self.state.set_state(AdminStates.editing_server_incy_param)
-        await self.state.update_data(server_id=1, incy_param="desc")
+        await self.state.update_data(server_id=1, incy_param="announce")
 
         msg = self._create_msg("-")
 
@@ -155,7 +155,7 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
             name="Origin-RU",
             protocol=XRAY_PROTOCOL,
             is_active=True,
-            extra_data={"profile_description": "Old desc"},
+            extra_data={"announce": "Old announce"},
         )
 
         with patch("bot.handlers.admin.servers.incy_routes.is_admin", return_value=True):
@@ -165,20 +165,20 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
                     mock_update.assert_awaited_once_with(
                         self.mock_session,
                         server,
-                        extra_data={"profile_description": ""},
+                        extra_data={"announce": ""},
                     )
                     self.mock_render_hub.assert_awaited_once()
                     msg.delete.assert_awaited_once()
 
-    async def test_process_server_incy_param_input_desc_100_chars(self):
+    async def test_process_server_incy_param_input_announce_200_chars(self):
         await self.state.set_state(AdminStates.editing_server_incy_param)
-        await self.state.update_data(server_id=1, incy_param="desc")
+        await self.state.update_data(server_id=1, incy_param="announce")
 
-        long_desc = "Лимит устройств: {devices} (активно: {active}) — стабильное подключение"
-        self.assertGreater(len(long_desc), 50)
-        self.assertLessEqual(len(long_desc), 100)
+        long_announce = "Лимит устройств: {devices} (активно: {active}) — стабильное подключение"
+        self.assertGreater(len(long_announce), 50)
+        self.assertLessEqual(len(long_announce), 200)
 
-        msg = self._create_msg(long_desc)
+        msg = self._create_msg(long_announce)
 
         server = Server(
             id=1,
@@ -195,7 +195,7 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
                     mock_update.assert_awaited_once_with(
                         self.mock_session,
                         server,
-                        extra_data={"profile_description": long_desc},
+                        extra_data={"announce": long_announce},
                     )
                     self.mock_render_hub.assert_awaited_once()
                     msg.delete.assert_awaited_once()
@@ -634,12 +634,13 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
 
                 # Keyboard should have standard buttons, NOT origin or relays or global incy settings
                 kb_btns = [b.text for row in kb.inline_keyboard for b in row]
+                kb_callbacks = [b.callback_data for row in kb.inline_keyboard for b in row]
                 self.assertIn(texts.ADMIN_SERVER_INCY_BTN_NODE_NAME, kb_btns)
                 self.assertIn(texts.ADMIN_SERVER_INCY_BTN_NODE_BADGE, kb_btns)
                 self.assertNotIn(texts.ADMIN_SERVER_INCY_BTN_ORIGIN_NAME, kb_btns)
                 self.assertNotIn(texts.ADMIN_SERVER_INCY_BTN_RELAYS, kb_btns)
                 self.assertNotIn(texts.ADMIN_SERVER_INCY_BTN_TITLE, kb_btns)
-                self.assertNotIn(texts.ADMIN_SERVER_INCY_BTN_DESC, kb_btns)
+                self.assertFalse(any(cb.endswith(":desc") for cb in kb_callbacks))
                 self.assertNotIn(texts.ADMIN_SERVER_INCY_BTN_ANNOUNCE, kb_btns)
                 self.assertNotIn(texts.ADMIN_SERVER_INCY_BTN_ANNOUNCE_URL, kb_btns)
 

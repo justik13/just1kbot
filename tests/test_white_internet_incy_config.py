@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from aiohttp import web
 from aiohttp.test_utils import AioHTTPTestCase
 
+from bot import texts
 from bot.handlers.white_internet_web import setup_white_internet_web_routes
 from config.constants import (
     XRAY_PROTOCOL,
@@ -301,11 +302,11 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
                     )
                     self.assertEqual(resp.status, 200)
 
-                    # Title (multiline with description per INCY specification)
+                    # Title (single-line strictly <= 25 characters)
                     title_b64 = resp.headers.get("Profile-Title", "").split("base64:")[1]
                     self.assertEqual(
                         base64.b64decode(title_b64).decode("utf-8"),
-                        "★ VIP Just1k\nПремиальный доступ",
+                        "★ VIP Just1k",
                     )
                     self.assertNotIn("Profile-Description", resp.headers)
 
@@ -394,7 +395,7 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
 
                         title_b64 = resp.headers.get("Profile-Title", "").split("base64:")[1]
                         decoded_title = base64.b64decode(title_b64).decode("utf-8")
-                        self.assertIn("Лимит: 5, активно: 2", decoded_title)
+                        self.assertEqual(decoded_title, texts.WL_PROFILE_NAME)
                         self.assertNotIn("Profile-Description", resp.headers)
 
                         announce_b64 = resp.headers.get("Announce", "").split("base64:")[1]
@@ -402,6 +403,60 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
                             base64.b64decode(announce_b64).decode("utf-8"),
                             "Подключено: 2 из 5 устройств",
                         )
+
+    async def test_feed_headers_announce_url_spaces_fallback(self):
+        now = now_utc()
+        sub = WhiteInternetSubscription(
+            id=43,
+            user_id=12,
+            origin_node_id=2,
+            token="valid-token-announce-spaces-12345",
+            uuid="a2b9d4e1-73c5-4812-b964-f3e7b85a1902",
+            status=WhiteInternetStatus.ACTIVE,
+            started_at=now,
+            expires_at=now + timedelta(days=30),
+            traffic_limit_bytes=53687091200,
+            traffic_used_bytes=0,
+            traffic_uplink_bytes=0,
+            traffic_downlink_bytes=0,
+            desired_version=1,
+            actual_version=1,
+            last_reconciled_node_epoch="epoch-xyz",
+            device_limit=1,
+            active_hwids={},
+        )
+        server = Server(
+            id=2,
+            name="Origin-Custom",
+            protocol=XRAY_PROTOCOL,
+            api_url="https://cdn.example.com:8444",
+            xray_instance_epoch="epoch-xyz",
+            capabilities=["xray_origin"],
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            extra_data={
+                "announce_url": "   ",
+                "channel_url": "https://t.me/fallback_channel",
+            },
+        )
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = server
+        mock_session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
+        mock_session.get.return_value = sub
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.example.com"}):
+            with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+                with patch(
+                    "database.repositories.white_internet_repo.get_subscription_by_token",
+                    return_value=sub,
+                ):
+                    resp = await self.client.get(f"/sub/wl/{sub.token}")
+                    self.assertEqual(resp.status, 200)
+                    self.assertEqual(resp.headers.get("Announce-Url"), "https://t.me/fallback_channel")
 
     async def test_web_feed_hidden_origin_and_relays(self):
         now = now_utc()
