@@ -290,6 +290,7 @@ ADMIN_STD_SUB_INCY_CONFIG_CARD = """🛠 Админка › 💎 <b>Станда
 
 ADMIN_STD_SUB_INCY_STATUS_ON = ADMIN_SERVER_STATE_ENABLED
 ADMIN_STD_SUB_INCY_STATUS_OFF = "⚪️ Выключен"
+ADMIN_STD_SUB_INCY_BTN_DEVICES = "📊 Счётчик устройств: {status}"
 
 ADMIN_SERVER_INCY_STANDARD_CARD = """🛠 Админка › 🖥 <b>{flag} {name}</b> › 🎨 <b>Оформление INCY</b>
 

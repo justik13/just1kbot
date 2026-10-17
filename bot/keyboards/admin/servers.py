@@ -218,8 +218,11 @@ def get_admin_server_relays_keyboard(server_id: int) -> InlineKeyboardMarkup:
 def get_admin_std_sub_incy_keyboard(show_devices: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text=texts.ADMIN_SERVER_INCY_BTN_TITLE, callback_data="admin_std_incy_edit:title")
-    dev_status = "🟢 ВКЛ" if show_devices else "⚪️ ВЫКЛ"
-    builder.button(text=f"📊 Счётчик устройств: {dev_status}", callback_data="admin_std_incy_toggle_devs")
+    dev_status = texts.ADMIN_STD_SUB_INCY_STATUS_ON if show_devices else texts.ADMIN_STD_SUB_INCY_STATUS_OFF
+    builder.button(
+        text=texts.ADMIN_STD_SUB_INCY_BTN_DEVICES.format(status=dev_status),
+        callback_data="admin_std_incy_toggle_devs",
+    )
     builder.button(text=texts.ADMIN_SERVER_INCY_BTN_ANNOUNCE, callback_data="admin_std_incy_edit:announce")
     builder.button(text=texts.ADMIN_SERVER_INCY_BTN_ANNOUNCE_URL, callback_data="admin_std_incy_edit:announce_url")
     builder.button(text=texts.ADMIN_SERVER_INCY_BTN_RESET, callback_data="admin_std_incy_reset")
