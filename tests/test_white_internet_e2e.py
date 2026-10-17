@@ -295,7 +295,7 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
         self.assertEqual(sub.status, WhiteInternetStatus.EXHAUSTED)
         self.assertEqual(sub.desired_version, 2)
 
-        # 7. Feed check while exhausted -> 403 Forbidden with exact accumulated Userinfo
+        # 7. Feed check while exhausted -> 200 OK with service notice link and exact accumulated Userinfo
         with patch("bot.handlers.white_internet_web.session_scope") as mock_scope:
             session = AsyncMock()
             mock_scope.return_value.__aenter__.return_value = session
@@ -305,7 +305,7 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
                 return_value=sub,
             ):
                 resp = await self.client.get(f"/sub/wl/{sub.token}")
-                self.assertEqual(resp.status, 403)
+                self.assertEqual(resp.status, 200)
                 userinfo = resp.headers.get("Subscription-Userinfo", "")
                 self.assertIn(f"upload={sub.traffic_uplink_bytes};", userinfo)
                 self.assertIn(f"download={sub.traffic_downlink_bytes};", userinfo)

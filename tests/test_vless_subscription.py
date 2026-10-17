@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from aiohttp import web
 from aiohttp.test_utils import AioHTTPTestCase
 
+from bot import texts
 from bot.handlers.vless_web import setup_vless_web_routes
 from config.enums import ServerHealthState
 from database.models import Server, User, VlessSubscription
@@ -212,6 +213,110 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             self.assertIn("incy://add/", body)
             self.assertIn("Подключение к сервису", body)
             self.assertIn("apps.apple.com/app/incy", body)
+
+    async def test_browser_request_financial_hold_returns_paused_landing(self):
+        mock_session = AsyncMock()
+        mock_session.add = MagicMock()
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        now = now_utc()
+        hold_user = User(
+            id=42,
+            telegram_id=999,
+            is_banned=False,
+            is_deleted=False,
+            financial_hold=True,
+            subscription_end=now + timedelta(days=15),
+        )
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=hold_user),
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
+        ):
+            headers = {
+                "Accept": "text/html,application/xhtml+xml",
+                "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X)",
+            }
+            resp = await self.client.get("/sub/vless/test-token-valid-length-12345678", headers=headers)
+            self.assertEqual(resp.status, 200)
+            self.assertIn("text/html", resp.headers.get("Content-Type", ""))
+            body = await resp.text()
+            self.assertIn(texts.LANDING_INACTIVE_BADGE_PAUSED, body)
+            self.assertIn(texts.LANDING_INACTIVE_TITLE_DEFAULT, body)
+            self.assertNotIn(texts.LANDING_INACTIVE_TITLE_EXPIRED, body)
+
+    async def test_browser_request_expired_returns_expired_landing(self):
+        mock_session = AsyncMock()
+        mock_session.add = MagicMock()
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        now = now_utc()
+        expired_user = User(
+            id=42,
+            telegram_id=999,
+            is_banned=False,
+            is_deleted=False,
+            financial_hold=False,
+            subscription_end=now - timedelta(days=2),
+        )
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=expired_user),
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
+        ):
+            headers = {
+                "Accept": "text/html,application/xhtml+xml",
+                "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X)",
+            }
+            resp = await self.client.get("/sub/vless/test-token-valid-length-12345678", headers=headers)
+            self.assertEqual(resp.status, 200)
+            self.assertIn("text/html", resp.headers.get("Content-Type", ""))
+            body = await resp.text()
+            self.assertIn(texts.LANDING_INACTIVE_BADGE_EXPIRED, body)
+            self.assertIn(texts.LANDING_INACTIVE_TITLE_EXPIRED, body)
+            self.assertNotIn(texts.LANDING_INACTIVE_BADGE_PAUSED, body)
+
+    async def test_resolve_bot_username_retries_on_failure_without_caching_fallback(self):
+        from bot.handlers.vless_web import _resolve_bot_username
+        import bot.handlers.vless_web as vless_web
+
+        orig_cached = vless_web._cached_bot_username
+        try:
+            vless_web._cached_bot_username = None
+
+            mock_bot = AsyncMock()
+            mock_bot.get_me.side_effect = RuntimeError("Telegram connection failed")
+
+            mock_request = MagicMock()
+            mock_request.app = {"bot": mock_bot}
+
+            with patch.dict(os.environ, {"BOT_USERNAME": "env_bot"}):
+                resolved = await _resolve_bot_username(mock_request)
+                self.assertEqual(resolved, "env_bot")
+                self.assertIsNone(vless_web._cached_bot_username)
+                self.assertNotIn("bot_username", mock_request.app)
+
+                me_mock = MagicMock()
+                me_mock.username = "real_bot"
+                mock_bot.get_me.side_effect = None
+                mock_bot.get_me.return_value = me_mock
+
+                resolved_success = await _resolve_bot_username(mock_request)
+                self.assertEqual(resolved_success, "real_bot")
+                self.assertEqual(vless_web._cached_bot_username, "real_bot")
+                self.assertEqual(mock_request.app.get("bot_username"), "real_bot")
+        finally:
+            vless_web._cached_bot_username = orig_cached
 
     async def test_exceeded_device_limit_returns_notice_200(self):
         mock_session = AsyncMock()
@@ -511,6 +616,154 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             self.assertFalse(active_sub.is_active)
             self.assertEqual(active_sub.version, 2)
             mock_sync.assert_called_once_with(expired_user.id, session=mock_session)
+
+    async def test_vless_mobile_incy_happ_with_hwid_receives_service_notice_when_inactive(self):
+        expired_user = User(
+            id=42,
+            telegram_id=999,
+            is_banned=False,
+            is_deleted=False,
+            financial_hold=False,
+            subscription_end=datetime.now(timezone.utc) - timedelta(days=2),
+        )
+        inactive_sub = VlessSubscription(
+            id=1,
+            user_id=42,
+            token="test-token-valid-length-12345678",
+            uuid="11111111-2222-3333-4444-555555555555",
+            is_active=False,
+            version=1,
+        )
+        mock_session = AsyncMock()
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        user_agents = [
+            "INCY/2.4.1 (Linux; U; Android 14; SM-S918B Build/UP1A.231005.007)",
+            "Happ/1.8.0 (iPhone; iOS 17.5.1; Scale/3.00)",
+        ]
+
+        for ua in user_agents:
+            with (
+                patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+                patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=inactive_sub),
+                patch("database.repositories.users_repo.get_user_by_id", return_value=expired_user),
+                patch("services.subscription.SubscriptionService.check_vpn_access", return_value=False),
+                patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
+            ):
+                resp = await self.client.get(
+                    "/sub/access/test-token-valid-length-12345678",
+                    headers={
+                        "User-Agent": ua,
+                        "X-Hwid": "test-vless-mobile-hwid",
+                        "Accept": "text/html,application/xhtml+xml",
+                    },
+                )
+                self.assertEqual(resp.status, 200, f"Failed for UA: {ua}")
+                self.assertIn("text/plain", resp.headers.get("Content-Type", ""))
+                self.assertNotIn("text/html", resp.headers.get("Content-Type", ""))
+                body = await resp.text()
+                decoded = base64.b64decode(body).decode("utf-8")
+                self.assertIn("vless://00000000-0000-0000-0000-000000000000", decoded)
+
+    async def test_vless_is_browser_request_identifies_mobile_and_hwid(self):
+        from aiohttp.test_utils import make_mocked_request
+        from bot.handlers.vless_web import _is_browser_request
+
+        # Mobile clients without HWID are NEVER browsers, even with Accept: text/html
+        api_uas = [
+            "INCY/2.4.1 (Linux; U; Android 14; SM-S918B Build/UP1A.231005.007)",
+            "Happ/1.8.0 (iPhone; iOS 17.5.1; Scale/3.00)",
+            "curl/8.4.0",
+            "xray/1.8.4",
+            "sing-box 1.8.11",
+            "clash-meta/v1.18.0",
+        ]
+        for ua in api_uas:
+            for accept_val in ("*/*", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"):
+                req = make_mocked_request(
+                    "GET",
+                    "/sub/access/test-token",
+                    headers={
+                        "User-Agent": ua,
+                        "Accept": accept_val,
+                    },
+                )
+                self.assertFalse(
+                    _is_browser_request(req),
+                    f"Expected API client not browser for UA: {ua} with Accept: {accept_val}",
+                )
+
+        # HWID presence guarantees not a browser, even with Accept: text/html
+        req_with_hwid = make_mocked_request(
+            "GET",
+            "/sub/access/test-token",
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                "Accept": "text/html",
+                "X-Hwid": "test-device-hwid-123",
+            },
+        )
+        self.assertFalse(_is_browser_request(req_with_hwid))
+
+    async def test_vless_active_sub_mobile_client_without_hwid_gets_403_even_with_html_accept(self):
+        active_user = User(
+            id=42,
+            telegram_id=999,
+            is_banned=False,
+            is_deleted=False,
+            financial_hold=False,
+            subscription_end=datetime.now(timezone.utc) + timedelta(days=20),
+        )
+        active_sub = VlessSubscription(
+            id=1,
+            user_id=42,
+            token="test-token-valid-length-12345678",
+            uuid="11111111-2222-3333-4444-555555555555",
+            is_active=True,
+            version=1,
+        )
+        mock_session = AsyncMock()
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        mobile_uas = [
+            "INCY/2.4.1 (Linux; U; Android 14; SM-S918B Build/UP1A.231005.007)",
+            "Happ/1.8.0 (iPhone; iOS 17.5.1; Scale/3.00)",
+        ]
+
+        for ua in mobile_uas:
+            with (
+                patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+                patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=active_sub),
+                patch("database.repositories.users_repo.get_user_by_id", return_value=active_user),
+                patch("services.subscription.SubscriptionService.check_vpn_access", return_value=True),
+            ):
+                resp = await self.client.get(
+                    "/sub/access/test-token-valid-length-12345678",
+                    headers={
+                        "User-Agent": ua,
+                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    },
+                )
+                self.assertEqual(resp.status, 403, f"Expected 403 for {ua}")
+                self.assertEqual(resp.headers.get("x-hwid-required"), "true")
+                self.assertEqual(await resp.text(), "HWID required")
+
+    async def test_vless_url_header_sanitization_rejects_control_chars_and_non_ascii(self):
+        from bot.handlers.vless_web import _sanitize_header_url
+        self.assertEqual(_sanitize_header_url("https://example.com/test\r\nInjected: true", fallback="https://default.com"), "https://default.com")
+        self.assertEqual(_sanitize_header_url("https://example.com/test\tbad", fallback=""), "")
+        self.assertEqual(_sanitize_header_url("  https://example.com/clean  "), "https://example.com/clean")
+        self.assertEqual(_sanitize_header_url("https://example.com/test\x00bad", fallback="https://default.com"), "https://default.com")
+        self.assertEqual(_sanitize_header_url("https://example.com/test\x0bbad", fallback="https://default.com"), "https://default.com")
+        self.assertEqual(_sanitize_header_url("https://example.com/test\x7fbad", fallback="https://default.com"), "https://default.com")
+        self.assertEqual(_sanitize_header_url("https://t.me/мой_канал", fallback="https://default.com"), "https://default.com")
+        self.assertEqual(_sanitize_header_url("tg://resolve?domain=just1k13bot"), "tg://resolve?domain=just1k13bot")
 
     async def test_grace_period_access_within_4h_window(self):
         mock_session = AsyncMock()
@@ -1441,6 +1694,7 @@ class TestConnectionsScreenLayout(unittest.IsolatedAsyncioTestCase):
         mock_sub = SimpleNamespace(token="sim_token_12345678", uuid="some-uuid")
 
         with (
+            patch.dict(os.environ, {"DOMAIN": "sub.example.com"}),
             patch("database.repositories.vless_subscription_repo.get_or_create_subscription", new=AsyncMock(return_value=mock_sub)),
             patch("database.repositories.vless_subscription_repo.get_active_hwid_count", new=AsyncMock(return_value=1)),
             patch("bot.handlers.connection.common._get_effective_device_limit", new=AsyncMock(return_value=5)),
@@ -1494,6 +1748,7 @@ class TestConnectionsScreenLayout(unittest.IsolatedAsyncioTestCase):
         mock_sub = SimpleNamespace(token="sim_token_12345678", uuid="some-uuid")
 
         with (
+            patch.dict(os.environ, {"DOMAIN": "sub.example.com"}),
             patch("database.repositories.vless_subscription_repo.get_or_create_subscription", new=AsyncMock(return_value=mock_sub)),
             patch("database.repositories.vless_subscription_repo.get_active_hwid_count", new=AsyncMock(return_value=1)),
             patch("bot.handlers.connection.common._get_effective_device_limit", new=AsyncMock(return_value=5)),

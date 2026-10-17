@@ -433,9 +433,9 @@ class TestRelaysHealthAndNodeLimits(unittest.IsolatedAsyncioTestCase):
         kb = get_white_internet_overview_keyboard(sub, bot_domain="bot.example.com")
         rows = kb.inline_keyboard
         self.assertEqual(len(rows), 5, f"Expected 5 rows for active sub with topup & reset, got {len(rows)}")
-        # Row 1: Copy link (1)
+        # Row 1: Connect INCY (1)
         self.assertEqual(len(rows[0]), 1)
-        self.assertIsNotNone(rows[0][0].copy_text)
+        self.assertTrue(rows[0][0].url.startswith("https://bot.example.com/sub/wl/"))
         # Row 2: Instructions (1)
         self.assertEqual(len(rows[1]), 1)
         self.assertEqual(rows[1][0].callback_data, "wl_show_link")
