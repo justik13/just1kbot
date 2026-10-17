@@ -324,7 +324,8 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     self.assertEqual(resp.status, 200)
                     self.assertIn("text/html", resp.headers.get("Content-Type", ""))
                     html_text = await resp.text()
-                    self.assertIn("Подключить в INCY", html_text)
+                    self.assertIn("incy://add/", html_text)
+                    self.assertIn("Открыть в приложении INCY", html_text)
 
     async def test_epoch_mismatch_returns_503(self):
         now = datetime.now(timezone.utc)
