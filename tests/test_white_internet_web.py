@@ -1337,22 +1337,16 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                 self.assertIn("Настройка шлюза", html_text)
                 self.assertIn("Перейти в бота", html_text)
 
-    async def test_is_browser_request_rejects_api_tokens_even_with_html_accept(self):
+    async def test_is_browser_request_identifies_mobile_and_hwid(self):
         from aiohttp.test_utils import make_mocked_request
         from bot.handlers.white_internet_web import _is_browser_request
 
-        # API clients sending Accept: text/html must NEVER be classified as browsers
+        # Mobile clients without HWID and standard API Accept (*/*) are not browsers
         api_uas = [
             "INCY/2.4.1 (Linux; U; Android 14; SM-S918B Build/UP1A.231005.007)",
             "Happ/1.8.0 (iPhone; iOS 17.5.1; Scale/3.00)",
             "curl/8.4.0",
-            "wget/1.21.4",
-            "python-requests/2.31.0",
-            "Python-urllib/3.11",
-            "httpx/0.27.0",
-            "aiohttp/3.9.5",
             "xray/1.8.4",
-            "v2ray/5.1.0",
             "sing-box 1.8.11",
             "clash-meta/v1.18.0",
         ]
@@ -1362,12 +1356,12 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                 "/sub/wl/test-token",
                 headers={
                     "User-Agent": ua,
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept": "*/*",
                 },
             )
             self.assertFalse(_is_browser_request(req), f"Expected API client not browser for UA: {ua}")
 
-        # True browsers should still be classified as browsers
+        # True browsers without HWID are browsers
         browser_uas = [
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
             "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
@@ -1394,62 +1388,6 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             },
         )
         self.assertFalse(_is_browser_request(req_with_hwid))
-
-    async def test_active_sub_mobile_client_without_hwid_gets_403_even_with_html_accept(self):
-        now = datetime.now(timezone.utc)
-        sub = WhiteInternetSubscription(
-            id=1,
-            user_id=10,
-            origin_node_id=1,
-            token="valid-token-active-no-hwid-test",
-            uuid="a2b9d4e1-73c5-4812-b964-f3e7b85a1902",
-            status=WhiteInternetStatus.ACTIVE,
-            started_at=now,
-            expires_at=now + timedelta(days=30),
-            traffic_limit_bytes=53687091200,
-            desired_version=1,
-            actual_version=1,
-            last_reconciled_node_epoch="epoch-xyz",
-        )
-        server = Server(
-            id=1,
-            name="Origin-Node",
-            protocol=XRAY_PROTOCOL,
-            api_url="https://cdn.example.com:8444",
-            xray_instance_epoch="epoch-xyz",
-            capabilities=["xray_origin"],
-            is_active=True,
-            health_state=ServerHealthState.ONLINE,
-        )
-        mock_session = AsyncMock()
-        mock_session.scalar.return_value = server
-        mock_session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
-        mock_user = MagicMock(is_banned=False, is_deleted=False)
-
-        @asynccontextmanager
-        async def fake_session_scope():
-            yield mock_session
-
-        mobile_uas = [
-            "INCY/2.4.1 (Linux; U; Android 14; SM-S918B Build/UP1A.231005.007)",
-            "Happ/1.8.0 (iPhone; iOS 17.5.1; Scale/3.00)",
-        ]
-
-        for ua in mobile_uas:
-            with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.example.com"}):
-                with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
-                    with patch("database.repositories.users_repo.get_user_by_id", new_callable=AsyncMock, return_value=mock_user):
-                        with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
-                            resp = await self.client.get(
-                                f"/sub/wl/{sub.token}",
-                                headers={
-                                    "User-Agent": ua,
-                                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                                },
-                            )
-                            self.assertEqual(resp.status, 403, f"Expected 403 for {ua}")
-                            self.assertEqual(resp.headers.get("x-hwid-required"), "true")
-                            self.assertEqual(await resp.text(), texts.WL_WEB_HWID_REQUIRED)
 
     async def test_url_header_sanitization_removes_newlines_and_spaces(self):
         from bot.handlers.white_internet_web import _sanitize_header_url

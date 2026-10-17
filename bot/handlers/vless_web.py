@@ -132,13 +132,16 @@ def _is_browser_request(request: web.Request) -> bool:
     if raw_hwid:
         return False
 
+    accept = request.headers.get("Accept", "").lower()
+    if "text/html" in accept:
+        return True
+
     ua = request.headers.get("User-Agent", "").lower()
+    browser_tokens = ("mozilla/", "chrome/", "safari/", "applewebkit/", "mobile/", "android", "iphone")
     api_tokens = (
         "curl/",
         "wget/",
         "python-requests",
-        "urllib",
-        "httpx",
         "aiohttp/",
         "xray/",
         "v2ray",
@@ -147,15 +150,7 @@ def _is_browser_request(request: web.Request) -> bool:
         "incy",
         "happ",
     )
-    if any(a in ua for a in api_tokens):
-        return False
-
-    accept = request.headers.get("Accept", "").lower()
-    if "text/html" in accept:
-        return True
-
-    browser_tokens = ("mozilla/", "chrome/", "safari/", "applewebkit/", "mobile/", "android", "iphone")
-    return any(b in ua for b in browser_tokens)
+    return any(b in ua for b in browser_tokens) and not any(a in ua for a in api_tokens)
 
 
 async def _resolve_bot_username(request: web.Request) -> str:
