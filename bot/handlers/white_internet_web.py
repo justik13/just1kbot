@@ -47,6 +47,8 @@ _LANDING_INACTIVE_HTML = (_TEMPLATES_DIR / "vless_landing_inactive.html").read_t
 _ip_rate_limiter = HttpRateLimiter(rate_per_minute=60.0, burst=15)
 _token_rate_limiter = HttpRateLimiter(rate_per_minute=30.0, burst=10)
 
+HWID_PATTERN = re.compile(r"^[a-zA-Z0-9_\-:]{3,128}$")
+
 
 def _safe_format_device_template(
     template: str,
@@ -427,10 +429,17 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         hwid = (
             request.headers.get("X-Hwid")
             or request.headers.get("X-HWID")
+            or request.headers.get("X-Device-Hwid")
+            or request.headers.get("X-Device-HWID")
             or request.headers.get("X-Device-Id")
             or request.headers.get("X-Device-ID")
             or ""
         ).strip()
+        if hwid and not HWID_PATTERN.match(hwid):
+            headers = dict(common_headers)
+            headers["x-hwid-required"] = "true"
+            return web.Response(status=400, text="Invalid HWID format", headers=headers)
+
         if not hwid:
             if _is_browser_request(request):
                 html_body = _render_white_internet_landing_html(bot_username=bot_user, is_active=True)
@@ -539,6 +548,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         response_headers.update(
             {
                 "Content-Type": "text/plain; charset=utf-8",
+                "Content-Disposition": 'inline; filename="Just1k.txt"; filename*=UTF-8\'\'Just1k.txt',
                 "Subscription-Userinfo": texts.WL_USERINFO_HEADER_TEMPLATE.format(
                     upload=upload_bytes,
                     download=download_bytes,
