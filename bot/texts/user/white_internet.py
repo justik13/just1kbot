@@ -231,11 +231,8 @@ WL_WEB_DEVICE_LIMIT_EXCEEDED = "Лимит устройств ({active}/{limit})
 WL_WEB_HWID_REQUIRED = "Требуется HWID устройства. Включите отправку HWID в приложении."
 WL_ANNOUNCE_MAINTENANCE = "⚠️ Сервер на техническом обслуживании. Связь скоро восстановится."
 
-WL_FEED_EXPIRED_TITLE = "⚠️ Подписка закончилась"
-WL_FEED_EXPIRED_NOTICE = "⚠️ Подписка закончилась. Продлите доступ: @{bot_username}"
 WL_FEED_EXHAUSTED_TITLE = "⚠️ Трафик исчерпан"
 WL_FEED_EXHAUSTED_NOTICE = "⚠️ Трафик исчерпан. Докупите пакет в @{bot_username}"
-WL_FEED_DEVICE_LIMIT_TITLE = "⚠️ Лимит устройств"
 WL_FEED_DEVICE_LIMIT_NOTICE = "⚠️ Превышен лимит устройств ({active}/{limit}). Управление в @{bot_username}"
 
 

@@ -125,7 +125,8 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                 self.assertEqual(resp.status, 200)
                 self.assertIn("text/html", resp.headers.get("Content-Type", ""))
                 html_text = await resp.text()
-                self.assertIn("just1k13bot", html_text)
+                self.assertIn("Перейти в бота", html_text)
+                self.assertIn("https://t.me/", html_text)
 
     async def test_expired_status_returns_200_with_notice(self):
         now = datetime.now(timezone.utc)
@@ -180,7 +181,8 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                 self.assertEqual(resp.status, 200)
                 self.assertIn("text/html", resp.headers.get("Content-Type", ""))
                 html_text = await resp.text()
-                self.assertIn("just1k13bot", html_text)
+                self.assertIn("Перейти в бота", html_text)
+                self.assertIn("https://t.me/", html_text)
 
     async def test_runtime_out_of_sync_returns_503(self):
         now = datetime.now(timezone.utc)

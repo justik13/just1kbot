@@ -325,8 +325,8 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                 html_body = _render_white_internet_landing_html(bot_username=bot_user, is_active=False)
                 return web.Response(status=200, text=html_body, headers=landing_headers)
             return _build_service_notice_response(
-                title_text=texts.WL_FEED_EXPIRED_TITLE,
-                notice_text=texts.WL_FEED_EXPIRED_NOTICE.format(bot_username=bot_user),
+                title_text=texts.VLESS_FEED_EXPIRED_TITLE,
+                notice_text=texts.VLESS_FEED_EXPIRED_NOTICE.format(bot_username=bot_user),
                 common_headers=common_headers,
                 channel_url=channel_url,
                 support_url=support_url,
@@ -451,7 +451,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                 "x-hwid-active": str(active_count),
             }
             return _build_service_notice_response(
-                title_text=texts.WL_FEED_DEVICE_LIMIT_TITLE,
+                title_text=texts.VLESS_FEED_DEVICE_LIMIT_TITLE,
                 notice_text=limit_msg,
                 common_headers=common_headers,
                 channel_url=channel_url,

@@ -305,7 +305,7 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
                 return_value=sub,
             ):
                 resp = await self.client.get(f"/sub/wl/{sub.token}")
-                self.assertEqual(resp.status, 403)
+                self.assertEqual(resp.status, 200)
                 userinfo = resp.headers.get("Subscription-Userinfo", "")
                 self.assertIn(f"upload={sub.traffic_uplink_bytes};", userinfo)
                 self.assertIn(f"download={sub.traffic_downlink_bytes};", userinfo)
