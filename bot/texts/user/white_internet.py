@@ -6,8 +6,7 @@ WL_DATETIME_FORMAT = "%d.%m.%Y %H:%M UTC"
 
 BTN_WL_BUY_ACCESS = "🚀 Оформить доступ ({price} ₽ / {days} дней)"
 BTN_WL_ACTIVATE_TRIAL = "🎁 Активировать бесплатно (3 дня / 5 ГБ)"
-BTN_WL_CONNECT_INCY = "🚀 Подключить в INCY"
-BTN_WL_CONNECT_CLIENT = BTN_WL_CONNECT_INCY
+BTN_WL_CONNECT_CLIENT = "📱 Подключить в приложении"
 BTN_WL_COPY_LINK = "📋 Скопировать ссылку подписки"
 BTN_WL_INCY_INSTRUCTIONS = "📱 Инструкция по подключению в INCY"
 BTN_WL_REFRESH_STATUS = "🔄 Обновить статус"
@@ -79,6 +78,11 @@ WL_OVERVIEW_ACTIVE = (
     "<b>Использовано:</b> {used} из {total}\n"
     "<code>[{progress}]</code>\n\n"
     "📱 <b>Устройства:</b> {active_devices} из {device_limit}{sub_url_block}"
+)
+WL_OVERVIEW_SUB_URL_BLOCK = (
+    "\n\n📋 <b>Ваша ссылка на подписку:</b>\n"
+    "<code>{sub_url}</code>\n"
+    "<i>(нажмите на ссылку для копирования)</i>"
 )
 
 WL_TOPUP_MENU_TEXT = (

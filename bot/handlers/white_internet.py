@@ -397,9 +397,7 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
             else ""
         )
         sub_url_block = (
-            f"\n\n📋 <b>Ваша ссылка на подписку:</b>\n"
-            f"<code>{sub_url}</code>\n"
-            f"<i>(нажмите на ссылку для копирования)</i>"
+            texts.WL_OVERVIEW_SUB_URL_BLOCK.format(sub_url=sub_url)
             if sub_url
             else ""
         )
