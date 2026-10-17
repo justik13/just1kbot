@@ -2217,21 +2217,23 @@ HTTP/1.1 200 OK
 Content-Type: text/plain; charset=utf-8
 Cache-Control: no-store, private, no-cache, must-revalidate
 CDN-Cache-Control: no-store
-Profile-Title: base64:0JHQtdC70YvQtSDRgdC/0LjRgdC60Lgg0KDQpApWTEVTUyBYSFRUUCBZYW5kZXggUHJlbWl1bQ==
+Profile-Title: base64:0JHQtdC70YvQtSDRgdC/0LjRgdC60Lgg0KDQpA==
 Subscription-Userinfo: upload=0; download=1073741824; total=107374182400; expire=1788000000
 Profile-Update-Interval: 6
 Support-URL: https://t.me/your_support_bot
+Announce-URL: https://t.me/your_channel_or_bot
 Announce: base64:0KDQtdC20LjQvCDQsdC10LvRi9GFINGB0L/QuNGB0LrQvtCyINCw0LrRgtC40LLQtdC9LiDQmNGB0L/QvtC70YzQt9GD0LnRgtC1IFhSQUku
 Hide-URL: 1
 
 <Base64-закодированное тело: либо Full JSON, либо vless:// URI>
 ```
 
-- **`Profile-Title`**: Название и описание профиля в списке серверов INCY (поддерживает многострочный формат через `base64:`: 1-я строка — имя до 25 символов, 2-я строка — описание/лимиты по спецификации INCY `app-management.md`). Отдельный заголовок `Profile-Description` не отображается клиентами INCY и удалён из выдачи.
+- **`Profile-Title`**: Название профиля в списке серверов INCY (строго одна строка через `base64:`, до 25 символов). Перевод строки `\n` и заголовок `Profile-Description` клиентом INCY в интерфейсе не отображаются.
 - **`Subscription-Userinfo`**: Виджет трафика и срока действия подписки прямо на главном экране INCY (`upload`, `download`, `total`, `expire`).
 - **`Profile-Update-Interval`**: Интервал автообновления серверов в часах (например, каждые 6 или 12 часов).
-- **`Support-URL`**: Ссылка на бота поддержки или справочный контакт.
-- **`Announce`**: Сервисное уведомление при обновлении конфигурации клиентом.
+- **`Support-URL`**: Ссылка на бота поддержки или справочный контакт (отображается как кнопка «💬 Поддержка»).
+- **`Announce-URL`**: Ссылка объявления (генерирует кнопку «✈️ Канал / Бот» в карточке профиля).
+- **`Announce`**: Сервисное текстовое уведомление (баннер) при обновлении конфигурации клиентом.
 - **`Hide-URL: 1`**: Защищает URL подписки от случайного копирования и утечки пользователем.
 - **`Cache-Control` / `CDN-Cache-Control: no-store`**: Запрещают промежуточное кэширование персонализированной ленты на узлах CDN и в клиентских кэшах.
 

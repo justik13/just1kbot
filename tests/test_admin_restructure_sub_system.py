@@ -103,7 +103,8 @@ class TestAdminMenuAndCategoryKeyboards(unittest.TestCase):
         callbacks = [b.callback_data for row in kb.inline_keyboard for b in row]
 
         self.assertIn("admin_std_incy_edit:title", callbacks)
-        self.assertIn("admin_std_incy_edit:desc", callbacks)
+        self.assertIn("admin_std_incy_toggle_devs", callbacks)
+        self.assertNotIn("admin_std_incy_edit:desc", callbacks)
         self.assertIn("admin_std_incy_edit:announce", callbacks)
         self.assertIn("admin_std_incy_edit:announce_url", callbacks)
         self.assertIn("admin_std_incy_reset", callbacks)
@@ -428,20 +429,24 @@ class TestAdminStandardIncySettings(unittest.IsolatedAsyncioTestCase):
                         self.mock_session, "vless_profile_title", "✦ Just1k", updated_by=111
                     )
 
-    async def test_process_std_incy_param_input_desc_dash_clears_both_keys(self):
-        await self.state.set_state(AdminStates.editing_std_incy_param)
-        await self.state.update_data(field="desc")
-        msg = self._create_msg("-")
+    async def test_toggle_std_sub_incy_devices(self):
+        from bot.handlers.admin.servers.incy_routes import toggle_std_sub_incy_devices
+        cb = MagicMock(spec=CallbackQuery)
+        cb.from_user = self.admin_user
+        cb.data = "admin_std_incy_toggle_devs"
+        cb.answer = AsyncMock()
+        cb.message = MagicMock()
+        cb.message.edit_text = AsyncMock()
+
         with patch("bot.handlers.admin.servers.incy_routes.is_admin", return_value=True):
-            with patch("bot.handlers.admin.servers.incy_routes.set_system_setting", new_callable=AsyncMock) as mock_set:
-                await process_std_incy_param_input(msg, self.state, self.mock_session)
-                self.assertEqual(mock_set.await_count, 2)
-                mock_set.assert_any_await(
-                    self.mock_session, "vless_profile_description", None, updated_by=111
-                )
-                mock_set.assert_any_await(
-                    self.mock_session, "vless_profile_desc", None, updated_by=111
-                )
+            with patch("bot.handlers.admin.servers.incy_routes.get_system_setting", return_value=False):
+                with patch("bot.handlers.admin.servers.incy_routes.set_system_setting", new_callable=AsyncMock) as mock_set:
+                    await toggle_std_sub_incy_devices(cb, self.state, self.mock_session)
+                    mock_set.assert_awaited_once_with(
+                        self.mock_session, "vless_profile_show_devices", "true", updated_by=111
+                    )
+                    cb.answer.assert_awaited_once()
+                    cb.message.edit_text.assert_awaited_once()
 
     async def test_reset_std_sub_incy_to_defaults(self):
         cb = MagicMock(spec=CallbackQuery)
@@ -454,7 +459,7 @@ class TestAdminStandardIncySettings(unittest.IsolatedAsyncioTestCase):
         with patch("bot.handlers.admin.servers.incy_routes.is_admin", return_value=True):
             with patch("bot.handlers.admin.servers.incy_routes.set_system_setting", new_callable=AsyncMock) as mock_set:
                 await reset_std_sub_incy_to_defaults(cb, self.state, self.mock_session)
-                self.assertEqual(mock_set.await_count, 5)
+                self.assertEqual(mock_set.await_count, 6)
                 cb.answer.assert_awaited_once_with(texts.ADMIN_SERVER_INCY_RESET_SUCCESS, show_alert=False)
 
 

@@ -91,15 +91,16 @@ class VlessSubscriptionService:
             else:
                 label = clean_name
 
+            quoted_label = urllib.parse.quote(label)
             # INCY renders vector flag when emoji is the first character after #
             # and displays serverDescription badge via ?serverDescription=base64(UTF-8)
             badge_raw = extra.get("origin_badge") if "origin_badge" in extra else extra.get("server_description")
             if badge_raw and str(badge_raw).strip() and str(badge_raw).strip().lower() != "none":
                 clean_badge = str(badge_raw).strip()[:30]
                 b64_badge = base64.b64encode(clean_badge.encode("utf-8")).decode("utf-8")
-                fragment = f"{label}?serverDescription={b64_badge}"
+                fragment = f"{quoted_label}?serverDescription={b64_badge}"
             else:
-                fragment = label
+                fragment = quoted_label
 
             link = (
                 f"vless://{subscription.uuid}@{domain}:{port}"
