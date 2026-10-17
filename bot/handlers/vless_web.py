@@ -219,21 +219,24 @@ def _resolve_channel_url(first_extra: dict | None, default_bot_url: str) -> str:
 def _render_vless_landing_html(
     bot_username: str = "",
     is_active: bool = True,
-    status_badge: str = "Доступ приостановлен",
-    status_title: str = "Подписка не активна",
-    status_description: str = "Срок действия доступа истек или подписка приостановлена. Для возобновления перейдите в бота.",
+    status_badge: str | None = None,
+    status_title: str | None = None,
+    status_description: str | None = None,
 ) -> str:
     """Render universal landing page for INCY 1-click import and installation guidance."""
     clean_bot = html.escape(bot_username.strip().lstrip("@")) if bot_username else "just1k13bot"
     bot_link = f"https://t.me/{clean_bot}"
 
     if not is_active:
+        badge = status_badge or texts.LANDING_INACTIVE_BADGE_PAUSED
+        title = status_title or texts.LANDING_INACTIVE_TITLE_DEFAULT
+        desc = status_description or texts.LANDING_INACTIVE_DESC_DEFAULT
         return (
             _LANDING_INACTIVE_HTML.replace("{clean_bot}", clean_bot)
             .replace("{bot_link}", bot_link)
-            .replace("{status_badge}", html.escape(status_badge))
-            .replace("{status_title}", html.escape(status_title))
-            .replace("{status_description}", html.escape(status_description))
+            .replace("{status_badge}", html.escape(badge))
+            .replace("{status_title}", html.escape(title))
+            .replace("{status_description}", html.escape(desc))
         )
     return _LANDING_ACTIVE_HTML
 
@@ -323,9 +326,9 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                 html_body = _render_vless_landing_html(
                     bot_username=bot_username,
                     is_active=False,
-                    status_badge="Срок истек",
-                    status_title="Срок действия истек",
-                    status_description="Срок действия доступа подошел к концу. Для продления перейдите в бота.",
+                    status_badge=texts.LANDING_INACTIVE_BADGE_EXPIRED,
+                    status_title=texts.LANDING_INACTIVE_TITLE_EXPIRED,
+                    status_description=texts.LANDING_INACTIVE_DESC_EXPIRED,
                 )
                 landing_headers = {
                     **common_headers,

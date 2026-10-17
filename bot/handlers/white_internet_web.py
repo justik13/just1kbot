@@ -126,21 +126,24 @@ def _is_browser_request(request: web.Request) -> bool:
 def _render_white_internet_landing_html(
     bot_username: str = "",
     is_active: bool = True,
-    status_badge: str = "Доступ приостановлен",
-    status_title: str = "Подписка не активна",
-    status_description: str = "Срок действия доступа истек или подписка приостановлена. Для возобновления перейдите в бота.",
+    status_badge: str | None = None,
+    status_title: str | None = None,
+    status_description: str | None = None,
 ) -> str:
     """Render universal landing page for INCY 1-click import."""
     clean_bot = html.escape(bot_username.strip().lstrip("@")) if bot_username else "just1k13bot"
     bot_link = f"https://t.me/{clean_bot}"
 
     if not is_active:
+        badge = status_badge or texts.LANDING_INACTIVE_BADGE_PAUSED
+        title = status_title or texts.LANDING_INACTIVE_TITLE_DEFAULT
+        desc = status_description or texts.LANDING_INACTIVE_DESC_DEFAULT
         return (
             _LANDING_INACTIVE_HTML.replace("{clean_bot}", clean_bot)
             .replace("{bot_link}", bot_link)
-            .replace("{status_badge}", html.escape(status_badge))
-            .replace("{status_title}", html.escape(status_title))
-            .replace("{status_description}", html.escape(status_description))
+            .replace("{status_badge}", html.escape(badge))
+            .replace("{status_title}", html.escape(title))
+            .replace("{status_description}", html.escape(desc))
         )
     return _LANDING_ACTIVE_HTML
 
@@ -409,9 +412,9 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                 html_body = _render_white_internet_landing_html(
                     bot_username=bot_user,
                     is_active=False,
-                    status_badge="Доступ отключен",
-                    status_title="Доступ отключен",
-                    status_description="Доступ отключен администратором. Для уточнения обратитесь в поддержку в боте.",
+                    status_badge=texts.LANDING_INACTIVE_BADGE_DISABLED,
+                    status_title=texts.LANDING_INACTIVE_TITLE_DISABLED,
+                    status_description=texts.LANDING_INACTIVE_DESC_DISABLED,
                 )
                 return web.Response(status=200, text=html_body, headers=landing_headers)
             return _build_service_notice_response(
@@ -435,9 +438,9 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                 html_body = _render_white_internet_landing_html(
                     bot_username=bot_user,
                     is_active=False,
-                    status_badge="Срок истек",
-                    status_title="Срок действия истек",
-                    status_description="Срок действия доступа подошел к концу. Для продления перейдите в бота.",
+                    status_badge=texts.LANDING_INACTIVE_BADGE_EXPIRED,
+                    status_title=texts.LANDING_INACTIVE_TITLE_EXPIRED,
+                    status_description=texts.LANDING_INACTIVE_DESC_EXPIRED,
                 )
                 return web.Response(status=200, text=html_body, headers=landing_headers)
             return _build_service_notice_response(
@@ -458,9 +461,9 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                 html_body = _render_white_internet_landing_html(
                     bot_username=bot_user,
                     is_active=False,
-                    status_badge="Лимит исчерпан",
-                    status_title="Трафик исчерпан",
-                    status_description="Включенный пакет трафика закончился. Для продолжения работы перейдите в бота.",
+                    status_badge=texts.LANDING_INACTIVE_BADGE_EXHAUSTED,
+                    status_title=texts.LANDING_INACTIVE_TITLE_EXHAUSTED,
+                    status_description=texts.LANDING_INACTIVE_DESC_EXHAUSTED,
                 )
                 return web.Response(status=200, text=html_body, headers=landing_headers)
             is_trial = bool(getattr(sub, "is_trial", False))

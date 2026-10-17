@@ -103,6 +103,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
         sub.traffic_downlink_bytes = 2000
         sub.traffic_limit_bytes = 53687091200
         sub.expires_at = datetime.now(timezone.utc) + timedelta(days=30)
+        sub.is_trial = False
 
         mock_session = AsyncMock()
         @asynccontextmanager
@@ -1459,6 +1460,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
         ):
             sub = MagicMock(spec=WhiteInternetSubscription)
             sub.id = 1
+            sub.user_id = 10
             sub.origin_node_id = 1
             sub.status = WhiteInternetStatus.EXHAUSTED
             sub.traffic_uplink_bytes = 1000
@@ -1476,7 +1478,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
                 with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
                     resp = await self.client.get(
-                        "/sub/wl/exhausted-token",
+                        "/sub/wl/exhausted-token-sample-123",
                         headers={"X-Hwid": "test-device-123"},
                     )
                     self.assertEqual(resp.status, 200)

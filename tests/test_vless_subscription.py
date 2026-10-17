@@ -605,7 +605,6 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
 
     async def test_vless_active_sub_mobile_client_without_hwid_gets_403_even_with_html_accept(self):
         from bot import texts
-        from config.enums import SubscriptionStatus
         active_user = User(
             id=42,
             telegram_id=999,
@@ -613,7 +612,6 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             is_deleted=False,
             financial_hold=False,
             subscription_end=datetime.now(timezone.utc) + timedelta(days=20),
-            subscription_status=SubscriptionStatus.ACTIVE.value,
         )
         active_sub = VlessSubscription(
             id=1,
