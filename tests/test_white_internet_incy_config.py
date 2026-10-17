@@ -454,7 +454,10 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
                     "database.repositories.white_internet_repo.get_subscription_by_token",
                     return_value=sub,
                 ):
-                    resp = await self.client.get(f"/sub/wl/{sub.token}")
+                    resp = await self.client.get(
+                        f"/sub/wl/{sub.token}",
+                        headers={"X-Hwid": "test-device"},
+                    )
                     self.assertEqual(resp.status, 200)
                     self.assertEqual(resp.headers.get("Announce-Url"), "https://t.me/fallback_channel")
 
