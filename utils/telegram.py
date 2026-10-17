@@ -11,7 +11,7 @@ from aiogram.exceptions import (
     TelegramNetworkError,
     TelegramRetryAfter,
 )
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InputFile, LinkPreviewOptions
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, LinkPreviewOptions
 from cachetools import TTLCache
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -386,6 +386,97 @@ async def _dispatch_delete_hub_messages(
     return await _delete_hub_messages(bot, chat_id, msg_ids)
 
 
+def sanitize_reply_markup(reply_markup: InlineKeyboardMarkup | None) -> InlineKeyboardMarkup | None:
+    """Validate and sanitize an InlineKeyboardMarkup to strictly satisfy Telegram Bot API constraints.
+
+    Guarantees:
+    - copy_text: Telegram Bot API limits text to 1..256 characters. If text length is outside [1, 256]
+      (e.g., raw AWG configs/keys of 800+ chars, empty strings), copy_text is dropped and safely replaced
+      with callback_data="ignore" to prevent TelegramBadRequest: BUTTON_COPY_TEXT_INVALID.
+    - callback_data: Telegram Bot API limits callback_data to 1..64 bytes (UTF-8). If exceeded, truncated
+      safely to <= 64 bytes to prevent TelegramBadRequest: BUTTON_DATA_INVALID.
+    - text: button label must not be empty (defaults to '—' if whitespace/empty).
+    - row width: Telegram Bot API limits each row to max 8 buttons. Rows > 8 buttons are automatically partitioned.
+    - total rows: Telegram Bot API limits keyboards to max 100 rows. Excess rows are capped.
+    """
+    if reply_markup is None or not getattr(reply_markup, "inline_keyboard", None):
+        return reply_markup
+
+    sanitized_rows: list[list[InlineKeyboardButton]] = []
+    has_changes = False
+
+    for row in reply_markup.inline_keyboard:
+        sanitized_row: list[InlineKeyboardButton] = []
+        for btn in row:
+            updates: dict[str, Any] = {}
+
+            # 1. Text label must not be empty
+            btn_text = getattr(btn, "text", "") or ""
+            if not btn_text.strip():
+                updates["text"] = "—"
+
+            # 2. Check copy_text: Telegram Bot API specifies 1 <= len(text) <= 256
+            if getattr(btn, "copy_text", None) is not None:
+                cp_text = getattr(btn.copy_text, "text", "") or ""
+                if not (1 <= len(cp_text) <= 256):
+                    updates["copy_text"] = None
+                    if not (
+                        btn.url
+                        or btn.web_app
+                        or btn.login_url
+                        or btn.switch_inline_query
+                        or btn.switch_inline_query_current_chat
+                        or btn.switch_inline_query_chosen_chat
+                        or btn.callback_game
+                        or btn.pay
+                    ):
+                        updates["callback_data"] = "ignore"
+                    logger.warning(
+                        "Sanitized invalid copy_text in button '%s' (len=%s, must be 1..256)",
+                        btn_text,
+                        len(cp_text),
+                    )
+
+            # 3. Check callback_data: Telegram Bot API specifies 1 <= len(utf-8 bytes) <= 64
+            if getattr(btn, "callback_data", None) is not None and "callback_data" not in updates:
+                cb_str = str(btn.callback_data)
+                cb_bytes = cb_str.encode("utf-8")
+                if len(cb_bytes) > 64:
+                    truncated = cb_bytes[:64].decode("utf-8", "ignore") or "ignore"
+                    updates["callback_data"] = truncated
+                    logger.warning(
+                        "Sanitized oversized callback_data in button '%s' (%s bytes -> %s bytes)",
+                        btn_text,
+                        len(cb_bytes),
+                        len(truncated.encode("utf-8")),
+                    )
+
+            if updates:
+                has_changes = True
+                sanitized_btn = btn.model_copy(update=updates) if hasattr(btn, "model_copy") else btn
+                sanitized_row.append(sanitized_btn)
+            else:
+                sanitized_row.append(btn)
+
+        # 4. Check row width: Telegram Bot API max 8 buttons per row
+        if len(sanitized_row) > 8:
+            has_changes = True
+            for i in range(0, len(sanitized_row), 8):
+                sanitized_rows.append(sanitized_row[i : i + 8])
+        else:
+            sanitized_rows.append(sanitized_row)
+
+    # 5. Check max rows: Telegram Bot API max 100 rows
+    if len(sanitized_rows) > 100:
+        has_changes = True
+        sanitized_rows = sanitized_rows[:100]
+
+    if not has_changes:
+        return reply_markup
+
+    return InlineKeyboardMarkup(inline_keyboard=sanitized_rows)
+
+
 async def render_hub(
     bot,
     chat_id: int,
@@ -400,6 +491,7 @@ async def render_hub(
 ) -> int:
     """Render a single navigable hub, editing the target text message first."""
     _maybe_cleanup_cache()
+    reply_markup = sanitize_reply_markup(reply_markup)
 
     link_preview_opts = LinkPreviewOptions(is_disabled=True) if disable_web_page_preview else None
 
@@ -648,6 +740,7 @@ async def _append_hub_document_unlocked(
     parse_mode: str | None = "HTML",
     session: AsyncSession | None = None,
 ) -> int:
+    reply_markup = sanitize_reply_markup(reply_markup)
     if caption:
         caption = caption[:1024]
 
@@ -706,6 +799,7 @@ async def _append_hub_message_unlocked(
     reply_markup: InlineKeyboardMarkup | None = None,
     parse_mode: str | None = "HTML",
 ) -> int:
+    reply_markup = sanitize_reply_markup(reply_markup)
     text_parts = split_text_by_lines(text, limit=4096)
 
     if not text_parts:
@@ -873,6 +967,7 @@ async def safe_send_message(
     - Returns the message_id of the sent message (or last part if split), or None on terminal error.
     """
     link_preview_opts = LinkPreviewOptions(is_disabled=True) if disable_web_page_preview else None
+    reply_markup = sanitize_reply_markup(reply_markup)
     text_parts = split_text_by_lines(text, limit=4096) or ["—"]
     sent_id = None
 
