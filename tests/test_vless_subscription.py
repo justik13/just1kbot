@@ -1592,6 +1592,77 @@ class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sub.uuid, "abc-uuid")
         self.assertEqual(sub.version, 1)
 
+    async def test_get_or_create_subscription_race_condition(self):
+        from sqlalchemy.exc import IntegrityError
+        from database.models import VlessSubscription
+        from database.repositories import vless_subscription_repo
+
+        existing_sub = VlessSubscription(
+            id=5,
+            user_id=42,
+            token="winning-token-12345678",
+            uuid="winning-uuid-1234",
+            is_active=True,
+            active_hwids={},
+        )
+
+        @asynccontextmanager
+        async def fake_nested():
+            yield
+
+        mock_session = AsyncMock()
+        mock_session.add = MagicMock()
+        mock_session.begin_nested = fake_nested
+        mock_session.scalar = AsyncMock(side_effect=[None, existing_sub])
+        mock_session.execute = AsyncMock(side_effect=[
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=existing_sub)),
+        ])
+        mock_session.flush = AsyncMock(side_effect=IntegrityError("duplicate key", params=None, orig=Exception()))
+
+        sub = await vless_subscription_repo.get_or_create_subscription(mock_session, 42)
+        self.assertEqual(sub.id, 5)
+        self.assertEqual(sub.token, "winning-token-12345678")
+
+    async def test_register_hwid_atomic_rejects_banned_user_under_lock(self):
+        from database.models import User, VlessSubscription
+        from database.repositories import vless_subscription_repo
+
+        user = User(id=1, telegram_id=123, is_banned=True, subscription_end=None)
+        sub = VlessSubscription(id=1, user_id=1, token="tok1234567890123456", uuid="abc-uuid", is_active=True, active_hwids={})
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(side_effect=[
+            MagicMock(scalar_one_or_none=MagicMock(return_value=1)),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=user)),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=sub)),
+        ])
+
+        allowed, count, limit = await vless_subscription_repo.register_hwid_atomic(
+            mock_session,
+            subscription_id=1,
+            hwid="hwid-test",
+            effective_limit=2,
+        )
+        self.assertFalse(allowed)
+        self.assertEqual(limit, 0)
+
+    async def test_bump_subscription_version_under_row_lock(self):
+        from database.models import VlessSubscription
+        from database.repositories import vless_subscription_repo
+
+        sub = VlessSubscription(id=99, user_id=1, uuid="test-uuid", version=3)
+        session = AsyncMock()
+        session.scalar = AsyncMock(return_value=sub)
+        mock_res = MagicMock()
+        mock_res.scalar_one_or_none = MagicMock(return_value=sub)
+        session.execute = AsyncMock(return_value=mock_res)
+
+        updated = await vless_subscription_repo.bump_subscription_version(session, 99)
+        self.assertIsNotNone(updated)
+        self.assertEqual(updated.version, 4)
+        session.flush.assert_called_once()
+
 
 class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
     """Test suite for VlessSubscriptionService methods."""
@@ -1667,6 +1738,301 @@ class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(res, 0)
         finally:
             VlessSubscriptionService._ACTIVE_SERVER_SYNCS.discard(99)
+
+    async def test_create_device_enforces_combined_quota(self):
+        from database.models import Server, User
+        from services.device_service import DeviceLimitExceeded, DeviceService
+        from services.slots_cache import ServerPeerSnapshot
+
+        user = User(
+            id=1,
+            telegram_id=123,
+            device_limit=2,
+            is_deleted=False,
+            is_banned=False,
+            financial_hold=False,
+            subscription_end=datetime.now(timezone.utc) + timedelta(days=10),
+            device_creations_today=0,
+            last_creation_date=None,
+        )
+        server = Server(id=1, name="Test", is_active=True, max_clients=100)
+        snapshot = ServerPeerSnapshot(server_id=1, peer_ids=frozenset(), captured_at=datetime.now(timezone.utc))
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(side_effect=[
+            # 1. select User FOR UPDATE
+            MagicMock(scalar_one=MagicMock(return_value=user)),
+            # 2. select Server FOR UPDATE
+            MagicMock(scalar_one_or_none=MagicMock(return_value=server)),
+            # 3. select user profiles -> []
+            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
+            # 4. duplicate -> None
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+            # 5. user_count -> 1 (with vless_count=1 -> 1 + 1 = 2 >= device_limit 2 -> DeviceLimitExceeded)
+            MagicMock(scalar_one=MagicMock(return_value=1)),
+        ])
+
+        with (
+            patch("services.device_service.is_admin", return_value=False),
+            patch("database.repositories.vless_subscription_repo.get_active_hwid_count", new=AsyncMock(return_value=1)),
+        ):
+            with self.assertRaises(DeviceLimitExceeded):
+                await DeviceService.create_device(
+                    mock_session,
+                    user_id=1,
+                    server_id=1,
+                    snapshot=snapshot,
+                    vless_count=1,
+                )
+
+    async def test_sync_user_to_nodes_handles_version_conflict_by_bumping(self):
+        from database.models import User, Server, VlessSubscription
+        from services.vless_subscription_service import VlessSubscriptionService
+
+        session = AsyncMock()
+        user = User(
+            id=10,
+            telegram_id=1010,
+            subscription_end=now_utc() + timedelta(days=5),
+            is_banned=False,
+            is_deleted=False,
+            financial_hold=False,
+        )
+        sub = VlessSubscription(id=20, user_id=10, uuid="test-uuid", is_active=True, version=1)
+        srv = Server(id=1, api_url="https://node.com:8443", api_key="secret", capabilities=["vless"])
+
+        session.get = AsyncMock(return_value=user)
+
+        def do_bump(s, sid):
+            sub.version = sub.version + 1
+            return sub
+
+        with (
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_configured_vless_servers", new=AsyncMock(return_value=[srv])),
+            patch("database.repositories.vless_subscription_repo.bump_subscription_version", new=AsyncMock(side_effect=do_bump)) as mock_bump,
+            patch.object(VlessSubscriptionService, "_execute_sync_to_nodes_with_status") as mock_sync_status,
+        ):
+            # First attempt triggers version bump; second attempt succeeds
+            mock_sync_status.side_effect = [
+                ({1: False}, True),
+                ({1: True}, False),
+            ]
+            res = await VlessSubscriptionService.sync_user_to_nodes(session, 10)
+            assert res == {1: True}
+            mock_bump.assert_called_once_with(session, 20)
+            assert sub.version == 2
+            assert mock_sync_status.call_count == 2
+            assert sub.last_synced_version == 2
+
+    async def test_sweep_converges_unsynced_server_epochs(self):
+        from database.models import Server
+        from services.workers.cleanup import _sweep_vless_pending_revocations
+
+        srv = Server(
+            id=42,
+            is_active=True,
+            capabilities=["vless"],
+            xray_instance_epoch="new_epoch_999",
+            extra_data={"vless_synced_epoch": "old_epoch_111"},
+        )
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))))
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with (
+            patch("services.workers.cleanup.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscriptions_with_pending_revocations", new=AsyncMock(return_value=[])),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_configured_vless_servers", new=AsyncMock(return_value=[srv])),
+            patch("services.vless_subscription_service.VlessSubscriptionService.sync_all_active_to_server", new=AsyncMock(return_value=5)) as mock_sync_server,
+        ):
+            await _sweep_vless_pending_revocations()
+            mock_sync_server.assert_called_once_with(42)
+
+    async def test_ensure_synced_background_revocation_failure_retains_pending_uuid(self):
+        from config.enums import ServerLifecycleStatus
+        from database.models import Server, User, VlessSubscription
+        from services.vless_subscription_service import VlessSubscriptionService
+
+        user = User(id=10, is_deleted=False, is_banned=False, financial_hold=False, subscription_end=None)
+        sub = VlessSubscription(
+            id=1,
+            user_id=10,
+            uuid="curr-uuid",
+            version=1,
+            is_active=True,
+            pending_revoked_uuids=["pending-old-uuid"],
+        )
+        srv1 = Server(id=1, is_active=True, lifecycle_status=ServerLifecycleStatus.ACTIVE, capabilities=["vless"], api_url="https://s1.example.com:8443", api_key="k1")
+        srv2 = Server(id=2, is_active=False, lifecycle_status=ServerLifecycleStatus.ACTIVE, capabilities=["vless"], api_url="https://s2.example.com:8443", api_key="k2")
+
+        mock_session = AsyncMock()
+        mock_session.get.return_value = user
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with (
+            patch("database.connection.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)),
+            patch.object(VlessSubscriptionService, "get_configured_vless_servers", new=AsyncMock(return_value=[srv1])),
+            patch.object(VlessSubscriptionService, "get_revocation_target_servers", new=AsyncMock(return_value=[srv1, srv2])),
+            patch.object(VlessSubscriptionService, "_execute_sync_to_nodes_with_status", new=AsyncMock(return_value=({1: True}, False))),
+            patch.object(VlessSubscriptionService, "_execute_deprovision_on_nodes", new=AsyncMock(return_value={1: True, 2: False})) as mock_deprov,
+            patch("database.repositories.vless_subscription_repo.pop_pending_revoked_uuid", new=AsyncMock()) as mock_pop,
+        ):
+            task = VlessSubscriptionService.ensure_synced_background(10, is_active=True)
+            self.assertIsNotNone(task)
+            await task
+            mock_deprov.assert_called_once()
+            mock_pop.assert_not_called()
+
+    async def test_execute_sync_and_deprovision_strict_all_inbounds_verified(self):
+        from services.vless_subscription_service import VlessSubscriptionService
+        from services.xray_node_client import SyncResponse, SyncResult
+
+        targets = [(10, "https://node1.example.com:8443", "key1")]
+
+        # Case 1: result == "applied" but all_inbounds_verified is False -> results[10] must be False
+        partial_resp = SyncResponse(
+            result=SyncResult.APPLIED,
+            verified_inbounds=["just1k-vless-direct"],
+            all_inbounds_verified=False,
+            raw_data={"result": "applied"},
+        )
+        with patch("services.vless_subscription_service.XrayNodeClient.sync_client", new=AsyncMock(return_value=partial_resp)):
+            sync_res, _ = await VlessSubscriptionService._execute_sync_to_nodes_with_status(
+                targets, "uuid-123", True, version=1
+            )
+            self.assertEqual(sync_res, {10: False})
+
+            deprov_res = await VlessSubscriptionService._execute_deprovision_on_nodes(
+                targets, "uuid-123", version=1
+            )
+            self.assertEqual(deprov_res, {10: False})
+
+        # Case 2: result == "applied" and all_inbounds_verified is True -> results[10] must be True
+        full_resp = SyncResponse(
+            result=SyncResult.APPLIED,
+            verified_inbounds=["just1k-vless-direct"],
+            all_inbounds_verified=True,
+            raw_data={"result": "applied"},
+        )
+        with patch("services.vless_subscription_service.XrayNodeClient.sync_client", new=AsyncMock(return_value=full_resp)):
+            sync_res, _ = await VlessSubscriptionService._execute_sync_to_nodes_with_status(
+                targets, "uuid-123", True, version=1
+            )
+            self.assertEqual(sync_res, {10: True})
+
+            deprov_res = await VlessSubscriptionService._execute_deprovision_on_nodes(
+                targets, "uuid-123", version=1
+            )
+            self.assertEqual(deprov_res, {10: True})
+
+    async def test_get_revocation_target_servers_includes_inactive_servers(self):
+        from config.enums import ServerLifecycleStatus
+        from database.models import Server
+        from services.vless_subscription_service import VlessSubscriptionService
+
+        active_srv = Server(
+            id=1,
+            is_active=True,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            capabilities=["vless"],
+            api_url="https://s1.example.com:8443",
+            api_key="k1",
+        )
+        inactive_but_alive_srv = Server(
+            id=2,
+            is_active=False,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            capabilities=["vless"],
+            api_url="https://s2.example.com:8443",
+            api_key="k2",
+        )
+        non_vless_srv = Server(
+            id=3,
+            is_active=True,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            capabilities=["awg"],
+            api_url="https://s3.example.com:8443",
+            api_key="k3",
+        )
+        _decommissioned_srv = Server(
+            id=4,
+            is_active=False,
+            lifecycle_status=ServerLifecycleStatus.DECOMMISSIONED,
+            capabilities=["vless"],
+            api_url="https://s4.example.com:8443",
+            api_key="k4",
+        )
+
+        session = AsyncMock()
+        mock_res = MagicMock()
+        mock_res.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=[active_srv, inactive_but_alive_srv, non_vless_srv])))
+        session.execute = AsyncMock(return_value=mock_res)
+
+        targets = await VlessSubscriptionService.get_revocation_target_servers(session)
+        target_ids = [s.id for s in targets]
+        self.assertIn(1, target_ids)
+        self.assertIn(2, target_ids)
+        self.assertNotIn(3, target_ids)
+        self.assertNotIn(4, target_ids)
+
+    def test_generate_vless_links_skips_invalid_domain_or_missing_fqdn(self):
+        from config.enums import ServerHealthState
+        from database.models import Server, VlessSubscription
+        from services.vless_subscription_service import VlessSubscriptionService
+
+        sub = VlessSubscription(id=1, uuid="11111111-2222-3333-4444-555555555555", is_active=True)
+
+        srv_no_domain = Server(
+            id=1,
+            name="No Domain",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            capabilities=["vless"],
+            api_url="https://192.168.1.1:8443",
+            extra_data={},
+        )
+        srv_invalid_domain = Server(
+            id=2,
+            name="Invalid Domain",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            capabilities=["vless"],
+            api_url="https://node.example.com:8443",
+            extra_data={"domain": "localhost:8443"},
+        )
+        srv_no_dot = Server(
+            id=3,
+            name="No Dot Domain",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            capabilities=["vless"],
+            api_url="https://node.example.com:8443",
+            extra_data={"domain": "nodomain"},
+        )
+        srv_valid = Server(
+            id=4,
+            name="Valid Domain",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            capabilities=["vless"],
+            api_url="https://node.example.com:8443",
+            extra_data={"domain": "valid.example.com"},
+        )
+
+        links = VlessSubscriptionService.generate_vless_links(
+            sub, [srv_no_domain, srv_invalid_domain, srv_no_dot, srv_valid]
+        )
+        self.assertEqual(len(links), 1)
+        self.assertIn("@valid.example.com:443", links[0])
 
 
 class TestVlessSubscriptionDomainAndBotResolution(unittest.TestCase):
