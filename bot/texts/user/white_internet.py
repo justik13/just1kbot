@@ -233,6 +233,7 @@ WL_ANNOUNCE_MAINTENANCE = "⚠️ Сервер на техническом об�
 
 WL_FEED_EXHAUSTED_TITLE = "⚠️ Трафик исчерпан"
 WL_FEED_EXHAUSTED_NOTICE = "⚠️ Трафик исчерпан. Докупите пакет в @{bot_username}"
+WL_FEED_EXHAUSTED_TRIAL_NOTICE = "⚠️ Пробный трафик исчерпан. Оформите подписку в @{bot_username}"
 WL_FEED_DISABLED_TITLE = "🚫 Доступ отключен"
 WL_FEED_DISABLED_NOTICE = "🚫 Доступ отключен администратором. Обратитесь в поддержку: @{bot_username}"
 WL_FEED_DEVICE_LIMIT_NOTICE = "⚠️ Превышен лимит устройств ({active}/{limit}). Управление в @{bot_username}"

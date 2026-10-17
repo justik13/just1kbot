@@ -146,6 +146,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                 self.assertEqual(resp.status, 200)
                 self.assertIn("text/html", resp.headers.get("Content-Type", ""))
                 html_text = await resp.text()
+                self.assertIn("Трафик исчерпан", html_text)
                 self.assertIn("Перейти в бота", html_text)
                 self.assertIn("https://t.me/", html_text)
 
@@ -256,6 +257,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                 self.assertEqual(resp.status, 200)
                 self.assertIn("text/html", resp.headers.get("Content-Type", ""))
                 html_text = await resp.text()
+                self.assertIn("Доступ отключен", html_text)
                 self.assertIn("Перейти в бота", html_text)
                 self.assertIn("https://t.me/", html_text)
 
@@ -1341,7 +1343,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
         from aiohttp.test_utils import make_mocked_request
         from bot.handlers.white_internet_web import _is_browser_request
 
-        # Mobile clients without HWID and standard API Accept (*/*) are not browsers
+        # Mobile and API clients without HWID are NEVER browsers, even with Accept: text/html
         api_uas = [
             "INCY/2.4.1 (Linux; U; Android 14; SM-S918B Build/UP1A.231005.007)",
             "Happ/1.8.0 (iPhone; iOS 17.5.1; Scale/3.00)",
@@ -1351,15 +1353,19 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             "clash-meta/v1.18.0",
         ]
         for ua in api_uas:
-            req = make_mocked_request(
-                "GET",
-                "/sub/wl/test-token",
-                headers={
-                    "User-Agent": ua,
-                    "Accept": "*/*",
-                },
-            )
-            self.assertFalse(_is_browser_request(req), f"Expected API client not browser for UA: {ua}")
+            for accept_val in ("*/*", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"):
+                req = make_mocked_request(
+                    "GET",
+                    "/sub/wl/test-token",
+                    headers={
+                        "User-Agent": ua,
+                        "Accept": accept_val,
+                    },
+                )
+                self.assertFalse(
+                    _is_browser_request(req),
+                    f"Expected API client not browser for UA: {ua} with Accept: {accept_val}",
+                )
 
         # True browsers without HWID are browsers
         browser_uas = [
@@ -1388,6 +1394,95 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             },
         )
         self.assertFalse(_is_browser_request(req_with_hwid))
+
+    async def test_active_sub_mobile_client_without_hwid_gets_403_even_with_html_accept(self):
+        now = datetime.now(timezone.utc)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            origin_node_id=1,
+            token="valid-token-active-no-hwid-test",
+            uuid="a2b9d4e1-73c5-4812-b964-f3e7b85a1902",
+            status=WhiteInternetStatus.ACTIVE,
+            started_at=now,
+            expires_at=now + timedelta(days=30),
+            traffic_limit_bytes=53687091200,
+            desired_version=1,
+            actual_version=1,
+            last_reconciled_node_epoch="epoch-xyz",
+        )
+        server = Server(
+            id=1,
+            name="Origin-Node",
+            protocol=XRAY_PROTOCOL,
+            api_url="https://cdn.example.com:8444",
+            xray_instance_epoch="epoch-xyz",
+            capabilities=["xray_origin"],
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+        )
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = server
+        mock_session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
+        mock_user = MagicMock(is_banned=False, is_deleted=False)
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        mobile_uas = [
+            "INCY/2.4.1 (Linux; U; Android 14; SM-S918B Build/UP1A.231005.007)",
+            "Happ/1.8.0 (iPhone; iOS 17.5.1; Scale/3.00)",
+        ]
+
+        for ua in mobile_uas:
+            with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.example.com"}):
+                with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+                    with patch("database.repositories.users_repo.get_user_by_id", new_callable=AsyncMock, return_value=mock_user):
+                        with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                            resp = await self.client.get(
+                                f"/sub/wl/{sub.token}",
+                                headers={
+                                    "User-Agent": ua,
+                                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                                },
+                            )
+                            self.assertEqual(resp.status, 403, f"Expected 403 for {ua}")
+                            self.assertEqual(resp.headers.get("x-hwid-required"), "true")
+                            self.assertEqual(await resp.text(), texts.WL_WEB_HWID_REQUIRED)
+
+    async def test_exhausted_sub_trial_notice_vs_regular(self):
+        now = datetime.now(timezone.utc)
+        for is_trial, expected_phrase in (
+            (True, "Пробный трафик исчерпан"),
+            (False, "Трафик исчерпан. Докупите пакет"),
+        ):
+            sub = MagicMock(spec=WhiteInternetSubscription)
+            sub.id = 1
+            sub.origin_node_id = 1
+            sub.status = WhiteInternetStatus.EXHAUSTED
+            sub.traffic_uplink_bytes = 1000
+            sub.traffic_downlink_bytes = 2000
+            sub.traffic_limit_bytes = 53687091200
+            sub.expires_at = now + timedelta(days=10)
+            sub.is_trial = is_trial
+
+            mock_session = AsyncMock()
+
+            @asynccontextmanager
+            async def fake_session_scope(ms=mock_session):
+                yield ms
+
+            with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+                with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                    resp = await self.client.get(
+                        "/sub/wl/exhausted-token",
+                        headers={"X-Hwid": "test-device-123"},
+                    )
+                    self.assertEqual(resp.status, 200)
+                    body = await resp.text()
+                    decoded = base64.b64decode(body).decode("utf-8")
+                    self.assertIn(expected_phrase, unquote(decoded))
 
     async def test_url_header_sanitization_removes_newlines_and_spaces(self):
         from bot.handlers.white_internet_web import _sanitize_header_url

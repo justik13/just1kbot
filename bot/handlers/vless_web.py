@@ -122,27 +122,20 @@ def _is_browser_request(request: web.Request) -> bool:
     """Check if incoming request is from a browser navigating to the page."""
     raw_hwid = (
         request.headers.get("X-Hwid")
-        or request.headers.get("X-HWID")
         or request.headers.get("X-Device-Hwid")
-        or request.headers.get("X-Device-HWID")
         or request.headers.get("X-Device-Id")
-        or request.headers.get("X-Device-ID")
         or ""
     ).strip()
     if raw_hwid:
         return False
 
-    accept = request.headers.get("Accept", "").lower()
-    if "text/html" in accept:
-        return True
-
     ua = request.headers.get("User-Agent", "").lower()
-    browser_tokens = ("mozilla/", "chrome/", "safari/", "applewebkit/", "mobile/", "android", "iphone")
     api_tokens = (
         "curl/",
         "wget/",
         "python-requests",
-        "aiohttp/",
+        "urllib",
+        "httpx",
         "xray/",
         "v2ray",
         "sing-box",
@@ -150,7 +143,15 @@ def _is_browser_request(request: web.Request) -> bool:
         "incy",
         "happ",
     )
-    return any(b in ua for b in browser_tokens) and not any(a in ua for a in api_tokens)
+    if any(a in ua for a in api_tokens):
+        return False
+
+    accept = request.headers.get("Accept", "").lower()
+    if "text/html" in accept:
+        return True
+
+    browser_tokens = ("mozilla/", "chrome/", "safari/", "applewebkit/", "mobile/", "android", "iphone")
+    return any(b in ua for b in browser_tokens)
 
 
 async def _resolve_bot_username(request: web.Request) -> str:
@@ -177,22 +178,6 @@ async def _resolve_bot_username(request: web.Request) -> str:
                 return username
         except Exception:
             pass
-
-    try:
-        from config.settings import get_settings
-
-        settings_bot = getattr(get_settings(), "BOT_USERNAME", None)
-        if settings_bot:
-            fallback = str(settings_bot).lstrip("@")
-            _cached_bot_username = fallback
-            if hasattr(request, "app") and not getattr(request.app, "frozen", False):
-                try:
-                    request.app["bot_username"] = fallback
-                except Exception:
-                    pass
-            return fallback
-    except Exception:
-        pass
 
     fallback = os.getenv("BOT_USERNAME", "").lstrip("@") or "just1k13bot"
     _cached_bot_username = fallback
@@ -231,13 +216,25 @@ def _resolve_channel_url(first_extra: dict | None, default_bot_url: str) -> str:
     return _sanitize_header_url(default_bot_url)
 
 
-def _render_vless_landing_html(bot_username: str = "", is_active: bool = True) -> str:
+def _render_vless_landing_html(
+    bot_username: str = "",
+    is_active: bool = True,
+    status_badge: str = "Доступ приостановлен",
+    status_title: str = "Подписка не активна",
+    status_description: str = "Срок действия доступа истек или подписка приостановлена. Для возобновления перейдите в бота.",
+) -> str:
     """Render universal landing page for INCY 1-click import and installation guidance."""
     clean_bot = html.escape(bot_username.strip().lstrip("@")) if bot_username else "just1k13bot"
     bot_link = f"https://t.me/{clean_bot}"
 
     if not is_active:
-        return _LANDING_INACTIVE_HTML.replace("{clean_bot}", clean_bot).replace("{bot_link}", bot_link)
+        return (
+            _LANDING_INACTIVE_HTML.replace("{clean_bot}", clean_bot)
+            .replace("{bot_link}", bot_link)
+            .replace("{status_badge}", html.escape(status_badge))
+            .replace("{status_title}", html.escape(status_title))
+            .replace("{status_description}", html.escape(status_description))
+        )
     return _LANDING_ACTIVE_HTML
 
 
@@ -284,11 +281,8 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
 
     raw_hwid = (
         request.headers.get("X-Hwid")
-        or request.headers.get("X-HWID")
         or request.headers.get("X-Device-Hwid")
-        or request.headers.get("X-Device-HWID")
         or request.headers.get("X-Device-Id")
-        or request.headers.get("X-Device-ID")
         or ""
     ).strip()
     if raw_hwid and not HWID_PATTERN.match(raw_hwid):
@@ -326,7 +320,13 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             support_url = _resolve_support_url({}, default_bot_url)
             channel_url = _resolve_channel_url({}, default_bot_url)
             if not raw_hwid and _is_browser_request(request):
-                html_body = _render_vless_landing_html(bot_username=bot_username, is_active=False)
+                html_body = _render_vless_landing_html(
+                    bot_username=bot_username,
+                    is_active=False,
+                    status_badge="Срок истек",
+                    status_title="Срок действия истек",
+                    status_description="Срок действия доступа подошел к концу. Для продления перейдите в бота.",
+                )
                 landing_headers = {
                     **common_headers,
                     "Content-Type": "text/html; charset=utf-8",
