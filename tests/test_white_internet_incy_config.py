@@ -404,6 +404,60 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
                             "Подключено: 2 из 5 устройств",
                         )
 
+    async def test_feed_headers_announce_url_spaces_fallback(self):
+        now = now_utc()
+        sub = WhiteInternetSubscription(
+            id=43,
+            user_id=12,
+            origin_node_id=2,
+            token="valid-token-announce-spaces-12345",
+            uuid="a2b9d4e1-73c5-4812-b964-f3e7b85a1902",
+            status=WhiteInternetStatus.ACTIVE,
+            started_at=now,
+            expires_at=now + timedelta(days=30),
+            traffic_limit_bytes=53687091200,
+            traffic_used_bytes=0,
+            traffic_uplink_bytes=0,
+            traffic_downlink_bytes=0,
+            desired_version=1,
+            actual_version=1,
+            last_reconciled_node_epoch="epoch-xyz",
+            device_limit=1,
+            active_hwids={},
+        )
+        server = Server(
+            id=2,
+            name="Origin-Custom",
+            protocol=XRAY_PROTOCOL,
+            api_url="https://cdn.example.com:8444",
+            xray_instance_epoch="epoch-xyz",
+            capabilities=["xray_origin"],
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            extra_data={
+                "announce_url": "   ",
+                "channel_url": "https://t.me/fallback_channel",
+            },
+        )
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = server
+        mock_session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
+        mock_session.get.return_value = sub
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.example.com"}):
+            with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+                with patch(
+                    "database.repositories.white_internet_repo.get_subscription_by_token",
+                    return_value=sub,
+                ):
+                    resp = await self.client.get(f"/sub/wl/{sub.token}")
+                    self.assertEqual(resp.status, 200)
+                    self.assertEqual(resp.headers.get("Announce-Url"), "https://t.me/fallback_channel")
+
     async def test_web_feed_hidden_origin_and_relays(self):
         now = now_utc()
         sub = WhiteInternetSubscription(

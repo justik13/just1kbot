@@ -408,7 +408,13 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             announce_b64 = base64.b64encode(clean_announce.encode("utf-8")).decode("ascii")
             response_headers["Announce"] = f"base64:{announce_b64}"
 
-        effective_announce_url = extra.get("announce_url") or channel_url
+        raw_announce_url = extra.get("announce_url")
+        clean_announce_url = (
+            str(raw_announce_url).strip()
+            if raw_announce_url and str(raw_announce_url).strip()
+            else None
+        )
+        effective_announce_url = clean_announce_url or channel_url
         if effective_announce_url and str(effective_announce_url).strip():
             response_headers["Announce-Url"] = str(effective_announce_url).strip()
 
