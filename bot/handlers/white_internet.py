@@ -10,7 +10,7 @@ import os
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import CallbackQuery, CopyTextButton, InlineKeyboardMarkup
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -152,8 +152,8 @@ def get_white_internet_overview_keyboard(
     if has_sub_link:
         sub_url = _build_subscription_url(bot_domain, sub.token, sub_prefix=sub_prefix)
         builder.button(
-            text=texts.BTN_WL_COPY_LINK,
-            copy_text=CopyTextButton(text=sub_url),
+            text=texts.BTN_SUB_CONNECT_INCY,
+            url=sub_url,
         )
         builder.button(
             text=texts.BTN_WL_INCY_INSTRUCTIONS,
@@ -391,6 +391,19 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
         )
         effective_device_limit = max(1, getattr(sub, "device_limit", 1) or 1)
 
+        sub_url = (
+            _build_subscription_url(sub_domain, sub.token, sub_prefix=sub_prefix)
+            if (sub.status == WhiteInternetStatus.ACTIVE and getattr(sub, "token", None) and sub_domain)
+            else ""
+        )
+        sub_url_block = (
+            f"\n\n📋 <b>Ваша ссылка на подписку:</b>\n"
+            f"<code>{sub_url}</code>\n"
+            f"<i>(нажмите на ссылку для копирования)</i>"
+            if sub_url
+            else ""
+        )
+
         text = texts.WL_OVERVIEW_ACTIVE.format(
             status=status_str,
             expiry=expiry_str,
@@ -400,6 +413,7 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
             progress=progress_bar,
             active_devices=active_devices,
             device_limit=effective_device_limit,
+            sub_url_block=sub_url_block,
         )
         if sub.status == WhiteInternetStatus.ACTIVE and not sub_domain:
             text += texts.WL_DOMAIN_UNCONFIGURED_BANNER
@@ -1005,11 +1019,11 @@ async def show_subscription_link(query: CallbackQuery, session: AsyncSession):
 
     kb = InlineKeyboardBuilder()
     kb.button(
-        text=texts.BTN_WL_COPY_LINK,
-        copy_text=CopyTextButton(text=sub_url),
+        text=texts.BTN_SUB_CONNECT_INCY,
+        url=sub_url,
     )
     kb.button(text=texts.BTN_BACK, callback_data="white_internet")
-    kb.adjust(1, 1)
+    kb.adjust(1)
 
     await query.message.edit_text(
         texts.WL_SHOW_LINK_TEXT.format(url=html.escape(sub_url)),

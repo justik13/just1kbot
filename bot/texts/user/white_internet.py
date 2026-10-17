@@ -6,7 +6,8 @@ WL_DATETIME_FORMAT = "%d.%m.%Y %H:%M UTC"
 
 BTN_WL_BUY_ACCESS = "🚀 Оформить доступ ({price} ₽ / {days} дней)"
 BTN_WL_ACTIVATE_TRIAL = "🎁 Активировать бесплатно (3 дня / 5 ГБ)"
-BTN_WL_CONNECT_CLIENT = "📱 Подключить в приложении"
+BTN_WL_CONNECT_INCY = "🚀 Подключить в INCY"
+BTN_WL_CONNECT_CLIENT = BTN_WL_CONNECT_INCY
 BTN_WL_COPY_LINK = "📋 Скопировать ссылку подписки"
 BTN_WL_INCY_INSTRUCTIONS = "📱 Инструкция по подключению в INCY"
 BTN_WL_REFRESH_STATUS = "🔄 Обновить статус"
@@ -77,8 +78,7 @@ WL_OVERVIEW_ACTIVE = (
     "<b>Остаток трафика:</b> {available}\n"
     "<b>Использовано:</b> {used} из {total}\n"
     "<code>[{progress}]</code>\n\n"
-    "📱 <b>Устройства:</b> {active_devices} из {device_limit}\n\n"
-    "<i>Подключение: по ссылке подписки в приложении INCY.</i>"
+    "📱 <b>Устройства:</b> {active_devices} из {device_limit}{sub_url_block}"
 )
 
 WL_TOPUP_MENU_TEXT = (
@@ -99,7 +99,7 @@ WL_INCY_INSTRUCTIONS_TEXT = (
     "   💻 / 📦 <a href=\"https://github.com/INCY-DEV/incy-platforms/releases\">Скачать для ПК (Windows, macOS, Linux) или APK (GitHub)</a>\n\n"
     "2️⃣ <b>Скопируйте вашу ссылку подписки:</b>\n"
     "<code>{url}</code>\n"
-    "<i>(нажмите на ссылку выше или на кнопку внизу)</i>\n\n"
+    "<i>(нажмите на ссылку выше для копирования)</i>\n\n"
     "3️⃣ <b>Добавьте подписку в INCY:</b>\n"
     "   • Откройте приложение <b>INCY</b>\n"
     "   • Перейдите во вкладку <b>«Подписки»</b> (в нижней панели)\n"
