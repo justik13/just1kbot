@@ -28,8 +28,9 @@ from config.constants import (
 )
 from config.enums import ServerHealthState, WhiteInternetProvisioningStatus, WhiteInternetStatus
 from database.connection import session_scope
-from database.models import Server
+from database.models import Server, Tariff
 from database.repositories import users_repo, white_internet_repo
+from database.repositories.system_settings_repo import get_system_setting
 from services.white_internet_service import WhiteInternetService
 from utils.datetime_helpers import now_utc
 from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
@@ -47,14 +48,21 @@ _ip_rate_limiter = HttpRateLimiter(rate_per_minute=60.0, burst=15)
 _token_rate_limiter = HttpRateLimiter(rate_per_minute=30.0, burst=10)
 
 
-def _safe_format_device_template(template: str, *, devices: int, active: int) -> str:
-    """Safely format {devices}, {device_limit}, {limit}, {active}, {active_devices} placeholders."""
+def _safe_format_device_template(
+    template: str,
+    *,
+    devices: int,
+    active: int,
+    tariff: str = "",
+) -> str:
+    """Safely format {devices}, {device_limit}, {limit}, {active}, {active_devices}, {tariff} placeholders."""
     mapping = {
         "devices": str(devices),
         "device_limit": str(devices),
         "limit": str(devices),
         "active": str(active),
         "active_devices": str(active),
+        "tariff": str(tariff),
     }
     pattern = re.compile(r"\{(" + "|".join(re.escape(k) for k in mapping.keys()) + r")\}")
     return pattern.sub(lambda m: mapping.get(m.group(1), m.group(0)), template)
@@ -509,9 +517,22 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             or WHITE_INTERNET_PROFILE_TITLE
             or texts.WL_PROFILE_NAME
         )
-        profile_title_clean = (
-            str(profile_title).strip().replace("\r\n", " ").replace("\r", " ").replace("\n", " ")[:25]
+        show_devices_setting = await get_system_setting(session, "vless_profile_show_devices", False)
+        if isinstance(show_devices_setting, str):
+            show_devices = show_devices_setting.lower() in ("1", "true", "yes", "on")
+        else:
+            show_devices = bool(show_devices_setting)
+
+        profile_title_base = (
+            str(profile_title).strip().replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
         )
+        if show_devices:
+            suffix = f" [{active_count}/{max_devs}]"
+            max_base_len = max(0, 25 - len(suffix))
+            clean_base = profile_title_base[:max_base_len].rstrip()
+            profile_title_clean = f"{clean_base}{suffix}"[:25]
+        else:
+            profile_title_clean = profile_title_base[:25]
         profile_title_b64 = base64.b64encode(profile_title_clean.encode("utf-8")).decode("ascii")
 
         response_headers = dict(common_headers)
@@ -524,6 +545,8 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                     total=total_quota,
                     expire=expire_ts,
                 ),
+                "Device-Limit": str(max_devs),
+                "Device-Active-Count": str(active_count),
                 "Profile-Title": f"base64:{profile_title_b64}",
                 "Profile-Update-Interval": _get_white_internet_update_interval(),
                 "Support-Url": support_url,
@@ -533,8 +556,19 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                 "Hide-Check": "1",
                 "Sort-Order": "none",
                 "No-Limit-Enabled": "1",
+                "x-hwid-active": "true",
             }
         )
+
+        tariff_name = None
+        user_tariff_id = getattr(user, "current_tariff_id", None) or getattr(sub, "tariff_id", None)
+        if user_tariff_id:
+            t_obj = await session.scalar(select(Tariff).where(Tariff.id == user_tariff_id))
+            if t_obj and getattr(t_obj, "name", None):
+                tariff_name = t_obj.name
+        if not tariff_name:
+            tariff_name = texts.WL_DEFAULT_TARIFF_NAME
+        tariff_clean = re.sub(r"^[^\w\u0400-\u04ffa-zA-Z0-9]+", "", str(tariff_name)).strip()[:40]
 
         announce = extra.get("announce")
         if not announce and not is_server_available:
@@ -543,7 +577,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         if announce and str(announce).strip():
             clean_announce = str(announce).strip()
             clean_announce = _safe_format_device_template(
-                clean_announce, devices=max_devs, active=active_count
+                clean_announce, devices=max_devs, active=active_count, tariff=tariff_clean
             )[:200]
             announce_b64 = base64.b64encode(clean_announce.encode("utf-8")).decode("ascii")
             response_headers["Announce"] = f"base64:{announce_b64}"

@@ -14,18 +14,28 @@ from aiohttp import web
 from aiohttp.test_utils import AioHTTPTestCase
 
 from bot import texts
-from bot.handlers.white_internet_web import setup_white_internet_web_routes
+from bot.handlers.white_internet_web import _safe_format_device_template, setup_white_internet_web_routes
 from config.constants import (
     XRAY_PROTOCOL,
 )
 from config.enums import ServerHealthState, WhiteInternetStatus
-from database.models import Server, WhiteInternetSubscription
+from database.models import Server, Tariff, WhiteInternetSubscription
 from services.white_internet_service import WhiteInternetService
 from utils.datetime_helpers import now_utc
 
 
 class TestWhiteInternetIncyConfig(unittest.TestCase):
     """Tests for VLESS tag formatting and ?serverDescription parameter generation."""
+
+    def test_safe_format_device_template_with_tariff(self):
+        tmpl = "Тариф: {tariff}, Устройств: {active}/{devices}"
+        res = _safe_format_device_template(tmpl, devices=3, active=1, tariff="Базовый")
+        self.assertEqual(res, "Тариф: Базовый, Устройств: 1/3")
+
+    def test_safe_format_device_template_without_tariff(self):
+        tmpl = "Лимит: {limit}, активно: {active_devices}"
+        res = _safe_format_device_template(tmpl, devices=2, active=1)
+        self.assertEqual(res, "Лимит: 2, активно: 1")
 
     def test_format_vless_tag_without_badge(self):
         tag = WhiteInternetService._format_vless_tag("🇷🇺 Россия", None)
@@ -588,6 +598,86 @@ class TestWhiteInternetIncyWebHeaders(AioHTTPTestCase):
                     decoded_title = base64.b64decode(title_b64).decode("utf-8")
                     self.assertEqual(len(decoded_title), 25)
                     self.assertEqual(decoded_title, "A" * 25)
+
+    async def test_feed_headers_tariff_placeholder_and_show_devices_toggle(self):
+        now = now_utc()
+        from database.models import User
+        test_user = User(id=10, telegram_id=777, is_banned=False, is_deleted=False, current_tariff_id=1)
+        sub = WhiteInternetSubscription(
+            id=45,
+            user_id=10,
+            origin_node_id=1,
+            token="valid-token-tariff-test-1234567890abcdef",
+            uuid="a2b9d4e1-73c5-4812-b964-f3e7b85a1902",
+            status=WhiteInternetStatus.ACTIVE,
+            started_at=now,
+            expires_at=now + timedelta(days=30),
+            traffic_limit_bytes=53687091200,
+            traffic_used_bytes=1000,
+            traffic_uplink_bytes=500,
+            traffic_downlink_bytes=500,
+            desired_version=1,
+            actual_version=1,
+            last_reconciled_node_epoch="epoch-xyz",
+            device_limit=2,
+            active_hwids={},
+        )
+        server = Server(
+            id=1,
+            name="Origin-Node",
+            protocol=XRAY_PROTOCOL,
+            api_url="https://cdn.example.com:8444",
+            xray_instance_epoch="epoch-xyz",
+            capabilities=["xray_origin"],
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            extra_data={
+                "announce": "Тариф: {tariff} | Активно: {active}/{limit}",
+            },
+        )
+        tariff = Tariff(id=1, name="⭐ Премиум", price_rub=500)
+
+        mock_session = AsyncMock()
+
+        def fake_scalar(stmt):
+            stmt_str = str(stmt).lower()
+            if "server" in stmt_str:
+                return server
+            if "tariff" in stmt_str:
+                return tariff
+            return None
+
+        mock_session.scalar.side_effect = fake_scalar
+        mock_session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
+        mock_session.get.side_effect = lambda model, id_val: test_user if model == User else sub
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.example.com"}):
+            with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+                with patch("database.repositories.users_repo.get_user_by_id", return_value=test_user):
+                    with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                        with patch("database.repositories.white_internet_repo.register_hwid_atomic", return_value=(True, 1, 2)):
+                            with patch("bot.handlers.white_internet_web.get_system_setting", return_value=True):
+                                resp = await self.client.get(
+                                    f"/sub/wl/{sub.token}",
+                                    headers={"X-Hwid": "dev-tariff-1"},
+                                )
+                                self.assertEqual(resp.status, 200)
+                                self.assertEqual(resp.headers.get("Device-Limit"), "2")
+                                self.assertEqual(resp.headers.get("Device-Active-Count"), "1")
+                                self.assertEqual(resp.headers.get("x-hwid-active"), "true")
+
+                                title_b64 = resp.headers.get("Profile-Title", "").split("base64:")[1]
+                                decoded_title = base64.b64decode(title_b64).decode("utf-8")
+                                self.assertIn("[1/2]", decoded_title)
+
+                                announce_b64 = resp.headers.get("Announce", "").split("base64:")[1]
+                                decoded_ann = base64.b64decode(announce_b64).decode("utf-8")
+                                self.assertIn("Тариф: Премиум", decoded_ann)
+                                self.assertIn("Активно: 1/2", decoded_ann)
 
     async def test_web_feed_error_headers_have_cdn_cache_control(self):
         # 1. Invalid short token (404)

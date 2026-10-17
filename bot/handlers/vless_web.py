@@ -14,10 +14,6 @@ from aiohttp import web
 
 from bot import texts
 from bot.formatters import get_tariff_display_name
-from config.constants import (
-    WHITE_INTERNET_CHANNEL_URL,
-    WHITE_INTERNET_SUPPORT_URL,
-)
 from database.connection import session_scope
 from database.repositories import tariffs_repo, users_repo, vless_subscription_repo
 from database.repositories.system_settings_repo import get_system_setting
@@ -156,8 +152,6 @@ def _resolve_support_url(first_extra: dict | None, default_bot_url: str) -> str:
     extra = first_extra if isinstance(first_extra, dict) else {}
     if extra.get("support_url"):
         return str(extra["support_url"])
-    if WHITE_INTERNET_SUPPORT_URL:
-        return WHITE_INTERNET_SUPPORT_URL
     try:
         from config.settings import get_settings
         supp = getattr(get_settings(), "SUPPORT_USERNAME", None)
@@ -172,8 +166,6 @@ def _resolve_channel_url(first_extra: dict | None, default_bot_url: str) -> str:
     extra = first_extra if isinstance(first_extra, dict) else {}
     if extra.get("channel_url"):
         return str(extra["channel_url"])
-    if WHITE_INTERNET_CHANNEL_URL:
-        return WHITE_INTERNET_CHANNEL_URL
     return default_bot_url
 
 
@@ -344,9 +336,13 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             default_bot_url = f"https://t.me/{bot_username}"
             support_url = _resolve_support_url({}, default_bot_url)
             channel_url = _resolve_channel_url({}, default_bot_url)
+            total_device_limit = await SubscriptionService.get_effective_device_limit(session, user)
+            total_active_devices, _awg_active, _vless_active = (
+                await VlessSubscriptionService.get_combined_quota(session, user)
+            )
             limit_msg = texts.VLESS_FEED_DEVICE_LIMIT_NOTICE.format(
-                active=active_hwid_count,
-                limit=effective_vless_limit,
+                active=total_active_devices,
+                limit=total_device_limit,
                 bot_username=bot_username,
             )
             quoted_limit = urllib.parse.quote(limit_msg)
@@ -364,11 +360,11 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                 "Subscription-Userinfo": f"upload=0; download=0; total=0; expire={expire_ts}",
                 "Profile-Title": f"base64:{b64_title}",
                 "Device-Limit-Exceeded": "1",
-                "Device-Limit": str(effective_vless_limit),
-                "Device-Active-Count": str(active_hwid_count),
+                "Device-Limit": str(total_device_limit),
+                "Device-Active-Count": str(total_active_devices),
                 "x-hwid-max-devices-reached": "true",
                 "x-hwid-limit": "true",
-                "x-hwid-active": str(active_hwid_count),
+                "x-hwid-active": str(total_active_devices),
                 "Hide-Url": "1",
                 "No-Limit-Enabled": "1",
                 "Support-Url": support_url,
