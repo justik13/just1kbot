@@ -105,12 +105,15 @@ def _get_vless_update_interval() -> str:
     return val if val.isdigit() and int(val) > 0 else "6"
 
 
+_cached_bot_username: str | None = None
+
+
 def _sanitize_header_url(url: str | None, fallback: str = "") -> str:
-    """Sanitize URL for safe usage in HTTP headers without forbidden control chars or whitespace."""
+    """Sanitize URL for safe usage in HTTP headers without forbidden control chars, whitespace, or non-ASCII."""
     for candidate in (url, fallback):
         if candidate and isinstance(candidate, str):
             clean = candidate.strip()
-            if clean and not any(c in clean for c in ("\r", "\n", "\t", " ")):
+            if clean and clean.isascii() and all(32 < ord(c) < 127 for c in clean):
                 return clean
     return ""
 
@@ -129,16 +132,13 @@ def _is_browser_request(request: web.Request) -> bool:
     if raw_hwid:
         return False
 
-    accept = request.headers.get("Accept", "").lower()
-    if "text/html" in accept:
-        return True
-
     ua = request.headers.get("User-Agent", "").lower()
-    browser_tokens = ("mozilla/", "chrome/", "safari/", "applewebkit/", "mobile/", "android", "iphone")
     api_tokens = (
         "curl/",
         "wget/",
         "python-requests",
+        "urllib",
+        "httpx",
         "aiohttp/",
         "xray/",
         "v2ray",
@@ -147,38 +147,65 @@ def _is_browser_request(request: web.Request) -> bool:
         "incy",
         "happ",
     )
-    return any(b in ua for b in browser_tokens) and not any(a in ua for a in api_tokens)
+    if any(a in ua for a in api_tokens):
+        return False
+
+    accept = request.headers.get("Accept", "").lower()
+    if "text/html" in accept:
+        return True
+
+    browser_tokens = ("mozilla/", "chrome/", "safari/", "applewebkit/", "mobile/", "android", "iphone")
+    return any(b in ua for b in browser_tokens)
 
 
 async def _resolve_bot_username(request: web.Request) -> str:
     """Resolve current Telegram bot username dynamically without manual env setup."""
-    cached = request.app.get("bot_username")
+    global _cached_bot_username
+    cached = request.app.get("bot_username") if hasattr(request, "app") else None
     if cached and isinstance(cached, str):
         return cached
+    if _cached_bot_username:
+        return _cached_bot_username
 
-    bot = request.app.get("bot")
+    bot = request.app.get("bot") if hasattr(request, "app") else None
     if bot is not None and hasattr(bot, "get_me"):
         try:
             me = await bot.get_me()
             if me and getattr(me, "username", None):
                 username = str(me.username).lstrip("@")
-                request.app["bot_username"] = username
+                _cached_bot_username = username
+                if hasattr(request, "app") and not getattr(request.app, "frozen", False):
+                    try:
+                        request.app["bot_username"] = username
+                    except Exception:
+                        pass
                 return username
         except Exception:
             pass
 
     try:
         from config.settings import get_settings
+
         settings_bot = getattr(get_settings(), "BOT_USERNAME", None)
         if settings_bot:
             fallback = str(settings_bot).lstrip("@")
-            request.app["bot_username"] = fallback
+            _cached_bot_username = fallback
+            if hasattr(request, "app") and not getattr(request.app, "frozen", False):
+                try:
+                    request.app["bot_username"] = fallback
+                except Exception:
+                    pass
             return fallback
     except Exception:
         pass
 
     fallback = os.getenv("BOT_USERNAME", "").lstrip("@") or "just1k13bot"
-    request.app["bot_username"] = fallback
+    _cached_bot_username = fallback
+    if hasattr(request, "app") and not getattr(request.app, "frozen", False):
+        try:
+            request.app["bot_username"] = fallback
+        except Exception:
+            pass
     return fallback
 
 

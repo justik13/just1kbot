@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from aiohttp import web
 from aiohttp.test_utils import AioHTTPTestCase
 
+from bot import texts
 from bot.handlers.vless_web import setup_vless_web_routes
 from config.enums import ServerHealthState
 from database.models import Server, User, VlessSubscription
@@ -562,6 +563,88 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
                 body = await resp.text()
                 decoded = base64.b64decode(body).decode("utf-8")
                 self.assertIn("vless://00000000-0000-0000-0000-000000000000", decoded)
+
+    async def test_vless_is_browser_request_rejects_api_tokens_even_with_html_accept(self):
+        from aiohttp.test_utils import make_mocked_request
+        from bot.handlers.vless_web import _is_browser_request
+
+        api_uas = [
+            "INCY/2.4.1 (Linux; U; Android 14; SM-S918B Build/UP1A.231005.007)",
+            "Happ/1.8.0 (iPhone; iOS 17.5.1; Scale/3.00)",
+            "curl/8.4.0",
+            "xray/1.8.4",
+            "sing-box 1.8.11",
+            "clash-meta/v1.18.0",
+        ]
+        for ua in api_uas:
+            req = make_mocked_request(
+                "GET",
+                "/sub/access/test-token",
+                headers={
+                    "User-Agent": ua,
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                },
+            )
+            self.assertFalse(_is_browser_request(req), f"Expected API client not browser for UA: {ua}")
+
+    async def test_vless_active_sub_mobile_client_without_hwid_gets_403_even_with_html_accept(self):
+        from config.enums import SubscriptionStatus
+        active_user = User(
+            id=42,
+            telegram_id=999,
+            is_banned=False,
+            is_deleted=False,
+            financial_hold=False,
+            subscription_end=datetime.now(timezone.utc) + timedelta(days=20),
+            subscription_status=SubscriptionStatus.ACTIVE.value,
+        )
+        active_sub = VlessSubscription(
+            id=1,
+            user_id=42,
+            token="test-token-valid-length-12345678",
+            uuid="11111111-2222-3333-4444-555555555555",
+            is_active=True,
+            version=1,
+        )
+        mock_session = AsyncMock()
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        mobile_uas = [
+            "INCY/2.4.1 (Linux; U; Android 14; SM-S918B Build/UP1A.231005.007)",
+            "Happ/1.8.0 (iPhone; iOS 17.5.1; Scale/3.00)",
+        ]
+
+        for ua in mobile_uas:
+            with (
+                patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+                patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=active_sub),
+                patch("database.repositories.users_repo.get_user_by_id", return_value=active_user),
+                patch("services.subscription.SubscriptionService.check_vpn_access", return_value=True),
+            ):
+                resp = await self.client.get(
+                    "/sub/access/test-token-valid-length-12345678",
+                    headers={
+                        "User-Agent": ua,
+                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    },
+                )
+                self.assertEqual(resp.status, 403, f"Expected 403 for {ua}")
+                self.assertEqual(resp.headers.get("x-hwid-required"), "true")
+                self.assertEqual(await resp.text(), texts.VLESS_WEB_HWID_REQUIRED)
+
+    async def test_vless_url_header_sanitization_rejects_control_chars_and_non_ascii(self):
+        from bot.handlers.vless_web import _sanitize_header_url
+        self.assertEqual(_sanitize_header_url("https://example.com/test\r\nInjected: true", fallback="https://default.com"), "https://default.com")
+        self.assertEqual(_sanitize_header_url("https://example.com/test\tbad", fallback=""), "")
+        self.assertEqual(_sanitize_header_url("  https://example.com/clean  "), "https://example.com/clean")
+        self.assertEqual(_sanitize_header_url("https://example.com/test\x00bad", fallback="https://default.com"), "https://default.com")
+        self.assertEqual(_sanitize_header_url("https://example.com/test\x0bbad", fallback="https://default.com"), "https://default.com")
+        self.assertEqual(_sanitize_header_url("https://example.com/test\x7fbad", fallback="https://default.com"), "https://default.com")
+        self.assertEqual(_sanitize_header_url("https://t.me/мой_канал", fallback="https://default.com"), "https://default.com")
+        self.assertEqual(_sanitize_header_url("tg://resolve?domain=just1k13bot"), "tg://resolve?domain=just1k13bot")
 
     async def test_grace_period_access_within_4h_window(self):
         mock_session = AsyncMock()
