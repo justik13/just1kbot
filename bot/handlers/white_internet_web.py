@@ -180,14 +180,7 @@ async def _resolve_bot_username(request: web.Request) -> str:
         except Exception:
             pass
 
-    fallback = os.getenv("BOT_USERNAME", "").lstrip("@") or "just1k13bot"
-    _cached_bot_username = fallback
-    if hasattr(request, "app") and not getattr(request.app, "frozen", False):
-        try:
-            request.app["bot_username"] = fallback
-        except Exception:
-            pass
-    return fallback
+    return os.getenv("BOT_USERNAME", "").lstrip("@") or "just1k13bot"
 
 
 async def _resolve_urls_and_bot(request: web.Request, extra: dict | None) -> tuple[str, str, str, str]:

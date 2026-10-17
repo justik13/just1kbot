@@ -179,14 +179,7 @@ async def _resolve_bot_username(request: web.Request) -> str:
         except Exception:
             pass
 
-    fallback = os.getenv("BOT_USERNAME", "").lstrip("@") or "just1k13bot"
-    _cached_bot_username = fallback
-    if hasattr(request, "app") and not getattr(request.app, "frozen", False):
-        try:
-            request.app["bot_username"] = fallback
-        except Exception:
-            pass
-    return fallback
+    return os.getenv("BOT_USERNAME", "").lstrip("@") or "just1k13bot"
 
 
 def _resolve_support_url(first_extra: dict | None, default_bot_url: str) -> str:
@@ -323,12 +316,25 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             support_url = _resolve_support_url({}, default_bot_url)
             channel_url = _resolve_channel_url({}, default_bot_url)
             if not raw_hwid and _is_browser_request(request):
+                sub_end = getattr(user, "subscription_end", None)
+                now = now_utc()
+                is_time_expired = sub_end is None or sub_end <= now
+
+                if getattr(user, "financial_hold", False) or not is_time_expired:
+                    badge = texts.LANDING_INACTIVE_BADGE_PAUSED
+                    title = texts.LANDING_INACTIVE_TITLE_DEFAULT
+                    desc = texts.LANDING_INACTIVE_DESC_DEFAULT
+                else:
+                    badge = texts.LANDING_INACTIVE_BADGE_EXPIRED
+                    title = texts.LANDING_INACTIVE_TITLE_EXPIRED
+                    desc = texts.LANDING_INACTIVE_DESC_EXPIRED
+
                 html_body = _render_vless_landing_html(
                     bot_username=bot_username,
                     is_active=False,
-                    status_badge=texts.LANDING_INACTIVE_BADGE_EXPIRED,
-                    status_title=texts.LANDING_INACTIVE_TITLE_EXPIRED,
-                    status_description=texts.LANDING_INACTIVE_DESC_EXPIRED,
+                    status_badge=badge,
+                    status_title=title,
+                    status_description=desc,
                 )
                 landing_headers = {
                     **common_headers,

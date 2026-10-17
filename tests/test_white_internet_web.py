@@ -1501,3 +1501,35 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
         self.assertEqual(_sanitize_header_url("https://t.me/мой_канал", fallback="https://default.com"), "https://default.com")
         self.assertEqual(_sanitize_header_url("tg://resolve?domain=just1k13bot"), "tg://resolve?domain=just1k13bot")
 
+    async def test_resolve_bot_username_retries_on_failure_without_caching_fallback(self):
+        from bot.handlers.white_internet_web import _resolve_bot_username
+        import bot.handlers.white_internet_web as wi_web
+
+        orig_cached = wi_web._cached_bot_username
+        try:
+            wi_web._cached_bot_username = None
+
+            mock_bot = AsyncMock()
+            mock_bot.get_me.side_effect = RuntimeError("Telegram connection failed")
+
+            mock_request = MagicMock()
+            mock_request.app = {"bot": mock_bot}
+
+            with patch.dict(os.environ, {"BOT_USERNAME": "env_bot"}):
+                resolved = await _resolve_bot_username(mock_request)
+                self.assertEqual(resolved, "env_bot")
+                self.assertIsNone(wi_web._cached_bot_username)
+                self.assertNotIn("bot_username", mock_request.app)
+
+                me_mock = MagicMock()
+                me_mock.username = "real_bot"
+                mock_bot.get_me.side_effect = None
+                mock_bot.get_me.return_value = me_mock
+
+                resolved_success = await _resolve_bot_username(mock_request)
+                self.assertEqual(resolved_success, "real_bot")
+                self.assertEqual(wi_web._cached_bot_username, "real_bot")
+                self.assertEqual(mock_request.app.get("bot_username"), "real_bot")
+        finally:
+            wi_web._cached_bot_username = orig_cached
+
