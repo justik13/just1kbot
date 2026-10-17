@@ -604,7 +604,6 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
         self.assertFalse(_is_browser_request(req_with_hwid))
 
     async def test_vless_active_sub_mobile_client_without_hwid_gets_403_even_with_html_accept(self):
-        from bot import texts
         active_user = User(
             id=42,
             telegram_id=999,
@@ -648,7 +647,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
                 )
                 self.assertEqual(resp.status, 403, f"Expected 403 for {ua}")
                 self.assertEqual(resp.headers.get("x-hwid-required"), "true")
-                self.assertEqual(await resp.text(), texts.VLESS_WEB_HWID_REQUIRED)
+                self.assertEqual(await resp.text(), "HWID required")
 
     async def test_vless_url_header_sanitization_rejects_control_chars_and_non_ascii(self):
         from bot.handlers.vless_web import _sanitize_header_url
