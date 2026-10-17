@@ -122,7 +122,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             self.assertEqual(resp.status, 200)
             body = await resp.text()
             decoded = base64.b64decode(body).decode("utf-8")
-            self.assertIn("Подписка закончилась", decoded)
+            self.assertIn(urllib.parse.quote("Подписка закончилась"), decoded)
 
     async def test_banned_user_returns_403(self):
         mock_session = AsyncMock()
