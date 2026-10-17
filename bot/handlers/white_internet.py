@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
 from decimal import Decimal
 import html
 import logging
@@ -10,7 +9,7 @@ import os
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import CallbackQuery, CopyTextButton, InlineKeyboardMarkup
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,7 +19,6 @@ from config.constants import (
     WHITE_INTERNET_BASE_PRICE_RUB,
     WHITE_INTERNET_BASE_TRAFFIC_BYTES,
     WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB,
-    WHITE_INTERNET_HWID_TTL_HOURS,
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
     WHITE_INTERNET_SUB_PATH_PREFIX,
     WHITE_INTERNET_TOPUP_PACKS,
@@ -36,6 +34,7 @@ from database.repositories.account_ledger_repo import get_account_balance
 from database.repositories.users_repo import get_user_by_telegram_id
 from database.repositories.white_internet_repo import (
     WhiteInternetResetCooldownError,
+    count_active_hwids,
 )
 from services.maintenance_service import MaintenanceService
 from services.white_internet_service import (
@@ -152,8 +151,8 @@ def get_white_internet_overview_keyboard(
     if has_sub_link:
         sub_url = _build_subscription_url(bot_domain, sub.token, sub_prefix=sub_prefix)
         builder.button(
-            text=texts.BTN_WL_COPY_LINK,
-            copy_text=CopyTextButton(text=sub_url),
+            text=texts.BTN_SUB_CONNECT_INCY,
+            url=sub_url,
         )
         builder.button(
             text=texts.BTN_WL_INCY_INSTRUCTIONS,
@@ -384,12 +383,19 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
         progress_bar = _render_progress_bar(used_bytes, total_limit)
         expiry_str = sub.expires_at.strftime(texts.WL_DATETIME_FORMAT) if sub.expires_at else texts.TIME_FOREVER
 
-        current_hwids = dict(sub.active_hwids or {})
-        cutoff = (now - timedelta(hours=WHITE_INTERNET_HWID_TTL_HOURS)).isoformat()
-        active_devices = sum(
-            1 for ts in current_hwids.values() if isinstance(ts, str) and ts >= cutoff
-        )
+        active_devices = count_active_hwids(sub.active_hwids, now=now)
         effective_device_limit = max(1, getattr(sub, "device_limit", 1) or 1)
+
+        sub_url = (
+            _build_subscription_url(sub_domain, sub.token, sub_prefix=sub_prefix)
+            if (sub.status == WhiteInternetStatus.ACTIVE and getattr(sub, "token", None) and sub_domain)
+            else ""
+        )
+        sub_url_block = (
+            texts.WL_OVERVIEW_SUB_URL_BLOCK.format(sub_url=html.escape(sub_url))
+            if sub_url
+            else ""
+        )
 
         text = texts.WL_OVERVIEW_ACTIVE.format(
             status=status_str,
@@ -400,6 +406,7 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
             progress=progress_bar,
             active_devices=active_devices,
             device_limit=effective_device_limit,
+            sub_url_block=sub_url_block,
         )
         if sub.status == WhiteInternetStatus.ACTIVE and not sub_domain:
             text += texts.WL_DOMAIN_UNCONFIGURED_BANNER
@@ -1005,11 +1012,11 @@ async def show_subscription_link(query: CallbackQuery, session: AsyncSession):
 
     kb = InlineKeyboardBuilder()
     kb.button(
-        text=texts.BTN_WL_COPY_LINK,
-        copy_text=CopyTextButton(text=sub_url),
+        text=texts.BTN_SUB_CONNECT_INCY,
+        url=sub_url,
     )
     kb.button(text=texts.BTN_BACK, callback_data="white_internet")
-    kb.adjust(1, 1)
+    kb.adjust(1)
 
     await query.message.edit_text(
         texts.WL_SHOW_LINK_TEXT.format(url=html.escape(sub_url)),

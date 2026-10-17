@@ -7,7 +7,6 @@ WL_DATETIME_FORMAT = "%d.%m.%Y %H:%M UTC"
 BTN_WL_BUY_ACCESS = "🚀 Оформить доступ ({price} ₽ / {days} дней)"
 BTN_WL_ACTIVATE_TRIAL = "🎁 Активировать бесплатно (3 дня / 5 ГБ)"
 BTN_WL_CONNECT_CLIENT = "📱 Подключить в приложении"
-BTN_WL_COPY_LINK = "📋 Скопировать ссылку подписки"
 BTN_WL_INCY_INSTRUCTIONS = "📱 Инструкция по подключению в INCY"
 BTN_WL_REFRESH_STATUS = "🔄 Обновить статус"
 BTN_WL_TOPUP = "➕ Докупить трафик"
@@ -77,8 +76,12 @@ WL_OVERVIEW_ACTIVE = (
     "<b>Остаток трафика:</b> {available}\n"
     "<b>Использовано:</b> {used} из {total}\n"
     "<code>[{progress}]</code>\n\n"
-    "📱 <b>Устройства:</b> {active_devices} из {device_limit}\n\n"
-    "<i>Подключение: по ссылке подписки в приложении INCY.</i>"
+    "📱 <b>Устройства:</b> {active_devices} из {device_limit}{sub_url_block}"
+)
+WL_OVERVIEW_SUB_URL_BLOCK = (
+    "\n\n📋 <b>Ваша ссылка на подписку:</b>\n"
+    "<code>{sub_url}</code>\n"
+    "<i>(нажмите на ссылку для копирования)</i>"
 )
 
 WL_TOPUP_MENU_TEXT = (
@@ -99,7 +102,7 @@ WL_INCY_INSTRUCTIONS_TEXT = (
     "   💻 / 📦 <a href=\"https://github.com/INCY-DEV/incy-platforms/releases\">Скачать для ПК (Windows, macOS, Linux) или APK (GitHub)</a>\n\n"
     "2️⃣ <b>Скопируйте вашу ссылку подписки:</b>\n"
     "<code>{url}</code>\n"
-    "<i>(нажмите на ссылку выше или на кнопку внизу)</i>\n\n"
+    "<i>(нажмите на ссылку выше для копирования)</i>\n\n"
     "3️⃣ <b>Добавьте подписку в INCY:</b>\n"
     "   • Откройте приложение <b>INCY</b>\n"
     "   • Перейдите во вкладку <b>«Подписки»</b> (в нижней панели)\n"
@@ -223,13 +226,17 @@ WL_TRAFFIC_90P_TRIAL_ALERT = (
 
 WL_WEB_TOO_MANY_REQUESTS = "Слишком много запросов. Пожалуйста, подождите минуту."
 WL_WEB_PENDING = "Шлюз настраивается, повторите через несколько секунд."
-WL_WEB_EXHAUSTED = "Лимит трафика исчерпан. Пополните баланс в боте."
-WL_WEB_EXPIRED = "Срок действия подписки истек или доступ приостановлен."
 WL_WEB_UNSYNCED = "Шлюз синхронизируется, повторите через несколько секунд."
 WL_WEB_CDN_UNCONFIGURED = "Сетевой шлюз временно недоступен. Обратитесь к администратору."
-WL_WEB_DEVICE_LIMIT_EXCEEDED = "Лимит устройств ({active}/{limit}). Управление: @{bot_username}"
 WL_WEB_HWID_REQUIRED = "Требуется HWID устройства. Включите отправку HWID в приложении."
 WL_ANNOUNCE_MAINTENANCE = "⚠️ Сервер на техническом обслуживании. Связь скоро восстановится."
+
+WL_FEED_EXHAUSTED_TITLE = "⚠️ Трафик исчерпан"
+WL_FEED_EXHAUSTED_NOTICE = "⚠️ Трафик исчерпан. Докупите пакет в @{bot_username}"
+WL_FEED_EXHAUSTED_TRIAL_NOTICE = "⚠️ Пробный трафик исчерпан. Оформите подписку в @{bot_username}"
+WL_FEED_DISABLED_TITLE = "🚫 Доступ отключен"
+WL_FEED_DISABLED_NOTICE = "🚫 Доступ отключен администратором. Обратитесь в поддержку: @{bot_username}"
+WL_FEED_DEVICE_LIMIT_NOTICE = "⚠️ Превышен лимит устройств ({active}/{limit}). Управление в @{bot_username}"
 
 
 

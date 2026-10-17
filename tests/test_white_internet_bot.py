@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from aiogram.types import CallbackQuery, User as TgUser
 
+from bot import texts
 from bot.handlers.white_internet import (
     handle_wl_reset_devices,
     process_white_internet_buy,
@@ -243,18 +244,19 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
                         f"Forbidden custom URL scheme in inline button: {btn.url}",
                     )
 
-        # Find the copy text button and instruction button
-        copy_button = None
+        # Find the connect button and instruction button
+        connect_button = None
         instruction_button = None
         for row in kb.inline_keyboard:
             for btn in row:
-                if btn.copy_text and btn.copy_text.text == f"https://{domain}/sub/wl/{sub.token}":
-                    copy_button = btn
+                if btn.url and btn.url == f"https://{domain}/sub/wl/{sub.token}":
+                    connect_button = btn
                 if btn.callback_data == "wl_show_link":
                     instruction_button = btn
 
-        self.assertIsNotNone(copy_button, "Copy link button with CopyTextButton not found")
-        self.assertEqual(copy_button.copy_text.text, f"https://{domain}/sub/wl/{sub.token}")
+        self.assertIsNotNone(connect_button, "Connect link button with url not found")
+        self.assertEqual(connect_button.url, f"https://{domain}/sub/wl/{sub.token}")
+        self.assertEqual(connect_button.text, texts.BTN_SUB_CONNECT_INCY)
         self.assertIsNotNone(instruction_button, "Instruction button with wl_show_link callback not found")
 
     def test_overview_keyboard_all_states_return_valid_markup(self):
@@ -358,17 +360,17 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("sub-secret-token", text)
 
                 # Check keyboard buttons
-                copy_btns = []
+                connect_btns = []
                 back_btn = None
                 for row in reply_markup.inline_keyboard:
                     for btn in row:
-                        if btn.copy_text:
-                            copy_btns.append(btn)
+                        if btn.url:
+                            connect_btns.append(btn)
                         if btn.callback_data == "white_internet":
                             back_btn = btn
 
-                self.assertTrue(len(copy_btns) >= 1, "Copy subscription link button must be present")
-                self.assertTrue(any("sub-secret-token" in b.copy_text.text for b in copy_btns))
+                self.assertTrue(len(connect_btns) >= 1, "Connect subscription link button must be present")
+                self.assertTrue(any("sub-secret-token" in b.url for b in connect_btns))
                 self.assertIsNotNone(back_btn, "Back button must be present")
 
     async def test_resolve_subscription_domain_priority(self):
@@ -470,9 +472,9 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         reply_markup = call_args[1]["reply_markup"]
 
         self.assertIn("https://cdn.example.com/sub/wl/sub-secret-token", text)
-        copy_btn = next((btn for row in reply_markup.inline_keyboard for btn in row if btn.copy_text), None)
-        self.assertIsNotNone(copy_btn)
-        self.assertEqual(copy_btn.copy_text.text, "https://cdn.example.com/sub/wl/sub-secret-token")
+        connect_btn = next((btn for row in reply_markup.inline_keyboard for btn in row if btn.url), None)
+        self.assertIsNotNone(connect_btn)
+        self.assertEqual(connect_btn.url, "https://cdn.example.com/sub/wl/sub-secret-token")
 
     async def test_show_white_internet_menu_formats_adaptive_traffic(self):
         """Traffic is formatted adaptively (KiB/MiB/GiB), so small usage is not hidden as 0.0 ГБ."""
@@ -572,15 +574,15 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
             domain = "cdn.example.com"
             kb = get_white_internet_overview_keyboard(sub, bot_domain=domain)
 
-            copy_btns = [btn for row in kb.inline_keyboard for btn in row if btn.copy_text]
-            self.assertEqual(len(copy_btns), 1)
-            copy_text = copy_btns[0].copy_text.text
-            self.assertTrue(copy_text.startswith("https://"), f"Must start with https://, got: {copy_text}")
-            self.assertIn("/sub/", copy_text)
-            self.assertIn(sub.token, copy_text)
-            self.assertNotIn("vless://", copy_text)
-            self.assertNotIn("vmess://", copy_text)
-            self.assertNotIn(sub.uuid, copy_text)
+            connect_btns = [btn for row in kb.inline_keyboard for btn in row if btn.url]
+            self.assertEqual(len(connect_btns), 1)
+            connect_url = connect_btns[0].url
+            self.assertTrue(connect_url.startswith("https://"), f"Must start with https://, got: {connect_url}")
+            self.assertIn("/sub/", connect_url)
+            self.assertIn(sub.token, connect_url)
+            self.assertNotIn("vless://", connect_url)
+            self.assertNotIn("vmess://", connect_url)
+            self.assertNotIn(sub.uuid, connect_url)
 
             query = MagicMock(spec=CallbackQuery)
             query.from_user = self.tg_user
@@ -602,11 +604,11 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("vless://", rendered_text)
             self.assertNotIn(sub.uuid, rendered_text)
 
-            modal_copy_btns = [btn for row in markup.inline_keyboard for btn in row if btn.copy_text]
-            self.assertEqual(len(modal_copy_btns), 1)
-            modal_copy_text = modal_copy_btns[0].copy_text.text
-            self.assertEqual(modal_copy_text, f"https://{domain}/sub/wl/{sub.token}")
-            self.assertNotIn("vless://", modal_copy_text)
+            modal_connect_btns = [btn for row in markup.inline_keyboard for btn in row if btn.url]
+            self.assertEqual(len(modal_connect_btns), 1)
+            modal_connect_url = modal_connect_btns[0].url
+            self.assertEqual(modal_connect_url, f"https://{domain}/sub/wl/{sub.token}")
+            self.assertNotIn("vless://", modal_connect_url)
 
     async def test_process_wl_topup_shortage_contextual_actions(self):
         """Shortage top-up callbacks must properly parse action type and pass into context."""

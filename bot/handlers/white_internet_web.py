@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import base64
+import html
 import json
 import logging
 import os
+from pathlib import Path
 import re
+import urllib.parse
 
 from aiohttp import web
 
@@ -27,6 +30,7 @@ from config.enums import ServerHealthState, WhiteInternetProvisioningStatus, Whi
 from database.connection import session_scope
 from database.models import Server
 from database.repositories import users_repo, white_internet_repo
+from database.repositories.system_settings_repo import get_system_setting
 from services.white_internet_service import WhiteInternetService
 from utils.datetime_helpers import now_utc
 from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
@@ -34,13 +38,38 @@ from utils.security import normalize_public_domain
 
 logger = logging.getLogger(__name__)
 
+_TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
+_LANDING_ACTIVE_HTML = (_TEMPLATES_DIR / "vless_landing_active.html").read_text(encoding="utf-8")
+_LANDING_INACTIVE_HTML = (_TEMPLATES_DIR / "vless_landing_inactive.html").read_text(encoding="utf-8")
+_LANDING_PENDING_HTML = (_TEMPLATES_DIR / "vless_landing_pending.html").read_text(encoding="utf-8")
+
 # Scoped rate limiters: IP bucket prevents unauthenticated DoS / token brute force,
 # token bucket prevents single subscription thrashing across rotating IPs.
 _ip_rate_limiter = HttpRateLimiter(rate_per_minute=60.0, burst=15)
 _token_rate_limiter = HttpRateLimiter(rate_per_minute=30.0, burst=10)
 
+HWID_PATTERN = re.compile(r"^[a-zA-Z0-9_\-:]{3,128}$")
 
-def _safe_format_device_template(template: str, *, devices: int, active: int) -> str:
+
+_cached_bot_username: str | None = None
+
+
+def _sanitize_header_url(url: str | None, fallback: str = "") -> str:
+    """Sanitize URL for safe usage in HTTP headers without forbidden control chars, whitespace, or non-ASCII."""
+    for candidate in (url, fallback):
+        if candidate and isinstance(candidate, str):
+            clean = candidate.strip()
+            if clean and clean.isascii() and all(32 < ord(c) < 127 for c in clean):
+                return clean
+    return ""
+
+
+def _safe_format_device_template(
+    template: str,
+    *,
+    devices: int,
+    active: int,
+) -> str:
     """Safely format {devices}, {device_limit}, {limit}, {active}, {active_devices} placeholders."""
     mapping = {
         "devices": str(devices),
@@ -53,36 +82,193 @@ def _safe_format_device_template(template: str, *, devices: int, active: int) ->
     return pattern.sub(lambda m: mapping.get(m.group(1), m.group(0)), template)
 
 
+def _get_white_internet_update_interval() -> str:
+    val = os.getenv("WHITE_INTERNET_PROFILE_UPDATE_INTERVAL", "6").strip()
+    return val if val.isdigit() and int(val) > 0 else "6"
+
+
+def _is_browser_request(request: web.Request) -> bool:
+    """Check if incoming request is from a browser navigating to the page."""
+    raw_hwid = (
+        request.headers.get("X-Hwid")
+        or request.headers.get("X-Device-Hwid")
+        or request.headers.get("X-Device-Id")
+        or ""
+    ).strip()
+    if raw_hwid:
+        return False
+
+    ua = request.headers.get("User-Agent", "").lower()
+    api_tokens = (
+        "curl/",
+        "wget/",
+        "python-requests",
+        "urllib",
+        "httpx",
+        "xray/",
+        "v2ray",
+        "sing-box",
+        "clash",
+        "incy",
+        "happ",
+    )
+    if any(a in ua for a in api_tokens):
+        return False
+
+    accept = request.headers.get("Accept", "").lower()
+    if "text/html" in accept:
+        return True
+
+    browser_tokens = ("mozilla/", "chrome/", "safari/", "applewebkit/", "mobile/", "android", "iphone")
+    return any(b in ua for b in browser_tokens)
+
+
+def _render_white_internet_landing_html(
+    bot_username: str = "",
+    is_active: bool = True,
+    status_badge: str | None = None,
+    status_title: str | None = None,
+    status_description: str | None = None,
+) -> str:
+    """Render universal landing page for INCY 1-click import."""
+    clean_bot = html.escape(bot_username.strip().lstrip("@")) if bot_username else "just1k13bot"
+    bot_link = f"https://t.me/{clean_bot}"
+
+    if not is_active:
+        badge = status_badge or texts.LANDING_INACTIVE_BADGE_PAUSED
+        title = status_title or texts.LANDING_INACTIVE_TITLE_DEFAULT
+        desc = status_description or texts.LANDING_INACTIVE_DESC_DEFAULT
+        return (
+            _LANDING_INACTIVE_HTML.replace("{clean_bot}", clean_bot)
+            .replace("{bot_link}", bot_link)
+            .replace("{status_badge}", html.escape(badge))
+            .replace("{status_title}", html.escape(title))
+            .replace("{status_description}", html.escape(desc))
+        )
+    return _LANDING_ACTIVE_HTML
+
+
+def _render_white_internet_pending_landing_html(bot_username: str = "") -> str:
+    """Render landing page for PENDING state with auto-refresh."""
+    clean_bot = html.escape(bot_username.strip().lstrip("@")) if bot_username else "just1k13bot"
+    bot_link = f"https://t.me/{clean_bot}"
+    return _LANDING_PENDING_HTML.replace("{clean_bot}", clean_bot).replace("{bot_link}", bot_link)
+
+
 async def _resolve_bot_username(request: web.Request) -> str:
     """Resolve current Telegram bot username dynamically without manual env setup."""
-    cached = request.app.get("bot_username")
+    global _cached_bot_username
+    cached = request.app.get("bot_username") if hasattr(request, "app") else None
     if cached and isinstance(cached, str):
         return cached
+    if _cached_bot_username:
+        return _cached_bot_username
 
-    bot = request.app.get("bot")
+    bot = request.app.get("bot") if hasattr(request, "app") else None
     if bot is not None and hasattr(bot, "get_me"):
         try:
             me = await bot.get_me()
             if me and getattr(me, "username", None):
                 username = str(me.username).lstrip("@")
-                request.app["bot_username"] = username
+                _cached_bot_username = username
+                if hasattr(request, "app") and not getattr(request.app, "frozen", False):
+                    try:
+                        request.app["bot_username"] = username
+                    except Exception:
+                        pass
                 return username
         except Exception:
             pass
 
+    return os.getenv("BOT_USERNAME", "").lstrip("@") or "just1k13bot"
+
+
+async def _resolve_urls_and_bot(request: web.Request, extra: dict | None) -> tuple[str, str, str, str]:
+    extra_dict = extra if isinstance(extra, dict) else {}
+    bot_user = await _resolve_bot_username(request)
+    default_bot_url = f"https://t.me/{bot_user}"
     try:
         from config.settings import get_settings
-        settings_supp = getattr(get_settings(), "SUPPORT_USERNAME", None)
-        if settings_supp:
-            fallback = str(settings_supp).lstrip("@")
-            request.app["bot_username"] = fallback
-            return fallback
+        support_user = (
+            getattr(get_settings(), "SUPPORT_USERNAME", None)
+            or os.getenv("SUPPORT_BOT_USERNAME")
+            or ""
+        ).lstrip("@")
     except Exception:
-        pass
+        support_user = (os.getenv("SUPPORT_USERNAME") or os.getenv("SUPPORT_BOT_USERNAME") or "").lstrip("@")
+    default_support_url = f"https://t.me/{support_user}" if support_user else default_bot_url
 
-    fallback = os.getenv("BOT_USERNAME", "").lstrip("@") or "just1k13bot"
-    request.app["bot_username"] = fallback
-    return fallback
+    raw_channel_url = (
+        extra_dict.get("channel_url")
+        or WHITE_INTERNET_CHANNEL_URL
+        or default_bot_url
+    )
+    raw_support_url = (
+        extra_dict.get("support_url")
+        or WHITE_INTERNET_SUPPORT_URL
+        or default_support_url
+    )
+    raw_announce_url = extra_dict.get("announce_url")
+
+    channel_url = _sanitize_header_url(raw_channel_url, fallback=default_bot_url)
+    support_url = _sanitize_header_url(raw_support_url, fallback=channel_url)
+    effective_announce_url = _sanitize_header_url(raw_announce_url, fallback=channel_url)
+
+    return channel_url, support_url, effective_announce_url, bot_user
+
+
+def _build_service_notice_response(
+    *,
+    title_text: str,
+    notice_text: str,
+    common_headers: dict[str, str],
+    channel_url: str,
+    support_url: str,
+    effective_announce_url: str,
+    upload_bytes: int = 0,
+    download_bytes: int = 0,
+    total_quota: int = 0,
+    expire_ts: int = 0,
+    extra_headers: dict[str, str] | None = None,
+) -> web.Response:
+    quoted_notice = urllib.parse.quote(notice_text)
+    notice_link = (
+        f"vless://00000000-0000-0000-0000-000000000000@127.0.0.1:443"
+        f"?encryption=none&security=none#{quoted_notice}"
+    )
+    b64_payload = base64.b64encode(notice_link.encode("utf-8")).decode("utf-8")
+    b64_title = base64.b64encode(title_text.encode("utf-8")).decode("utf-8")
+
+    sanitized_support = _sanitize_header_url(support_url)
+    sanitized_channel = _sanitize_header_url(channel_url)
+    sanitized_announce = _sanitize_header_url(effective_announce_url, fallback=sanitized_channel)
+
+    headers = dict(common_headers)
+    headers.update(
+        {
+            "Content-Type": "text/plain; charset=utf-8",
+            "Profile-Update-Interval": _get_white_internet_update_interval(),
+            "Subscription-Userinfo": texts.WL_USERINFO_HEADER_TEMPLATE.format(
+                upload=upload_bytes,
+                download=download_bytes,
+                total=total_quota,
+                expire=expire_ts,
+            ),
+            "Profile-Title": f"base64:{b64_title}",
+            "Hide-Url": "1",
+            "No-Limit-Enabled": "1",
+        }
+    )
+    if sanitized_support:
+        headers["Support-Url"] = sanitized_support
+    if sanitized_announce:
+        headers["Announce-Url"] = sanitized_announce
+    if sanitized_channel:
+        headers["Profile-Web-Page-Url"] = sanitized_channel
+        headers["Channel-Url"] = sanitized_channel
+    if extra_headers:
+        headers.update(extra_headers)
+    return web.Response(status=200, text=b64_payload, headers=headers)
 
 
 async def white_internet_subscription_feed_handler(request: web.Request) -> web.Response:
@@ -128,6 +314,17 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         "X-Content-Type-Options": "nosniff",
     }
 
+    raw_hwid = (
+        request.headers.get("X-Hwid")
+        or request.headers.get("X-Device-Hwid")
+        or request.headers.get("X-Device-Id")
+        or ""
+    ).strip()
+    if raw_hwid and not HWID_PATTERN.match(raw_hwid):
+        headers = dict(common_headers)
+        headers["x-hwid-required"] = "true"
+        return web.Response(status=400, text="Invalid HWID format", headers=headers)
+
     async with session_scope() as session:
         sub = await white_internet_repo.get_subscription_by_token(session, token)
         if sub is None:
@@ -141,16 +338,25 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         ):
             return web.Response(status=403, text="Forbidden", headers=common_headers)
 
+        server: Server | None = None
+        if getattr(sub, "origin_node_id", None):
+            server = await session.scalar(select(Server).where(Server.id == sub.origin_node_id))
+        extra = server.extra_data if server and isinstance(server.extra_data, dict) else {}
+        channel_url, support_url, effective_announce_url, bot_user = await _resolve_urls_and_bot(request, extra)
+
+        landing_headers = {
+            **common_headers,
+            "Content-Type": "text/html; charset=utf-8",
+            "Content-Security-Policy": "default-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:;",
+        }
+
         if sub.status == WhiteInternetStatus.PENDING:
+            if not raw_hwid and _is_browser_request(request):
+                html_body = _render_white_internet_pending_landing_html(bot_username=bot_user)
+                return web.Response(status=200, text=html_body, headers=landing_headers)
             headers = dict(common_headers)
             headers["Retry-After"] = "5"
             return web.Response(status=503, text=texts.WL_WEB_PENDING, headers=headers)
-
-        if (
-            sub.status in (WhiteInternetStatus.EXPIRED, WhiteInternetStatus.DISABLED)
-            or (sub.expires_at and sub.expires_at <= now)
-        ):
-            return web.Response(status=403, text=texts.WL_WEB_EXPIRED, headers=common_headers)
 
         traffic_limit = getattr(sub, "traffic_limit_bytes", None)
         base_bytes = getattr(sub, "base_traffic_bytes", None)
@@ -194,17 +400,89 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             else 0
         )
 
-        if sub.status == WhiteInternetStatus.EXHAUSTED or available_bytes <= 0:
-            headers = dict(common_headers)
-            headers["Subscription-Userinfo"] = texts.WL_USERINFO_HEADER_TEMPLATE.format(
-                upload=upload_bytes,
-                download=download_bytes,
-                total=total_quota,
-                expire=expire_ts,
+        if sub.status == WhiteInternetStatus.DISABLED:
+            if not raw_hwid and _is_browser_request(request):
+                html_body = _render_white_internet_landing_html(
+                    bot_username=bot_user,
+                    is_active=False,
+                    status_badge=texts.LANDING_INACTIVE_BADGE_DISABLED,
+                    status_title=texts.LANDING_INACTIVE_TITLE_DISABLED,
+                    status_description=texts.LANDING_INACTIVE_DESC_DISABLED,
+                )
+                return web.Response(status=200, text=html_body, headers=landing_headers)
+            return _build_service_notice_response(
+                title_text=texts.WL_FEED_DISABLED_TITLE,
+                notice_text=texts.WL_FEED_DISABLED_NOTICE.format(bot_username=bot_user),
+                common_headers=common_headers,
+                channel_url=channel_url,
+                support_url=support_url,
+                effective_announce_url=effective_announce_url,
+                upload_bytes=upload_bytes,
+                download_bytes=download_bytes,
+                total_quota=total_quota,
+                expire_ts=expire_ts,
             )
-            return web.Response(status=403, text=texts.WL_WEB_EXHAUSTED, headers=headers)
 
-        server = await session.scalar(select(Server).where(Server.id == sub.origin_node_id))
+        if (
+            sub.status == WhiteInternetStatus.EXPIRED
+            or (sub.expires_at and sub.expires_at <= now)
+        ):
+            if not raw_hwid and _is_browser_request(request):
+                html_body = _render_white_internet_landing_html(
+                    bot_username=bot_user,
+                    is_active=False,
+                    status_badge=texts.LANDING_INACTIVE_BADGE_EXPIRED,
+                    status_title=texts.LANDING_INACTIVE_TITLE_EXPIRED,
+                    status_description=texts.LANDING_INACTIVE_DESC_EXPIRED,
+                )
+                return web.Response(status=200, text=html_body, headers=landing_headers)
+            return _build_service_notice_response(
+                title_text=texts.VLESS_FEED_EXPIRED_TITLE,
+                notice_text=texts.VLESS_FEED_EXPIRED_NOTICE.format(bot_username=bot_user),
+                common_headers=common_headers,
+                channel_url=channel_url,
+                support_url=support_url,
+                effective_announce_url=effective_announce_url,
+                upload_bytes=upload_bytes,
+                download_bytes=download_bytes,
+                total_quota=total_quota,
+                expire_ts=expire_ts,
+            )
+
+        if sub.status == WhiteInternetStatus.EXHAUSTED or available_bytes <= 0:
+            if not raw_hwid and _is_browser_request(request):
+                html_body = _render_white_internet_landing_html(
+                    bot_username=bot_user,
+                    is_active=False,
+                    status_badge=texts.LANDING_INACTIVE_BADGE_EXHAUSTED,
+                    status_title=texts.LANDING_INACTIVE_TITLE_EXHAUSTED,
+                    status_description=texts.LANDING_INACTIVE_DESC_EXHAUSTED,
+                )
+                return web.Response(status=200, text=html_body, headers=landing_headers)
+            is_trial = bool(getattr(sub, "is_trial", False))
+            notice_text_tmpl = texts.WL_FEED_EXHAUSTED_TRIAL_NOTICE if is_trial else texts.WL_FEED_EXHAUSTED_NOTICE
+            return _build_service_notice_response(
+                title_text=texts.WL_FEED_EXHAUSTED_TITLE,
+                notice_text=notice_text_tmpl.format(bot_username=bot_user),
+                common_headers=common_headers,
+                channel_url=channel_url,
+                support_url=support_url,
+                effective_announce_url=effective_announce_url,
+                upload_bytes=upload_bytes,
+                download_bytes=download_bytes,
+                total_quota=total_quota,
+                expire_ts=expire_ts,
+            )
+
+        # HWID (Device ID) enforcement: browser gets 1-click landing, app must provide HWID
+        if not raw_hwid:
+            if _is_browser_request(request):
+                html_body = _render_white_internet_landing_html(bot_username=bot_user, is_active=True)
+                return web.Response(status=200, text=html_body, headers=landing_headers)
+            headers = dict(common_headers)
+            headers["x-hwid-required"] = "true"
+            return web.Response(status=403, text=texts.WL_WEB_HWID_REQUIRED, headers=headers)
+
         server_proto = getattr(server, "protocol", None)
         if not server_proto and server:
             caps = getattr(server, "capabilities", None) or []
@@ -236,7 +514,6 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             headers["Retry-After"] = "5"
             return web.Response(status=503, text=texts.WL_WEB_UNSYNCED, headers=headers)
 
-        extra = server.extra_data if isinstance(getattr(server, "extra_data", None), dict) else {}
         cdn_domain = normalize_public_domain(extra.get("cdn_domain") or os.getenv("WHITE_INTERNET_CDN_DOMAIN"))
         if not cdn_domain:
             logger.error(
@@ -267,38 +544,37 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         if not isinstance(relays, list):
             relays = None
 
-        # HWID (Device ID) strict enforcement
-        hwid = (
-            request.headers.get("X-Hwid")
-            or request.headers.get("X-HWID")
-            or request.headers.get("X-Device-Id")
-            or request.headers.get("X-Device-ID")
-            or ""
-        ).strip()
-        if not hwid:
-            headers = dict(common_headers)
-            headers["x-hwid-required"] = "true"
-            return web.Response(status=403, text=texts.WL_WEB_HWID_REQUIRED, headers=headers)
-
         effective_limit = max(1, getattr(sub, "device_limit", 1) or 1)
         allowed_hwid, active_count, max_devs = await white_internet_repo.register_hwid_atomic(
-            session, sub.id, hwid, max_devices=effective_limit
+            session, sub.id, raw_hwid, max_devices=effective_limit
         )
         if not allowed_hwid:
-            headers = dict(common_headers)
-            headers["Device-Limit-Exceeded"] = "1"
-            headers["Device-Limit"] = str(max_devs)
-            headers["Device-Active-Count"] = str(active_count)
-            headers["x-hwid-max-devices-reached"] = "true"
-            headers["x-hwid-limit"] = str(max_devs)
-            headers["x-hwid-active"] = str(active_count)
-            bot_username = await _resolve_bot_username(request)
-            limit_msg = texts.WL_WEB_DEVICE_LIMIT_EXCEEDED.format(
+            limit_msg = texts.WL_FEED_DEVICE_LIMIT_NOTICE.format(
                 active=active_count,
                 limit=max_devs,
-                bot_username=bot_username,
+                bot_username=bot_user,
             )
-            return web.Response(status=403, text=limit_msg, headers=headers)
+            extra_headers = {
+                "Device-Limit-Exceeded": "1",
+                "Device-Limit": str(max_devs),
+                "Device-Active-Count": str(active_count),
+                "x-hwid-max-devices-reached": "true",
+                "x-hwid-limit": "true",
+                "x-hwid-active": str(active_count),
+            }
+            return _build_service_notice_response(
+                title_text=texts.VLESS_FEED_DEVICE_LIMIT_TITLE,
+                notice_text=limit_msg,
+                common_headers=common_headers,
+                channel_url=channel_url,
+                support_url=support_url,
+                effective_announce_url=effective_announce_url,
+                upload_bytes=upload_bytes,
+                download_bytes=download_bytes,
+                total_quota=total_quota,
+                expire_ts=expire_ts,
+                extra_headers=extra_headers,
+            )
 
         origin_tag = extra.get("origin_tag")
         origin_badge = extra.get("origin_badge")
@@ -345,56 +621,55 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             or WHITE_INTERNET_PROFILE_TITLE
             or texts.WL_PROFILE_NAME
         )
-        profile_title_clean = (
-            str(profile_title).strip().replace("\r\n", " ").replace("\r", " ").replace("\n", " ")[:25]
+        show_devices_setting = await get_system_setting(session, "vless_profile_show_devices", False)
+        if isinstance(show_devices_setting, str):
+            show_devices = show_devices_setting.lower() in ("1", "true", "yes", "on")
+        else:
+            show_devices = bool(show_devices_setting)
+
+        profile_title_base = (
+            str(profile_title).strip().replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
         )
+        if show_devices:
+            suffix = f" [{active_count}/{max_devs}]"
+            max_base_len = max(0, 25 - len(suffix))
+            clean_base = profile_title_base[:max_base_len].rstrip()
+            profile_title_clean = f"{clean_base}{suffix}"[:25]
+        else:
+            profile_title_clean = profile_title_base[:25]
         profile_title_b64 = base64.b64encode(profile_title_clean.encode("utf-8")).decode("ascii")
-
-        bot_user = await _resolve_bot_username(request)
-        default_bot_url = f"https://t.me/{bot_user}"
-        try:
-            from config.settings import get_settings
-            support_user = (getattr(get_settings(), "SUPPORT_USERNAME", None) or os.getenv("SUPPORT_BOT_USERNAME") or "").lstrip("@")
-        except Exception:
-            support_user = (os.getenv("SUPPORT_USERNAME") or os.getenv("SUPPORT_BOT_USERNAME") or "").lstrip("@")
-        default_support_url = f"https://t.me/{support_user}" if support_user else default_bot_url
-
-        channel_url = (
-            extra.get("channel_url")
-            or WHITE_INTERNET_CHANNEL_URL
-            or default_bot_url
-        )
-        support_url = (
-            extra.get("support_url")
-            or WHITE_INTERNET_SUPPORT_URL
-            or default_support_url
-        )
 
         response_headers = dict(common_headers)
         response_headers.update(
             {
                 "Content-Type": "text/plain; charset=utf-8",
+                "Content-Disposition": 'inline; filename="Just1k.txt"; filename*=UTF-8\'\'Just1k.txt',
                 "Subscription-Userinfo": texts.WL_USERINFO_HEADER_TEMPLATE.format(
                     upload=upload_bytes,
                     download=download_bytes,
                     total=total_quota,
                     expire=expire_ts,
                 ),
+                "Device-Limit": str(max_devs),
+                "Device-Active-Count": str(active_count),
                 "Profile-Title": f"base64:{profile_title_b64}",
-                "Profile-Update-Interval": (
-                    os.getenv("WHITE_INTERNET_PROFILE_UPDATE_INTERVAL", "6").strip()
-                    if os.getenv("WHITE_INTERNET_PROFILE_UPDATE_INTERVAL", "6").strip().isdigit()
-                    and int(os.getenv("WHITE_INTERNET_PROFILE_UPDATE_INTERVAL", "6").strip()) > 0
-                    else "6"
-                ),
-                "Support-Url": support_url,
-                "Profile-Web-Page-Url": channel_url,
+                "Profile-Update-Interval": _get_white_internet_update_interval(),
                 "Hide-Url": "1",
                 "Hide-Check": "1",
                 "Sort-Order": "none",
                 "No-Limit-Enabled": "1",
+                "x-hwid-active": "true",
             }
         )
+        sanitized_support = _sanitize_header_url(support_url)
+        sanitized_channel = _sanitize_header_url(channel_url)
+        sanitized_announce = _sanitize_header_url(effective_announce_url, fallback=sanitized_channel)
+
+        if sanitized_support:
+            response_headers["Support-Url"] = sanitized_support
+        if sanitized_channel:
+            response_headers["Profile-Web-Page-Url"] = sanitized_channel
+            response_headers["Channel-Url"] = sanitized_channel
 
         announce = extra.get("announce")
         if not announce and not is_server_available:
@@ -408,15 +683,8 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             announce_b64 = base64.b64encode(clean_announce.encode("utf-8")).decode("ascii")
             response_headers["Announce"] = f"base64:{announce_b64}"
 
-        raw_announce_url = extra.get("announce_url")
-        clean_announce_url = (
-            str(raw_announce_url).strip()
-            if raw_announce_url and str(raw_announce_url).strip()
-            else None
-        )
-        effective_announce_url = clean_announce_url or channel_url
-        if effective_announce_url and str(effective_announce_url).strip():
-            response_headers["Announce-Url"] = str(effective_announce_url).strip()
+        if sanitized_announce:
+            response_headers["Announce-Url"] = sanitized_announce
 
         return web.Response(status=200, text=b64_payload, headers=response_headers)
 

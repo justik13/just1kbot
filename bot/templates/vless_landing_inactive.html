@@ -171,7 +171,7 @@
         <div class="header-top">
             <div class="status-pill">
                 <span class="status-dot"></span>
-                <span>Доступ приостановлен</span>
+                <span>{status_badge}</span>
             </div>
             <div class="icon-badge" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -180,8 +180,8 @@
                 </svg>
             </div>
         </div>
-        <h1>Подписка не активна</h1>
-        <p>Срок действия доступа истек или подписка приостановлена. Для возобновления перейдите в бота.</p>
+        <h1>{status_title}</h1>
+        <p>{status_description}</p>
         <a href="{bot_link}" class="btn">Перейти в бота @{clean_bot}</a>
     </div>
 </body>

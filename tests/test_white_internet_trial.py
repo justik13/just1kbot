@@ -414,9 +414,10 @@ class TestWhiteInternetTrialBotUI(unittest.IsolatedAsyncioTestCase):
         )
         kb_active = get_white_internet_overview_keyboard(sub_active, bot_domain=domain)
         callbacks_active = [btn.callback_data for row in kb_active.inline_keyboard for btn in row if btn.callback_data]
-        copy_buttons = [btn for row in kb_active.inline_keyboard for btn in row if btn.copy_text]
+        connect_buttons = [btn for row in kb_active.inline_keyboard for btn in row if btn.url]
 
-        self.assertEqual(len(copy_buttons), 1)
+        self.assertEqual(len(connect_buttons), 1)
+        self.assertTrue(connect_buttons[0].url.startswith("https://"))
         self.assertIn("wl_show_link", callbacks_active)
         self.assertIn("wl_renew_preview", callbacks_active)
         self.assertIn("wl_reset_devices", callbacks_active)

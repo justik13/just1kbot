@@ -227,6 +227,20 @@ VLESS_FEED_EXPIRED_NOTICE = "⚠️ Подписка закончилась. П�
 VLESS_FEED_DEVICE_LIMIT_TITLE = "⚠️ Лимит устройств"
 VLESS_FEED_DEVICE_LIMIT_NOTICE = "⚠️ Превышен лимит устройств ({active}/{limit}). Отключите старые в @{bot_username}"
 
+LANDING_INACTIVE_BADGE_PAUSED = "Доступ приостановлен"
+LANDING_INACTIVE_TITLE_DEFAULT = "Подписка не активна"
+LANDING_INACTIVE_DESC_DEFAULT = "Срок действия доступа истек или подписка приостановлена. Для возобновления перейдите в бота."
+LANDING_INACTIVE_BADGE_DISABLED = "Отключено"
+LANDING_INACTIVE_TITLE_DISABLED = "Доступ отключен"
+LANDING_INACTIVE_DESC_DISABLED = "Доступ отключен администратором. Для уточнения обратитесь в поддержку в боте."
+LANDING_INACTIVE_BADGE_EXPIRED = "Срок истек"
+LANDING_INACTIVE_TITLE_EXPIRED = "Срок действия истек"
+LANDING_INACTIVE_DESC_EXPIRED = "Срок действия доступа подошел к концу. Для продления перейдите в бота."
+LANDING_INACTIVE_BADGE_EXHAUSTED = "Лимит исчерпан"
+LANDING_INACTIVE_TITLE_EXHAUSTED = "Трафик исчерпан"
+LANDING_INACTIVE_DESC_EXHAUSTED = "Включенный пакет трафика закончился. Для продолжения работы перейдите в бота."
+
+
 
 
 
