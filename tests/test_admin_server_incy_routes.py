@@ -634,12 +634,13 @@ class TestAdminServerIncyRoutes(unittest.IsolatedAsyncioTestCase):
 
                 # Keyboard should have standard buttons, NOT origin or relays or global incy settings
                 kb_btns = [b.text for row in kb.inline_keyboard for b in row]
+                kb_callbacks = [b.callback_data for row in kb.inline_keyboard for b in row]
                 self.assertIn(texts.ADMIN_SERVER_INCY_BTN_NODE_NAME, kb_btns)
                 self.assertIn(texts.ADMIN_SERVER_INCY_BTN_NODE_BADGE, kb_btns)
                 self.assertNotIn(texts.ADMIN_SERVER_INCY_BTN_ORIGIN_NAME, kb_btns)
                 self.assertNotIn(texts.ADMIN_SERVER_INCY_BTN_RELAYS, kb_btns)
                 self.assertNotIn(texts.ADMIN_SERVER_INCY_BTN_TITLE, kb_btns)
-                self.assertNotIn("Описание профиля", kb_btns)
+                self.assertFalse(any(cb.endswith(":desc") for cb in kb_callbacks))
                 self.assertNotIn(texts.ADMIN_SERVER_INCY_BTN_ANNOUNCE, kb_btns)
                 self.assertNotIn(texts.ADMIN_SERVER_INCY_BTN_ANNOUNCE_URL, kb_btns)
 

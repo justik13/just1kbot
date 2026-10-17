@@ -406,7 +406,6 @@ ADMIN_SERVER_INCY_ACTION_HIDE = "Скрыть"
 ADMIN_SERVER_INCY_ACTION_SHOW = "Показать"
 
 ADMIN_SERVER_INCY_VALUE_NONE = "— (не задан)"
-ADMIN_SERVER_INCY_VALUE_DEFAULT = "{value} (по умолчанию)"
 ADMIN_SERVER_INCY_VALUE_DISABLED = "Отключен"
 ADMIN_SERVER_INCY_NO_RELAYS = "На сервере нет подключенных Relay-узлов."
 ADMIN_SERVER_INCY_RELAY_BTN = "🌐 {name}{badge_part}{status_part}"
