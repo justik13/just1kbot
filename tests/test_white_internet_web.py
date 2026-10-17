@@ -292,7 +292,10 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
         with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
             with patch("database.repositories.users_repo.get_user_by_id", new_callable=AsyncMock, return_value=mock_user):
                 with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
-                    resp = await self.client.get("/sub/wl/unsynced-token-1234567890abcdef")
+                    resp = await self.client.get(
+                        "/sub/wl/unsynced-token-1234567890abcdef",
+                        headers={"X-Hwid": "test-device-id"},
+                    )
                     self.assertEqual(resp.status, 503)
                     self.assertEqual(resp.headers.get("Retry-After"), "5")
 
@@ -361,7 +364,10 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
         with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
             with patch("database.repositories.users_repo.get_user_by_id", new_callable=AsyncMock, return_value=mock_user):
                 with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
-                    resp = await self.client.get("/sub/wl/epoch-mismatch-token-1234567890")
+                    resp = await self.client.get(
+                        "/sub/wl/epoch-mismatch-token-1234567890",
+                        headers={"X-Hwid": "test-device-id"},
+                    )
                     self.assertEqual(resp.status, 503)
                     self.assertEqual(resp.headers.get("Retry-After"), "5")
 
@@ -580,7 +586,10 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
         with patch.dict(os.environ, {}, clear=True):
             with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
                 with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
-                    resp = await self.client.get("/sub/wl/valid-token-1234567890abcdef")
+                    resp = await self.client.get(
+                        "/sub/wl/valid-token-1234567890abcdef",
+                        headers={"X-Hwid": "test-device-id"},
+                    )
                     self.assertEqual(resp.status, 503)
                     self.assertEqual(resp.headers.get("Retry-After"), "60")
 
@@ -682,7 +691,10 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
 
         with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
             with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
-                resp = await self.client.get("/sub/wl/valid-token-1234567890abcdef")
+                resp = await self.client.get(
+                    "/sub/wl/valid-token-1234567890abcdef",
+                    headers={"X-Hwid": "test-device-id"},
+                )
                 self.assertEqual(resp.status, 503)
                 self.assertEqual(resp.headers.get("Retry-After"), "5")
 
@@ -790,7 +802,10 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub),
             patch("services.white_internet_service.WhiteInternetService.generate_vless_links") as mock_generate,
         ):
-            resp = await self.client.get("/sub/wl/valid-token-1234567890abcdef")
+            resp = await self.client.get(
+                "/sub/wl/valid-token-1234567890abcdef",
+                headers={"X-Hwid": "test-device-id"},
+            )
             self.assertEqual(resp.status, 503)
             self.assertIn("Retry-After", resp.headers)
             # VLESS link generation must never be invoked for an AWG server!
@@ -946,7 +961,10 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
 
         with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
             with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
-                resp = await self.client.get("/sub/wl/active-sub-wrong-proto-12345")
+                resp = await self.client.get(
+                    "/sub/wl/active-sub-wrong-proto-12345",
+                    headers={"X-Hwid": "test-device-id"},
+                )
                 self.assertEqual(resp.status, 503)
                 self.assertEqual(resp.headers.get("Retry-After"), "5")
 
@@ -988,7 +1006,10 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
 
         with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
             with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
-                resp = await self.client.get("/sub/wl/active-sub-epoch-mismatch-12345")
+                resp = await self.client.get(
+                    "/sub/wl/active-sub-epoch-mismatch-12345",
+                    headers={"X-Hwid": "test-device-id"},
+                )
                 self.assertEqual(resp.status, 503)
                 self.assertEqual(resp.headers.get("Retry-After"), "5")
 
@@ -1030,7 +1051,10 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
 
         with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
             with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
-                resp = await self.client.get("/sub/wl/active-sub-version-mismatch-12345")
+                resp = await self.client.get(
+                    "/sub/wl/active-sub-version-mismatch-12345",
+                    headers={"X-Hwid": "test-device-id"},
+                )
                 self.assertEqual(resp.status, 503)
                 self.assertEqual(resp.headers.get("Retry-After"), "5")
 
@@ -1133,4 +1157,191 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                 self.assertTrue(announce_header.startswith("base64:"))
                 decoded_announce = base64.b64decode(announce_header.replace("base64:", "")).decode("utf-8")
                 self.assertIn("техническом обслуживании", decoded_announce)
+
+    async def test_mobile_incy_and_happ_with_hwid_receive_service_notice_on_expired(self):
+        now = datetime.now(timezone.utc)
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 50
+        sub.user_id = 10
+        sub.origin_node_id = 1
+        sub.token = "expired-mobile-1234567890abcdef"
+        sub.status = WhiteInternetStatus.EXPIRED
+        sub.expires_at = now - timedelta(days=1)
+        sub.traffic_limit_bytes = 53687091200
+        sub.traffic_used_bytes = 0
+        sub.traffic_overage_bytes = 0
+        sub.traffic_uplink_bytes = 0
+        sub.traffic_downlink_bytes = 0
+
+        mock_session = AsyncMock()
+        mock_user = MagicMock(is_banned=False, is_deleted=False)
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        # INCY on Android includes "Android" in UA; Happ on iOS includes "iPhone" in UA
+        user_agents = [
+            "INCY/2.4.1 (Linux; U; Android 14; SM-S918B Build/UP1A.231005.007)",
+            "Happ/1.8.0 (iPhone; iOS 17.5.1; Scale/3.00)",
+        ]
+
+        for ua in user_agents:
+            with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+                with patch("database.repositories.users_repo.get_user_by_id", new_callable=AsyncMock, return_value=mock_user):
+                    with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                        resp = await self.client.get(
+                            f"/sub/wl/{sub.token}",
+                            headers={
+                                "User-Agent": ua,
+                                "X-Hwid": "mobile-hwid-device-123",
+                                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                            },
+                        )
+                        self.assertEqual(resp.status, 200, f"Failed for UA: {ua}")
+                        self.assertIn("text/plain", resp.headers.get("Content-Type", ""))
+                        self.assertNotIn("text/html", resp.headers.get("Content-Type", ""))
+                        text_payload = await resp.text()
+                        decoded_links = base64.b64decode(text_payload).decode("utf-8")
+                        self.assertIn("vless://00000000-0000-0000-0000-000000000000", decoded_links)
+                        self.assertIn("Profile-Title", resp.headers)
+
+    async def test_mobile_happ_with_hwid_receives_service_notice_on_disabled(self):
+        now = datetime.now(timezone.utc)
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 51
+        sub.user_id = 10
+        sub.origin_node_id = 1
+        sub.token = "disabled-mobile-1234567890abcdef"
+        sub.status = WhiteInternetStatus.DISABLED
+        sub.expires_at = now + timedelta(days=10)
+        sub.traffic_limit_bytes = 53687091200
+        sub.traffic_used_bytes = 0
+        sub.traffic_overage_bytes = 0
+        sub.traffic_uplink_bytes = 0
+        sub.traffic_downlink_bytes = 0
+
+        mock_session = AsyncMock()
+        mock_user = MagicMock(is_banned=False, is_deleted=False)
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+            with patch("database.repositories.users_repo.get_user_by_id", new_callable=AsyncMock, return_value=mock_user):
+                with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                    resp = await self.client.get(
+                        f"/sub/wl/{sub.token}",
+                        headers={
+                            "User-Agent": "Happ/1.8.0 (iPhone; iOS 17.5.1; Scale/3.00)",
+                            "X-Device-Hwid": "mobile-happ-hwid-456",
+                        },
+                    )
+                    self.assertEqual(resp.status, 200)
+                    self.assertIn("text/plain", resp.headers.get("Content-Type", ""))
+                    self.assertNotIn("text/html", resp.headers.get("Content-Type", ""))
+                    text_payload = await resp.text()
+                    decoded_links = base64.b64decode(text_payload).decode("utf-8")
+                    self.assertIn("vless://00000000-0000-0000-0000-000000000000", decoded_links)
+
+    async def test_mobile_incy_with_hwid_receives_service_notice_on_exhausted(self):
+        now = datetime.now(timezone.utc)
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 52
+        sub.user_id = 10
+        sub.origin_node_id = 1
+        sub.token = "exhausted-mobile-123456789abcdef"
+        sub.status = WhiteInternetStatus.EXHAUSTED
+        sub.expires_at = now + timedelta(days=10)
+        sub.traffic_limit_bytes = 53687091200
+        sub.traffic_used_bytes = 53687091200
+        sub.traffic_overage_bytes = 0
+        sub.traffic_uplink_bytes = 0
+        sub.traffic_downlink_bytes = 0
+
+        mock_session = AsyncMock()
+        mock_user = MagicMock(is_banned=False, is_deleted=False)
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+            with patch("database.repositories.users_repo.get_user_by_id", new_callable=AsyncMock, return_value=mock_user):
+                with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                    resp = await self.client.get(
+                        f"/sub/wl/{sub.token}",
+                        headers={
+                            "User-Agent": "INCY/2.4.1 (Linux; U; Android 14; Pixel 8)",
+                            "X-Device-Id": "mobile-pixel-hwid-789",
+                        },
+                    )
+                    self.assertEqual(resp.status, 200)
+                    self.assertIn("text/plain", resp.headers.get("Content-Type", ""))
+                    text_payload = await resp.text()
+                    decoded_links = base64.b64decode(text_payload).decode("utf-8")
+                    self.assertIn("vless://00000000-0000-0000-0000-000000000000", decoded_links)
+
+    async def test_mobile_incy_with_hwid_receives_503_on_pending(self):
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 53
+        sub.user_id = 10
+        sub.origin_node_id = 1
+        sub.token = "pending-mobile-1234567890abcdef"
+        sub.status = WhiteInternetStatus.PENDING
+
+        mock_session = AsyncMock()
+        mock_user = MagicMock(is_banned=False, is_deleted=False)
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+            with patch("database.repositories.users_repo.get_user_by_id", new_callable=AsyncMock, return_value=mock_user):
+                with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                    resp = await self.client.get(
+                        f"/sub/wl/{sub.token}",
+                        headers={
+                            "User-Agent": "INCY/2.4.1 (Linux; U; Android 14; SM-S918B)",
+                            "X-Hwid": "mobile-hwid-pending-123",
+                        },
+                    )
+                    self.assertEqual(resp.status, 503)
+                    self.assertEqual(resp.headers.get("Retry-After"), "5")
+                    self.assertNotIn("text/html", resp.headers.get("Content-Type", ""))
+
+    async def test_pending_status_browser_receives_auto_refresh_html(self):
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.status = WhiteInternetStatus.PENDING
+
+        mock_session = AsyncMock()
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+            with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                resp = await self.client.get(
+                    "/sub/wl/pending-token-1234567890abcdef",
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                        "Accept": "text/html,application/xhtml+xml",
+                    },
+                )
+                self.assertEqual(resp.status, 200)
+                self.assertIn("text/html", resp.headers.get("Content-Type", ""))
+                html_text = await resp.text()
+                self.assertIn('<meta http-equiv="refresh" content="5">', html_text)
+                self.assertIn("Настройка шлюза", html_text)
+                self.assertIn("Перейти в бота", html_text)
+
+    async def test_url_header_sanitization_removes_newlines_and_spaces(self):
+        from bot.handlers.white_internet_web import _sanitize_header_url
+        self.assertEqual(_sanitize_header_url("https://example.com/test\r\nInjected: true", fallback="https://default.com"), "https://default.com")
+        self.assertEqual(_sanitize_header_url("https://example.com/test\tbad", fallback=""), "")
+        self.assertEqual(_sanitize_header_url("  https://example.com/clean  "), "https://example.com/clean")
+        self.assertEqual(_sanitize_header_url(None, fallback="https://default.com"), "https://default.com")
+        self.assertEqual(_sanitize_header_url("", fallback="https://default.com"), "https://default.com")
 

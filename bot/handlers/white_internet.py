@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
 from decimal import Decimal
 import html
 import logging
@@ -20,7 +19,6 @@ from config.constants import (
     WHITE_INTERNET_BASE_PRICE_RUB,
     WHITE_INTERNET_BASE_TRAFFIC_BYTES,
     WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB,
-    WHITE_INTERNET_HWID_TTL_HOURS,
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
     WHITE_INTERNET_SUB_PATH_PREFIX,
     WHITE_INTERNET_TOPUP_PACKS,
@@ -36,6 +34,7 @@ from database.repositories.account_ledger_repo import get_account_balance
 from database.repositories.users_repo import get_user_by_telegram_id
 from database.repositories.white_internet_repo import (
     WhiteInternetResetCooldownError,
+    count_active_hwids,
 )
 from services.maintenance_service import MaintenanceService
 from services.white_internet_service import (
@@ -384,11 +383,7 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
         progress_bar = _render_progress_bar(used_bytes, total_limit)
         expiry_str = sub.expires_at.strftime(texts.WL_DATETIME_FORMAT) if sub.expires_at else texts.TIME_FOREVER
 
-        current_hwids = dict(sub.active_hwids or {})
-        cutoff = (now - timedelta(hours=WHITE_INTERNET_HWID_TTL_HOURS)).isoformat()
-        active_devices = sum(
-            1 for ts in current_hwids.values() if isinstance(ts, str) and ts >= cutoff
-        )
+        active_devices = count_active_hwids(sub.active_hwids, now=now)
         effective_device_limit = max(1, getattr(sub, "device_limit", 1) or 1)
 
         sub_url = (

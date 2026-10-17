@@ -105,14 +105,48 @@ def _get_vless_update_interval() -> str:
     return val if val.isdigit() and int(val) > 0 else "6"
 
 
+def _sanitize_header_url(url: str | None, fallback: str = "") -> str:
+    """Sanitize URL for safe usage in HTTP headers without forbidden control chars or whitespace."""
+    for candidate in (url, fallback):
+        if candidate and isinstance(candidate, str):
+            clean = candidate.strip()
+            if clean and not any(c in clean for c in ("\r", "\n", "\t", " ")):
+                return clean
+    return ""
+
+
 def _is_browser_request(request: web.Request) -> bool:
     """Check if incoming request is from a browser navigating to the page."""
+    raw_hwid = (
+        request.headers.get("X-Hwid")
+        or request.headers.get("X-HWID")
+        or request.headers.get("X-Device-Hwid")
+        or request.headers.get("X-Device-HWID")
+        or request.headers.get("X-Device-Id")
+        or request.headers.get("X-Device-ID")
+        or ""
+    ).strip()
+    if raw_hwid:
+        return False
+
     accept = request.headers.get("Accept", "").lower()
     if "text/html" in accept:
         return True
+
     ua = request.headers.get("User-Agent", "").lower()
     browser_tokens = ("mozilla/", "chrome/", "safari/", "applewebkit/", "mobile/", "android", "iphone")
-    api_tokens = ("curl/", "wget/", "python-requests", "aiohttp/", "xray/", "v2ray", "sing-box", "clash")
+    api_tokens = (
+        "curl/",
+        "wget/",
+        "python-requests",
+        "aiohttp/",
+        "xray/",
+        "v2ray",
+        "sing-box",
+        "clash",
+        "incy",
+        "happ",
+    )
     return any(b in ua for b in browser_tokens) and not any(a in ua for a in api_tokens)
 
 
@@ -135,9 +169,9 @@ async def _resolve_bot_username(request: web.Request) -> str:
 
     try:
         from config.settings import get_settings
-        settings_supp = getattr(get_settings(), "SUPPORT_USERNAME", None)
-        if settings_supp:
-            fallback = str(settings_supp).lstrip("@")
+        settings_bot = getattr(get_settings(), "BOT_USERNAME", None)
+        if settings_bot:
+            fallback = str(settings_bot).lstrip("@")
             request.app["bot_username"] = fallback
             return fallback
     except Exception:
@@ -150,23 +184,29 @@ async def _resolve_bot_username(request: web.Request) -> str:
 
 def _resolve_support_url(first_extra: dict | None, default_bot_url: str) -> str:
     extra = first_extra if isinstance(first_extra, dict) else {}
-    if extra.get("support_url"):
-        return str(extra["support_url"])
+    raw = extra.get("support_url")
+    if raw:
+        cleaned = _sanitize_header_url(raw)
+        if cleaned:
+            return cleaned
     try:
         from config.settings import get_settings
         supp = getattr(get_settings(), "SUPPORT_USERNAME", None)
         if supp:
-            return f"https://t.me/{str(supp).lstrip('@')}"
+            return _sanitize_header_url(f"https://t.me/{str(supp).lstrip('@')}", fallback=default_bot_url)
     except Exception:
         pass
-    return default_bot_url
+    return _sanitize_header_url(default_bot_url)
 
 
 def _resolve_channel_url(first_extra: dict | None, default_bot_url: str) -> str:
     extra = first_extra if isinstance(first_extra, dict) else {}
-    if extra.get("channel_url"):
-        return str(extra["channel_url"])
-    return default_bot_url
+    raw = extra.get("channel_url")
+    if raw:
+        cleaned = _sanitize_header_url(raw)
+        if cleaned:
+            return cleaned
+    return _sanitize_header_url(default_bot_url)
 
 
 def _render_vless_landing_html(bot_username: str = "", is_active: bool = True) -> str:
@@ -263,7 +303,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             default_bot_url = f"https://t.me/{bot_username}"
             support_url = _resolve_support_url({}, default_bot_url)
             channel_url = _resolve_channel_url({}, default_bot_url)
-            if _is_browser_request(request):
+            if not raw_hwid and _is_browser_request(request):
                 html_body = _render_vless_landing_html(bot_username=bot_username, is_active=False)
                 landing_headers = {
                     **common_headers,
@@ -281,6 +321,8 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             b64_payload = base64.b64encode(notice_link.encode("utf-8")).decode("utf-8")
             b64_title = base64.b64encode(texts.VLESS_FEED_EXPIRED_TITLE.encode("utf-8")).decode("utf-8")
             expire_ts = int(user.subscription_end.timestamp()) if getattr(user, "subscription_end", None) else 0
+            sanitized_support = _sanitize_header_url(support_url)
+            sanitized_channel = _sanitize_header_url(channel_url)
             response_headers = {
                 **common_headers,
                 "Content-Type": "text/plain; charset=utf-8",
@@ -289,11 +331,13 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                 "Profile-Title": f"base64:{b64_title}",
                 "Hide-Url": "1",
                 "No-Limit-Enabled": "1",
-                "Support-Url": support_url,
-                "Announce-Url": channel_url,
-                "Profile-Web-Page-Url": channel_url,
-                "Channel-Url": channel_url,
             }
+            if sanitized_support:
+                response_headers["Support-Url"] = sanitized_support
+            if sanitized_channel:
+                response_headers["Announce-Url"] = sanitized_channel
+                response_headers["Profile-Web-Page-Url"] = sanitized_channel
+                response_headers["Channel-Url"] = sanitized_channel
             return web.Response(status=200, text=b64_payload, headers=response_headers)
 
         # Strict HWID validation for active/emergency subscription requests
@@ -367,11 +411,15 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                 "x-hwid-active": str(total_active_devices),
                 "Hide-Url": "1",
                 "No-Limit-Enabled": "1",
-                "Support-Url": support_url,
-                "Announce-Url": channel_url,
-                "Profile-Web-Page-Url": channel_url,
-                "Channel-Url": channel_url,
             })
+            sanitized_support = _sanitize_header_url(support_url)
+            sanitized_channel = _sanitize_header_url(channel_url)
+            if sanitized_support:
+                headers["Support-Url"] = sanitized_support
+            if sanitized_channel:
+                headers["Announce-Url"] = sanitized_channel
+                headers["Profile-Web-Page-Url"] = sanitized_channel
+                headers["Channel-Url"] = sanitized_channel
             return web.Response(status=200, text=b64_payload, headers=headers)
 
         await session.refresh(sub)
@@ -424,11 +472,8 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         if not isinstance(announce, str) or not announce.strip():
             announce = None
 
-        announce_url = await get_system_setting(session, "vless_announce_url", None)
-        if not isinstance(announce_url, str) or not announce_url.strip():
-            announce_url = None
-        elif any(c in announce_url for c in (" ", "\n", "\r", "\t")):
-            announce_url = None
+        raw_announce_url = await get_system_setting(session, "vless_announce_url", None)
+        clean_announce_url = _sanitize_header_url(raw_announce_url)
 
         first_extra = {}
         if servers:
@@ -468,10 +513,17 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             "x-hwid-active": "true",
             "Hide-Url": "1",
             "No-Limit-Enabled": "1",
-            "Support-Url": support_url,
-            "Profile-Web-Page-Url": channel_url,
-            "Channel-Url": channel_url,
         }
+        sanitized_support = _sanitize_header_url(support_url)
+        sanitized_channel = _sanitize_header_url(channel_url)
+        sanitized_announce = _sanitize_header_url(clean_announce_url, fallback=sanitized_channel)
+
+        if sanitized_support:
+            response_headers["Support-Url"] = sanitized_support
+        if sanitized_channel:
+            response_headers["Profile-Web-Page-Url"] = sanitized_channel
+            response_headers["Channel-Url"] = sanitized_channel
+
         if announce:
             formatted_ann = _safe_format_vless_template(
                 str(announce).strip(),
@@ -481,9 +533,9 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             )[:200]
             b64_ann = base64.b64encode(formatted_ann.encode("utf-8")).decode("ascii")
             response_headers["Announce"] = f"base64:{b64_ann}"
-        effective_announce_url = announce_url or channel_url
-        if effective_announce_url:
-            response_headers["Announce-Url"] = effective_announce_url
+
+        if sanitized_announce:
+            response_headers["Announce-Url"] = sanitized_announce
         return web.Response(status=200, text=b64_payload, headers=response_headers)
 
 
