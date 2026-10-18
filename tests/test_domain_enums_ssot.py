@@ -1,0 +1,257 @@
+import re
+from enum import StrEnum
+from pathlib import Path
+import unittest
+from sqlalchemy import CheckConstraint
+
+import config.constants
+import config.enums
+import config.tariffs
+from database import models
+
+
+def _extract_check_constraint_in(table, constraint_name: str) -> set[str]:
+    for constraint in table.constraints:
+        if isinstance(constraint, CheckConstraint) and constraint.name == constraint_name:
+            sql_text = str(constraint.sqltext)
+            match = re.search(r"\bIN\s*\(([^)]+)\)", sql_text, re.IGNORECASE)
+            if match:
+                raw_items = match.group(1).split(",")
+                return {item.strip().strip("'\"") for item in raw_items}
+    raise AssertionError(f"CheckConstraint '{constraint_name}' not found on table {table.name}")
+
+
+class DomainEnumsSSOTTests(unittest.TestCase):
+    """Verify that domain enums in config.enums strictly match model constants, DB constraints, and architecture rules."""
+
+    def test_enums_exported_in_constants(self):
+        """All Enums in config.enums must be re-exported in config.constants."""
+        for enum_name in config.enums.__all__:
+            self.assertTrue(
+                hasattr(config.constants, enum_name),
+                f"{enum_name} missing from config.constants",
+            )
+            self.assertIs(
+                getattr(config.constants, enum_name),
+                getattr(config.enums, enum_name),
+            )
+
+    def test_all_enums_declared_are_strenums_with_values(self):
+        """Every exported enum in config.enums must be a valid StrEnum with non-empty members."""
+        defined = {
+            name
+            for name, value in vars(config.enums).items()
+            if isinstance(value, type)
+            and issubclass(value, StrEnum)
+            and value is not StrEnum
+        }
+        self.assertEqual(
+            set(config.enums.__all__),
+            defined,
+            "config.enums.__all__ must list exactly the StrEnum classes declared in the module",
+        )
+        for enum_name in config.enums.__all__:
+            enum_cls = getattr(config.enums, enum_name)
+            self.assertTrue(
+                issubclass(enum_cls, (str, StrEnum)),
+                f"{enum_name} is not a StrEnum subclass",
+            )
+            members = list(enum_cls)
+            self.assertGreater(len(members), 0, f"{enum_name} has no members")
+            for member in members:
+                self.assertIsInstance(member.value, str)
+                self.assertTrue(len(member.value) > 0)
+                # StrEnum member must equal its string value
+                self.assertEqual(member, member.value)
+                self.assertEqual(enum_cls(member.value), member)
+
+    def test_model_tuples_derived_from_enums(self):
+        """The one live database.models tuple constant must match config.enums exactly."""
+        self.assertEqual(
+            models.API_OPERATION_TYPES,
+            tuple(s.value for s in config.enums.ApiOperationType),
+        )
+
+    def test_database_model_constraints_match_enums(self):
+        """Extract CheckConstraint IN (...) definitions on SQLAlchemy models and ensure 0 drift against Enums."""
+        # 1. VPNProfile provisioning_status
+        self.assertEqual(
+            _extract_check_constraint_in(models.VPNProfile.__table__, "ck_vpn_profiles_provisioning_status"),
+            set(config.enums.VPNProvisioningStatus),
+        )
+
+        # 2. Payment provider_status, fulfillment_status, reconciliation_status, checkout_status
+        self.assertEqual(
+            _extract_check_constraint_in(models.Payment.__table__, "ck_payments_provider_status"),
+            set(config.enums.PaymentProviderStatus),
+        )
+        self.assertEqual(
+            _extract_check_constraint_in(models.Payment.__table__, "ck_payments_fulfillment_status"),
+            set(config.enums.PaymentFulfillmentStatus),
+        )
+        self.assertEqual(
+            _extract_check_constraint_in(models.Payment.__table__, "ck_payments_reconciliation_status"),
+            set(config.enums.PaymentReconciliationStatus),
+        )
+        self.assertEqual(
+            _extract_check_constraint_in(models.Payment.__table__, "ck_payments_checkout_status"),
+            set(config.enums.PaymentCheckoutStatus),
+        )
+
+        # 4. AccountLedgerEntry entry_type
+        self.assertEqual(
+            _extract_check_constraint_in(models.AccountLedgerEntry.__table__, "ck_account_ledger_entry_type"),
+            set(config.enums.AccountLedgerEntryType),
+        )
+
+
+        # 5. WebhookInbox status
+        self.assertEqual(
+            _extract_check_constraint_in(models.WebhookInbox.__table__, "ck_webhook_inbox_status"),
+            set(config.enums.WebhookInboxStatus),
+        )
+
+
+
+        # 6. APIOperation operation_type & status
+        self.assertEqual(
+            _extract_check_constraint_in(models.APIOperation.__table__, "ck_api_operations_operation_type"),
+            set(config.enums.ApiOperationType),
+        )
+        self.assertEqual(
+            _extract_check_constraint_in(models.APIOperation.__table__, "ck_api_operations_status"),
+            set(config.enums.ApiOperationStatus),
+        )
+
+        # 7. Order status & service_type
+        self.assertEqual(
+            _extract_check_constraint_in(models.Order.__table__, "ck_orders_status"),
+            set(config.enums.OrderStatus),
+        )
+        self.assertEqual(
+            _extract_check_constraint_in(models.Order.__table__, "ck_orders_service_type"),
+            set(config.enums.OrderServiceType),
+        )
+
+    def test_exact_spelling_and_serialization_integrity(self):
+        """Ensure bit-for-bit spelling fidelity for legacy and provider DB compatibility."""
+        # YooKassa / DB uses 'canceled' (single 'l') for Payment Provider Status
+        self.assertEqual(config.enums.PaymentProviderStatus.CANCELED, "canceled")
+        self.assertEqual(config.enums.PaymentProviderStatus("canceled"), config.enums.PaymentProviderStatus.CANCELED)
+
+        # ApiOperation and PaymentQueue use 'cancelled' (double 'l')
+        self.assertEqual(config.enums.ApiOperationStatus.CANCELLED, "cancelled")
+
+    def test_default_tariffs_seeds_ssot_layering(self):
+        """DEFAULT_TARIFFS_SEEDS must live strictly in config.tariffs and NOT in bot.texts."""
+        from bot import texts
+
+        self.assertFalse(
+            hasattr(texts, "DEFAULT_TARIFFS_SEEDS"),
+            "DEFAULT_TARIFFS_SEEDS must not be in bot.texts (Level 0 domain seed SSOT)",
+        )
+        self.assertTrue(
+            hasattr(config.tariffs, "DEFAULT_TARIFFS_SEEDS"),
+            "DEFAULT_TARIFFS_SEEDS must be in config.tariffs",
+        )
+        seeds = config.tariffs.DEFAULT_TARIFFS_SEEDS
+        self.assertIsInstance(seeds, list)
+        self.assertGreater(len(seeds), 0)
+        for seed in seeds:
+            self.assertIn("name", seed)
+            self.assertIn("duration_days", seed)
+            self.assertIn("device_limit", seed)
+            self.assertIn("price_rub", seed)
+            self.assertIn("sort_order", seed)
+
+    def test_tariff_model_has_duration_days(self):
+        """Tariff model stores duration_days directly."""
+        tariff = models.Tariff(
+            id=1,
+            duration_days=30,
+            device_limit=2,
+            price_rub=300,
+        )
+        self.assertEqual(tariff.duration_days, 30)
+
+    def test_support_urls_in_texts_ssot(self):
+        """Amnezia support URLs are correctly exposed via bot.texts."""
+        from bot import texts
+
+        self.assertTrue(texts.AMNEZIA_DOWNLOAD_MIRROR.startswith("https://"))
+        self.assertTrue(texts.AMNEZIA_GITHUB_LATEST.startswith("https://"))
+        self.assertTrue(texts.AMNEZIA_OFFICIAL_SITE.startswith("https://"))
+        self.assertTrue(texts.AMNEZIA_DOCS.startswith("https://"))
+        self.assertTrue(texts.AMNEZIA_SPLIT_TUNNELING.startswith("https://"))
+        self.assertTrue(texts.AMNEZIA_IOS_RU.startswith("https://"))
+        self.assertTrue(texts.AMNEZIA_WIN_INSTALL.startswith("https://"))
+        self.assertTrue(texts.AMNEZIA_WIN_UPDATE.startswith("https://"))
+
+    def test_sql_enum_in_identifier_validation(self):
+        """sql_enum_in rejects non-identifier column names."""
+        from database.models import sql_enum_in
+
+        # Valid identifier
+        sql = sql_enum_in("status", config.enums.PaymentProviderStatus)
+        self.assertTrue(sql.startswith("status IN ("))
+
+        # Invalid identifiers
+        with self.assertRaises(ValueError):
+            sql_enum_in("status; DROP TABLE users; --", config.enums.PaymentProviderStatus)
+        with self.assertRaises(ValueError):
+            sql_enum_in("status with spaces", config.enums.PaymentProviderStatus)
+
+    def test_purchases_repo_audit_mapping_ssot(self):
+        """All purchase audit actions map to non-empty Russian labels without empty fallbacks."""
+        from database.repositories.purchases_repo import AUDIT_PURCHASE_ACTIONS, get_audit_op_info
+
+        for action in AUDIT_PURCHASE_ACTIONS:
+            op_type, title = get_audit_op_info(action)
+            self.assertIn(op_type, {"grant", "extend", "change", "reduce"})
+            self.assertTrue(len(title) > 0, f"Empty title for action {action}")
+
+        # Unknown action fallback
+        op_type, title = get_audit_op_info("SOME_UNKNOWN_ACTION")
+        self.assertEqual(op_type, "grant")
+        self.assertEqual(title, "SOME_UNKNOWN_ACTION")
+
+    def test_no_active_code_references_to_legacy_incy_or_bridge(self):
+        """Active codebase must contain zero operational references to deprecated AMNEZIA_BRIDGE / legacy bridges."""
+        root = Path(__file__).parents[1]
+        active_dirs = [
+            root / "bot",
+            root / "database",
+            root / "services",
+            root / "utils",
+            root / "scripts",
+        ]
+
+        allowed_files = {
+            (root / "config" / "constants.py").resolve(),
+        }
+
+        for d in active_dirs:
+            for py_file in d.rglob("*.py"):
+                if py_file.resolve() in allowed_files:
+                    continue
+                content = py_file.read_text(encoding="utf-8")
+                self.assertNotIn(
+                    "AMNEZIA_BRIDGE",
+                    content,
+                    f"Found legacy AMNEZIA_BRIDGE reference in {py_file}",
+                )
+                self.assertNotIn(
+                    "INCY_BRIDGE",
+                    content,
+                    f"Found legacy INCY_BRIDGE reference in {py_file}",
+                )
+                self.assertNotIn(
+                    "AMNEZIA_BRIDGE_HMAC_SECRET",
+                    content,
+                    f"Found legacy AMNEZIA_BRIDGE_HMAC_SECRET reference in {py_file}",
+                )
+
+
+
+if __name__ == "__main__":
+    unittest.main()

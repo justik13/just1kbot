@@ -183,7 +183,28 @@ class TestRenderHubEffects(unittest.IsolatedAsyncioTestCase):
             second_call = bot.send_message.call_args_list[1]
             self.assertIsNone(second_call.kwargs.get('parse_mode'))
             self.assertEqual(second_call.kwargs.get('text'), 'Instruction ')
+    async def test_copy_text_button_length_guard(self):
+        from bot.keyboards.user import get_referral_keyboard
 
+        # Standard referral link <= 256 chars has CopyTextButton
+        short_link = "https://t.me/just1kbot?start=ref123"
+        kb = get_referral_keyboard(short_link)
+        has_copy = any(
+            btn.copy_text is not None
+            for row in kb.inline_keyboard
+            for btn in row
+        )
+        self.assertTrue(has_copy)
+
+        # Oversized referral link > 256 chars omits CopyTextButton to avoid TelegramBadRequest
+        long_link = "https://t.me/just1kbot?start=" + "x" * 300
+        kb_long = get_referral_keyboard(long_link)
+        has_copy_long = any(
+            btn.copy_text is not None
+            for row in kb_long.inline_keyboard
+            for btn in row
+        )
+        self.assertFalse(has_copy_long)
 
 if __name__ == '__main__':
     unittest.main()
