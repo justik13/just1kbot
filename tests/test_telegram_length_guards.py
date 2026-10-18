@@ -277,16 +277,14 @@ class TestTelegramBotApi103KeyboardAudit(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(btn.copy_text)
         self.assertEqual(btn.callback_data, "alert:copy_too_long")
 
-    def test_sanitize_reply_markup_truncates_oversized_callback_data(self):
+    def test_sanitize_reply_markup_neutralizes_oversized_callback_data_to_ignore(self):
         oversized_cb = "action:" + "я" * 50  # 7 + 100 = 107 bytes
         kb = InlineKeyboardMarkup(
             inline_keyboard=[[InlineKeyboardButton(text="Long", callback_data=oversized_cb)]]
         )
         res = sanitize_reply_markup(kb)
         btn = res.inline_keyboard[0][0]
-        cb_bytes = btn.callback_data.encode("utf-8")
-        self.assertLessEqual(len(cb_bytes), 64)
-        self.assertTrue(btn.callback_data.startswith("action:"))
+        self.assertEqual(btn.callback_data, "ignore")
 
     def test_sanitize_reply_markup_splits_rows_exceeding_8_buttons(self):
         buttons = [InlineKeyboardButton(text=f"B{i}", callback_data=f"b{i}") for i in range(12)]

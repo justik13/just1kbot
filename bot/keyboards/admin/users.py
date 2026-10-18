@@ -145,11 +145,17 @@ def get_admin_awg_subscription_keyboard(
             text=texts.ADMIN_BTN_REDUCE_SUBSCRIPTION,
             callback_data=f"admin_sub_reduce:{telegram_id}",
         )
-        if vless_sub_url and 1 <= len(vless_sub_url) <= 256:
-            builder.button(
-                text=texts.ADMIN_BTN_VLESS_COPY_LINK,
-                copy_text=CopyTextButton(text=vless_sub_url),
-            )
+        if vless_sub_url:
+            if 1 <= len(vless_sub_url) <= 256:
+                builder.button(
+                    text=texts.ADMIN_BTN_VLESS_COPY_LINK,
+                    copy_text=CopyTextButton(text=vless_sub_url),
+                )
+            else:
+                builder.button(
+                    text=texts.ADMIN_BTN_VLESS_COPY_LINK,
+                    callback_data="alert:copy_too_long",
+                )
         builder.button(
             text=texts.ADMIN_BTN_USER_DEVICES,
             callback_data=f"admin_user_devices:{telegram_id}",
@@ -555,11 +561,17 @@ def get_admin_user_devices_keyboard(
             ),
         )
 
-    if vless_sub_url and 1 <= len(vless_sub_url) <= 256:
-        builder.button(
-            text=texts.ADMIN_BTN_VLESS_COPY_LINK,
-            copy_text=CopyTextButton(text=vless_sub_url),
-        )
+    if vless_sub_url:
+        if 1 <= len(vless_sub_url) <= 256:
+            builder.button(
+                text=texts.ADMIN_BTN_VLESS_COPY_LINK,
+                copy_text=CopyTextButton(text=vless_sub_url),
+            )
+        else:
+            builder.button(
+                text=texts.ADMIN_BTN_VLESS_COPY_LINK,
+                callback_data="alert:copy_too_long",
+            )
 
     if has_vless_hwids:
         builder.button(

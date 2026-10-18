@@ -443,13 +443,12 @@ def sanitize_reply_markup(reply_markup: InlineKeyboardMarkup | None) -> InlineKe
                 cb_str = str(btn.callback_data)
                 cb_bytes = cb_str.encode("utf-8")
                 if len(cb_bytes) > 64:
-                    truncated = cb_bytes[:64].decode("utf-8", "ignore") or "ignore"
-                    updates["callback_data"] = truncated
-                    logger.warning(
-                        "Sanitized oversized callback_data in button '%s' (%s bytes -> %s bytes)",
+                    updates["callback_data"] = "ignore"
+                    logger.critical(
+                        "BUTTON_CALLBACK_OVERFLOW: callback_data in button '%s' exceeds 64 bytes (%s bytes: '%s'). Neutralized to 'ignore' to prevent route corruption.",
                         btn_text,
                         len(cb_bytes),
-                        len(truncated.encode("utf-8")),
+                        cb_str[:32] + "...",
                     )
 
             if updates:
@@ -459,18 +458,13 @@ def sanitize_reply_markup(reply_markup: InlineKeyboardMarkup | None) -> InlineKe
             else:
                 sanitized_row.append(btn)
 
-        # 4. Check row width: Telegram Bot API max 8 buttons per row
+        # 4. Check row width: Partition rows exceeding 8 buttons to maintain clean Telegram UI rendering
         if len(sanitized_row) > 8:
             has_changes = True
             for i in range(0, len(sanitized_row), 8):
                 sanitized_rows.append(sanitized_row[i : i + 8])
         else:
             sanitized_rows.append(sanitized_row)
-
-    # 5. Check max rows: Telegram Bot API max 100 rows
-    if len(sanitized_rows) > 100:
-        has_changes = True
-        sanitized_rows = sanitized_rows[:100]
 
     if not has_changes:
         return reply_markup
