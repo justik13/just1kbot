@@ -428,3 +428,11 @@ async def back_to_main_menu(
 @router.callback_query(F.data == "ignore")
 async def ignore_callback(callback: CallbackQuery) -> None:
     await callback.answer()
+
+
+@router.callback_query(F.data == "alert:copy_too_long")
+async def alert_copy_too_long_callback(callback: CallbackQuery) -> None:
+    await callback.answer(
+        texts.ALERT_COPY_TEXT_TOO_LONG,
+        show_alert=True,
+    )

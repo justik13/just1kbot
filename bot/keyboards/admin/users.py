@@ -146,10 +146,16 @@ def get_admin_awg_subscription_keyboard(
             callback_data=f"admin_sub_reduce:{telegram_id}",
         )
         if vless_sub_url:
-            builder.button(
-                text=texts.ADMIN_BTN_VLESS_COPY_LINK,
-                copy_text=CopyTextButton(text=vless_sub_url),
-            )
+            if 1 <= len(vless_sub_url) <= 256:
+                builder.button(
+                    text=texts.ADMIN_BTN_VLESS_COPY_LINK,
+                    copy_text=CopyTextButton(text=vless_sub_url),
+                )
+            else:
+                builder.button(
+                    text=texts.ADMIN_BTN_VLESS_COPY_LINK,
+                    callback_data="alert:copy_too_long",
+                )
         builder.button(
             text=texts.ADMIN_BTN_USER_DEVICES,
             callback_data=f"admin_user_devices:{telegram_id}",
@@ -182,7 +188,7 @@ def get_admin_wi_subscription_keyboard(
     builder = InlineKeyboardBuilder()
 
     if has_wi_sub:
-        if sub_url:
+        if sub_url and 1 <= len(sub_url) <= 256:
             builder.button(
                 text=texts.ADMIN_WI_BTN_COPY_LINK,
                 copy_text=CopyTextButton(text=sub_url),
@@ -283,7 +289,7 @@ def get_admin_wi_devices_keyboard(
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
-    if sub_url:
+    if sub_url and 1 <= len(sub_url) <= 256:
         builder.button(
             text=texts.ADMIN_WI_BTN_COPY_LINK,
             copy_text=CopyTextButton(text=sub_url),
@@ -556,10 +562,16 @@ def get_admin_user_devices_keyboard(
         )
 
     if vless_sub_url:
-        builder.button(
-            text=texts.ADMIN_BTN_VLESS_COPY_LINK,
-            copy_text=CopyTextButton(text=vless_sub_url),
-        )
+        if 1 <= len(vless_sub_url) <= 256:
+            builder.button(
+                text=texts.ADMIN_BTN_VLESS_COPY_LINK,
+                copy_text=CopyTextButton(text=vless_sub_url),
+            )
+        else:
+            builder.button(
+                text=texts.ADMIN_BTN_VLESS_COPY_LINK,
+                callback_data="alert:copy_too_long",
+            )
 
     if has_vless_hwids:
         builder.button(

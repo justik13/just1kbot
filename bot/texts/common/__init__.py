@@ -91,6 +91,7 @@ from bot.texts.common.buttons import (
 )
 
 from bot.texts.common.errors import (
+    ALERT_COPY_TEXT_TOO_LONG,
     ERROR_ACCESS_DENIED,
     ERROR_ACTION_IN_PROGRESS,
     ERROR_ADMIN_BAN_FORBIDDEN,
@@ -169,6 +170,7 @@ from bot.texts.common.status import (
 )
 
 __all__ = [
+    "ALERT_COPY_TEXT_TOO_LONG",
     "BTN_ADMIN",
     "BTN_ADMIN_MENU",
     "BTN_ADMIN_SERVER_PING",

@@ -1,6 +1,11 @@
 """Domain texts for common/errors.py."""
 from __future__ import annotations
 
+ALERT_COPY_TEXT_TOO_LONG = (
+    "Текст слишком длинный для кнопки копирования. "
+    "Нажмите на текст в сообщении выше — он скопируется в один тап."
+)
+
 ERROR_ACCESS_DENIED = "⛔️ Нет доступа"
 
 ERROR_ACTION_IN_PROGRESS = "⏳ Выполняется предыдущее действие..."

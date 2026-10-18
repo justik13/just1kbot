@@ -30,11 +30,17 @@ def get_referral_keyboard(
     builder = InlineKeyboardBuilder()
 
     has_copy = False
-    if referral_link and 1 <= len(referral_link) <= 256:
-        builder.button(
-            text=texts.BUTTON_COPY_REFERRAL,
-            copy_text=CopyTextButton(text=referral_link),
-        )
+    if referral_link:
+        if 1 <= len(referral_link) <= 256:
+            builder.button(
+                text=texts.BUTTON_COPY_REFERRAL,
+                copy_text=CopyTextButton(text=referral_link),
+            )
+        else:
+            builder.button(
+                text=texts.BUTTON_COPY_REFERRAL,
+                callback_data="alert:copy_too_long",
+            )
         has_copy = True
     share_text = texts.REFERRAL_SHARE_TEXT
     share_url = f"https://t.me/share/url?url={quote(referral_link, safe='')}&text={quote(share_text, safe='')}"
