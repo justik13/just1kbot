@@ -392,7 +392,8 @@ def sanitize_reply_markup(reply_markup: InlineKeyboardMarkup | None) -> InlineKe
     Guarantees:
     - copy_text: Telegram Bot API limits text to 1..256 characters. If text length is outside [1, 256]
       (e.g., raw AWG configs/keys of 800+ chars, empty strings), copy_text is dropped and safely replaced
-      with callback_data="ignore" to prevent TelegramBadRequest: BUTTON_COPY_TEXT_INVALID.
+      with callback_data="alert:copy_too_long" to inform the user explicitly via popup alert instead of
+      failing silently or causing TelegramBadRequest: BUTTON_COPY_TEXT_INVALID.
     - callback_data: Telegram Bot API limits callback_data to 1..64 bytes (UTF-8). If exceeded, truncated
       safely to <= 64 bytes to prevent TelegramBadRequest: BUTTON_DATA_INVALID.
     - text: button label must not be empty (defaults to '—' if whitespace/empty).
@@ -430,9 +431,9 @@ def sanitize_reply_markup(reply_markup: InlineKeyboardMarkup | None) -> InlineKe
                         or btn.callback_game
                         or btn.pay
                     ):
-                        updates["callback_data"] = "ignore"
-                    logger.warning(
-                        "Sanitized invalid copy_text in button '%s' (len=%s, must be 1..256)",
+                        updates["callback_data"] = "alert:copy_too_long"
+                    logger.error(
+                        "BUTTON_COPY_TEXT_OVERFLOW: Sanitized invalid copy_text in button '%s' (len=%s, must be 1..256)",
                         btn_text,
                         len(cp_text),
                     )

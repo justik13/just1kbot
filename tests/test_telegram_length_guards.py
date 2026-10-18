@@ -266,7 +266,7 @@ class TestTelegramBotApi103KeyboardAudit(unittest.IsolatedAsyncioTestCase):
         res = sanitize_reply_markup(kb)
         btn = res.inline_keyboard[0][0]
         self.assertIsNone(btn.copy_text)
-        self.assertEqual(btn.callback_data, "ignore")
+        self.assertEqual(btn.callback_data, "alert:copy_too_long")
 
     def test_sanitize_reply_markup_neutralizes_empty_copy_text(self):
         kb = InlineKeyboardMarkup(
@@ -275,7 +275,7 @@ class TestTelegramBotApi103KeyboardAudit(unittest.IsolatedAsyncioTestCase):
         res = sanitize_reply_markup(kb)
         btn = res.inline_keyboard[0][0]
         self.assertIsNone(btn.copy_text)
-        self.assertEqual(btn.callback_data, "ignore")
+        self.assertEqual(btn.callback_data, "alert:copy_too_long")
 
     def test_sanitize_reply_markup_truncates_oversized_callback_data(self):
         oversized_cb = "action:" + "я" * 50  # 7 + 100 = 107 bytes
@@ -318,7 +318,21 @@ class TestTelegramBotApi103KeyboardAudit(unittest.IsolatedAsyncioTestCase):
 
         sent_kb = bot.edit_message_text.call_args[1]["reply_markup"]
         self.assertIsNone(sent_kb.inline_keyboard[0][0].copy_text)
-        self.assertEqual(sent_kb.inline_keyboard[0][0].callback_data, "ignore")
+        self.assertEqual(sent_kb.inline_keyboard[0][0].callback_data, "alert:copy_too_long")
+
+    async def test_alert_copy_too_long_callback_shows_alert(self):
+        from bot import texts
+        from bot.handlers.start import alert_copy_too_long_callback
+
+        callback = MagicMock()
+        callback.answer = AsyncMock()
+
+        await alert_copy_too_long_callback(callback)
+
+        callback.answer.assert_awaited_once_with(
+            texts.ALERT_COPY_TEXT_TOO_LONG,
+            show_alert=True,
+        )
 
     def test_universal_keyboards_audit_bot_api_10_3(self):
         """Universal audit of all keyboards across bot against Telegram Bot API 10.3 constraints."""
