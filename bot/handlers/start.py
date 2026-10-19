@@ -106,7 +106,11 @@ async def _ensure_bot_unblocked(
 
 
 async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[str, InlineKeyboardMarkup]:
-    from database.repositories.profiles_repo import get_user_profiles
+    from database.repositories.profiles_repo import (
+        PROFILE_QUOTA_EXCLUDED_STATUSES,
+        get_user_profiles,
+    )
+    from database.repositories import vless_subscription_repo
     from bot.formatters import format_days_left, format_subscription_date
 
     is_active = await SubscriptionService.check_access(session, db_user.telegram_id)
@@ -140,8 +144,20 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
     status_str = texts.STATUS_SUBSCRIPTION_ACTIVE if is_active else texts.STATUS_SUBSCRIPTION_INACTIVE
     valid_until_str = format_subscription_date(db_user.subscription_end) if db_user.subscription_end else texts.PLACEHOLDER_DASH
     days_left_str = format_days_left(db_user.subscription_end) if db_user.subscription_end else texts.ZERO_DAYS_LABEL
-    devices_count = len(profiles)
-    device_limit = db_user.device_limit or 0
+
+    quota_profiles_count = len([
+        p for p in profiles
+        if getattr(p, "provisioning_status", "") not in PROFILE_QUOTA_EXCLUDED_STATUSES
+    ])
+    try:
+        vless_hwid_count = await vless_subscription_repo.get_active_hwid_count(session, db_user.id)
+        if not isinstance(vless_hwid_count, int):
+            vless_hwid_count = 0
+    except Exception:
+        vless_hwid_count = 0
+
+    devices_count = quota_profiles_count + vless_hwid_count
+    device_limit = await SubscriptionService.get_effective_device_limit(session, db_user)
 
     white_internet_line = ""
     if is_wi_active and wi_sub:

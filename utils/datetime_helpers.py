@@ -1,7 +1,10 @@
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-MSK_TZ = ZoneInfo("Europe/Moscow")
+try:
+    MSK_TZ = ZoneInfo("Europe/Moscow")
+except (ZoneInfoNotFoundError, KeyError):
+    MSK_TZ = timezone(timedelta(hours=3), name="MSK")
 
 
 def now_utc() -> datetime:
