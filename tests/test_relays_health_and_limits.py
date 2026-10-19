@@ -432,7 +432,7 @@ class TestRelaysHealthAndNodeLimits(unittest.IsolatedAsyncioTestCase):
 
         kb = get_white_internet_overview_keyboard(sub, bot_domain="bot.example.com")
         rows = kb.inline_keyboard
-        self.assertEqual(len(rows), 5, f"Expected 5 rows for active sub with topup & reset, got {len(rows)}")
+        self.assertEqual(len(rows), 6, f"Expected 6 rows for active sub with topup & reset, got {len(rows)}")
         # Row 1: Connect INCY (1)
         self.assertEqual(len(rows[0]), 1)
         self.assertTrue(rows[0][0].url.startswith("https://bot.example.com/sub/wl/"))
@@ -446,10 +446,12 @@ class TestRelaysHealthAndNodeLimits(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(rows[3]), 2)
         self.assertEqual(rows[3][0].callback_data, "wl_topup_menu")
         self.assertEqual(rows[3][1].callback_data, "wl_add_device_menu")
-        # Row 5: Reset Devices + Back (2 buttons in row)
-        self.assertEqual(len(rows[4]), 2)
+        # Row 5: Reset Devices (isolated in its own row)
+        self.assertEqual(len(rows[4]), 1)
         self.assertEqual(rows[4][0].callback_data, "wl_reset_devices")
-        self.assertEqual(rows[4][1].callback_data, "back_to_main_menu")
+        # Row 6: Back (isolated in its own row)
+        self.assertEqual(len(rows[5]), 1)
+        self.assertEqual(rows[5][0].callback_data, "back_to_main_menu")
 
     async def test_show_server_relays_config_error_status_renders_api_error(self):
         server = Server(
