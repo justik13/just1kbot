@@ -1,27 +1,20 @@
 # Release Notes — just1kbot v2.5.0
 
-## Обзор релиза / Overview
-Официальный релиз контроллера Telegram-бота **just1kbot** версии **v2.5.0** в рамках комплексной стабилизации платформы just1k.
+## Что изменилось
 
-## Изменения в версии v2.5.0 / Changelog
+### Интерфейс и уведомления
+- Добавили кнопки закрытия (`dismiss_notification`) в клавиатуры реферальных бонусов, онбординга и предупреждений о трафике (`bot/keyboards/notifications.py`).
+- Добавили кнопку закрытия системного алерта (`admin_dismiss_alert:general`) при падении фоновых воркеров (`services/workers/__init__.py`).
+- Исправили счетчик устройств на Главном экране (`bot/handlers/start.py`): теперь он суммирует AWG-профили и активные привязки VLESS HWID, а не показывает ноль при подключении по VLESS.
+- Переименовали константу кнопки удаления устройства в `BTN_CONFIRM_DELETE = "🗑 Да, удалить"` (`bot/texts/connection/devices.py`), старый алиас сохранили для совместимости.
 
-### Keyboards & UX Polish
-- **Закрываемые уведомления (Чистый чат):**
-  - В `bot/keyboards/notifications.py` добавлены кнопки закрытия (`BTN_DISMISS_NOTIFICATION` / `dismiss_notification`) в клавиатуры `get_referral_bonus_keyboard`, `get_referral_onboarding_keyboard` и `get_traffic_alert_keyboard`.
-  - В `services/workers/__init__.py` метод `_send_alert` при аварийном падении воркеров оснащен инлайн-клавиатурой с кнопкой закрытия алерта для администраторов (`admin_dismiss_alert:general`).
-- **Рефакторинг констант устройств:**
-  - В `bot/texts/connection/devices.py` константа подтверждения удаления переименована в семантически корректное `BTN_CONFIRM_DELETE = "🗑 Да, удалить"` с сохранением легаси-алиаса `DEVICE_STATUS_CREATING_LABEL` для полной обратной совместимости.
-  - В `bot/keyboards/device.py` функция `get_device_delete_confirm_keyboard` переведена на использование `BTN_CONFIRM_DELETE`.
+### Среда и зависимости
+- Добавили `pythonpath = ["."]` в `pyproject.toml`, чтобы `pytest` находил модули бота без ручной настройки путей на Windows.
+- Добавили fallback таймзоны на `MSK` (`UTC+3`) в `utils/datetime_helpers.py`, если в системе нет `tzdata`.
+- Обновили пин `certifi==2026.10.18` с точными хэшами в `requirements.lock`, устранив падение проверки зависимостей на CI.
+- Подняли версию бота до `2.5.0` в `pyproject.toml`.
 
-### Pytest & Build Configuration
-- В `pyproject.toml` в секцию `[tool.pytest.ini_options]` добавлен параметр `pythonpath = ["."]`, что гарантирует предсказуемое обнаружение модулей при запуске `pytest` на Windows и Linux.
-
-### Синхронизация версий
-- Версия пакета в `pyproject.toml` обновлена до `2.5.0`.
-
----
-
-## Архитектурные инварианты
-- **Биллинг и фин. машина:** Обработка вебхуков ЮKassa с двухуровневой фильтрацией IP, SHA-256 хешированием в `webhook_inbox`, строчными блокировками заказов и динамическим расчетом баланса по append-only журналу `account_ledger_entries`.
-- **Протоколы:** AmneziaWG (AWG 2.0–3.1, ChaCha20 $S1..S4 \ge 12$, `vpn://` URI), Direct VLESS TLS (`/sub/access/{token}`, квотирование HWID), White Internet (2-Hop каскад Origin/Relay, Bodiless GET Uplink, Nginx Zero Buffering, Epoch rotation).
-- **Юридический комплаенс:** 100% отсутствие запрещенных стоп-слов во внешнем контуре (`test_user_text_audit.py`).
+## Инварианты
+- Биллинг: транзакционные блокировки `pg_advisory_xact_lock` и строчные блокировки `SELECT ... FOR UPDATE`, баланс считается строго по журналу `account_ledger_entries`.
+- Протоколы: AmneziaWG (ChaCha20 Nonce $\ge 12$ байт, подсеть `/22`), VLESS TLS с учетом HWID, Белый Интернет через XHTTP с каскадом Origin/Relay.
+- Внешний контур: стоп-слова отсутствуют, тесты `test_user_text_audit.py` проходят без замечаний.
