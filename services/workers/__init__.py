@@ -7,6 +7,8 @@ from dataclasses import asdict, dataclass
 
 import aiohttp
 from aiogram import Bot
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+from bot.texts.common.buttons import BTN_DISMISS_ALERT
 from bot.texts.runtime.alerts import (
     ALERT_TITLE_CRITICAL_STOP,
     ALERT_TITLE_WORKER_FAILED,
@@ -154,10 +156,23 @@ async def _send_alert(bot: Bot, title: str, worker: str,
         failure_count=failure_count,
         error_type=error_type,
     )
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=BTN_DISMISS_ALERT,
+        callback_data="admin_dismiss_alert:general",
+    )
+    builder.adjust(1)
+    reply_markup = builder.as_markup()
     try:
         for admin_id in get_settings().ADMIN_IDS:
             try:
-                await safe_send_message(bot, admin_id, message, parse_mode="HTML")
+                await safe_send_message(
+                    bot,
+                    admin_id,
+                    message,
+                    reply_markup=reply_markup,
+                    parse_mode="HTML",
+                )
             except Exception:
                 logger.exception("Failed to send worker alert to admin")
     except Exception:

@@ -2,6 +2,7 @@ from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot import texts
+from bot.texts.connection.devices import BTN_CONFIRM_DELETE
 
 
 def get_device_keyboard(
@@ -92,7 +93,7 @@ def get_device_delete_confirm_keyboard(
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text=texts.DEVICE_STATUS_CREATING_LABEL,
+        text=BTN_CONFIRM_DELETE,
         callback_data=f"confirm_delete_device:{profile_id}",
         style="danger",
     )

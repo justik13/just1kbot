@@ -1,6 +1,6 @@
 [project]
 name = "just1kbot"
-version = "2.4.1"
+version = "2.5.0"
 description = "Telegram bot for selling VPN access based on AmneziaWG 2.0"
 requires-python = ">=3.12"
 
@@ -25,4 +25,5 @@ ignore = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 norecursedirs = [".git", ".pytest_cache", "scripts"]

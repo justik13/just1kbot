@@ -49,6 +49,7 @@ def get_devices_deleted_keyboard() -> InlineKeyboardMarkup:
 def get_referral_bonus_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text=BTN_MY_BALANCE, callback_data="menu_balance")
+    builder.button(text=BTN_DISMISS_NOTIFICATION, callback_data="dismiss_notification")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -56,6 +57,7 @@ def get_referral_bonus_keyboard() -> InlineKeyboardMarkup:
 def get_referral_onboarding_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text=BTN_INVITE_FRIEND, callback_data="menu_referral")
+    builder.button(text=BTN_DISMISS_NOTIFICATION, callback_data="dismiss_notification")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -92,6 +94,10 @@ def get_traffic_alert_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
     builder.button(
         text=BTN_OPEN_USER_CARD,
         callback_data=f"admin_user_card:{telegram_id}",
+    )
+    builder.button(
+        text=BTN_DISMISS_NOTIFICATION,
+        callback_data="dismiss_notification",
     )
     builder.adjust(1)
     return builder.as_markup()
