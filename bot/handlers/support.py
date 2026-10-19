@@ -145,7 +145,11 @@ async def show_help_incy(callback: CallbackQuery):
         text=texts.BTN_BACK,
         callback_data=back_cb,
     )
-    builder.adjust(1, 1)
+    builder.button(
+        text=texts.BTN_MAIN_MENU_NAV,
+        callback_data="back_to_main_menu",
+    )
+    builder.adjust(1, 2)
 
     await render_hub(
         callback.bot,
@@ -180,7 +184,11 @@ async def show_help_download(callback: CallbackQuery):
         text=texts.BTN_BACK,
         callback_data=back_cb,
     )
-    builder.adjust(1, 1, 1, 1)
+    builder.button(
+        text=texts.BTN_MAIN_MENU_NAV,
+        callback_data="back_to_main_menu",
+    )
+    builder.adjust(1, 1, 1, 2)
 
     await render_hub(
         callback.bot,
@@ -207,7 +215,11 @@ async def show_help_ios(callback: CallbackQuery):
         text=texts.BTN_BACK,
         callback_data=back_cb,
     )
-    builder.adjust(1, 1)
+    builder.button(
+        text=texts.BTN_MAIN_MENU_NAV,
+        callback_data="back_to_main_menu",
+    )
+    builder.adjust(1, 2)
 
     await render_hub(
         callback.bot,
@@ -238,7 +250,11 @@ async def show_help_windows(callback: CallbackQuery):
         text=texts.BTN_BACK,
         callback_data=back_cb,
     )
-    builder.adjust(1, 1, 1)
+    builder.button(
+        text=texts.BTN_MAIN_MENU_NAV,
+        callback_data="back_to_main_menu",
+    )
+    builder.adjust(1, 1, 2)
 
     await render_hub(
         callback.bot,
@@ -265,7 +281,11 @@ async def show_help_split(callback: CallbackQuery):
         text=texts.BTN_BACK,
         callback_data=back_cb,
     )
-    builder.adjust(1, 1)
+    builder.button(
+        text=texts.BTN_MAIN_MENU_NAV,
+        callback_data="back_to_main_menu",
+    )
+    builder.adjust(1, 2)
 
     await render_hub(
         callback.bot,

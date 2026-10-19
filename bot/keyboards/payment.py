@@ -334,7 +334,7 @@ def get_order_invoice_keyboard(
     payment_url: str,
     order_id: str,
     price: int,
-    back_callback: str,
+    back_callback: str | None = None,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(

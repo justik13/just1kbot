@@ -34,7 +34,7 @@ def get_admin_menu(
     )
 
     builder.button(
-        text=texts.BTN_V_GLAVNOE_MENYU_BOTA,
+        text=texts.BTN_MAIN_MENU_NAV,
         callback_data="back_to_main_menu",
     )
 
