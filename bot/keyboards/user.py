@@ -69,8 +69,17 @@ def get_referral_keyboard(
     return builder.as_markup()
 
 
-def get_referral_leaderboard_keyboard() -> InlineKeyboardMarkup:
+def get_referral_leaderboard_keyboard(is_anonymous: bool = True) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+    toggle_text = (
+        texts.BTN_LEADERBOARD_ANONYMOUS_ON
+        if is_anonymous
+        else texts.BTN_LEADERBOARD_ANONYMOUS_OFF
+    )
+    builder.button(
+        text=toggle_text,
+        callback_data="referral_toggle_anonymity",
+    )
     builder.button(
         text=texts.BTN_BACK,
         callback_data="referral",
@@ -79,7 +88,7 @@ def get_referral_leaderboard_keyboard() -> InlineKeyboardMarkup:
         text=texts.BTN_MAIN_MENU_NAV,
         callback_data="back_to_main_menu",
     )
-    builder.adjust(1, 1)
+    builder.adjust(1, 1, 1)
     return builder.as_markup()
 
 

@@ -21,6 +21,8 @@ from database.repositories.users_repo import (
     get_user_referral_rank,
     get_user_referrals_count,
     get_user_referrals_paginated,
+    get_users_by_telegram_ids,
+    update_user,
 )
 from services.referral_bonus import get_referral_bonus_balance, get_referral_tier
 from utils.formatters import format_datetime
@@ -192,23 +194,11 @@ async def show_referral(
     )
 
 
-@router.callback_query(F.data == "referral_leaderboard")
-async def show_referral_leaderboard(
+async def _render_referral_leaderboard(
     callback: CallbackQuery,
-    state: FSMContext,
     session: AsyncSession,
-    db_user: User | None = None,
+    db_user: User,
 ) -> None:
-    await callback.answer(show_alert=False)
-    await state.clear()
-
-    if not db_user:
-        try:
-            await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
-        except Exception:
-            pass
-        return
-
     top_leaders = await get_referral_leaderboard(session, limit=5)
     user_rank, user_active_count = await get_user_referral_rank(
         session, db_user.telegram_id
@@ -219,15 +209,29 @@ async def show_referral_leaderboard(
     if not top_leaders:
         rendered = texts.REFERRAL_LEADERBOARD_TITLE + "\n" + texts.REFERRAL_LEADERBOARD_EMPTY
     else:
+        leader_ids = [leader_tg_id for leader_tg_id, _ in top_leaders]
+        leader_users = await get_users_by_telegram_ids(session, leader_ids)
+
         rendered = texts.REFERRAL_LEADERBOARD_TITLE + "\n"
         for pos, (leader_tg_id, count) in enumerate(top_leaders, start=1):
             medal = texts.REFERRAL_LEADERBOARD_MEDALS.get(pos, "")
             is_me = leader_tg_id == db_user.telegram_id
-            masked = mask_telegram_id(leader_tg_id)
+            leader_user = leader_users.get(leader_tg_id)
+
+            if leader_user and getattr(leader_user, "show_in_leaderboard", False):
+                if leader_user.username:
+                    display_name = f"@{safe(leader_user.username)}"
+                elif leader_user.first_name:
+                    display_name = safe(leader_user.first_name)
+                else:
+                    display_name = mask_telegram_id(leader_tg_id)
+            else:
+                display_name = mask_telegram_id(leader_tg_id)
+
             user_label = (
-                texts.REFERRAL_LEADERBOARD_USER_YOU.format(masked=masked)
+                texts.REFERRAL_LEADERBOARD_USER_YOU.format(masked=display_name)
                 if is_me
-                else texts.REFERRAL_LEADERBOARD_USER_OTHER.format(masked=masked)
+                else texts.REFERRAL_LEADERBOARD_USER_OTHER.format(masked=display_name)
             )
             noun = pluralize(count, texts.NOUN_USERS)
             line = texts.REFERRAL_LEADERBOARD_ITEM.format(
@@ -249,13 +253,63 @@ async def show_referral_leaderboard(
     else:
         rendered += texts.REFERRAL_LEADERBOARD_NOT_RANKED
 
+    is_anonymous = not bool(getattr(db_user, "show_in_leaderboard", False))
     await render_hub(
         callback.bot,
         callback.message.chat.id,
         rendered,
-        get_referral_leaderboard_keyboard(),
+        get_referral_leaderboard_keyboard(is_anonymous=is_anonymous),
         trigger_message_id=callback.message.message_id if callback.message else None,
     )
+
+
+@router.callback_query(F.data == "referral_leaderboard")
+async def show_referral_leaderboard(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User | None = None,
+) -> None:
+    await callback.answer(show_alert=False)
+    await state.clear()
+
+    if not db_user:
+        try:
+            await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        except Exception:
+            pass
+        return
+
+    await _render_referral_leaderboard(callback, session, db_user)
+
+
+@router.callback_query(F.data == "referral_toggle_anonymity")
+async def referral_toggle_anonymity(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User | None = None,
+) -> None:
+    await state.clear()
+
+    if not db_user:
+        try:
+            await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        except Exception:
+            pass
+        return
+
+    current_val = bool(getattr(db_user, "show_in_leaderboard", False))
+    new_val = not current_val
+    await update_user(session, db_user, show_in_leaderboard=new_val)
+    await session.commit()
+
+    try:
+        await callback.answer(texts.LEADERBOARD_ANONYMITY_TOGGLED, show_alert=False)
+    except Exception:
+        pass
+
+    await _render_referral_leaderboard(callback, session, db_user)
 
 
 @router.callback_query(F.data.startswith("referrals_list"))

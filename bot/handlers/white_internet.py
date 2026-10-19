@@ -210,9 +210,8 @@ def get_white_internet_overview_keyboard(
     elif has_topup:
         pattern.append(1)
     if has_reset:
-        pattern.append(2)
-    else:
         pattern.append(1)
+    pattern.append(1)
 
     builder.adjust(*pattern)
 

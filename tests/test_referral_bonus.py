@@ -1414,3 +1414,41 @@ class TestActiveReferralsLegacyPayments(unittest.TestCase):
         self.assertEqual(leaders, [(777000111, 2)])
         self.assertIn("payments", captured["sql"])
         self.assertIn("orders", captured["sql"])
+
+
+class TestReferralLeaderboardPrivacy(unittest.TestCase):
+    def test_user_model_has_show_in_leaderboard_field(self):
+        from database.models import User
+
+        col = User.__table__.columns.get("show_in_leaderboard")
+        self.assertIsNotNone(col)
+        self.assertFalse(col.nullable)
+        self.assertEqual(str(col.server_default.arg), "false")
+
+    def test_allowed_user_update_fields_includes_show_in_leaderboard(self):
+        from database.repositories.users_repo import ALLOWED_USER_UPDATE_FIELDS
+
+        self.assertIn("show_in_leaderboard", ALLOWED_USER_UPDATE_FIELDS)
+
+    def test_get_users_by_telegram_ids_empty(self):
+        import asyncio
+        from database.repositories.users_repo import get_users_by_telegram_ids
+
+        session = AsyncMock()
+        res = asyncio.run(get_users_by_telegram_ids(session, []))
+        self.assertEqual(res, {})
+        session.execute.assert_not_called()
+
+    def test_get_referral_leaderboard_keyboard_toggle(self):
+        from bot import texts
+        from bot.keyboards.user import get_referral_leaderboard_keyboard
+
+        kb_anon = get_referral_leaderboard_keyboard(is_anonymous=True)
+        first_btn_anon = kb_anon.inline_keyboard[0][0]
+        self.assertEqual(first_btn_anon.text, texts.BTN_LEADERBOARD_ANONYMOUS_ON)
+        self.assertEqual(first_btn_anon.callback_data, "referral_toggle_anonymity")
+
+        kb_public = get_referral_leaderboard_keyboard(is_anonymous=False)
+        first_btn_public = kb_public.inline_keyboard[0][0]
+        self.assertEqual(first_btn_public.text, texts.BTN_LEADERBOARD_ANONYMOUS_OFF)
+        self.assertEqual(first_btn_public.callback_data, "referral_toggle_anonymity")
