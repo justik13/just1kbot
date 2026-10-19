@@ -911,7 +911,11 @@ async def show_add_device_menu(query: CallbackQuery, session: AsyncSession):
     next_traffic = next_limit * base_gb
 
     kb = InlineKeyboardBuilder()
-    kb.button(text=texts.BTN_WL_ADD_DEVICE_CONFIRM, callback_data="wl_add_device_confirm")
+    kb.button(
+        text=texts.BTN_WL_ADD_DEVICE_CONFIRM,
+        callback_data="wl_add_device_confirm",
+        style="success",
+    )
     kb.button(text=texts.BTN_BACK, callback_data="white_internet")
     kb.adjust(1, 1)
 

@@ -82,7 +82,11 @@ def get_alt_connection_keyboard(
         text=texts.CONNECTION_DEVICES_DEVICE_BACK_TO_DEVICE,
         callback_data=f"manage_device:{profile_id}",
     )
-    builder.adjust(1)
+    builder.button(
+        text=texts.BTN_MAIN_MENU_NAV,
+        callback_data="back_to_main_menu",
+    )
+    builder.adjust(2)
     return builder.as_markup()
 
 
