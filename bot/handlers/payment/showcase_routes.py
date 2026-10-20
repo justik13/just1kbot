@@ -35,7 +35,13 @@ from bot.formatters import (
     get_tariff_display_name,
     get_tariff_group_name,
 )
-from utils.telegram import render_hub
+from bot.keyboards.payment import format_dynamic_tariff_button
+from utils.telegram import (
+    make_rich_button,
+    make_rich_button_row,
+    make_rich_nav_row,
+    render_hub,
+)
 
 from .common import (
     _check_tariff_change_allowed,
@@ -50,6 +56,60 @@ logger = logging.getLogger(__name__)
 
 
 router = Router()
+
+
+def _make_checkout_rich_buttons(tariff_id: int, price: int, can_pay_wallet: bool, back_callback: str) -> str:
+    rows = []
+    if price == 0:
+        rows.append(
+            make_rich_button_row(
+                make_rich_button(
+                    texts.BTN_PAYMENT_CONFIRM_FREE_CHANGE,
+                    callback_data=f"order_pay_wallet:{tariff_id}",
+                    style="success",
+                )
+            )
+        )
+    elif can_pay_wallet:
+        rows.append(
+            make_rich_button_row(
+                make_rich_button(
+                    texts.BTN_PAYMENT_BUY_FROM_BALANCE,
+                    callback_data=f"order_pay_wallet:{tariff_id}",
+                    style="success",
+                )
+            )
+        )
+        rows.append(
+            make_rich_button_row(
+                make_rich_button(
+                    texts.BTN_PAYMENT_PAY_CARD.format(price=price),
+                    callback_data=f"order_pay_card:{tariff_id}",
+                    style="primary",
+                )
+            )
+        )
+    else:
+        rows.append(
+            make_rich_button_row(
+                make_rich_button(
+                    texts.BTN_PAYMENT_PAY_CARD.format(price=price),
+                    callback_data=f"order_pay_card:{tariff_id}",
+                    style="success",
+                )
+            )
+        )
+        rows.append(
+            make_rich_button_row(
+                make_rich_button(
+                    texts.BUTTON_TOPUP,
+                    callback_data="balance_topup",
+                    style="primary",
+                )
+            )
+        )
+    rows.append(make_rich_nav_row(back_callback))
+    return "\n" + "\n".join(rows)
 
 
 _START_KEYBOARD_BUILDER = InlineKeyboardBuilder()
@@ -254,16 +314,17 @@ async def select_tariff(
             balance_after=balance_after,
             shortage_line=shortage_line,
         )
+        rich_text = text + _make_checkout_rich_buttons(
+            tariff_id=tariff.id,
+            price=price,
+            can_pay_wallet=(balance_before >= price),
+            back_callback=back_to,
+        )
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            text,
-            get_order_checkout_keyboard(
-                tariff_id=tariff.id,
-                price=price,
-                can_pay_wallet=(balance_before >= price),
-                back_callback=back_to,
-            ),
+            rich_text,
+            reply_markup=None,
         )
         await callback.answer(show_alert=False)
         return
@@ -331,16 +392,17 @@ async def select_tariff(
         )
     )
 
+    rich_text = text + _make_checkout_rich_buttons(
+        tariff_id=tariff.id,
+        price=price,
+        can_pay_wallet=(balance_before >= price),
+        back_callback=back_to,
+    )
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        text,
-        get_order_checkout_keyboard(
-            tariff_id=tariff.id,
-            price=price,
-            can_pay_wallet=(balance_before >= price),
-            back_callback=back_to,
-        ),
+        rich_text,
+        reply_markup=None,
     )
 
     await callback.answer(show_alert=False)
@@ -602,10 +664,25 @@ async def render_tariff_duration_selection(
     description = f"<b>{get_tariff_group_name(device_limit)}</b>\n\n"
     text = description + texts.PAYMENT_DURATION_HEADER
 
-    keyboard = get_tariff_duration_keyboard(type_tariffs, source=source)
+    duration_rows = []
+    base_tariff = min(type_tariffs, key=lambda t: getattr(t, "duration_days", 30))
+    tariffs_sorted = sorted(type_tariffs, key=lambda t: getattr(t, "duration_days", 0))
+    for t in tariffs_sorted:
+        btn_label = format_dynamic_tariff_button(t, base_tariff)
+        duration_rows.append(
+            make_rich_button_row(
+                make_rich_button(
+                    btn_label,
+                    callback_data=f"select_tariff:{t.id}:{source}",
+                    style="primary",
+                )
+            )
+        )
+    nav_row = make_rich_nav_row(back_to)
+    full_text = text + "\n" + "\n".join(duration_rows) + f"\n{nav_row}"
 
     await render_hub(
-        bot, chat_id, text, keyboard
+        bot, chat_id, full_text, reply_markup=None
     )
 
 

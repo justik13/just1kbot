@@ -47,7 +47,14 @@ from services.white_internet_service import (
     get_white_internet_tier_price,
 )
 from utils.admin import is_admin
-from utils.telegram import has_rich_tags, safe_callback_answer
+from utils.telegram import (
+    has_rich_tags,
+    make_rich_button,
+    make_rich_button_row,
+    make_rich_nav_row,
+    render_hub,
+    safe_callback_answer,
+)
 from utils.datetime_helpers import now_utc
 from utils.formatters import format_traffic
 from utils.security import normalize_public_domain
@@ -430,51 +437,71 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
         if sub.status == WhiteInternetStatus.ACTIVE and not sub_domain:
             text += texts.WL_DOMAIN_UNCONFIGURED_BANNER
 
-    is_admin_user = is_admin(query.from_user.id)
-    kb = get_white_internet_overview_keyboard(
-        sub,
-        sub_domain,
-        base_price=base_price_int,
-        sub_prefix=sub_prefix,
-        is_admin_user=is_admin_user,
-        has_trial_available=has_trial_available,
-    )
-    try:
-        if has_rich_tags(text):
-            try:
-                await query.message.edit_text(
-                    text,
-                    reply_markup=kb,
-                    rich_message=InputRichMessage(html=text),
+        action_rows = []
+        action_rows.append(
+            make_rich_button_row(
+                make_rich_button(texts.BTN_WL_INCY_INSTRUCTIONS, callback_data="wl_show_link", style="primary")
+            )
+        )
+        is_trial = bool(getattr(sub, "is_trial", False))
+        is_exhausted = sub.status == WhiteInternetStatus.EXHAUSTED
+        can_renew = (
+            is_trial
+            or is_exhausted
+            or sub.expires_at is None
+            or (sub.expires_at - now).total_seconds() <= 30 * 86400
+        )
+        sub_limit = max(1, getattr(sub, "device_limit", 1) or 1)
+        renew_price = int(get_white_internet_tier_price(sub_limit, base_price=Decimal(base_price_int)))
+        if can_renew:
+            if is_trial:
+                renew_btn = make_rich_button(
+                    texts.BTN_WL_CONVERT_TRIAL.format(price=base_price_int),
+                    callback_data="wl_renew_preview",
+                    style="success",
                 )
-            except (TelegramBadRequest, TypeError, AttributeError) as rich_err:
-                if (
-                    isinstance(rich_err, TelegramBadRequest)
-                    and "not_modified" in str(rich_err).lower().replace(" ", "_")
-                ):
-                    raise
-                logger.debug("Failed editing with rich_message: %s, falling back to HTML", rich_err)
-                await query.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
-        else:
-            await query.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+            else:
+                renew_btn = make_rich_button(
+                    texts.BTN_WL_RENEW.format(price=renew_price),
+                    callback_data="wl_renew_preview",
+                    style="success",
+                )
+            action_rows.append(make_rich_button_row(renew_btn))
+
+        addon_btns = []
+        if not getattr(sub, "is_trial", False):
+            addon_btns.append(make_rich_button(texts.BTN_WL_TOPUP, callback_data="wl_topup_menu"))
+            if effective_device_limit < WHITE_INTERNET_MAX_DEVICE_LIMIT:
+                addon_btns.append(make_rich_button(texts.BTN_WL_ADD_DEVICE, callback_data="wl_add_device_menu"))
+        if addon_btns:
+            action_rows.append(make_rich_button_row(*addon_btns))
+
+        if sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED):
+            action_rows.append(
+                make_rich_button_row(
+                    make_rich_button(texts.BTN_WL_RESET_DEVICES, callback_data="wl_reset_devices", style="danger")
+                )
+            )
+
+        action_rows.append(make_rich_nav_row(include_menu=True))
+        text += "\n" + "\n".join(action_rows)
+
+    if sub is None:
+        text += f"\n{make_rich_nav_row(include_menu=True)}"
+
+    try:
+        await render_hub(
+            query.bot,
+            query.message.chat.id,
+            text,
+            reply_markup=None,
+        )
         try:
             await query.answer(texts.WL_ALERT_TRAFFIC_UPDATED, show_alert=False)
         except Exception:
             pass
-    except TelegramBadRequest as exc:
-        if "not_modified" in str(exc).lower().replace(" ", "_"):
-            try:
-                await query.answer(texts.WL_ALERT_TRAFFIC_UP_TO_DATE, show_alert=False)
-            except Exception:
-                pass
-        else:
-            logger.warning("TelegramBadRequest editing white internet menu: %s", exc)
-            try:
-                await query.answer()
-            except Exception:
-                pass
     except Exception as exc:
-        logger.warning("Unexpected error editing white internet menu: %s", exc)
+        logger.debug("Failed render_hub for white_internet: %s", exc)
         try:
             await query.answer()
         except Exception:
@@ -529,33 +556,46 @@ async def process_white_internet_buy_preview(query: CallbackQuery, session: Asyn
     balance_snapshot = await get_account_balance(session, user_id=user.id)
     balance = balance_snapshot.available
 
-    builder = InlineKeyboardBuilder()
+    action_btns = []
     if balance >= base_price:
         balance_details = texts.WL_PREVIEW_BALANCE_OK.format(remaining=(balance - base_price))
-        builder.button(
-            text=texts.BTN_WL_PAY_BASE.format(price=base_price_int),
-            callback_data="wl_buy_execute",
-            style="success",
+        action_btns.append(
+            make_rich_button_row(
+                make_rich_button(
+                    texts.BTN_WL_PAY_BASE.format(price=base_price_int),
+                    callback_data="wl_buy_execute",
+                    style="success",
+                )
+            )
         )
     else:
         shortage = base_price - balance
         balance_details = texts.WL_PREVIEW_BALANCE_SHORTAGE.format(shortage=shortage)
-        builder.button(
-            text=texts.BTN_WL_TOPUP_SHORTAGE.format(shortage=int(shortage)),
-            callback_data=f"wl_topup_shortage:{int(shortage)}:buy",
-            style="success",
+        action_btns.append(
+            make_rich_button_row(
+                make_rich_button(
+                    texts.BTN_WL_TOPUP_SHORTAGE.format(shortage=int(shortage)),
+                    callback_data=f"wl_topup_shortage:{int(shortage)}:buy",
+                    style="success",
+                )
+            )
         )
-    builder.button(text=texts.BTN_BACK, callback_data="white_internet")
-    builder.adjust(1, 1)
+    nav_row = make_rich_nav_row("white_internet")
 
-    text = texts.WL_BUY_PREVIEW_TEXT.format(
-        days=duration_days,
-        traffic=traffic_gb,
-        price=base_price_int,
-        balance=balance,
-        balance_details=balance_details,
+    text = (
+        texts.WL_BUY_PREVIEW_TEXT.format(
+            days=duration_days,
+            traffic=traffic_gb,
+            price=base_price_int,
+            balance=balance,
+            balance_details=balance_details,
+        )
+        + "\n"
+        + "\n".join(action_btns)
+        + "\n"
+        + nav_row
     )
-    await query.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    await render_hub(query.bot, query.message.chat.id, text, reply_markup=None)
 
 
 @router.callback_query(F.data.in_({"wl_buy_execute", "wl_buy_confirm"}))
@@ -748,7 +788,21 @@ async def show_topup_menu(query: CallbackQuery, session: AsyncSession):
     if getattr(sub, "is_trial", False):
         await query.answer(texts.WL_TRIAL_CANNOT_TOPUP, show_alert=True)
         return
-    await query.message.edit_text(texts.WL_TOPUP_MENU_TEXT, reply_markup=get_topup_keyboard(), parse_mode="HTML")
+
+    pack_btns = []
+    for pack_gb, price in sorted(WHITE_INTERNET_TOPUP_PACKS.items()):
+        pack_btns.append(
+            make_rich_button_row(
+                make_rich_button(
+                    texts.BTN_WL_TOPUP_PACK_ITEM.format(gb=pack_gb, price=int(price)),
+                    callback_data=f"wl_topup_preview:{pack_gb}",
+                    style="primary",
+                )
+            )
+        )
+    nav_row = make_rich_nav_row("white_internet")
+    rich_text = texts.WL_TOPUP_MENU_TEXT + "\n" + "\n".join(pack_btns) + "\n" + nav_row
+    await render_hub(query.bot, query.message.chat.id, rich_text, reply_markup=None)
 
 
 @router.callback_query(F.data.startswith("wl_topup_preview:"))
@@ -770,32 +824,44 @@ async def process_topup_preview(query: CallbackQuery, session: AsyncSession):
     balance_snapshot = await get_account_balance(session, user_id=user.id)
     balance = balance_snapshot.available
 
-    builder = InlineKeyboardBuilder()
+    action_btns = []
     if balance >= pack_price:
         balance_details = texts.WL_PREVIEW_BALANCE_OK.format(remaining=(balance - pack_price))
-        builder.button(
-            text=texts.BTN_WL_PAY_PACK.format(gb=pack_gb, price=int(pack_price)),
-            callback_data=f"wl_topup_execute:{pack_gb}",
-            style="success",
+        action_btns.append(
+            make_rich_button_row(
+                make_rich_button(
+                    texts.BTN_WL_PAY_PACK.format(gb=pack_gb, price=int(pack_price)),
+                    callback_data=f"wl_topup_execute:{pack_gb}",
+                    style="success",
+                )
+            )
         )
     else:
         shortage = pack_price - balance
         balance_details = texts.WL_PREVIEW_BALANCE_SHORTAGE.format(shortage=shortage)
-        builder.button(
-            text=texts.BTN_WL_TOPUP_SHORTAGE.format(shortage=int(shortage)),
-            callback_data=f"wl_topup_shortage:{int(shortage)}:pack:{pack_gb}",
-            style="success",
+        action_btns.append(
+            make_rich_button_row(
+                make_rich_button(
+                    texts.BTN_WL_TOPUP_SHORTAGE.format(shortage=int(shortage)),
+                    callback_data=f"wl_topup_shortage:{int(shortage)}:pack:{pack_gb}",
+                    style="success",
+                )
+            )
         )
-    builder.button(text=texts.BTN_BACK, callback_data="wl_topup_menu")
-    builder.adjust(1, 1)
-
-    text = texts.WL_TOPUP_PREVIEW_TEXT.format(
-        gb=pack_gb,
-        price=int(pack_price),
-        balance=balance,
-        balance_details=balance_details,
+    nav_row = make_rich_nav_row("wl_topup_menu")
+    text = (
+        texts.WL_TOPUP_PREVIEW_TEXT.format(
+            gb=pack_gb,
+            price=int(pack_price),
+            balance=balance,
+            balance_details=balance_details,
+        )
+        + "\n"
+        + "\n".join(action_btns)
+        + "\n"
+        + nav_row
     )
-    await query.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    await render_hub(query.bot, query.message.chat.id, text, reply_markup=None)
 
 
 @router.callback_query(F.data.startswith("wl_topup_execute:") | F.data.startswith("wl_topup_pack_"))
@@ -1048,50 +1114,18 @@ async def show_subscription_link(query: CallbackQuery, session: AsyncSession):
         return
 
     sub_url = _build_subscription_url(sub_domain, sub.token, sub_prefix=sub_prefix)
+    copy_btn = make_rich_button(texts.BTN_SUB_COPY_LINK, copy_text=sub_url)
+    connect_btn = make_rich_button(texts.BTN_SUB_CONNECT_INCY, url=sub_url, style="success")
+    nav_row = make_rich_nav_row("white_internet")
 
-    kb = InlineKeyboardBuilder()
-    kb.button(
-        text=texts.BTN_SUB_CONNECT_INCY,
-        url=sub_url,
-        style="success",
+    rich_text = (
+        texts.WL_SHOW_LINK_TEXT.format(url=html.escape(sub_url))
+        + "\n"
+        + make_rich_button_row(copy_btn, connect_btn)
+        + "\n"
+        + nav_row
     )
-    if len(sub_url) <= 256:
-        kb.button(
-            text=texts.BTN_SUB_COPY_LINK,
-            copy_text=CopyTextButton(text=sub_url),
-        )
-    kb.button(text=texts.BTN_BACK, callback_data="white_internet")
-    kb.adjust(1)
-
-    text = texts.WL_SHOW_LINK_TEXT.format(url=html.escape(sub_url))
-    if has_rich_tags(text):
-        try:
-            await query.message.edit_text(
-                text,
-                reply_markup=kb.as_markup(),
-                rich_message=InputRichMessage(html=text),
-            )
-        except (TelegramBadRequest, TypeError, AttributeError) as rich_err:
-            if (
-                isinstance(rich_err, TelegramBadRequest)
-                and "not_modified" in str(rich_err).lower().replace(" ", "_")
-            ):
-                raise
-            logger.debug(
-                "Failed editing with rich_message in show_subscription_link: %s, falling back to HTML",
-                rich_err,
-            )
-            await query.message.edit_text(
-                text,
-                reply_markup=kb.as_markup(),
-                parse_mode="HTML",
-            )
-    else:
-        await query.message.edit_text(
-            text,
-            reply_markup=kb.as_markup(),
-            parse_mode="HTML",
-        )
+    await render_hub(query.bot, query.message.chat.id, rich_text, reply_markup=None)
 
 
 @router.callback_query(F.data == "wl_reset_devices")

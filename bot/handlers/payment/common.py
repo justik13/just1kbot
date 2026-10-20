@@ -18,8 +18,14 @@ from bot.formatters import (
     format_days_left,
     format_subscription_date,
     get_tariff_display_name,
+    get_tariff_group_name,
 )
-from utils.telegram import render_hub
+from utils.telegram import (
+    make_rich_button,
+    make_rich_button_row,
+    make_rich_nav_row,
+    render_hub,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -103,12 +109,32 @@ async def render_tariff_showcase(
         )
     table = texts.PAYMENT_SHOWCASE_TABLE_TEMPLATE.format(rows="".join(rows))
     text = f"{texts.PAYMENT_SHOWCASE_HEADER}\n{table}"
-    keyboard = get_tariff_showcase_keyboard(grouped)
+
+    tariff_buttons = []
+    for limit in sorted(grouped.keys()):
+        group_name = get_tariff_group_name(limit)
+        group_tariffs = grouped.get(limit) or []
+        if group_tariffs:
+            min_price = min(int(t.price_rub) for t in group_tariffs)
+            btn_text = texts.BTN_TARIFF_SHOWCASE_ITEM.format(group_name=group_name, min_price=min_price)
+        else:
+            btn_text = group_name
+        tariff_buttons.append(
+            make_rich_button_row(
+                make_rich_button(
+                    btn_text,
+                    callback_data=f"select_tariff_type:{limit}:showcase",
+                    style="primary",
+                )
+            )
+        )
+    nav_row = make_rich_nav_row(include_menu=True)
+    full_text = f"{text}\n" + "\n".join(tariff_buttons) + f"\n{nav_row}"
     await render_hub(
         bot,
         chat_id,
-        text,
-        keyboard,
+        full_text,
+        reply_markup=None,
         session=session,
     )
 
@@ -141,16 +167,13 @@ async def _show_hub(
         devices_count=total_devices,
         device_limit=device_limit,
     )
+    nav_row = make_rich_nav_row(include_menu=True)
+    full_text = f"{text}\n{nav_row}"
 
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu"
-    )
-    builder.adjust(1)
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        text,
-        builder.as_markup(),
+        full_text,
+        reply_markup=None,
         session=session,
     )

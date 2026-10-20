@@ -69,11 +69,17 @@ async def request_delete_device(
 
     await callback.answer(show_alert=False)
 
+    delete_actions = (
+        '\n<tg-button-row align="center">\n'
+        f'  <tg-button type="callback_data" style="danger" data="confirm_delete_device:{profile_id}">{texts.BTN_CONFIRM_DELETE}</tg-button>\n'
+        f'  <tg-button type="callback_data" data="cancel_delete_device:{profile_id}">{texts.BTN_CANCEL_ACTION}</tg-button>\n'
+        '</tg-button-row>'
+    )
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        texts.DEVICE_DELETE_CONFIRM.format(device_name=safe(profile.device_name)),
-        get_device_delete_confirm_keyboard(profile_id),
+        texts.DEVICE_DELETE_CONFIRM.format(device_name=safe(profile.device_name)) + delete_actions,
+        reply_markup=None,
     )
 
 

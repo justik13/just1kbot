@@ -42,6 +42,61 @@ def has_rich_tags(text: str | None) -> bool:
         return False
     return bool(_RICH_TAGS_PATTERN.search(text))
 
+
+def make_rich_button(
+    text: str,
+    *,
+    callback_data: str | None = None,
+    url: str | None = None,
+    copy_text: str | None = None,
+    style: str | None = None,
+) -> str:
+    """Build a Telegram Bot API 10.3 <tg-button> element."""
+    escaped_text = html.escape(str(text))
+    attrs = []
+    if callback_data:
+        attrs.append('type="callback_data"')
+        attrs.append(f'data="{html.escape(str(callback_data), quote=True)}"')
+    elif url:
+        attrs.append('type="url"')
+        attrs.append(f'url="{html.escape(str(url), quote=True)}"')
+    elif copy_text:
+        attrs.append('type="copy_text"')
+        attrs.append(f'text="{html.escape(str(copy_text), quote=True)}"')
+    else:
+        attrs.append('type="callback_data"')
+        attrs.append('data="ignore"')
+
+    if style:
+        attrs.append(f'style="{html.escape(str(style), quote=True)}"')
+
+    return f'<tg-button {" ".join(attrs)}>{escaped_text}</tg-button>'
+
+
+def make_rich_button_row(*buttons: str, align: str = "center") -> str:
+    """Wrap buttons into a <tg-button-row> container."""
+    non_empty = [b.strip() for b in buttons if b and b.strip()]
+    if not non_empty:
+        return ""
+    joined = " ".join(non_empty)
+    return f'<tg-button-row align="{align}">{joined}</tg-button-row>'
+
+
+def make_rich_nav_row(
+    back_callback: str | None = None,
+    *,
+    include_menu: bool = True,
+    back_label: str = "◀️ Назад",
+    menu_label: str = "🏠 В меню",
+) -> str:
+    """Build standardized navigation bottom row."""
+    btns = []
+    if back_callback:
+        btns.append(make_rich_button(back_label, callback_data=back_callback))
+    if include_menu:
+        btns.append(make_rich_button(menu_label, callback_data="back_to_main_menu"))
+    return make_rich_button_row(*btns)
+
 # ==============================================================================
 # Telegram Message Effect IDs (Telegram Bot API 7.4+)
 # Verified via live API scan (696 tested against Telegram servers, exactly 6 supported):

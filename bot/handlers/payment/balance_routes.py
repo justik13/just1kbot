@@ -36,7 +36,13 @@ from services.maintenance_service import MaintenanceService
 from services.order_service import OrderService
 from utils.callbacks import parse_callback_id
 from utils.formatters import format_datetime
-from utils.telegram import render_hub, safe_callback_answer
+from utils.telegram import (
+    make_rich_button,
+    make_rich_button_row,
+    make_rich_nav_row,
+    render_hub,
+    safe_callback_answer,
+)
 
 from .common import _render_maintenance
 
@@ -172,19 +178,27 @@ async def _render_balance(
         '  <tg-button type="callback_data" style="primary" data="balance_history:0">🧾 История</tg-button>\n'
         '</tg-button-row>'
     )
+    if pending_topup is not None:
+        rich_actions += (
+            '\n<tg-button-row align="center">\n'
+            f'  <tg-button type="callback_data" style="primary" data="balance_resume_topup">{texts.BUTTON_RESUME_TOPUP}</tg-button>\n'
+            '</tg-button-row>'
+        )
+    nav_row = make_rich_nav_row(include_menu=True)
     text = (
         f"{prefix}<p>💰 <b>Баланс</b></p>\n"
         f"<table>{''.join(rows)}</table>"
         + texts.BALANCE_HISTORY_SECTION_TITLE
         + _history_lines(history)
         + rich_actions
+        + f"\n{nav_row}"
     )
 
     await render_hub(
         bot,
         chat_id,
         text,
-        custom_keyboard or get_balance_keyboard(has_visible_topup=pending_topup is not None),
+        reply_markup=None,
         trigger_message_id=trigger_message_id,
         message_effect_id=message_effect_id,
         force_new=force_new,
@@ -304,16 +318,20 @@ async def _create_and_render_topup(
                 order_ref=str(order.id)[:8],
             )
         )
+        invoice_actions = (
+            '\n<tg-button-row align="center">\n'
+            f'  <tg-button type="url" style="success" url="{order.payment_url or ""}">{texts.BTN_PAYMENT_PAY_ORDER.format(price=int(order.amount_rub))}</tg-button>\n'
+            '</tg-button-row>\n'
+            '<tg-button-row align="center">\n'
+            f'  <tg-button type="callback_data" style="primary" data="check_order:{order.id}">{texts.BTN_PAYMENT_CHECK_PAYMENT}</tg-button>\n'
+            f'  <tg-button type="callback_data" data="cancel_order:{order.id}">{texts.BTN_PAYMENT_CANCEL_ORDER}</tg-button>\n'
+            '</tg-button-row>'
+        )
         await render_hub(
             bot,
             chat_id,
-            text,
-            get_order_invoice_keyboard(
-                payment_url=order.payment_url or "",
-                order_id=str(order.id),
-                price=int(order.amount_rub),
-                support_url=support_url,
-            ),
+            text + invoice_actions,
+            reply_markup=None,
         )
     finally:
         if isinstance(target, CallbackQuery):
@@ -375,11 +393,23 @@ async def show_balance_history(
         session, user_id=db_user.id, limit=page_size, offset=offset
     )
 
+    pag_btns = []
+    if total_pages > 1:
+        if page > 1:
+            pag_btns.append(make_rich_button(texts.BTN_PAGINATION_PREV, callback_data=f"balance_history:{page - 1}"))
+        pag_btns.append(make_rich_button(texts.BTN_PAGINATION_PAGE.format(page=page, total_pages=total_pages), callback_data="ignore"))
+        if page < total_pages:
+            pag_btns.append(make_rich_button(texts.BTN_PAGINATION_NEXT, callback_data=f"balance_history:{page + 1}"))
+
+    pag_row = make_rich_button_row(*pag_btns) if pag_btns else ""
+    nav_row = make_rich_nav_row("menu_balance")
+    text = texts.BALANCE_HISTORY_TITLE.format(history=_history_lines(entries)) + (f"\n{pag_row}" if pag_row else "") + f"\n{nav_row}"
+
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        texts.BALANCE_HISTORY_TITLE.format(history=_history_lines(entries)),
-        get_balance_history_keyboard(page=page, total_pages=total_pages),
+        text,
+        reply_markup=None,
     )
 
 
@@ -530,6 +560,7 @@ async def choose_topup_amount(
     rich_rows.append(
         '<tg-button-row align="center">\n  <tg-button type="callback_data" style="primary" data="balance_custom_amount">✏️ Другая сумма</tg-button>\n</tg-button-row>'
     )
+    rich_rows.append(make_rich_nav_row("menu_balance"))
     rich_presets = "\n" + "\n".join(rich_rows)
 
     text = (
@@ -543,7 +574,7 @@ async def choose_topup_amount(
         callback.bot,
         callback.message.chat.id,
         text,
-        get_back_button("menu_balance"),
+        reply_markup=None,
     )
 
 

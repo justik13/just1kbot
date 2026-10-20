@@ -26,7 +26,13 @@ from database.repositories.users_repo import (
 )
 from services.referral_bonus import get_referral_bonus_balance, get_referral_tier
 from utils.formatters import format_datetime
-from utils.telegram import render_hub, safe
+from utils.telegram import (
+    make_rich_button,
+    make_rich_button_row,
+    make_rich_nav_row,
+    render_hub,
+    safe,
+)
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -114,11 +120,13 @@ async def show_history(
         if len(payments) > 10:
             rendered += texts.HISTORY_LIMIT_NOTE.format(count=len(payments))
 
+    rendered += f"\n{make_rich_nav_row('menu_referral')}"
+
     await render_hub(
         callback.bot,
         callback.message.chat.id,
         rendered,
-        get_history_keyboard(),
+        reply_markup=None,
         trigger_message_id=callback.message.message_id if callback.message else None,
     )
 
@@ -176,9 +184,10 @@ async def show_referral(
     else:
         inviter_line = ""
 
-    await render_hub(
-        callback.bot,
-        callback.message.chat.id,
+    ref_btn = make_rich_button(f"👥 Мои рефералы ({invited_count})", callback_data="referrals_list", style="primary")
+    nav_row = make_rich_nav_row(include_menu=True)
+
+    body_text = (
         texts.REFERRAL_TEXT_BALANCE.format(
             bonus_balance=int(bonus_balance),
             tier_name=tier_info.name,
@@ -189,13 +198,15 @@ async def show_referral(
             tier_progress_line=tier_progress_line,
             referral_link=referral_link,
             inviter_line=inviter_line,
-        ),
-        get_referral_keyboard(
-            referral_link,
-            count=invited_count,
-            include_copy=False,
-            include_leaderboard=False,
-        ),
+        )
+        + f"\n{make_rich_button_row(ref_btn)}\n{nav_row}"
+    )
+
+    await render_hub(
+        callback.bot,
+        callback.message.chat.id,
+        body_text,
+        reply_markup=None,
         trigger_message_id=callback.message.message_id if callback.message else None,
     )
 
@@ -260,11 +271,16 @@ async def _render_referral_leaderboard(
         rendered += texts.REFERRAL_LEADERBOARD_NOT_RANKED
 
     is_anonymous = not bool(getattr(db_user, "show_in_leaderboard", False))
+    anon_text = texts.BTN_REFERRAL_SHOW_NAME if is_anonymous else texts.BTN_REFERRAL_HIDE_NAME
+    anon_btn = make_rich_button(anon_text, callback_data="toggle_ref_anon", style="primary")
+    nav_row = make_rich_nav_row("menu_referral")
+    rendered += f"\n{make_rich_button_row(anon_btn)}\n{nav_row}"
+
     await render_hub(
         callback.bot,
         callback.message.chat.id,
         rendered,
-        get_referral_leaderboard_keyboard(is_anonymous=is_anonymous),
+        reply_markup=None,
         trigger_message_id=callback.message.message_id if callback.message else None,
     )
 
@@ -378,10 +394,22 @@ async def show_referrals_list(
             count=format_plural(total_count, texts.NOUN_USERS)
         )
 
+    pag_btns = []
+    if total_pages > 1:
+        if page > 1:
+            pag_btns.append(make_rich_button(texts.BTN_PAGINATION_PREV, callback_data=f"referrals_list:{page - 1}"))
+        pag_btns.append(make_rich_button(texts.BTN_PAGINATION_PAGE.format(page=page, total_pages=total_pages), callback_data="ignore"))
+        if page < total_pages:
+            pag_btns.append(make_rich_button(texts.BTN_PAGINATION_NEXT, callback_data=f"referrals_list:{page + 1}"))
+
+    pag_row = make_rich_button_row(*pag_btns) if pag_btns else ""
+    nav_row = make_rich_nav_row("menu_referral")
+    full_text = rendered + (f"\n{pag_row}" if pag_row else "") + f"\n{nav_row}"
+
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        rendered,
-        get_referrals_list_keyboard(page=page, total_pages=total_pages),
+        full_text,
+        reply_markup=None,
         trigger_message_id=callback.message.message_id if callback.message else None,
     )

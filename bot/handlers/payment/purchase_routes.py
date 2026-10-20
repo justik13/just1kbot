@@ -110,6 +110,15 @@ async def handle_order_pay_wallet(
     is_change = bool(order.metadata_ and order.metadata_.get("is_tariff_change"))
     operation = texts.PAYMENT_OP_TITLE_CHANGE if is_change else texts.PURCHASE_COMPLETED
 
+    success_actions = (
+        '\n<tg-button-row align="center">\n'
+        f'  <tg-button type="callback_data" style="success" data="menu_connections">{texts.BTN_PAYMENT_CONNECT_DEVICE}</tg-button>\n'
+        f'  <tg-button type="callback_data" style="primary" data="menu_subscription">{texts.BTN_PAYMENT_TO_SUBSCRIPTION}</tg-button>\n'
+        '</tg-button-row>\n'
+        '<tg-button-row align="center">\n'
+        f'  <tg-button type="callback_data" data="back_to_main_menu">{texts.BTN_MAIN_MENU_NAV}</tg-button>\n'
+        '</tg-button-row>'
+    )
     await render_hub(
         callback.bot,
         callback.message.chat.id,
@@ -120,8 +129,8 @@ async def handle_order_pay_wallet(
             charged=int(order.amount_rub),
             real_balance=int(balance.real_available),
             bonus_balance=int(balance.bonus_available),
-        ),
-        get_payment_success_keyboard(),
+        ) + success_actions,
+        reply_markup=None,
         message_effect_id=EFFECT_CONFETTI,
         force_new=True,
     )
@@ -218,8 +227,8 @@ async def handle_order_pay_card(
                     charged=int(order.amount_rub),
                     real_balance=int(balance.real_available),
                     bonus_balance=int(balance.bonus_available),
-                ),
-                get_payment_success_keyboard(),
+                ) + success_actions,
+                reply_markup=None,
                 message_effect_id=EFFECT_CONFETTI,
                 force_new=True,
             )
@@ -266,16 +275,20 @@ async def handle_order_pay_card(
             price=price,
         )
     )
+    invoice_actions = (
+        '\n<tg-button-row align="center">\n'
+        f'  <tg-button type="url" style="success" url="{order.payment_url or ""}">{texts.BTN_PAYMENT_PAY_ORDER.format(price=price)}</tg-button>\n'
+        '</tg-button-row>\n'
+        '<tg-button-row align="center">\n'
+        f'  <tg-button type="callback_data" style="primary" data="check_order:{order.id}">{texts.BTN_PAYMENT_CHECK_PAYMENT}</tg-button>\n'
+        f'  <tg-button type="callback_data" data="cancel_order:{order.id}">{texts.BTN_PAYMENT_CANCEL_ORDER}</tg-button>\n'
+        '</tg-button-row>'
+    )
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        text,
-        get_order_invoice_keyboard(
-            payment_url=order.payment_url or "",
-            order_id=str(order.id),
-            price=price,
-            support_url=support_url,
-        ),
+        text + invoice_actions,
+        reply_markup=None,
     )
     await safe_callback_answer(callback)
 

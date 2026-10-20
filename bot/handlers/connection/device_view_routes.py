@@ -42,6 +42,9 @@ from utils.telegram import (
     _get_hub_render_lock,
     _hub_cache,
     get_hub_ids,
+    make_rich_button,
+    make_rich_button_row,
+    make_rich_nav_row,
     render_hub,
     safe,
 )
@@ -228,28 +231,55 @@ async def render_device_screen(
         if len(rendered) + len(guide_block) <= 4000:
             rendered += guide_block
 
-        keyboard = get_device_keyboard(
-            profile.id,
-            config_ready=config_ready,
-            show_delete=show_delete,
-            copy_key=display_key,
+        action_rows = []
+        action_rows.append(
+            make_rich_button_row(
+                make_rich_button(texts.BTN_HELP_INSTRUCTIONS, callback_data=f"support_help:device_{profile.id}", style="primary"),
+                make_rich_button(texts.BTN_CHANGE_SERVER, callback_data=f"migrate_device:{profile.id}"),
+            )
         )
+        mgmt_btns = []
+        if config_ready:
+            mgmt_btns.append(make_rich_button(texts.CONNECTION_DEVICES_DEVICE_ALT_CONNECTION, callback_data=f"alt_connection:{profile.id}"))
+        if show_delete:
+            mgmt_btns.append(make_rich_button(texts.BTN_DELETE_DEVICE, callback_data=f"request_delete_device:{profile.id}", style="danger"))
+        if mgmt_btns:
+            action_rows.append(make_rich_button_row(*mgmt_btns))
+
+        action_rows.append(
+            make_rich_button_row(
+                make_rich_button(texts.BTN_BACK_TO_DEVICES, callback_data="back_to_amnezia_devices"),
+                make_rich_button(texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu"),
+            )
+        )
+        rendered += "\n" + "\n".join(action_rows)
     else:
         rendered += texts.DEVICE_ACCESS_INACTIVE_NOTICE
-
-        builder = InlineKeyboardBuilder()
+        action_rows = []
+        action_rows.append(
+            make_rich_button_row(
+                make_rich_button(texts.BTN_BUY_ACCESS, callback_data="menu_buy", style="success")
+            )
+        )
         if show_delete:
-            builder.button(text=texts.BTN_DELETE_DEVICE, callback_data=f"request_delete_device:{profile.id}")
-        builder.button(text=texts.BTN_BACK_TO_DEVICES, callback_data="back_to_amnezia_devices")
-        builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
-        builder.adjust(1)
-        keyboard = builder.as_markup()
+            action_rows.append(
+                make_rich_button_row(
+                    make_rich_button(texts.BTN_DELETE_DEVICE, callback_data=f"request_delete_device:{profile.id}", style="danger")
+                )
+            )
+        action_rows.append(
+            make_rich_button_row(
+                make_rich_button(texts.BTN_BACK_TO_DEVICES, callback_data="back_to_amnezia_devices"),
+                make_rich_button(texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu"),
+            )
+        )
+        rendered += "\n" + "\n".join(action_rows)
 
     await render_hub(
         bot,
         chat_id,
         rendered,
-        keyboard,
+        reply_markup=None,
         message_effect_id=message_effect_id,
         force_new=bool(message_effect_id),
     )
