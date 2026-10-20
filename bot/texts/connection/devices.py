@@ -66,11 +66,12 @@ DEVICE_DELETE_IN_PROGRESS = "⏳ Уже удаляем устройство..."
 
 DEVICE_DELETING_PROGRESS = "⏳ Удаляю устройство..."
 
-DEVICE_MANAGE_HEADER = """📱 <b>{device_name}</b>
-
-🌍 Локация: <b>{country_display}</b>
-📊 Трафик: <b>{traffic_total}</b>
-⏱ Активность: <b>{last_connected}</b>"""
+DEVICE_MANAGE_HEADER = """<p>📱 <b>{device_name}</b></p>
+<table>
+  <tr><td>🌍 Локация: <b>{country_display}</b></td></tr>
+  <tr><td>📊 Трафик: <b>{traffic_total}</b></td></tr>
+  <tr><td>⏱ Активность: <b>{last_connected}</b></td></tr>
+</table>"""
 
 DEVICE_NAME_DUPLICATE = """⚠️ <b>Устройство с таким именем уже существует</b>
 

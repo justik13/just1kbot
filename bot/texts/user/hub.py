@@ -10,24 +10,22 @@ BOT_SHORT_DESCRIPTION = "Личный сервис безопасного дос
 
 CURRENCY_RUB_SYMBOL = "₽"
 
-HUB_HEADER = """🏠 <b>Главное меню</b>
-
-👋 Привет, <b>{name}</b>!
-🆔 <b>Telegram ID:</b> <code>{telegram_id}</code>
-
-<b>📊 Статус подписки:</b> {status}
-<b>⏳ Действует до:</b> {valid_until} ({days_left})
-<b>📱 Подключено устройств:</b> {devices_count}/{device_limit}{white_internet_line}
-
-<b>💰 Баланс:</b> {real_balance} ₽{bonus_line}{inviter_line}
+HUB_HEADER = """<p>🏠 <b>Главное меню</b></p>
+<p>👋 Привет, <b>{name}</b>! <code>(ID: {telegram_id})</code></p>
+<table>
+  <tr><td>Статус:</td><td>{status}</td></tr>
+  <tr><td>Действует до:</td><td>{valid_until} <i>({days_left})</i></td></tr>
+  <tr><td>Устройства:</td><td><b>{devices_count} / {device_limit}</b></td></tr>
+  <tr><td>Баланс:</td><td><b>{real_balance} ₽</b>{bonus_line}</td></tr>
+</table>{white_internet_line}{inviter_line}
 
 Выберите нужный раздел:"""
 
 HUB_WHITE_INTERNET_LINE_FORMAT = (
     "\n⚪️ <b>Белый Интернет:</b> {status_icon} до {expiry} ({days_left})\n"
-    "   • <i>Трафик: {traffic_rem} из {traffic_total} ГБ · {devices_count} устр.</i>"
+    "<blockquote expandable>• <i>Трафик: {traffic_rem} из {traffic_total} ГБ · {devices_count} устр.</i></blockquote>"
 )
-HUB_BONUS_LINE_FORMAT = "\n<b>🎁 Бонусный баланс:</b> {bonus_balance} ₽"
+HUB_BONUS_LINE_FORMAT = " (+{bonus_balance} 🎁)"
 
 PAYMENT_STATUS_PENDING_ICON = "⏳"
 

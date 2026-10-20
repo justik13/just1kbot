@@ -9,7 +9,12 @@ import os
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup
+from aiogram.types import (
+    CallbackQuery,
+    CopyTextButton,
+    InlineKeyboardMarkup,
+    InputRichMessage,
+)
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -42,7 +47,7 @@ from services.white_internet_service import (
     get_white_internet_tier_price,
 )
 from utils.admin import is_admin
-from utils.telegram import safe_callback_answer
+from utils.telegram import has_rich_tags, safe_callback_answer
 from utils.datetime_helpers import now_utc
 from utils.formatters import format_traffic
 from utils.security import normalize_public_domain
@@ -156,6 +161,11 @@ def get_white_internet_overview_keyboard(
             url=sub_url,
             style="success",
         )
+        if len(sub_url) <= 256:
+            builder.button(
+                text=texts.BTN_SUB_COPY_LINK,
+                copy_text=CopyTextButton(text=sub_url),
+            )
         builder.button(
             text=texts.BTN_WL_INCY_INSTRUCTIONS,
             callback_data="wl_show_link",
@@ -208,7 +218,11 @@ def get_white_internet_overview_keyboard(
 
     pattern: list[int] = []
     if has_sub_link:
-        pattern.extend([1, 1])
+        sub_url_for_pat = _build_subscription_url(bot_domain, sub.token, sub_prefix=sub_prefix)
+        pattern.append(1)
+        if len(sub_url_for_pat) <= 256:
+            pattern.append(1)
+        pattern.append(1)
     if can_renew:
         pattern.append(1)
     if has_topup and has_add_device:
@@ -426,7 +440,18 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
         has_trial_available=has_trial_available,
     )
     try:
-        await query.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+        if has_rich_tags(text):
+            try:
+                await query.message.edit_text(
+                    text,
+                    reply_markup=kb,
+                    rich_message=InputRichMessage(html=text),
+                )
+            except (TelegramBadRequest, TypeError, AttributeError) as rich_err:
+                logger.debug("Failed editing with rich_message: %s, falling back to HTML", rich_err)
+                await query.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+        else:
+            await query.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
         try:
             await query.answer(texts.WL_ALERT_TRAFFIC_UPDATED, show_alert=False)
         except Exception:
@@ -1025,14 +1050,38 @@ async def show_subscription_link(query: CallbackQuery, session: AsyncSession):
         url=sub_url,
         style="success",
     )
+    if len(sub_url) <= 256:
+        kb.button(
+            text=texts.BTN_SUB_COPY_LINK,
+            copy_text=CopyTextButton(text=sub_url),
+        )
     kb.button(text=texts.BTN_BACK, callback_data="white_internet")
     kb.adjust(1)
 
-    await query.message.edit_text(
-        texts.WL_SHOW_LINK_TEXT.format(url=html.escape(sub_url)),
-        reply_markup=kb.as_markup(),
-        parse_mode="HTML",
-    )
+    text = texts.WL_SHOW_LINK_TEXT.format(url=html.escape(sub_url))
+    if has_rich_tags(text):
+        try:
+            await query.message.edit_text(
+                text,
+                reply_markup=kb.as_markup(),
+                rich_message=InputRichMessage(html=text),
+            )
+        except (TelegramBadRequest, TypeError, AttributeError) as rich_err:
+            logger.debug(
+                "Failed editing with rich_message in show_subscription_link: %s, falling back to HTML",
+                rich_err,
+            )
+            await query.message.edit_text(
+                text,
+                reply_markup=kb.as_markup(),
+                parse_mode="HTML",
+            )
+    else:
+        await query.message.edit_text(
+            text,
+            reply_markup=kb.as_markup(),
+            parse_mode="HTML",
+        )
 
 
 @router.callback_query(F.data == "wl_reset_devices")

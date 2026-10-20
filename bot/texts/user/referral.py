@@ -52,13 +52,14 @@ REFERRAL_MAIN_RANK_RANKED = "\n🏆 Место в рейтинге: <b>#{rank}</
 
 REFERRAL_SHARE_TEXT = "🎁 Приглашаю в just1kbot! Получи скидку 25% на первый тариф по моей ссылке:"
 
-REFERRAL_TEXT_BALANCE = """🤝 <b>Реферальная программа</b>
+REFERRAL_TEXT_BALANCE = """<p>🤝 <b>Реферальная программа</b></p>
+<table>
+  <tr><td>Бонусный баланс:</td><td><b>{bonus_balance} ₽ 🎁</b></td></tr>
+  <tr><td>Ваш статус:</td><td><b>{tier_name} ({rate_pct}%)</b></td></tr>
+  <tr><td>Приглашённых:</td><td><b>{active_count}</b> (всего {invited_count})</td></tr>
+</table>{rank_line}{tier_progress_line}
 
-💰 Бонусный баланс: <b>{bonus_balance} ₽</b>
-🎖 Ваш статус: <b>{tier_name} ({rate_pct}%)</b>{rank_line}
-👥 Активных приглашённых: <b>{active_count}</b> (всего приглашено: {invited_count}){tier_progress_line}
-
-🎁 <b>Условия программы:</b>
+<blockquote expandable>🎁 <b>Условия программы:</b>
 • Вы получаете <b>от 15% до 30%</b> с каждой оплаты приглашённых пользователей на бонусный баланс.
 • <b>Лестница статусов:</b>
   ▫️ 0–2 приглашённых — <b>15% (Standard)</b>
@@ -67,10 +68,10 @@ REFERRAL_TEXT_BALANCE = """🤝 <b>Реферальная программа</b>
   ▫️ 15+ приглашённых — <b>30% (Platinum)</b>
 • Приглашённый получает <b>скидку 25%</b> на первый тариф по вашей ссылке (пополнение баланса на скидку не влияет).
 
-<i>Бонусы списываются при оплате и продлении подписки.</i>
+<i>Бонусы списываются при оплате и продлении подписки.</i></blockquote>
 
 🔗 <b>Ваша ссылка для приглашения:</b>
-<code>{referral_link}</code>{inviter_line}"""
+<blockquote expandable><code>{referral_link}</code></blockquote>{inviter_line}"""
 REFERRAL_TIER_PROGRESS_NEXT = "\nДо статуса <b>{next_tier_name} ({next_rate_pct}%)</b>: ещё {needed_count}"
 
 REFERRAL_TIER_PROGRESS_MAX = "\n🏆 <b>Максимальный статус</b>"
