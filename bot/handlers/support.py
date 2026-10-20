@@ -35,6 +35,10 @@ async def hub_menu_support(
     support_url = get_support_url(text=support_greeting, username=username)
 
     support_btn = make_rich_button(texts.BTN_CONTACT_SUPPORT, url=support_url, style="success")
+    help_btns = [
+        make_rich_button(texts.BTN_HELP_INSTRUCTIONS, callback_data="support_help", style="primary"),
+        make_rich_button(texts.SUPPORT, callback_data="faq", style="primary"),
+    ]
     legal_btns = [
         make_rich_button(texts.BTN_TOS, url=texts.TOS_AGREEMENT_URL),
         make_rich_button(texts.BTN_PRIVACY_POLICY, url=texts.PRIVACY_POLICY_URL),
@@ -45,6 +49,8 @@ async def hub_menu_support(
         texts.SUPPORT_TEXT.format(support_username=f"@{username}")
         + "\n"
         + make_rich_button_row(support_btn)
+        + "\n"
+        + make_rich_button_row(*help_btns)
         + "\n"
         + make_rich_button_row(*legal_btns)
         + "\n"

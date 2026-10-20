@@ -165,11 +165,7 @@ SUPPORT_TEXT = """<p>💬 <b>Поддержка</b></p>
 <blockquote expandable>Если у вас возникли вопросы, напишите нашему оператору:
 👤 {support_username}
 
-Мы постараемся помочь как можно скорее.</blockquote>
-<tg-button-row align="center">
-  <tg-button type="callback_data" style="primary" data="support_help">📖 Инструкции</tg-button>
-  <tg-button type="callback_data" style="primary" data="faq">❓ Частые вопросы</tg-button>
-</tg-button-row>"""
+Мы постараемся помочь как можно скорее.</blockquote>"""
 
 SUPPORT_WINDOWS_INSTRUCTION_TEXT = """<p>💻 <b>Инструкции для Windows</b></p>
 
