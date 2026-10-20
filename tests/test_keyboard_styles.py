@@ -64,7 +64,7 @@ class TestKeyboardStylesAST(unittest.TestCase):
             )
 
 
-class TestKeyboardRuntimeStyles(unittest.TestCase):
+class TestKeyboardRuntimeStyles(unittest.IsolatedAsyncioTestCase):
     """Runtime inspection of button styles on generated keyboards."""
 
     def test_order_invoice_keyboard_styles_and_support_url(self):
@@ -158,6 +158,125 @@ class TestKeyboardRuntimeStyles(unittest.TestCase):
             for btn in row:
                 if btn.style is not None:
                     self.assertIn(btn.style, ALLOWED_TELEGRAM_BUTTON_STYLES)
+
+    def test_order_invoice_keyboard_without_explicit_support_url(self):
+        """Test get_order_invoice_keyboard gracefully falls back to default support URL if omitted."""
+        kb = get_order_invoice_keyboard(
+            payment_url="https://pay.example.com/123",
+            order_id="order-fallback-test",
+            price=250,
+        )
+        rows = kb.inline_keyboard
+        self.assertEqual(len(rows), 4)
+        support_btn = rows[2][0]
+        self.assertIsNotNone(support_btn.url)
+        self.assertTrue(support_btn.url.startswith("https://t.me/"))
+
+    async def test_connection_hub_vless_reset_hwid_danger_style(self):
+        """Test _build_connections_screen assigns danger style to VLESS HWID reset button."""
+        import datetime
+        from unittest.mock import AsyncMock, patch
+        from bot.handlers.connection.common import _build_connections_screen
+        from database.models import User, VlessSubscription
+        from bot import texts
+
+        user = User(
+            id=42,
+            telegram_id=12345,
+            subscription_end=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=10),
+        )
+        session = AsyncMock()
+        mock_sub = VlessSubscription(id=1, user_id=42, token="token-vless-123")
+
+        with patch("database.repositories.vless_subscription_repo.get_subscription_by_user_id", new_callable=AsyncMock, return_value=mock_sub), \
+             patch("database.repositories.vless_subscription_repo.get_active_hwid_count", new_callable=AsyncMock, return_value=2), \
+             patch("bot.handlers.connection.common._get_effective_device_limit", new_callable=AsyncMock, return_value=3):
+            _, builder = await _build_connections_screen(user, session, [], read_only=False)
+
+        markup = builder.as_markup()
+        reset_buttons = [
+            btn for row in markup.inline_keyboard for btn in row if btn.callback_data == "vless_sub_reset"
+        ]
+        self.assertEqual(len(reset_buttons), 1)
+        self.assertEqual(reset_buttons[0].text, texts.BTN_VLESS_RESET_HWID)
+        self.assertEqual(reset_buttons[0].style, "danger")
+
+    def test_white_internet_overview_reset_devices_danger_style(self):
+        """Test get_white_internet_overview_keyboard assigns danger style to reset devices button."""
+        import datetime
+        from bot.handlers.white_internet import get_white_internet_overview_keyboard
+        from config.enums import WhiteInternetStatus
+        from database.models import WhiteInternetSubscription
+        from bot import texts
+
+        sub = WhiteInternetSubscription(
+            id=10,
+            user_id=100,
+            token="test-tok-123",
+            status=WhiteInternetStatus.ACTIVE,
+            device_limit=2,
+            is_trial=False,
+            expires_at=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=5),
+        )
+        kb = get_white_internet_overview_keyboard(sub, bot_domain="bot.example.com")
+        reset_buttons = [
+            btn for row in kb.inline_keyboard for btn in row if btn.callback_data == "wl_reset_devices"
+        ]
+        self.assertEqual(len(reset_buttons), 1)
+        self.assertEqual(reset_buttons[0].text, texts.BTN_WL_RESET_DEVICES)
+        self.assertEqual(reset_buttons[0].style, "danger")
+
+    def test_support_handler_keyboard_url_generation(self):
+        """Test _support_keyboard from support handler generates expected contact button URL."""
+        from bot.handlers.support import _support_keyboard
+        from bot import texts
+
+        kb = _support_keyboard(username="official_support", telegram_id=999888)
+        contact_btn = kb.inline_keyboard[0][0]
+        self.assertEqual(contact_btn.text, texts.BTN_CONTACT_SUPPORT)
+        self.assertTrue(contact_btn.url.startswith("https://t.me/official_support?text="))
+        self.assertIn("999888", contact_btn.url)
+
+
+class TestSupportUrlHelpers(unittest.TestCase):
+    """Unit tests for utils.support helpers."""
+
+    def test_resolve_support_username_explicit(self):
+        from utils.support import _resolve_support_username
+
+        self.assertEqual(_resolve_support_username("test_user"), "test_user")
+        self.assertEqual(_resolve_support_username("@test_user"), "test_user")
+        self.assertEqual(_resolve_support_username("   @test_user   "), "test_user")
+
+    def test_resolve_support_username_edge_cases(self):
+        from utils.support import _resolve_support_username
+
+        # If user passes empty or only '@' or spaces, it must not return empty string
+        res_at = _resolve_support_username("@")
+        self.assertTrue(bool(res_at))
+        self.assertNotEqual(res_at, "")
+
+        res_spaces = _resolve_support_username("   ")
+        self.assertTrue(bool(res_spaces))
+        self.assertNotEqual(res_spaces, "")
+
+    def test_get_support_url_without_text(self):
+        from utils.support import get_support_url
+
+        url = get_support_url(username="my_support")
+        self.assertEqual(url, "https://t.me/my_support")
+
+    def test_get_support_url_with_prefilled_text(self):
+        from utils.support import get_support_url
+        from urllib.parse import parse_qs, urlparse
+
+        text = "Здравствуйте! Мой ID: 12345. Вопрос по оплате заказа #ab/cd (450 ₽)."
+        url = get_support_url(text=text, username="@my_support")
+        self.assertTrue(url.startswith("https://t.me/my_support?text="))
+
+        parsed = urlparse(url)
+        params = parse_qs(parsed.query)
+        self.assertEqual(params["text"][0], text)
 
 
 if __name__ == "__main__":

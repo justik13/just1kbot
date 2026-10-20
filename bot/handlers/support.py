@@ -13,9 +13,14 @@ router = Router()
 def _support_keyboard(username: str, telegram_id: int | None = None):
     builder = InlineKeyboardBuilder()
 
-    from urllib.parse import quote
-    text_param = quote(texts.SUPPORT_GREETING_TEMPLATE.format(telegram_id=telegram_id)) if telegram_id else ""
-    support_url = f"https://t.me/{username}?text={text_param}" if text_param else f"https://t.me/{username}"
+    from utils.support import get_support_url
+
+    text = (
+        texts.SUPPORT_GREETING_TEMPLATE.format(telegram_id=telegram_id)
+        if telegram_id
+        else None
+    )
+    support_url = get_support_url(text=text, username=username)
 
     builder.button(
         text=texts.BTN_CONTACT_SUPPORT,

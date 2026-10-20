@@ -158,8 +158,11 @@ async def select_tariff(
         return
 
     if getattr(db_user, "has_financial_hold", False) or getattr(db_user, "financial_hold", False):
+        user_tg_id = getattr(db_user, "telegram_id", None) or (
+            callback.from_user.id if callback.from_user else None
+        )
         support_url = get_support_url(
-            texts.SUPPORT_DISPUTE_GREETING_TEMPLATE.format(telegram_id=callback.from_user.id)
+            texts.SUPPORT_DISPUTE_GREETING_TEMPLATE.format(telegram_id=user_tg_id)
         )
         await render_hub(
             callback.bot,
