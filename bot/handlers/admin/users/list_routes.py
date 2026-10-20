@@ -4,7 +4,7 @@ import math
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, DisabledButton, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -406,12 +406,12 @@ async def show_user_audit(
         if page > 1:
             builder.button(text=texts.BTN_BACK, callback_data=f"admin_user_audit:{telegram_id}:{page - 1}")
         else:
-            builder.button(text=" ⏹ ", callback_data="ignore")
-        builder.button(text=texts.PAGE_INDEX_FORMAT.format(page=page, total_pages=total_pages), callback_data="ignore")
+            builder.button(text=" ⏹ ", disabled=DisabledButton())
+        builder.button(text=texts.PAGE_INDEX_FORMAT.format(page=page, total_pages=total_pages), disabled=DisabledButton())
         if page < total_pages:
             builder.button(text=texts.BTN_PAGINATION_NEXT, callback_data=f"admin_user_audit:{telegram_id}:{page + 1}")
         else:
-            builder.button(text=" ⏹ ", callback_data="ignore")
+            builder.button(text=" ⏹ ", disabled=DisabledButton())
     builder.button(text=texts.ADMIN_USERS_LIST_K_KARTOCHKE_POLZOVATELYA, callback_data=f"admin_user_card:{telegram_id}")
     if total_pages > 1:
         builder.adjust(3, 1)

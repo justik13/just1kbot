@@ -3,7 +3,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from aiogram.types import CopyTextButton, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import CopyTextButton, DisabledButton, InlineKeyboardButton, InlineKeyboardMarkup
 from bot.handlers.connection.device_view_routes import build_display_vpn_key, render_device_screen
 from utils.telegram import render_hub, sanitize_reply_markup
 
@@ -301,6 +301,41 @@ class TestTelegramBotApi103KeyboardAudit(unittest.IsolatedAsyncioTestCase):
         res = sanitize_reply_markup(kb)
         btn = res.inline_keyboard[0][0]
         self.assertEqual(btn.text, "—")
+
+    def test_sanitize_reply_markup_preserves_disabled_button(self):
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="1/3", disabled=DisabledButton())]]
+        )
+        res = sanitize_reply_markup(kb)
+        btn = res.inline_keyboard[0][0]
+        self.assertEqual(btn.text, "1/3")
+        self.assertIsInstance(btn.disabled, DisabledButton)
+        self.assertIsNone(btn.callback_data)
+
+    def test_sanitize_reply_markup_caps_rows_at_100(self):
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text=f"Btn {i}", callback_data=f"data:{i}")] for i in range(120)]
+        )
+        res = sanitize_reply_markup(kb)
+        self.assertEqual(len(res.inline_keyboard), 100)
+        self.assertEqual(res.inline_keyboard[0][0].text, "Btn 0")
+        self.assertEqual(res.inline_keyboard[99][0].text, "Btn 99")
+
+
+    def test_sanitize_reply_markup_does_not_convert_disabled_button_to_alert_copy_too_long(self):
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton.model_construct(
+                text="Disabled",
+                disabled=DisabledButton(),
+                copy_text=CopyTextButton(text="X" * 300),
+            )]]
+        )
+        res = sanitize_reply_markup(kb)
+        btn = res.inline_keyboard[0][0]
+        self.assertEqual(btn.text, "Disabled")
+        self.assertIsInstance(btn.disabled, DisabledButton)
+        self.assertIsNone(btn.copy_text)
+        self.assertIsNone(btn.callback_data)
 
     async def test_render_hub_applies_sanitizer_end_to_end(self):
         bot = MagicMock()

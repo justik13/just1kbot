@@ -2,6 +2,11 @@
 from __future__ import annotations
 
 BOT_START_DESCRIPTION = "🚀 Запустить бота"
+BOT_DESCRIPTION = (
+    "Личный сервис безопасного доступа в интернет. "
+    "Управление подключениями и устройствами в едином интерфейсе."
+)
+BOT_SHORT_DESCRIPTION = "Личный сервис безопасного доступа в интернет"
 
 CURRENCY_RUB_SYMBOL = "₽"
 

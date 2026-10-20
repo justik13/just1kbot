@@ -11,7 +11,14 @@ from aiogram.exceptions import (
     TelegramNetworkError,
     TelegramRetryAfter,
 )
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, LinkPreviewOptions
+from aiogram.types import (
+    CallbackQuery,
+    DisabledButton,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InputFile,
+    LinkPreviewOptions,
+)
 from cachetools import TTLCache
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -84,34 +91,68 @@ async def _safe_delete_batch(
     deleted_ids: list[int] = []
     failed_ids: list[int] = []
 
-    for msg_id in msg_ids:
+    if not msg_ids:
+        return deleted_ids, failed_ids
+
+    # Deduplicate while preserving order to prevent API errors from duplicate message IDs
+    unique_ids = list(dict.fromkeys(msg_ids))
+
+    async def _delete_individually(ids_to_delete: list[int]) -> None:
+        for mid in ids_to_delete:
+            try:
+                await _retry_flood(
+                    lambda m=mid: bot.delete_message(chat_id=chat_id, message_id=m)
+                )
+                deleted_ids.append(mid)
+            except TelegramBadRequest as sub_e:
+                sub_err = str(sub_e).lower()
+                if (
+                    "not found" in sub_err
+                    or "not valid" in sub_err
+                    or "chat not found" in sub_err
+                    or "can't be deleted" in sub_err
+                    or "cannot be deleted" in sub_err
+                ):
+                    deleted_ids.append(mid)
+                else:
+                    failed_ids.append(mid)
+                    logger.warning(
+                        "TelegramBadRequest on delete_message %s in %s: %s",
+                        mid,
+                        chat_id,
+                        sub_e,
+                    )
+            except Exception as sub_e:
+                failed_ids.append(mid)
+                logger.error(
+                    "Unexpected error deleting message %s in %s: %s",
+                    mid,
+                    chat_id,
+                    sub_e,
+                )
+
+    # Telegram Bot API deleteMessages accepts up to 100 message identifiers per request
+    chunk_size = 100
+    for i in range(0, len(unique_ids), chunk_size):
+        chunk = unique_ids[i : i + chunk_size]
         try:
             await _retry_flood(
-                lambda mid=msg_id: bot.delete_message(chat_id=chat_id, message_id=mid)
+                lambda c=chunk: bot.delete_messages(chat_id=chat_id, message_ids=c)
             )
-            deleted_ids.append(msg_id)
+            deleted_ids.extend(chunk)
         except TelegramBadRequest as e:
-            err_str = str(e).lower()
-            if (
-                "message to delete not found" in err_str
-                or "message identifier is not valid" in err_str
-                or "chat not found" in err_str
-                or "message can't be deleted" in err_str
-            ):
-                deleted_ids.append(msg_id)
-            else:
-                failed_ids.append(msg_id)
-                logger.warning(
-                    "TelegramBadRequest on delete_message %s in %s: %s",
-                    msg_id,
-                    chat_id,
-                    e,
-                )
+            logger.warning(
+                "TelegramBadRequest on delete_messages %s in %s: %s; falling back to individual deletions",
+                chunk,
+                chat_id,
+                e,
+            )
+            await _delete_individually(chunk)
         except Exception as e:
-            failed_ids.append(msg_id)
+            failed_ids.extend(chunk)
             logger.error(
-                "Unexpected error deleting message %s in %s: %s",
-                msg_id,
+                "Unexpected error deleting messages %s in %s: %s",
+                chunk,
                 chat_id,
                 e,
             )
@@ -416,8 +457,17 @@ def sanitize_reply_markup(reply_markup: InlineKeyboardMarkup | None) -> InlineKe
             if not btn_text.strip():
                 updates["text"] = "—"
 
-            # 2. Check copy_text: Telegram Bot API specifies 1 <= len(text) <= 256
-            if getattr(btn, "copy_text", None) is not None:
+            # 2. Check disabled button: strip redundant callback_data / copy_text if button is disabled
+            is_disabled = isinstance(getattr(btn, "disabled", None), DisabledButton)
+
+            if is_disabled:
+                if getattr(btn, "callback_data", None) is not None:
+                    updates["callback_data"] = None
+                if getattr(btn, "copy_text", None) is not None:
+                    updates["copy_text"] = None
+
+            # 3. Check copy_text: Telegram Bot API specifies 1 <= len(text) <= 256
+            if getattr(btn, "copy_text", None) is not None and "copy_text" not in updates:
                 cp_text = getattr(btn.copy_text, "text", "") or ""
                 if not (1 <= len(cp_text) <= 256):
                     updates["copy_text"] = None
@@ -430,6 +480,7 @@ def sanitize_reply_markup(reply_markup: InlineKeyboardMarkup | None) -> InlineKe
                         or btn.switch_inline_query_chosen_chat
                         or btn.callback_game
                         or btn.pay
+                        or is_disabled
                     ):
                         updates["callback_data"] = "alert:copy_too_long"
                     logger.error(
@@ -438,7 +489,7 @@ def sanitize_reply_markup(reply_markup: InlineKeyboardMarkup | None) -> InlineKe
                         len(cp_text),
                     )
 
-            # 3. Check callback_data: Telegram Bot API specifies 1 <= len(utf-8 bytes) <= 64
+            # 4. Check callback_data: Telegram Bot API specifies 1 <= len(utf-8 bytes) <= 64
             if getattr(btn, "callback_data", None) is not None and "callback_data" not in updates:
                 cb_str = str(btn.callback_data)
                 cb_bytes = cb_str.encode("utf-8")
@@ -465,6 +516,15 @@ def sanitize_reply_markup(reply_markup: InlineKeyboardMarkup | None) -> InlineKe
                 sanitized_rows.append(sanitized_row[i : i + 8])
         else:
             sanitized_rows.append(sanitized_row)
+
+    # 5. Check total rows: cap at 100 rows to satisfy Telegram Bot API maximum
+    if len(sanitized_rows) > 100:
+        has_changes = True
+        logger.error(
+            "KEYBOARD_ROW_OVERFLOW: Sanitized keyboard has %s rows (capped at 100)",
+            len(sanitized_rows),
+        )
+        sanitized_rows = sanitized_rows[:100]
 
     if not has_changes:
         return reply_markup
