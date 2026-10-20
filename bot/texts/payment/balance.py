@@ -60,7 +60,7 @@ BALANCE_TOPUP_CARD = """<p>💳 <b>Пополнение баланса</b></p>
   <tr><td>К оплате:</td><td><b>{value_0} ₽</b></td></tr>
   <tr><td>Текущий баланс:</td><td><b>{value_1} ₽</b></td></tr>
 </table>
-<blockquote expandable>Ссылка ведёт на защищённую страницу ЮKassa.
+<blockquote>Ссылка ведёт на защищённую страницу ЮKassa.
 Если возникла задержка зачисления — напишите в поддержку.</blockquote>"""
 
 BALANCE_TOTAL_AVAILABLE_LABEL = "💰 Баланс: <b>{int_balance_real_available} ₽</b>"

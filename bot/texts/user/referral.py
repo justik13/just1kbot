@@ -73,10 +73,8 @@ REFERRAL_TEXT_BALANCE = """<p>🤝 <b>Реферальная программа<
 <i>Бонусы списываются при оплате и продлении подписки.</i></blockquote>
 
 <p>🔗 <b>Ваша ссылка для приглашения:</b></p>
-<blockquote expandable><code>{referral_link}</code></blockquote>{inviter_line}
-<tg-button-row align="center">
-  <tg-button type="copy_text" text="{referral_link}">📋 Скопировать ссылку</tg-button>
-</tg-button-row>
+<code>{referral_link}</code>
+<p><i>(нажмите на ссылку, чтобы скопировать)</i></p>{inviter_line}
 <tg-button-row align="center">
   <tg-button type="callback_data" style="primary" data="referrals_list">👥 Мои рефералы ({invited_count})</tg-button>
   <tg-button type="callback_data" style="primary" data="referral_leaderboard">🏆 Топ-5 лидеров</tg-button>

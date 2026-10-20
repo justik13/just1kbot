@@ -198,16 +198,10 @@ async def render_device_screen(
 
         if display_key:
             copy_hint = texts.CONNECTION_CONFIG_DEVICE_VIEW_NAZHMITE_NA_MONOSHIRINNYY_KLYU
-            copy_btn = (
-                texts.CONNECTION_DEVICE_VIEW_COPY_KEY_BUTTON_ROW.format(key=safe(display_key))
-                if (1 <= len(display_key) <= 256)
-                else ""
-            )
             key_block = (
-                texts.CONNECTION_CONFIG_DEVICE_VIEW_KEY_PODKLYUCHENIYA.format()+
-                texts.CONNECTION_CONFIG_DEVICE_VIEW_KEY_BLOCKQUOTE.format(key=safe(display_key))+
-                f"{copy_btn}"+
-                f"{copy_hint}"
+                texts.CONNECTION_CONFIG_DEVICE_VIEW_KEY_PODKLYUCHENIYA.format()
+                + texts.CONNECTION_CONFIG_DEVICE_VIEW_KEY_BLOCKQUOTE.format(key=safe(display_key))
+                + f"{copy_hint}"
             )
             if len(rendered) + len(key_block) <= 4000:
                 rendered += key_block

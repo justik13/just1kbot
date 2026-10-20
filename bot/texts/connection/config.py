@@ -171,5 +171,5 @@ EMOJI_GLOBE = "🌍"
 
 LABEL_UNKNOWN_CAP = "Неизвестно"
 
-CONNECTION_CONFIG_DEVICE_VIEW_KEY_BLOCKQUOTE = "<blockquote expandable><code>{key}</code></blockquote>\n"
+CONNECTION_CONFIG_DEVICE_VIEW_KEY_BLOCKQUOTE = "<code>{key}</code>\n"
 

@@ -168,11 +168,6 @@ def get_white_internet_overview_keyboard(
             url=sub_url,
             style="success",
         )
-        if len(sub_url) <= 256:
-            builder.button(
-                text=texts.BTN_SUB_COPY_LINK,
-                copy_text=CopyTextButton(text=sub_url),
-            )
         builder.button(
             text=texts.BTN_WL_INCY_INSTRUCTIONS,
             callback_data="wl_show_link",
@@ -225,10 +220,7 @@ def get_white_internet_overview_keyboard(
 
     pattern: list[int] = []
     if has_sub_link:
-        sub_url_for_pat = _build_subscription_url(bot_domain, sub.token, sub_prefix=sub_prefix)
         pattern.append(1)
-        if len(sub_url_for_pat) <= 256:
-            pattern.append(1)
         pattern.append(1)
     if can_renew:
         pattern.append(1)
@@ -1115,14 +1107,13 @@ async def show_subscription_link(query: CallbackQuery, session: AsyncSession):
         return
 
     sub_url = _build_subscription_url(sub_domain, sub.token, sub_prefix=sub_prefix)
-    copy_btn = make_rich_button(texts.BTN_SUB_COPY_LINK, copy_text=sub_url)
     connect_btn = make_rich_button(texts.BTN_SUB_CONNECT_INCY, url=sub_url, style="success")
     nav_row = make_rich_nav_row("white_internet")
 
     rich_text = (
         texts.WL_SHOW_LINK_TEXT.format(url=html.escape(sub_url))
         + "\n"
-        + make_rich_button_row(copy_btn, connect_btn)
+        + make_rich_button_row(connect_btn)
         + "\n"
         + nav_row
     )

@@ -85,7 +85,7 @@ SUPPORT_DOWNLOAD_CLIENT_TEXT = """<p>📥 <b>Скачать клиент Amnezia
 
 Официальные ссылки для загрузки приложения AmneziaVPN для Windows, Android, iOS, macOS и Linux:
 
-<blockquote expandable>• <b>Прямая ссылка (Зеркало)</b> — загрузка последней сборки клиента
+<blockquote>• <b>Прямая ссылка (Зеркало)</b> — загрузка последней сборки клиента
 • <b>GitHub Releases</b> — релизы и бинарные файлы всех версий
 • <b>Официальный сайт Amnezia</b> — подробная информация</blockquote>
 <tg-button-row align="center">
@@ -108,7 +108,7 @@ SUPPORT_HELP_ROOT_TEXT = """<p>📖 <b>Инструкции и справка</b
 
 В этом разделе собраны пошаговые руководства по подключению и настройке приложений.
 
-<blockquote expandable>⚠️ <b>Правила и рекомендации:</b>
+<blockquote>⚠️ <b>Правила и рекомендации:</b>
 • Не рекомендуется использовать торренты и P2P-сети.
 • Часть сайтов или сервисов может быть недоступна по решению провайдеров.</blockquote>
 
@@ -118,14 +118,14 @@ SUPPORT_INCY_INSTRUCTION_TEXT = """<p>📱 <b>Инструкция по подк
 
 <b>INCY</b> — удобное приложение для стабильного интернета на смартфонах и планшетах.
 
-<blockquote expandable><b>Шаг 1. Установите приложение:</b>
+<blockquote><b>Шаг 1. Установите приложение:</b>
 • 🍏 <a href="https://apps.apple.com/app/incy/id6756943388">Установить из App Store (iPhone / iPad)</a>
 • 🤖 <a href="https://play.google.com/store/apps/details?id=llc.itdev.incy">Установить из Google Play (Android)</a>
 • 📦 <a href="https://github.com/INCY-DEV/incy-platforms/releases">Скачать файл APK напрямую (GitHub)</a>
 
 <b>Шаг 2. Скопируйте ссылку подписки:</b>
 • В боте перейдите в раздел <b>«⚪️ Белый Интернет»</b>.
-• Нажмите кнопку <b>«📋 Скопировать ссылку подписки»</b>.
+• Нажмите на ссылку подписки в поле или используйте кнопку подключения.
 
 <b>Шаг 3. Добавьте подписку в INCY:</b>
 1. Запустите приложение <b>INCY</b>.
@@ -144,14 +144,14 @@ SUPPORT_INCY_INSTRUCTION_TEXT = """<p>📱 <b>Инструкция по подк
 
 SUPPORT_IOS_INSTRUCTION_TEXT = """<p>🍏 <b>Установка AmneziaVPN на iOS для жителей России</b></p>
 
-<blockquote expandable>Подробное пошаговое руководство по скачиванию и первичной настройке приложения AmneziaVPN на iPhone и iPad в условиях региональных ограничений App Store.</blockquote>
+<blockquote>Подробное пошаговое руководство по скачиванию и первичной настройке приложения AmneziaVPN на iPhone и iPad в условиях региональных ограничений App Store.</blockquote>
 <tg-button-row align="center">
   <tg-button type="url" style="primary" url="https://storage.googleapis.com/amnezia/docs?m-path=/documentation/instructions/installing-amneziavpn-on-ios/">📖 Открыть инструкцию</tg-button>
 </tg-button-row>"""
 
 SUPPORT_SPLIT_TUNNELING_TEXT = """<p>🔀 <b>Инструкция для Раздельного Туннелирования</b></p>
 
-<blockquote expandable>Раздельное туннелирование (Split Tunneling) позволяет направить через выбранное подключение только нужные сайты или приложения, сохраняя обычное подключение для остальных ресурсов.</blockquote>
+<blockquote>Раздельное туннелирование (Split Tunneling) позволяет направить через выбранное подключение только нужные сайты или приложения, сохраняя обычное подключение для остальных ресурсов.</blockquote>
 <tg-button-row align="center">
   <tg-button type="url" style="primary" url="https://storage.googleapis.com/amnezia/docs?m-path=/documentation/instructions/vpn-split-tunneling/">🔀 Открыть инструкцию</tg-button>
 </tg-button-row>"""
@@ -162,14 +162,14 @@ SUPPORT_TEXT = """<p>💬 <b>Поддержка</b></p>
   <tr><td>Ответ:</td><td>Обычно в течение 10–15 минут</td></tr>
 </table>
 
-<blockquote expandable>Если у вас возникли вопросы, напишите нашему оператору:
+<blockquote>Если у вас возникли вопросы, напишите нашему оператору:
 👤 {support_username}
 
 Мы постараемся помочь как можно скорее.</blockquote>"""
 
 SUPPORT_WINDOWS_INSTRUCTION_TEXT = """<p>💻 <b>Инструкции для Windows</b></p>
 
-<blockquote expandable>Руководства по установке и обновлению приложения AmneziaVPN на ПК под управлением Windows.</blockquote>
+<blockquote>Руководства по установке и обновлению приложения AmneziaVPN на ПК под управлением Windows.</blockquote>
 <tg-button-row align="center">
   <tg-button type="url" style="primary" url="https://storage.googleapis.com/amnezia/docs?m-path=/documentation/instructions/installing-app-on-windows/">📥 Установка на Windows</tg-button>
   <tg-button type="url" style="primary" url="https://storage.googleapis.com/amnezia/docs?m-path=/documentation/instructions/application-update-on-windows/">🔄 Обновление</tg-button>

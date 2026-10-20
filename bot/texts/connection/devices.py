@@ -157,8 +157,8 @@ VLESS_SUB_SCREEN_TEXT = """⚡️ <b>Основное подключение п�
 
 📋 <b>Ваша ссылка на подписку:</b>
 <code>{sub_url}</code>
+<p><i>(нажмите на ссылку, чтобы скопировать)</i></p>
 <tg-button-row align="center">
-  <tg-button type="copy_text" text="{sub_url}">📋 Скопировать ссылку</tg-button>
   <tg-button type="url" style="success" url="{sub_url}">🚀 Подключить в INCY</tg-button>
 </tg-button-row>
 
@@ -189,15 +189,9 @@ CONNECTION_HUB_ACTIVE_TEXT = """<p>🌐 <b>Подключение</b></p>
   <tr><td>Разбивка:</td><td>по ссылке: {vless_count} · Amnezia: {amnezia_count}</td></tr>
 </table>
 
-<p>⚡️ <b>Основное подключение по ссылке (INCY)</b></p>
-<blockquote expandable>Единая ссылка даёт доступ сразу ко всем серверам с автообновлением без ручной настройки отдельных ключей. Рекомендуется для всех ваших устройств.
-
-📋 <b>Ссылка на подписку:</b>
+<p>⚡️ <b>Ссылка для подключения (INCY):</b></p>
 <code>{sub_url}</code>
-<i>(нажмите на ссылку для копирования)</i></blockquote>{sub_button_row}
-
-<blockquote expandable>🛡 <b>Устройства Amnezia:</b>
-Для приложений Amnezia или роутеров перейдите в раздел ниже.</blockquote>"""
+<p><i>(нажмите на ссылку, чтобы скопировать)</i></p>{sub_button_row}"""
 
 CONNECTION_HUB_EXPIRED_TEXT = """<p>🌐 <b>Подключение</b></p>
 <table>
@@ -229,7 +223,7 @@ AMNEZIA_SCREEN_EMPTY_TEXT = """<p>🛡 <b>Устройства Amnezia</b></p>
   <tr><td>Разбивка:</td><td>по ссылке: {vless_count} · Amnezia: 0</td></tr>
 </table>
 
-<blockquote expandable>У вас пока нет добавленных устройств Amnezia.</blockquote>{action_hint}{add_device_row}"""
+<p><i>У вас пока нет добавленных устройств Amnezia.</i></p>{action_hint}{add_device_row}"""
 
 VLESS_FEED_EXPIRED_TITLE = "⚠️ Подписка закончилась"
 VLESS_FEED_EXPIRED_NOTICE = "⚠️ Подписка закончилась. Продлите доступ: @{bot_username}"
@@ -251,7 +245,6 @@ LANDING_INACTIVE_DESC_EXHAUSTED = "Включенный пакет трафик�
 
 CONNECTION_SUB_BUTTON_ROW_TEMPLATE = (
     '\n<tg-button-row align="center">\n'
-    '  <tg-button type="copy_text" text="{sub_url}">📋 Скопировать ссылку</tg-button>\n'
     '  <tg-button type="url" style="success" url="{sub_url}">🚀 Подключить в INCY</tg-button>\n'
     '</tg-button-row>'
 )
@@ -261,11 +254,7 @@ AMNEZIA_ADD_DEVICE_ROW = (
     '</tg-button-row>'
 )
 AMNEZIA_DEVICES_TABLE_TEMPLATE = "<table><tr><th>Устройство</th><th>Локация</th><th>Трафик</th></tr>{rows}</table>"
-CONNECTION_DEVICE_VIEW_COPY_KEY_BUTTON_ROW = (
-    '\n<tg-button-row align="center">\n'
-    '  <tg-button type="copy_text" text="{key}">📋 Скопировать ключ</tg-button>\n'
-    '</tg-button-row>'
-)
+CONNECTION_DEVICE_VIEW_COPY_KEY_BUTTON_ROW = ""
 
 
 

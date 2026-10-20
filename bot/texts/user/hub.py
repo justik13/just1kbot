@@ -34,8 +34,8 @@ HUB_HEADER = """<h2>🏠 Личный кабинет</h2>
 </tg-button-row>{admin_row}{mtproto_row}"""
 
 HUB_WHITE_INTERNET_LINE_FORMAT = (
-    "\n⚪️ <b>Белый Интернет:</b> {status_icon} до {expiry} ({days_left})\n"
-    "<blockquote expandable>• <i>Трафик: {traffic_rem} из {traffic_total} ГБ · {devices_count} устр.</i></blockquote>"
+    "\n⚪️ <b>Белый Интернет:</b> {status_icon} до {expiry} <i>({days_left})</i>\n"
+    "• <i>Трафик: {traffic_rem} из {traffic_total} ГБ · {devices_count} устр.</i>\n"
 )
 HUB_BONUS_LINE_FORMAT = " (+{bonus_balance} 🎁)"
 

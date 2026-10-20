@@ -89,12 +89,11 @@ WL_OVERVIEW_ACTIVE = (
 )
 WL_OVERVIEW_SUB_URL_BLOCK = (
     "\n<p>📋 <b>Ваша ссылка на подписку:</b></p>\n"
-    "<blockquote expandable><code>{sub_url}</code></blockquote>\n"
+    "<code>{sub_url}</code>\n"
+    "<p><i>(нажмите на ссылку для копирования)</i></p>\n"
     '<tg-button-row align="center">\n'
-    '  <tg-button type="copy_text" text="{sub_url}">📋 Скопировать ссылку</tg-button>\n'
     '  <tg-button type="url" style="success" url="{sub_url}">🚀 Подключить в приложении</tg-button>\n'
-    "</tg-button-row>\n"
-    "<p><i>(нажмите на ссылку для копирования)</i></p>"
+    "</tg-button-row>"
 )
 
 WL_TOPUP_MENU_TEXT = (
@@ -114,7 +113,7 @@ WL_INCY_INSTRUCTIONS_TEXT = (
     "   🤖 <a href=\"https://play.google.com/store/apps/details?id=llc.itdev.incy\">Скачать в Google Play (для Android)</a>\n"
     "   💻 / 📦 <a href=\"https://github.com/INCY-DEV/incy-platforms/releases\">Скачать для ПК (Windows, macOS, Linux) или APK (GitHub)</a>\n\n"
     "2️⃣ <b>Скопируйте вашу ссылку подписки:</b>\n"
-    "<blockquote expandable><code>{url}</code></blockquote>\n"
+    "<code>{url}</code>\n"
     "<i>(нажмите на ссылку выше для копирования)</i>\n\n"
     "3️⃣ <b>Добавьте подписку в INCY:</b>\n"
     "   • Откройте приложение <b>INCY</b>\n"

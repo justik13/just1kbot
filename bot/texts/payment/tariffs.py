@@ -66,7 +66,7 @@ PAYMENT_ORDER_INVOICE_CARD = """<p>💳 <b>Оплата заказа</b></p>
   <tr><td>Срок:</td><td>{duration_days} дней</td></tr>
   <tr><td>К оплате:</td><td><b>{price} ₽</b></td></tr>
 </table>
-<blockquote expandable>Нажмите кнопку ниже для перехода к безопасной оплате.
+<blockquote>Нажмите кнопку ниже для перехода к безопасной оплате.
 Подписка активируется автоматически сразу после завершения платежа.
 Если возникла задержка — напишите в поддержку.</blockquote>"""
 
@@ -123,7 +123,7 @@ PAYMENT_SHOWCASE_ORDER_CARD = """<p>💳 <b>Оформление заказа</b
   <tr><td>Баланс:</td><td>{balance_before} ₽</td></tr>
   <tr><td>После покупки:</td><td><b>{balance_after} ₽</b>{shortage_line}</td></tr>
 </table>
-<blockquote expandable>Покупка выполняется только после отдельного подтверждения.</blockquote>"""
+<blockquote>Покупка выполняется только после отдельного подтверждения.</blockquote>"""
 
 PAYMENT_STATUS_ACTIVE_BADGE = " ✅"
 
@@ -138,7 +138,7 @@ PAYMENT_TARIFF_CHANGE_HEADER_CARD = """<p>💱 <b>Смена тарифа</b></p
   <tr><td>Баланс:</td><td>{balance_before} ₽</td></tr>
   <tr><td>После смены:</td><td><b>{balance_after} ₽</b>{shortage_line}</td></tr>
 </table>
-<blockquote expandable>Остаточная стоимость подписки используется только в этом расчёте и не зачисляется на свободный баланс.</blockquote>"""
+<blockquote>Остаточная стоимость подписки используется только в этом расчёте и не зачисляется на свободный баланс.</blockquote>"""
 
 PAYMENT_USER_NOT_REGISTERED = """⚠️ <b>Аккаунт не найден</b>
 
