@@ -97,9 +97,11 @@ async def render_tariff_showcase(
         name = get_tariff_display_name(limit)
         min_price = min(int(t.price_rub) for t in group_tariffs)
         rows.append(
-            f"<tr><td>{name}</td><td>до {limit}</td><td><b>от {min_price} ₽</b></td></tr>"
+            texts.PAYMENT_SHOWCASE_TABLE_ROW_TEMPLATE.format(
+                name=name, limit=limit, min_price=min_price
+            )
         )
-    table = f"<table><tr><th>Тариф</th><th>Лимит</th><th>Цена</th></tr>{''.join(rows)}</table>"
+    table = texts.PAYMENT_SHOWCASE_TABLE_TEMPLATE.format(rows="".join(rows))
     text = f"{texts.PAYMENT_SHOWCASE_HEADER}\n{table}"
     keyboard = get_tariff_showcase_keyboard(grouped)
     await render_hub(
@@ -142,17 +144,9 @@ async def _show_hub(
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=texts.BTN_PAYMENT_RENEW_SUBSCRIPTION,
-        callback_data="payment_quick_renew",
-        style="success",
-    )
-    builder.button(
-        text=texts.BTN_CHANGE_TARIFF, callback_data="payment_change_tariff"
-    )
-    builder.button(
         text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu"
     )
-    builder.adjust(1, 1, 1)
+    builder.adjust(1)
     await render_hub(
         callback.bot,
         callback.message.chat.id,

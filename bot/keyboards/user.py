@@ -26,11 +26,14 @@ def get_history_keyboard(back_callback: str = "menu_balance") -> InlineKeyboardM
 def get_referral_keyboard(
     referral_link: str,
     count: int = 0,
+    *,
+    include_copy: bool = True,
+    include_leaderboard: bool = True,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
     has_copy = False
-    if referral_link:
+    if include_copy and referral_link:
         if 1 <= len(referral_link) <= 256:
             builder.button(
                 text=texts.BUTTON_COPY_REFERRAL,
@@ -52,17 +55,22 @@ def get_referral_keyboard(
         text=texts.BUTTON_REFERRAL_LIST_COUNT.format(count=count),
         callback_data="referrals_list",
     )
-    builder.button(
-        text=texts.BTN_REFERRAL_LEADERBOARD,
-        callback_data="referral_leaderboard",
-    )
+    if include_leaderboard:
+        builder.button(
+            text=texts.BTN_REFERRAL_LEADERBOARD,
+            callback_data="referral_leaderboard",
+        )
     builder.button(
         text=texts.BTN_MAIN_MENU_NAV,
         callback_data="back_to_main_menu",
     )
 
-    if has_copy:
+    if has_copy and include_leaderboard:
         builder.adjust(2, 2, 1)
+    elif not has_copy and not include_leaderboard:
+        builder.adjust(1, 1, 1)
+    elif has_copy:
+        builder.adjust(2, 1, 1)
     else:
         builder.adjust(1, 2, 1)
 

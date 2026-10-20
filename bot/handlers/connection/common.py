@@ -6,7 +6,6 @@ from config.constants import (
 )
 from datetime import timedelta
 
-from aiogram.types import CopyTextButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -158,7 +157,7 @@ async def _build_connections_screen(
             tariff_name = get_tariff_display_name(device_limit)
 
         sub_button_row = (
-            f'\n<tg-button-row align="center">\n  <tg-button type="copy_text" text="{sub_url}">📋 Скопировать ссылку</tg-button>\n  <tg-button type="url" style="success" url="{sub_url}">🚀 Подключить в INCY</tg-button>\n</tg-button-row>'
+            texts.CONNECTION_SUB_BUTTON_ROW_TEMPLATE.format(sub_url=sub_url)
             if (sub_url and 1 <= len(sub_url) <= 256)
             else ""
         )
@@ -177,15 +176,11 @@ async def _build_connections_screen(
 
     has_sub_btn = bool(sub_url and 1 <= len(sub_url) <= 256)
     if not read_only:
-        if has_sub_btn:
+        if not has_sub_btn and sub_url:
             builder.button(
                 text=texts.BTN_SUB_CONNECT_INCY,
                 url=sub_url,
                 style="success",
-            )
-            builder.button(
-                text=texts.BTN_SUB_COPY_LINK,
-                copy_text=CopyTextButton(text=sub_url),
             )
         builder.button(
             text=texts.BTN_INCY_INSTRUCTIONS,
@@ -250,14 +245,20 @@ async def _build_amnezia_screen(
             if (not read_only and total_active_devices < device_limit)
             else (texts.AMNEZIA_SCREEN_HINT_LIMIT if not read_only else "")
         )
+        add_device_row = (
+            texts.AMNEZIA_ADD_DEVICE_ROW
+            if (not read_only and total_active_devices < device_limit)
+            else ""
+        )
         rendered = texts.AMNEZIA_SCREEN_EMPTY_TEXT.format(
             active=total_active_devices,
             limit=device_limit,
             vless_count=vless_hwid_count,
             action_hint=action_hint,
+            add_device_row=add_device_row,
         )
     else:
-        table_rows = ["<table><tr><th>Устройство</th><th>Локация</th><th>Трафик</th></tr>"]
+        row_items = []
         for profile in profiles:
             server = profile.server
 
@@ -293,12 +294,11 @@ async def _build_amnezia_screen(
             if profile.provisioning_status in labels:
                 status_suffix = f" ({labels[profile.provisioning_status]})"
 
-            table_rows.append(
+            row_items.append(
                 f"<tr><td>📱 {safe(profile.device_name)}{status_suffix}</td><td>{location_label}</td><td>{traffic_str}</td></tr>"
             )
 
-        table_rows.append("</table>")
-        profiles_block = "\n" + "".join(table_rows)
+        profiles_block = "\n" + texts.AMNEZIA_DEVICES_TABLE_TEMPLATE.format(rows="".join(row_items))
 
         rendered = texts.AMNEZIA_SCREEN_TEXT.format(
             active=total_active_devices,
@@ -309,7 +309,7 @@ async def _build_amnezia_screen(
         )
 
     action_buttons_count = 0
-    if not read_only and total_active_devices < device_limit:
+    if not read_only and total_active_devices < device_limit and profiles:
         builder.button(
             text=texts.BTN_ADD_DEVICE,
             callback_data="add_device",

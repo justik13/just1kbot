@@ -16,7 +16,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.keyboards import (
     get_back_button,
-    get_balance_amounts_keyboard,
     get_balance_history_keyboard,
     get_balance_keyboard,
     get_dispute_blocked_keyboard,
@@ -92,7 +91,7 @@ def _history_lines(entries: list) -> str:
         rows.append(
             f"<tr><td>{format_datetime(entry.created_at)}</td><td>{label}</td><td><b>{sign}{amount} ₽</b></td></tr>"
         )
-    return f"<table><tr><th>Дата</th><th>Операция</th><th>Сумма</th></tr>{''.join(rows)}</table>"
+    return texts.BALANCE_HISTORY_TABLE_TEMPLATE.format(rows=''.join(rows))
 
 
 def _pending_topup_conditions(user_id: int):
@@ -169,7 +168,7 @@ async def _render_balance(
     prefix = f"{notice}\n\n" if notice else ""
     rich_actions = (
         '\n<tg-button-row align="center">\n'
-        '  <tg-button type="callback_data" style="success" data="topup_balance">➕ Пополнить счёт</tg-button>\n'
+        '  <tg-button type="callback_data" style="success" data="balance_topup">➕ Пополнить счёт</tg-button>\n'
         '  <tg-button type="callback_data" style="primary" data="balance_history:0">🧾 История</tg-button>\n'
         '</tg-button-row>'
     )
@@ -544,7 +543,7 @@ async def choose_topup_amount(
         callback.bot,
         callback.message.chat.id,
         text,
-        get_balance_amounts_keyboard(amounts),
+        get_back_button("menu_balance"),
     )
 
 

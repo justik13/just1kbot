@@ -52,7 +52,7 @@ WL_OVERVIEW_NO_SUB = (
     "<b>Тариф:</b> {price} ₽ / {days} дней\n"
     "<b>Включено:</b> {traffic} ГБ трафика\n"
     '<tg-button-row align="center">\n'
-    '  <tg-button type="callback_data" style="success" data="wl_buy_base">🚀 Оформить доступ ({price} ₽)</tg-button>\n'
+    '  <tg-button type="callback_data" style="success" data="wl_buy_preview">🚀 Оформить доступ ({price} ₽)</tg-button>\n'
     "</tg-button-row>"
 )
 
@@ -69,7 +69,7 @@ WL_OVERVIEW_TRIAL_NO_SUB = (
     "📊 <b>Включено:</b> {traffic} ГБ трафика\n"
     "💰 <b>Стоимость:</b> 0 ₽ (Бесплатно)\n"
     '<tg-button-row align="center">\n'
-    '  <tg-button type="callback_data" style="success" data="wl_activate_trial">🎁 Активировать бесплатно</tg-button>\n'
+    '  <tg-button type="callback_data" style="success" data="wl_trial_activate">🎁 Активировать бесплатно</tg-button>\n'
     "</tg-button-row>"
 )
 

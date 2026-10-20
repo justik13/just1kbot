@@ -28,16 +28,6 @@ def _support_keyboard(username: str, telegram_id: int | None = None):
     )
 
     builder.button(
-        text=texts.BTN_HELP_INSTRUCTIONS,
-        callback_data="support_help",
-    )
-
-    builder.button(
-        text=texts.SUPPORT,
-        callback_data="faq",
-    )
-
-    builder.button(
         text=texts.BTN_TOS,
         url=texts.TOS_AGREEMENT_URL,
     )
@@ -52,7 +42,7 @@ def _support_keyboard(username: str, telegram_id: int | None = None):
         callback_data="back_to_main_menu",
     )
 
-    builder.adjust(1, 2, 2, 1)
+    builder.adjust(1, 2, 1)
 
     return builder.as_markup()
 
@@ -177,14 +167,6 @@ async def show_help_download(callback: CallbackQuery):
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=texts.BTN_DOWNLOAD_MIRROR,
-        url=texts.AMNEZIA_DOWNLOAD_MIRROR,
-    )
-    builder.button(
-        text=texts.BTN_LATEST_VERSION_GITHUB,
-        url=texts.AMNEZIA_GITHUB_LATEST,
-    )
-    builder.button(
         text=texts.BTN_OFFICIAL_SITE_AMNEZIA,
         url=texts.AMNEZIA_OFFICIAL_SITE,
     )
@@ -196,7 +178,7 @@ async def show_help_download(callback: CallbackQuery):
         text=texts.BTN_MAIN_MENU_NAV,
         callback_data="back_to_main_menu",
     )
-    builder.adjust(1, 1, 1, 2)
+    builder.adjust(1, 2)
 
     await render_hub(
         callback.bot,
@@ -216,10 +198,6 @@ async def show_help_ios(callback: CallbackQuery):
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=texts.BTN_OPEN_IOS_INSTRUCTION,
-        url=texts.AMNEZIA_IOS_RU,
-    )
-    builder.button(
         text=texts.BTN_BACK,
         callback_data=back_cb,
     )
@@ -227,7 +205,7 @@ async def show_help_ios(callback: CallbackQuery):
         text=texts.BTN_MAIN_MENU_NAV,
         callback_data="back_to_main_menu",
     )
-    builder.adjust(1, 2)
+    builder.adjust(2)
 
     await render_hub(
         callback.bot,
@@ -247,14 +225,6 @@ async def show_help_windows(callback: CallbackQuery):
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=texts.BTN_INSTALL_WINDOWS,
-        url=texts.AMNEZIA_WIN_INSTALL,
-    )
-    builder.button(
-        text=texts.BTN_UPDATE_WINDOWS,
-        url=texts.AMNEZIA_WIN_UPDATE,
-    )
-    builder.button(
         text=texts.BTN_BACK,
         callback_data=back_cb,
     )
@@ -262,7 +232,7 @@ async def show_help_windows(callback: CallbackQuery):
         text=texts.BTN_MAIN_MENU_NAV,
         callback_data="back_to_main_menu",
     )
-    builder.adjust(1, 1, 2)
+    builder.adjust(2)
 
     await render_hub(
         callback.bot,
@@ -282,10 +252,6 @@ async def show_help_split(callback: CallbackQuery):
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=texts.BTN_OPEN_SPLIT_TUNNEL_INSTRUCTION,
-        url=texts.AMNEZIA_SPLIT_TUNNELING,
-    )
-    builder.button(
         text=texts.BTN_BACK,
         callback_data=back_cb,
     )
@@ -293,7 +259,7 @@ async def show_help_split(callback: CallbackQuery):
         text=texts.BTN_MAIN_MENU_NAV,
         callback_data="back_to_main_menu",
     )
-    builder.adjust(1, 2)
+    builder.adjust(2)
 
     await render_hub(
         callback.bot,

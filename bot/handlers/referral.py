@@ -108,7 +108,7 @@ async def show_history(
             rows.append(
                 f"<tr><td>{status_icon}</td><td>{date}</td><td><b>{amount} {currency}</b></td></tr>"
             )
-        table = f"<table><tr><th>Статус</th><th>Дата</th><th>Сумма</th></tr>{''.join(rows)}</table>"
+        table = texts.REFERRAL_PAYMENTS_TABLE_TEMPLATE.format(rows=''.join(rows))
         rendered = texts.HISTORY_HEADER + table
 
         if len(payments) > 10:
@@ -190,7 +190,12 @@ async def show_referral(
             referral_link=referral_link,
             inviter_line=inviter_line,
         ),
-        get_referral_keyboard(referral_link, count=invited_count),
+        get_referral_keyboard(
+            referral_link,
+            count=invited_count,
+            include_copy=False,
+            include_leaderboard=False,
+        ),
         trigger_message_id=callback.message.message_id if callback.message else None,
     )
 
@@ -241,7 +246,7 @@ async def _render_referral_leaderboard(
             rows.append(
                 f"<tr><td>{medal.strip() or pos}</td><td>{user_label}</td><td><b>{count}</b></td></tr>"
             )
-        table = f"<table><tr><th>#</th><th>Участник</th><th>Приглашено</th></tr>{''.join(rows)}</table>"
+        table = texts.REFERRAL_LEADERBOARD_TABLE_TEMPLATE.format(rows=''.join(rows))
         rendered += table
 
     if user_rank is not None and user_active_count > 0:

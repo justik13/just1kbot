@@ -488,6 +488,21 @@ class TextsConsistencyTests(unittest.TestCase):
             "s",
             "tg-spoiler",
             "blockquote",
+            "p",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "table",
+            "thead",
+            "tbody",
+            "tr",
+            "th",
+            "td",
+            "tg-button-row",
+            "tg-button",
         }
 
         tag_pattern = re.compile(r"<(/?[a-zA-Z0-9_-]+)(?:\s+[^>]*)?>")

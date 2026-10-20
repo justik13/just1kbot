@@ -52,8 +52,8 @@ PAYMENT_HUB_HEADER = """<p>⏳ <b>Ваша подписка</b></p>
   <tr><td>Устройства:</td><td><b>{devices_count} / {device_limit}</b></td></tr>
 </table>
 <tg-button-row align="center">
-  <tg-button type="callback_data" style="success" data="quick_renew">🔄 Продлить подписку</tg-button>
-  <tg-button type="callback_data" style="primary" data="menu_buy">⚙️ Сменить тариф</tg-button>
+  <tg-button type="callback_data" style="success" data="payment_quick_renew">🔄 Продлить подписку</tg-button>
+  <tg-button type="callback_data" style="primary" data="payment_change_tariff">⚙️ Сменить тариф</tg-button>
 </tg-button-row>"""
 
 PAYMENT_NO_TARIFFS = """💳 В данный момент нет доступных тарифов.
@@ -160,4 +160,7 @@ PAYMENT_OP_TITLE_PURCHASE = '🛒 Покупка тарифа'
 PAYMENT_OP_TITLE_RENEW = '⏳ Продление тарифа'
 PAYMENT_OP_TITLE_CHANGE = '🔄 Смена тарифа'
 PAYMENT_OP_TITLE_DEFAULT = '🛒 Покупка'
+
+PAYMENT_SHOWCASE_TABLE_ROW_TEMPLATE = "<tr><td>{name}</td><td>до {limit}</td><td><b>от {min_price} ₽</b></td></tr>"
+PAYMENT_SHOWCASE_TABLE_TEMPLATE = "<table><tr><th>Тариф</th><th>Лимит</th><th>Цена</th></tr>{rows}</table>"
 

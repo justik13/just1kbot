@@ -12,12 +12,17 @@ CURRENCY_RUB_SYMBOL = "₽"
 
 HUB_HEADER = """<h2>🏠 Личный кабинет</h2>
 <p>👋 Здравствуйте, <b>{name}</b>! (ID: <code>{telegram_id}</code>)</p>
-<p><b>Статус:</b> {status}<br/><b>Баланс:</b> {real_balance} ₽{bonus_line}</p>{white_internet_line}{inviter_line}
+<table>
+  <tr><td>Статус:</td><td>{status}</td></tr>
+  <tr><td>Действует до:</td><td>{valid_until} <i>({days_left})</i></td></tr>
+  <tr><td>Устройства:</td><td><b>{devices_count} / {device_limit}</b></td></tr>
+  <tr><td>Баланс:</td><td><b>{real_balance} ₽</b>{bonus_line}</td></tr>
+</table>{white_internet_line}{inviter_line}
 <tg-button-row align="center">
   <tg-button type="callback_data" style="success" data="{buy_or_sub_action}">{buy_or_sub_text}</tg-button>
   <tg-button type="callback_data" style="primary" data="menu_balance">➕ Пополнить счёт</tg-button>
 </tg-button-row>
-<hr/>
+
 <p><b>Разделы сервиса:</b></p>
 <tg-button-row align="center">
   <tg-button type="callback_data" style="primary" data="menu_connections">📱 Мои устройства</tg-button>

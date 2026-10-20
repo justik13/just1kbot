@@ -601,13 +601,14 @@ async def render_hub(
                         ):
                             raise
                         logger.debug("render_hub edit rich_message failed: %s; falling back", rich_err)
+                        plain_fallback = strip_html_tags(text_parts[0])
                         await _retry_flood(
                             lambda: bot.edit_message_text(
                                 chat_id=chat_id,
                                 message_id=target_edit_id,
-                                text=text_parts[0],
+                                text=plain_fallback,
                                 reply_markup=reply_markup,
-                                parse_mode=parse_mode,
+                                parse_mode=None,
                                 link_preview_options=link_preview_opts,
                             )
                         )
@@ -942,38 +943,58 @@ async def _append_hub_message_unlocked(
             is_last = (i == len(text_parts) - 1)
             kb = reply_markup if is_last else None
 
-            try:
-                msg = await _send_with_resilience(
-                    lambda p=part, k=kb: bot.send_message(
-                        chat_id=chat_id,
-                        text=p,
-                        reply_markup=k,
-                        parse_mode=parse_mode,
-                    ),
-                    chat_id=chat_id,
-                    context="append_hub_message",
-                )
-            except TelegramBadRequest as e:
-                err_str = str(e).lower()
-                if "parse" in err_str or "entities" in err_str:
-                    logger.warning(
-                        "HTML parse failed in append_hub_message for chat %s, fallback to plain text: %s",
-                        chat_id,
-                        e,
-                    )
-                    plain = html.unescape(re.sub(r"<[^>]+>", "", part))
+            part_is_rich = parse_mode == "HTML" and has_rich_tags(part) and hasattr(bot, "send_rich_message")
+            sent_via_rich = False
+            if part_is_rich:
+                try:
                     msg = await _send_with_resilience(
-                        lambda p=plain, k=kb: bot.send_message(
+                        lambda p=part, k=kb: bot.send_rich_message(
+                            chat_id=chat_id,
+                            rich_message=InputRichMessage(html=p),
+                            reply_markup=k,
+                        ),
+                        chat_id=chat_id,
+                        context="append_hub_message_rich",
+                    )
+                    sent_via_rich = True
+                except (TelegramBadRequest, TypeError, AttributeError):
+                    pass
+
+            if not sent_via_rich:
+                fallback_text = strip_html_tags(part) if part_is_rich else part
+                fallback_mode = None if part_is_rich else parse_mode
+                try:
+                    msg = await _send_with_resilience(
+                        lambda p=fallback_text, k=kb, pm=fallback_mode: bot.send_message(
                             chat_id=chat_id,
                             text=p,
                             reply_markup=k,
-                            parse_mode=None,
+                            parse_mode=pm,
                         ),
                         chat_id=chat_id,
-                        context="append_hub_message_plain",
+                        context="append_hub_message",
                     )
-                else:
-                    raise
+                except TelegramBadRequest as e:
+                    err_str = str(e).lower()
+                    if "parse" in err_str or "entities" in err_str:
+                        logger.warning(
+                            "HTML parse failed in append_hub_message for chat %s, fallback to plain text: %s",
+                            chat_id,
+                            e,
+                        )
+                        plain = html.unescape(re.sub(r"<[^>]+>", "", strip_html_tags(part)))
+                        msg = await _send_with_resilience(
+                            lambda p=plain, k=kb: bot.send_message(
+                                chat_id=chat_id,
+                                text=p,
+                                reply_markup=k,
+                                parse_mode=None,
+                            ),
+                            chat_id=chat_id,
+                            context="append_hub_message_plain",
+                        )
+                    else:
+                        raise
 
             sent_ids.append(msg.message_id)
             # Same ordering contract as render_hub: id must be in sent_ids

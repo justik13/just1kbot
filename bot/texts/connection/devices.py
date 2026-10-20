@@ -229,10 +229,7 @@ AMNEZIA_SCREEN_EMPTY_TEXT = """<p>🛡 <b>Устройства Amnezia</b></p>
   <tr><td>Разбивка:</td><td>по ссылке: {vless_count} · Amnezia: 0</td></tr>
 </table>
 
-<blockquote expandable>У вас пока нет добавленных устройств Amnezia.</blockquote>{action_hint}
-<tg-button-row align="center">
-  <tg-button type="callback_data" style="success" data="create_device">➕ Добавить устройство</tg-button>
-</tg-button-row>"""
+<blockquote expandable>У вас пока нет добавленных устройств Amnezia.</blockquote>{action_hint}{add_device_row}"""
 
 VLESS_FEED_EXPIRED_TITLE = "⚠️ Подписка закончилась"
 VLESS_FEED_EXPIRED_NOTICE = "⚠️ Подписка закончилась. Продлите доступ: @{bot_username}"
@@ -251,6 +248,24 @@ LANDING_INACTIVE_DESC_EXPIRED = "Срок действия доступа под
 LANDING_INACTIVE_BADGE_EXHAUSTED = "Лимит исчерпан"
 LANDING_INACTIVE_TITLE_EXHAUSTED = "Трафик исчерпан"
 LANDING_INACTIVE_DESC_EXHAUSTED = "Включенный пакет трафика закончился. Для продолжения работы перейдите в бота."
+
+CONNECTION_SUB_BUTTON_ROW_TEMPLATE = (
+    '\n<tg-button-row align="center">\n'
+    '  <tg-button type="copy_text" text="{sub_url}">📋 Скопировать ссылку</tg-button>\n'
+    '  <tg-button type="url" style="success" url="{sub_url}">🚀 Подключить в INCY</tg-button>\n'
+    '</tg-button-row>'
+)
+AMNEZIA_ADD_DEVICE_ROW = (
+    '\n<tg-button-row align="center">\n'
+    '  <tg-button type="callback_data" style="success" data="add_device">➕ Добавить устройство</tg-button>\n'
+    '</tg-button-row>'
+)
+AMNEZIA_DEVICES_TABLE_TEMPLATE = "<table><tr><th>Устройство</th><th>Локация</th><th>Трафик</th></tr>{rows}</table>"
+CONNECTION_DEVICE_VIEW_COPY_KEY_BUTTON_ROW = (
+    '\n<tg-button-row align="center">\n'
+    '  <tg-button type="copy_text" text="{key}">📋 Скопировать ключ</tg-button>\n'
+    '</tg-button-row>'
+)
 
 
 

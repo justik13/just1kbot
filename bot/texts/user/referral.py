@@ -74,9 +74,11 @@ REFERRAL_TEXT_BALANCE = """<p>🤝 <b>Реферальная программа<
 <code>{referral_link}</code>{inviter_line}
 <tg-button-row align="center">
   <tg-button type="copy_text" text="{referral_link}">📋 Скопировать ссылку</tg-button>
-  <tg-button type="callback_data" style="primary" data="ref_leaderboard">🏆 Топ-5 лидеров</tg-button>
+  <tg-button type="callback_data" style="primary" data="referral_leaderboard">🏆 Топ-5 лидеров</tg-button>
 </tg-button-row>"""
 REFERRAL_TIER_PROGRESS_NEXT = "\nДо статуса <b>{next_tier_name} ({next_rate_pct}%)</b>: ещё {needed_count}"
 
 REFERRAL_TIER_PROGRESS_MAX = "\n🏆 <b>Максимальный статус</b>"
+REFERRAL_PAYMENTS_TABLE_TEMPLATE = "<table><tr><th>Статус</th><th>Дата</th><th>Сумма</th></tr>{rows}</table>"
+REFERRAL_LEADERBOARD_TABLE_TEMPLATE = "<table><tr><th>#</th><th>Участник</th><th>Приглашено</th></tr>{rows}</table>"
 

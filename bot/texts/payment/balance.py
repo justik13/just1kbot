@@ -79,3 +79,20 @@ HISTORY_HEADER = """<p>🧾 <b>История пополнений</b></p>
 HISTORY_LIMIT_NOTE = """
 <i>Показаны последние 10 из {count} пополнений</i>"""
 
+BALANCE_HISTORY_TABLE_TEMPLATE = "<table><tr><th>Дата</th><th>Операция</th><th>Сумма</th></tr>{rows}</table>"
+BALANCE_SCREEN_TITLE = "<p>💰 <b>Баланс</b></p>\n"
+BALANCE_ROW_MAIN = "<tr><td>Основной:</td><td><b>{amount} ₽</b></td></tr>"
+BALANCE_ROW_BONUS = "<tr><td>Бонусный:</td><td><b>+{amount} ₽ 🎁</b></td></tr>"
+BALANCE_ROW_DEBT = "<tr><td>Задолженность:</td><td><b>−{amount} ₽</b></td></tr>"
+BALANCE_RICH_ACTIONS = (
+    '\n<tg-button-row align="center">\n'
+    '  <tg-button type="callback_data" style="success" data="balance_topup">➕ Пополнить счёт</tg-button>\n'
+    '  <tg-button type="callback_data" style="primary" data="balance_history:0">🧾 История</tg-button>\n'
+    '</tg-button-row>'
+)
+BALANCE_CUSTOM_AMOUNT_ROW = (
+    '<tg-button-row align="center">\n'
+    '  <tg-button type="callback_data" style="primary" data="balance_custom_amount">✏️ Другая сумма</tg-button>\n'
+    '</tg-button-row>'
+)
+

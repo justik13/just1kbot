@@ -142,10 +142,7 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
 
     valid_until_str = format_subscription_date(db_user.subscription_end) if db_user.subscription_end else texts.PLACEHOLDER_DASH
     days_left_str = format_days_left(db_user.subscription_end) if db_user.subscription_end else texts.ZERO_DAYS_LABEL
-    if is_active:
-        status_str = f"{texts.STATUS_SUBSCRIPTION_ACTIVE} (до {valid_until_str})"
-    else:
-        status_str = texts.STATUS_SUBSCRIPTION_INACTIVE
+    status_str = texts.STATUS_SUBSCRIPTION_ACTIVE if is_active else texts.STATUS_SUBSCRIPTION_INACTIVE
 
     quota_profiles_count = len([
         p for p in profiles
