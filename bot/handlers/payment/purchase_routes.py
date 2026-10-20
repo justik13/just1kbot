@@ -15,6 +15,7 @@ from bot.keyboards import (
     get_order_invoice_keyboard,
     get_payment_success_keyboard,
 )
+from utils.support import get_support_url
 from database.models import Order, User
 from database.repositories.account_ledger_repo import get_account_balance
 from database.repositories.tariffs_repo import get_tariff_by_id
@@ -257,11 +258,14 @@ async def handle_order_pay_card(
         price=price,
     )
 
-    from .common import _is_subscription_active
 
-    is_active = await _is_subscription_active(db_user)
-    back_target = "menu_subscription" if is_active else "payment_showcase"
-
+    support_url = get_support_url(
+        texts.SUPPORT_ORDER_GREETING_TEMPLATE.format(
+            telegram_id=getattr(db_user, "telegram_id", None) or callback.from_user.id,
+            order_ref=str(order.id)[:8],
+            price=price,
+        )
+    )
     await render_hub(
         callback.bot,
         callback.message.chat.id,
@@ -270,7 +274,7 @@ async def handle_order_pay_card(
             payment_url=order.payment_url or "",
             order_id=str(order.id),
             price=price,
-            back_callback=back_target,
+            support_url=support_url,
         ),
     )
     await safe_callback_answer(callback)

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-WL_DATETIME_FORMAT = "%d.%m.%Y %H:%M UTC"
-
 BTN_WL_BUY_ACCESS = "🚀 Оформить доступ ({price} ₽ / {days} дней)"
 BTN_WL_ACTIVATE_TRIAL = "🎁 Активировать бесплатно (3 дня / 5 ГБ)"
 BTN_WL_CONNECT_CLIENT = "📱 Подключить в приложении"

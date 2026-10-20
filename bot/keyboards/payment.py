@@ -334,7 +334,7 @@ def get_order_invoice_keyboard(
     payment_url: str,
     order_id: str,
     price: int,
-    back_callback: str | None = None,
+    support_url: str,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
@@ -349,12 +349,30 @@ def get_order_invoice_keyboard(
     )
     builder.button(
         text=texts.BTN_SUPPORT,
-        callback_data="menu_support",
+        url=support_url,
     )
     builder.button(
         text=texts.BTN_CANCEL_ACTION,
         callback_data=f"order_cancel:{order_id}",
         style="danger",
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_dispute_blocked_keyboard(
+    back_callback: str = "back_to_main_menu",
+    support_url: str | None = None,
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    if support_url:
+        builder.button(
+            text=texts.BTN_SUPPORT,
+            url=support_url,
+        )
+    builder.button(
+        text=texts.BTN_BACK if back_callback != "back_to_main_menu" else texts.BTN_MAIN_MENU_NAV,
+        callback_data=back_callback,
     )
     builder.adjust(1)
     return builder.as_markup()

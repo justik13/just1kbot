@@ -483,7 +483,7 @@ class TestTelegramBotApi103KeyboardAudit(unittest.IsolatedAsyncioTestCase):
             get_balance_history_keyboard(1, 1),
             get_balance_keyboard(),
             get_order_checkout_keyboard(1, 100, True, "back"),
-            get_order_invoice_keyboard("https://pay.url", "ord123", 100, "back"),
+            get_order_invoice_keyboard("https://pay.url", "ord123", 100, "https://t.me/support"),
             get_payment_success_keyboard(),
             get_renew_keyboard([]),
             get_tariff_duration_keyboard([]),

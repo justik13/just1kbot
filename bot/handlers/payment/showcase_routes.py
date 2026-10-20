@@ -11,11 +11,13 @@ from bot import texts
 from bot.keyboards import (
     get_back_button,
     get_change_tariff_keyboard,
+    get_dispute_blocked_keyboard,
     get_order_checkout_keyboard,
     get_renew_keyboard,
     get_same_tariff_keyboard,
     get_tariff_duration_keyboard,
 )
+from utils.support import get_support_url
 from config.constants import REFERRAL_WELCOME_DISCOUNT_PERCENT
 from database.repositories.account_ledger_repo import get_account_balance
 from database.repositories.profiles_repo import get_user_profiles_count
@@ -156,11 +158,14 @@ async def select_tariff(
         return
 
     if getattr(db_user, "has_financial_hold", False) or getattr(db_user, "financial_hold", False):
+        support_url = get_support_url(
+            texts.SUPPORT_DISPUTE_GREETING_TEMPLATE.format(telegram_id=callback.from_user.id)
+        )
         await render_hub(
             callback.bot,
             callback.message.chat.id,
             texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
-            get_back_button(back_to),
+            get_dispute_blocked_keyboard(back_to, support_url=support_url),
         )
         await callback.answer(show_alert=False)
         return

@@ -200,7 +200,7 @@ def get_white_internet_overview_keyboard(
         builder.button(
             text=texts.BTN_WL_RESET_DEVICES,
             callback_data="wl_reset_devices",
-            style="warning",
+            style="danger",
         )
         has_reset = True
 

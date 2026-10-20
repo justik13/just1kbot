@@ -90,6 +90,15 @@ SUPPORT_DOWNLOAD_CLIENT_TEXT = """📥 <b>Скачать клиент Amnezia д
 • <b>Официальный сайт Amnezia</b> — подробная информация"""
 
 SUPPORT_GREETING_TEMPLATE = "Здравствуйте! Мой ID: {telegram_id}"
+SUPPORT_TOPUP_GREETING_TEMPLATE = (
+    "Здравствуйте! Мой ID: {telegram_id}. Вопрос по пополнению баланса на {price} ₽ (заказ #{order_ref})."
+)
+SUPPORT_ORDER_GREETING_TEMPLATE = (
+    "Здравствуйте! Мой ID: {telegram_id}. Вопрос по оплате заказа #{order_ref} ({price} ₽)."
+)
+SUPPORT_DISPUTE_GREETING_TEMPLATE = (
+    "Здравствуйте! Мой ID: {telegram_id}. Вопрос по блокировке операций (финансовый спор)."
+)
 
 SUPPORT_HELP_ROOT_TEXT = """📖 <b>Инструкции и справка</b>
 

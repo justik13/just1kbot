@@ -184,7 +184,7 @@ async def _build_connections_screen(
             builder.button(
                 text=texts.BTN_VLESS_RESET_HWID,
                 callback_data="vless_sub_reset",
-                style="warning",
+                style="danger",
             )
         amnezia_btn_text = (
             texts.BTN_AMNEZIA_DEVICES_COUNT.format(count=quota_profiles_count)
