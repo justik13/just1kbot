@@ -53,6 +53,9 @@ async def _update_user_profile_if_changed(
     user: User,
     message: Message,
 ) -> User:
+    if not message.from_user:
+        return user
+
     updates = {}
 
     new_username = message.from_user.username

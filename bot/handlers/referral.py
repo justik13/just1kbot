@@ -216,7 +216,7 @@ async def _render_referral_leaderboard(
         for pos, (leader_tg_id, count) in enumerate(top_leaders, start=1):
             medal = texts.REFERRAL_LEADERBOARD_MEDALS.get(pos, "")
             is_me = leader_tg_id == db_user.telegram_id
-            leader_user = leader_users.get(leader_tg_id)
+            leader_user = leader_users.get(leader_tg_id) or (db_user if is_me else None)
 
             open_name: str | None = None
             if leader_user and getattr(leader_user, "show_in_leaderboard", False):
@@ -382,11 +382,15 @@ async def show_referrals_list(
         start_idx = (page - 1) * page_size
         rendered = texts.REFERRAL_LIST_HEADER
         for idx, referral in enumerate(page_referrals, start=start_idx + 1):
-            safe_user = (
-                f"@{safe(referral.username)}"
-                if referral.username
-                else texts.USER_ID_LABEL.format(user_id=referral.telegram_id)
-            )
+            if referral.username and referral.username.strip():
+                clean_ref_uname = referral.username.strip().lstrip("@")[:32]
+                safe_user = (
+                    f"@{safe(clean_ref_uname)}"
+                    if clean_ref_uname
+                    else texts.USER_ID_LABEL.format(user_id=referral.telegram_id)
+                )
+            else:
+                safe_user = texts.USER_ID_LABEL.format(user_id=referral.telegram_id)
             created_str = referral.created_at.strftime("%d.%m.%Y") if referral.created_at else ""
             rendered += texts.REFERRAL_LIST_ITEM_FORMAT.format(idx=idx, user=safe_user, date=created_str)
 

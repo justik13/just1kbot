@@ -1588,6 +1588,12 @@ class TestReferralLeaderboardPrivacy(unittest.TestCase):
             asyncio.run(_update_user_profile_if_changed(session, user, msg_long))
             mock_update.assert_awaited_once_with(session, user, username="x" * 32)
 
+        # Message without from_user -> no-op, returns user without error
+        msg_no_user = MagicMock()
+        msg_no_user.from_user = None
+        res = asyncio.run(_update_user_profile_if_changed(session, user, msg_no_user))
+        self.assertIs(res, user)
+
     def test_render_referral_leaderboard_formats_names_and_truncates(self):
         import asyncio
         from bot.handlers.referral import _render_referral_leaderboard
@@ -1695,3 +1701,89 @@ class TestReferralLeaderboardPrivacy(unittest.TestCase):
             rendered_text = call_args[2]
             # Masked self: strict monospace code with (Вы)
             self.assertIn("<code>111***33</code> (Вы)", rendered_text)
+
+    def test_render_referral_leaderboard_open_user_without_names_falls_back_to_masked(self):
+        import asyncio
+        from bot.handlers.referral import _render_referral_leaderboard
+        from database.models import User
+
+        callback = AsyncMock()
+        callback.bot = AsyncMock()
+        callback.message = MagicMock(chat=MagicMock(id=999), message_id=123)
+        session = AsyncMock()
+        db_user = User(
+            id=1,
+            telegram_id=111222333,
+            username=None,
+            first_name=None,
+            show_in_leaderboard=True,
+        )
+
+        top_leaders = [(111222333, 10), (222333444, 5)]
+        leader_users = {
+            111222333: db_user,
+            222333444: User(
+                id=2,
+                telegram_id=222333444,
+                username="   @   ",
+                first_name="   ",
+                show_in_leaderboard=True,
+            ),
+        }
+
+        with (
+            patch("bot.handlers.referral.get_referral_leaderboard", new_callable=AsyncMock) as mock_top,
+            patch("bot.handlers.referral.get_user_referral_rank", new_callable=AsyncMock) as mock_rank,
+            patch("bot.handlers.referral.get_users_by_telegram_ids", new_callable=AsyncMock) as mock_users,
+            patch("bot.handlers.referral.render_hub", new_callable=AsyncMock) as mock_render_hub,
+        ):
+            mock_top.return_value = top_leaders
+            mock_rank.return_value = (1, 10)
+            mock_users.return_value = leader_users
+
+            asyncio.run(_render_referral_leaderboard(callback, session, db_user))
+
+            call_args = mock_render_hub.await_args[0]
+            rendered_text = call_args[2]
+            # Both open users have no usable name, safely falls back to masked code ID
+            self.assertIn("<code>111***33</code> (Вы)", rendered_text)
+            self.assertIn("<code>222***44</code>", rendered_text)
+
+    def test_show_referrals_list_sanitizes_usernames(self):
+        import asyncio
+        from bot.handlers.referral import show_referrals_list
+        from database.models import User
+
+        callback = AsyncMock()
+        callback.data = "referrals_list:1"
+        callback.message = MagicMock(chat=MagicMock(id=1000), message_id=100)
+        state = AsyncMock()
+        session = AsyncMock()
+        db_user = User(id=1, telegram_id=1000, username="owner")
+
+        referrals = [
+            User(id=2, telegram_id=2001, username="@clean_me"),
+            User(id=3, telegram_id=2002, username="@" + "z" * 40),
+            User(id=4, telegram_id=2003, username="   @   "),
+        ]
+
+        rendered_texts = []
+
+        async def fake_render(bot, chat_id, text, reply_markup, trigger_message_id=None):
+            rendered_texts.append((text, reply_markup))
+
+        with (
+            patch("bot.handlers.referral.get_user_referrals_paginated", AsyncMock(return_value=(referrals, 3, 1))),
+            patch("bot.handlers.referral.render_hub", side_effect=fake_render),
+        ):
+            asyncio.run(show_referrals_list(callback, state, session, db_user))
+
+        self.assertEqual(len(rendered_texts), 1)
+        text, _ = rendered_texts[0]
+        # Strips leading @ without @@
+        self.assertIn("<b>@clean_me</b>", text)
+        self.assertNotIn("@@clean_me", text)
+        # Bounds to 32 chars
+        self.assertIn(f"<b>@{'z' * 32}</b>", text)
+        # Empty/whitespace falls back to user ID label
+        self.assertIn("ID: 2003", text)
