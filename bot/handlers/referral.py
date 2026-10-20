@@ -219,10 +219,13 @@ async def _render_referral_leaderboard(
             leader_user = leader_users.get(leader_tg_id)
 
             if leader_user and getattr(leader_user, "show_in_leaderboard", False):
-                if leader_user.username:
-                    display_name = f"@{safe(leader_user.username)}"
-                elif leader_user.first_name:
-                    display_name = safe(leader_user.first_name)
+                if leader_user.username and leader_user.username.strip():
+                    display_name = f"@{safe(leader_user.username.strip())}"
+                elif leader_user.first_name and leader_user.first_name.strip():
+                    fname = leader_user.first_name.strip()
+                    if len(fname) > 20:
+                        fname = fname[:19] + "…"
+                    display_name = safe(fname)
                 else:
                     display_name = mask_telegram_id(leader_tg_id)
             else:
@@ -301,7 +304,17 @@ async def referral_toggle_anonymity(
 
     current_val = bool(getattr(db_user, "show_in_leaderboard", False))
     new_val = not current_val
-    await update_user(session, db_user, show_in_leaderboard=new_val)
+
+    update_kwargs: dict[str, object] = {"show_in_leaderboard": new_val}
+    if callback.from_user:
+        raw_username = callback.from_user.username
+        raw_first_name = callback.from_user.first_name
+        if raw_username and raw_username != getattr(db_user, "username", None):
+            update_kwargs["username"] = raw_username
+        if raw_first_name and raw_first_name != getattr(db_user, "first_name", None):
+            update_kwargs["first_name"] = raw_first_name
+
+    await update_user(session, db_user, **update_kwargs)
     await session.commit()
 
     try:
