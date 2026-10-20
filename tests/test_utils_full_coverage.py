@@ -320,8 +320,9 @@ class TestUtilsTelegram(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(failed_plural, [])
 
         # 5. Fallback on AttributeError (bot lacking delete_messages)
-        bot_legacy = AsyncMock(spec=["delete_message"])
-        bot_legacy.delete_message.return_value = None
+        bot_legacy = MagicMock()
+        bot_legacy.delete_message = AsyncMock(return_value=None)
+        del bot_legacy.delete_messages
         deleted_attr, failed_attr = await _safe_delete_batch(bot_legacy, 123, [4, 5])
         self.assertEqual(deleted_attr, [4, 5])
         self.assertEqual(failed_attr, [])
