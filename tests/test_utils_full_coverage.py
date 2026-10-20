@@ -306,7 +306,35 @@ class TestUtilsTelegram(unittest.IsolatedAsyncioTestCase):
         self.assertIn(2, deleted)
         self.assertIn(3, failed)
 
-        # 4. Empty input
+        # 4. Fallback on plural "messages can't be deleted"
+        bot.reset_mock()
+        bot.delete_messages.side_effect = TelegramBadRequest(
+            method=MagicMock(), message="Bad Request: messages can't be deleted"
+        )
+        bot.delete_message.side_effect = [
+            None,
+            TelegramBadRequest(method=MagicMock(), message="message can't be deleted"),
+        ]
+        deleted_plural, failed_plural = await _safe_delete_batch(bot, 123, [10, 20])
+        self.assertEqual(deleted_plural, [10, 20])
+        self.assertEqual(failed_plural, [])
+
+        # 5. Fallback on AttributeError (bot lacking delete_messages)
+        bot_legacy = AsyncMock(spec=["delete_message"])
+        bot_legacy.delete_message.return_value = None
+        deleted_attr, failed_attr = await _safe_delete_batch(bot_legacy, 123, [4, 5])
+        self.assertEqual(deleted_attr, [4, 5])
+        self.assertEqual(failed_attr, [])
+
+        # 6. Deduplication of duplicate message IDs
+        bot.reset_mock()
+        bot.delete_messages.side_effect = None
+        deleted_dedup, failed_dedup = await _safe_delete_batch(bot, 123, [7, 7, 8, 8, 9])
+        bot.delete_messages.assert_awaited_once_with(chat_id=123, message_ids=[7, 8, 9])
+        self.assertEqual(deleted_dedup, [7, 8, 9])
+        self.assertEqual(failed_dedup, [])
+
+        # 7. Empty input
         d_empty, f_empty = await _safe_delete_batch(bot, 123, [])
         self.assertEqual(d_empty, [])
         self.assertEqual(f_empty, [])

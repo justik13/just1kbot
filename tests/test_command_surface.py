@@ -83,6 +83,7 @@ class TestSetupBotCommands(unittest.IsolatedAsyncioTestCase):
 
     async def test_setup_bot_commands_handles_description_api_failure(self):
         from unittest.mock import AsyncMock, patch
+        from bot import texts
         from bot.main import setup_bot_commands
 
         bot = AsyncMock()
@@ -90,6 +91,11 @@ class TestSetupBotCommands(unittest.IsolatedAsyncioTestCase):
         with patch("bot.main._is_ci_test_mode", return_value=False):
             # Must not raise
             await setup_bot_commands(bot)
+
+        # Failure in set_my_description must not suppress set_my_short_description
+        bot.set_my_short_description.assert_awaited_once_with(
+            short_description=texts.BOT_SHORT_DESCRIPTION
+        )
 
 
 if __name__ == "__main__":

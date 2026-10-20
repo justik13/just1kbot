@@ -1,5 +1,6 @@
 """General formatting helpers for traffic, datetime, breadcrumbs, and audit logs."""
 from datetime import date, datetime, time, timezone
+import html
 
 from utils.datetime_helpers import format_datetime_msk
 
@@ -49,11 +50,12 @@ def format_tg_time(
         return "—"
 
     unix_ts = int(dt.timestamp())
-    fallback = custom_fallback if custom_fallback is not None else format_datetime_msk(dt, fallback_format)
+    raw_fallback = custom_fallback if custom_fallback is not None else format_datetime_msk(dt, fallback_format)
     if unix_ts <= 0:
-        return fallback
+        return raw_fallback
 
+    escaped_fallback = html.escape(raw_fallback)
     if format_spec:
         clean_spec = format_spec.replace(" ", "")
-        return f'<tg-time unix="{unix_ts}" format="{clean_spec}">{fallback}</tg-time>'
-    return f'<tg-time unix="{unix_ts}">{fallback}</tg-time>'
+        return f'<tg-time unix="{unix_ts}" format="{clean_spec}">{escaped_fallback}</tg-time>'
+    return f'<tg-time unix="{unix_ts}">{escaped_fallback}</tg-time>'
