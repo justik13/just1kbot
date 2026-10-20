@@ -167,11 +167,18 @@ async def _render_balance(
             f"<tr><td>Задолженность:</td><td><b>−{int(snapshot.debt)} ₽</b></td></tr>"
         )
     prefix = f"{notice}\n\n" if notice else ""
+    rich_actions = (
+        '\n<tg-button-row align="center">\n'
+        '  <tg-button type="callback_data" style="success" data="topup_balance">➕ Пополнить счёт</tg-button>\n'
+        '  <tg-button type="callback_data" style="primary" data="balance_history:0">🧾 История</tg-button>\n'
+        '</tg-button-row>'
+    )
     text = (
         f"{prefix}<p>💰 <b>Баланс</b></p>\n"
         f"<table>{''.join(rows)}</table>"
         + texts.BALANCE_HISTORY_SECTION_TITLE
         + _history_lines(history)
+        + rich_actions
     )
 
     await render_hub(
@@ -512,11 +519,26 @@ async def choose_topup_amount(
                 + texts.BALANCE_RASCHET_BONUSA_K_SUMME.format(bonus_lines=bonus_lines)
             )
 
+    btn_elements = [
+        f'<tg-button type="callback_data" style="primary" data="balance_create:{amt}">+{amt} ₽</tg-button>'
+        for amt in amounts
+    ]
+    rich_rows = []
+    for i in range(0, len(btn_elements), 3):
+        rich_rows.append(
+            f'<tg-button-row align="center">\n  {" ".join(btn_elements[i:i+3])}\n</tg-button-row>'
+        )
+    rich_rows.append(
+        '<tg-button-row align="center">\n  <tg-button type="callback_data" style="primary" data="balance_custom_amount">✏️ Другая сумма</tg-button>\n</tg-button-row>'
+    )
+    rich_presets = "\n" + "\n".join(rich_rows)
+
     text = (
         texts.BALANCE_TOPUP_BALANCE.format()
         + f"{balance_lines}\n"
         + f"{bonus_notice}\n"
         + texts.BALANCE_SELECT_AMOUNT_ILI_UKAZHITE_DR.format()
+        + rich_presets
     )
     await render_hub(
         callback.bot,

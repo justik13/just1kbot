@@ -195,9 +195,15 @@ async def render_device_screen(
 
         if display_key:
             copy_hint = texts.CONNECTION_CONFIG_DEVICE_VIEW_NAZHMITE_NA_MONOSHIRINNYY_KLYU
+            copy_btn = (
+                f'\n<tg-button-row align="center">\n  <tg-button type="copy_text" text="{safe(display_key)}">📋 Скопировать ключ</tg-button>\n</tg-button-row>'
+                if (1 <= len(display_key) <= 256)
+                else ""
+            )
             key_block = (
                 texts.CONNECTION_CONFIG_DEVICE_VIEW_KEY_PODKLYUCHENIYA.format()+
                 texts.CONNECTION_CONFIG_DEVICE_VIEW_KEY_BLOCKQUOTE.format(key=safe(display_key))+
+                f"{copy_btn}"+
                 f"{copy_hint}"
             )
             if len(rendered) + len(key_block) <= 4000:

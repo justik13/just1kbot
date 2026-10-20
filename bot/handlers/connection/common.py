@@ -157,6 +157,11 @@ async def _build_connections_screen(
         if not tariff_name:
             tariff_name = get_tariff_display_name(device_limit)
 
+        sub_button_row = (
+            f'\n<tg-button-row align="center">\n  <tg-button type="copy_text" text="{sub_url}">📋 Скопировать ссылку</tg-button>\n  <tg-button type="url" style="success" url="{sub_url}">🚀 Подключить в INCY</tg-button>\n</tg-button-row>'
+            if (sub_url and 1 <= len(sub_url) <= 256)
+            else ""
+        )
         rendered = texts.CONNECTION_HUB_ACTIVE_TEXT.format(
             expiry=expiry_str,
             tariff=tariff_name,
@@ -165,6 +170,7 @@ async def _build_connections_screen(
             vless_count=vless_hwid_count,
             amnezia_count=quota_profiles_count,
             sub_url=sub_url,
+            sub_button_row=sub_button_row,
         )
 
     builder = InlineKeyboardBuilder()

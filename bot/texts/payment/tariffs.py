@@ -50,7 +50,11 @@ PAYMENT_HUB_HEADER = """<p>⏳ <b>Ваша подписка</b></p>
   <tr><td>Действует до:</td><td>{valid_until} <i>({days_left})</i></td></tr>
   <tr><td>Тариф:</td><td><b>{tariff_name}</b></td></tr>
   <tr><td>Устройства:</td><td><b>{devices_count} / {device_limit}</b></td></tr>
-</table>"""
+</table>
+<tg-button-row align="center">
+  <tg-button type="callback_data" style="success" data="quick_renew">🔄 Продлить подписку</tg-button>
+  <tg-button type="callback_data" style="primary" data="menu_buy">⚙️ Сменить тариф</tg-button>
+</tg-button-row>"""
 
 PAYMENT_NO_TARIFFS = """💳 В данный момент нет доступных тарифов.
 
@@ -87,7 +91,11 @@ PAYMENT_PURCHASE_SUCCESS_CARD = """<p>🎉 <b>{operation_title}</b></p>
   <tr><td>Списано:</td><td><b>{charged} ₽</b></td></tr>
   <tr><td>Баланс:</td><td>{real_balance} ₽</td></tr>
   <tr><td>Бонусный баланс:</td><td>{bonus_balance} ₽</td></tr>
-</table>"""
+</table>
+<tg-button-row align="center">
+  <tg-button type="callback_data" style="success" data="menu_connections">🔌 Подключить устройство</tg-button>
+  <tg-button type="callback_data" style="primary" data="back_to_main_menu">🏠 В главное меню</tg-button>
+</tg-button-row>"""
 
 PAYMENT_QUICK_RENEW_HEADER = """🔄 <b>Продление доступа</b>
 

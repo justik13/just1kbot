@@ -50,7 +50,10 @@ WL_OVERVIEW_NO_SUB = (
     "• Подключение по ссылке подписки в приложении <b>INCY</b>.\n"
     "• <b>Купленный дополнительный трафик не сгорает</b> при своевременном продлении подписки.\n\n"
     "<b>Тариф:</b> {price} ₽ / {days} дней\n"
-    "<b>Включено:</b> {traffic} ГБ трафика"
+    "<b>Включено:</b> {traffic} ГБ трафика\n"
+    '<tg-button-row align="center">\n'
+    '  <tg-button type="callback_data" style="success" data="wl_buy_base">🚀 Оформить доступ ({price} ₽)</tg-button>\n'
+    "</tg-button-row>"
 )
 
 WL_OVERVIEW_TRIAL_NO_SUB = (
@@ -64,7 +67,10 @@ WL_OVERVIEW_TRIAL_NO_SUB = (
     "🎁 <b>Бесплатный пробный доступ для тестирования:</b>\n"
     "⏱ <b>Срок:</b> {days} дня\n"
     "📊 <b>Включено:</b> {traffic} ГБ трафика\n"
-    "💰 <b>Стоимость:</b> 0 ₽ (Бесплатно)"
+    "💰 <b>Стоимость:</b> 0 ₽ (Бесплатно)\n"
+    '<tg-button-row align="center">\n'
+    '  <tg-button type="callback_data" style="success" data="wl_activate_trial">🎁 Активировать бесплатно</tg-button>\n'
+    "</tg-button-row>"
 )
 
 WL_OVERVIEW_ACTIVE = (
@@ -81,6 +87,10 @@ WL_OVERVIEW_ACTIVE = (
 WL_OVERVIEW_SUB_URL_BLOCK = (
     "\n\n📋 <b>Ваша ссылка на подписку:</b>\n"
     "<blockquote expandable><code>{sub_url}</code></blockquote>\n"
+    '<tg-button-row align="center">\n'
+    '  <tg-button type="copy_text" text="{sub_url}">📋 Скопировать ссылку</tg-button>\n'
+    '  <tg-button type="url" style="success" url="{sub_url}">🚀 Подключить в приложении</tg-button>\n'
+    "</tg-button-row>\n"
     "<i>(нажмите на ссылку для копирования)</i>"
 )
 

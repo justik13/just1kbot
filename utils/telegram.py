@@ -1061,8 +1061,16 @@ def strip_html_tags(text: str) -> str:
     text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
     text = re.sub(r"</p>", "\n", text, flags=re.IGNORECASE)
     text = re.sub(r"<p(?:\s+[^>]*?)?>", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"</?tr(?:\s+[^>]*?)?>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<hr\s*/?>", "\n---\n", text, flags=re.IGNORECASE)
     text = re.sub(
-        r"</?(?:b|strong|i|em|u|ins|s|strike|del|span|tg-spoiler|tg-emoji|tg-time|code|pre|blockquote|expandable-blockquote)(?:\s+[^>]*?)?>",
+        r"<tg-button(?:\s+[^>]*?)?>(.*?)</tg-button>",
+        r"[\1]",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    text = re.sub(
+        r"</?(?:b|strong|i|em|u|ins|s|strike|del|span|tg-spoiler|tg-emoji|tg-time|code|pre|blockquote|expandable-blockquote|table|thead|tbody|th|td|h[1-6]|details|summary|tg-button-row)(?:\s+[^>]*?)?>",
         "",
         text,
         flags=re.IGNORECASE,

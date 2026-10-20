@@ -87,7 +87,11 @@ SUPPORT_DOWNLOAD_CLIENT_TEXT = """<p>📥 <b>Скачать клиент Amnezia
 
 <blockquote expandable>• <b>Прямая ссылка (Зеркало)</b> — загрузка последней сборки клиента
 • <b>GitHub Releases</b> — релизы и бинарные файлы всех версий
-• <b>Официальный сайт Amnezia</b> — подробная информация</blockquote>"""
+• <b>Официальный сайт Amnezia</b> — подробная информация</blockquote>
+<tg-button-row align="center">
+  <tg-button type="url" style="primary" url="https://storage.googleapis.com/amnezia/amnezia.org?m-path=/downloads">📥 Скачать Amnezia</tg-button>
+  <tg-button type="url" style="primary" url="https://github.com/amnezia-vpn/amnezia-client/releases/latest">📦 GitHub Releases</tg-button>
+</tg-button-row>"""
 
 SUPPORT_GREETING_TEMPLATE = "Здравствуйте! Мой ID: {telegram_id}"
 SUPPORT_TOPUP_GREETING_TEMPLATE = (
@@ -132,15 +136,25 @@ SUPPORT_INCY_INSTRUCTION_TEXT = """<p>📱 <b>Инструкция по подк
 
 💡 <b>Полезно знать:</b>
 • <b>Банки и Госуслуги:</b> работают напрямую на полной скорости, приложение отключать не нужно.
-• <b>Если интернет замедлился:</b> на вкладке «Подписки» потяните экран вниз для обновления.</blockquote>"""
+• <b>Если интернет замедлился:</b> на вкладке «Подписки» потяните экран вниз для обновления.</blockquote>
+<tg-button-row align="center">
+  <tg-button type="url" style="primary" url="https://apps.apple.com/app/incy/id6756943388">🍏 App Store</tg-button>
+  <tg-button type="url" style="primary" url="https://play.google.com/store/apps/details?id=llc.itdev.incy">🤖 Google Play</tg-button>
+</tg-button-row>"""
 
 SUPPORT_IOS_INSTRUCTION_TEXT = """<p>🍏 <b>Установка AmneziaVPN на iOS для жителей России</b></p>
 
-<blockquote expandable>Подробное пошаговое руководство по скачиванию и первичной настройке приложения AmneziaVPN на iPhone и iPad в условиях региональных ограничений App Store.</blockquote>"""
+<blockquote expandable>Подробное пошаговое руководство по скачиванию и первичной настройке приложения AmneziaVPN на iPhone и iPad в условиях региональных ограничений App Store.</blockquote>
+<tg-button-row align="center">
+  <tg-button type="url" style="primary" url="https://storage.googleapis.com/amnezia/docs?m-path=/documentation/instructions/installing-amneziavpn-on-ios/">📖 Открыть инструкцию</tg-button>
+</tg-button-row>"""
 
 SUPPORT_SPLIT_TUNNELING_TEXT = """<p>🔀 <b>Инструкция для Раздельного Туннелирования</b></p>
 
-<blockquote expandable>Раздельное туннелирование (Split Tunneling) позволяет направить через выбранное подключение только нужные сайты или приложения, сохраняя обычное подключение для остальных ресурсов.</blockquote>"""
+<blockquote expandable>Раздельное туннелирование (Split Tunneling) позволяет направить через выбранное подключение только нужные сайты или приложения, сохраняя обычное подключение для остальных ресурсов.</blockquote>
+<tg-button-row align="center">
+  <tg-button type="url" style="primary" url="https://storage.googleapis.com/amnezia/docs?m-path=/documentation/instructions/vpn-split-tunneling/">🔀 Открыть инструкцию</tg-button>
+</tg-button-row>"""
 
 SUPPORT_TEXT = """<p>💬 <b>Поддержка</b></p>
 <table>
@@ -151,10 +165,18 @@ SUPPORT_TEXT = """<p>💬 <b>Поддержка</b></p>
 <blockquote expandable>Если у вас возникли вопросы, напишите нашему оператору:
 👤 {support_username}
 
-Мы постараемся помочь как можно скорее.</blockquote>"""
+Мы постараемся помочь как можно скорее.</blockquote>
+<tg-button-row align="center">
+  <tg-button type="callback_data" style="primary" data="support_help">📖 Инструкции</tg-button>
+  <tg-button type="callback_data" style="primary" data="faq">❓ Частые вопросы</tg-button>
+</tg-button-row>"""
 
 SUPPORT_WINDOWS_INSTRUCTION_TEXT = """<p>💻 <b>Инструкции для Windows</b></p>
 
-<blockquote expandable>Руководства по установке и обновлению приложения AmneziaVPN на ПК под управлением Windows.</blockquote>"""
+<blockquote expandable>Руководства по установке и обновлению приложения AmneziaVPN на ПК под управлением Windows.</blockquote>
+<tg-button-row align="center">
+  <tg-button type="url" style="primary" url="https://storage.googleapis.com/amnezia/docs?m-path=/documentation/instructions/installing-app-on-windows/">📥 Установка на Windows</tg-button>
+  <tg-button type="url" style="primary" url="https://storage.googleapis.com/amnezia/docs?m-path=/documentation/instructions/application-update-on-windows/">🔄 Обновление</tg-button>
+</tg-button-row>"""
 
 TOS_AGREEMENT_URL = "https://telegra.ph/Polzovatelskoe-soglashenie-07-23-48"

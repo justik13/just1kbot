@@ -282,6 +282,27 @@ class SafeSendMessageTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Detailed incident report & diagnostic logs", plain)
         self.assertIn("Visit dashboard (https://example.com) for info.", plain)
 
+    def test_strip_html_tags_with_rich_buttons_and_tables(self):
+        """strip_html_tags converts tg-button to [label] and strips tables and headers."""
+        sample_html = (
+            "<h2>🏠 Личный кабинет</h2>\n"
+            "<p><b>Баланс:</b> 500 ₽</p>\n"
+            '<tg-button-row align="center">\n'
+            '  <tg-button type="callback_data" style="success" data="menu_buy">Купить</tg-button>\n'
+            '  <tg-button type="callback_data" style="primary" data="menu_balance">Пополнить</tg-button>\n'
+            "</tg-button-row>\n"
+            "<hr/>\n"
+            "<table><tr><td>A</td><td>B</td></tr></table>"
+        )
+        plain = strip_html_tags(sample_html)
+        self.assertNotIn("<h2>", plain)
+        self.assertNotIn("<tg-button", plain)
+        self.assertNotIn("<tg-button-row", plain)
+        self.assertNotIn("<table>", plain)
+        self.assertIn("[Купить]", plain)
+        self.assertIn("[Пополнить]", plain)
+        self.assertIn("Баланс: 500 ₽", plain)
+
     async def test_extract_msg_id_rejects_bool(self):
         """safe_send_message rejects boolean True/False as message_id and strictly returns None."""
         self.mock_bot.send_message.return_value = True

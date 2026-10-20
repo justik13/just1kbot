@@ -157,6 +157,10 @@ VLESS_SUB_SCREEN_TEXT = """⚡️ <b>Основное подключение п�
 
 📋 <b>Ваша ссылка на подписку:</b>
 <code>{sub_url}</code>
+<tg-button-row align="center">
+  <tg-button type="copy_text" text="{sub_url}">📋 Скопировать ссылку</tg-button>
+  <tg-button type="url" style="success" url="{sub_url}">🚀 Подключить в INCY</tg-button>
+</tg-button-row>
 
 📱 <b>Как подключить:</b>
 1. Установите приложение <b>INCY</b> на телефон или планшет.
@@ -190,7 +194,7 @@ CONNECTION_HUB_ACTIVE_TEXT = """<p>🌐 <b>Подключение</b></p>
 
 📋 <b>Ссылка на подписку:</b>
 <code>{sub_url}</code>
-<i>(нажмите на ссылку для копирования)</i></blockquote>
+<i>(нажмите на ссылку для копирования)</i></blockquote>{sub_button_row}
 
 <blockquote expandable>🛡 <b>Устройства Amnezia:</b>
 Для приложений Amnezia или роутеров перейдите в раздел ниже.</blockquote>"""
@@ -225,7 +229,10 @@ AMNEZIA_SCREEN_EMPTY_TEXT = """<p>🛡 <b>Устройства Amnezia</b></p>
   <tr><td>Разбивка:</td><td>по ссылке: {vless_count} · Amnezia: 0</td></tr>
 </table>
 
-<blockquote expandable>У вас пока нет добавленных устройств Amnezia.</blockquote>{action_hint}"""
+<blockquote expandable>У вас пока нет добавленных устройств Amnezia.</blockquote>{action_hint}
+<tg-button-row align="center">
+  <tg-button type="callback_data" style="success" data="create_device">➕ Добавить устройство</tg-button>
+</tg-button-row>"""
 
 VLESS_FEED_EXPIRED_TITLE = "⚠️ Подписка закончилась"
 VLESS_FEED_EXPIRED_NOTICE = "⚠️ Подписка закончилась. Продлите доступ: @{bot_username}"

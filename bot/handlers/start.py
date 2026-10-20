@@ -14,7 +14,6 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.keyboards.common import get_hub_keyboard
 from bot.middlewares.user_context import invalidate_user_cache
 from config.settings import get_settings
 from database.models import User
@@ -105,7 +104,7 @@ async def _ensure_bot_unblocked(
     )
 
 
-async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[str, InlineKeyboardMarkup]:
+async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[str, InlineKeyboardMarkup | None]:
     from database.repositories.profiles_repo import (
         PROFILE_QUOTA_EXCLUDED_STATUSES,
         get_user_profiles,
@@ -141,9 +140,12 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
         and wi_sub.expires_at > now
     )
 
-    status_str = texts.STATUS_SUBSCRIPTION_ACTIVE if is_active else texts.STATUS_SUBSCRIPTION_INACTIVE
     valid_until_str = format_subscription_date(db_user.subscription_end) if db_user.subscription_end else texts.PLACEHOLDER_DASH
     days_left_str = format_days_left(db_user.subscription_end) if db_user.subscription_end else texts.ZERO_DAYS_LABEL
+    if is_active:
+        status_str = f"{texts.STATUS_SUBSCRIPTION_ACTIVE} (до {valid_until_str})"
+    else:
+        status_str = texts.STATUS_SUBSCRIPTION_INACTIVE
 
     quota_profiles_count = len([
         p for p in profiles
@@ -212,6 +214,28 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
         else ""
     )
 
+    from database.repositories.system_settings_repo import get_system_setting
+    mtproto_url = await get_system_setting(session, "mtproto_proxy_url")
+
+    buy_or_sub_action = "menu_subscription" if is_active else "menu_buy"
+    buy_or_sub_text = texts.BTN_MY_SUBSCRIPTION if is_active else texts.BTN_BUY_ACCESS
+
+    admin_row = ""
+    if is_admin:
+        admin_row = (
+            '\n<tg-button-row align="center">\n'
+            f'  <tg-button type="callback_data" style="primary" data="menu_admin">{texts.BTN_ADMIN}</tg-button>\n'
+            '</tg-button-row>'
+        )
+
+    mtproto_row = ""
+    if mtproto_url:
+        mtproto_row = (
+            '\n<tg-button-row align="center">\n'
+            f'  <tg-button type="url" url="{mtproto_url}">{texts.BTN_MTPROTO_PROXY}</tg-button>\n'
+            '</tg-button-row>'
+        )
+
     text = texts.HUB_HEADER.format(
         name=name,
         telegram_id=db_user.telegram_id,
@@ -224,18 +248,13 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
         real_balance=int(balance.real_available),
         bonus_line=bonus_line,
         inviter_line=inviter_line,
+        buy_or_sub_action=buy_or_sub_action,
+        buy_or_sub_text=buy_or_sub_text,
+        admin_row=admin_row,
+        mtproto_row=mtproto_row,
     )
 
-    from database.repositories.system_settings_repo import get_system_setting
-    mtproto_url = await get_system_setting(session, "mtproto_proxy_url")
-
-    kb = get_hub_keyboard(
-        is_admin=is_admin,
-        is_active=is_active,
-        mtproto_url=mtproto_url,
-    )
-
-    return text, kb
+    return text, None
 
 
 @router.message(CommandStart(), StateFilter("*"))
