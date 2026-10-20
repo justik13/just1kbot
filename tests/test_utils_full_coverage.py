@@ -215,6 +215,37 @@ class TestUtilsFormatters(unittest.TestCase):
             f'<tg-time unix="{ts_next}" format="d">{expected_next_fallback}</tg-time>',
         )
 
+    def test_has_rich_tags(self):
+        from utils.telegram import has_rich_tags
+
+        # Negative cases
+        self.assertFalse(has_rich_tags(None))
+        self.assertFalse(has_rich_tags(""))
+        self.assertFalse(has_rich_tags("Hello, world!"))
+        self.assertFalse(has_rich_tags("<b>Bold</b> <i>Italic</i> <code>Code</code> <pre>pre</pre>"))
+        self.assertFalse(has_rich_tags('<a href="https://example.com">link</a>'))
+
+        # Positive cases: headings, paragraphs, dividers
+        self.assertTrue(has_rich_tags("<h1>Heading 1</h1>"))
+        self.assertTrue(has_rich_tags("<h3>Section</h3>"))
+        self.assertTrue(has_rich_tags("<p>Paragraph</p>"))
+        self.assertTrue(has_rich_tags("<hr>"))
+        self.assertTrue(has_rich_tags("<hr/>"))
+        self.assertTrue(has_rich_tags("<hr />"))
+
+        # Positive cases: tables
+        self.assertTrue(has_rich_tags("<table><tr><td>Cell</td></tr></table>"))
+        self.assertTrue(has_rich_tags("<th>Column</th>"))
+        self.assertTrue(has_rich_tags("<thead></thead>"))
+        self.assertTrue(has_rich_tags("<tbody></tbody>"))
+
+        # Positive cases: blockquotes, buttons, details
+        self.assertTrue(has_rich_tags("<blockquote>Quote</blockquote>"))
+        self.assertTrue(has_rich_tags("<blockquote expandable>Expandable</blockquote>"))
+        self.assertTrue(has_rich_tags('<tg-button text="Tap" />'))
+        self.assertTrue(has_rich_tags("<tg-button-row></tg-button-row>"))
+        self.assertTrue(has_rich_tags("<details><summary>Sum</summary>Content</details>"))
+
     def test_normalize_hostname(self):
         from utils.security import normalize_hostname
 

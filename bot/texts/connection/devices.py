@@ -68,9 +68,9 @@ DEVICE_DELETING_PROGRESS = "⏳ Удаляю устройство..."
 
 DEVICE_MANAGE_HEADER = """<p>📱 <b>{device_name}</b></p>
 <table>
-  <tr><td>🌍 Локация: <b>{country_display}</b></td></tr>
-  <tr><td>📊 Трафик: <b>{traffic_total}</b></td></tr>
-  <tr><td>⏱ Активность: <b>{last_connected}</b></td></tr>
+  <tr><td>Локация:</td><td><b>{country_display}</b></td></tr>
+  <tr><td>Трафик:</td><td><b>{traffic_total}</b></td></tr>
+  <tr><td>Активность:</td><td><b>{last_connected}</b></td></tr>
 </table>"""
 
 DEVICE_NAME_DUPLICATE = """⚠️ <b>Устройство с таким именем уже существует</b>
@@ -176,28 +176,29 @@ BTN_AMNEZIA_DEVICES_COUNT = "🛡 Устройства Amnezia ({count})"
 BTN_BACK_TO_CONNECTION = "◀️ Назад к подключению"
 BTN_ADD_DEVICE = "➕ Добавить устройство"
 
-CONNECTION_HUB_ACTIVE_TEXT = """🌐 <b>Подключение</b>
+CONNECTION_HUB_ACTIVE_TEXT = """<p>🌐 <b>Подключение</b></p>
+<table>
+  <tr><td>Статус:</td><td>🟢 <b>Активна</b></td></tr>
+  <tr><td>Срок:</td><td>до {expiry}</td></tr>
+  <tr><td>Тариф:</td><td><b>{tariff}</b></td></tr>
+  <tr><td>Устройства:</td><td><b>{active} / {limit}</b></td></tr>
+  <tr><td>Разбивка:</td><td>по ссылке: {vless_count} · Amnezia: {amnezia_count}</td></tr>
+</table>
 
-<b>Статус:</b> 🟢 Активна
-<b>Срок действия:</b> до {expiry}
-<b>Тариф:</b> {tariff}
+<p>⚡️ <b>Основное подключение по ссылке (INCY)</b></p>
+<blockquote expandable>Единая ссылка даёт доступ сразу ко всем серверам с автообновлением без ручной настройки отдельных ключей. Рекомендуется для всех ваших устройств.
 
-📱 <b>Устройства:</b> {active} из {limit}
-<i>(по ссылке: {vless_count} • Amnezia: {amnezia_count})</i>
-
-⚡️ <b>Основное подключение по ссылке (INCY):</b>
-Единая ссылка дает доступ сразу ко всем серверам с автообновлением без ручной настройки отдельных ключей. Рекомендуется для всех основных устройств.
-
-📋 <b>Ваша ссылка на подписку:</b>
+📋 <b>Ссылка на подписку:</b>
 <code>{sub_url}</code>
-<i>(нажмите на ссылку для копирования)</i>
+<i>(нажмите на ссылку для копирования)</i></blockquote>
 
-🛡 <b>Устройства Amnezia:</b>
-<i>Для приложений Amnezia или роутеров перейдите в раздел ниже.</i>"""
+<blockquote expandable>🛡 <b>Устройства Amnezia:</b>
+Для приложений Amnezia или роутеров перейдите в раздел ниже.</blockquote>"""
 
-CONNECTION_HUB_EXPIRED_TEXT = """🌐 <b>Подключение</b>
-
-<b>Статус:</b> 🔴 Не активна
+CONNECTION_HUB_EXPIRED_TEXT = """<p>🌐 <b>Подключение</b></p>
+<table>
+  <tr><td>Статус:</td><td>🔴 <b>Не активна</b></td></tr>
+</table>
 {grace_notice}
 <i>Для возобновления доступа продлите подписку.</i>"""
 
@@ -208,21 +209,23 @@ VLESS_WEB_TOO_MANY_REQUESTS = "Слишком много запросов к п�
 AMNEZIA_SCREEN_HINT_ADD = "\n\n<i>Нажмите кнопку ниже, чтобы создать первое устройство.</i>"
 AMNEZIA_SCREEN_HINT_LIMIT = "\n\n⚠️ <i>Общий лимит устройств исчерпан. Для добавления перейдите на тариф с большим количеством устройств или отключите неиспользуемые.</i>"
 
-AMNEZIA_SCREEN_TEXT = """🛡 <b>Устройства Amnezia</b>
-
-Подключение и файлы конфигураций для приложений Amnezia.
-
-📱 <b>Устройства:</b> {active} из {limit} <i>(по ссылке: {vless_count} • Amnezia: {amnezia_count})</i>
+AMNEZIA_SCREEN_TEXT = """<p>🛡 <b>Устройства Amnezia</b></p>
+<p><i>Подключение и файлы конфигураций для приложений Amnezia.</i></p>
+<table>
+  <tr><td>Устройства:</td><td><b>{active} / {limit}</b></td></tr>
+  <tr><td>Разбивка:</td><td>по ссылке: {vless_count} · Amnezia: {amnezia_count}</td></tr>
+</table>
 {profiles_block}
 <i>Нажмите на устройство ниже для управления:</i>"""
 
-AMNEZIA_SCREEN_EMPTY_TEXT = """🛡 <b>Устройства Amnezia</b>
+AMNEZIA_SCREEN_EMPTY_TEXT = """<p>🛡 <b>Устройства Amnezia</b></p>
+<p><i>Подключение и файлы конфигураций для приложений Amnezia.</i></p>
+<table>
+  <tr><td>Устройства:</td><td><b>{active} / {limit}</b></td></tr>
+  <tr><td>Разбивка:</td><td>по ссылке: {vless_count} · Amnezia: 0</td></tr>
+</table>
 
-Подключение и файлы конфигураций для приложений Amnezia.
-
-📱 <b>Устройства:</b> {active} из {limit} <i>(по ссылке: {vless_count} • Amnezia: 0)</i>
-
-<i>У вас пока нет добавленных устройств Amnezia.</i>{action_hint}"""
+<blockquote expandable>У вас пока нет добавленных устройств Amnezia.</blockquote>{action_hint}"""
 
 VLESS_FEED_EXPIRED_TITLE = "⚠️ Подписка закончилась"
 VLESS_FEED_EXPIRED_NOTICE = "⚠️ Подписка закончилась. Продлите доступ: @{bot_username}"

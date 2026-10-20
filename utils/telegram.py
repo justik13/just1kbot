@@ -31,7 +31,7 @@ from utils.text_limits import split_text_by_lines
 logger = logging.getLogger(__name__)
 
 _RICH_TAGS_PATTERN = re.compile(
-    r"<(table|thead|tbody|tr|th|td|p|blockquote\s+expandable|tg-button)[\s>]",
+    r"<(?:table|thead|tbody|tr|th|td|p|h[1-6]|hr|blockquote|tg-button|tg-button-row|details|summary)(?:[\s/>]|$)",
     re.IGNORECASE,
 )
 
@@ -589,12 +589,17 @@ async def render_hub(
                             lambda: bot.edit_message_text(
                                 chat_id=chat_id,
                                 message_id=target_edit_id,
-                                text=text_parts[0],
+                                text=None,
                                 rich_message=InputRichMessage(html=text_parts[0]),
                                 reply_markup=reply_markup,
                             )
                         )
                     except (TelegramBadRequest, TypeError, AttributeError) as rich_err:
+                        if (
+                            isinstance(rich_err, TelegramBadRequest)
+                            and "message is not modified" in str(rich_err).lower()
+                        ):
+                            raise
                         logger.debug("render_hub edit rich_message failed: %s; falling back", rich_err)
                         await _retry_flood(
                             lambda: bot.edit_message_text(
@@ -722,7 +727,25 @@ async def render_hub(
                         )
                         sent_via_rich = True
                     except (TelegramBadRequest, TypeError, AttributeError) as r_err:
-                        logger.debug("render_hub send_rich_message failed: %s; falling back", r_err)
+                        if effect and _is_message_effect_error(r_err):
+                            try:
+                                message = await _send_with_resilience(
+                                    lambda p=part, m=markup: bot.send_rich_message(
+                                        chat_id=chat_id,
+                                        rich_message=InputRichMessage(html=p),
+                                        reply_markup=m,
+                                    ),
+                                    chat_id=chat_id,
+                                    context="render_hub_rich_no_effect",
+                                )
+                                sent_via_rich = True
+                            except (TelegramBadRequest, TypeError, AttributeError) as inner_r_err:
+                                logger.debug(
+                                    "render_hub send_rich_message without effect failed: %s; falling back",
+                                    inner_r_err,
+                                )
+                        else:
+                            logger.debug("render_hub send_rich_message failed: %s; falling back", r_err)
 
                 if not sent_via_rich:
                     try:
@@ -1104,6 +1127,19 @@ async def safe_send_message(
                             context="safe_send_message_rich",
                         )
                     except (TelegramBadRequest, TypeError, AttributeError) as r_err:
+                        if p_eff and _is_message_effect_error(r_err):
+                            try:
+                                return await _send_with_resilience(
+                                    lambda: bot.send_rich_message(
+                                        chat_id=chat_id,
+                                        rich_message=InputRichMessage(html=p_text),
+                                        reply_markup=p_markup,
+                                    ),
+                                    chat_id=chat_id,
+                                    context="safe_send_message_rich_no_effect",
+                                )
+                            except (TelegramBadRequest, TypeError, AttributeError):
+                                pass
                         logger.debug("safe_send_message rich_message failed: %s, falling back", r_err)
                 return await _send_with_resilience(
                     lambda: bot.send_message(

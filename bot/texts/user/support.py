@@ -81,13 +81,13 @@ PRIVACY_POLICY_URL = "https://telegra.ph/Politika-konfidencialnosti-07-23-84"
 
 SUPPORT = "❓ Частые вопросы"
 
-SUPPORT_DOWNLOAD_CLIENT_TEXT = """📥 <b>Скачать клиент Amnezia для подключения</b>
+SUPPORT_DOWNLOAD_CLIENT_TEXT = """<p>📥 <b>Скачать клиент Amnezia для подключения</b></p>
 
 Официальные ссылки для загрузки приложения AmneziaVPN для Windows, Android, iOS, macOS и Linux:
 
-• <b>Прямая ссылка (Зеркало)</b> — загрузка последней сборки клиента
+<blockquote expandable>• <b>Прямая ссылка (Зеркало)</b> — загрузка последней сборки клиента
 • <b>GitHub Releases</b> — релизы и бинарные файлы всех версий
-• <b>Официальный сайт Amnezia</b> — подробная информация"""
+• <b>Официальный сайт Amnezia</b> — подробная информация</blockquote>"""
 
 SUPPORT_GREETING_TEMPLATE = "Здравствуйте! Мой ID: {telegram_id}"
 SUPPORT_TOPUP_GREETING_TEMPLATE = (
@@ -100,21 +100,21 @@ SUPPORT_DISPUTE_GREETING_TEMPLATE = (
     "Здравствуйте! Мой ID: {telegram_id}. Вопрос по блокировке операций (финансовый спор)."
 )
 
-SUPPORT_HELP_ROOT_TEXT = """📖 <b>Инструкции и справка</b>
+SUPPORT_HELP_ROOT_TEXT = """<p>📖 <b>Инструкции и справка</b></p>
 
 В этом разделе собраны пошаговые руководства по подключению и настройке приложений.
 
-⚠️ <b>Правила и рекомендации:</b>
-• <b>Не рекомендуется использовать торренты/P2P.</b>
-• <b>Часть сайтов/сервисов может быть недоступна по решению провайдеров.</b>
+<blockquote expandable>⚠️ <b>Правила и рекомендации:</b>
+• Не рекомендуется использовать торренты и P2P-сети.
+• Часть сайтов или сервисов может быть недоступна по решению провайдеров.</blockquote>
 
 Выберите нужную тему ниже:"""
 
-SUPPORT_INCY_INSTRUCTION_TEXT = """📱 <b>Инструкция по подключению INCY (Белый Интернет)</b>
+SUPPORT_INCY_INSTRUCTION_TEXT = """<p>📱 <b>Инструкция по подключению INCY (Белый Интернет)</b></p>
 
 <b>INCY</b> — удобное приложение для стабильного интернета на смартфонах и планшетах.
 
-<b>Шаг 1. Установите приложение:</b>
+<blockquote expandable><b>Шаг 1. Установите приложение:</b>
 • 🍏 <a href="https://apps.apple.com/app/incy/id6756943388">Установить из App Store (iPhone / iPad)</a>
 • 🤖 <a href="https://play.google.com/store/apps/details?id=llc.itdev.incy">Установить из Google Play (Android)</a>
 • 📦 <a href="https://github.com/INCY-DEV/incy-platforms/releases">Скачать файл APK напрямую (GitHub)</a>
@@ -132,26 +132,29 @@ SUPPORT_INCY_INSTRUCTION_TEXT = """📱 <b>Инструкция по подкл�
 
 💡 <b>Полезно знать:</b>
 • <b>Банки и Госуслуги:</b> работают напрямую на полной скорости, приложение отключать не нужно.
-• <b>Если интернет замедлился:</b> на вкладке «Подписки» потяните экран вниз для обновления."""
+• <b>Если интернет замедлился:</b> на вкладке «Подписки» потяните экран вниз для обновления.</blockquote>"""
 
-SUPPORT_IOS_INSTRUCTION_TEXT = """🍏 <b>Установка AmneziaVPN на iOS для жителей России</b>
+SUPPORT_IOS_INSTRUCTION_TEXT = """<p>🍏 <b>Установка AmneziaVPN на iOS для жителей России</b></p>
 
-Подробное пошаговое руководство по скачиванию и первичной настройке приложения AmneziaVPN на iPhone и iPad в условиях региональных ограничений App Store."""
+<blockquote expandable>Подробное пошаговое руководство по скачиванию и первичной настройке приложения AmneziaVPN на iPhone и iPad в условиях региональных ограничений App Store.</blockquote>"""
 
-SUPPORT_SPLIT_TUNNELING_TEXT = """🔀 <b>Инструкция для Раздельного Туннелирования</b>
+SUPPORT_SPLIT_TUNNELING_TEXT = """<p>🔀 <b>Инструкция для Раздельного Туннелирования</b></p>
 
-Раздельное туннелирование (Split Tunneling) позволяет направить через выбранное подключение только нужные сайты или приложения, сохраняя обычное подключение для остальных ресурсов."""
+<blockquote expandable>Раздельное туннелирование (Split Tunneling) позволяет направить через выбранное подключение только нужные сайты или приложения, сохраняя обычное подключение для остальных ресурсов.</blockquote>"""
 
-SUPPORT_TEXT = """💬 <b>Поддержка</b>
+SUPPORT_TEXT = """<p>💬 <b>Поддержка</b></p>
+<table>
+  <tr><td>Оператор:</td><td><b>{support_username}</b></td></tr>
+  <tr><td>Ответ:</td><td>Обычно в течение 10–15 минут</td></tr>
+</table>
 
-Если у вас возникли вопросы, напишите нашему оператору:
-
+<blockquote expandable>Если у вас возникли вопросы, напишите нашему оператору:
 👤 {support_username}
 
-Мы постараемся помочь как можно скорее."""
+Мы постараемся помочь как можно скорее.</blockquote>"""
 
-SUPPORT_WINDOWS_INSTRUCTION_TEXT = """💻 <b>Инструкции для Windows</b>
+SUPPORT_WINDOWS_INSTRUCTION_TEXT = """<p>💻 <b>Инструкции для Windows</b></p>
 
-Руководства по установке и обновлению приложения AmneziaVPN на ПК под управлением Windows:"""
+<blockquote expandable>Руководства по установке и обновлению приложения AmneziaVPN на ПК под управлением Windows.</blockquote>"""
 
 TOS_AGREEMENT_URL = "https://telegra.ph/Polzovatelskoe-soglashenie-07-23-48"

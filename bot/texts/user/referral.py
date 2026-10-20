@@ -71,7 +71,7 @@ REFERRAL_TEXT_BALANCE = """<p>🤝 <b>Реферальная программа<
 <i>Бонусы списываются при оплате и продлении подписки.</i></blockquote>
 
 🔗 <b>Ваша ссылка для приглашения:</b>
-<blockquote expandable><code>{referral_link}</code></blockquote>{inviter_line}"""
+<code>{referral_link}</code>{inviter_line}"""
 REFERRAL_TIER_PROGRESS_NEXT = "\nДо статуса <b>{next_tier_name} ({next_rate_pct}%)</b>: ещё {needed_count}"
 
 REFERRAL_TIER_PROGRESS_MAX = "\n🏆 <b>Максимальный статус</b>"

@@ -47,6 +47,8 @@ BTN_CONNECTIONS = "🔌 Подключения"
 
 BTN_CONTACT_SUPPORT = "💬 Написать в поддержку"
 
+BTN_COPY_KEY = "📋 Скопировать ключ"
+
 BTN_DISMISS = "✅ Прочитано"
 
 BTN_DISMISS_ALERT = "🗑 Прочитано"

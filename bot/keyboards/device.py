@@ -17,7 +17,7 @@ def get_device_keyboard(
 
     if copy_key and 1 <= len(copy_key) <= 256:
         builder.button(
-            text="📋 Скопировать ключ",
+            text=texts.BTN_COPY_KEY,
             copy_text=CopyTextButton(text=copy_key),
         )
         adjustments.append(1)

@@ -448,6 +448,11 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
                     rich_message=InputRichMessage(html=text),
                 )
             except (TelegramBadRequest, TypeError, AttributeError) as rich_err:
+                if (
+                    isinstance(rich_err, TelegramBadRequest)
+                    and "not_modified" in str(rich_err).lower().replace(" ", "_")
+                ):
+                    raise
                 logger.debug("Failed editing with rich_message: %s, falling back to HTML", rich_err)
                 await query.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
         else:
@@ -1067,6 +1072,11 @@ async def show_subscription_link(query: CallbackQuery, session: AsyncSession):
                 rich_message=InputRichMessage(html=text),
             )
         except (TelegramBadRequest, TypeError, AttributeError) as rich_err:
+            if (
+                isinstance(rich_err, TelegramBadRequest)
+                and "not_modified" in str(rich_err).lower().replace(" ", "_")
+            ):
+                raise
             logger.debug(
                 "Failed editing with rich_message in show_subscription_link: %s, falling back to HTML",
                 rich_err,
