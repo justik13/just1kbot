@@ -184,7 +184,6 @@ async def show_referral(
     else:
         inviter_line = ""
 
-    ref_btn = make_rich_button(f"👥 Мои рефералы ({invited_count})", callback_data="referrals_list", style="primary")
     nav_row = make_rich_nav_row(include_menu=True)
 
     body_text = (
@@ -199,7 +198,7 @@ async def show_referral(
             referral_link=referral_link,
             inviter_line=inviter_line,
         )
-        + f"\n{make_rich_button_row(ref_btn)}\n{nav_row}"
+        + f"\n{nav_row}"
     )
 
     await render_hub(

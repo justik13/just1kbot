@@ -46,9 +46,9 @@ REFERRAL_LIST_HEADER = """👥 <b>Ваши рефералы</b>
 
 REFERRAL_LIST_ITEM_FORMAT = "\n{idx}. <b>{user}</b> ({date})"
 
-REFERRAL_MAIN_RANK_NOT_RANKED = "\n🏆 Место в рейтинге: <b>вне рейтинга</b>"
+REFERRAL_MAIN_RANK_NOT_RANKED = "вне рейтинга"
 
-REFERRAL_MAIN_RANK_RANKED = "\n🏆 Место в рейтинге: <b>#{rank}</b>"
+REFERRAL_MAIN_RANK_RANKED = "#{rank}"
 
 REFERRAL_SHARE_TEXT = "🎁 Приглашаю в just1kbot! Получи скидку 25% на первый тариф по моей ссылке:"
 
@@ -57,7 +57,9 @@ REFERRAL_TEXT_BALANCE = """<p>🤝 <b>Реферальная программа<
   <tr><td>Бонусный баланс:</td><td><b>{bonus_balance} ₽ 🎁</b></td></tr>
   <tr><td>Ваш статус:</td><td><b>{tier_name} ({rate_pct}%)</b></td></tr>
   <tr><td>Приглашённых:</td><td><b>{active_count}</b> (всего {invited_count})</td></tr>
-</table>{rank_line}{tier_progress_line}
+  <tr><td>Место в рейтинге:</td><td><b>{rank_line}</b></td></tr>
+  {tier_progress_line}
+</table>
 
 <blockquote expandable>🎁 <b>Условия программы:</b>
 • Вы получаете <b>от 15% до 30%</b> с каждой оплаты приглашённых пользователей на бонусный баланс.
@@ -70,15 +72,18 @@ REFERRAL_TEXT_BALANCE = """<p>🤝 <b>Реферальная программа<
 
 <i>Бонусы списываются при оплате и продлении подписки.</i></blockquote>
 
-🔗 <b>Ваша ссылка для приглашения:</b>
-<code>{referral_link}</code>{inviter_line}
+<p>🔗 <b>Ваша ссылка для приглашения:</b></p>
+<blockquote expandable><code>{referral_link}</code></blockquote>{inviter_line}
 <tg-button-row align="center">
   <tg-button type="copy_text" text="{referral_link}">📋 Скопировать ссылку</tg-button>
+</tg-button-row>
+<tg-button-row align="center">
+  <tg-button type="callback_data" style="primary" data="referrals_list">👥 Мои рефералы ({invited_count})</tg-button>
   <tg-button type="callback_data" style="primary" data="referral_leaderboard">🏆 Топ-5 лидеров</tg-button>
 </tg-button-row>"""
-REFERRAL_TIER_PROGRESS_NEXT = "\nДо статуса <b>{next_tier_name} ({next_rate_pct}%)</b>: ещё {needed_count}"
+REFERRAL_TIER_PROGRESS_NEXT = "<tr><td>До статуса {next_tier_name} ({next_rate_pct}%):</td><td><b>ещё {needed_count}</b></td></tr>"
 
-REFERRAL_TIER_PROGRESS_MAX = "\n🏆 <b>Максимальный статус</b>"
+REFERRAL_TIER_PROGRESS_MAX = "<tr><td>Прогресс:</td><td><b>🏆 Максимальный</b></td></tr>"
 REFERRAL_PAYMENTS_TABLE_TEMPLATE = "<table><tr><th>Статус</th><th>Дата</th><th>Сумма</th></tr>{rows}</table>"
 REFERRAL_LEADERBOARD_TABLE_TEMPLATE = "<table><tr><th>#</th><th>Участник</th><th>Приглашено</th></tr>{rows}</table>"
 

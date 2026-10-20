@@ -83,18 +83,18 @@ WL_OVERVIEW_ACTIVE = (
     "<tr><td>Срок:</td><td>до {expiry}</td></tr>"
     "<tr><td>Остаток:</td><td><b>{available}</b></td></tr>"
     "<tr><td>Использовано:</td><td>{used} из {total}</td></tr>"
+    "<tr><td>Устройства:</td><td><b>{active_devices} из {device_limit}</b></td></tr>"
     "</table>\n"
-    "<code>[{progress}]</code>\n\n"
-    "📱 <b>Устройства:</b> {active_devices} из {device_limit}{sub_url_block}"
+    "<p><code>[{progress}]</code></p>{sub_url_block}"
 )
 WL_OVERVIEW_SUB_URL_BLOCK = (
-    "\n\n📋 <b>Ваша ссылка на подписку:</b>\n"
+    "\n<p>📋 <b>Ваша ссылка на подписку:</b></p>\n"
     "<blockquote expandable><code>{sub_url}</code></blockquote>\n"
     '<tg-button-row align="center">\n'
     '  <tg-button type="copy_text" text="{sub_url}">📋 Скопировать ссылку</tg-button>\n'
     '  <tg-button type="url" style="success" url="{sub_url}">🚀 Подключить в приложении</tg-button>\n'
     "</tg-button-row>\n"
-    "<i>(нажмите на ссылку для копирования)</i>"
+    "<p><i>(нажмите на ссылку для копирования)</i></p>"
 )
 
 WL_TOPUP_MENU_TEXT = (
