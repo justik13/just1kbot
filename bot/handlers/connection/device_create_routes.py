@@ -97,6 +97,7 @@ def _get_device_limit_keyboard(can_upgrade: bool = True):
     if can_upgrade:
         builder.button(text=texts.BTN_CHANGE_TARIFF, callback_data="payment_change_tariff")
     builder.button(text=texts.BTN_BACK_TO_DEVICES, callback_data="back_to_connections")
+    builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -210,7 +211,8 @@ async def start_add_device(
         )
 
     builder.button(text=texts.BTN_BACK, callback_data="back_to_connections")
-    builder.adjust(1)
+    builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
+    builder.adjust(*([1] * len(servers)), 2)
 
     await render_hub(
         callback.bot,

@@ -7,8 +7,14 @@
 - Добавили кнопку закрытия системного алерта (`admin_dismiss_alert:general`) при падении фоновых воркеров (`services/workers/__init__.py`).
 - Исправили счетчик устройств на Главном экране (`bot/handlers/start.py`): теперь он суммирует AWG-профили и активные привязки VLESS HWID, а не показывает ноль при подключении по VLESS.
 - Переименовали константу кнопки удаления устройства в `BTN_CONFIRM_DELETE = "🗑 Да, удалить"` (`bot/texts/connection/devices.py`), старый алиас сохранили для совместимости.
+- Привели нативные стили кнопок к стандарту Telegram Bot API (`success`, `primary`, `danger`), заменив неподдерживаемый стиль `warning` на кнопках сброса привязок устройств (`bot/handlers/connection/common.py`, `bot/handlers/white_internet.py`).
+- Реализовали прямой переход в поддержку по URL-ссылке с контекстным предзаполненным сообщением на экранах оплаты и блокировки финансовых споров без сброса карточки платежа (`bot/keyboards/payment.py`, `utils/support.py`).
+- Ликвидировали глубокие навигационные тупики в разделах инструкций, FAQ и добавления устройств (`bot/handlers/support.py`, `bot/handlers/connection/device_create_routes.py`).
+- Синхронизировали часовой пояс отображения окончания подписки Белого Интернета по московскому времени (`Europe/Moscow`).
 
 ### Среда и зависимости
+- Обновили базовый стек библиотек Telegram до `aiogram 3.31.0` и `aiohttp 3.14.5`.
+- Добавили тест валидации стилей кнопок Telegram Bot API (`tests/test_keyboard_styles.py`).
 - Добавили `pythonpath = ["."]` в `pyproject.toml`, чтобы `pytest` находил модули бота без ручной настройки путей на Windows.
 - Добавили fallback таймзоны на `MSK` (`UTC+3`) в `utils/datetime_helpers.py`, если в системе нет `tzdata`.
 - Обновили пин `certifi==2026.10.18` с точными хэшами в `requirements.lock`, устранив падение проверки зависимостей на CI.

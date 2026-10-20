@@ -19,8 +19,10 @@ from bot.keyboards import (
     get_balance_amounts_keyboard,
     get_balance_history_keyboard,
     get_balance_keyboard,
+    get_dispute_blocked_keyboard,
     get_order_invoice_keyboard,
 )
+from utils.support import get_support_url
 from bot.states import BalanceStates
 from config.settings import get_settings
 from database.models import Order, User
@@ -244,11 +246,14 @@ async def _create_and_render_topup(
             return
 
         if getattr(user, "financial_hold", False):
+            support_url = get_support_url(
+                texts.SUPPORT_DISPUTE_GREETING_TEMPLATE.format(telegram_id=user_id)
+            )
             await render_hub(
                 bot,
                 chat_id,
                 texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
-                get_back_button(back_to),
+                get_dispute_blocked_keyboard(back_to, support_url=support_url),
             )
             return
 
@@ -297,6 +302,13 @@ async def _create_and_render_topup(
         text = texts.BALANCE_TOPUP_CARD.format(
             value_0=int(order.amount_rub), value_1=int(balance.available)
         )
+        support_url = get_support_url(
+            texts.SUPPORT_TOPUP_GREETING_TEMPLATE.format(
+                telegram_id=user_id,
+                price=int(order.amount_rub),
+                order_ref=str(order.id)[:8],
+            )
+        )
         await render_hub(
             bot,
             chat_id,
@@ -305,7 +317,7 @@ async def _create_and_render_topup(
                 payment_url=order.payment_url or "",
                 order_id=str(order.id),
                 price=int(order.amount_rub),
-                back_callback=back_to,
+                support_url=support_url,
             ),
         )
     finally:
@@ -402,11 +414,16 @@ async def choose_topup_amount(
         return
 
     if db_user.financial_hold:
+        support_url = get_support_url(
+            texts.SUPPORT_DISPUTE_GREETING_TEMPLATE.format(
+                telegram_id=getattr(db_user, "telegram_id", None) or callback.from_user.id
+            )
+        )
         await render_hub(
             callback.bot,
             callback.message.chat.id,
             texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
-            get_back_button("menu_balance"),
+            get_dispute_blocked_keyboard("menu_balance", support_url=support_url),
         )
         return
 
@@ -416,6 +433,13 @@ async def choose_topup_amount(
         text = texts.BALANCE_TOPUP_CARD.format(
             value_0=int(pending_topup.amount_rub), value_1=int(balance.available)
         )
+        support_url = get_support_url(
+            texts.SUPPORT_TOPUP_GREETING_TEMPLATE.format(
+                telegram_id=getattr(db_user, "telegram_id", None) or callback.from_user.id,
+                price=int(pending_topup.amount_rub),
+                order_ref=str(pending_topup.id)[:8],
+            )
+        )
         await render_hub(
             callback.bot,
             callback.message.chat.id,
@@ -424,7 +448,7 @@ async def choose_topup_amount(
                 payment_url=pending_topup.payment_url,
                 order_id=str(pending_topup.id),
                 price=int(pending_topup.amount_rub),
-                back_callback="menu_balance",
+                support_url=support_url,
             ),
         )
         return
@@ -657,11 +681,16 @@ async def resume_topup(
         return
 
     if getattr(db_user, "financial_hold", False):
+        support_url = get_support_url(
+            texts.SUPPORT_DISPUTE_GREETING_TEMPLATE.format(
+                telegram_id=getattr(db_user, "telegram_id", None) or callback.from_user.id
+            )
+        )
         await render_hub(
             callback.bot,
             callback.message.chat.id,
             texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
-            get_back_button("menu_balance"),
+            get_dispute_blocked_keyboard("menu_balance", support_url=support_url),
         )
         return
     pending_topup = await _get_pending_topup_order(session, db_user.id)
@@ -678,6 +707,13 @@ async def resume_topup(
     text = texts.BALANCE_TOPUP_CARD.format(
         value_0=int(pending_topup.amount_rub), value_1=int(balance.available)
     )
+    support_url = get_support_url(
+        texts.SUPPORT_TOPUP_GREETING_TEMPLATE.format(
+            telegram_id=getattr(db_user, "telegram_id", None) or callback.from_user.id,
+            price=int(pending_topup.amount_rub),
+            order_ref=str(pending_topup.id)[:8],
+        )
+    )
     await render_hub(
         callback.bot,
         callback.message.chat.id,
@@ -686,6 +722,6 @@ async def resume_topup(
             payment_url=pending_topup.payment_url,
             order_id=str(pending_topup.id),
             price=int(pending_topup.amount_rub),
-            back_callback="menu_balance",
+            support_url=support_url,
         ),
     )

@@ -4,7 +4,6 @@ from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot import texts
-from bot.keyboards import get_back_button
 from config.settings import get_settings
 from utils.telegram import render_hub
 
@@ -14,9 +13,14 @@ router = Router()
 def _support_keyboard(username: str, telegram_id: int | None = None):
     builder = InlineKeyboardBuilder()
 
-    from urllib.parse import quote
-    text_param = quote(texts.SUPPORT_GREETING_TEMPLATE.format(telegram_id=telegram_id)) if telegram_id else ""
-    support_url = f"https://t.me/{username}?text={text_param}" if text_param else f"https://t.me/{username}"
+    from utils.support import get_support_url
+
+    text = (
+        texts.SUPPORT_GREETING_TEMPLATE.format(telegram_id=telegram_id)
+        if telegram_id
+        else None
+    )
+    support_url = get_support_url(text=text, username=username)
 
     builder.button(
         text=texts.BTN_CONTACT_SUPPORT,
@@ -118,7 +122,11 @@ async def show_support_help(callback: CallbackQuery):
         text=texts.BTN_BACK,
         callback_data=f"manage_device:{device_id}" if device_id else "menu_support",
     )
-    builder.adjust(1, 1, 1, 1, 1, 1, 1)
+    builder.button(
+        text=texts.BTN_MAIN_MENU_NAV,
+        callback_data="back_to_main_menu",
+    )
+    builder.adjust(1, 1, 1, 1, 1, 1, 2)
 
     await render_hub(
         callback.bot,
@@ -145,7 +153,11 @@ async def show_help_incy(callback: CallbackQuery):
         text=texts.BTN_BACK,
         callback_data=back_cb,
     )
-    builder.adjust(1, 1)
+    builder.button(
+        text=texts.BTN_MAIN_MENU_NAV,
+        callback_data="back_to_main_menu",
+    )
+    builder.adjust(1, 2)
 
     await render_hub(
         callback.bot,
@@ -180,7 +192,11 @@ async def show_help_download(callback: CallbackQuery):
         text=texts.BTN_BACK,
         callback_data=back_cb,
     )
-    builder.adjust(1, 1, 1, 1)
+    builder.button(
+        text=texts.BTN_MAIN_MENU_NAV,
+        callback_data="back_to_main_menu",
+    )
+    builder.adjust(1, 1, 1, 2)
 
     await render_hub(
         callback.bot,
@@ -207,7 +223,11 @@ async def show_help_ios(callback: CallbackQuery):
         text=texts.BTN_BACK,
         callback_data=back_cb,
     )
-    builder.adjust(1, 1)
+    builder.button(
+        text=texts.BTN_MAIN_MENU_NAV,
+        callback_data="back_to_main_menu",
+    )
+    builder.adjust(1, 2)
 
     await render_hub(
         callback.bot,
@@ -238,7 +258,11 @@ async def show_help_windows(callback: CallbackQuery):
         text=texts.BTN_BACK,
         callback_data=back_cb,
     )
-    builder.adjust(1, 1, 1)
+    builder.button(
+        text=texts.BTN_MAIN_MENU_NAV,
+        callback_data="back_to_main_menu",
+    )
+    builder.adjust(1, 1, 2)
 
     await render_hub(
         callback.bot,
@@ -265,7 +289,11 @@ async def show_help_split(callback: CallbackQuery):
         text=texts.BTN_BACK,
         callback_data=back_cb,
     )
-    builder.adjust(1, 1)
+    builder.button(
+        text=texts.BTN_MAIN_MENU_NAV,
+        callback_data="back_to_main_menu",
+    )
+    builder.adjust(1, 2)
 
     await render_hub(
         callback.bot,
@@ -279,9 +307,14 @@ async def show_help_split(callback: CallbackQuery):
 async def show_faq(callback: CallbackQuery):
     await callback.answer(show_alert=False)
 
+    builder = InlineKeyboardBuilder()
+    builder.button(text=texts.BTN_BACK, callback_data="menu_support")
+    builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
+    builder.adjust(2)
+
     await render_hub(
         callback.bot,
         callback.message.chat.id,
         texts.FAQ_TEXT,
-        get_back_button("menu_support"),
+        builder.as_markup(),
     )
