@@ -28,9 +28,13 @@ REFERRAL_LEADERBOARD_NOT_RANKED = "\n➖➖➖➖➖➖➖➖\nВаше мест
 
 REFERRAL_LEADERBOARD_TITLE = "🏆 <b>Топ-5 лидеров</b>\n"
 
+REFERRAL_LEADERBOARD_USER_OPEN = "<b>{name}</b>"
+
+REFERRAL_LEADERBOARD_USER_OPEN_YOU = "<b>{name}</b> (Вы)"
+
 REFERRAL_LEADERBOARD_USER_OTHER = "<code>{masked}</code>"
 
-REFERRAL_LEADERBOARD_USER_YOU = "<b>{masked}</b> (Вы)"
+REFERRAL_LEADERBOARD_USER_YOU = "<code>{masked}</code> (Вы)"
 
 REFERRAL_LEADERBOARD_YOUR_RANK = "\n➖➖➖➖➖➖➖➖\nВаше место: <b>#{rank}</b> ({count} {noun})"
 

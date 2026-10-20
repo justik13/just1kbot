@@ -21,7 +21,8 @@
 - Добавили тест валидации стилей кнопок Telegram Bot API (`tests/test_keyboard_styles.py`).
 - Добавили `pythonpath = ["."]` в `pyproject.toml`, чтобы `pytest` находил модули бота без ручной настройки путей на Windows.
 - Добавили fallback таймзоны на `MSK` (`UTC+3`) в `utils/datetime_helpers.py`, если в системе нет `tzdata`.
-- Обновили пин `certifi==2026.10.18` с точными хэшами в `requirements.lock`, устранив падение проверки зависимостей на CI.
+- Обновили пин `certifi==2026.10.19` с точными хэшами в `requirements.lock`, устранив падение проверки зависимостей на CI.
+- Синхронизировали зависимости в `requirements.lock`: обновлены пины `cachetools==7.2.4` и `pydantic-settings==2.16.1` с актуальными хэшами.
 - Подняли версию бота до `2.5.0` в `pyproject.toml`.
 
 ## Инварианты

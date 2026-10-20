@@ -58,8 +58,14 @@ async def _update_user_profile_if_changed(
     new_username = message.from_user.username
     new_first_name = message.from_user.first_name
 
-    if new_username is not None and user.username != new_username:
-        updates["username"] = new_username
+    if new_username:
+        clean_username = new_username.strip().lstrip("@")[:32]
+        if clean_username and user.username != clean_username:
+            updates["username"] = clean_username
+        elif not clean_username and user.username is not None:
+            updates["username"] = None
+    elif user.username is not None:
+        updates["username"] = None
 
     if new_first_name is not None and user.first_name != new_first_name:
         updates["first_name"] = new_first_name
