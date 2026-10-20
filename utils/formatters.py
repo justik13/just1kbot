@@ -30,6 +30,7 @@ def format_tg_time(
     dt: datetime | date | None,
     format_spec: str = "dt",
     fallback_format: str = "%d.%m.%Y %H:%M",
+    custom_fallback: str | None = None,
 ) -> str:
     """Render a datetime into a localized Telegram <tg-time> HTML tag.
 
@@ -48,7 +49,7 @@ def format_tg_time(
         return "—"
 
     unix_ts = int(dt.timestamp())
-    fallback = format_datetime_msk(dt, fallback_format)
+    fallback = custom_fallback if custom_fallback is not None else format_datetime_msk(dt, fallback_format)
     if unix_ts <= 0:
         return fallback
 

@@ -54,5 +54,43 @@ class CommandSurfaceTests(unittest.TestCase):
             self.assertNotIn("CommandStart(", source, path.relative_to(ROOT).as_posix())
 
 
+class TestSetupBotCommands(unittest.IsolatedAsyncioTestCase):
+    async def test_setup_bot_commands_registers_descriptions(self):
+        from unittest.mock import AsyncMock, patch
+        from bot.main import setup_bot_commands
+        from bot import texts
+
+        bot = AsyncMock()
+        with patch("bot.main._is_ci_test_mode", return_value=False):
+            await setup_bot_commands(bot)
+
+        bot.set_my_commands.assert_awaited_once()
+        bot.set_chat_menu_button.assert_awaited_once()
+        bot.set_my_description.assert_awaited_once_with(description=texts.BOT_DESCRIPTION)
+        bot.set_my_short_description.assert_awaited_once_with(short_description=texts.BOT_SHORT_DESCRIPTION)
+
+    async def test_setup_bot_commands_skips_in_ci_test_mode(self):
+        from unittest.mock import AsyncMock, patch
+        from bot.main import setup_bot_commands
+
+        bot = AsyncMock()
+        with patch("bot.main._is_ci_test_mode", return_value=True):
+            await setup_bot_commands(bot)
+
+        bot.set_my_commands.assert_not_called()
+        bot.set_my_description.assert_not_called()
+        bot.set_my_short_description.assert_not_called()
+
+    async def test_setup_bot_commands_handles_description_api_failure(self):
+        from unittest.mock import AsyncMock, patch
+        from bot.main import setup_bot_commands
+
+        bot = AsyncMock()
+        bot.set_my_description.side_effect = Exception("Telegram API timeout")
+        with patch("bot.main._is_ci_test_mode", return_value=False):
+            # Must not raise
+            await setup_bot_commands(bot)
+
+
 if __name__ == "__main__":
     unittest.main()

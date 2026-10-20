@@ -11,7 +11,14 @@ from aiogram.exceptions import (
     TelegramNetworkError,
     TelegramRetryAfter,
 )
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, LinkPreviewOptions
+from aiogram.types import (
+    CallbackQuery,
+    DisabledButton,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InputFile,
+    LinkPreviewOptions,
+)
 from cachetools import TTLCache
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -84,12 +91,18 @@ async def _safe_delete_batch(
     deleted_ids: list[int] = []
     failed_ids: list[int] = []
 
-    for msg_id in msg_ids:
+    if not msg_ids:
+        return deleted_ids, failed_ids
+
+    # Telegram Bot API deleteMessages accepts up to 100 message identifiers per request
+    chunk_size = 100
+    for i in range(0, len(msg_ids), chunk_size):
+        chunk = msg_ids[i : i + chunk_size]
         try:
             await _retry_flood(
-                lambda mid=msg_id: bot.delete_message(chat_id=chat_id, message_id=mid)
+                lambda c=chunk: bot.delete_messages(chat_id=chat_id, message_ids=c)
             )
-            deleted_ids.append(msg_id)
+            deleted_ids.extend(chunk)
         except TelegramBadRequest as e:
             err_str = str(e).lower()
             if (
@@ -98,20 +111,73 @@ async def _safe_delete_batch(
                 or "chat not found" in err_str
                 or "message can't be deleted" in err_str
             ):
-                deleted_ids.append(msg_id)
+                # When batch delete fails due to missing or protected messages, fallback
+                # to individual deletions so all remaining valid messages get deleted cleanly.
+                for mid in chunk:
+                    try:
+                        await _retry_flood(
+                            lambda m=mid: bot.delete_message(chat_id=chat_id, message_id=m)
+                        )
+                        deleted_ids.append(mid)
+                    except TelegramBadRequest as sub_e:
+                        sub_err = str(sub_e).lower()
+                        if (
+                            "message to delete not found" in sub_err
+                            or "message identifier is not valid" in sub_err
+                            or "chat not found" in sub_err
+                            or "message can't be deleted" in sub_err
+                        ):
+                            deleted_ids.append(mid)
+                        else:
+                            failed_ids.append(mid)
+                            logger.warning(
+                                "TelegramBadRequest on delete_message %s in %s: %s",
+                                mid,
+                                chat_id,
+                                sub_e,
+                            )
+                    except Exception as sub_e:
+                        failed_ids.append(mid)
+                        logger.error(
+                            "Unexpected error deleting message %s in %s: %s",
+                            mid,
+                            chat_id,
+                            sub_e,
+                        )
             else:
-                failed_ids.append(msg_id)
+                failed_ids.extend(chunk)
                 logger.warning(
-                    "TelegramBadRequest on delete_message %s in %s: %s",
-                    msg_id,
+                    "TelegramBadRequest on delete_messages %s in %s: %s",
+                    chunk,
                     chat_id,
                     e,
                 )
+        except AttributeError:
+            # Fallback when bot object or test mock lacks delete_messages
+            for mid in chunk:
+                try:
+                    await _retry_flood(
+                        lambda m=mid: bot.delete_message(chat_id=chat_id, message_id=m)
+                    )
+                    deleted_ids.append(mid)
+                except TelegramBadRequest as sub_e:
+                    sub_err = str(sub_e).lower()
+                    if (
+                        "message to delete not found" in sub_err
+                        or "message identifier is not valid" in sub_err
+                        or "chat not found" in sub_err
+                        or "message can't be deleted" in sub_err
+                    ):
+                        deleted_ids.append(mid)
+                    else:
+                        failed_ids.append(mid)
+                except Exception:
+                    failed_ids.append(mid)
         except Exception as e:
-            failed_ids.append(msg_id)
+            failed_ids.extend(chunk)
             logger.error(
-                "Unexpected error deleting message %s in %s: %s",
-                msg_id,
+                "Unexpected error deleting messages %s in %s: %s",
+                chunk,
                 chat_id,
                 e,
             )
@@ -416,7 +482,16 @@ def sanitize_reply_markup(reply_markup: InlineKeyboardMarkup | None) -> InlineKe
             if not btn_text.strip():
                 updates["text"] = "—"
 
-            # 2. Check copy_text: Telegram Bot API specifies 1 <= len(text) <= 256
+            # 2. Check disabled button: normalize boolean disabled=True and strip redundant callback_data
+            btn_disabled = getattr(btn, "disabled", None)
+            if btn_disabled is True:
+                updates["disabled"] = DisabledButton()
+                if getattr(btn, "callback_data", None) is not None:
+                    updates["callback_data"] = None
+            elif btn_disabled is not None and getattr(btn, "callback_data", None) is not None:
+                updates["callback_data"] = None
+
+            # 3. Check copy_text: Telegram Bot API specifies 1 <= len(text) <= 256
             if getattr(btn, "copy_text", None) is not None:
                 cp_text = getattr(btn.copy_text, "text", "") or ""
                 if not (1 <= len(cp_text) <= 256):
@@ -430,6 +505,8 @@ def sanitize_reply_markup(reply_markup: InlineKeyboardMarkup | None) -> InlineKe
                         or btn.switch_inline_query_chosen_chat
                         or btn.callback_game
                         or btn.pay
+                        or getattr(btn, "disabled", None) is not None
+                        or "disabled" in updates
                     ):
                         updates["callback_data"] = "alert:copy_too_long"
                     logger.error(
@@ -438,7 +515,7 @@ def sanitize_reply_markup(reply_markup: InlineKeyboardMarkup | None) -> InlineKe
                         len(cp_text),
                     )
 
-            # 3. Check callback_data: Telegram Bot API specifies 1 <= len(utf-8 bytes) <= 64
+            # 4. Check callback_data: Telegram Bot API specifies 1 <= len(utf-8 bytes) <= 64
             if getattr(btn, "callback_data", None) is not None and "callback_data" not in updates:
                 cb_str = str(btn.callback_data)
                 cb_bytes = cb_str.encode("utf-8")

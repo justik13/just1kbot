@@ -232,6 +232,11 @@ async def setup_bot_commands(bot: Bot):
         commands, scope=BotCommandScopeDefault()
     )
     await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+    try:
+        await bot.set_my_description(description=texts.BOT_DESCRIPTION)
+        await bot.set_my_short_description(short_description=texts.BOT_SHORT_DESCRIPTION)
+    except Exception as e:
+        logger.warning("Failed to register bot descriptions on startup: %s", e)
 
 
 async def setup_bot(bot: Bot | None = None, storage: BaseStorage | None = None) -> tuple[Bot, Dispatcher]:

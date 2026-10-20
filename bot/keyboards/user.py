@@ -1,6 +1,6 @@
 from urllib.parse import quote
 
-from aiogram.types import CopyTextButton, InlineKeyboardMarkup
+from aiogram.types import CopyTextButton, DisabledButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot import texts
@@ -102,17 +102,17 @@ def get_referrals_list_keyboard(
         if page > 1:
             builder.button(text=texts.BTN_PAGINATION_PREV, callback_data=f"referrals_list:{page - 1}")
         else:
-            builder.button(text=texts.BTN_PAGINATION_EMPTY, callback_data="ignore")
+            builder.button(text=texts.BTN_PAGINATION_EMPTY, disabled=DisabledButton())
 
         builder.button(
             text=texts.BTN_PAGINATION_PAGE.format(page=page, total_pages=total_pages),
-            callback_data="ignore",
+            disabled=DisabledButton(),
         )
 
         if page < total_pages:
             builder.button(text=texts.BTN_PAGINATION_NEXT, callback_data=f"referrals_list:{page + 1}")
         else:
-            builder.button(text=texts.BTN_PAGINATION_EMPTY, callback_data="ignore")
+            builder.button(text=texts.BTN_PAGINATION_EMPTY, disabled=DisabledButton())
 
         builder.button(text=texts.BTN_BACK, callback_data="referral")
         builder.adjust(3, 1)

@@ -276,6 +276,26 @@ class TestUtilsTelegram(unittest.IsolatedAsyncioTestCase):
 
     async def test_safe_delete_batch(self):
         bot = AsyncMock()
+
+        # 1. Batch deletion happy path
+        deleted, failed = await _safe_delete_batch(bot, 123, [1, 2, 3])
+        bot.delete_messages.assert_awaited_once_with(chat_id=123, message_ids=[1, 2, 3])
+        self.assertEqual(deleted, [1, 2, 3])
+        self.assertEqual(failed, [])
+
+        # 2. Chunking over 100 IDs
+        bot.reset_mock()
+        large_ids = list(range(1, 251))
+        deleted_large, failed_large = await _safe_delete_batch(bot, 123, large_ids)
+        self.assertEqual(bot.delete_messages.await_count, 3)
+        self.assertEqual(len(deleted_large), 250)
+        self.assertEqual(failed_large, [])
+
+        # 3. Fallback on TelegramBadRequest
+        bot.reset_mock()
+        bot.delete_messages.side_effect = TelegramBadRequest(
+            method=MagicMock(), message="Message to delete not found"
+        )
         bot.delete_message.side_effect = [
             None,
             TelegramBadRequest(method=MagicMock(), message="Message to delete not found"),
@@ -285,6 +305,11 @@ class TestUtilsTelegram(unittest.IsolatedAsyncioTestCase):
         self.assertIn(1, deleted)
         self.assertIn(2, deleted)
         self.assertIn(3, failed)
+
+        # 4. Empty input
+        d_empty, f_empty = await _safe_delete_batch(bot, 123, [])
+        self.assertEqual(d_empty, [])
+        self.assertEqual(f_empty, [])
 
 
 class TestUtilsTextLimits(unittest.TestCase):

@@ -108,6 +108,7 @@ def get_tariff_group_name(device_limit: int) -> str:
 
 def format_subscription_date(dt) -> str:
     from utils.datetime_helpers import is_permanent_subscription, now_msk, to_msk
+    from utils.formatters import format_tg_time
 
     if dt is None:
         return texts.PLACEHOLDER_DASH
@@ -121,8 +122,10 @@ def format_subscription_date(dt) -> str:
     month_name = texts.MONTH_NAMES_LABELS[msk_dt.month - 1]
     now_dt = now_msk()
     if msk_dt.year == now_dt.year:
-        return texts.DATE_DAY_MONTH_FORMAT.format(day=msk_dt.day, month=month_name)
-    return texts.DATE_DAY_MONTH_YEAR_FORMAT.format(day=msk_dt.day, month=month_name, year=msk_dt.year)
+        fallback = texts.DATE_DAY_MONTH_FORMAT.format(day=msk_dt.day, month=month_name)
+    else:
+        fallback = texts.DATE_DAY_MONTH_YEAR_FORMAT.format(day=msk_dt.day, month=month_name, year=msk_dt.year)
+    return format_tg_time(dt, format_spec="d", custom_fallback=fallback)
 
 
 def format_days_left(dt) -> str:

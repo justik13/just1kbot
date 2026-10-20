@@ -1,4 +1,4 @@
-from aiogram.types import InlineKeyboardMarkup
+from aiogram.types import DisabledButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot import texts
@@ -106,12 +106,12 @@ def get_audit_keyboard(page: int = 1, total_pages: int = 1) -> InlineKeyboardMar
         if page > 1:
             builder.button(text=texts.BTN_BACK, callback_data=f"admin_audit:{page - 1}")
         else:
-            builder.button(text=" ⏹ ", callback_data="ignore")
-        builder.button(text=texts.PAGE_INDEX_FORMAT.format(page=page, total_pages=total_pages), callback_data="ignore")
+            builder.button(text=" ⏹ ", disabled=DisabledButton())
+        builder.button(text=texts.PAGE_INDEX_FORMAT.format(page=page, total_pages=total_pages), disabled=DisabledButton())
         if page < total_pages:
             builder.button(text=texts.BTN_PAGINATION_NEXT, callback_data=f"admin_audit:{page + 1}")
         else:
-            builder.button(text=" ⏹ ", callback_data="ignore")
+            builder.button(text=" ⏹ ", disabled=DisabledButton())
         builder.adjust(3, 1)
     else:
         builder.adjust(1)
