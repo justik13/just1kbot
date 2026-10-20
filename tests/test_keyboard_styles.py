@@ -193,7 +193,7 @@ class TestKeyboardRuntimeStyles(unittest.IsolatedAsyncioTestCase):
              patch("bot.handlers.connection.common._get_effective_device_limit", new_callable=AsyncMock, return_value=3):
             rendered, _ = await _build_connections_screen(user, session, [], read_only=False)
 
-        self.assertIn('callback_data="vless_sub_reset"', rendered)
+        self.assertIn('data="vless_sub_reset"', rendered)
         self.assertIn('style="danger"', rendered)
         self.assertIn(texts.BTN_VLESS_RESET_HWID, rendered)
 
