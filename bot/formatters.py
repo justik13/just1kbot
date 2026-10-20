@@ -137,6 +137,8 @@ def format_days_left(dt) -> str:
         return texts.TIME_FOREVER
 
     msk_dt = to_msk(dt)
+    if msk_dt is None:
+        return texts.PLACEHOLDER_DASH
     now_msk_dt = now_msk()
     if msk_dt < now_msk_dt:
         return texts.PLACEHOLDER_DASH

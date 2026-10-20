@@ -312,6 +312,15 @@ class TestTelegramBotApi103KeyboardAudit(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(btn.disabled, DisabledButton)
         self.assertIsNone(btn.callback_data)
 
+    def test_sanitize_reply_markup_caps_rows_at_100(self):
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text=f"Btn {i}", callback_data=f"data:{i}")] for i in range(120)]
+        )
+        res = sanitize_reply_markup(kb)
+        self.assertEqual(len(res.inline_keyboard), 100)
+        self.assertEqual(res.inline_keyboard[0][0].text, "Btn 0")
+        self.assertEqual(res.inline_keyboard[99][0].text, "Btn 99")
+
 
     def test_sanitize_reply_markup_does_not_convert_disabled_button_to_alert_copy_too_long(self):
         kb = InlineKeyboardMarkup(

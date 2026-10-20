@@ -517,6 +517,15 @@ def sanitize_reply_markup(reply_markup: InlineKeyboardMarkup | None) -> InlineKe
         else:
             sanitized_rows.append(sanitized_row)
 
+    # 5. Check total rows: cap at 100 rows to satisfy Telegram Bot API maximum
+    if len(sanitized_rows) > 100:
+        has_changes = True
+        logger.error(
+            "KEYBOARD_ROW_OVERFLOW: Sanitized keyboard has %s rows (capped at 100)",
+            len(sanitized_rows),
+        )
+        sanitized_rows = sanitized_rows[:100]
+
     if not has_changes:
         return reply_markup
 

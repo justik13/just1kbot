@@ -118,6 +118,16 @@ class BalanceTelegramUXTests(unittest.TestCase):
         self.assertEqual(len(kb_multi_p2.inline_keyboard[1]), 1)
         self.assertEqual(kb_multi_p2.inline_keyboard[1][0].callback_data, "admin_menu")
 
+        # Multiple pages (page 3 of 3): 2 rows (last page)
+        kb_multi_p3 = get_audit_keyboard(3, 3)
+        self.assertEqual(len(kb_multi_p3.inline_keyboard), 2)
+        self.assertEqual(len(kb_multi_p3.inline_keyboard[0]), 3)
+        self.assertEqual(kb_multi_p3.inline_keyboard[0][0].callback_data, "admin_audit:2")
+        self.assertIsNotNone(kb_multi_p3.inline_keyboard[0][1].disabled)
+        self.assertIsNotNone(kb_multi_p3.inline_keyboard[0][2].disabled)
+        self.assertEqual(len(kb_multi_p3.inline_keyboard[1]), 1)
+        self.assertEqual(kb_multi_p3.inline_keyboard[1][0].callback_data, "admin_menu")
+
     def test_amount_keyboard_always_has_custom_amount(self):
         values = callbacks(get_balance_amounts_keyboard([149, 499]))
         self.assertEqual(

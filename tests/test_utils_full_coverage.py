@@ -101,6 +101,26 @@ class TestUtilsDatetimeHelpers(unittest.TestCase):
         self.assertIsNotNone(now_utc().tzinfo)
         self.assertIsNotNone(now_msk().tzinfo)
 
+    def test_to_msk_and_permanent_with_date(self):
+        from utils.datetime_helpers import is_permanent_subscription, to_msk
+        from bot.formatters import format_days_left
+
+        d = datetime.date(2026, 10, 20)
+        msk_dt = to_msk(d)
+        self.assertIsNotNone(msk_dt)
+        self.assertEqual(msk_dt.year, 2026)
+        self.assertIsNone(to_msk(None))
+        self.assertIsNone(to_msk("not-a-datetime"))
+
+        self.assertFalse(is_permanent_subscription(d))
+        self.assertTrue(is_permanent_subscription(datetime.date(2100, 1, 1)))
+        self.assertFalse(is_permanent_subscription(None))
+        self.assertFalse(is_permanent_subscription("invalid"))
+
+        # format_days_left with date and invalid input
+        self.assertEqual(format_days_left("invalid"), "—")
+        self.assertNotEqual(format_days_left(datetime.date(2027, 1, 1)), "—")
+
 
 class TestUtilsEncryption(unittest.TestCase):
     def test_encrypted_string_type_decorator(self):
@@ -166,10 +186,14 @@ class TestUtilsFormatters(unittest.TestCase):
             f'<tg-time unix="{ts}" format="R">&lt;custom &amp; &#x27;safe&#x27;&gt;</tg-time>',
         )
 
-        # 6. Format spec cleanup (removes internal spaces) and empty format_spec
+        # 6. Format spec cleanup (removes internal spaces and special characters) and empty format_spec
         self.assertEqual(
             format_tg_time(dt_aware, format_spec="d t", custom_fallback="fallback"),
             f'<tg-time unix="{ts}" format="dt">fallback</tg-time>',
+        )
+        self.assertEqual(
+            format_tg_time(dt_aware, format_spec="d\" style='color:red'", custom_fallback="fallback"),
+            f'<tg-time unix="{ts}" format="dstylecolorred">fallback</tg-time>',
         )
         self.assertEqual(
             format_tg_time(dt_aware, format_spec="", custom_fallback="fallback"),
@@ -187,12 +211,16 @@ class TestUtilsFormatters(unittest.TestCase):
         from bot import texts
         from utils.datetime_helpers import now_msk
 
-        # 1. None
+        # 1. None and invalid types
         self.assertEqual(format_subscription_date(None), texts.PLACEHOLDER_DASH)
+        self.assertEqual(format_subscription_date("invalid"), texts.PLACEHOLDER_DASH)
+        self.assertEqual(format_subscription_date(12345), texts.PLACEHOLDER_DASH)
 
         # 2. Permanent subscription (year >= 2100)
         dt_perm = datetime.datetime(2100, 1, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
         self.assertEqual(format_subscription_date(dt_perm), texts.TIME_FOREVER)
+        d_perm = datetime.date(2100, 1, 1)
+        self.assertEqual(format_subscription_date(d_perm), texts.TIME_FOREVER)
 
         # 3. Current year subscription
         cur_year = now_msk().year
@@ -204,7 +232,16 @@ class TestUtilsFormatters(unittest.TestCase):
             f'<tg-time unix="{ts}" format="d">{expected_fallback}</tg-time>',
         )
 
-        # 4. Next year subscription (includes year)
+        # 4. Date object (date without time)
+        d_current_year = datetime.date(cur_year, 8, 15)
+        d_expected_dt = datetime.datetime(cur_year, 8, 15, 0, 0, 0, tzinfo=datetime.timezone.utc)
+        ts_d = int(d_expected_dt.timestamp())
+        self.assertEqual(
+            format_subscription_date(d_current_year),
+            f'<tg-time unix="{ts_d}" format="d">{expected_fallback}</tg-time>',
+        )
+
+        # 5. Next year subscription (includes year)
         dt_next_year = datetime.datetime(cur_year + 1, 3, 10, 12, 0, 0, tzinfo=datetime.timezone.utc)
         ts_next = int(dt_next_year.timestamp())
         expected_next_fallback = texts.DATE_DAY_MONTH_YEAR_FORMAT.format(
