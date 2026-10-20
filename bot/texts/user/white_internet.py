@@ -70,6 +70,9 @@ WL_OVERVIEW_TRIAL_NO_SUB = (
     "💰 <b>Стоимость:</b> 0 ₽ (Бесплатно)\n"
     '<tg-button-row align="center">\n'
     '  <tg-button type="callback_data" style="success" data="wl_trial_activate">🎁 Активировать бесплатно</tg-button>\n'
+    "</tg-button-row>\n"
+    '<tg-button-row align="center">\n'
+    '  <tg-button type="callback_data" style="primary" data="wl_buy_preview">🚀 Оформить доступ ({price} ₽)</tg-button>\n'
     "</tg-button-row>"
 )
 

@@ -383,6 +383,7 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
             text = texts.WL_OVERVIEW_TRIAL_NO_SUB.format(
                 days=WHITE_INTERNET_TRIAL_DURATION_DAYS,
                 traffic=int(WHITE_INTERNET_TRIAL_TRAFFIC_BYTES / (1024**3)),
+                price=base_price_int,
             )
         else:
             text = texts.WL_OVERVIEW_NO_SUB.format(
