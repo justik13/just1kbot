@@ -51,10 +51,10 @@ def format_tg_time(
 
     unix_ts = int(dt.timestamp())
     raw_fallback = custom_fallback if custom_fallback is not None else format_datetime_msk(dt, fallback_format)
-    if unix_ts <= 0:
-        return raw_fallback
-
     escaped_fallback = html.escape(raw_fallback)
+    if unix_ts <= 0:
+        return escaped_fallback
+
     if format_spec:
         clean_spec = format_spec.replace(" ", "")
         return f'<tg-time unix="{unix_ts}" format="{clean_spec}">{escaped_fallback}</tg-time>'

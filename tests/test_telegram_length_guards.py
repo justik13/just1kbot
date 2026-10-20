@@ -312,25 +312,6 @@ class TestTelegramBotApi103KeyboardAudit(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(btn.disabled, DisabledButton)
         self.assertIsNone(btn.callback_data)
 
-    def test_sanitize_reply_markup_normalizes_boolean_disabled(self):
-        kb = InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton.model_construct(text="Prev", disabled=True, callback_data="ignore")]]
-        )
-        res = sanitize_reply_markup(kb)
-        btn = res.inline_keyboard[0][0]
-        self.assertEqual(btn.text, "Prev")
-        self.assertIsInstance(btn.disabled, DisabledButton)
-        self.assertIsNone(btn.callback_data)
-
-    def test_sanitize_reply_markup_preserves_enabled_button_when_disabled_is_false(self):
-        kb = InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton.model_construct(text="Next", disabled=False, callback_data="page:2")]]
-        )
-        res = sanitize_reply_markup(kb)
-        btn = res.inline_keyboard[0][0]
-        self.assertEqual(btn.text, "Next")
-        self.assertIsNone(btn.disabled)
-        self.assertEqual(btn.callback_data, "page:2")
 
     def test_sanitize_reply_markup_does_not_convert_disabled_button_to_alert_copy_too_long(self):
         kb = InlineKeyboardMarkup(

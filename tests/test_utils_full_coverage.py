@@ -20,8 +20,8 @@ from utils.datetime_helpers import (
 from utils.encryption import (
     EncryptedString,
 )
-from bot.formatters import format_days_left
-from utils.formatters import format_datetime, format_traffic
+from bot.formatters import format_days_left, format_subscription_date
+from utils.formatters import format_datetime, format_tg_time, format_traffic
 from utils.logging_security import (
     SensitiveDataFilter,
     safe_url_target,
@@ -129,6 +129,91 @@ class TestUtilsFormatters(unittest.TestCase):
         self.assertEqual(format_traffic(1048576), "1.0 MiB")
         self.assertEqual(format_traffic(1073741824), "1.0 GiB")
         self.assertEqual(format_traffic(1099511627776), "1.0 TiB")
+
+    def test_format_tg_time(self):
+        # 1. None and invalid types
+        self.assertEqual(format_tg_time(None), "—")
+        self.assertEqual(format_tg_time("invalid"), "—")
+        self.assertEqual(format_tg_time(12345), "—")
+
+        # 2. Aware datetime (UTC)
+        dt_aware = datetime.datetime(2026, 10, 20, 12, 0, 0, tzinfo=datetime.timezone.utc)
+        ts = int(dt_aware.timestamp())
+        self.assertEqual(
+            format_tg_time(dt_aware, format_spec="dt"),
+            f'<tg-time unix="{ts}" format="dt">20.10.2026 15:00</tg-time>',
+        )
+
+        # 3. Naive datetime (treated as UTC)
+        dt_naive = datetime.datetime(2026, 10, 20, 12, 0, 0)
+        self.assertEqual(
+            format_tg_time(dt_naive, format_spec="d"),
+            f'<tg-time unix="{ts}" format="d">20.10.2026 15:00</tg-time>',
+        )
+
+        # 4. Date object (combined with time.min at UTC)
+        d_obj = datetime.date(2026, 10, 20)
+        dt_date_expected = datetime.datetime(2026, 10, 20, 0, 0, 0, tzinfo=datetime.timezone.utc)
+        ts_date = int(dt_date_expected.timestamp())
+        self.assertEqual(
+            format_tg_time(d_obj, format_spec="d"),
+            f'<tg-time unix="{ts_date}" format="d">20.10.2026 03:00</tg-time>',
+        )
+
+        # 5. Custom fallback and HTML escaping inside tag
+        self.assertEqual(
+            format_tg_time(dt_aware, format_spec="R", custom_fallback="<custom & 'safe'>"),
+            f'<tg-time unix="{ts}" format="R">&lt;custom &amp; &#x27;safe&#x27;&gt;</tg-time>',
+        )
+
+        # 6. Format spec cleanup (removes internal spaces) and empty format_spec
+        self.assertEqual(
+            format_tg_time(dt_aware, format_spec="d t", custom_fallback="fallback"),
+            f'<tg-time unix="{ts}" format="dt">fallback</tg-time>',
+        )
+        self.assertEqual(
+            format_tg_time(dt_aware, format_spec="", custom_fallback="fallback"),
+            f'<tg-time unix="{ts}">fallback</tg-time>',
+        )
+
+        # 7. unix_ts <= 0: returns escaped fallback without tag
+        dt_epoch = datetime.datetime(1970, 1, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
+        self.assertEqual(
+            format_tg_time(dt_epoch, custom_fallback="<epoch & raw>"),
+            "&lt;epoch &amp; raw&gt;",
+        )
+
+    def test_format_subscription_date(self):
+        from bot import texts
+        from utils.datetime_helpers import now_msk
+
+        # 1. None
+        self.assertEqual(format_subscription_date(None), texts.PLACEHOLDER_DASH)
+
+        # 2. Permanent subscription (year >= 2100)
+        dt_perm = datetime.datetime(2100, 1, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
+        self.assertEqual(format_subscription_date(dt_perm), texts.TIME_FOREVER)
+
+        # 3. Current year subscription
+        cur_year = now_msk().year
+        dt_current_year = datetime.datetime(cur_year, 8, 15, 12, 0, 0, tzinfo=datetime.timezone.utc)
+        ts = int(dt_current_year.timestamp())
+        expected_fallback = texts.DATE_DAY_MONTH_FORMAT.format(day=15, month=texts.MONTH_NAMES_LABELS[7])
+        self.assertEqual(
+            format_subscription_date(dt_current_year),
+            f'<tg-time unix="{ts}" format="d">{expected_fallback}</tg-time>',
+        )
+
+        # 4. Next year subscription (includes year)
+        dt_next_year = datetime.datetime(cur_year + 1, 3, 10, 12, 0, 0, tzinfo=datetime.timezone.utc)
+        ts_next = int(dt_next_year.timestamp())
+        expected_next_fallback = texts.DATE_DAY_MONTH_YEAR_FORMAT.format(
+            day=10, month=texts.MONTH_NAMES_LABELS[2], year=cur_year + 1
+        )
+        self.assertEqual(
+            format_subscription_date(dt_next_year),
+            f'<tg-time unix="{ts_next}" format="d">{expected_next_fallback}</tg-time>',
+        )
 
     def test_normalize_hostname(self):
         from utils.security import normalize_hostname
@@ -319,15 +404,7 @@ class TestUtilsTelegram(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(deleted_plural, [10, 20])
         self.assertEqual(failed_plural, [])
 
-        # 5. Fallback on AttributeError (bot lacking delete_messages)
-        bot_legacy = MagicMock()
-        bot_legacy.delete_message = AsyncMock(return_value=None)
-        del bot_legacy.delete_messages
-        deleted_attr, failed_attr = await _safe_delete_batch(bot_legacy, 123, [4, 5])
-        self.assertEqual(deleted_attr, [4, 5])
-        self.assertEqual(failed_attr, [])
-
-        # 6. Deduplication of duplicate message IDs
+        # 5. Deduplication of duplicate message IDs
         bot.reset_mock()
         bot.delete_messages.side_effect = None
         deleted_dedup, failed_dedup = await _safe_delete_batch(bot, 123, [7, 7, 8, 8, 9])
@@ -335,7 +412,7 @@ class TestUtilsTelegram(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(deleted_dedup, [7, 8, 9])
         self.assertEqual(failed_dedup, [])
 
-        # 7. Empty input
+        # 6. Empty input
         d_empty, f_empty = await _safe_delete_batch(bot, 123, [])
         self.assertEqual(d_empty, [])
         self.assertEqual(f_empty, [])

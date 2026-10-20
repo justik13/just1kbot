@@ -140,14 +140,13 @@ async def _safe_delete_batch(
                 lambda c=chunk: bot.delete_messages(chat_id=chat_id, message_ids=c)
             )
             deleted_ids.extend(chunk)
-        except (TelegramBadRequest, AttributeError) as e:
-            if isinstance(e, TelegramBadRequest):
-                logger.warning(
-                    "TelegramBadRequest on delete_messages %s in %s: %s; falling back to individual deletions",
-                    chunk,
-                    chat_id,
-                    e,
-                )
+        except TelegramBadRequest as e:
+            logger.warning(
+                "TelegramBadRequest on delete_messages %s in %s: %s; falling back to individual deletions",
+                chunk,
+                chat_id,
+                e,
+            )
             await _delete_individually(chunk)
         except Exception as e:
             failed_ids.extend(chunk)
@@ -458,13 +457,8 @@ def sanitize_reply_markup(reply_markup: InlineKeyboardMarkup | None) -> InlineKe
             if not btn_text.strip():
                 updates["text"] = "—"
 
-            # 2. Check disabled button: normalize boolean disabled=True/False and strip redundant callback_data
-            btn_disabled = getattr(btn, "disabled", None)
-            is_disabled = (btn_disabled is True) or isinstance(btn_disabled, DisabledButton)
-            if btn_disabled is True:
-                updates["disabled"] = DisabledButton()
-            elif btn_disabled is False:
-                updates["disabled"] = None
+            # 2. Check disabled button: strip redundant callback_data / copy_text if button is disabled
+            is_disabled = isinstance(getattr(btn, "disabled", None), DisabledButton)
 
             if is_disabled:
                 if getattr(btn, "callback_data", None) is not None:
