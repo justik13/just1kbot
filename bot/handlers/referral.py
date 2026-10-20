@@ -91,7 +91,7 @@ async def show_history(
     if not payments:
         rendered = texts.HISTORY_HEADER + texts.HISTORY_EMPTY
     else:
-        rendered = texts.HISTORY_HEADER
+        rows = []
         for payment in payments[:10]:
             display_status = payment_display_status(payment)
             status_icon = texts.PAYMENT_STATUS_ICONS.get(
@@ -105,10 +105,11 @@ async def show_history(
                 if hasattr(payment, "amount_rub")
                 else int(getattr(payment, "amount", 0))
             )
-            rendered += (
-                f"{status_icon} {date} | "
-                f"{amount} {currency}\n"
+            rows.append(
+                f"<tr><td>{status_icon}</td><td>{date}</td><td><b>{amount} {currency}</b></td></tr>"
             )
+        table = f"<table><tr><th>Статус</th><th>Дата</th><th>Сумма</th></tr>{''.join(rows)}</table>"
+        rendered = texts.HISTORY_HEADER + table
 
         if len(payments) > 10:
             rendered += texts.HISTORY_LIMIT_NOTE.format(count=len(payments))
@@ -212,7 +213,8 @@ async def _render_referral_leaderboard(
         leader_ids = [leader_tg_id for leader_tg_id, _ in top_leaders]
         leader_users = await get_users_by_telegram_ids(session, leader_ids)
 
-        rendered = texts.REFERRAL_LEADERBOARD_TITLE + "\n"
+        rendered = f"<p>{texts.REFERRAL_LEADERBOARD_TITLE.strip()}</p>\n"
+        rows = []
         for pos, (leader_tg_id, count) in enumerate(top_leaders, start=1):
             medal = texts.REFERRAL_LEADERBOARD_MEDALS.get(pos, "")
             is_me = leader_tg_id == db_user.telegram_id
@@ -236,15 +238,11 @@ async def _render_referral_leaderboard(
                 if is_me
                 else texts.REFERRAL_LEADERBOARD_USER_OTHER.format(masked=display_name)
             )
-            noun = pluralize(count, texts.NOUN_USERS)
-            line = texts.REFERRAL_LEADERBOARD_ITEM.format(
-                pos=pos,
-                medal=medal,
-                user=user_label,
-                count=count,
-                noun=noun,
+            rows.append(
+                f"<tr><td>{medal.strip() or pos}</td><td>{user_label}</td><td><b>{count}</b></td></tr>"
             )
-            rendered += f"{line}\n"
+        table = f"<table><tr><th>#</th><th>Участник</th><th>Приглашено</th></tr>{''.join(rows)}</table>"
+        rendered += table
 
     if user_rank is not None and user_active_count > 0:
         noun = pluralize(user_active_count, texts.NOUN_USERS)

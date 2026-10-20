@@ -92,11 +92,20 @@ async def render_tariff_showcase(
         if limit not in grouped:
             grouped[limit] = []
         grouped[limit].append(tariff)
+    rows = []
+    for limit, group_tariffs in sorted(grouped.items()):
+        name = get_tariff_display_name(limit)
+        min_price = min(int(t.price_rub) for t in group_tariffs)
+        rows.append(
+            f"<tr><td>{name}</td><td>до {limit}</td><td><b>от {min_price} ₽</b></td></tr>"
+        )
+    table = f"<table><tr><th>Тариф</th><th>Лимит</th><th>Цена</th></tr>{''.join(rows)}</table>"
+    text = f"{texts.PAYMENT_SHOWCASE_HEADER}\n{table}"
     keyboard = get_tariff_showcase_keyboard(grouped)
     await render_hub(
         bot,
         chat_id,
-        texts.PAYMENT_SHOWCASE_HEADER,
+        text,
         keyboard,
         session=session,
     )

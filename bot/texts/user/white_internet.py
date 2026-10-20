@@ -68,17 +68,19 @@ WL_OVERVIEW_TRIAL_NO_SUB = (
 )
 
 WL_OVERVIEW_ACTIVE = (
-    "⚪️ <b>Белый Интернет</b>\n\n"
-    "<b>Статус:</b> {status}\n"
-    "<b>Срок действия:</b> до {expiry}\n\n"
-    "<b>Остаток трафика:</b> {available}\n"
-    "<b>Использовано:</b> {used} из {total}\n"
+    "<p>⚪️ <b>Белый Интернет</b></p>\n"
+    "<table>"
+    "<tr><td>Статус:</td><td>{status}</td></tr>"
+    "<tr><td>Срок:</td><td>до {expiry}</td></tr>"
+    "<tr><td>Остаток:</td><td><b>{available}</b></td></tr>"
+    "<tr><td>Использовано:</td><td>{used} из {total}</td></tr>"
+    "</table>\n"
     "<code>[{progress}]</code>\n\n"
     "📱 <b>Устройства:</b> {active_devices} из {device_limit}{sub_url_block}"
 )
 WL_OVERVIEW_SUB_URL_BLOCK = (
     "\n\n📋 <b>Ваша ссылка на подписку:</b>\n"
-    "<code>{sub_url}</code>\n"
+    "<blockquote expandable><code>{sub_url}</code></blockquote>\n"
     "<i>(нажмите на ссылку для копирования)</i>"
 )
 
@@ -93,13 +95,13 @@ WL_ALERT_TRAFFIC_UP_TO_DATE = "Данные о трафике актуальны
 WL_ALERT_TRAFFIC_UPDATED = "Данные о трафике обновлены."
 
 WL_INCY_INSTRUCTIONS_TEXT = (
-    "📱 <b>Подключение Белого Интернета в приложении INCY</b>\n\n"
+    "<p>📱 <b>Подключение Белого Интернета в приложении INCY</b></p>\n\n"
     "1️⃣ <b>Установите приложение INCY:</b>\n"
     "   🍏 <a href=\"https://apps.apple.com/app/incy/id6756943388\">Скачать в App Store (для iPhone / iPad)</a>\n"
     "   🤖 <a href=\"https://play.google.com/store/apps/details?id=llc.itdev.incy\">Скачать в Google Play (для Android)</a>\n"
     "   💻 / 📦 <a href=\"https://github.com/INCY-DEV/incy-platforms/releases\">Скачать для ПК (Windows, macOS, Linux) или APK (GitHub)</a>\n\n"
     "2️⃣ <b>Скопируйте вашу ссылку подписки:</b>\n"
-    "<code>{url}</code>\n"
+    "<blockquote expandable><code>{url}</code></blockquote>\n"
     "<i>(нажмите на ссылку выше для копирования)</i>\n\n"
     "3️⃣ <b>Добавьте подписку в INCY:</b>\n"
     "   • Откройте приложение <b>INCY</b>\n"

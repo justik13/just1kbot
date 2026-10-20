@@ -82,22 +82,17 @@ def topup_presets(tariffs: list, settings=None) -> list[int]:
 def _history_lines(entries: list) -> str:
     if not entries:
         return texts.BALANCE_HISTORY_EMPTY
-    lines = []
+    rows = []
     for entry in entries:
         label = HISTORY_LABELS.get(
             entry.entry_type, texts.BALANCE_OPERATION_DEFAULT_LABEL
         )
         sign = "+" if entry.amount > 0 else texts.BALANCE_SIGN_MINUS
         amount = abs(int(entry.amount))
-        lines.append(
-            texts.BALANCE_HISTORY_ROW_FORMAT.format(
-                value_0=format_datetime(entry.created_at),
-                value_1=label,
-                value_2=sign,
-                value_3=amount,
-            )
+        rows.append(
+            f"<tr><td>{format_datetime(entry.created_at)}</td><td>{label}</td><td><b>{sign}{amount} ₽</b></td></tr>"
         )
-    return "\n".join(lines)
+    return f"<table><tr><th>Дата</th><th>Операция</th><th>Сумма</th></tr>{''.join(rows)}</table>"
 
 
 def _pending_topup_conditions(user_id: int):
@@ -160,27 +155,21 @@ async def _render_balance(
     history = await get_account_history(session, user_id=user.id, limit=5)
     pending_topup = await _get_pending_topup_order(session, user.id)
 
-    details = [
-        texts.BALANCE_BALANCE.format(
-            int_snapshot_real_available=int(snapshot.real_available)
-        ),
+    rows = [
+        f"<tr><td>Основной:</td><td><b>{int(snapshot.real_available)} ₽</b></td></tr>"
     ]
     if snapshot.bonus_available > 0:
-        details.append(
-            texts.BALANCE_BONUS_BALANCE.format(
-                int_snapshot_bonus_available=int(snapshot.bonus_available)
-            )
+        rows.append(
+            f"<tr><td>Бонусный:</td><td><b>+{int(snapshot.bonus_available)} ₽ 🎁</b></td></tr>"
         )
     if snapshot.debt > 0:
-        details.append(
-            texts.BALANCE_INSUFFICIENT_FUNDS_DIFFERENCE.format(
-                value_0=int(snapshot.debt)
-            )
+        rows.append(
+            f"<tr><td>Задолженность:</td><td><b>−{int(snapshot.debt)} ₽</b></td></tr>"
         )
     prefix = f"{notice}\n\n" if notice else ""
     text = (
-        texts.BALANCE_TOPUP_CANCELLED_NO_DEBIT.format(value_0=prefix)
-        + "\n".join(details)
+        f"{prefix}<p>💰 <b>Баланс</b></p>\n"
+        f"<table>{''.join(rows)}</table>"
         + texts.BALANCE_HISTORY_SECTION_TITLE
         + _history_lines(history)
     )

@@ -25,7 +25,7 @@ BALANCE_HISTORY_SECTION_TITLE = """
 <b>Последние операции</b>
 """
 
-BALANCE_HISTORY_TITLE = """🧾 <b>История операций</b>
+BALANCE_HISTORY_TITLE = """<p>🧾 <b>История операций</b></p>
 
 {history}"""
 
@@ -55,13 +55,13 @@ BALANCE_TOPUP_CANCELLED_NO_DEBIT = """{value_0}💰 <b>Баланс</b>
 
 """
 
-BALANCE_TOPUP_CARD = """💳 <b>Пополнение баланса</b>
-
-Сумма: <b>{value_0} ₽</b>
-Текущий баланс: <b>{value_1} ₽</b>
-
-Ссылка ведёт на защищённую страницу ЮKassa.
-Если возникла задержка зачисления — напишите в поддержку."""
+BALANCE_TOPUP_CARD = """<p>💳 <b>Пополнение баланса</b></p>
+<table>
+  <tr><td>К оплате:</td><td><b>{value_0} ₽</b></td></tr>
+  <tr><td>Текущий баланс:</td><td><b>{value_1} ₽</b></td></tr>
+</table>
+<blockquote expandable>Ссылка ведёт на защищённую страницу ЮKassa.
+Если возникла задержка зачисления — напишите в поддержку.</blockquote>"""
 
 BALANCE_TOTAL_AVAILABLE_LABEL = "💰 Баланс: <b>{int_balance_real_available} ₽</b>"
 
@@ -73,7 +73,7 @@ BALANCE_VY_POLUCHITE_20_OT_SUMMY_POPOL = """Ваш пригласивший по
 
 HISTORY_EMPTY = "<i>История пуста. У вас пока не было пополнений.</i>"
 
-HISTORY_HEADER = """🧾 <b>История пополнений</b>
+HISTORY_HEADER = """<p>🧾 <b>История пополнений</b></p>
 """
 
 HISTORY_LIMIT_NOTE = """

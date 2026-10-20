@@ -35,7 +35,7 @@ BTN_BROADCAST_START = "🚀 Запустить рассылку ({count})"
 
 BTN_BROADCAST_TEST_ADMIN = "🧪 Тест админу"
 
-BTN_BUY_ACCESS = "🚀 Купить доступ"
+BTN_BUY_ACCESS = "🚀 Оформить доступ"
 
 BTN_BUY_SUBSCRIPTION = "🛒 Купить подписку"
 

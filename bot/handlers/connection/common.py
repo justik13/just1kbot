@@ -6,6 +6,7 @@ from config.constants import (
 )
 from datetime import timedelta
 
+from aiogram.types import CopyTextButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,7 +19,7 @@ from database.repositories.profiles_repo import (
 )
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc
-from utils.formatters import format_datetime, format_traffic
+from utils.formatters import format_traffic
 from utils.telegram import render_hub, safe
 
 logger = logging.getLogger(__name__)
@@ -176,6 +177,10 @@ async def _build_connections_screen(
                 url=sub_url,
                 style="success",
             )
+            builder.button(
+                text=texts.BTN_SUB_COPY_LINK,
+                copy_text=CopyTextButton(text=sub_url),
+            )
         builder.button(
             text=texts.BTN_INCY_INSTRUCTIONS,
             callback_data="vless_sub_feed_info",
@@ -246,7 +251,7 @@ async def _build_amnezia_screen(
             action_hint=action_hint,
         )
     else:
-        profiles_block = "\n"
+        table_rows = ["<table><tr><th>Устройство</th><th>Локация</th><th>Трафик</th></tr>"]
         for profile in profiles:
             server = profile.server
 
@@ -268,14 +273,8 @@ async def _build_amnezia_screen(
             )
             dev_bytes = (getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0) + archived_bytes
             traffic_str = format_traffic(dev_bytes)
-            last_conn_str = format_datetime(profile.last_connected) if getattr(profile, "last_connected", None) else texts.CONNECTION_CONFIG_COMMON_NE_BYLO_AKTIVNOSTEY
 
-            profiles_block += texts.CONNECTION_DEVICE_ROW_FORMAT.format(
-                device_name=safe(profile.device_name),
-                location=location_label,
-                traffic=traffic_str,
-                last_conn=last_conn_str,
-            )
+            status_suffix = ""
             labels = {
                 "pending_create": texts.DEVICE_STATUS_CREATING,
                 "pending_update": texts.PROVISIONING_UPDATING,
@@ -286,7 +285,14 @@ async def _build_amnezia_screen(
                 "delete_failed": texts.PROVISIONING_DELETE_FAILED,
             }
             if profile.provisioning_status in labels:
-                profiles_block += texts.DEVICE_STATUS_LINE_FORMAT.format(v0=labels[profile.provisioning_status])
+                status_suffix = f" ({labels[profile.provisioning_status]})"
+
+            table_rows.append(
+                f"<tr><td>📱 {safe(profile.device_name)}{status_suffix}</td><td>{location_label}</td><td>{traffic_str}</td></tr>"
+            )
+
+        table_rows.append("</table>")
+        profiles_block = "\n" + "".join(table_rows)
 
         rendered = texts.AMNEZIA_SCREEN_TEXT.format(
             active=total_active_devices,

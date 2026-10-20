@@ -226,6 +226,7 @@ async def render_device_screen(
             profile.id,
             config_ready=config_ready,
             show_delete=show_delete,
+            copy_key=display_key,
         )
     else:
         rendered += texts.DEVICE_ACCESS_INACTIVE_NOTICE
