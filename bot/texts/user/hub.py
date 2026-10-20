@@ -18,7 +18,10 @@ HUB_HEADER = """🏠 <b>Главное меню</b>
 
 Выберите нужный раздел:"""
 
-HUB_WHITE_INTERNET_LINE_FORMAT = "\n⚪️ <b>Белый Интернет:</b> {status_icon} до {expiry} ({days_left}, {devices_count} устр., {traffic_rem}/{traffic_total} ГБ)"
+HUB_WHITE_INTERNET_LINE_FORMAT = (
+    "\n⚪️ <b>Белый Интернет:</b> {status_icon} до {expiry} ({days_left})\n"
+    "   • <i>Трафик: {traffic_rem} из {traffic_total} ГБ · {devices_count} устр.</i>"
+)
 HUB_BONUS_LINE_FORMAT = "\n<b>🎁 Бонусный баланс:</b> {bonus_balance} ₽"
 
 PAYMENT_STATUS_PENDING_ICON = "⏳"
