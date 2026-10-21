@@ -312,14 +312,21 @@ class TestTelegramBotApi103KeyboardAudit(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(btn.disabled, DisabledButton)
         self.assertIsNone(btn.callback_data)
 
-    def test_sanitize_reply_markup_caps_rows_at_100(self):
-        kb = InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text=f"Btn {i}", callback_data=f"data:{i}")] for i in range(120)]
-        )
+    def test_sanitize_reply_markup_caps_buttons_at_100(self):
+        # 15 rows with 8 buttons each = 120 buttons total
+        rows = [
+            [InlineKeyboardButton(text=f"B{r}_{c}", callback_data=f"d:{r}_{c}") for c in range(8)]
+            for r in range(15)
+        ]
+        kb = InlineKeyboardMarkup(inline_keyboard=rows)
         res = sanitize_reply_markup(kb)
-        self.assertEqual(len(res.inline_keyboard), 100)
-        self.assertEqual(res.inline_keyboard[0][0].text, "Btn 0")
-        self.assertEqual(res.inline_keyboard[99][0].text, "Btn 99")
+        total_buttons = sum(len(row) for row in res.inline_keyboard)
+        self.assertEqual(total_buttons, 100)
+        # 12 rows of 8 buttons (= 96 buttons) + 1 row of 4 buttons (= 100 buttons total)
+        self.assertEqual(len(res.inline_keyboard), 13)
+        self.assertEqual(len(res.inline_keyboard[-1]), 4)
+        self.assertEqual(res.inline_keyboard[0][0].text, "B0_0")
+        self.assertEqual(res.inline_keyboard[-1][-1].text, "B12_3")
 
 
     def test_sanitize_reply_markup_does_not_convert_disabled_button_to_alert_copy_too_long(self):

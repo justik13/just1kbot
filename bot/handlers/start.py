@@ -158,11 +158,24 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
         p for p in profiles
         if getattr(p, "provisioning_status", "") not in PROFILE_QUOTA_EXCLUDED_STATUSES
     ])
+    vless_hwid_count = 0
     try:
-        vless_hwid_count = await vless_subscription_repo.get_active_hwid_count(session, db_user.id)
-        if not isinstance(vless_hwid_count, int):
-            vless_hwid_count = 0
-    except Exception:
+        begin_nested_fn = getattr(session, "begin_nested", None)
+        if callable(begin_nested_fn):
+            async with begin_nested_fn():
+                cnt = await vless_subscription_repo.get_active_hwid_count(session, db_user.id)
+                if isinstance(cnt, int):
+                    vless_hwid_count = cnt
+        else:
+            cnt = await vless_subscription_repo.get_active_hwid_count(session, db_user.id)
+            if isinstance(cnt, int):
+                vless_hwid_count = cnt
+    except Exception as e:
+        logger.warning(
+            "Failed to resolve active VLESS HWID count for user %s: %s",
+            getattr(db_user, "id", None),
+            e,
+        )
         vless_hwid_count = 0
 
     devices_count = quota_profiles_count + vless_hwid_count
