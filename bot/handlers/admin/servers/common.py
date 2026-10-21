@@ -242,7 +242,6 @@ async def _show_server_card(
         vless_device_count = await vless_subscription_repo.get_total_active_hwid_count(session)
         slots_text = texts.ADMIN_SERVER_SLOTS_VLESS.format(
             vless_device_count=vless_device_count,
-            vless_sub_count=vless_device_count,
         )
     elif cached_used is not None and cached_used != db_used:
         slots_text = texts.ADMIN_SERVER_SLOTS_VALUE.format(
