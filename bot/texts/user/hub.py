@@ -25,7 +25,7 @@ HUB_HEADER = """🏠 <b>Главное меню</b>
 
 HUB_WHITE_INTERNET_LINE_FORMAT = (
     "\n⚪️ <b>Белый Интернет:</b> {status_icon} до {expiry} ({days_left})\n"
-    "   • <i>Трафик: {traffic_rem} из {traffic_total} ГБ · {devices_count} устр.</i>"
+    "   • <i>Трафик: {traffic_used} из {traffic_total} ГБ · {devices_count}/{device_limit} устр.</i>"
 )
 HUB_BONUS_LINE_FORMAT = "\n<b>🎁 Бонусный баланс:</b> {bonus_balance} ₽"
 
