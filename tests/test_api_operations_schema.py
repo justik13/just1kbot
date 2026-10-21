@@ -164,7 +164,7 @@ class APIOperationSchemaTests(unittest.TestCase):
     def test_alembic_graph_has_one_head(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
         self.assertEqual(len(scripts.get_heads()), 1)
-        self.assertEqual(scripts.get_heads(), ["0038_rename_awg_to_standard"])
+        self.assertEqual(scripts.get_heads(), ["0039_user_show_in_leaderboard"])
         self.assertEqual(scripts.get_bases(), ["0001_clean_baseline"])
 
 

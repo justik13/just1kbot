@@ -9,7 +9,10 @@ def mask_telegram_id(telegram_id: int | str) -> str:
     return f"{s[:3]}***{s[-2:]}"
 
 
+BTN_LEADERBOARD_ANONYMOUS_OFF = "🌐 Анонимность: ВЫКЛ"
+BTN_LEADERBOARD_ANONYMOUS_ON = "🔒 Анонимность: ВКЛ"
 BTN_REFERRAL_LEADERBOARD = "🏆 Топ-5 лидеров"
+LEADERBOARD_ANONYMITY_TOGGLED = "Режим отображения в рейтинге изменен"
 
 REFERRAL_DISCOUNT_BADGE = "\n🎁 Скидка 25% по пригласительной ссылке: <b>-{discount} ₽</b> (вместо <s>{original_price} ₽</s>)\n<i>Скидка действует на первый заказ тарифа. Пополнение баланса на неё не влияет. Продление будет по обычной цене ({original_price} ₽).</i>"
 
@@ -25,9 +28,13 @@ REFERRAL_LEADERBOARD_NOT_RANKED = "\n➖➖➖➖➖➖➖➖\nВаше мест
 
 REFERRAL_LEADERBOARD_TITLE = "🏆 <b>Топ-5 лидеров</b>\n"
 
+REFERRAL_LEADERBOARD_USER_OPEN = "<b>{name}</b>"
+
+REFERRAL_LEADERBOARD_USER_OPEN_YOU = "<b>{name}</b> (Вы)"
+
 REFERRAL_LEADERBOARD_USER_OTHER = "<code>{masked}</code>"
 
-REFERRAL_LEADERBOARD_USER_YOU = "<b>{masked}</b> (Вы)"
+REFERRAL_LEADERBOARD_USER_YOU = "<code>{masked}</code> (Вы)"
 
 REFERRAL_LEADERBOARD_YOUR_RANK = "\n➖➖➖➖➖➖➖➖\nВаше место: <b>#{rank}</b> ({count} {noun})"
 

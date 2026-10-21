@@ -82,7 +82,11 @@ def get_alt_connection_keyboard(
         text=texts.CONNECTION_DEVICES_DEVICE_BACK_TO_DEVICE,
         callback_data=f"manage_device:{profile_id}",
     )
-    builder.adjust(1)
+    builder.button(
+        text=texts.BTN_MAIN_MENU_NAV,
+        callback_data="back_to_main_menu",
+    )
+    builder.adjust(2)
     return builder.as_markup()
 
 
@@ -92,7 +96,7 @@ def get_device_delete_confirm_keyboard(
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text=texts.DEVICE_STATUS_CREATING_LABEL,
+        text=texts.BTN_CONFIRM_DELETE,
         callback_data=f"confirm_delete_device:{profile_id}",
         style="danger",
     )

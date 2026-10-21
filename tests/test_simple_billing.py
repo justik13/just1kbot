@@ -622,13 +622,13 @@ class TestOrderKeyboards(unittest.TestCase):
             payment_url="https://pay.link/123",
             order_id="ord-abc",
             price=300,
-            back_callback="back_to_menu",
+            support_url="https://t.me/test_support?text=hello",
         )
         rows = kb.inline_keyboard
         # First row is URL button
         self.assertEqual(rows[0][0].url, "https://pay.link/123")
         self.assertEqual(rows[1][0].callback_data, "order_check:ord-abc")
-        self.assertEqual(rows[2][0].callback_data, "menu_support")
+        self.assertEqual(rows[2][0].url, "https://t.me/test_support?text=hello")
         self.assertEqual(rows[3][0].callback_data, "order_cancel:ord-abc")
 
 

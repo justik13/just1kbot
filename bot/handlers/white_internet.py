@@ -46,6 +46,7 @@ from utils.telegram import safe_callback_answer
 from utils.datetime_helpers import now_utc
 from utils.formatters import format_traffic
 from utils.security import normalize_public_domain
+from bot.formatters import format_subscription_date
 
 logger = logging.getLogger(__name__)
 router = Router(name="white_internet")
@@ -109,13 +110,13 @@ def get_white_internet_overview_keyboard(
             callback_data="wl_buy_preview",
             style="success" if not has_trial_available else None,
         )
-        builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
+        builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
         builder.adjust(1)
         return builder.as_markup()
 
     if sub.status == WhiteInternetStatus.PENDING:
         builder.button(text=texts.BTN_WL_REFRESH_STATUS, callback_data="white_internet")
-        builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
+        builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
         builder.adjust(1)
         return builder.as_markup()
 
@@ -134,12 +135,12 @@ def get_white_internet_overview_keyboard(
                 callback_data="wl_renew_preview",
                 style="success",
             )
-        builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
+        builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
         builder.adjust(1)
         return builder.as_markup()
 
     if sub.status == WhiteInternetStatus.DISABLED:
-        builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
+        builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
         builder.adjust(1)
         return builder.as_markup()
 
@@ -153,6 +154,7 @@ def get_white_internet_overview_keyboard(
         builder.button(
             text=texts.BTN_SUB_CONNECT_INCY,
             url=sub_url,
+            style="success",
         )
         builder.button(
             text=texts.BTN_WL_INCY_INSTRUCTIONS,
@@ -195,10 +197,14 @@ def get_white_internet_overview_keyboard(
 
     has_reset = False
     if sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED):
-        builder.button(text=texts.BTN_WL_RESET_DEVICES, callback_data="wl_reset_devices")
+        builder.button(
+            text=texts.BTN_WL_RESET_DEVICES,
+            callback_data="wl_reset_devices",
+            style="danger",
+        )
         has_reset = True
 
-    builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
+    builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
 
     pattern: list[int] = []
     if has_sub_link:
@@ -210,9 +216,8 @@ def get_white_internet_overview_keyboard(
     elif has_topup:
         pattern.append(1)
     if has_reset:
-        pattern.append(2)
-    else:
         pattern.append(1)
+    pattern.append(1)
 
     builder.adjust(*pattern)
 
@@ -381,7 +386,7 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
         status_str = status_text_map.get(sub.status, str(sub.status))
         used_bytes = max(0, total_limit - available_bytes)
         progress_bar = _render_progress_bar(used_bytes, total_limit)
-        expiry_str = sub.expires_at.strftime(texts.WL_DATETIME_FORMAT) if sub.expires_at else texts.TIME_FOREVER
+        expiry_str = format_subscription_date(sub.expires_at) if sub.expires_at else texts.TIME_FOREVER
 
         active_devices = count_active_hwids(sub.active_hwids, now=now)
         effective_device_limit = max(1, getattr(sub, "device_limit", 1) or 1)
@@ -906,7 +911,11 @@ async def show_add_device_menu(query: CallbackQuery, session: AsyncSession):
     next_traffic = next_limit * base_gb
 
     kb = InlineKeyboardBuilder()
-    kb.button(text=texts.BTN_WL_ADD_DEVICE_CONFIRM, callback_data="wl_add_device_confirm")
+    kb.button(
+        text=texts.BTN_WL_ADD_DEVICE_CONFIRM,
+        callback_data="wl_add_device_confirm",
+        style="success",
+    )
     kb.button(text=texts.BTN_BACK, callback_data="white_internet")
     kb.adjust(1, 1)
 
@@ -1014,6 +1023,7 @@ async def show_subscription_link(query: CallbackQuery, session: AsyncSession):
     kb.button(
         text=texts.BTN_SUB_CONNECT_INCY,
         url=sub_url,
+        style="success",
     )
     kb.button(text=texts.BTN_BACK, callback_data="white_internet")
     kb.adjust(1)

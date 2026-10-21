@@ -186,6 +186,9 @@ class User(Base):
     archived_device_traffic: Mapped[dict] = mapped_column(
         JSONB, nullable=False, default=dict, server_default=text("'{}'")
     )
+    show_in_leaderboard: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
 
     profiles = relationship(
         "VPNProfile",

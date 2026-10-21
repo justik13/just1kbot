@@ -84,7 +84,8 @@ DEVICE_RENAME_PROMPT = """✏️ <b>Переименование устройс�
 
 Введите новое имя (буквы, цифры, пробелы, дефисы, подчёркивания, до 16 символов):"""
 
-DEVICE_STATUS_CREATING_LABEL = "🗑 Да, удалить"
+BTN_CONFIRM_DELETE = "🗑 Да, удалить"
+DEVICE_STATUS_CREATING_LABEL = BTN_CONFIRM_DELETE
 
 DOWNLOAD_CONF_FALLBACK = """⚠️ <b>Не удалось сформировать файл</b> для устройства <b>{device_name}</b>.
 

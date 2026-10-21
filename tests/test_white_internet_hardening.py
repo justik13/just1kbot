@@ -126,7 +126,9 @@ class TestGroupCAlembicMigration0017(unittest.TestCase):
     def test_alembic_heads_and_chain(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
         heads = scripts.get_heads()
-        self.assertEqual(heads, ["0038_rename_awg_to_standard"])
+        self.assertEqual(heads, ["0039_user_show_in_leaderboard"])
+        rev = scripts.get_revision("0039_user_show_in_leaderboard")
+        self.assertEqual(rev.down_revision, "0038_rename_awg_to_standard")
         rev = scripts.get_revision("0038_rename_awg_to_standard")
         self.assertEqual(rev.down_revision, "0037_vless_subscriptions")
         rev = scripts.get_revision("0037_vless_subscriptions")

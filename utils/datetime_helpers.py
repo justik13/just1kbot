@@ -1,7 +1,10 @@
-from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
+from datetime import date, datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-MSK_TZ = ZoneInfo("Europe/Moscow")
+try:
+    MSK_TZ = ZoneInfo("Europe/Moscow")
+except (ZoneInfoNotFoundError, KeyError):
+    MSK_TZ = timezone(timedelta(hours=3), name="MSK")
 
 
 def now_utc() -> datetime:
@@ -12,8 +15,12 @@ def now_msk() -> datetime:
     return datetime.now(MSK_TZ)
 
 
-def to_msk(dt: datetime | None) -> datetime | None:
+def to_msk(dt: datetime | date | None) -> datetime | None:
     if dt is None:
+        return None
+    if isinstance(dt, date) and not isinstance(dt, datetime):
+        dt = datetime.combine(dt, time.min, tzinfo=timezone.utc)
+    elif not isinstance(dt, datetime):
         return None
 
     if dt.tzinfo is None:
@@ -23,24 +30,36 @@ def to_msk(dt: datetime | None) -> datetime | None:
 
 
 def format_datetime_msk(
-    dt: datetime | None,
+    dt: datetime | date | None,
     format_str: str = "%d.%m.%Y %H:%M",
 ) -> str:
     if dt is None:
         return "—"
 
     msk_dt = to_msk(dt)
+    if msk_dt is None:
+        return "—"
     return msk_dt.strftime(format_str)
 
 
-def is_permanent_subscription(dt: datetime | None) -> bool:
-    if dt is None:
+def is_permanent_subscription(dt: datetime | date | None) -> bool:
+    if dt is None or not hasattr(dt, "year"):
         return False
-    return dt.year >= 2100 or (dt.replace(tzinfo=timezone.utc) - now_utc()).days >= 36500
+    if dt.year >= 2100:
+        return True
+    if isinstance(dt, date) and not isinstance(dt, datetime):
+        dt = datetime.combine(dt, time.min, tzinfo=timezone.utc)
+    elif dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return (dt - now_utc()).days >= 36500
 
 
-def is_expired(dt: datetime | None) -> bool:
+def is_expired(dt: datetime | date | None) -> bool:
     if dt is None:
+        return True
+    if isinstance(dt, date) and not isinstance(dt, datetime):
+        dt = datetime.combine(dt, time.min, tzinfo=timezone.utc)
+    elif not isinstance(dt, datetime):
         return True
 
     if dt.tzinfo is None:

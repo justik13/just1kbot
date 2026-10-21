@@ -1414,3 +1414,376 @@ class TestActiveReferralsLegacyPayments(unittest.TestCase):
         self.assertEqual(leaders, [(777000111, 2)])
         self.assertIn("payments", captured["sql"])
         self.assertIn("orders", captured["sql"])
+
+
+class TestReferralLeaderboardPrivacy(unittest.TestCase):
+    def test_user_model_has_show_in_leaderboard_field(self):
+        from database.models import User
+
+        col = User.__table__.columns.get("show_in_leaderboard")
+        self.assertIsNotNone(col)
+        self.assertFalse(col.nullable)
+        self.assertEqual(str(col.server_default.arg), "false")
+
+    def test_allowed_user_update_fields_includes_show_in_leaderboard(self):
+        from database.repositories.users_repo import ALLOWED_USER_UPDATE_FIELDS
+
+        self.assertIn("show_in_leaderboard", ALLOWED_USER_UPDATE_FIELDS)
+
+    def test_get_users_by_telegram_ids_empty(self):
+        import asyncio
+        from database.repositories.users_repo import get_users_by_telegram_ids
+
+        session = AsyncMock()
+        res = asyncio.run(get_users_by_telegram_ids(session, []))
+        self.assertEqual(res, {})
+        session.execute.assert_not_called()
+
+    def test_get_referral_leaderboard_keyboard_toggle(self):
+        from bot import texts
+        from bot.keyboards.user import get_referral_leaderboard_keyboard
+
+        kb_anon = get_referral_leaderboard_keyboard(is_anonymous=True)
+        first_btn_anon = kb_anon.inline_keyboard[0][0]
+        self.assertEqual(first_btn_anon.text, texts.BTN_LEADERBOARD_ANONYMOUS_ON)
+        self.assertEqual(first_btn_anon.callback_data, "referral_toggle_anonymity")
+
+        kb_public = get_referral_leaderboard_keyboard(is_anonymous=False)
+        first_btn_public = kb_public.inline_keyboard[0][0]
+        self.assertEqual(first_btn_public.text, texts.BTN_LEADERBOARD_ANONYMOUS_OFF)
+        self.assertEqual(first_btn_public.callback_data, "referral_toggle_anonymity")
+
+    def test_referral_toggle_anonymity_updates_user_and_profile_info(self):
+        import asyncio
+        from bot.handlers.referral import referral_toggle_anonymity
+        from database.models import User
+
+        callback = AsyncMock()
+        callback.from_user = MagicMock(username="@new_handle", first_name="New Name")
+        state = AsyncMock()
+        session = AsyncMock()
+        db_user = User(
+            id=1,
+            telegram_id=123456789,
+            username="old_handle",
+            first_name="Old Name",
+            show_in_leaderboard=False,
+        )
+
+        with (
+            patch("bot.handlers.referral._render_referral_leaderboard", new_callable=AsyncMock) as mock_render,
+            patch("bot.handlers.referral.update_user", new_callable=AsyncMock) as mock_update_user,
+        ):
+            asyncio.run(referral_toggle_anonymity(callback, state, session, db_user))
+
+            state.clear.assert_awaited_once()
+            mock_update_user.assert_awaited_once_with(
+                session,
+                db_user,
+                show_in_leaderboard=True,
+                username="new_handle",
+                first_name="New Name",
+            )
+            session.commit.assert_awaited_once()
+            callback.answer.assert_awaited_once()
+            mock_render.assert_awaited_once_with(callback, session, db_user)
+
+    def test_referral_toggle_anonymity_clears_deleted_username(self):
+        import asyncio
+        from bot.handlers.referral import referral_toggle_anonymity
+        from database.models import User
+
+        callback = AsyncMock()
+        callback.from_user = MagicMock(username=None, first_name="Current Name")
+        state = AsyncMock()
+        session = AsyncMock()
+        db_user = User(
+            id=1,
+            telegram_id=123456789,
+            username="deleted_handle",
+            first_name="Current Name",
+            show_in_leaderboard=False,
+        )
+
+        with (
+            patch("bot.handlers.referral._render_referral_leaderboard", new_callable=AsyncMock) as mock_render,
+            patch("bot.handlers.referral.update_user", new_callable=AsyncMock) as mock_update_user,
+        ):
+            asyncio.run(referral_toggle_anonymity(callback, state, session, db_user))
+
+            mock_update_user.assert_awaited_once_with(
+                session,
+                db_user,
+                show_in_leaderboard=True,
+                username=None,
+            )
+            mock_render.assert_awaited_once_with(callback, session, db_user)
+
+    def test_referral_toggle_anonymity_bounds_username_length(self):
+        import asyncio
+        from bot.handlers.referral import referral_toggle_anonymity
+        from database.models import User
+
+        callback = AsyncMock()
+        callback.from_user = MagicMock(username="@" + "a" * 40, first_name="Name")
+        state = AsyncMock()
+        session = AsyncMock()
+        db_user = User(
+            id=1,
+            telegram_id=123456789,
+            username=None,
+            first_name="Name",
+            show_in_leaderboard=False,
+        )
+
+        with (
+            patch("bot.handlers.referral._render_referral_leaderboard", new_callable=AsyncMock) as mock_render,
+            patch("bot.handlers.referral.update_user", new_callable=AsyncMock) as mock_update_user,
+        ):
+            asyncio.run(referral_toggle_anonymity(callback, state, session, db_user))
+
+            mock_update_user.assert_awaited_once_with(
+                session,
+                db_user,
+                show_in_leaderboard=True,
+                username="a" * 32,
+            )
+            mock_render.assert_awaited_once_with(callback, session, db_user)
+
+    def test_start_profile_update_clears_deleted_username_and_bounds_length(self):
+        import asyncio
+        from bot.handlers.start import _update_user_profile_if_changed
+        from database.models import User
+
+        session = AsyncMock()
+        user = User(
+            id=1,
+            telegram_id=123456789,
+            username="old_handle",
+            first_name="Alice",
+        )
+
+        # Message with username=None -> clears username
+        msg_none = MagicMock()
+        msg_none.from_user = MagicMock(username=None, first_name="Alice")
+
+        with (
+            patch("bot.handlers.start.update_user", new_callable=AsyncMock) as mock_update,
+            patch("bot.handlers.start.invalidate_user_cache") as mock_cache,
+        ):
+            mock_update.return_value = user
+            asyncio.run(_update_user_profile_if_changed(session, user, msg_none))
+            mock_update.assert_awaited_once_with(session, user, username=None)
+            mock_cache.assert_called_once_with(123456789)
+
+        # Message with long username starting with @ -> strips @ and bounds to 32
+        msg_long = MagicMock()
+        msg_long.from_user = MagicMock(username="@" + "x" * 50, first_name="Alice")
+
+        with (
+            patch("bot.handlers.start.update_user", new_callable=AsyncMock) as mock_update,
+            patch("bot.handlers.start.invalidate_user_cache") as mock_cache,
+        ):
+            mock_update.return_value = user
+            asyncio.run(_update_user_profile_if_changed(session, user, msg_long))
+            mock_update.assert_awaited_once_with(session, user, username="x" * 32)
+
+        # Message without from_user -> no-op, returns user without error
+        msg_no_user = MagicMock()
+        msg_no_user.from_user = None
+        res = asyncio.run(_update_user_profile_if_changed(session, user, msg_no_user))
+        self.assertIs(res, user)
+
+    def test_render_referral_leaderboard_formats_names_and_truncates(self):
+        import asyncio
+        from bot.handlers.referral import _render_referral_leaderboard
+        from database.models import User
+
+        callback = AsyncMock()
+        callback.bot = AsyncMock()
+        callback.message = MagicMock(chat=MagicMock(id=999), message_id=123)
+        session = AsyncMock()
+        db_user = User(
+            id=1,
+            telegram_id=111222333,
+            username="me_user",
+            first_name="My Name",
+            show_in_leaderboard=True,
+        )
+
+        top_leaders = [
+            (111222333, 10),
+            (222333444, 8),
+            (333444555, 5),
+            (444555666, 3),
+        ]
+        leader_users = {
+            111222333: db_user,
+            222333444: User(
+                id=2,
+                telegram_id=222333444,
+                username=None,
+                first_name="VeryLongNameExceedingTwentyChars",
+                show_in_leaderboard=True,
+            ),
+            333444555: User(
+                id=3,
+                telegram_id=333444555,
+                username="hidden_user",
+                first_name="Hidden",
+                show_in_leaderboard=False,
+            ),
+            444555666: User(
+                id=4,
+                telegram_id=444555666,
+                username="@public_other",
+                first_name="Other",
+                show_in_leaderboard=True,
+            ),
+        }
+
+        with (
+            patch("bot.handlers.referral.get_referral_leaderboard", new_callable=AsyncMock) as mock_top,
+            patch("bot.handlers.referral.get_user_referral_rank", new_callable=AsyncMock) as mock_rank,
+            patch("bot.handlers.referral.get_users_by_telegram_ids", new_callable=AsyncMock) as mock_users,
+            patch("bot.handlers.referral.render_hub", new_callable=AsyncMock) as mock_render_hub,
+        ):
+            mock_top.return_value = top_leaders
+            mock_rank.return_value = (1, 10)
+            mock_users.return_value = leader_users
+
+            asyncio.run(_render_referral_leaderboard(callback, session, db_user))
+
+            mock_render_hub.assert_awaited_once()
+            call_args = mock_render_hub.await_args[0]
+            rendered_text = call_args[2]
+
+            # Open users: bold without monospace code
+            self.assertIn("<b>@me_user</b> (Вы)", rendered_text)
+            self.assertIn("<b>VeryLongNameExceedi…</b>", rendered_text)
+            self.assertIn("<b>@public_other</b>", rendered_text)
+            # Masked user: strict monospace code
+            self.assertIn("<code>333***55</code>", rendered_text)
+
+    def test_render_referral_leaderboard_masked_self(self):
+        import asyncio
+        from bot.handlers.referral import _render_referral_leaderboard
+        from database.models import User
+
+        callback = AsyncMock()
+        callback.bot = AsyncMock()
+        callback.message = MagicMock(chat=MagicMock(id=999), message_id=123)
+        session = AsyncMock()
+        db_user = User(
+            id=1,
+            telegram_id=111222333,
+            username="me_user",
+            first_name="My Name",
+            show_in_leaderboard=False,
+        )
+
+        top_leaders = [(111222333, 10)]
+        leader_users = {111222333: db_user}
+
+        with (
+            patch("bot.handlers.referral.get_referral_leaderboard", new_callable=AsyncMock) as mock_top,
+            patch("bot.handlers.referral.get_user_referral_rank", new_callable=AsyncMock) as mock_rank,
+            patch("bot.handlers.referral.get_users_by_telegram_ids", new_callable=AsyncMock) as mock_users,
+            patch("bot.handlers.referral.render_hub", new_callable=AsyncMock) as mock_render_hub,
+        ):
+            mock_top.return_value = top_leaders
+            mock_rank.return_value = (1, 10)
+            mock_users.return_value = leader_users
+
+            asyncio.run(_render_referral_leaderboard(callback, session, db_user))
+
+            call_args = mock_render_hub.await_args[0]
+            rendered_text = call_args[2]
+            # Masked self: strict monospace code with (Вы)
+            self.assertIn("<code>111***33</code> (Вы)", rendered_text)
+
+    def test_render_referral_leaderboard_open_user_without_names_falls_back_to_masked(self):
+        import asyncio
+        from bot.handlers.referral import _render_referral_leaderboard
+        from database.models import User
+
+        callback = AsyncMock()
+        callback.bot = AsyncMock()
+        callback.message = MagicMock(chat=MagicMock(id=999), message_id=123)
+        session = AsyncMock()
+        db_user = User(
+            id=1,
+            telegram_id=111222333,
+            username=None,
+            first_name=None,
+            show_in_leaderboard=True,
+        )
+
+        top_leaders = [(111222333, 10), (222333444, 5)]
+        leader_users = {
+            111222333: db_user,
+            222333444: User(
+                id=2,
+                telegram_id=222333444,
+                username="   @   ",
+                first_name="   ",
+                show_in_leaderboard=True,
+            ),
+        }
+
+        with (
+            patch("bot.handlers.referral.get_referral_leaderboard", new_callable=AsyncMock) as mock_top,
+            patch("bot.handlers.referral.get_user_referral_rank", new_callable=AsyncMock) as mock_rank,
+            patch("bot.handlers.referral.get_users_by_telegram_ids", new_callable=AsyncMock) as mock_users,
+            patch("bot.handlers.referral.render_hub", new_callable=AsyncMock) as mock_render_hub,
+        ):
+            mock_top.return_value = top_leaders
+            mock_rank.return_value = (1, 10)
+            mock_users.return_value = leader_users
+
+            asyncio.run(_render_referral_leaderboard(callback, session, db_user))
+
+            call_args = mock_render_hub.await_args[0]
+            rendered_text = call_args[2]
+            # Both open users have no usable name, safely falls back to masked code ID
+            self.assertIn("<code>111***33</code> (Вы)", rendered_text)
+            self.assertIn("<code>222***44</code>", rendered_text)
+
+    def test_show_referrals_list_sanitizes_usernames(self):
+        import asyncio
+        from bot.handlers.referral import show_referrals_list
+        from database.models import User
+
+        callback = AsyncMock()
+        callback.data = "referrals_list:1"
+        callback.message = MagicMock(chat=MagicMock(id=1000), message_id=100)
+        state = AsyncMock()
+        session = AsyncMock()
+        db_user = User(id=1, telegram_id=1000, username="owner")
+
+        referrals = [
+            User(id=2, telegram_id=2001, username="@clean_me"),
+            User(id=3, telegram_id=2002, username="@" + "z" * 40),
+            User(id=4, telegram_id=2003, username="   @   "),
+        ]
+
+        rendered_texts = []
+
+        async def fake_render(bot, chat_id, text, reply_markup, trigger_message_id=None):
+            rendered_texts.append((text, reply_markup))
+
+        with (
+            patch("bot.handlers.referral.get_user_referrals_paginated", AsyncMock(return_value=(referrals, 3, 1))),
+            patch("bot.handlers.referral.render_hub", side_effect=fake_render),
+        ):
+            asyncio.run(show_referrals_list(callback, state, session, db_user))
+
+        self.assertEqual(len(rendered_texts), 1)
+        text, _ = rendered_texts[0]
+        # Strips leading @ without @@
+        self.assertIn("<b>@clean_me</b>", text)
+        self.assertNotIn("@@clean_me", text)
+        # Bounds to 32 chars
+        self.assertIn(f"<b>@{'z' * 32}</b>", text)
+        # Empty/whitespace falls back to user ID label
+        self.assertIn("ID: 2003", text)

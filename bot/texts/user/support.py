@@ -75,7 +75,7 @@ FAQ_TEXT = """❓ <b>Частые вопросы (FAQ)</b>
 
 <blockquote expandable>📌 <b>8. Безопасность и конфиденциальность</b>
 • Всё соединение защищено современными протоколами шифрования.
-• Сервис не ведёт журналов (логов) активности и не сохраняет историю посещённых вами страниц.</blockquote>"""
+• Сервис не ведёт журналы активности и не сохраняет историю посещённых вами страниц.</blockquote>"""
 
 PRIVACY_POLICY_URL = "https://telegra.ph/Politika-konfidencialnosti-07-23-84"
 
@@ -90,6 +90,15 @@ SUPPORT_DOWNLOAD_CLIENT_TEXT = """📥 <b>Скачать клиент Amnezia д
 • <b>Официальный сайт Amnezia</b> — подробная информация"""
 
 SUPPORT_GREETING_TEMPLATE = "Здравствуйте! Мой ID: {telegram_id}"
+SUPPORT_TOPUP_GREETING_TEMPLATE = (
+    "Здравствуйте! Мой ID: {telegram_id}. Вопрос по пополнению баланса на {price} ₽ (заказ #{order_ref})."
+)
+SUPPORT_ORDER_GREETING_TEMPLATE = (
+    "Здравствуйте! Мой ID: {telegram_id}. Вопрос по оплате заказа #{order_ref} ({price} ₽)."
+)
+SUPPORT_DISPUTE_GREETING_TEMPLATE = (
+    "Здравствуйте! Мой ID: {telegram_id}. Вопрос по блокировке операций (финансовый спор)."
+)
 
 SUPPORT_HELP_ROOT_TEXT = """📖 <b>Инструкции и справка</b>
 

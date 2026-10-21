@@ -1,6 +1,6 @@
 from decimal import Decimal, ROUND_HALF_UP
 
-from aiogram.types import InlineKeyboardMarkup
+from aiogram.types import DisabledButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot import texts
@@ -225,17 +225,17 @@ def get_balance_history_keyboard(
         if page > 1:
             builder.button(text=texts.BTN_PAGINATION_PREV, callback_data=f"balance_history:{page - 1}")
         else:
-            builder.button(text=texts.BTN_PAGINATION_EMPTY, callback_data="ignore")
+            builder.button(text=texts.BTN_PAGINATION_EMPTY, disabled=DisabledButton())
 
         builder.button(
             text=texts.BTN_PAGINATION_PAGE.format(page=page, total_pages=total_pages),
-            callback_data="ignore",
+            disabled=DisabledButton(),
         )
 
         if page < total_pages:
             builder.button(text=texts.BTN_PAGINATION_NEXT, callback_data=f"balance_history:{page + 1}")
         else:
-            builder.button(text=texts.BTN_PAGINATION_EMPTY, callback_data="ignore")
+            builder.button(text=texts.BTN_PAGINATION_EMPTY, disabled=DisabledButton())
 
         builder.button(text=texts.BTN_BACK, callback_data="menu_balance")
         builder.adjust(3, 1)
@@ -334,7 +334,7 @@ def get_order_invoice_keyboard(
     payment_url: str,
     order_id: str,
     price: int,
-    back_callback: str,
+    support_url: str | None = None,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
@@ -347,14 +347,35 @@ def get_order_invoice_keyboard(
         callback_data=f"order_check:{order_id}",
         style="primary",
     )
+    if not support_url:
+        from utils.support import get_support_url
+        support_url = get_support_url()
     builder.button(
         text=texts.BTN_SUPPORT,
-        callback_data="menu_support",
+        url=support_url,
     )
     builder.button(
         text=texts.BTN_CANCEL_ACTION,
         callback_data=f"order_cancel:{order_id}",
         style="danger",
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_dispute_blocked_keyboard(
+    back_callback: str = "back_to_main_menu",
+    support_url: str | None = None,
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    if support_url:
+        builder.button(
+            text=texts.BTN_SUPPORT,
+            url=support_url,
+        )
+    builder.button(
+        text=texts.BTN_BACK if back_callback != "back_to_main_menu" else texts.BTN_MAIN_MENU_NAV,
+        callback_data=back_callback,
     )
     builder.adjust(1)
     return builder.as_markup()
