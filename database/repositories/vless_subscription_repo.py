@@ -127,6 +127,21 @@ async def get_active_hwid_count(
     return len(active)
 
 
+async def get_total_active_hwid_count(
+    session: AsyncSession,
+    ttl_hours: int = VLESS_HWID_TTL_HOURS,
+) -> int:
+    """Return total count of active non-stale HWIDs across all active VLESS subscriptions."""
+    stmt = select(VlessSubscription.active_hwids).where(VlessSubscription.is_active.is_(True))
+    result = await session.execute(stmt)
+    total = 0
+    for raw_hwids in result.scalars().all():
+        if isinstance(raw_hwids, dict) and raw_hwids:
+            active = prune_stale_hwids(raw_hwids, ttl_hours=ttl_hours)
+            total += len(active)
+    return total
+
+
 async def register_hwid_atomic(
     session: AsyncSession,
     subscription_id: int,

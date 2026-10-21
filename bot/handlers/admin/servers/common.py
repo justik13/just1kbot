@@ -7,7 +7,7 @@ from urllib.parse import urlsplit, urlunsplit
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
@@ -64,17 +64,13 @@ async def _build_servers_list_text_and_kb(
     else:
         from services.slots_cache import get_cached_peer_count
         db_counts = await get_server_peer_counts(session) if session is not None else {}
-        vless_sub_count: int | None = None
+        vless_device_count: int | None = None
         if any(
             (str(getattr(s, "protocol", "") or "").lower() == "vless" or "vless" in (getattr(s, "capabilities", None) or []))
             for s in servers
         ) and session is not None:
-            from database.models import VlessSubscription
-            vless_sub_count = (
-                await session.execute(
-                    select(func.count(VlessSubscription.id)).where(VlessSubscription.is_active.is_(True))
-                )
-            ).scalar_one_or_none() or 0
+            from database.repositories import vless_subscription_repo
+            vless_device_count = await vless_subscription_repo.get_total_active_hwid_count(session)
 
         for server in servers:
             flag = server.country_flag or texts.EMOJI_GLOBE
@@ -96,7 +92,7 @@ async def _build_servers_list_text_and_kb(
 
             is_pure_vless = has_vless and not has_awg and not has_wl
             if is_pure_vless:
-                cap_str = texts.ADMIN_SERVER_CAP_VLESS_SUBS_TPL.format(count=vless_sub_count or 0)
+                cap_str = texts.ADMIN_SERVER_CAP_VLESS_SUBS_TPL.format(count=vless_device_count or 0)
             else:
                 db_used = db_counts.get(server.id, 0)
                 cached_used = get_cached_peer_count(server.id)
@@ -241,14 +237,13 @@ async def _show_server_card(
 
     is_pure_vless = has_vless and not has_awg and not is_origin
     if is_pure_vless:
-        from database.models import VlessSubscription
+        from database.repositories import vless_subscription_repo
 
-        vless_sub_count = (
-            await session.execute(
-                select(func.count(VlessSubscription.id)).where(VlessSubscription.is_active.is_(True))
-            )
-        ).scalar_one_or_none() or 0
-        slots_text = texts.ADMIN_SERVER_SLOTS_VLESS.format(vless_sub_count=vless_sub_count)
+        vless_device_count = await vless_subscription_repo.get_total_active_hwid_count(session)
+        slots_text = texts.ADMIN_SERVER_SLOTS_VLESS.format(
+            vless_device_count=vless_device_count,
+            vless_sub_count=vless_device_count,
+        )
     elif cached_used is not None and cached_used != db_used:
         slots_text = texts.ADMIN_SERVER_SLOTS_VALUE.format(
             used_clients=effective_capacity, max_clients=max_clients

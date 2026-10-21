@@ -102,6 +102,29 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
 
             self.assertTrue(any("23/240" in lbl for lbl in labels))
 
+    async def test_server_list_buttons_vless_shows_active_devices(self):
+        server_vless = SimpleNamespace(
+            id=5,
+            name="Netherlands",
+            country_flag="🇳🇱",
+            is_active=True,
+            protocol="vless",
+            capabilities=["vless"],
+            max_clients=1000,
+        )
+        session = AsyncMock()
+
+        with patch("bot.handlers.admin.servers.common.get_server_peer_counts", AsyncMock(return_value={})), \
+             patch("database.repositories.vless_subscription_repo.get_total_active_hwid_count", AsyncMock(return_value=3)):
+            rendered, builder = await _build_servers_list_text_and_kb(
+                [server_vless], page=1, total_pages=1, total=1, session=session
+            )
+            buttons = [b for row in builder.as_markup().inline_keyboard for b in row]
+            labels = [b.text for b in buttons]
+
+            self.assertTrue(any("3 устр." in lbl for lbl in labels))
+            self.assertTrue(any("[VLESS] Netherlands" in lbl for lbl in labels))
+
     async def test_server_card_keyboard_has_peers_button(self):
         kb = get_admin_server_card_keyboard(server_id=1, is_active=True, used_clients=23, max_clients=240)
         callbacks = [b.callback_data for row in kb.inline_keyboard for b in row]

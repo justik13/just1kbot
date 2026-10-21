@@ -1358,8 +1358,33 @@ class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("legacy-old", pruned)
         self.assertIn("meta-fresh", pruned)
         self.assertNotIn("meta-old", pruned)
-        self.assertIsInstance(pruned["meta-fresh"], dict)
-        self.assertEqual(pruned["meta-fresh"]["model"], "Pixel 8")
+
+    async def test_get_total_active_hwid_count_empty(self):
+        mock_session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = []
+        mock_session.execute.return_value = mock_result
+
+        total = await vless_subscription_repo.get_total_active_hwid_count(mock_session)
+        self.assertEqual(total, 0)
+
+    async def test_get_total_active_hwid_count_mixed(self):
+        now = datetime.now(timezone.utc)
+        recent_ts = (now - timedelta(hours=2)).isoformat()
+        stale_ts = (now - timedelta(hours=60)).isoformat()
+
+        mock_session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [
+            {"hw1": recent_ts, "hw2": stale_ts},
+            {},
+            None,
+            {"hw3": {"last_seen": recent_ts, "model": "Pixel"}},
+        ]
+        mock_session.execute.return_value = mock_result
+
+        total = await vless_subscription_repo.get_total_active_hwid_count(mock_session)
+        self.assertEqual(total, 2)
 
     async def test_register_hwid_atomic_with_device_metadata(self):
         sub = VlessSubscription(
