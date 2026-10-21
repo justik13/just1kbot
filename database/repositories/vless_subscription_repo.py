@@ -13,7 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.models import VlessSubscription
+from database.models import User, VlessSubscription
 from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger(__name__)
@@ -127,19 +127,54 @@ async def get_active_hwid_count(
     return len(active)
 
 
+async def get_active_vless_counts(
+    session: AsyncSession,
+    ttl_hours: int = VLESS_HWID_TTL_HOURS,
+) -> tuple[int, int]:
+    """Return tuple of (active_users_count, active_devices_count) for VLESS.
+
+    Only counts users who:
+    - Have an active VlessSubscription (is_active is True)
+    - Are not deleted, not banned, not on financial hold
+    - Have a valid subscription_end within network grace window
+    - Have at least one non-stale HWID in active_hwids
+    """
+    now = now_utc()
+    from config.constants import VPN_ACCESS_GRACE_HOURS
+
+    grace_cutoff = now - timedelta(hours=VPN_ACCESS_GRACE_HOURS)
+
+    stmt = (
+        select(VlessSubscription.active_hwids)
+        .join(User, VlessSubscription.user_id == User.id)
+        .where(
+            VlessSubscription.is_active.is_(True),
+            User.is_deleted.is_(False),
+            User.is_banned.is_(False),
+            User.financial_hold.is_(False),
+            User.subscription_end.is_not(None),
+            User.subscription_end > grace_cutoff,
+        )
+    )
+    result = await session.execute(stmt)
+    total_users = 0
+    total_devices = 0
+    for raw_hwids in result.scalars().all():
+        if isinstance(raw_hwids, dict) and raw_hwids:
+            active = prune_stale_hwids(raw_hwids, ttl_hours=ttl_hours)
+            if active:
+                total_users += 1
+                total_devices += len(active)
+    return total_users, total_devices
+
+
 async def get_total_active_hwid_count(
     session: AsyncSession,
     ttl_hours: int = VLESS_HWID_TTL_HOURS,
 ) -> int:
-    """Return total count of active non-stale HWIDs across all active VLESS subscriptions."""
-    stmt = select(VlessSubscription.active_hwids).where(VlessSubscription.is_active.is_(True))
-    result = await session.execute(stmt)
-    total = 0
-    for raw_hwids in result.scalars().all():
-        if isinstance(raw_hwids, dict) and raw_hwids:
-            active = prune_stale_hwids(raw_hwids, ttl_hours=ttl_hours)
-            total += len(active)
-    return total
+    """Return total count of active non-stale HWIDs across all valid active VLESS subscriptions."""
+    _users, devices = await get_active_vless_counts(session, ttl_hours=ttl_hours)
+    return devices
 
 
 async def register_hwid_atomic(
