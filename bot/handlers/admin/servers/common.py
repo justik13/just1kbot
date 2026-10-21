@@ -7,7 +7,7 @@ from urllib.parse import urlsplit, urlunsplit
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
@@ -15,8 +15,8 @@ from bot.keyboards import get_admin_server_card_keyboard
 from config.constants import AMNEZIA_PROTOCOLS
 from database.repositories.servers_repo import (
     get_server_peer_counts,
+    is_vless_capable_server,
     is_white_internet_origin_server,
-    is_xray_server,
 )
 from utils.datetime_helpers import now_utc
 from utils.formatters import format_traffic
@@ -64,17 +64,11 @@ async def _build_servers_list_text_and_kb(
     else:
         from services.slots_cache import get_cached_peer_count
         db_counts = await get_server_peer_counts(session) if session is not None else {}
-        vless_sub_count: int | None = None
-        if any(
-            (str(getattr(s, "protocol", "") or "").lower() == "vless" or "vless" in (getattr(s, "capabilities", None) or []))
-            for s in servers
-        ) and session is not None:
-            from database.models import VlessSubscription
-            vless_sub_count = (
-                await session.execute(
-                    select(func.count(VlessSubscription.id)).where(VlessSubscription.is_active.is_(True))
-                )
-            ).scalar_one_or_none() or 0
+        vless_users_count: int = 0
+        vless_devices_count: int = 0
+        if any(is_vless_capable_server(s) for s in servers) and session is not None:
+            from database.repositories import vless_subscription_repo
+            vless_users_count, vless_devices_count = await vless_subscription_repo.get_active_vless_counts(session)
 
         for server in servers:
             flag = server.country_flag or texts.EMOJI_GLOBE
@@ -83,7 +77,7 @@ async def _build_servers_list_text_and_kb(
             proto = str(getattr(server, "protocol", "") or "").lower()
             has_awg = proto in AMNEZIA_PROTOCOLS or "awg" in caps
             has_vless = "vless" in caps or "xray_vless" in caps or proto == "vless"
-            has_wl = is_xray_server(server)
+            has_wl = is_white_internet_origin_server(server)
 
             if has_awg and has_vless:
                 proto_badge = "[AWG+VLESS]"
@@ -96,7 +90,13 @@ async def _build_servers_list_text_and_kb(
 
             is_pure_vless = has_vless and not has_awg and not has_wl
             if is_pure_vless:
-                cap_str = texts.ADMIN_SERVER_CAP_VLESS_SUBS_TPL.format(count=vless_sub_count or 0)
+                if not server.is_active:
+                    cap_str = "—"
+                else:
+                    cap_str = texts.ADMIN_SERVER_CAP_VLESS_SUBS_TPL.format(
+                        users=vless_users_count,
+                        devices=vless_devices_count,
+                    )
             else:
                 db_used = db_counts.get(server.id, 0)
                 cached_used = get_cached_peer_count(server.id)
@@ -241,14 +241,13 @@ async def _show_server_card(
 
     is_pure_vless = has_vless and not has_awg and not is_origin
     if is_pure_vless:
-        from database.models import VlessSubscription
+        from database.repositories import vless_subscription_repo
 
-        vless_sub_count = (
-            await session.execute(
-                select(func.count(VlessSubscription.id)).where(VlessSubscription.is_active.is_(True))
-            )
-        ).scalar_one_or_none() or 0
-        slots_text = texts.ADMIN_SERVER_SLOTS_VLESS.format(vless_sub_count=vless_sub_count)
+        vless_users_count, vless_devices_count = await vless_subscription_repo.get_active_vless_counts(session)
+        slots_text = texts.ADMIN_SERVER_SLOTS_VLESS.format(
+            active_users=vless_users_count,
+            active_devices=vless_devices_count,
+        )
     elif cached_used is not None and cached_used != db_used:
         slots_text = texts.ADMIN_SERVER_SLOTS_VALUE.format(
             used_clients=effective_capacity, max_clients=max_clients
