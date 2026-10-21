@@ -1543,6 +1543,7 @@ check_bot_update_on_entry
 
 
 @unittest.skipIf(sys.platform == "win32", "Shell behavioural tests run strictly on Linux CI")
+@unittest.skipUnless(shutil.which("bash"), "Bash is required for shell behavioural tests")
 class SetupScriptErrorSemanticsTests(unittest.TestCase):
     """Regression guard: `error()` in scripts/setup.sh must abort the whole
     installer (exit 1). This is what makes the sysctl-overcommit failure path
@@ -1569,6 +1570,7 @@ class SetupScriptErrorSemanticsTests(unittest.TestCase):
 
 
 @unittest.skipIf(sys.platform == "win32", "Shell behavioural tests run strictly on Linux CI")
+@unittest.skipUnless(shutil.which("bash"), "Bash is required for shell behavioural tests")
 class SetupOvercommitPersistenceTests(unittest.TestCase):
     """`configure_overcommit_memory` must pin the persistence VALUE 1
     UNCONDITIONALLY — including the scenario `runtime=1 + persistent=0`
@@ -1699,6 +1701,7 @@ class SetupOvercommitPersistenceTests(unittest.TestCase):
 
 
 @unittest.skipIf(sys.platform == "win32", "Shell behavioural tests run strictly on Linux CI")
+@unittest.skipUnless(shutil.which("bash"), "Bash is required for shell behavioural tests")
 class SetupReadinessAndPortGuardTests(unittest.TestCase):
     def setUp(self):
         self.test_dir = tempfile.TemporaryDirectory()

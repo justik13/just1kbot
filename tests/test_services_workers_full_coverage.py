@@ -87,6 +87,10 @@ class ServicesWorkersFullCoverageTests(unittest.IsolatedAsyncioTestCase):
                 mock_scope.return_value.__aenter__.return_value = s2
                 await notifications._send_pre_expiry_notifications(bot, current_time)
 
+        bot.send_message.assert_awaited_once()
+        self.assertEqual(bot.send_message.call_args[0][0], 999111222)
+        self.assertEqual(bot.send_message.call_args[0][1], notifications.NOTIFY_2H)
+
     async def test_grace_cleanup_disables_instead_of_deleting_hold_with_active_sub(self):
         """H1: financial_hold + active subscription => disable (pending_update), NEVER delete."""
         async with self.sessions.begin() as session:
