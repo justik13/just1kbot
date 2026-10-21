@@ -160,22 +160,7 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
     ])
     vless_hwid_count = 0
     try:
-        begin_nested_fn = getattr(session, "begin_nested", None)
-        # In real SQLAlchemy, begin_nested() is a method returning an AsyncSessionTransaction.
-        # In unconfigured unit test AsyncMocks, begin_nested is an AsyncMock that returns an unawaited coroutine.
-        is_async_mock = type(begin_nested_fn).__name__ == "AsyncMock"
-        if callable(begin_nested_fn) and not is_async_mock:
-            cm = begin_nested_fn()
-            if hasattr(cm, "__aenter__"):
-                async with cm:
-                    cnt = await vless_subscription_repo.get_active_hwid_count(session, db_user.id)
-                    if isinstance(cnt, int):
-                        vless_hwid_count = cnt
-            else:
-                cnt = await vless_subscription_repo.get_active_hwid_count(session, db_user.id)
-                if isinstance(cnt, int):
-                    vless_hwid_count = cnt
-        else:
+        async with session.begin_nested():
             cnt = await vless_subscription_repo.get_active_hwid_count(session, db_user.id)
             if isinstance(cnt, int):
                 vless_hwid_count = cnt
@@ -204,7 +189,15 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
         used_gb = used_quota_bytes / (1024 ** 3)
         tot_gb = total_quota_bytes / (1024 ** 3)
 
-        used_str = f"{used_gb:.1f}" if used_gb < 10 and (used_gb % 1 != 0) else f"{int(round(used_gb))}"
+        if used_gb == 0:
+            used_str = "0"
+        elif 0 < used_gb < 0.1:
+            used_str = "<0.1"
+        elif used_gb < 100 and (used_gb % 1 != 0):
+            used_str = f"{used_gb:.1f}"
+        else:
+            used_str = f"{int(round(used_gb))}"
+
         tot_str = f"{tot_gb:.1f}" if tot_gb % 1 != 0 else f"{int(tot_gb)}"
 
         expiry_str = format_subscription_date(wi_sub.expires_at) if wi_sub.expires_at else texts.PLACEHOLDER_DASH
