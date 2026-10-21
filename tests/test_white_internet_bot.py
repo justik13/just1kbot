@@ -706,8 +706,8 @@ class TestWhiteInternetHubNavigation(unittest.IsolatedAsyncioTestCase):
             text, kb = await _build_hub_text_and_kb(session, user)
 
             self.assertIn("Белый Интернет:", text)
-            self.assertIn("1 устр.", text)
-            self.assertIn("8.5 из 10 ГБ", text)
+            self.assertIn("1/1 устр.", text)
+            self.assertIn("1.5 из 10 ГБ", text)
             # Standard access must remain inactive in top lines
             self.assertIn("Неактивна", text)
 
@@ -752,7 +752,7 @@ class TestWhiteInternetHubNavigation(unittest.IsolatedAsyncioTestCase):
             text, kb = await _build_hub_text_and_kb(session, user)
 
             self.assertIn("Белый Интернет:", text)
-            self.assertIn("10.0 из 10 ГБ", text)
+            self.assertIn("0 из 10 ГБ", text)
 
     async def test_hub_text_renders_white_internet_exhausted_status(self):
         """_build_hub_text_and_kb renders EXHAUSTED subscription with 🔴 icon while still within validity period."""
@@ -796,7 +796,7 @@ class TestWhiteInternetHubNavigation(unittest.IsolatedAsyncioTestCase):
 
             self.assertIn("Белый Интернет:", text)
             self.assertIn("🔴", text)
-            self.assertIn("0.0 из 10 ГБ", text)
+            self.assertIn("10 из 10 ГБ", text)
 
     def test_payment_balance_keyboard_does_not_contain_white_internet(self):
         """Balance keyboard is strictly for finances and never contains White Internet shortcut."""
@@ -866,6 +866,20 @@ class TestWhiteInternetHubNavigation(unittest.IsolatedAsyncioTestCase):
         from bot import texts
 
         self.assertTrue(texts.HUB_WHITE_INTERNET_LINE_FORMAT.startswith("\n⚪️ <b>Белый Интернет:</b>"))
+
+    def test_hub_white_internet_line_format_shows_used_traffic_and_device_limit(self):
+        from bot import texts
+
+        rendered = texts.HUB_WHITE_INTERNET_LINE_FORMAT.format(
+            status_icon="🟢",
+            expiry="10 нояб",
+            days_left="20 дн.",
+            traffic_used="7",
+            traffic_total="595",
+            devices_count=2,
+            device_limit=3,
+        )
+        self.assertIn("Трафик: 7 из 595 ГБ · 2/3 устр.", rendered)
 
 
 

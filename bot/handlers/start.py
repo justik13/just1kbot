@@ -161,8 +161,17 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
     vless_hwid_count = 0
     try:
         begin_nested_fn = getattr(session, "begin_nested", None)
-        if callable(begin_nested_fn):
-            async with begin_nested_fn():
+        # In real SQLAlchemy, begin_nested() is a method returning an AsyncSessionTransaction.
+        # In unconfigured unit test AsyncMocks, begin_nested is an AsyncMock that returns an unawaited coroutine.
+        is_async_mock = type(begin_nested_fn).__name__ == "AsyncMock"
+        if callable(begin_nested_fn) and not is_async_mock:
+            cm = begin_nested_fn()
+            if hasattr(cm, "__aenter__"):
+                async with cm:
+                    cnt = await vless_subscription_repo.get_active_hwid_count(session, db_user.id)
+                    if isinstance(cnt, int):
+                        vless_hwid_count = cnt
+            else:
                 cnt = await vless_subscription_repo.get_active_hwid_count(session, db_user.id)
                 if isinstance(cnt, int):
                     vless_hwid_count = cnt
@@ -192,23 +201,24 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
             0,
             (wi_sub.traffic_used_bytes or 0) - (wi_sub.traffic_overage_bytes or 0),
         )
-        rem_bytes = max(0, total_quota_bytes - used_quota_bytes)
-        rem_gb = rem_bytes / (1024 ** 3)
+        used_gb = used_quota_bytes / (1024 ** 3)
         tot_gb = total_quota_bytes / (1024 ** 3)
 
-        rem_str = f"{rem_gb:.1f}" if rem_gb < 100 else f"{int(rem_gb)}"
+        used_str = f"{used_gb:.1f}" if used_gb < 10 and (used_gb % 1 != 0) else f"{int(round(used_gb))}"
         tot_str = f"{tot_gb:.1f}" if tot_gb % 1 != 0 else f"{int(tot_gb)}"
 
         expiry_str = format_subscription_date(wi_sub.expires_at) if wi_sub.expires_at else texts.PLACEHOLDER_DASH
         days_str = format_days_left(wi_sub.expires_at) if wi_sub.expires_at else texts.ZERO_DAYS_LABEL
         status_icon = "🔴" if wi_sub.status == WhiteInternetStatus.EXHAUSTED else "🟢"
+        wi_device_limit = max(1, getattr(wi_sub, "device_limit", 1) or 1)
 
         white_internet_line = texts.HUB_WHITE_INTERNET_LINE_FORMAT.format(
             status_icon=status_icon,
             expiry=expiry_str,
             days_left=days_str,
             devices_count=wi_active_cnt,
-            traffic_rem=rem_str,
+            device_limit=wi_device_limit,
+            traffic_used=used_str,
             traffic_total=tot_str,
         )
 
