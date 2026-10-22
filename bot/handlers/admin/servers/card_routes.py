@@ -3,6 +3,8 @@ import logging
 import time
 
 from config.constants import (
+    AMNEZIA_PROTOCOLS,
+    VLESS_PROTOCOL,
     XRAY_PROTOCOL,
     AdminAuditAction,
 )
@@ -266,6 +268,14 @@ async def ping_server(
 
     start_t = time.monotonic()
     try:
+        caps = getattr(server, "capabilities", None) or []
+        if not isinstance(caps, (list, tuple, set)):
+            caps = []
+        raw_proto = getattr(server, "protocol", None)
+        if not isinstance(raw_proto, str) or not raw_proto.strip():
+            raw_proto = XRAY_PROTOCOL if "xray_origin" in caps else "amneziawg"
+        proto = raw_proto.strip().lower()
+
         has_awg = is_awg_capable_server(server)
         has_xray_or_vless = is_vless_capable_server(server) or is_white_internet_origin_server(server)
 
@@ -300,7 +310,11 @@ async def ping_server(
                     x_ok, _epoch, _detail = await xclient.check_health(xray_url, server.api_key)
             xray_ok = x_ok
 
-        if has_awg and has_xray_or_vless:
+        if proto in AMNEZIA_PROTOCOLS:
+            is_healthy = awg_ok
+        elif proto in (XRAY_PROTOCOL, VLESS_PROTOCOL):
+            is_healthy = xray_ok
+        elif has_awg and has_xray_or_vless:
             is_healthy = awg_ok and xray_ok
         elif has_awg:
             is_healthy = awg_ok

@@ -28,8 +28,11 @@ from bot.texts.runtime.alerts import (
     ALERT_SERVER_RESTORED,
 )
 from config.constants import (
+    AMNEZIA_PROTOCOLS,
     ServerHealthState,
     WHITE_INTERNET_SUB_PATH_PREFIX,
+    VLESS_PROTOCOL,
+    XRAY_PROTOCOL,
 )
 from config.settings import get_settings
 from database.connection import session_scope
@@ -272,6 +275,14 @@ async def check_node_resources_and_alerts(bot: Bot):
         expected_consecutive_successes = st.consecutive_successes
 
         st.last_check_monotonic = now_m
+        caps = getattr(server, "capabilities", None) or []
+        if not isinstance(caps, (list, tuple, set)):
+            caps = []
+        raw_proto = getattr(server, "protocol", None)
+        if not isinstance(raw_proto, str) or not raw_proto.strip():
+            raw_proto = XRAY_PROTOCOL if "xray_origin" in caps else "amneziawg"
+        server_proto = raw_proto.strip().lower()
+
         has_amnezia = is_awg_capable_server(server)
         has_xray = is_vless_capable_server(server) or is_white_internet_origin_server(server)
 
@@ -329,7 +340,11 @@ async def check_node_resources_and_alerts(bot: Bot):
                 )
                 xray_ok = False
 
-        if has_amnezia and has_xray:
+        if server_proto in AMNEZIA_PROTOCOLS:
+            is_healthy = awg_ok
+        elif server_proto in (XRAY_PROTOCOL, VLESS_PROTOCOL):
+            is_healthy = xray_ok
+        elif has_amnezia and has_xray:
             is_healthy = awg_ok and xray_ok
         elif has_amnezia:
             is_healthy = awg_ok

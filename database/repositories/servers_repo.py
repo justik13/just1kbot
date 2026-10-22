@@ -33,8 +33,13 @@ def is_awg_capable_server(server) -> bool:
     """
     if not server:
         return False
-    proto = str(getattr(server, "protocol", "") or "").lower()
     caps = getattr(server, "capabilities", None) or []
+    if not isinstance(caps, (list, tuple, set)):
+        caps = []
+    raw_proto = getattr(server, "protocol", None)
+    if not isinstance(raw_proto, str) or not raw_proto.strip():
+        raw_proto = XRAY_PROTOCOL if XRAY_ORIGIN_CAPABILITY in caps else AMNEZIA_PROTOCOL
+    proto = raw_proto.strip().lower()
     return proto in AMNEZIA_PROTOCOLS or any(c in ("awg", "amnezia") for c in caps)
 
 
@@ -45,9 +50,12 @@ def is_vless_capable_server(server) -> bool:
     """
     if not server:
         return False
-    proto = str(getattr(server, "protocol", "") or "").lower()
     caps = getattr(server, "capabilities", None) or []
-    return "vless" in caps or "xray_vless" in caps or proto == "vless"
+    if not isinstance(caps, (list, tuple, set)):
+        caps = []
+    raw_proto = getattr(server, "protocol", None)
+    proto = raw_proto.strip().lower() if isinstance(raw_proto, str) else ""
+    return "vless" in caps or "xray_vless" in caps or proto == VLESS_PROTOCOL
 
 
 def is_white_internet_origin_server(server) -> bool:
@@ -55,7 +63,10 @@ def is_white_internet_origin_server(server) -> bool:
     if not server:
         return False
     caps = getattr(server, "capabilities", None) or []
-    proto = str(getattr(server, "protocol", "") or "").lower()
+    if not isinstance(caps, (list, tuple, set)):
+        caps = []
+    raw_proto = getattr(server, "protocol", None)
+    proto = raw_proto.strip().lower() if isinstance(raw_proto, str) else ""
     if proto in AMNEZIA_PROTOCOLS:
         return False
     if XRAY_ORIGIN_CAPABILITY in caps:
