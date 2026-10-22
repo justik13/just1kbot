@@ -3,8 +3,6 @@ import logging
 import time
 
 from config.constants import (
-    AMNEZIA_PROTOCOLS,
-    VLESS_PROTOCOL,
     XRAY_PROTOCOL,
     AdminAuditAction,
 )
