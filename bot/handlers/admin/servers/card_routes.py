@@ -26,6 +26,9 @@ from database.repositories.servers_repo import (
     capacity_consuming_wl_condition,
     get_server_by_id,
     get_server_xray_api_url,
+    is_awg_capable_server,
+    is_vless_capable_server,
+    is_white_internet_origin_server,
     migrate_origin_subscriptions,
     update_server,
 )
@@ -265,10 +268,8 @@ async def ping_server(
 
     start_t = time.monotonic()
     try:
-        caps = getattr(server, "capabilities", None) or []
-        proto = str(getattr(server, "protocol", "") or "").lower()
-        has_awg = proto in AMNEZIA_PROTOCOLS or "awg" in caps
-        has_xray_or_vless = proto in (XRAY_PROTOCOL, "vless") or "vless" in caps or "xray_origin" in caps
+        has_awg = is_awg_capable_server(server)
+        has_xray_or_vless = is_vless_capable_server(server) or is_white_internet_origin_server(server)
 
         awg_ok = True
         xray_ok = True

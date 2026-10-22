@@ -42,6 +42,9 @@ from database.repositories.servers_repo import (
     get_all_servers,
     get_server_by_id,
     get_server_xray_api_url,
+    is_awg_capable_server,
+    is_vless_capable_server,
+    is_white_internet_origin_server,
     update_server,
     update_server_health_snapshot,
     update_server_xray_epoch_cas,
@@ -279,13 +282,8 @@ async def check_node_resources_and_alerts(bot: Bot):
             raw_proto = XRAY_PROTOCOL if "xray_origin" in caps else AMNEZIA_PROTOCOL
         server_proto = raw_proto.strip().lower()
 
-        has_amnezia = server_proto in AMNEZIA_PROTOCOLS or "awg" in caps
-        has_xray = (
-            server_proto in (XRAY_PROTOCOL, "vless")
-            or "vless" in caps
-            or "xray_vless" in caps
-            or (server_proto not in AMNEZIA_PROTOCOLS and "xray_origin" in caps)
-        )
+        has_amnezia = is_awg_capable_server(server)
+        has_xray = is_vless_capable_server(server) or is_white_internet_origin_server(server)
 
         if not has_amnezia and not has_xray:
             logger.warning(

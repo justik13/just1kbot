@@ -488,7 +488,7 @@ async def get_total_free_ips(session: AsyncSession) -> int:
 
     awg_servers = [
         s for s in active_servers
-        if s.protocol in AMNEZIA_PROTOCOLS and "xray_origin" not in (s.capabilities or [])
+        if is_awg_capable_server(s)
     ]
     if not awg_servers:
         return 0
