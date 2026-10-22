@@ -26,20 +26,6 @@ CAPACITY_CONSUMING_STATUSES = (
 )
 
 
-def is_xray_server(server) -> bool:
-    """Whether a server belongs to the Xray contour.
-
-    A server counts as Xray when its protocol is the Xray protocol, or when it
-    advertises the ``xray_origin`` capability (relay/origin nodes carry a
-    different protocol but still speak Xray to the edge). This is the single
-    definition of the predicate; callers must not re-derive it from the raw
-    string literals.
-    """
-    if getattr(server, "protocol", None) == XRAY_PROTOCOL:
-        return True
-    return XRAY_ORIGIN_CAPABILITY in (getattr(server, "capabilities", None) or [])
-
-
 def is_awg_capable_server(server) -> bool:
     """Whether a server can serve AmneziaWG clients.
 

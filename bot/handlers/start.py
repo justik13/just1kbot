@@ -367,43 +367,6 @@ async def cmd_start(
         )
 
 
-@router.message(F.text & F.text.in_(texts.LEGACY_REPLY_BUTTON_TRIGGER_TEXTS))
-async def handle_legacy_reply_keyboard(
-    message: Message,
-    state: FSMContext,
-    session: AsyncSession,
-):
-    await state.clear()
-    try:
-        tmp_msg = await message.answer("🧹", reply_markup=ReplyKeyboardRemove())
-        await message.bot.delete_message(message.chat.id, tmp_msg.message_id)
-        await message.bot.delete_message(message.chat.id, message.message_id)
-    except Exception:
-        pass
-
-    db_user = await SubscriptionService.process_onboarding(
-        session,
-        message.from_user.id,
-        message.from_user.username,
-        message.from_user.first_name,
-        None,
-    )
-    if not db_user:
-        await message.answer(texts.ERROR_USER_NOT_FOUND)
-        return
-
-    text, kb = await _build_hub_text_and_kb(session, db_user)
-
-    await render_hub(
-        message.bot,
-        message.chat.id,
-        text,
-        kb,
-        force_new=True,
-        session=session,
-    )
-
-
 @router.callback_query(F.data == "back_to_main_menu")
 async def back_to_main_menu(
     callback: CallbackQuery,

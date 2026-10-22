@@ -30,7 +30,6 @@ from config.constants import (
 from database.repositories.servers_repo import (
     get_server_by_id,
     is_white_internet_origin_server,
-    is_xray_server,
     update_server,
 )
 from database.repositories.system_settings_repo import (
@@ -142,7 +141,6 @@ def _build_server_incy_card(server: Any, details: dict[str, Any]) -> tuple[str, 
     keyboard = get_admin_server_incy_keyboard(
         server.id,
         origin_hidden=details["origin_hidden"],
-        is_xray=is_xray_server(server),
         is_origin=is_origin,
     )
     return card_text, keyboard
