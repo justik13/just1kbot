@@ -115,11 +115,12 @@ async def _get_financial_stats(session: AsyncSession) -> dict:
 
 
 async def _get_servers_capacity_summary(session: AsyncSession) -> str:
-    from config.constants import AMNEZIA_PROTOCOLS
     from config.enums import ServerLifecycleStatus
     from database.repositories.servers_repo import (
         get_all_servers,
         get_server_peer_counts,
+        is_awg_capable_server,
+        is_pure_vless_server,
         is_vless_capable_server,
         is_white_internet_origin_server,
     )
@@ -151,12 +152,10 @@ async def _get_servers_capacity_summary(session: AsyncSession) -> str:
             and getattr(s, "lifecycle_status", ServerLifecycleStatus.ACTIVE) == ServerLifecycleStatus.ACTIVE
         )
 
-        caps = getattr(s, "capabilities", None) or []
-        proto = str(getattr(s, "protocol", "") or "").lower()
-        has_awg = proto in AMNEZIA_PROTOCOLS or "awg" in caps
-        has_vless = "vless" in caps or "xray_vless" in caps or proto == "vless"
+        has_awg = is_awg_capable_server(s)
+        has_vless = is_vless_capable_server(s)
         has_wl = is_white_internet_origin_server(s)
-        is_pure_vless = has_vless and not has_awg and not has_wl
+        is_pure_vless = is_pure_vless_server(s)
 
         if is_server_active:
             if is_pure_vless:
@@ -183,10 +182,16 @@ async def _get_servers_capacity_summary(session: AsyncSession) -> str:
                 total = s.max_clients or 240
                 pct = int((effective_used / total) * 100) if total > 0 else 0
                 status_icon = "🟢" if pct < 80 else ("🟡" if pct < 90 else "🔴")
+
+                if has_awg and has_vless:
+                    display_name = f"[AWG+VLESS] {safe(s.name)}"
+                else:
+                    display_name = safe(s.name)
+
                 formatted_row = texts.ADMIN_DASHBOARD_SERVER_ROW_FORMAT.format(
                     status_icon=status_icon,
                     flag=flag,
-                    name=safe(s.name),
+                    name=display_name,
                     used=effective_used,
                     total=total,
                     pct=pct,

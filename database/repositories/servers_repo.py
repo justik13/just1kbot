@@ -40,14 +40,67 @@ def is_xray_server(server) -> bool:
     return XRAY_ORIGIN_CAPABILITY in (getattr(server, "capabilities", None) or [])
 
 
+def is_awg_capable_server(server) -> bool:
+    """Whether a server can serve AmneziaWG clients.
+
+    True if protocol is in AMNEZIA_PROTOCOLS, or 'awg'/'amnezia' capability is present.
+    """
+    if not server:
+        return False
+    proto = str(getattr(server, "protocol", "") or "").lower()
+    caps = getattr(server, "capabilities", None) or []
+    return proto in AMNEZIA_PROTOCOLS or any(c in ("awg", "amnezia") for c in caps)
+
+
 def is_vless_capable_server(server) -> bool:
     """Whether a server can serve direct VLESS TLS clients.
 
     True if 'vless' or 'xray_vless' capability is present, or protocol is 'vless'.
     """
+    if not server:
+        return False
     proto = str(getattr(server, "protocol", "") or "").lower()
     caps = getattr(server, "capabilities", None) or []
     return "vless" in caps or "xray_vless" in caps or proto == "vless"
+
+
+def is_white_internet_origin_server(server) -> bool:
+    """Whether a server is an origin server for White Internet contour."""
+    if not server:
+        return False
+    caps = getattr(server, "capabilities", None) or []
+    proto = str(getattr(server, "protocol", "") or "").lower()
+    if proto in AMNEZIA_PROTOCOLS:
+        return False
+    if XRAY_ORIGIN_CAPABILITY in caps:
+        return True
+    return proto == XRAY_PROTOCOL and not is_vless_capable_server(server)
+
+
+def is_pure_vless_server(server) -> bool:
+    """Whether a server is a pure direct VLESS server (not AWG and not White Internet Origin)."""
+    return (
+        is_vless_capable_server(server)
+        and not is_awg_capable_server(server)
+        and not is_white_internet_origin_server(server)
+    )
+
+
+def get_server_protocol_badge(server) -> str:
+    """Return protocol badge string for a server ([AWG], [VLESS], [AWG+VLESS], [Origin РФ])."""
+    from bot import texts
+
+    has_awg = is_awg_capable_server(server)
+    has_vless = is_vless_capable_server(server)
+    has_wl = is_white_internet_origin_server(server)
+
+    if has_awg and has_vless:
+        return "[AWG+VLESS]"
+    if has_vless and not has_wl:
+        return "[VLESS]"
+    if has_wl:
+        return getattr(texts, "ADMIN_SERVER_PROTO_ORIGIN_BADGE", "[Origin РФ]")
+    return "[AWG]"
 
 
 def get_server_xray_api_url(server) -> str | None:
@@ -70,14 +123,6 @@ def get_server_xray_api_url(server) -> str | None:
         return extra.get("xray_api_url")
 
     return getattr(server, "api_url", None) or extra.get("xray_api_url")
-
-
-
-def is_white_internet_origin_server(server) -> bool:
-    """Whether a server is an origin server for White Internet contour."""
-    caps = getattr(server, "capabilities", None) or []
-    proto = str(getattr(server, "protocol", "") or "").lower()
-    return XRAY_ORIGIN_CAPABILITY in caps or (proto == XRAY_PROTOCOL and "vless" not in caps)
 
 
 def _capacity_consuming_profiles_condition():
