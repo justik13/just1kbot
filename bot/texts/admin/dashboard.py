@@ -247,9 +247,14 @@ DASHBOARD_VY_MOZHETE_IZMENIT_SSYLKU_NA_M = "Вы можете изменить �
 PAGE_INDEX_FORMAT = "Стр {page}/{total_pages}"
 
 ADMIN_DASHBOARD_PROXY_TAB_LABEL = "MTProto Proxy"
+ADMIN_DASHBOARD_SECTION_AWG = "<b>Стандартный доступ (AWG):</b>"
+ADMIN_DASHBOARD_SECTION_VLESS = "<b>Стандартный доступ (VLESS):</b>"
+ADMIN_DASHBOARD_SECTION_ORIGIN = "<b>Белый Интернет (Origin):</b>"
 ADMIN_DASHBOARD_SERVER_ROW_FORMAT = "{status_icon} {flag} <b>{name}</b>: {used}/{total} ({pct}%){extra_info}"
+ADMIN_DASHBOARD_VLESS_ROW_FORMAT = "{status_icon} {flag} <b>{name}</b>: {cap_str}"
 DASHBOARD_INACTIVE_SERVERS_HEADER = "⏸️ <b>Выключенные серверы:</b>"
 DASHBOARD_INACTIVE_SERVER_ROW = "⚪ {flag} <b>{name}</b>: выключен{reason_text} (в БД: {db_used})"
+DASHBOARD_INACTIVE_SERVER_ROW_VLESS = "⚪ {flag} <b>{name}</b>: выключен{reason_text}"
 DASHBOARD_DISABLED_REASON_MANUAL = " (вручную)"
 DASHBOARD_DISABLED_REASON_AUTO = " (автоматически)"
 

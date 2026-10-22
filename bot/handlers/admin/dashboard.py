@@ -115,10 +115,13 @@ async def _get_financial_stats(session: AsyncSession) -> dict:
 
 
 async def _get_servers_capacity_summary(session: AsyncSession) -> str:
+    from config.constants import AMNEZIA_PROTOCOLS
     from config.enums import ServerLifecycleStatus
     from database.repositories.servers_repo import (
         get_all_servers,
         get_server_peer_counts,
+        is_vless_capable_server,
+        is_white_internet_origin_server,
     )
     from services.slots_cache import get_cached_peer_count
 
@@ -127,8 +130,18 @@ async def _get_servers_capacity_summary(session: AsyncSession) -> str:
         return texts.DASHBOARD_SERVEROV_POKA_NET
 
     db_counts = await get_server_peer_counts(session)
-    active_lines = []
-    inactive_lines = []
+
+    vless_users_count: int = 0
+    vless_devices_count: int = 0
+    if any(is_vless_capable_server(s) for s in servers):
+        from database.repositories import vless_subscription_repo
+
+        vless_users_count, vless_devices_count = await vless_subscription_repo.get_active_vless_counts(session)
+
+    awg_lines: list[str] = []
+    vless_lines: list[str] = []
+    origin_lines: list[str] = []
+    inactive_lines: list[str] = []
 
     for s in servers:
         flag = s.country_flag or "🌐"
@@ -138,22 +151,51 @@ async def _get_servers_capacity_summary(session: AsyncSession) -> str:
             and getattr(s, "lifecycle_status", ServerLifecycleStatus.ACTIVE) == ServerLifecycleStatus.ACTIVE
         )
 
-        if is_server_active:
-            cached_used = get_cached_peer_count(s.id)
-            effective_used = max(cached_used, db_used) if cached_used is not None else db_used
-            if cached_used is not None and cached_used != db_used:
-                extra_info = texts.ADMIN_SERVER_SLOTS_BREAKDOWN_NOTE.format(
-                    cached_used=cached_used, db_used=db_used
-                )
-            else:
-                extra_info = ""
+        caps = getattr(s, "capabilities", None) or []
+        proto = str(getattr(s, "protocol", "") or "").lower()
+        has_awg = proto in AMNEZIA_PROTOCOLS or "awg" in caps
+        has_vless = "vless" in caps or "xray_vless" in caps or proto == "vless"
+        has_wl = is_white_internet_origin_server(s)
+        is_pure_vless = has_vless and not has_awg and not has_wl
 
-            total = s.max_clients or 240
-            pct = int((effective_used / total) * 100) if total > 0 else 0
-            status_icon = "🟢" if pct < 80 else ("🟡" if pct < 90 else "🔴")
-            active_lines.append(texts.ADMIN_DASHBOARD_SERVER_ROW_FORMAT.format(
-                status_icon=status_icon, flag=flag, name=safe(s.name), used=effective_used, total=total, pct=pct, extra_info=extra_info
-            ))
+        if is_server_active:
+            if is_pure_vless:
+                cap_str = texts.ADMIN_SERVER_CAP_VLESS_SUBS_TPL.format(
+                    users=vless_users_count,
+                    devices=vless_devices_count,
+                )
+                vless_lines.append(texts.ADMIN_DASHBOARD_VLESS_ROW_FORMAT.format(
+                    status_icon="🟢",
+                    flag=flag,
+                    name=safe(s.name),
+                    cap_str=cap_str,
+                ))
+            else:
+                cached_used = get_cached_peer_count(s.id)
+                effective_used = max(cached_used, db_used) if cached_used is not None else db_used
+                if cached_used is not None and cached_used != db_used:
+                    extra_info = texts.ADMIN_SERVER_SLOTS_BREAKDOWN_NOTE.format(
+                        cached_used=cached_used, db_used=db_used
+                    )
+                else:
+                    extra_info = ""
+
+                total = s.max_clients or 240
+                pct = int((effective_used / total) * 100) if total > 0 else 0
+                status_icon = "🟢" if pct < 80 else ("🟡" if pct < 90 else "🔴")
+                formatted_row = texts.ADMIN_DASHBOARD_SERVER_ROW_FORMAT.format(
+                    status_icon=status_icon,
+                    flag=flag,
+                    name=safe(s.name),
+                    used=effective_used,
+                    total=total,
+                    pct=pct,
+                    extra_info=extra_info,
+                )
+                if has_wl:
+                    origin_lines.append(formatted_row)
+                else:
+                    awg_lines.append(formatted_row)
         else:
             reason = getattr(s, "disabled_reason", None)
             if reason == "MANUAL":
@@ -164,20 +206,35 @@ async def _get_servers_capacity_summary(session: AsyncSession) -> str:
                 reason_text = f" ({safe(reason)})"
             else:
                 reason_text = ""
-            inactive_lines.append(texts.DASHBOARD_INACTIVE_SERVER_ROW.format(
-                flag=flag, name=safe(s.name), reason_text=reason_text, db_used=db_used
-            ))
 
-    result_parts = []
-    if active_lines:
-        result_parts.extend(active_lines)
+            if is_pure_vless:
+                inactive_lines.append(texts.DASHBOARD_INACTIVE_SERVER_ROW_VLESS.format(
+                    flag=flag,
+                    name=safe(s.name),
+                    reason_text=reason_text,
+                ))
+            else:
+                inactive_lines.append(texts.DASHBOARD_INACTIVE_SERVER_ROW.format(
+                    flag=flag,
+                    name=safe(s.name),
+                    reason_text=reason_text,
+                    db_used=db_used,
+                ))
+
+    section_parts: list[str] = []
+    if awg_lines:
+        section_parts.append(f"{texts.ADMIN_DASHBOARD_SECTION_AWG}\n" + "\n".join(awg_lines))
+    if vless_lines:
+        section_parts.append(f"{texts.ADMIN_DASHBOARD_SECTION_VLESS}\n" + "\n".join(vless_lines))
+    if origin_lines:
+        section_parts.append(f"{texts.ADMIN_DASHBOARD_SECTION_ORIGIN}\n" + "\n".join(origin_lines))
     if inactive_lines:
-        if active_lines:
-            result_parts.append("")
-        result_parts.append(texts.DASHBOARD_INACTIVE_SERVERS_HEADER)
-        result_parts.extend(inactive_lines)
+        section_parts.append(f"{texts.DASHBOARD_INACTIVE_SERVERS_HEADER}\n" + "\n".join(inactive_lines))
 
-    return "\n".join(result_parts)
+    if not section_parts:
+        return texts.DASHBOARD_SERVEROV_POKA_NET
+
+    return "\n" + "\n\n".join(section_parts)
 
 
 

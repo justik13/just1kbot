@@ -88,6 +88,67 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
             self.assertIn("выключен (автоматически)", summary)
             self.assertIn("в БД: 5", summary)
 
+    async def test_dashboard_server_capacity_summary_grouped_sections(self):
+        server_awg = SimpleNamespace(
+            id=1, name="Netherlands", country_flag="🇳🇱", max_clients=240,
+            is_active=True, lifecycle_status="ACTIVE", protocol="amneziawg", capabilities=["awg"],
+        )
+        server_vless = SimpleNamespace(
+            id=2, name="Poland", country_flag="🇵🇱", max_clients=1000,
+            is_active=True, lifecycle_status="ACTIVE", protocol="vless", capabilities=["vless"],
+        )
+        server_origin = SimpleNamespace(
+            id=3, name="Russia", country_flag="🇷🇺", max_clients=1000,
+            is_active=True, lifecycle_status="ACTIVE", protocol="xray", capabilities=["xray_origin"],
+        )
+        session = AsyncMock()
+
+        with patch("database.repositories.servers_repo.get_all_servers", AsyncMock(return_value=[server_awg, server_vless, server_origin])), \
+             patch("database.repositories.servers_repo.get_server_peer_counts", AsyncMock(return_value={1: 36, 3: 4})), \
+             patch("services.slots_cache.get_cached_peer_count", return_value=None), \
+             patch("database.repositories.vless_subscription_repo.get_active_vless_counts", AsyncMock(return_value=(1, 1))):
+            summary = await _get_servers_capacity_summary(session)
+
+            self.assertIn("Стандартный доступ (AWG):", summary)
+            self.assertIn("Netherlands</b>: 36/240 (15%)", summary)
+            self.assertIn("Стандартный доступ (VLESS):", summary)
+            self.assertIn("Poland</b>: 1п / 1у", summary)
+            self.assertIn("Белый Интернет (Origin):", summary)
+            self.assertIn("Russia</b>: 4/1000 (0%)", summary)
+
+    async def test_dashboard_server_capacity_summary_inactive_vless_clean_row(self):
+        server_vless_inactive = SimpleNamespace(
+            id=4, name="Estonia", country_flag="🇪🇪", max_clients=1000,
+            is_active=False, lifecycle_status="ACTIVE", protocol="vless", capabilities=["vless"],
+            disabled_reason="MANUAL",
+        )
+        session = AsyncMock()
+
+        with patch("database.repositories.servers_repo.get_all_servers", AsyncMock(return_value=[server_vless_inactive])), \
+             patch("database.repositories.servers_repo.get_server_peer_counts", AsyncMock(return_value={})), \
+             patch("database.repositories.vless_subscription_repo.get_active_vless_counts", AsyncMock(return_value=(0, 0))):
+            summary = await _get_servers_capacity_summary(session)
+
+            self.assertIn("Выключенные серверы:", summary)
+            self.assertIn("Estonia</b>: выключен (вручную)", summary)
+            self.assertNotIn("в БД:", summary)
+
+    async def test_dashboard_server_capacity_summary_omits_empty_groups(self):
+        server_awg = SimpleNamespace(
+            id=1, name="Netherlands", country_flag="🇳🇱", max_clients=240,
+            is_active=True, lifecycle_status="ACTIVE", protocol="amneziawg", capabilities=["awg"],
+        )
+        session = AsyncMock()
+
+        with patch("database.repositories.servers_repo.get_all_servers", AsyncMock(return_value=[server_awg])), \
+             patch("database.repositories.servers_repo.get_server_peer_counts", AsyncMock(return_value={1: 10})), \
+             patch("services.slots_cache.get_cached_peer_count", return_value=None):
+            summary = await _get_servers_capacity_summary(session)
+
+            self.assertIn("Стандартный доступ (AWG):", summary)
+            self.assertNotIn("Стандартный доступ (VLESS):", summary)
+            self.assertNotIn("Белый Интернет (Origin):", summary)
+
     async def test_server_list_buttons_include_capacity(self):
         server1 = SimpleNamespace(id=1, name="Netherlands", country_flag="🇳🇱", is_active=True, max_clients=240)
         session = AsyncMock()
