@@ -339,11 +339,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                 )
                 xray_ok = False
 
-        if server_proto in AMNEZIA_PROTOCOLS:
-            is_healthy = awg_ok
-        elif server_proto in (XRAY_PROTOCOL, VLESS_PROTOCOL):
-            is_healthy = xray_ok
-        elif has_amnezia and has_xray:
+        if has_amnezia and has_xray:
             is_healthy = awg_ok and xray_ok
         elif has_amnezia:
             is_healthy = awg_ok
@@ -835,7 +831,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                             await session.flush()
 
                     # Trigger VLESS re-provisioning only if epoch changed or is unsynced on a VLESS capable server
-                    from database.repositories.servers_repo import is_vless_capable_server
                     if is_vless_capable_server(updated_srv):
                         cur_synced = (dict(updated_srv.extra_data or {})).get("vless_synced_epoch")
                         if prev_epoch != updated_srv.xray_instance_epoch or cur_synced != updated_srv.xray_instance_epoch:
