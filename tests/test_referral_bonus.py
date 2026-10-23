@@ -1301,6 +1301,50 @@ class TestReferralEligibilityAndRanks(unittest.TestCase):
         orders_where = str(seen[0].compile(compile_kwargs={"literal_binds": True}))
         self.assertIn("service_type != 'topup'", orders_where)
 
+    def test_is_first_topup_eligible_recognizes_direct_card_purchases(self):
+        """A direct external-gateway tariff order (payment_method != wallet) >= threshold burns first top-up eligibility."""
+        import asyncio
+        from services.referral_bonus import is_first_topup_eligible
+
+        session = AsyncMock()
+        user_invited = MagicMock(id=5, telegram_id=500, referred_by=100)
+        seen_stmts = []
+
+        async def fake_scalar(stmt):
+            seen_stmts.append(stmt)
+            if len(seen_stmts) == 1:
+                # 1st query: User lookup
+                return user_invited
+            elif len(seen_stmts) == 2:
+                # 2nd query: Payment count
+                return 0
+            else:
+                # 3rd query: Order count
+                return 1
+
+        session.scalar = fake_scalar
+
+        is_eligible = asyncio.run(is_first_topup_eligible(session, user_id=5))
+        self.assertFalse(is_eligible)
+
+        order_stmt = seen_stmts[2]
+        compiled = str(order_stmt.compile(compile_kwargs={"literal_binds": True}))
+        self.assertIn("orders.payment_method != 'wallet'", compiled)
+        self.assertIn("orders.service_type = 'topup'", compiled)
+        self.assertIn("orders.amount_rub >= 68", compiled)
+
+    def test_is_first_topup_eligible_true_when_no_qualifying_orders(self):
+        """Brand new referred user with no qualifying orders is eligible for first topup notice."""
+        import asyncio
+        from services.referral_bonus import is_first_topup_eligible
+
+        session = AsyncMock()
+        user_invited = MagicMock(id=6, telegram_id=600, referred_by=100)
+        session.scalar = AsyncMock(side_effect=[user_invited, 0, 0])
+
+        is_eligible = asyncio.run(is_first_topup_eligible(session, user_id=6))
+        self.assertTrue(is_eligible)
+
     def test_get_user_referral_rank_unranked_for_zero_active(self):
         import asyncio
         from database.repositories.users_repo import get_user_referral_rank
