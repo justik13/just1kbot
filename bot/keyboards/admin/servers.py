@@ -234,7 +234,6 @@ def get_admin_std_sub_incy_keyboard(show_devices: bool = False) -> InlineKeyboar
 def get_admin_server_incy_keyboard(
     server_id: int,
     origin_hidden: bool = False,
-    is_xray: bool = True,
     is_origin: bool = False,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()

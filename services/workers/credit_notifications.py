@@ -493,8 +493,3 @@ def _note_failed_referrer_attempt(order: Order) -> int | None:
     meta[REFERRER_ATTEMPTS_KEY] = attempts
     order.metadata_ = meta
     return attempts
-
-
-def _note_failed_attempt(order: Order, meta: dict | None = None) -> int | None:
-    """Backward-compatible helper for legacy test suites."""
-    return _note_failed_owner_attempt(order)

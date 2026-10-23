@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
 from database.repositories.profiles_repo import PROFILE_LIST_HIDDEN_STATUSES
-from database.repositories.servers_repo import is_xray_server
+from database.repositories.servers_repo import get_server_protocol_badge
 from bot.keyboards import get_back_button
 from bot.keyboards.admin.broadcast import (
     get_broadcast_audience_keyboard,
@@ -293,8 +293,7 @@ async def process_broadcast_message(
                     server = await s_sess.get(Server, server_id)
             if server:
                 flag = server.country_flag or "🌐"
-                is_xray = is_xray_server(server)
-                proto = "[Xray]" if is_xray else "[AWG]"
+                proto = get_server_protocol_badge(server)
                 aud_label = texts.BROADCAST_AUDIENCE_SERVER_LABEL.format(
                     flag=flag, proto=proto, name=safe(server.name)
                 )

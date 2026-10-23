@@ -3,7 +3,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot import texts
 from config.enums import ServerLifecycleStatus
-from database.repositories.servers_repo import is_xray_server
+from database.repositories.servers_repo import get_server_protocol_badge
 
 
 def get_broadcast_audience_keyboard() -> InlineKeyboardMarkup:
@@ -56,8 +56,7 @@ def get_broadcast_server_selection_keyboard(servers) -> InlineKeyboardMarkup:
             getattr(s, "is_active", True)
             and getattr(s, "lifecycle_status", ServerLifecycleStatus.ACTIVE) == ServerLifecycleStatus.ACTIVE
         )
-        is_xray = is_xray_server(s)
-        proto = "[Xray]" if is_xray else "[AWG]"
+        proto = get_server_protocol_badge(s)
         status = "" if is_server_active else texts.BROADCAST_SERVER_STATUS_DISABLED
         builder.button(
             text=f"{flag} {proto} {s.name}{status}",

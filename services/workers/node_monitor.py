@@ -28,7 +28,6 @@ from bot.texts.runtime.alerts import (
     ALERT_SERVER_RESTORED,
 )
 from config.constants import (
-    AMNEZIA_PROTOCOL,
     AMNEZIA_PROTOCOLS,
     ServerHealthState,
     WHITE_INTERNET_SUB_PATH_PREFIX,
@@ -42,6 +41,9 @@ from database.repositories.servers_repo import (
     get_all_servers,
     get_server_by_id,
     get_server_xray_api_url,
+    is_awg_capable_server,
+    is_vless_capable_server,
+    is_white_internet_origin_server,
     update_server,
     update_server_health_snapshot,
     update_server_xray_epoch_cas,
@@ -274,18 +276,15 @@ async def check_node_resources_and_alerts(bot: Bot):
 
         st.last_check_monotonic = now_m
         caps = getattr(server, "capabilities", None) or []
+        if not isinstance(caps, (list, tuple, set)):
+            caps = []
         raw_proto = getattr(server, "protocol", None)
         if not isinstance(raw_proto, str) or not raw_proto.strip():
-            raw_proto = XRAY_PROTOCOL if "xray_origin" in caps else AMNEZIA_PROTOCOL
+            raw_proto = XRAY_PROTOCOL if "xray_origin" in caps else "amneziawg"
         server_proto = raw_proto.strip().lower()
 
-        has_amnezia = server_proto in AMNEZIA_PROTOCOLS or "awg" in caps
-        has_xray = (
-            server_proto in (XRAY_PROTOCOL, "vless")
-            or "vless" in caps
-            or "xray_vless" in caps
-            or (server_proto not in AMNEZIA_PROTOCOLS and "xray_origin" in caps)
-        )
+        has_amnezia = is_awg_capable_server(server)
+        has_xray = is_vless_capable_server(server) or is_white_internet_origin_server(server)
 
         if not has_amnezia and not has_xray:
             logger.warning(
@@ -837,7 +836,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                             await session.flush()
 
                     # Trigger VLESS re-provisioning only if epoch changed or is unsynced on a VLESS capable server
-                    from database.repositories.servers_repo import is_vless_capable_server
                     if is_vless_capable_server(updated_srv):
                         cur_synced = (dict(updated_srv.extra_data or {})).get("vless_synced_epoch")
                         if prev_epoch != updated_srv.xray_instance_epoch or cur_synced != updated_srv.xray_instance_epoch:

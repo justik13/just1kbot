@@ -213,6 +213,10 @@ async def get_real_peer_count(server: Server, force_refresh: bool = False) -> in
                 server.id, server.name, count, server.max_clients,
             )
             return count
+        elif server_proto == VLESS_PROTOCOL:
+            t_done = time.monotonic()
+            update_cached_peer_count(server.id, 0, timestamp=t_done, generation=gen)
+            return 0
         else:
             logger.error(
                 "Refusing to invoke AmneziaClient for server %s (%s) with unsupported protocol: %r",
