@@ -382,13 +382,15 @@ class TestOrderService(unittest.IsolatedAsyncioTestCase):
                 tariff_id=1,
             )
 
+    @patch("services.referral_bonus.grant_referral_bonus_for_topup")
     @patch("services.order_service.FulfillmentService.fulfill_order")
     @patch("services.order_service.create_order_debit")
     @patch("services.order_service.create_order_credit")
     @patch("services.order_service.get_payment_gateway")
     async def test_process_webhook_event_payment_succeeded(
-        self, mock_gw_factory, mock_credit, mock_debit, mock_fulfill
+        self, mock_gw_factory, mock_credit, mock_debit, mock_fulfill, mock_bonus
     ):
+        mock_bonus.return_value = MagicMock(referrer_bonus=Decimal("0"), referrer_user_id=None)
         mock_gw = AsyncMock()
         order_uuid = uuid.uuid4()
         mock_gw.parse_webhook.return_value = WebhookResult(
@@ -422,13 +424,20 @@ class TestOrderService(unittest.IsolatedAsyncioTestCase):
         mock_credit.assert_not_called()
         mock_debit.assert_not_called()
         mock_fulfill.assert_called_once_with(session, order)
+        mock_bonus.assert_called_once_with(
+            session,
+            purchaser_user_id=10,
+            order_id=str(order_uuid),
+            topup_amount=Decimal("200.00"),
+        )
         session.flush.assert_called()
 
+    @patch("services.order_service.reverse_referral_bonus_for_topup")
     @patch("services.order_service.FulfillmentService.revoke_order")
     @patch("services.order_service.create_order_refund_debit")
     @patch("services.order_service.get_payment_gateway")
     async def test_process_webhook_event_refund_succeeded(
-        self, mock_gw_factory, mock_refund_debit, mock_revoke
+        self, mock_gw_factory, mock_refund_debit, mock_revoke, mock_rev_bonus
     ):
         mock_gw = AsyncMock()
         order_uuid = uuid.uuid4()
@@ -457,6 +466,11 @@ class TestOrderService(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(success)
         self.assertEqual(order.status, "refunded")
         mock_refund_debit.assert_not_called()
+        mock_rev_bonus.assert_called_once_with(
+            session,
+            order_id=order_uuid,
+            refund_id="ext-pay-888",
+        )
         mock_revoke.assert_called_once_with(session, order)
         session.flush.assert_called()
 
@@ -1458,8 +1472,10 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call_kwargs["subscription_id"], 100)
         self.assertEqual(call_kwargs["pack_gb"], 25)
 
+    @patch("services.referral_bonus.grant_referral_bonus_for_topup")
     @patch("services.order_service.FulfillmentService.fulfill_order")
-    async def test_mark_order_paid_revives_canceled_order(self, mock_fulfill):
+    async def test_mark_order_paid_revives_canceled_order(self, mock_fulfill, mock_bonus):
+        mock_bonus.return_value = MagicMock(referrer_bonus=Decimal("0"), referrer_user_id=None)
         session = AsyncMock(spec=AsyncSession)
         order_uuid = uuid.uuid4()
         order = Order(
@@ -1968,11 +1984,12 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
         mock_rev_bonus.assert_not_called()
         mock_revoke.assert_not_called()
 
+    @patch("services.order_service.reverse_referral_bonus_for_topup")
     @patch("services.order_service.FulfillmentService.revoke_order")
     @patch("services.order_service.create_order_refund_debit")
     @patch("services.order_service.get_payment_gateway")
     async def test_process_webhook_refund_finds_order_by_payment_id(
-        self, mock_gw_factory, mock_refund_debit, mock_revoke
+        self, mock_gw_factory, mock_refund_debit, mock_revoke, mock_rev_bonus
     ):
         """Verify webhook refund finds order by payment_id when metadata lacks order_id."""
         mock_gw = AsyncMock()
@@ -2009,6 +2026,11 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(res)
         self.assertEqual(res.id, order_uuid)
         self.assertEqual(res.status, "refunded")
+        mock_rev_bonus.assert_called_once_with(
+            session,
+            order_id=order_uuid,
+            refund_id=refund_ext_id,
+        )
         mock_revoke.assert_called_once_with(session, order)
 
     @patch("services.order_service.reverse_referral_bonus_for_topup")
