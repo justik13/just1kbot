@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config.constants import (
     AMNEZIA_PROTOCOL,
     AMNEZIA_PROTOCOLS,
+    DEFAULT_ORIGIN_PROTOCOL_BADGE,
     VLESS_PROTOCOL,
     XRAY_ORIGIN_CAPABILITY,
     XRAY_PROTOCOL,
@@ -85,8 +86,6 @@ def is_pure_vless_server(server) -> bool:
 
 def get_server_protocol_badge(server) -> str:
     """Return protocol badge string for a server ([AWG], [VLESS], [AWG+VLESS], [Origin РФ])."""
-    from bot import texts
-
     has_awg = is_awg_capable_server(server)
     has_vless = is_vless_capable_server(server)
     has_wl = is_white_internet_origin_server(server)
@@ -96,7 +95,7 @@ def get_server_protocol_badge(server) -> str:
     if has_vless and not has_wl:
         return "[VLESS]"
     if has_wl:
-        return getattr(texts, "ADMIN_SERVER_PROTO_ORIGIN_BADGE", "[Origin РФ]")
+        return DEFAULT_ORIGIN_PROTOCOL_BADGE
     return "[AWG]"
 
 

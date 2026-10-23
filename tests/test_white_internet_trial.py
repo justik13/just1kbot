@@ -44,8 +44,6 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
     """Test suite for WhiteInternetService.create_trial_subscription."""
 
     async def asyncSetUp(self):
-        self.orig_trial_env = os.environ.get("WHITE_INTERNET_TRIAL_MODE_ONLY")
-        os.environ["WHITE_INTERNET_TRIAL_MODE_ONLY"] = "true"
         self.session = AsyncMock(spec=AsyncSession)
         self.user = User(id=10, telegram_id=777000111, first_name="TrialUser")
         self.origin_server = Server(
@@ -57,12 +55,6 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
             extra_data={"cdn_domain": "cdn.example.com"},
         )
         self.tariff = MagicMock(id=5, duration_days=30)
-
-    async def asyncTearDown(self):
-        if self.orig_trial_env is None:
-            os.environ.pop("WHITE_INTERNET_TRIAL_MODE_ONLY", None)
-        else:
-            os.environ["WHITE_INTERNET_TRIAL_MODE_ONLY"] = self.orig_trial_env
 
     async def test_trial_creation_success_with_sync_xray(self):
         """Trial is created with 3 days, 10 GiB, 0 RUB, and immediately synced to ACTIVE."""
@@ -381,16 +373,6 @@ class TestWhiteInternetTrialService(unittest.IsolatedAsyncioTestCase):
 
 class TestWhiteInternetTrialBotUI(unittest.IsolatedAsyncioTestCase):
     """Test suite for Telegram Bot UI in trial mode."""
-
-    def setUp(self):
-        self.orig_trial_env = os.environ.get("WHITE_INTERNET_TRIAL_MODE_ONLY")
-        os.environ["WHITE_INTERNET_TRIAL_MODE_ONLY"] = "true"
-
-    def tearDown(self):
-        if self.orig_trial_env is None:
-            os.environ.pop("WHITE_INTERNET_TRIAL_MODE_ONLY", None)
-        else:
-            os.environ["WHITE_INTERNET_TRIAL_MODE_ONLY"] = self.orig_trial_env
 
     def test_trial_overview_keyboard_has_trial_buttons(self):
         """Overview keyboard displays appropriate buttons for trial status."""

@@ -1,6 +1,8 @@
 """Domain texts for admin/servers.py."""
 from __future__ import annotations
 
+from config.constants import DEFAULT_ORIGIN_PROTOCOL_BADGE
+
 ADMIN_BTN_ADD_SERVER = "➕ Добавить сервер"
 ADMIN_SERVER_SELECT_PROTO_PROMPT = """🛠 Админка › ➕ <b>Добавление сервера</b>
 
@@ -11,7 +13,7 @@ ADMIN_SERVER_BTN_PROTO_XRAY = "⚡ Xray (Белый Интернет)"
 
 PROTOCOL_XRAY_ORIGIN = "Xray (Origin)"
 PROTOCOL_VLESS = "VLESS TLS"
-ADMIN_SERVER_PROTO_ORIGIN_BADGE = "[Origin РФ]"
+ADMIN_SERVER_PROTO_ORIGIN_BADGE = DEFAULT_ORIGIN_PROTOCOL_BADGE
 ADMIN_SERVER_CAP_VLESS_SUBS_TPL = "{users}п / {devices}у"
 
 ADMIN_BTN_BACK_TO_SERVERS = "← К списку серверов"

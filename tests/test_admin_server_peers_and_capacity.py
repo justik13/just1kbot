@@ -197,8 +197,25 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
             summary = await _get_servers_capacity_summary(session)
 
             self.assertIn("Выключенные серверы:", summary)
-            self.assertIn("Estonia</b>: выключен (вручную)", summary)
+            self.assertIn("[VLESS] Estonia</b>: выключен (вручную)", summary)
             self.assertNotIn("в БД:", summary)
+
+    async def test_dashboard_server_capacity_summary_inactive_origin_shows_badge(self):
+        server_origin_inactive = SimpleNamespace(
+            id=5, name="Russia", country_flag="🇷🇺", max_clients=1000,
+            is_active=False, lifecycle_status="ACTIVE", protocol="xray", capabilities=["xray_origin"],
+            disabled_reason="AUTO_UNAVAILABLE",
+        )
+        session = AsyncMock()
+
+        with patch("database.repositories.servers_repo.get_all_servers", AsyncMock(return_value=[server_origin_inactive])), \
+             patch("database.repositories.servers_repo.get_server_peer_counts", AsyncMock(return_value={5: 2})), \
+             patch("services.slots_cache.get_cached_peer_count", return_value=None):
+            summary = await _get_servers_capacity_summary(session)
+
+            self.assertIn("Выключенные серверы:", summary)
+            self.assertIn("[Origin РФ] Russia</b>: выключен (автоматически)", summary)
+            self.assertIn("в БД: 2", summary)
 
     async def test_dashboard_server_capacity_summary_omits_empty_groups(self):
         from config.constants import AMNEZIA_PROTOCOL
