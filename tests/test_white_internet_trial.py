@@ -10,7 +10,6 @@ Tests cover:
 - Main hub indicator when White Internet is active
 """
 
-import os
 import unittest
 import uuid
 from datetime import datetime, timedelta, timezone
