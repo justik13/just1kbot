@@ -11,10 +11,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
+from bot.formatters import get_server_protocol_badge
 from bot.keyboards import get_admin_server_card_keyboard
 from database.repositories.servers_repo import (
     get_server_peer_counts,
-    get_server_protocol_badge,
     is_awg_capable_server,
     is_pure_vless_server,
     is_vless_capable_server,
@@ -68,7 +68,10 @@ async def _build_servers_list_text_and_kb(
         db_counts = await get_server_peer_counts(session) if session is not None else {}
         vless_users_count: int = 0
         vless_devices_count: int = 0
-        if any(is_vless_capable_server(s) for s in servers) and session is not None:
+        has_active_pure_vless = any(
+            is_pure_vless_server(s) and getattr(s, "is_active", True) for s in servers
+        )
+        if has_active_pure_vless and session is not None:
             from database.repositories import vless_subscription_repo
             vless_users_count, vless_devices_count = await vless_subscription_repo.get_active_vless_counts(session)
 

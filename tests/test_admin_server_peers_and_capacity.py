@@ -177,11 +177,12 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
         with patch("database.repositories.servers_repo.get_all_servers", AsyncMock(return_value=[server_hybrid])), \
              patch("database.repositories.servers_repo.get_server_peer_counts", AsyncMock(return_value={13: 10})), \
              patch("services.slots_cache.get_cached_peer_count", return_value=None), \
-             patch("database.repositories.vless_subscription_repo.get_active_vless_counts", AsyncMock(return_value=(1, 1))):
+             patch("database.repositories.vless_subscription_repo.get_active_vless_counts", AsyncMock(return_value=(1, 1))) as mock_vless_counts:
             summary = await _get_servers_capacity_summary(session)
 
             self.assertIn("Стандартный доступ (AWG):", summary)
             self.assertIn("[AWG+VLESS] Germany</b>: 10/200 (5%)", summary)
+            mock_vless_counts.assert_not_called()
 
     async def test_dashboard_server_capacity_summary_inactive_vless_clean_row(self):
         server_vless_inactive = SimpleNamespace(
@@ -193,12 +194,30 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
 
         with patch("database.repositories.servers_repo.get_all_servers", AsyncMock(return_value=[server_vless_inactive])), \
              patch("database.repositories.servers_repo.get_server_peer_counts", AsyncMock(return_value={})), \
-             patch("database.repositories.vless_subscription_repo.get_active_vless_counts", AsyncMock(return_value=(0, 0))):
+             patch("database.repositories.vless_subscription_repo.get_active_vless_counts", AsyncMock(return_value=(0, 0))) as mock_vless_counts:
             summary = await _get_servers_capacity_summary(session)
 
             self.assertIn("Выключенные серверы:", summary)
-            self.assertIn("Estonia</b>: выключен (вручную)", summary)
+            self.assertIn("[VLESS] Estonia</b>: выключен (вручную)", summary)
             self.assertNotIn("в БД:", summary)
+            mock_vless_counts.assert_not_called()
+
+    async def test_dashboard_server_capacity_summary_inactive_origin_shows_badge(self):
+        server_origin_inactive = SimpleNamespace(
+            id=5, name="Russia", country_flag="🇷🇺", max_clients=1000,
+            is_active=False, lifecycle_status="ACTIVE", protocol="xray", capabilities=["xray_origin"],
+            disabled_reason="AUTO_UNAVAILABLE",
+        )
+        session = AsyncMock()
+
+        with patch("database.repositories.servers_repo.get_all_servers", AsyncMock(return_value=[server_origin_inactive])), \
+             patch("database.repositories.servers_repo.get_server_peer_counts", AsyncMock(return_value={5: 2})), \
+             patch("services.slots_cache.get_cached_peer_count", return_value=None):
+            summary = await _get_servers_capacity_summary(session)
+
+            self.assertIn("Выключенные серверы:", summary)
+            self.assertIn("[Origin РФ] Russia</b>: выключен (автоматически)", summary)
+            self.assertIn("в БД: 2", summary)
 
     async def test_dashboard_server_capacity_summary_omits_empty_groups(self):
         from config.constants import AMNEZIA_PROTOCOL
@@ -219,9 +238,9 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("Белый Интернет (Origin):", summary)
 
     def test_server_protocol_badges_and_predicates(self):
+        from bot.formatters import get_server_protocol_badge
         from config.constants import AMNEZIA_PROTOCOL
         from database.repositories.servers_repo import (
-            get_server_protocol_badge,
             is_awg_capable_server,
             is_pure_vless_server,
             is_vless_capable_server,

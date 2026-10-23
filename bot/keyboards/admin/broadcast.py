@@ -3,7 +3,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot import texts
 from config.enums import ServerLifecycleStatus
-from database.repositories.servers_repo import get_server_protocol_badge
+from bot.formatters import get_server_protocol_badge
 
 
 def get_broadcast_audience_keyboard() -> InlineKeyboardMarkup:

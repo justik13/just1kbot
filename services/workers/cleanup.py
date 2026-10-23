@@ -892,7 +892,7 @@ async def _cleanup_old_records():
     )
 
     threshold_idempotency = current_time - timedelta(days=7)
-    await _batch_delete_matching(
+    idempotency_deleted = await _batch_delete_matching(
         AdminOperationIdempotency,
         AdminOperationIdempotency.created_at < threshold_idempotency,
     )
@@ -913,14 +913,16 @@ async def _cleanup_old_records():
         or deleted_logs > 0
         or hub_deleted > 0
         or webhooks_deleted > 0
+        or idempotency_deleted > 0
     ):
         logger.info(
             "Cleanup: %s old broadcasts, %s old audit logs, "
-            "%s old hub_messages, %s old webhooks deleted",
+            "%s old hub_messages, %s old webhooks deleted, %s old idempotency records deleted",
             broadcasts_deleted,
             deleted_logs,
             hub_deleted,
             webhooks_deleted,
+            idempotency_deleted,
         )
 
 

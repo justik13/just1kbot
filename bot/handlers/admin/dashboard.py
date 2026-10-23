@@ -115,11 +115,11 @@ async def _get_financial_stats(session: AsyncSession) -> dict:
 
 
 async def _get_servers_capacity_summary(session: AsyncSession) -> str:
+    from bot.formatters import get_server_protocol_badge
     from config.enums import ServerLifecycleStatus
     from database.repositories.servers_repo import (
         get_all_servers,
         get_server_peer_counts,
-        get_server_protocol_badge,
         is_awg_capable_server,
         is_pure_vless_server,
         is_vless_capable_server,
@@ -135,7 +135,13 @@ async def _get_servers_capacity_summary(session: AsyncSession) -> str:
 
     vless_users_count: int = 0
     vless_devices_count: int = 0
-    if any(is_vless_capable_server(s) for s in servers):
+    has_active_pure_vless = any(
+        is_pure_vless_server(s)
+        and getattr(s, "is_active", True)
+        and getattr(s, "lifecycle_status", ServerLifecycleStatus.ACTIVE) == ServerLifecycleStatus.ACTIVE
+        for s in servers
+    )
+    if has_active_pure_vless:
         from database.repositories import vless_subscription_repo
 
         vless_users_count, vless_devices_count = await vless_subscription_repo.get_active_vless_counts(session)
