@@ -14,7 +14,6 @@ from bot import texts
 from bot.keyboards import get_admin_server_card_keyboard
 from database.repositories.servers_repo import (
     get_server_peer_counts,
-    get_server_protocol_badge,
     is_awg_capable_server,
     is_pure_vless_server,
     is_vless_capable_server,
@@ -28,6 +27,21 @@ from utils.text_limits import truncate_button_text
 logger = logging.getLogger(__name__)
 
 SERVERS_PER_PAGE = 10
+
+
+def get_server_protocol_badge(server: Any) -> str:
+    """Return protocol badge string for a server ([AWG], [VLESS], [AWG+VLESS], [Origin РФ])."""
+    has_awg = is_awg_capable_server(server)
+    has_vless = is_vless_capable_server(server)
+    has_wl = is_white_internet_origin_server(server)
+
+    if has_awg and has_vless:
+        return texts.ADMIN_SERVER_PROTO_AWG_VLESS_BADGE
+    if has_vless and not has_wl:
+        return texts.ADMIN_SERVER_PROTO_VLESS_BADGE
+    if has_wl:
+        return texts.ADMIN_SERVER_PROTO_ORIGIN_BADGE
+    return texts.ADMIN_SERVER_PROTO_AWG_BADGE
 
 URL_REGEX = re.compile(
     r"^https?://"+

@@ -236,9 +236,9 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("Белый Интернет (Origin):", summary)
 
     def test_server_protocol_badges_and_predicates(self):
+        from bot.handlers.admin.servers.common import get_server_protocol_badge
         from config.constants import AMNEZIA_PROTOCOL
         from database.repositories.servers_repo import (
-            get_server_protocol_badge,
             is_awg_capable_server,
             is_pure_vless_server,
             is_vless_capable_server,

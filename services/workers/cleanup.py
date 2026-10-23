@@ -917,7 +917,7 @@ async def _cleanup_old_records():
     ):
         logger.info(
             "Cleanup: %s old broadcasts, %s old audit logs, "
-            "%s old hub_messages, %s old webhooks, %s old idempotency records deleted",
+            "%s old hub_messages, %s old webhooks deleted, %s old idempotency records deleted",
             broadcasts_deleted,
             deleted_logs,
             hub_deleted,

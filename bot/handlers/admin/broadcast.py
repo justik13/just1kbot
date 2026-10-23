@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
 from database.repositories.profiles_repo import PROFILE_LIST_HIDDEN_STATUSES
-from database.repositories.servers_repo import get_server_protocol_badge
+from bot.handlers.admin.servers.common import get_server_protocol_badge
 from bot.keyboards import get_back_button
 from bot.keyboards.admin.broadcast import (
     get_broadcast_audience_keyboard,
