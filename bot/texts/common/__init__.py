@@ -87,6 +87,7 @@ from bot.texts.common.buttons import (
     BUTTON_REFERRAL_LIST_COUNT,
     BUTTON_RESUME_TOPUP,
     BUTTON_TOPUP,
+    LEGACY_REPLY_BUTTON_TRIGGER_TEXTS,
 )
 
 from bot.texts.common.errors import (
@@ -255,6 +256,7 @@ __all__ = [
     "BUTTON_REFERRAL_LIST_COUNT",
     "BUTTON_RESUME_TOPUP",
     "BUTTON_TOPUP",
+    "LEGACY_REPLY_BUTTON_TRIGGER_TEXTS",
     "DATE_DAY_MONTH_FORMAT",
     "DATE_DAY_MONTH_YEAR_FORMAT",
     "ERROR_ACCESS_DENIED",

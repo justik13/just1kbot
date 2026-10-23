@@ -119,6 +119,7 @@ async def _get_servers_capacity_summary(session: AsyncSession) -> str:
     from database.repositories.servers_repo import (
         get_all_servers,
         get_server_peer_counts,
+        get_server_protocol_badge,
         is_awg_capable_server,
         is_pure_vless_server,
         is_vless_capable_server,
@@ -212,16 +213,19 @@ async def _get_servers_capacity_summary(session: AsyncSession) -> str:
             else:
                 reason_text = ""
 
+            proto_badge = get_server_protocol_badge(s)
+            server_display_name = f"{proto_badge} {safe(s.name)}"
+
             if is_pure_vless:
                 inactive_lines.append(texts.DASHBOARD_INACTIVE_SERVER_ROW_VLESS.format(
                     flag=flag,
-                    name=safe(s.name),
+                    name=server_display_name,
                     reason_text=reason_text,
                 ))
             else:
                 inactive_lines.append(texts.DASHBOARD_INACTIVE_SERVER_ROW.format(
                     flag=flag,
-                    name=safe(s.name),
+                    name=server_display_name,
                     reason_text=reason_text,
                     db_used=db_used,
                 ))

@@ -81,10 +81,10 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Netherlands", summary)
             self.assertIn("22/240", summary)
             self.assertIn("Выключенные серверы:", summary)
-            self.assertIn("Poland", summary)
+            self.assertIn("[AWG] Poland", summary)
             self.assertIn("выключен (вручную)", summary)
             self.assertIn("в БД: 20", summary)
-            self.assertIn("Germany", summary)
+            self.assertIn("[AWG] Germany", summary)
             self.assertIn("выключен (автоматически)", summary)
             self.assertIn("в БД: 5", summary)
 
