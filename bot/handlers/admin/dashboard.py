@@ -115,7 +115,7 @@ async def _get_financial_stats(session: AsyncSession) -> dict:
 
 
 async def _get_servers_capacity_summary(session: AsyncSession) -> str:
-    from bot.handlers.admin.servers.common import get_server_protocol_badge
+    from bot.formatters import get_server_protocol_badge
     from config.enums import ServerLifecycleStatus
     from database.repositories.servers_repo import (
         get_all_servers,
