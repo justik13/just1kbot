@@ -1512,6 +1512,18 @@ class TestNodeMonitorSyntheticProbe(unittest.IsolatedAsyncioTestCase):
         res3 = _safe_format_device_template("Неизвестный {placeholder} и {devices}", devices=1, active=0)
         self.assertEqual(res3, "Неизвестный {placeholder} и 1")
 
+    def test_node_monitor_ingress_probe_timeouts(self):
+        """Ingress probe timeouts are configured with safe margins for cross-border TLS."""
+        from services.workers.node_monitor import (
+            INGRESS_PROBE_CONNECT_TIMEOUT,
+            INGRESS_PROBE_TOTAL_TIMEOUT,
+        )
+
+        self.assertGreaterEqual(INGRESS_PROBE_TOTAL_TIMEOUT, 30.0)
+        self.assertGreaterEqual(INGRESS_PROBE_CONNECT_TIMEOUT, 25.0)
+        self.assertGreater(INGRESS_PROBE_TOTAL_TIMEOUT, INGRESS_PROBE_CONNECT_TIMEOUT)
+
+
 
 if __name__ == "__main__":
     unittest.main()

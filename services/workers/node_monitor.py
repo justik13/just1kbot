@@ -66,6 +66,8 @@ REQUIRED_INGRESS_FAILS = 3  # Требуется 3 цикла сбоя подр�
 REQUIRED_CDN_FAILS = 5  # Требуется 5 циклов сбоя подряд (~100-120с) для фильтрации трансграничного шума
 REQUIRED_INGRESS_SUCCESSES = 2  # Требуется 2 цикла успеха подряд для подтверждения восстановления
 INGRESS_RETRY_DELAY = 1.5  # Базовая задержка перед повторным запросом зонда при ошибке/таймауте
+INGRESS_PROBE_TOTAL_TIMEOUT = 30.0  # Максимальное время синтетического ingress-зонда
+INGRESS_PROBE_CONNECT_TIMEOUT = 25.0  # Запас на трансграничный TLS handshake при пиках нагрузки
 # A hung node can hold a healthcheck for tens of seconds; checking servers in
 # bounded parallel batches keeps one degraded node from freezing alerts for
 # every other node in the cycle.
@@ -392,7 +394,10 @@ async def check_node_resources_and_alerts(bot: Bot):
                     if cdn_domain:
                         cdn_domain = str(cdn_domain).strip()
 
-                    timeout = aiohttp.ClientTimeout(total=15.0, connect=10.0)
+                    timeout = aiohttp.ClientTimeout(
+                        total=INGRESS_PROBE_TOTAL_TIMEOUT,
+                        connect=INGRESS_PROBE_CONNECT_TIMEOUT,
+                    )
                     connector = aiohttp.TCPConnector(family=socket.AF_INET)
                     async with aiohttp.ClientSession(timeout=timeout, connector=connector) as probe_sess:
                         if origin_domain and cdn_domain and origin_domain != cdn_domain:
