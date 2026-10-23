@@ -811,6 +811,172 @@ class TestSimpleBillingEnhancements(unittest.IsolatedAsyncioTestCase):
         )
         mock_fulfill.assert_called_once_with(session, order)
 
+    @patch("services.referral_bonus.grant_referral_bonus_for_topup")
+    @patch("services.order_service.create_order_credit")
+    @patch("services.order_service.FulfillmentService.fulfill_order")
+    async def test_mark_direct_tariff_order_paid_triggers_referral_bonus(
+        self, mock_fulfill, mock_credit, mock_bonus
+    ):
+        """Direct tariff purchase via external gateway grants referral bonus without wallet credit."""
+        from services.referral_bonus import ReferralBonusGrantResult
+
+        mock_bonus.return_value = ReferralBonusGrantResult(
+            referrer_bonus=Decimal("10.00"),
+            referrer_user_id=11,
+            referrer_telegram_id=1046015415,
+            bonus_rate_pct=15,
+        )
+        session = AsyncMock(spec=AsyncSession)
+        order_uuid = uuid.uuid4()
+        order = Order(
+            id=order_uuid,
+            user_id=55,
+            service_type="standard",
+            amount_rub=Decimal("68.00"),
+            payment_method="yookassa",
+            status="pending",
+            metadata_={},
+        )
+        session.scalar.side_effect = [
+            order,
+            User(id=55, telegram_id=5555, is_banned=False, financial_hold=False, topup_blocked=False),
+        ]
+        session.get.return_value = order
+
+        paid_order = await OrderService.mark_order_paid(session, order_uuid)
+
+        self.assertIsNotNone(paid_order)
+        self.assertEqual(paid_order.status, "paid")
+        mock_credit.assert_not_called()
+        mock_bonus.assert_called_once_with(
+            session,
+            purchaser_user_id=55,
+            order_id=str(order_uuid),
+            topup_amount=Decimal("68.00"),
+        )
+        mock_fulfill.assert_called_once_with(session, order)
+        self.assertIn("referrer_notify_pending", paid_order.metadata_)
+        self.assertEqual(paid_order.metadata_["referrer_notify_pending"]["user_id"], 11)
+
+    @patch("services.referral_bonus.grant_referral_bonus_for_topup")
+    @patch("services.order_service.create_order_credit")
+    @patch("services.order_service.FulfillmentService.fulfill_order")
+    async def test_mark_wallet_tariff_order_paid_does_not_trigger_referral_bonus(
+        self, mock_fulfill, mock_credit, mock_bonus
+    ):
+        """Wallet-funded order does not grant referral bonus to prevent double-minting."""
+        session = AsyncMock(spec=AsyncSession)
+        order_uuid = uuid.uuid4()
+        order = Order(
+            id=order_uuid,
+            user_id=55,
+            service_type="standard",
+            amount_rub=Decimal("90.00"),
+            payment_method="wallet",
+            status="pending",
+            metadata_={},
+        )
+        session.scalar.side_effect = [
+            order,
+            User(id=55, telegram_id=5555, is_banned=False, financial_hold=False, topup_blocked=False),
+        ]
+        session.get.return_value = order
+
+        paid_order = await OrderService.mark_order_paid(session, order_uuid)
+
+        self.assertIsNotNone(paid_order)
+        self.assertEqual(paid_order.status, "paid")
+        mock_credit.assert_not_called()
+        mock_bonus.assert_not_called()
+        mock_fulfill.assert_called_once_with(session, order)
+        self.assertNotIn("referrer_notify_pending", paid_order.metadata_ or {})
+
+    @patch("services.order_service.reverse_referral_bonus_for_topup")
+    @patch("services.order_service.FulfillmentService.revoke_order")
+    @patch("services.order_service.get_payment_gateway")
+    async def test_refund_direct_tariff_order_reverses_referral_bonus(
+        self, mock_gw_factory, mock_revoke, mock_rev_bonus
+    ):
+        """Direct tariff purchase refund triggers reversal of credited referral bonus."""
+        from integrations.payment_gateways.base import WebhookResult
+
+        order_uuid = uuid.uuid4()
+        mock_gw = AsyncMock()
+        mock_gw_factory.return_value = mock_gw
+        mock_gw.parse_webhook.return_value = WebhookResult(
+            event_type="refund.succeeded",
+            order_id=str(order_uuid),
+            is_paid=False,
+            is_refunded=True,
+            amount_rub=Decimal("68.00"),
+            external_id="refund-direct-1",
+        )
+
+        session = AsyncMock(spec=AsyncSession)
+        order = Order(
+            id=order_uuid,
+            user_id=55,
+            service_type="standard",
+            payment_method="yookassa",
+            amount_rub=Decimal("68.00"),
+            status="paid",
+            metadata_={},
+        )
+        session.scalar.return_value = order
+        session.get.return_value = order
+
+        refunded_order = await OrderService.process_webhook_event(session, {"event": "refund.succeeded"})
+
+        self.assertIsNotNone(refunded_order)
+        self.assertEqual(refunded_order.status, "refunded")
+        mock_rev_bonus.assert_called_once_with(
+            session,
+            order_id=order_uuid,
+            refund_id="refund-direct-1",
+        )
+        mock_revoke.assert_called_once_with(session, order)
+
+    @patch("services.order_service.reverse_referral_bonus_for_topup")
+    @patch("services.order_service.FulfillmentService.revoke_order")
+    @patch("services.order_service.get_payment_gateway")
+    async def test_refund_wallet_tariff_order_does_not_reverse_referral_bonus(
+        self, mock_gw_factory, mock_revoke, mock_rev_bonus
+    ):
+        """Wallet-funded order refund does not trigger referral bonus reversal."""
+        from integrations.payment_gateways.base import WebhookResult
+
+        order_uuid = uuid.uuid4()
+        mock_gw = AsyncMock()
+        mock_gw_factory.return_value = mock_gw
+        mock_gw.parse_webhook.return_value = WebhookResult(
+            event_type="refund.succeeded",
+            order_id=str(order_uuid),
+            is_paid=False,
+            is_refunded=True,
+            amount_rub=Decimal("90.00"),
+            external_id="refund-wallet-1",
+        )
+
+        session = AsyncMock(spec=AsyncSession)
+        order = Order(
+            id=order_uuid,
+            user_id=55,
+            service_type="standard",
+            payment_method="wallet",
+            amount_rub=Decimal("90.00"),
+            status="paid",
+            metadata_={},
+        )
+        session.scalar.return_value = order
+        session.get.return_value = order
+
+        refunded_order = await OrderService.process_webhook_event(session, {"event": "refund.succeeded"})
+
+        self.assertIsNotNone(refunded_order)
+        self.assertEqual(refunded_order.status, "refunded")
+        mock_rev_bonus.assert_not_called()
+        mock_revoke.assert_called_once_with(session, order)
+
     async def test_has_successful_topup_checks_orders(self):
         from database.repositories.payments_repo import has_successful_topup
 
