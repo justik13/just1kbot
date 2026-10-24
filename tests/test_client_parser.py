@@ -12,14 +12,17 @@ class TestClientParser(unittest.TestCase):
         cases = [
             ("INCY/3.7.0 (iPhone; iOS 17.5.1; Scale/3.00)", "INCY 3.7.0"),
             ("INCY 3.7.0", "INCY 3.7.0"),
+            ("INCY/ 3.7.0", "INCY 3.7.0"),
             ("Happ/3.6.5 (build 365; iOS 18.0.0)", "Happ 3.6.5"),
             ("v2rayNG/1.8.5", "v2rayNG 1.8.5"),
             ("sing-box/1.9.0", "sing-box 1.9.0"),
             ("sing-box 1.9.0", "sing-box 1.9.0"),
+            ("sing-box / 1.9.0", "sing-box 1.9.0"),
             ("sing-box/1.9.0-rc.1", "sing-box 1.9.0-rc.1"),
             ("FoXray/1.4.2", "FoXray 1.4.2"),
             ("Clash.Meta/1.18.0", "Clash.Meta 1.18.0"),
             ("Clash/1.0", "Clash 1.0"),
+            ("Clash/V1.6.6", "Clash 1.6.6"),
             ("Shadowrocket/1982", "Shadowrocket 1982"),
             ("Streisand/1.5", "Streisand 1.5"),
             ("Karing/1.0.21", "Karing 1.0.21"),
@@ -63,6 +66,12 @@ class TestClientParser(unittest.TestCase):
             "python-requests/2.31.0",
             "Dart/3.1 (dart:io)",
             "Python/3.11 aiohttp/3.9.1",
+            "Go-http-client/1.1",
+            "Go-http-client/2.0",
+            "HTTP/1.1",
+            "Java/17.0.2",
+            "PostmanRuntime/7.36.0",
+            "axios/1.6.2",
         ]
         for ua in system_tools:
             with self.subTest(ua=ua):
@@ -75,40 +84,6 @@ class TestClientParser(unittest.TestCase):
         self.assertIsNone(parse_client_from_user_agent("some-random-text-without-version"))
 
 
-class TestWhiteInternetHwidBackwardCompatibility(unittest.TestCase):
-    def test_count_active_hwids_with_mixed_str_and_dict(self):
-        from datetime import datetime, timedelta, timezone
-        from database.repositories.white_internet_repo import count_active_hwids, extract_hwid_last_seen
-
-        now = datetime(2026, 10, 24, 12, 0, tzinfo=timezone.utc)
-        active_hwids = {
-            "dev_str_active": (now - timedelta(hours=1)).isoformat(),
-            "dev_str_stale": (now - timedelta(hours=50)).isoformat(),
-            "dev_dict_active": {
-                "last_seen": (now - timedelta(hours=2)).isoformat(),
-                "client": "INCY 3.7.0",
-                "model": "iPhone 17 Pro",
-            },
-            "dev_dict_stale": {
-                "last_seen": (now - timedelta(hours=60)).isoformat(),
-                "client": "Happ 3.6.5",
-            },
-        }
-
-        count = count_active_hwids(active_hwids, now=now, ttl_hours=48)
-        self.assertEqual(count, 2)
-
-        self.assertEqual(
-            extract_hwid_last_seen("2026-10-24T12:00:00+00:00"),
-            "2026-10-24T12:00:00+00:00",
-        )
-        self.assertEqual(
-            extract_hwid_last_seen({"last_seen": "2026-10-24T12:00:00+00:00"}),
-            "2026-10-24T12:00:00+00:00",
-        )
-        self.assertIsNone(extract_hwid_last_seen({}))
-        self.assertIsNone(extract_hwid_last_seen(None))
-
-
 if __name__ == "__main__":
     unittest.main()
+

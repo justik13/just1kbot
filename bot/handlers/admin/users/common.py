@@ -1,5 +1,5 @@
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery
@@ -521,13 +521,10 @@ async def _get_white_internet_card_info(
     cutoff_dt = now - timedelta(hours=white_internet_repo.WHITE_INTERNET_HWID_TTL_HOURS)
     for hwid, meta_or_ts in sorted(
         raw_hwids.items(),
-        key=lambda item: str(
-            (item[1].get("last_seen") if isinstance(item[1], dict) else item[1]) or ""
-        ),
+        key=lambda item: white_internet_repo.parse_hwid_last_seen_dt(item[1]),
         reverse=True,
     ):
         if isinstance(meta_or_ts, dict):
-            raw_ts = meta_or_ts.get("last_seen")
             model = meta_or_ts.get("model")
             os_name = meta_or_ts.get("os")
             client = meta_or_ts.get("client") or parse_client_from_user_agent(meta_or_ts.get("ua"))
@@ -538,41 +535,27 @@ async def _get_white_internet_card_info(
             else:
                 hwid_display = f"📱 {hwid[:8]}…"
         else:
-            raw_ts = meta_or_ts
             hwid_display = f"📱 {hwid[:8]}…"
 
-        if isinstance(raw_ts, str):
-            try:
-                from datetime import datetime, timezone
-                dt = datetime.fromisoformat(raw_ts)
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
-                last_conn = format_datetime(dt)
-                is_active = dt >= cutoff_dt
-            except Exception:
-                last_conn = raw_ts
-                is_active = raw_ts >= cutoff_dt.isoformat()
+        dt = white_internet_repo.parse_hwid_last_seen_dt(meta_or_ts)
+        if dt > datetime.min.replace(tzinfo=timezone.utc):
+            last_conn = format_datetime(dt)
+            is_active = dt >= cutoff_dt
             status_label = "активно" if is_active else "неактивно"
             extra_lines.append(f"  • <code>{safe(hwid_display)}</code> — активность: <i>{last_conn}</i> ({status_label})")
         else:
             extra_lines.append(f"  • <code>{safe(hwid_display)}</code>")
 
-    last_seen_ts = max(
-        (
-            white_internet_repo.extract_hwid_last_seen(ts)
-            for ts in raw_hwids.values()
-            if white_internet_repo.extract_hwid_last_seen(ts)
-        ),
+    active_dts = [
+        white_internet_repo.parse_hwid_last_seen_dt(ts)
+        for ts in raw_hwids.values()
+    ]
+    max_dt = max(
+        (dt for dt in active_dts if dt > datetime.min.replace(tzinfo=timezone.utc)),
         default=None,
     )
-    if last_seen_ts:
-        try:
-            from datetime import datetime
-            dt = datetime.fromisoformat(last_seen_ts)
-            last_seen_str = format_datetime(dt)
-        except Exception:
-            last_seen_str = last_seen_ts
-        extra_lines.append(texts.ADMIN_USER_CARD_WL_LAST_SEEN.format(last_seen=last_seen_str))
+    if max_dt:
+        extra_lines.append(texts.ADMIN_USER_CARD_WL_LAST_SEEN.format(last_seen=format_datetime(max_dt)))
     else:
         extra_lines.append(texts.ADMIN_USER_CARD_WL_LAST_SEEN.format(last_seen=texts.PLACEHOLDER_DASH))
     prov_status = getattr(sub, "provisioning_status", None)

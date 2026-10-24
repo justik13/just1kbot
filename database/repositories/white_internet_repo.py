@@ -94,10 +94,35 @@ def extract_hwid_last_seen(val: Any) -> str | None:
     """Extract ISO timestamp string from HWID value (either dict or ISO string)."""
     if isinstance(val, dict):
         raw = val.get("last_seen")
-        return raw if isinstance(raw, str) else None
+        if isinstance(raw, str):
+            return raw
+        if isinstance(raw, datetime):
+            return raw.isoformat()
+        return None
     if isinstance(val, str):
         return val
+    if isinstance(val, datetime):
+        return val.isoformat()
     return None
+
+
+def parse_hwid_last_seen_dt(val: Any) -> datetime:
+    """Safely parse last_seen from HWID value into an aware UTC datetime for sorting and filtering."""
+    if isinstance(val, dict):
+        raw = val.get("last_seen")
+    else:
+        raw = val
+    if isinstance(raw, datetime):
+        return raw if raw.tzinfo is not None else raw.replace(tzinfo=timezone.utc)
+    if isinstance(raw, (int, float)):
+        return datetime.fromtimestamp(raw, tz=timezone.utc)
+    if isinstance(raw, str):
+        try:
+            dt = datetime.fromisoformat(raw)
+            return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            pass
+    return datetime.min.replace(tzinfo=timezone.utc)
 
 
 def count_active_hwids(
@@ -112,22 +137,7 @@ def count_active_hwids(
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
     cutoff = now - timedelta(hours=ttl_hours)
-    cutoff_iso = cutoff.isoformat()
-    count = 0
-    for val in active_hwids.values():
-        ts_str = extract_hwid_last_seen(val)
-        if not ts_str:
-            continue
-        try:
-            dt = datetime.fromisoformat(ts_str)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            if dt >= cutoff:
-                count += 1
-        except Exception:
-            if ts_str >= cutoff_iso:
-                count += 1
-    return count
+    return sum(1 for val in active_hwids.values() if parse_hwid_last_seen_dt(val) >= cutoff)
 
 
 async def get_subscription_by_user_id(
@@ -727,23 +737,12 @@ async def register_hwid_atomic(
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
     cutoff = now - timedelta(hours=ttl_hours)
-    cutoff_iso = cutoff.isoformat()
 
     # Filter out stale HWIDs (supports both ISO string and enriched dict format)
-    active_hwids: dict[str, Any] = {}
-    for h, val in current_hwids.items():
-        ts_str = extract_hwid_last_seen(val)
-        if not ts_str:
-            continue
-        try:
-            dt = datetime.fromisoformat(ts_str)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            if dt >= cutoff:
-                active_hwids[h] = val
-        except Exception:
-            if ts_str >= cutoff_iso:
-                active_hwids[h] = val
+    active_hwids: dict[str, Any] = {
+        h: val for h, val in current_hwids.items()
+        if parse_hwid_last_seen_dt(val) >= cutoff
+    }
 
     clean_hwid = str(hwid).strip()[:128]
 
@@ -754,7 +753,7 @@ async def register_hwid_atomic(
     if len(active_hwids) > effective_limit:
         sorted_hwids = sorted(
             active_hwids.items(),
-            key=lambda item: extract_hwid_last_seen(item[1]) or "",
+            key=lambda item: parse_hwid_last_seen_dt(item[1]),
             reverse=True,
         )
         active_hwids = dict(sorted_hwids[:effective_limit])
@@ -1021,7 +1020,7 @@ async def set_device_limit_atomic(
     if len(current_hwids) > limit:
         sorted_hwids = sorted(
             current_hwids.items(),
-            key=lambda item: extract_hwid_last_seen(item[1]) or "",
+            key=lambda item: parse_hwid_last_seen_dt(item[1]),
             reverse=True,
         )
         sub.active_hwids = dict(sorted_hwids[:limit])

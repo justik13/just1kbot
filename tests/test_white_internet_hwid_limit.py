@@ -501,3 +501,81 @@ class TestWhiteInternetWebHwidEnforcement(AioHTTPTestCase):
                                 "ua": "INCY/3.7.0",
                             },
                         )
+
+
+class TestWhiteInternetHwidBackwardCompatibility(unittest.IsolatedAsyncioTestCase):
+    def test_count_active_hwids_with_mixed_str_and_dict_and_timezones(self):
+        from database.repositories.white_internet_repo import (
+            count_active_hwids,
+            extract_hwid_last_seen,
+            parse_hwid_last_seen_dt,
+        )
+
+        now = datetime(2026, 10, 24, 12, 0, tzinfo=timezone.utc)
+        active_hwids = {
+            "dev_str_active": (now - timedelta(hours=1)).isoformat(),
+            "dev_str_stale": (now - timedelta(hours=50)).isoformat(),
+            "dev_dict_active": {
+                "last_seen": (now - timedelta(hours=2)).isoformat(),
+                "client": "INCY 3.7.0",
+                "model": "iPhone 17 Pro",
+            },
+            "dev_dict_stale": {
+                "last_seen": (now - timedelta(hours=60)).isoformat(),
+                "client": "Happ 3.6.5",
+            },
+            "dev_tz_offset_active": (now - timedelta(hours=3)).astimezone(timezone(timedelta(hours=3))).isoformat(),
+        }
+
+        count = count_active_hwids(active_hwids, now=now, ttl_hours=48)
+        self.assertEqual(count, 3)
+
+        self.assertEqual(
+            extract_hwid_last_seen("2026-10-24T12:00:00+00:00"),
+            "2026-10-24T12:00:00+00:00",
+        )
+        self.assertEqual(
+            extract_hwid_last_seen({"last_seen": "2026-10-24T12:00:00+00:00"}),
+            "2026-10-24T12:00:00+00:00",
+        )
+        self.assertIsNone(extract_hwid_last_seen({}))
+        self.assertIsNone(extract_hwid_last_seen(None))
+
+        # Test aware datetime parsing and comparison across timezone offsets
+        dt_utc = parse_hwid_last_seen_dt("2026-10-24T13:00:00+00:00")
+        dt_msk = parse_hwid_last_seen_dt("2026-10-24T15:00:00+03:00")  # 12:00:00 UTC
+        self.assertGreater(dt_utc, dt_msk)
+
+    async def test_set_device_limit_atomic_lru_prunes_correctly_with_mixed_formats(self):
+        from database.repositories.white_internet_repo import set_device_limit_atomic, update_device_limit_atomic
+
+        # update_device_limit_atomic must be an alias for set_device_limit_atomic
+        self.assertIs(update_device_limit_atomic, set_device_limit_atomic)
+
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 99
+        sub.device_limit = 3
+        sub.extra_traffic_bytes = 0
+        sub.is_trial = False
+        sub.active_hwids = {
+            "hwid_oldest": "2026-10-24T10:00:00+00:00",
+            "hwid_middle": {
+                "last_seen": "2026-10-24T11:00:00+00:00",
+                "client": "Happ 3.6.5",
+            },
+            "hwid_newest": {
+                "last_seen": "2026-10-24T12:00:00+00:00",
+                "client": "INCY 3.7.0",
+            },
+        }
+
+        mock_session = AsyncMock()
+        mock_session.get.return_value = sub
+
+        res = await set_device_limit_atomic(mock_session, 99, limit=2)
+        self.assertEqual(res.device_limit, 2)
+        # Should keep newest 2 and prune oldest
+        self.assertIn("hwid_newest", res.active_hwids)
+        self.assertIn("hwid_middle", res.active_hwids)
+        self.assertNotIn("hwid_oldest", res.active_hwids)
+
