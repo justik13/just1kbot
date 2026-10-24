@@ -1256,7 +1256,12 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             _, kwargs = mock_register.call_args
             self.assertEqual(
                 kwargs.get("device_info"),
-                {"os": "Android 14", "model": "Pixel 8 Pro", "ua": "IncyClient/2.1.0"},
+                {
+                    "os": "Android 14",
+                    "model": "Pixel 8 Pro",
+                    "ua": "IncyClient/2.1.0",
+                    "client": "INCY 2.1.0",
+                },
             )
 
     async def test_handle_vless_feed_generates_links_after_hwid_registration(self):

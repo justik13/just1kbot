@@ -19,6 +19,7 @@ from database.repositories import tariffs_repo, users_repo, vless_subscription_r
 from database.repositories.system_settings_repo import get_system_setting
 from services.subscription import SubscriptionService
 from services.vless_subscription_service import VlessSubscriptionService
+from utils.client_parser import parse_vpn_client
 from utils.datetime_helpers import now_utc
 from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
 
@@ -97,6 +98,11 @@ def _extract_device_metadata(request: web.Request) -> dict[str, str]:
         meta["model"] = clean_model
     if clean_ua:
         meta["ua"] = clean_ua
+
+    client = parse_vpn_client(ua)
+    if client:
+        meta["client"] = client[:64]
+
     return meta
 
 

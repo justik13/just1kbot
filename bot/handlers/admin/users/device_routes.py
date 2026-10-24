@@ -20,6 +20,7 @@ from utils.callbacks import (
     parse_callback_int,
     parse_callback_parts,
 )
+from utils.client_parser import parse_vpn_client
 from utils.datetime_helpers import now_utc
 from bot.formatters import format_admin_breadcrumbs
 from utils.formatters import format_datetime, format_traffic
@@ -157,10 +158,23 @@ async def admin_user_devices(
         ):
             if isinstance(meta_or_ts, dict):
                 raw_ts = meta_or_ts.get("last_seen")
+                client = meta_or_ts.get("client")
+                if not client and meta_or_ts.get("ua"):
+                    client = parse_vpn_client(meta_or_ts.get("ua"))
                 model = meta_or_ts.get("model")
                 os_name = meta_or_ts.get("os")
-                if model or os_name:
-                    info_parts = [p for p in (model, os_name) if p]
+
+                info_parts = []
+                if client:
+                    clean_client = str(client).strip().strip("[]")
+                    if clean_client:
+                        info_parts.append(f"[{clean_client}]")
+                if model:
+                    info_parts.append(str(model).strip())
+                if os_name:
+                    info_parts.append(str(os_name).strip())
+
+                if info_parts:
                     hwid_display = f"📱 {' '.join(info_parts)} — {hwid[:8]}…"
                 else:
                     hwid_display = hwid
