@@ -755,11 +755,12 @@ async def register_hwid_atomic(
     if clean_hwid in active_hwids:
         # Existing device - refresh activity timestamp and enrich metadata (throttled to 15m)
         prev = active_hwids[clean_hwid]
+        has_pruned_hwids = len(active_hwids) != len(current_hwids)
         if isinstance(prev, dict):
             should_update = True
             prev_dt = parse_hwid_last_seen_dt(prev)
             if prev_dt != datetime.min.replace(tzinfo=timezone.utc):
-                if (now - prev_dt).total_seconds() < 900:
+                if 0 <= (now - prev_dt).total_seconds() < 900 and not has_pruned_hwids:
                     should_update = False
             if device_info and isinstance(device_info, dict):
                 for k, v in device_info.items():
@@ -780,22 +781,26 @@ async def register_hwid_atomic(
             active_hwids[clean_hwid] = entry
         else:
             prev_dt = parse_hwid_last_seen_dt(prev)
-            if prev_dt != datetime.min.replace(tzinfo=timezone.utc) and (now - prev_dt).total_seconds() < 900:
+            if (
+                not has_pruned_hwids
+                and prev_dt != datetime.min.replace(tzinfo=timezone.utc)
+                and 0 <= (now - prev_dt).total_seconds() < 900
+            ):
                 return True, len(active_hwids), effective_limit
             active_hwids[clean_hwid] = now.isoformat()
-        sub.active_hwids = active_hwids
+        sub.active_hwids = dict(active_hwids)
         await session.flush()
         return True, len(active_hwids), effective_limit
 
     # New device - check limit
     if len(active_hwids) >= effective_limit:
-        sub.active_hwids = active_hwids
+        sub.active_hwids = dict(active_hwids)
         await session.flush()
         return False, len(active_hwids), effective_limit
 
     # Within limit - register
     active_hwids[clean_hwid] = entry if device_info else now.isoformat()
-    sub.active_hwids = active_hwids
+    sub.active_hwids = dict(active_hwids)
     await session.flush()
     return True, len(active_hwids), effective_limit
 

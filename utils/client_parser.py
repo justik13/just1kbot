@@ -38,29 +38,24 @@ def extract_device_metadata(headers: Mapping[str, Any] | Any | None = None) -> d
     if not hasattr(headers, "get"):
         return {}
 
-    raw_os = (
-        headers.get("X-Device-Os")
-        or headers.get("X-Device-OS")
-        or headers.get("X-OS")
-        or headers.get("x-device-os")
-        or headers.get("x-os")
-        or ""
-    )
-    raw_ver = (
-        headers.get("X-Ver-Os")
-        or headers.get("X-Ver-OS")
-        or headers.get("x-ver-os")
-        or ""
-    )
-    raw_model = (
-        headers.get("X-Device-Model")
-        or headers.get("X-Device-MODEL")
-        or headers.get("X-Model")
-        or headers.get("x-device-model")
-        or headers.get("x-model")
-        or ""
-    )
-    ua = headers.get("User-Agent") or headers.get("user-agent") or ""
+    def _get_first(*candidates: str) -> str:
+        for k in candidates:
+            val = headers.get(k)
+            if val is not None and str(val).strip():
+                return str(val)
+        candidate_lowers = {k.lower() for k in candidates}
+        try:
+            for k, val in headers.items():
+                if str(k).lower() in candidate_lowers and val is not None and str(val).strip():
+                    return str(val)
+        except Exception:
+            pass
+        return ""
+
+    raw_os = _get_first("X-Device-Os", "X-Device-OS", "X-OS", "x-device-os", "x-os")
+    raw_ver = _get_first("X-Ver-Os", "X-Ver-OS", "x-ver-os")
+    raw_model = _get_first("X-Device-Model", "X-Device-MODEL", "X-Model", "x-device-model", "x-model")
+    ua = _get_first("User-Agent", "user-agent")
 
     clean_os = re.sub(r"[^\w\s\.\-]", "", str(raw_os)).strip()[:32]
     clean_ver = re.sub(r"[^\w\s\.\-]", "", str(raw_ver)).strip()[:16]

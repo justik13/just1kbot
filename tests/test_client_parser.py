@@ -132,6 +132,27 @@ class TestClientParser(unittest.TestCase):
         self.assertEqual(extract_device_metadata(None), {})
         self.assertEqual(extract_device_metadata("not-a-dict"), {})
 
+    def test_extract_device_metadata_uppercase_and_whitespace_fallback(self):
+        # All-caps headers in a standard Python dict
+        headers_upper = {
+            "USER-AGENT": "INCY/3.8.0 (iPhone; iOS 18.0)",
+            "X-DEVICE-OS": "iOS",
+            "X-VER-OS": "18.0",
+            "X-DEVICE-MODEL": "iPhone 16 Pro",
+        }
+        meta_upper = extract_device_metadata(headers_upper)
+        self.assertEqual(meta_upper.get("client"), "INCY 3.8.0")
+        self.assertEqual(meta_upper.get("os"), "iOS 18.0")
+        self.assertEqual(meta_upper.get("model"), "iPhone 16 Pro")
+
+        # Whitespace header does not shadow valid fallback header
+        headers_fallback = {
+            "X-Device-Model": "   ",
+            "x-model": "Pixel 8 Pro",
+        }
+        meta_fallback = extract_device_metadata(headers_fallback)
+        self.assertEqual(meta_fallback.get("model"), "Pixel 8 Pro")
+
 
 if __name__ == "__main__":
     unittest.main()
