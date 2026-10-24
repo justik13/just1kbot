@@ -188,7 +188,7 @@ async def admin_user_devices(
             vless_lines.append(
                 texts.ADMIN_VLESS_DEVICE_ITEM.format(
                     hwid=safe(hwid_display),
-                    last_conn=last_conn,
+                    last_conn=safe(last_conn),
                     status=status,
                 )
             )

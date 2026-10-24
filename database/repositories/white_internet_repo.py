@@ -90,21 +90,6 @@ async def get_subscription_by_token(
     ).scalar_one_or_none()
 
 
-def extract_hwid_last_seen(val: Any) -> str | None:
-    """Extract ISO timestamp string from HWID value (either dict or ISO string)."""
-    if isinstance(val, dict):
-        raw = val.get("last_seen")
-        if isinstance(raw, str):
-            return raw
-        if isinstance(raw, datetime):
-            return raw.isoformat()
-        return None
-    if isinstance(val, str):
-        return val
-    if isinstance(val, datetime):
-        return val.isoformat()
-    return None
-
 
 def parse_hwid_last_seen_dt(val: Any) -> datetime:
     """Safely parse last_seen from HWID value into an aware UTC datetime for sorting and filtering."""
@@ -1029,9 +1014,6 @@ async def set_device_limit_atomic(
         sub.active_hwids = dict(sorted_hwids[:limit])
     await session.flush()
     return sub
-
-
-update_device_limit_atomic = set_device_limit_atomic
 
 
 async def extend_subscription_atomic(

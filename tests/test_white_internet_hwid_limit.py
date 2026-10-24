@@ -507,7 +507,6 @@ class TestWhiteInternetHwidBackwardCompatibility(unittest.IsolatedAsyncioTestCas
     def test_count_active_hwids_with_mixed_str_and_dict_and_timezones(self):
         from database.repositories.white_internet_repo import (
             count_active_hwids,
-            extract_hwid_last_seen,
             parse_hwid_last_seen_dt,
         )
 
@@ -530,17 +529,6 @@ class TestWhiteInternetHwidBackwardCompatibility(unittest.IsolatedAsyncioTestCas
         count = count_active_hwids(active_hwids, now=now, ttl_hours=48)
         self.assertEqual(count, 3)
 
-        self.assertEqual(
-            extract_hwid_last_seen("2026-10-24T12:00:00+00:00"),
-            "2026-10-24T12:00:00+00:00",
-        )
-        self.assertEqual(
-            extract_hwid_last_seen({"last_seen": "2026-10-24T12:00:00+00:00"}),
-            "2026-10-24T12:00:00+00:00",
-        )
-        self.assertIsNone(extract_hwid_last_seen({}))
-        self.assertIsNone(extract_hwid_last_seen(None))
-
         # Test aware datetime parsing and comparison across timezone offsets
         dt_utc = parse_hwid_last_seen_dt("2026-10-24T13:00:00+00:00")
         dt_msk = parse_hwid_last_seen_dt("2026-10-24T15:00:00+03:00")  # 12:00:00 UTC
@@ -553,10 +541,7 @@ class TestWhiteInternetHwidBackwardCompatibility(unittest.IsolatedAsyncioTestCas
 
 
     async def test_set_device_limit_atomic_lru_prunes_correctly_with_mixed_formats(self):
-        from database.repositories.white_internet_repo import set_device_limit_atomic, update_device_limit_atomic
-
-        # update_device_limit_atomic must be an alias for set_device_limit_atomic
-        self.assertIs(update_device_limit_atomic, set_device_limit_atomic)
+        from database.repositories.white_internet_repo import set_device_limit_atomic
 
         sub = MagicMock(spec=WhiteInternetSubscription)
         sub.id = 99

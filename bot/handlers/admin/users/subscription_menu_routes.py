@@ -1422,6 +1422,10 @@ async def admin_wi_devices_view(
         ):
             raw_ts = val.get("last_seen") if isinstance(val, dict) else val
             client = val.get("client") if isinstance(val, dict) else None
+            if not client and isinstance(val, dict) and val.get("ua"):
+                from utils.client_parser import parse_client_from_user_agent
+
+                client = parse_client_from_user_agent(val.get("ua"))
             model = val.get("model") if isinstance(val, dict) else None
             os_name = val.get("os") if isinstance(val, dict) else None
 
