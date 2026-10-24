@@ -287,7 +287,7 @@ async def handle_order_pay_card(
         '</tg-button-row>\n'
         '<tg-button-row align="center">\n'
         f'  <tg-button type="callback_data" style="primary" data="check_order:{order.id}">{texts.BTN_PAYMENT_CHECK}</tg-button>\n'
-        f'  <tg-button type="callback_data" data="cancel_order:{order.id}">{texts.BTN_PAYMENT_CANCEL_ORDER}</tg-button>\n'
+        f'  <tg-button type="callback_data" data="cancel_order:{order.id}">{texts.BTN_PAYMENT_CANCEL}</tg-button>\n'
         '</tg-button-row>'
         + support_button
     )

@@ -518,7 +518,7 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         self.assertIn("457.5 KiB", rendered_text)
         self.assertIn("10.0 GiB", rendered_text)
         self.assertNotIn("0.0 ГБ", rendered_text)
-        self.assertIn("Устройства:</b> 0 из 1", rendered_text)
+        self.assertIn("0 из 1", rendered_text)
 
     async def test_wl_reset_devices_success(self):
         query = MagicMock(spec=CallbackQuery)

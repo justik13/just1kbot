@@ -86,19 +86,15 @@ def make_rich_nav_row(
     back_callback: str | None = None,
     *,
     include_menu: bool = True,
-    back_label: str | None = None,
-    menu_label: str | None = None,
+    back_label: str = "«",
+    menu_label: str = "☰",
 ) -> str:
     """Build standardized navigation bottom row."""
-    from bot import texts
-
-    actual_back = back_label or texts.BTN_BACK
-    actual_menu = menu_label or texts.BTN_MAIN_MENU_NAV
     btns = []
     if back_callback:
-        btns.append(make_rich_button(actual_back, callback_data=back_callback))
+        btns.append(make_rich_button(back_label, callback_data=back_callback))
     if include_menu:
-        btns.append(make_rich_button(actual_menu, callback_data="back_to_main_menu"))
+        btns.append(make_rich_button(menu_label, callback_data="back_to_main_menu"))
     return make_rich_button_row(*btns)
 
 # ==============================================================================
