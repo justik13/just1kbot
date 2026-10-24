@@ -11,10 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from bot.formatters import get_tariff_display_name
-from bot.keyboards import (
-    get_order_invoice_keyboard,
-    get_payment_success_keyboard,
-)
 from utils.support import get_support_url
 from database.models import Order, User
 from database.repositories.account_ledger_repo import get_account_balance
@@ -44,6 +40,18 @@ def _uuid_from_callback(data: str) -> uuid.UUID | None:
         return uuid.UUID(data.split(":", 1)[1])
     except (ValueError, IndexError, AttributeError):
         return None
+
+
+def _build_purchase_success_actions() -> str:
+    return (
+        '\n<tg-button-row align="center">\n'
+        f'  <tg-button type="callback_data" style="success" data="menu_connections">{texts.BTN_PAYMENT_CONNECT_DEVICE}</tg-button>\n'
+        f'  <tg-button type="callback_data" style="primary" data="menu_subscription">{texts.BTN_PAYMENT_TO_SUBSCRIPTION}</tg-button>\n'
+        '</tg-button-row>\n'
+        '<tg-button-row align="center">\n'
+        f'  <tg-button type="callback_data" data="back_to_main_menu">{texts.BTN_MAIN_MENU_NAV}</tg-button>\n'
+        '</tg-button-row>'
+    )
 
 
 @router.callback_query(F.data.startswith("order_pay_wallet:"))
@@ -110,15 +118,6 @@ async def handle_order_pay_wallet(
     is_change = bool(order.metadata_ and order.metadata_.get("is_tariff_change"))
     operation = texts.PAYMENT_OP_TITLE_CHANGE if is_change else texts.PURCHASE_COMPLETED
 
-    success_actions = (
-        '\n<tg-button-row align="center">\n'
-        f'  <tg-button type="callback_data" style="success" data="menu_connections">{texts.BTN_PAYMENT_CONNECT_DEVICE}</tg-button>\n'
-        f'  <tg-button type="callback_data" style="primary" data="menu_subscription">{texts.BTN_PAYMENT_TO_SUBSCRIPTION}</tg-button>\n'
-        '</tg-button-row>\n'
-        '<tg-button-row align="center">\n'
-        f'  <tg-button type="callback_data" data="back_to_main_menu">{texts.BTN_MAIN_MENU_NAV}</tg-button>\n'
-        '</tg-button-row>'
-    )
     await render_hub(
         callback.bot,
         callback.message.chat.id,
@@ -129,7 +128,7 @@ async def handle_order_pay_wallet(
             charged=int(order.amount_rub),
             real_balance=int(balance.real_available),
             bonus_balance=int(balance.bonus_available),
-        ) + success_actions,
+        ) + _build_purchase_success_actions(),
         reply_markup=None,
         message_effect_id=EFFECT_CONFETTI,
         force_new=True,
@@ -227,7 +226,7 @@ async def handle_order_pay_card(
                     charged=int(order.amount_rub),
                     real_balance=int(balance.real_available),
                     bonus_balance=int(balance.bonus_available),
-                ) + success_actions,
+                ) + _build_purchase_success_actions(),
                 reply_markup=None,
                 message_effect_id=EFFECT_CONFETTI,
                 force_new=True,

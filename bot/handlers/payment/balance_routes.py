@@ -16,8 +16,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.keyboards import (
     get_back_button,
-    get_balance_history_keyboard,
-    get_balance_keyboard,
     get_dispute_blocked_keyboard,
     get_order_invoice_keyboard,
 )

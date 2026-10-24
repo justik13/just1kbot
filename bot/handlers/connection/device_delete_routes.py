@@ -7,7 +7,6 @@ from cachetools import TTLCache
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.keyboards import get_device_delete_confirm_keyboard
 from database.models import User
 from database.repositories.profiles_repo import get_profile_by_id
 from database.repositories.users_repo import get_user_by_telegram_id

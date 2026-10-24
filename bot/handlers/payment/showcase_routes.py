@@ -12,10 +12,8 @@ from bot.keyboards import (
     get_back_button,
     get_change_tariff_keyboard,
     get_dispute_blocked_keyboard,
-    get_order_checkout_keyboard,
     get_renew_keyboard,
     get_same_tariff_keyboard,
-    get_tariff_duration_keyboard,
 )
 from utils.support import get_support_url
 from config.constants import REFERRAL_WELCOME_DISCOUNT_PERCENT

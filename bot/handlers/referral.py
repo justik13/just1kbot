@@ -7,12 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from bot.formatters import format_plural, pluralize
-from bot.keyboards import (
-    get_history_keyboard,
-    get_referral_keyboard,
-    get_referral_leaderboard_keyboard,
-    get_referrals_list_keyboard,
-)
 from database.models import User
 from database.repositories.payments_repo import get_user_payments
 from database.repositories.users_repo import (

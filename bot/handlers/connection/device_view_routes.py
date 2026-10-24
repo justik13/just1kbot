@@ -24,7 +24,6 @@ from bot import texts
 from bot.keyboards import (
     get_alt_connection_keyboard,
     get_back_button,
-    get_device_keyboard,
 )
 from database.models import User
 from database.repositories.profiles_repo import (
@@ -44,7 +43,6 @@ from utils.telegram import (
     get_hub_ids,
     make_rich_button,
     make_rich_button_row,
-    make_rich_nav_row,
     render_hub,
     safe,
 )

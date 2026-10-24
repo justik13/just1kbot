@@ -8,12 +8,9 @@ import logging
 import os
 
 from aiogram import F, Router
-from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import (
     CallbackQuery,
-    CopyTextButton,
     InlineKeyboardMarkup,
-    InputRichMessage,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,7 +45,6 @@ from services.white_internet_service import (
 )
 from utils.admin import is_admin
 from utils.telegram import (
-    has_rich_tags,
     make_rich_button,
     make_rich_button_row,
     make_rich_nav_row,

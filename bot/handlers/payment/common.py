@@ -1,11 +1,10 @@
 import logging
 
 from aiogram.types import CallbackQuery
-from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.keyboards import get_back_button, get_tariff_showcase_keyboard
+from bot.keyboards import get_back_button
 from database.repositories.profiles_repo import (
     get_user_profiles,
     get_user_profiles_count,
