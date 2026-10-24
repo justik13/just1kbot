@@ -242,9 +242,15 @@ class E2EUserFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
         # 4. Existing user sends /start again -> gets Hub directly without welcome
         update = self._create_message_update("/start")
         await self.dp.feed_update(bot=self.bot, update=update)
-        req = next(r for r in reversed(self.session.requests) if r.__class__.__name__ == "SendMessage")
-        self.assertIn("Главное меню", req.text)
-        self.assertNotIn("Добро пожаловать", req.text)
+        req = next(
+            r
+            for r in reversed(self.session.requests)
+            if r.__class__.__name__ in ("SendMessage", "SendRichMessage")
+            and getattr(r, "text", None) != "🧹"
+        )
+        content = req.text or getattr(getattr(req, "rich_message", None), "html", "")
+        self.assertIn("Главное меню", content)
+        self.assertNotIn("Добро пожаловать", content)
 
 
 if __name__ == "__main__":
