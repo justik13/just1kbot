@@ -6,14 +6,13 @@ from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     CallbackQuery,
-    InlineKeyboardMarkup,
     Message,
     ReplyKeyboardRemove,
 )
-from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
+from bot.keyboards import make_rich_nav_row
 from bot.middlewares.user_context import invalidate_user_cache
 from config.settings import get_settings
 from database.models import User
@@ -113,7 +112,7 @@ async def _ensure_bot_unblocked(
     )
 
 
-async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[str, InlineKeyboardMarkup | None]:
+async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[str, None]:
     from database.repositories.profiles_repo import (
         PROFILE_QUOTA_EXCLUDED_STATUSES,
         get_user_profiles,
@@ -336,14 +335,13 @@ async def cmd_start(
 
         async def _send_onboarding_push() -> None:
             try:
-                from bot.keyboards.notifications import get_referral_onboarding_keyboard
                 from utils.telegram import EFFECT_LIKE, safe_send_message
 
                 await safe_send_message(
                     bot_inst,
                     ref_tg_id,
                     texts.REFERRAL_ONBOARDING_NOTIFICATION,
-                    reply_markup=get_referral_onboarding_keyboard(),
+                    reply_markup=None,
                     message_effect_id=EFFECT_LIKE,
                 )
             except Exception as e:
@@ -356,14 +354,12 @@ async def cmd_start(
         queue_post_commit_task(session, _send_onboarding_push)
 
     if is_new_user:
-        builder = InlineKeyboardBuilder()
-        builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
-
+        nav_row = make_rich_nav_row(include_menu=True)
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.WELCOME_TEXT,
-            builder.as_markup(),
+            f"{texts.WELCOME_TEXT}\n{nav_row}",
+            reply_markup=None,
             force_new=True,
             session=session,
         )

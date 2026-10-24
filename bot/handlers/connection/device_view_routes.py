@@ -17,15 +17,9 @@ from aiogram.exceptions import (
 )
 from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery
-from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.keyboards import (
-    get_alt_connection_keyboard,
-    get_back_button,
-    get_device_keyboard,
-)
 from database.models import User
 from database.repositories.profiles_repo import (
     ALLOWED_DELETE_STATES,
@@ -42,6 +36,8 @@ from utils.telegram import (
     _get_hub_render_lock,
     _hub_cache,
     get_hub_ids,
+    make_rich_button,
+    make_rich_button_row,
     render_hub,
     safe,
 )
@@ -222,29 +218,88 @@ async def render_device_screen(
         if len(rendered) + len(guide_block) <= 4000:
             rendered += guide_block
 
-        keyboard = get_device_keyboard(
-            profile.id,
-            config_ready=config_ready,
-            show_delete=show_delete,
-            copy_key=display_key,
+        action_rows = []
+        if display_key and 1 <= len(display_key) <= 256:
+            action_rows.append(
+                make_rich_button_row(
+                    make_rich_button(texts.BTN_COPY_KEY, copy_text=display_key)
+                )
+            )
+
+        action_rows.append(
+            make_rich_button_row(
+                make_rich_button(
+                    texts.BTN_HELP_INSTRUCTIONS,
+                    callback_data=f"support_help:device_{profile.id}",
+                    style="primary",
+                )
+            )
         )
+
+        if config_ready:
+            action_rows.append(
+                make_rich_button_row(
+                    make_rich_button(
+                        texts.CONNECTION_DEVICES_DEVICE_ALT_CONNECTION,
+                        callback_data=f"alt_connection:{profile.id}",
+                    ),
+                    make_rich_button(
+                        texts.BTN_CHANGE_SERVER,
+                        callback_data=f"migrate_device:{profile.id}",
+                    ),
+                )
+            )
+
+        if show_delete:
+            action_rows.append(
+                make_rich_button_row(
+                    make_rich_button(
+                        texts.BTN_DELETE_DEVICE,
+                        callback_data=f"request_delete_device:{profile.id}",
+                        style="danger",
+                    )
+                )
+            )
+
+        action_rows.append(
+            make_rich_button_row(
+                make_rich_button(
+                    texts.BTN_BACK_TO_DEVICES,
+                    callback_data="back_to_amnezia_devices",
+                ),
+                make_rich_button(
+                    texts.BTN_MAIN_MENU_NAV,
+                    callback_data="back_to_main_menu",
+                ),
+            )
+        )
+        rendered += "\n" + "\n".join(action_rows)
     else:
         rendered += texts.DEVICE_ACCESS_INACTIVE_NOTICE
-
-        builder = InlineKeyboardBuilder()
-        builder.button(text=texts.BTN_BUY_ACCESS, callback_data="menu_buy", style="success")
+        action_rows = [
+            make_rich_button_row(
+                make_rich_button(texts.BTN_BUY_ACCESS, callback_data="menu_buy", style="success")
+            )
+        ]
         if show_delete:
-            builder.button(text=texts.BTN_DELETE_DEVICE, callback_data=f"request_delete_device:{profile.id}", style="danger")
-        builder.button(text=texts.BTN_BACK_TO_DEVICES, callback_data="back_to_amnezia_devices")
-        builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
-        builder.adjust(1)
-        keyboard = builder.as_markup()
+            action_rows.append(
+                make_rich_button_row(
+                    make_rich_button(texts.BTN_DELETE_DEVICE, callback_data=f"request_delete_device:{profile.id}", style="danger")
+                )
+            )
+        action_rows.append(
+            make_rich_button_row(
+                make_rich_button(texts.BTN_BACK_TO_DEVICES, callback_data="back_to_amnezia_devices"),
+                make_rich_button(texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu"),
+            )
+        )
+        rendered += "\n" + "\n".join(action_rows)
 
     await render_hub(
         bot,
         chat_id,
         rendered,
-        keyboard,
+        None,
         message_effect_id=message_effect_id,
         force_new=bool(message_effect_id),
     )
@@ -314,21 +369,22 @@ async def device_help(
         texts.CONNECTION_CONFIG_DEVICE_VIEW_SELECT_NUZHNUYU_TEMU_BELOW
     )
 
-    builder = InlineKeyboardBuilder()
     suffix = f":device_{profile_id}"
-    builder.button(text=texts.BTN_DOWNLOAD_AMNEZIA, callback_data=f"help_download{suffix}")
-    builder.button(text=texts.BTN_INSTRUCTION_IOS, callback_data=f"help_ios{suffix}")
-    builder.button(text=texts.BTN_INSTRUCTION_WINDOWS, callback_data=f"help_windows{suffix}")
-    builder.button(text=texts.BTN_SPLIT_TUNNELING, callback_data=f"help_split{suffix}")
-    builder.button(text=texts.BTN_AMNEZIA_DOCS, url=_AMNEZIA_DOCS)
-    builder.button(text=texts.CONNECTION_DEVICES_DEVICE_BACK_TO_DEVICE, callback_data=f"manage_device:{profile_id}")
-    builder.adjust(1)
+    help_rows = [
+        make_rich_button_row(make_rich_button(texts.BTN_DOWNLOAD_AMNEZIA, callback_data=f"help_download{suffix}", style="primary")),
+        make_rich_button_row(make_rich_button(texts.BTN_INSTRUCTION_IOS, callback_data=f"help_ios{suffix}", style="primary")),
+        make_rich_button_row(make_rich_button(texts.BTN_INSTRUCTION_WINDOWS, callback_data=f"help_windows{suffix}", style="primary")),
+        make_rich_button_row(make_rich_button(texts.BTN_SPLIT_TUNNELING, callback_data=f"help_split{suffix}", style="primary")),
+        make_rich_button_row(make_rich_button(texts.BTN_AMNEZIA_DOCS, url=_AMNEZIA_DOCS)),
+        make_rich_button_row(make_rich_button(texts.CONNECTION_DEVICES_DEVICE_BACK_TO_DEVICE, callback_data=f"manage_device:{profile_id}")),
+    ]
+    full_text = text + "\n" + "\n".join(help_rows)
 
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        text,
-        builder.as_markup(),
+        full_text,
+        None,
         trigger_message_id=callback.message.message_id,
     )
     await callback.answer(show_alert=False)
@@ -369,10 +425,13 @@ async def alt_connection(
 
     raw_config = profile.raw_config or ""
     if not can_show_config_actions(profile) or not raw_config:
+        nav = make_rich_button_row(
+            make_rich_button(texts.CONNECTION_DEVICES_DEVICE_BACK_TO_DEVICE, callback_data=f"manage_device:{profile.id}")
+        )
         await render_hub(
             callback.bot, callback.message.chat.id,
-            texts.DOWNLOAD_CONF_FALLBACK.format(device_name=safe(profile.device_name)),
-            get_back_button(f"manage_device:{profile.id}"),
+            f"{texts.DOWNLOAD_CONF_FALLBACK.format(device_name=safe(profile.device_name))}\n{nav}",
+            None,
             trigger_message_id=callback.message.message_id,
         )
         return
@@ -400,10 +459,13 @@ async def alt_connection(
             raise ValueError("Empty vpn or conf file content")
     except Exception as exc:
         logger.warning("Failed to prepare alt connection files for profile %s: %s", profile.id, exc)
+        nav = make_rich_button_row(
+            make_rich_button(texts.CONNECTION_DEVICES_DEVICE_BACK_TO_DEVICE, callback_data=f"manage_device:{profile.id}")
+        )
         await render_hub(
             callback.bot, callback.message.chat.id,
-            texts.DOWNLOAD_CONF_FALLBACK.format(device_name=safe(profile.device_name)),
-            get_back_button(f"manage_device:{profile.id}"),
+            f"{texts.DOWNLOAD_CONF_FALLBACK.format(device_name=safe(profile.device_name))}\n{nav}",
+            None,
             trigger_message_id=callback.message.message_id,
         )
         return
@@ -507,11 +569,17 @@ async def alt_connection(
                 texts.CONNECTION_CONFIG_DEVICE_VIEW_2_OTKROYTE_PRILOZHENIE_I_VYBER
             )
 
+            alt_nav_row = make_rich_button_row(
+                make_rich_button(texts.CONNECTION_DEVICES_DEVICE_BACK_TO_DEVICE, callback_data=f"manage_device:{profile.id}"),
+                make_rich_button(texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu"),
+            )
+            alt_guide_text += f"\n{alt_nav_row}"
+
             try:
                 await _append_hub_message_unlocked(
                     callback.bot, callback.message.chat.id,
                     text=alt_guide_text,
-                    reply_markup=get_alt_connection_keyboard(profile.id),
+                    reply_markup=None,
                     parse_mode="HTML",
                 )
                 guide_sent = True
@@ -572,27 +640,36 @@ async def render_vless_sub_screen(
         limit=effective_limit,
     )
 
-    builder = InlineKeyboardBuilder()
+    vless_rows = []
     if vless_active > 0:
-        builder.button(
-            text=texts.BTN_VLESS_RESET_HWID,
-            callback_data="vless_sub_reset",
+        vless_rows.append(
+            make_rich_button_row(
+                make_rich_button(
+                    texts.BTN_VLESS_RESET_HWID,
+                    callback_data="vless_sub_reset",
+                    style="danger",
+                )
+            )
         )
-    builder.button(
-        text=texts.BTN_BACK_TO_CONNECTION,
-        callback_data="back_to_connections",
+    vless_rows.append(
+        make_rich_button_row(
+            make_rich_button(
+                texts.BTN_BACK_TO_CONNECTION,
+                callback_data="back_to_connections",
+            ),
+            make_rich_button(
+                texts.BTN_MAIN_MENU_NAV,
+                callback_data="back_to_main_menu",
+            ),
+        )
     )
-    builder.button(
-        text=texts.BTN_MAIN_MENU_NAV,
-        callback_data="back_to_main_menu",
-    )
-    builder.adjust(1)
+    full_text = text + "\n" + "\n".join(vless_rows)
 
     await render_hub(
         bot,
         chat_id,
-        text,
-        builder.as_markup(),
+        full_text,
+        None,
     )
 
 

@@ -28,9 +28,6 @@ from sqlalchemy import func, or_, select
 
 from bot import texts
 from bot.formatters import get_tariff_display_name
-from bot.keyboards import get_payment_success_keyboard
-from bot.keyboards.notifications import get_referral_bonus_keyboard
-from bot.keyboards.payment import get_topup_credit_keyboard
 from config.constants import WORKER_ERROR_SLEEP_INTERVAL
 from database.connection import session_scope
 from database.models import AccountLedgerEntry, Order, User
@@ -43,7 +40,13 @@ from services.order_notifications import (
     mark_notified,
     mark_referrer_notified,
 )
-from utils.telegram import EFFECT_CONFETTI, EFFECT_FIRE, safe_send_message
+from utils.telegram import (
+    EFFECT_CONFETTI,
+    EFFECT_FIRE,
+    make_rich_button,
+    make_rich_button_row,
+    safe_send_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -152,16 +155,27 @@ async def _send_late_push(
     """
     try:
         if service_type == "topup":
-            keyboard = (
-                get_topup_credit_keyboard(fields["context"])
-                if fields["context"]
-                else None
+            order_context = fields["context"] if fields["context"] else None
+            topup_actions = []
+            if order_context and order_context.get("source") == "white_internet":
+                topup_actions.append(
+                    make_rich_button_row(
+                        make_rich_button(texts.BTN_WL_RETURN_TO_SERVICE, callback_data="white_internet", style="primary")
+                    )
+                )
+            topup_actions.append(
+                make_rich_button_row(
+                    make_rich_button(texts.BTN_PAYMENT_TO_BALANCE, callback_data="menu_balance", style="primary"),
+                    make_rich_button(texts.BTN_DISMISS, callback_data="dismiss_notification"),
+                )
             )
             text = (
                 f"{texts.TOPUP_CREDITED_NOTICE}\n\n"
                 + texts.BALANCE_BALANCE.format(
                     int_snapshot_real_available=real_available
                 )
+                + "\n"
+                + "\n".join(topup_actions)
             )
         else:
             # Same tier label as the request path (credit_notify.py):
@@ -180,12 +194,11 @@ async def _send_late_push(
                 real_balance=real_available,
                 bonus_balance=bonus_available,
             )
-            keyboard = get_payment_success_keyboard()
         sent_id = await safe_send_message(
             bot,
             telegram_id,
             text,
-            reply_markup=keyboard,
+            reply_markup=None,
             message_effect_id=EFFECT_CONFETTI,
         )
         return sent_id is not None
@@ -233,7 +246,7 @@ async def _send_referrer_push(bot: Bot, referrer: dict) -> bool:
             bot,
             referrer["telegram_id"],
             text,
-            reply_markup=get_referral_bonus_keyboard(),
+            reply_markup=None,
             message_effect_id=EFFECT_FIRE,
         )
 

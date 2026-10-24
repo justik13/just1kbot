@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -23,6 +24,14 @@ from bot.handlers.connection.device_view_routes import (
 from database.models import APIOperation, Server, User, VPNProfile
 from services.device_service import DeviceService
 from utils.vpn_parser import encode_json_to_vpn_uri
+
+
+def _extract_callback_buttons(captured: dict) -> list[str]:
+    kb = captured.get("keyboard")
+    if kb and hasattr(kb, "inline_keyboard"):
+        return [b.callback_data for row in kb.inline_keyboard for b in row if b.callback_data]
+    text = captured.get("text", "")
+    return re.findall(r'<tg-button\s+[^>]*?data="([^"]+)"', text)
 
 
 def _make_valid_vpn_uri() -> str:
@@ -159,8 +168,8 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
             # Assert device card was rendered
             self.assertTrue(mock_render_hub.called)
-            rendered_keyboard = mock_render_hub.call_args[0][3]
-            buttons = [b.callback_data for row in rendered_keyboard.inline_keyboard for b in row if b.callback_data]
+            rendered_keyboard = mock_render_hub.call_args[0][3] if len(mock_render_hub.call_args[0]) > 3 else None
+            buttons = _extract_callback_buttons({"keyboard": rendered_keyboard, "text": mock_render_hub.call_args[0][2]})
             self.assertIn("alt_connection:42", buttons)
             self.assertIn("request_delete_device:42", buttons)
 
@@ -232,8 +241,9 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         session = AsyncMock()
 
         captured = {}
-        async def mock_render_hub(_bot, _chat_id, _text, keyboard, **_kwargs):
+        async def mock_render_hub(_bot, _chat_id, _text, keyboard=None, **_kwargs):
             captured["keyboard"] = keyboard
+            captured["text"] = _text
 
         with (
             patch("bot.handlers.connection.device_view_routes.get_profile_by_id", new=AsyncMock(return_value=ready_profile)),
@@ -244,7 +254,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             await manage_device(callback, state, session, db_user)
 
             self.assertIn("keyboard", captured)
-            buttons = [b.callback_data for row in captured["keyboard"].inline_keyboard for b in row if b.callback_data]
+            buttons = _extract_callback_buttons(captured)
             self.assertIn("alt_connection:42", buttons)
             self.assertIn("request_delete_device:42", buttons)
 
@@ -274,7 +284,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         callback.answer = AsyncMock()
 
         captured = {}
-        async def mock_render_hub(_bot, _chat_id, text, keyboard, **_kwargs):
+        async def mock_render_hub(_bot, _chat_id, text, keyboard=None, **_kwargs):
             captured["text"] = text
             captured["keyboard"] = keyboard
 
@@ -287,7 +297,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             await manage_device(callback, AsyncMock(), AsyncMock(), db_user)
 
             self.assertIn("❌ <b>Не удалось создать устройство на сервере.</b>", captured["text"])
-            buttons = [b.callback_data for row in captured["keyboard"].inline_keyboard for b in row if b.callback_data]
+            buttons = _extract_callback_buttons(captured)
             self.assertNotIn("alt_connection:42", buttons)
             self.assertIn("request_delete_device:42", buttons)
 
@@ -312,7 +322,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         )
 
         captured = {}
-        async def mock_render_hub(_bot, _chat_id, text, keyboard, **_kwargs):
+        async def mock_render_hub(_bot, _chat_id, text, keyboard=None, **_kwargs):
             captured["text"] = text
             captured["keyboard"] = keyboard
 
@@ -325,7 +335,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             await render_device_screen(MagicMock(), 100, updating_profile, db_user, AsyncMock())
 
             self.assertIn("🔄 <b>Конфигурация устройства обновляется...</b>", captured["text"])
-            buttons = [b.callback_data for row in captured["keyboard"].inline_keyboard for b in row if b.callback_data]
+            buttons = _extract_callback_buttons(captured)
             self.assertIn("alt_connection:42", buttons)
             self.assertIn("request_delete_device:42", buttons)
 
@@ -350,7 +360,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         )
 
         captured = {}
-        async def mock_render_hub(_bot, _chat_id, text, keyboard, **_kwargs):
+        async def mock_render_hub(_bot, _chat_id, text, keyboard=None, **_kwargs):
             captured["text"] = text
             captured["keyboard"] = keyboard
 
@@ -363,7 +373,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             await render_device_screen(MagicMock(), 100, update_failed_profile, db_user, AsyncMock())
 
             self.assertIn("⚠️ <b>Не удалось обновить конфигурацию на сервере", captured["text"])
-            buttons = [b.callback_data for row in captured["keyboard"].inline_keyboard for b in row if b.callback_data]
+            buttons = _extract_callback_buttons(captured)
             self.assertIn("alt_connection:42", buttons)
             self.assertIn("request_delete_device:42", buttons)
 
@@ -409,7 +419,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         callback.answer = AsyncMock()
 
         captured = {}
-        async def mock_render_hub(_bot, _chat_id, text, keyboard, **_kwargs):
+        async def mock_render_hub(_bot, _chat_id, text, keyboard=None, **_kwargs):
             captured["text"] = text
             captured["keyboard"] = keyboard
 
@@ -422,7 +432,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             await cancel_delete_device(callback, AsyncMock(), AsyncMock(), db_user)
 
             self.assertIn("keyboard", captured)
-            buttons = [b.callback_data for row in captured["keyboard"].inline_keyboard for b in row if b.callback_data]
+            buttons = _extract_callback_buttons(captured)
             self.assertNotIn("alt_connection:42", buttons)
             self.assertNotIn("request_delete_device:42", buttons)
             self.assertIn("support_help:device_42", buttons)
@@ -535,7 +545,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
             self.assertNotIn(100, _creating_devices)
             self.assertTrue(mock_render_hub.called)
-            self.assertEqual(mock_render_hub.call_args[0][2], texts.ERROR_TECHNICAL_MESSAGE)
+            self.assertIn(texts.ERROR_TECHNICAL_MESSAGE, mock_render_hub.call_args[0][2])
 
     async def test_14_await_profile_ready_zero_or_negative_timeout_no_infinite_loop(self):
         """Zero or negative timeout evaluates once and returns None without hanging."""
@@ -617,7 +627,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         session.begin_nested = MagicMock(return_value=nested_ctx)
 
         captured = {}
-        async def mock_render_hub(_bot, _chat_id, text, keyboard, **_kwargs):
+        async def mock_render_hub(_bot, _chat_id, text, keyboard=None, **_kwargs):
             captured["text"] = text
             captured["keyboard"] = keyboard
 
@@ -633,7 +643,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             await rename_device_process(message, state, session, db_user)
 
             self.assertIn("keyboard", captured)
-            buttons = [b.callback_data for row in captured["keyboard"].inline_keyboard for b in row if b.callback_data]
+            buttons = _extract_callback_buttons(captured)
             self.assertIn("alt_connection:42", buttons)
             self.assertIn("request_delete_device:42", buttons)
 
@@ -806,7 +816,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         )
 
         captured = {}
-        async def mock_render_hub(_bot, _chat_id, text, keyboard, **_kwargs):
+        async def mock_render_hub(_bot, _chat_id, text, keyboard=None, **_kwargs):
             captured["text"] = text
             captured["keyboard"] = keyboard
 
@@ -818,7 +828,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             await render_device_screen(MagicMock(), 100, pending_profile, db_user, AsyncMock())
 
             self.assertIn("keyboard", captured)
-            buttons = [b.callback_data for row in captured["keyboard"].inline_keyboard for b in row if b.callback_data]
+            buttons = _extract_callback_buttons(captured)
             self.assertNotIn("request_delete_device:42", buttons)
             self.assertTrue("back_to_amnezia_devices" in buttons or "back_to_connections" in buttons)
             self.assertIn("back_to_main_menu", buttons)
@@ -842,7 +852,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         )
 
         captured = {}
-        async def mock_render_hub(_bot, _chat_id, text, keyboard, **_kwargs):
+        async def mock_render_hub(_bot, _chat_id, text, keyboard=None, **_kwargs):
             captured["text"] = text
             captured["keyboard"] = keyboard
 
@@ -853,7 +863,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         ):
             await render_device_screen(MagicMock(), 100, deleting_profile, db_user, AsyncMock())
 
-            buttons = [b.callback_data for row in captured["keyboard"].inline_keyboard for b in row if b.callback_data]
+            buttons = _extract_callback_buttons(captured)
             self.assertNotIn("request_delete_device:42", buttons)
 
     async def test_19_expired_subscription_with_active_shows_delete_button(self):
@@ -875,7 +885,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         )
 
         captured = {}
-        async def mock_render_hub(_bot, _chat_id, text, keyboard, **_kwargs):
+        async def mock_render_hub(_bot, _chat_id, text, keyboard=None, **_kwargs):
             captured["text"] = text
             captured["keyboard"] = keyboard
 
@@ -886,7 +896,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         ):
             await render_device_screen(MagicMock(), 100, active_profile, db_user, AsyncMock())
 
-            buttons = [b.callback_data for row in captured["keyboard"].inline_keyboard for b in row if b.callback_data]
+            buttons = _extract_callback_buttons(captured)
             self.assertIn("request_delete_device:42", buttons)
 
     async def test_20_stale_request_delete_on_pending_create_rejected_with_alert(self):
@@ -1233,7 +1243,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
             self.assertTrue(mock_render_hub.called)
             error_text = mock_render_hub.call_args.args[2]
-            self.assertEqual(error_text, texts.ERROR_SERVER_FULL)
+            self.assertIn(texts.ERROR_SERVER_FULL, error_text)
 
     async def test_31_expired_subscription_with_create_failed_renders_readonly_connections_screen(self):
         """Expired subscription user with create_failed device sees read-only screen with recoverable device."""

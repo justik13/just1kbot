@@ -6,8 +6,8 @@ from typing import Any
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
-from bot.keyboards.notifications import get_devices_deleted_keyboard
 from bot.texts.runtime.notifications import NOTIFY_DEVICES_DELETED
+from utils.telegram import safe_send_message
 from cachetools import TTLCache
 from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -236,10 +236,11 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
                     # Уведомить пользователя об удалении устройств
                     if bot:
                         try:
-                            await bot.send_message(
+                            await safe_send_message(
+                                bot,
                                 user.telegram_id,
                                 NOTIFY_DEVICES_DELETED,
-                                reply_markup=get_devices_deleted_keyboard(),
+                                reply_markup=None,
                                 parse_mode="HTML",
                             )
                         except TelegramForbiddenError:

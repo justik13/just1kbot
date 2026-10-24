@@ -371,27 +371,31 @@ async def handle_order_check(
 
         if order.service_type == "topup":
             from .balance_routes import _render_balance
-            from bot.keyboards.payment import get_topup_credit_keyboard
 
+            notice = texts.TOPUP_CREDITED_NOTICE
             order_context = (
                 (order.metadata_ or {}).get("context")
                 if order.metadata_
                 else None
             )
-            kb = (
-                get_topup_credit_keyboard(order_context)
-                if order_context
-                else None
-            )
+            if order_context and order_context.get("source") == "white_internet":
+                return_btn = make_rich_button_row(
+                    make_rich_button(
+                        texts.BTN_WL_RETURN_TO_SERVICE,
+                        callback_data="white_internet",
+                        style="primary",
+                    )
+                )
+                notice = f"{texts.TOPUP_CREDITED_NOTICE}\n{return_btn}"
+
             await _render_balance(
                 callback.bot,
                 callback.message.chat.id,
                 session,
                 db_user,
-                notice=texts.TOPUP_CREDITED_NOTICE,
+                notice=notice,
                 message_effect_id=EFFECT_CONFETTI,
                 force_new=True,
-                custom_keyboard=kb,
             )
             # Push delivered straight to the user looking at the screen:
             # clear the debt so the credit-notify worker does not duplicate it.
@@ -400,12 +404,12 @@ async def handle_order_check(
             return
 
         balance = await get_account_balance(session, user_id=db_user.id)
-        text, keyboard = build_tariff_success_card(order, balance)
+        text, _ = build_tariff_success_card(order, balance)
         await render_hub(
             callback.bot,
             callback.message.chat.id,
             text,
-            keyboard,
+            reply_markup=None,
             message_effect_id=EFFECT_CONFETTI,
             force_new=True,
         )
@@ -437,18 +441,7 @@ async def handle_order_check(
 
             if paid_order.service_type == "topup":
                 from .balance_routes import _render_balance
-                from bot.keyboards.payment import get_topup_credit_keyboard
 
-                order_context = (
-                    (paid_order.metadata_ or {}).get("context")
-                    if paid_order.metadata_
-                    else None
-                )
-                kb = (
-                    get_topup_credit_keyboard(order_context)
-                    if order_context
-                    else None
-                )
                 await _render_balance(
                     callback.bot,
                     callback.message.chat.id,
@@ -457,19 +450,18 @@ async def handle_order_check(
                     notice=texts.TOPUP_CREDITED_NOTICE,
                     message_effect_id=EFFECT_CONFETTI,
                     force_new=True,
-                    custom_keyboard=kb,
                 )
                 mark_notified(paid_order)
                 await safe_callback_answer(callback)
                 return
 
             balance = await get_account_balance(session, user_id=db_user.id)
-            text, keyboard = build_tariff_success_card(paid_order, balance)
+            text, _ = build_tariff_success_card(paid_order, balance)
             await render_hub(
                 callback.bot,
                 callback.message.chat.id,
                 text,
-                keyboard,
+                reply_markup=None,
                 message_effect_id=EFFECT_CONFETTI,
                 force_new=True,
             )

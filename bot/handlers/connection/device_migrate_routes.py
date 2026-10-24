@@ -3,13 +3,10 @@ import logging
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
-from aiogram.utils.keyboard import InlineKeyboardBuilder
 from cachetools import TTLCache
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.keyboards import get_back_button
-from bot.keyboards.device import get_device_migrate_confirm_keyboard
 from config.constants import AMNEZIA_PROTOCOL
 from database.models import User
 from database.repositories.profiles_repo import get_profile_by_id
@@ -34,7 +31,13 @@ from services.slots_cache import capture_server_peer_snapshot
 from services.subscription import SubscriptionService
 from utils.callbacks import parse_callback_id
 from utils.datetime_helpers import now_utc
-from utils.telegram import EFFECT_FIRE, render_hub, safe
+from utils.telegram import (
+    EFFECT_FIRE,
+    make_rich_button,
+    make_rich_button_row,
+    render_hub,
+    safe,
+)
 
 from .common import _render_maintenance
 from .device_create_routes import (
@@ -118,28 +121,39 @@ async def start_migrate_device(
     current_name = current_server.name if current_server else texts.LABEL_UNKNOWN_CAP
     current_server_display = f"{current_flag} {current_name}".strip()
 
-    builder = InlineKeyboardBuilder()
+    server_rows = []
     for server in target_servers:
         flag = server.country_flag or texts.EMOJI_GLOBE
-        builder.button(
-            text=f"{flag} {server.name}",
-            callback_data=f"select_migrate_server:{profile.id}:{server.id}",
+        server_rows.append(
+            make_rich_button_row(
+                make_rich_button(
+                    f"{flag} {server.name}",
+                    callback_data=f"select_migrate_server:{profile.id}:{server.id}",
+                    style="primary",
+                )
+            )
         )
-
-    builder.button(
-        text=texts.BTN_BACK_TO_DEVICE,
-        callback_data=f"manage_device:{profile.id}",
+    nav_row = make_rich_button_row(
+        make_rich_button(
+            texts.BTN_BACK_TO_DEVICE,
+            callback_data=f"manage_device:{profile.id}",
+        )
     )
-    builder.adjust(1)
+    full_text = (
+        texts.DEVICE_MIGRATE_SELECT_SERVER.format(
+            device_name=safe(profile.device_name),
+            current_server=safe(current_server_display),
+        )
+        + "\n"
+        + "\n".join(server_rows)
+        + f"\n{nav_row}"
+    )
 
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        texts.DEVICE_MIGRATE_SELECT_SERVER.format(
-            device_name=safe(profile.device_name),
-            current_server=safe(current_server_display),
-        ),
-        builder.as_markup(),
+        full_text,
+        reply_markup=None,
         parse_mode="HTML",
     )
 
@@ -191,14 +205,35 @@ async def select_migrate_target_server(
     target_flag = target_server.country_flag or texts.EMOJI_GLOBE
     target_display = f"{target_flag} {target_server.name}".strip()
 
-    await render_hub(
-        callback.bot,
-        callback.message.chat.id,
+    confirm_rows = [
+        make_rich_button_row(
+            make_rich_button(
+                texts.BTN_CONFIRM_MIGRATE,
+                callback_data=f"confirm_migrate_device:{profile.id}:{target_server.id}",
+                style="success",
+            )
+        ),
+        make_rich_button_row(
+            make_rich_button(
+                texts.BTN_CANCEL_ACTION,
+                callback_data=f"manage_device:{profile.id}",
+            )
+        ),
+    ]
+    full_text = (
         texts.DEVICE_MIGRATE_CONFIRM.format(
             device_name=safe(profile.device_name),
             target_server=safe(target_display),
-        ),
-        get_device_migrate_confirm_keyboard(profile.id, target_server.id),
+        )
+        + "\n"
+        + "\n".join(confirm_rows)
+    )
+
+    await render_hub(
+        callback.bot,
+        callback.message.chat.id,
+        full_text,
+        reply_markup=None,
         parse_mode="HTML",
     )
 
@@ -278,11 +313,14 @@ async def confirm_migrate_device(
         target_name = target_server.name or texts.CONNECTION_DEVICE_CREATE_DEFAULT_SERVER_NAME
         target_display = f"{target_server.country_flag or texts.EMOJI_GLOBE} {target_name}".strip()
 
+        nav_row = make_rich_button_row(
+            make_rich_button(texts.BTN_BACK_TO_DEVICE, callback_data=f"manage_device:{profile.id}")
+        )
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            texts.CONNECTION_DEVICE_CREATE_CREATING_SCREEN.format(v0=safe(target_name)),
-            get_back_button(f"manage_device:{profile.id}"),
+            texts.CONNECTION_DEVICE_CREATE_CREATING_SCREEN.format(v0=safe(target_name)) + f"\n{nav_row}",
+            reply_markup=None,
             parse_mode="HTML",
         )
 

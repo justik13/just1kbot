@@ -9,7 +9,7 @@ from aiogram.types import CallbackQuery, User as TgUser
 
 from bot.handlers.admin import admin_router
 from bot.handlers.connection import router as connection_router
-from bot.handlers.fallback import router as fallback_router
+from bot.handlers.fallback import router as fallback_router, stale_callback_fallback
 from bot.handlers.payment import router as payment_router
 from bot.handlers.referral import router as referral_router
 from bot.handlers.start import router as start_router
@@ -141,6 +141,13 @@ class TestRichButtonsCallbacks(unittest.IsolatedAsyncioTestCase):
                         break
                 if matched:
                     break
+            if not matched:
+                for h in fallback_router.callback_query.handlers:
+                    if h.callback != stale_callback_fallback:
+                        res, _ = await h.check(cb)
+                        if res:
+                            matched = True
+                            break
             self.assertTrue(
                 matched,
                 f"Callback '{cb_data}' has no matching handler in any registered router!",

@@ -10,7 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.middlewares.action_lock import STALE_ACTION_PREFIXES
 from database.models import User
-from utils.telegram import spawn_auto_delete
+from utils.telegram import (
+    make_rich_button,
+    make_rich_button_row,
+    safe_send_message,
+    spawn_auto_delete,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +29,6 @@ router = Router()
     StateFilter("*"),
 )
 async def fsm_media_guard(message: Message, state: FSMContext):
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
-
     try:
         current_state = await state.get_state()
     except Exception:
@@ -50,25 +53,24 @@ async def fsm_media_guard(message: Message, state: FSMContext):
 
     await state.clear()
 
-    builder = InlineKeyboardBuilder()
-    builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
-    builder.adjust(1)
-
+    nav_row = make_rich_button_row(
+        make_rich_button(texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
+    )
     try:
-        temp_msg = await message.answer(
-            texts.FALLBACK_UNSUPPORTED_TYPE,
-            reply_markup=builder.as_markup(),
-            parse_mode="HTML",
+        temp_msg = await safe_send_message(
+            message.bot,
+            message.chat.id,
+            f"{texts.FALLBACK_UNSUPPORTED_TYPE}\n{nav_row}",
+            reply_markup=None,
         )
-        spawn_auto_delete(message.bot, message.chat.id, temp_msg.message_id, delay=5.0)
+        if temp_msg:
+            spawn_auto_delete(message.bot, message.chat.id, temp_msg.message_id, delay=5.0)
     except Exception:
         pass
 
 
 @router.message()
 async def handle_unknown_text(message: Message, state: FSMContext):
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
-
     try:
         current_state = await state.get_state()
     except Exception:
@@ -98,17 +100,18 @@ async def handle_unknown_text(message: Message, state: FSMContext):
     except Exception:
         pass
 
-    builder = InlineKeyboardBuilder()
-    builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
-    builder.adjust(1)
-
+    nav_row = make_rich_button_row(
+        make_rich_button(texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
+    )
     try:
-        temp_msg = await message.answer(
-            texts.FALLBACK_UNKNOWN_TEXT,
-            reply_markup=builder.as_markup(),
-            parse_mode="HTML",
+        temp_msg = await safe_send_message(
+            message.bot,
+            message.chat.id,
+            f"{texts.FALLBACK_UNKNOWN_TEXT}\n{nav_row}",
+            reply_markup=None,
         )
-        spawn_auto_delete(message.bot, message.chat.id, temp_msg.message_id, delay=5.0)
+        if temp_msg:
+            spawn_auto_delete(message.bot, message.chat.id, temp_msg.message_id, delay=5.0)
     except Exception:
         pass
 

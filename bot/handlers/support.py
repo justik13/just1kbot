@@ -1,7 +1,6 @@
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
-from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot import texts
 from bot.keyboards import make_rich_nav_row
@@ -13,53 +12,6 @@ from utils.telegram import (
 )
 
 router = Router()
-
-
-def _support_keyboard(username: str, telegram_id: int | None = None):
-    builder = InlineKeyboardBuilder()
-
-    from utils.support import get_support_url
-
-    text = (
-        texts.SUPPORT_GREETING_TEMPLATE.format(telegram_id=telegram_id)
-        if telegram_id
-        else None
-    )
-    support_url = get_support_url(text=text, username=username)
-
-    builder.button(
-        text=texts.BTN_CONTACT_SUPPORT,
-        url=support_url,
-    )
-
-    builder.button(
-        text=texts.BTN_HELP_INSTRUCTIONS,
-        callback_data="support_help",
-    )
-
-    builder.button(
-        text=texts.SUPPORT,
-        callback_data="faq",
-    )
-
-    builder.button(
-        text=texts.BTN_TOS,
-        url=texts.TOS_AGREEMENT_URL,
-    )
-
-    builder.button(
-        text=texts.BTN_PRIVACY_POLICY,
-        url=texts.PRIVACY_POLICY_URL,
-    )
-
-    builder.button(
-        text=texts.BTN_MAIN_MENU_NAV,
-        callback_data="back_to_main_menu",
-    )
-
-    builder.adjust(1, 2, 2, 1)
-
-    return builder.as_markup()
 
 
 @router.callback_query(F.data == "menu_support")
@@ -109,7 +61,7 @@ async def hub_menu_support(
         callback.bot,
         callback.message.chat.id,
         rich_text,
-        reply_markup=None,
+        None,
     )
 
 
@@ -157,7 +109,7 @@ async def show_support_help(callback: CallbackQuery):
         callback.bot,
         callback.message.chat.id,
         rich_text,
-        reply_markup=None,
+        None,
     )
 
 
@@ -177,7 +129,7 @@ async def show_help_incy(callback: CallbackQuery):
         callback.bot,
         callback.message.chat.id,
         rich_text,
-        reply_markup=None,
+        None,
     )
 
 
@@ -197,7 +149,7 @@ async def show_help_download(callback: CallbackQuery):
         callback.bot,
         callback.message.chat.id,
         rich_text,
-        reply_markup=None,
+        None,
     )
 
 
@@ -216,7 +168,7 @@ async def show_help_ios(callback: CallbackQuery):
         callback.bot,
         callback.message.chat.id,
         rich_text,
-        reply_markup=None,
+        None,
     )
 
 
@@ -235,7 +187,7 @@ async def show_help_windows(callback: CallbackQuery):
         callback.bot,
         callback.message.chat.id,
         rich_text,
-        reply_markup=None,
+        None,
     )
 
 
@@ -254,7 +206,7 @@ async def show_help_split(callback: CallbackQuery):
         callback.bot,
         callback.message.chat.id,
         rich_text,
-        reply_markup=None,
+        None,
     )
 
 
@@ -269,5 +221,5 @@ async def show_faq(callback: CallbackQuery):
         callback.bot,
         callback.message.chat.id,
         rich_text,
-        reply_markup=None,
+        None,
     )

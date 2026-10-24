@@ -6,12 +6,11 @@ from aiogram import F, Router
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
-from aiogram.utils.keyboard import InlineKeyboardBuilder
 from cachetools import TTLCache
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.keyboards import get_back_button
+from bot.keyboards import make_rich_nav_row
 from bot.states import DeviceCreationStates
 from config.constants import AMNEZIA_PROTOCOL
 from database.connection import get_session
@@ -37,7 +36,13 @@ from services.maintenance_service import MaintenanceService
 from services.slots_cache import capture_server_peer_snapshot
 from services.subscription import SubscriptionService
 from utils.callbacks import parse_callback_id
-from utils.telegram import EFFECT_FIRE, render_hub, safe
+from utils.telegram import (
+    EFFECT_FIRE,
+    make_rich_button,
+    make_rich_button_row,
+    render_hub,
+    safe,
+)
 
 from .common import (
     _get_effective_device_limit,
@@ -84,22 +89,27 @@ async def _await_profile_ready(
         await asyncio.sleep(min(poll_interval, remaining))
 
 
-def _get_no_subscription_keyboard():
-    builder = InlineKeyboardBuilder()
-    builder.button(text=texts.BTN_BUY_ACCESS, callback_data="menu_buy")
-    builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
-    builder.adjust(1)
-    return builder.as_markup()
+def _make_no_subscription_rich_buttons() -> str:
+    btn = make_rich_button(texts.BTN_BUY_ACCESS, callback_data="menu_buy", style="success")
+    nav = make_rich_nav_row(include_menu=True)
+    return f"{make_rich_button_row(btn)}\n{nav}"
 
 
-def _get_device_limit_keyboard(can_upgrade: bool = True):
-    builder = InlineKeyboardBuilder()
+def _make_device_limit_rich_buttons(can_upgrade: bool = True) -> str:
+    rows = []
     if can_upgrade:
-        builder.button(text=texts.BTN_CHANGE_TARIFF, callback_data="payment_change_tariff")
-    builder.button(text=texts.BTN_BACK_TO_DEVICES, callback_data="back_to_connections")
-    builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
-    builder.adjust(1)
-    return builder.as_markup()
+        rows.append(
+            make_rich_button_row(
+                make_rich_button(texts.BTN_CHANGE_TARIFF, callback_data="payment_change_tariff", style="primary")
+            )
+        )
+    rows.append(
+        make_rich_button_row(
+            make_rich_button(texts.BTN_BACK_TO_DEVICES, callback_data="back_to_connections"),
+            make_rich_button(texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu"),
+        )
+    )
+    return "\n".join(rows)
 
 
 def _classify_server_error(error_msg: str) -> str:
@@ -162,8 +172,8 @@ async def start_add_device(
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            texts.ERROR_NO_SUBSCRIPTION,
-            _get_no_subscription_keyboard(),
+            texts.ERROR_NO_SUBSCRIPTION + f"\n{_make_no_subscription_rich_buttons()}",
+            reply_markup=None,
         )
         await callback.answer(show_alert=False)
         return
@@ -185,8 +195,8 @@ async def start_add_device(
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            texts.ERROR_DEVICE_LIMIT_UPGRADE.format(limit=device_limit),
-            _get_device_limit_keyboard(can_upgrade=can_upgrade),
+            texts.ERROR_DEVICE_LIMIT_UPGRADE.format(limit=device_limit) + f"\n{_make_device_limit_rich_buttons(can_upgrade=can_upgrade)}",
+            reply_markup=None,
         )
         return
 
@@ -196,29 +206,31 @@ async def start_add_device(
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            texts.ERROR_NO_FREE_SLOTS,
-            get_back_button("back_to_connections"),
+            f"{texts.ERROR_NO_FREE_SLOTS}\n{make_rich_nav_row('back_to_connections')}",
+            reply_markup=None,
         )
         return
 
-    builder = InlineKeyboardBuilder()
-
+    server_rows = []
     for server in servers:
         flag = server.country_flag or texts.EMOJI_GLOBE
-        builder.button(
-            text=texts.DEVICE_CREATING_SPINNER_NOTICE.format(v0=flag, value_1=server.name),
-            callback_data=f"select_server:{server.id}",
+        btn_text = texts.DEVICE_CREATING_SPINNER_NOTICE.format(v0=flag, value_1=server.name)
+        server_rows.append(
+            make_rich_button_row(
+                make_rich_button(btn_text, callback_data=f"select_server:{server.id}", style="primary")
+            )
         )
 
-    builder.button(text=texts.BTN_BACK, callback_data="back_to_connections")
-    builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
-    builder.adjust(*([1] * len(servers)), 2)
+    nav_row = make_rich_button_row(
+        make_rich_button(texts.BTN_BACK, callback_data="back_to_connections"),
+        make_rich_button(texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu"),
+    )
 
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        texts.CONNECTION_SELECT_SERVER,
-        builder.as_markup(),
+        texts.CONNECTION_SELECT_SERVER + "\n" + "\n".join(server_rows) + f"\n{nav_row}",
+        reply_markup=None,
     )
 
     await state.set_state(DeviceCreationStates.choose_server)
@@ -248,8 +260,8 @@ async def select_server(
             await render_hub(
                 callback.bot,
                 callback.message.chat.id,
-                texts.ERROR_LOCATION_NOT_FOUND,
-                get_back_button("add_device"),
+                f"{texts.ERROR_LOCATION_NOT_FOUND}\n{make_rich_nav_row('add_device')}",
+                reply_markup=None,
             )
             await state.clear()
             return
@@ -286,8 +298,8 @@ async def _process_server_selection(
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            texts.ERROR_NO_SUBSCRIPTION,
-            _get_no_subscription_keyboard(),
+            texts.ERROR_NO_SUBSCRIPTION + f"\n{_make_no_subscription_rich_buttons()}",
+            reply_markup=None,
         )
         await state.clear()
         return
@@ -298,8 +310,8 @@ async def _process_server_selection(
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            texts.ERROR_LOCATION_NOT_FOUND,
-            get_back_button("add_device"),
+            f"{texts.ERROR_LOCATION_NOT_FOUND}\n{make_rich_nav_row('add_device')}",
+            reply_markup=None,
         )
         await state.clear()
         return
@@ -308,8 +320,8 @@ async def _process_server_selection(
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            texts.ERROR_SERVER_DISABLED,
-            get_back_button("add_device"),
+            f"{texts.ERROR_SERVER_DISABLED}\n{make_rich_nav_row('add_device')}",
+            reply_markup=None,
         )
         await state.clear()
         return
@@ -325,8 +337,8 @@ async def _process_server_selection(
             callback.message.chat.id,
             texts.CONNECTION_DEVICE_CREATE_CREATING_SCREEN.format(
                 v0=safe(server_name)
-            ),
-            get_back_button("add_device"),
+            ) + f"\n{make_rich_nav_row('add_device')}",
+            reply_markup=None,
             parse_mode="HTML",
         )
 
@@ -355,8 +367,8 @@ async def _process_server_selection(
             await render_hub(
                 callback.bot,
                 callback.message.chat.id,
-                texts.ERROR_NO_SUBSCRIPTION,
-                _get_no_subscription_keyboard(),
+                texts.ERROR_NO_SUBSCRIPTION + f"\n{_make_no_subscription_rich_buttons()}",
+                reply_markup=None,
             )
             await state.clear()
             return
@@ -368,8 +380,8 @@ async def _process_server_selection(
             await render_hub(
                 callback.bot,
                 callback.message.chat.id,
-                texts.ERROR_DEVICE_DAILY_LIMIT,
-                get_back_button("back_to_connections"),
+                f"{texts.ERROR_DEVICE_DAILY_LIMIT}\n{make_rich_nav_row('back_to_connections')}",
+                reply_markup=None,
                 parse_mode="HTML",
             )
             await state.clear()
@@ -386,8 +398,8 @@ async def _process_server_selection(
             await render_hub(
                 callback.bot,
                 callback.message.chat.id,
-                texts.ERROR_DEVICE_LIMIT_UPGRADE.format(limit=limit),
-                _get_device_limit_keyboard(can_upgrade=can_upgrade),
+                texts.ERROR_DEVICE_LIMIT_UPGRADE.format(limit=limit) + f"\n{_make_device_limit_rich_buttons(can_upgrade=can_upgrade)}",
+                reply_markup=None,
             )
             await state.clear()
             return
@@ -399,8 +411,8 @@ async def _process_server_selection(
             await render_hub(
                 callback.bot,
                 callback.message.chat.id,
-                texts.DEVICE_NAME_DUPLICATE,
-                get_back_button("add_device"),
+                f"{texts.DEVICE_NAME_DUPLICATE}\n{make_rich_nav_row('add_device')}",
+                reply_markup=None,
             )
             await state.clear()
             return
@@ -412,8 +424,8 @@ async def _process_server_selection(
             await render_hub(
                 callback.bot,
                 callback.message.chat.id,
-                texts.ERROR_API_CREATE_FAILED,
-                get_back_button("back_to_connections"),
+                f"{texts.ERROR_API_CREATE_FAILED}\n{make_rich_nav_row('back_to_connections')}",
+                reply_markup=None,
             )
             await state.clear()
             return
@@ -435,8 +447,8 @@ async def _process_server_selection(
             await render_hub(
                 callback.bot,
                 callback.message.chat.id,
-                error_text,
-                get_back_button("back_to_connections"),
+                f"{error_text}\n{make_rich_nav_row('back_to_connections')}",
+                reply_markup=None,
             )
             await state.clear()
             return
@@ -453,8 +465,8 @@ async def _process_server_selection(
             await render_hub(
                 callback.bot,
                 callback.message.chat.id,
-                texts.ERROR_TECHNICAL_MESSAGE,
-                get_back_button("back_to_connections"),
+                f"{texts.ERROR_TECHNICAL_MESSAGE}\n{make_rich_nav_row('back_to_connections')}",
+                reply_markup=None,
                 parse_mode="HTML",
             )
             await state.clear()
@@ -469,8 +481,8 @@ async def _process_server_selection(
             await render_hub(
                 callback.bot,
                 callback.message.chat.id,
-                texts.ERROR_TECHNICAL_MESSAGE,
-                get_back_button("back_to_connections"),
+                f"{texts.ERROR_TECHNICAL_MESSAGE}\n{make_rich_nav_row('back_to_connections')}",
+                reply_markup=None,
                 parse_mode="HTML",
             )
             await state.clear()

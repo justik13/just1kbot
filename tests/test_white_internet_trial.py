@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from bot.handlers.white_internet import (
-    get_white_internet_overview_keyboard,
+    get_white_internet_overview_rich_actions,
     show_topup_menu,
 )
 from config.constants import (
@@ -378,11 +378,10 @@ class TestWhiteInternetTrialBotUI(unittest.IsolatedAsyncioTestCase):
         domain = "cdn.example.com"
 
         # 1. No subscription, has_trial_available=True -> Trial activation + buy preview
-        kb_none = get_white_internet_overview_keyboard(None, bot_domain=domain, has_trial_available=True)
-        callbacks_none = [btn.callback_data for row in kb_none.inline_keyboard for btn in row]
-        self.assertIn("wl_trial_activate", callbacks_none)
-        self.assertIn("wl_buy_preview", callbacks_none)
-        self.assertIn("back_to_main_menu", callbacks_none)
+        html_none = get_white_internet_overview_rich_actions(None, bot_domain=domain, has_trial_available=True)
+        self.assertIn('data="wl_trial_activate"', html_none)
+        self.assertIn('data="wl_buy_preview"', html_none)
+        self.assertIn('data="back_to_main_menu"', html_none)
 
         # 2. ACTIVE trial subscription -> Copy link, Instructions, Convert trial, Reset devices, Back. NO wl_topup_menu
         sub_active = WhiteInternetSubscription(
@@ -393,17 +392,14 @@ class TestWhiteInternetTrialBotUI(unittest.IsolatedAsyncioTestCase):
             status=WhiteInternetStatus.ACTIVE,
             provisioning_status=WhiteInternetProvisioningStatus.ACTIVE,
         )
-        kb_active = get_white_internet_overview_keyboard(sub_active, bot_domain=domain)
-        callbacks_active = [btn.callback_data for row in kb_active.inline_keyboard for btn in row if btn.callback_data]
-        connect_buttons = [btn for row in kb_active.inline_keyboard for btn in row if btn.url]
+        html_active = get_white_internet_overview_rich_actions(sub_active, bot_domain=domain)
 
-        self.assertEqual(len(connect_buttons), 1)
-        self.assertTrue(connect_buttons[0].url.startswith("https://"))
-        self.assertIn("wl_show_link", callbacks_active)
-        self.assertIn("wl_renew_preview", callbacks_active)
-        self.assertIn("wl_reset_devices", callbacks_active)
-        self.assertIn("back_to_main_menu", callbacks_active)
-        self.assertNotIn("wl_topup_menu", callbacks_active)
+        self.assertIn(f'url="https://{domain}/sub/wl/{sub_active.token}"', html_active)
+        self.assertIn('data="wl_show_link"', html_active)
+        self.assertIn('data="wl_renew_preview"', html_active)
+        self.assertIn('data="wl_reset_devices"', html_active)
+        self.assertIn('data="back_to_main_menu"', html_active)
+        self.assertNotIn('data="wl_topup_menu"', html_active)
 
         # 3. EXPIRED trial subscription -> Convert trial + Back button
         sub_expired = WhiteInternetSubscription(
@@ -412,10 +408,9 @@ class TestWhiteInternetTrialBotUI(unittest.IsolatedAsyncioTestCase):
             is_trial=True,
             status=WhiteInternetStatus.EXPIRED,
         )
-        kb_expired = get_white_internet_overview_keyboard(sub_expired, bot_domain=domain)
-        callbacks_expired = [btn.callback_data for row in kb_expired.inline_keyboard for btn in row]
-        self.assertIn("back_to_main_menu", callbacks_expired)
-        self.assertIn("wl_renew_preview", callbacks_expired)
+        html_expired = get_white_internet_overview_rich_actions(sub_expired, bot_domain=domain)
+        self.assertIn('data="back_to_main_menu"', html_expired)
+        self.assertIn('data="wl_renew_preview"', html_expired)
 
         # 4. EXHAUSTED trial subscription (unexpired calendar date) -> Convert trial button MUST be present
         sub_exhausted = WhiteInternetSubscription(
@@ -425,14 +420,12 @@ class TestWhiteInternetTrialBotUI(unittest.IsolatedAsyncioTestCase):
             status=WhiteInternetStatus.EXHAUSTED,
             expires_at=now_utc() + timedelta(days=2),
         )
-        kb_exhausted = get_white_internet_overview_keyboard(sub_exhausted, bot_domain=domain)
-        callbacks_exhausted = [btn.callback_data for row in kb_exhausted.inline_keyboard for btn in row]
-        buttons_exhausted_text = [btn.text for row in kb_exhausted.inline_keyboard for btn in row]
-        self.assertIn("back_to_main_menu", callbacks_exhausted)
-        self.assertIn("wl_renew_preview", callbacks_exhausted)
-        self.assertTrue(any(texts.BTN_WL_CONVERT_TRIAL.format(price=100) in t or "Перейти на полный тариф" in t for t in buttons_exhausted_text))
-        self.assertNotIn("wl_topup_menu", callbacks_exhausted)
-        self.assertNotIn("wl_show_link", callbacks_exhausted)
+        html_exhausted = get_white_internet_overview_rich_actions(sub_exhausted, bot_domain=domain)
+        self.assertIn('data="back_to_main_menu"', html_exhausted)
+        self.assertIn('data="wl_renew_preview"', html_exhausted)
+        self.assertTrue(texts.BTN_WL_CONVERT_TRIAL.format(price=100) in html_exhausted or "Перейти на полный тариф" in html_exhausted)
+        self.assertNotIn('data="wl_topup_menu"', html_exhausted)
+        self.assertNotIn('data="wl_show_link"', html_exhausted)
 
     async def test_topup_menu_blocks_trial_subscription(self):
         """Topup menu must reject users on trial subscription with an alert."""

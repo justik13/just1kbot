@@ -33,7 +33,8 @@ BTN_PAYMENT_TO_TARIFF_CHOICE = "← К выбору тарифа"
 
 BTN_TARIFF_SHOWCASE_ITEM = "{group_name} — от {min_price} ₽"
 
-PAYMENT = " 🔽"
+PAYMENT_STATUS_DOWNGRADE_BADGE = " 🔽"
+PAYMENT = PAYMENT_STATUS_DOWNGRADE_BADGE
 
 PAYMENT_ARCHIVED_TARIFF_NOTICE = "Ваш текущий тариф является архивным и больше недоступен для прямого продления. Выберите один из актуальных тарифов для продления доступа:"
 
@@ -97,12 +98,12 @@ PAYMENT_PURCHASE_SUCCESS_CARD = """<p>🎉 <b>{operation_title}</b></p>
   <tg-button type="callback_data" style="primary" data="back_to_main_menu">🏠 В главное меню</tg-button>
 </tg-button-row>"""
 
-PAYMENT_QUICK_RENEW_HEADER = """🔄 <b>Продление доступа</b>
-
-Ваш текущий тариф: <b>{tariff_name}</b>
-Активен до: <i>{valid_until}</i>
-
-Выберите, на сколько продлить:"""
+PAYMENT_QUICK_RENEW_HEADER = """<p>🔄 <b>Продление доступа</b></p>
+<table>
+  <tr><td>Текущий тариф:</td><td><b>{tariff_name}</b></td></tr>
+  <tr><td>Активен до:</td><td><i>{valid_until}</i></td></tr>
+</table>
+<p>Выберите срок продления:</p>"""
 
 PAYMENT_SHORTAGE_WARNING = """
 ⚠️ Не хватает: <b>{amount_rub} ₽</b>"""

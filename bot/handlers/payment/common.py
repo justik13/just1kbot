@@ -4,7 +4,6 @@ from aiogram.types import CallbackQuery
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.keyboards import get_back_button
 from database.repositories.profiles_repo import (
     get_user_profiles,
     get_user_profiles_count,
@@ -86,8 +85,8 @@ async def render_tariff_showcase(
         await render_hub(
             bot,
             chat_id,
-            texts.PAYMENT_NO_TARIFFS,
-            get_back_button("back_to_main_menu"),
+            f"{texts.PAYMENT_NO_TARIFFS}\n{make_rich_nav_row('back_to_main_menu')}",
+            reply_markup=None,
             session=session,
         )
         return

@@ -116,9 +116,11 @@ class TestDeviceViewPendingActions(unittest.IsolatedAsyncioTestCase):
             return callback
 
         rendered_keyboards = []
+        rendered_texts = []
 
-        async def capture_render_hub(_bot, _chat_id, _text, keyboard, **_kwargs):
+        async def capture_render_hub(_bot, _chat_id, _text, keyboard=None, **_kwargs):
             rendered_keyboards.append(keyboard)
+            rendered_texts.append(_text)
 
         state = AsyncMock()
         session = AsyncMock()
@@ -146,27 +148,41 @@ class TestDeviceViewPendingActions(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(rendered_keyboards), 2)
 
-        pending_callback_data = {
-            button.callback_data
-            for row in rendered_keyboards[0].inline_keyboard
-            for button in row
-            if button.callback_data
-        }
-        self.assertNotIn("alt_connection:1", pending_callback_data)
-        self.assertNotIn("request_delete_device:1", pending_callback_data)
-        self.assertNotIn("rename_device:1", pending_callback_data)
-        self.assertIn("support_help:device_1", pending_callback_data)
+        if rendered_keyboards[0] and hasattr(rendered_keyboards[0], "inline_keyboard"):
+            pending_callback_data = {
+                button.callback_data
+                for row in rendered_keyboards[0].inline_keyboard
+                for button in row
+                if button.callback_data
+            }
+            self.assertNotIn("alt_connection:1", pending_callback_data)
+            self.assertNotIn("request_delete_device:1", pending_callback_data)
+            self.assertNotIn("rename_device:1", pending_callback_data)
+            self.assertIn("support_help:device_1", pending_callback_data)
+        else:
+            txt0 = rendered_texts[0]
+            self.assertNotIn('data="alt_connection:1"', txt0)
+            self.assertNotIn('data="request_delete_device:1"', txt0)
+            self.assertNotIn('data="rename_device:1"', txt0)
+            self.assertIn('data="support_help:device_1"', txt0)
 
-        ready_callback_data = {
-            button.callback_data
-            for row in rendered_keyboards[1].inline_keyboard
-            for button in row
-            if button.callback_data
-        }
-        self.assertIn("alt_connection:1", ready_callback_data)
-        self.assertIn("request_delete_device:1", ready_callback_data)
-        self.assertNotIn("rename_device:1", ready_callback_data)
-        self.assertIn("support_help:device_1", ready_callback_data)
+        if rendered_keyboards[1] and hasattr(rendered_keyboards[1], "inline_keyboard"):
+            ready_callback_data = {
+                button.callback_data
+                for row in rendered_keyboards[1].inline_keyboard
+                for button in row
+                if button.callback_data
+            }
+            self.assertIn("alt_connection:1", ready_callback_data)
+            self.assertIn("request_delete_device:1", ready_callback_data)
+            self.assertNotIn("rename_device:1", ready_callback_data)
+            self.assertIn("support_help:device_1", ready_callback_data)
+        else:
+            txt1 = rendered_texts[1]
+            self.assertIn('data="alt_connection:1"', txt1)
+            self.assertIn('data="request_delete_device:1"', txt1)
+            self.assertNotIn('data="rename_device:1"', txt1)
+            self.assertIn('data="support_help:device_1"', txt1)
 
     async def test_device_help_topic_buttons_keep_device_context(self):
         callback = MagicMock()
@@ -177,8 +193,9 @@ class TestDeviceViewPendingActions(unittest.IsolatedAsyncioTestCase):
 
         captured = {}
 
-        async def capture_render_hub(_bot, _chat_id, _text, keyboard, **_kwargs):
+        async def capture_render_hub(_bot, _chat_id, _text, keyboard=None, **_kwargs):
             captured["keyboard"] = keyboard
+            captured["text"] = _text
 
         profile = MagicMock(user_id=42)
         with patch(
@@ -190,17 +207,26 @@ class TestDeviceViewPendingActions(unittest.IsolatedAsyncioTestCase):
         ):
             await device_help(callback, AsyncMock(), AsyncMock(), SimpleNamespace(id=42))
 
-        callback_data = {
-            button.callback_data
-            for row in captured["keyboard"].inline_keyboard
-            for button in row
-            if button.callback_data
-        }
-        self.assertIn("help_download:device_42", callback_data)
-        self.assertIn("help_ios:device_42", callback_data)
-        self.assertIn("help_windows:device_42", callback_data)
-        self.assertIn("help_split:device_42", callback_data)
-        self.assertIn("manage_device:42", callback_data)
+        kb = captured.get("keyboard")
+        if kb and hasattr(kb, "inline_keyboard"):
+            callback_data = {
+                button.callback_data
+                for row in kb.inline_keyboard
+                for button in row
+                if button.callback_data
+            }
+            self.assertIn("help_download:device_42", callback_data)
+            self.assertIn("help_ios:device_42", callback_data)
+            self.assertIn("help_windows:device_42", callback_data)
+            self.assertIn("help_split:device_42", callback_data)
+            self.assertIn("manage_device:42", callback_data)
+        else:
+            txt = captured.get("text", "")
+            self.assertIn('data="help_download:device_42"', txt)
+            self.assertIn('data="help_ios:device_42"', txt)
+            self.assertIn('data="help_windows:device_42"', txt)
+            self.assertIn('data="help_split:device_42"', txt)
+            self.assertIn('data="manage_device:42"', txt)
 
     async def test_device_help_rejects_foreign_profile(self):
         callback = MagicMock()

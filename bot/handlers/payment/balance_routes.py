@@ -9,16 +9,12 @@ from utils.datetime_helpers import now_utc
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, Message
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.keyboards import (
-    get_back_button,
-    get_dispute_blocked_keyboard,
-    get_order_invoice_keyboard,
-)
+from bot.keyboards import make_rich_nav_row
 from utils.support import get_support_url
 from bot.states import BalanceStates
 from config.settings import get_settings
@@ -28,7 +24,6 @@ from database.repositories.account_ledger_repo import (
     get_account_history,
     get_account_history_count,
 )
-from bot.keyboards import make_rich_nav_row
 from database.repositories.tariffs_repo import get_active_tariffs
 from integrations.payment_gateways.base import PaymentCreationAmbiguousError
 from services.maintenance_service import MaintenanceService
@@ -152,7 +147,6 @@ async def _render_balance(
     trigger_message_id: int | None = None,
     message_effect_id: str | None = None,
     force_new: bool = False,
-    custom_keyboard: InlineKeyboardMarkup | None = None,
 ) -> None:
     snapshot = await get_account_balance(session, user_id=user.id)
     history = await get_account_history(session, user_id=user.id, limit=5)
@@ -195,6 +189,45 @@ async def _render_balance(
         trigger_message_id=trigger_message_id,
         message_effect_id=message_effect_id,
         force_new=force_new,
+    )
+
+
+def _build_rich_topup_invoice_actions(
+    order_id: str | int,
+    price: int,
+    payment_url: str,
+    support_url: str | None = None,
+) -> str:
+    support_button = (
+        "\n"
+        + make_rich_button_row(
+            make_rich_button(texts.BTN_SUPPORT, url=support_url)
+        )
+        if support_url
+        else ""
+    )
+    return (
+        "\n"
+        + make_rich_button_row(
+            make_rich_button(
+                texts.BTN_PAYMENT_PAY_ORDER.format(price=price),
+                url=payment_url or "",
+                style="success",
+            )
+        )
+        + "\n"
+        + make_rich_button_row(
+            make_rich_button(
+                texts.BTN_PAYMENT_CHECK,
+                callback_data=f"order_check:{order_id}",
+                style="primary",
+            ),
+            make_rich_button(
+                texts.BTN_PAYMENT_CANCEL,
+                callback_data=f"order_cancel:{order_id}",
+            ),
+        )
+        + support_button
     )
 
 
@@ -242,8 +275,8 @@ async def _create_and_render_topup(
             await render_hub(
                 bot,
                 chat_id,
-                _topup_errors()["topup_blocked"],
-                get_back_button(back_to),
+                f"{_topup_errors()['topup_blocked']}\n{make_rich_nav_row(back_to)}",
+                reply_markup=None,
             )
             return
 
@@ -251,11 +284,15 @@ async def _create_and_render_topup(
             support_url = get_support_url(
                 texts.SUPPORT_DISPUTE_GREETING_TEMPLATE.format(telegram_id=user_id)
             )
+            actions = make_rich_button_row(
+                make_rich_button(texts.BTN_SUPPORT, url=support_url, style="primary")
+            )
+            nav = make_rich_nav_row(back_to)
             await render_hub(
                 bot,
                 chat_id,
-                texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
-                get_dispute_blocked_keyboard(back_to, support_url=support_url),
+                f"{texts.PAYMENT_DISPUTE_BLOCKED_NOTICE}\n{actions}\n{nav}",
+                reply_markup=None,
             )
             return
 
@@ -264,8 +301,8 @@ async def _create_and_render_topup(
             await render_hub(
                 bot,
                 chat_id,
-                _topup_errors()["too_many_unfinished_topups"],
-                get_back_button(back_to),
+                f"{_topup_errors()['too_many_unfinished_topups']}\n{make_rich_nav_row(back_to)}",
+                reply_markup=None,
             )
             return
 
@@ -286,8 +323,8 @@ async def _create_and_render_topup(
             await render_hub(
                 bot,
                 chat_id,
-                texts.PAYMENT_CREATION_STATUS_UNKNOWN,
-                get_back_button(back_to),
+                f"{texts.PAYMENT_CREATION_STATUS_UNKNOWN}\n{make_rich_nav_row(back_to)}",
+                reply_markup=None,
             )
             return
         except Exception as exc:
@@ -295,8 +332,8 @@ async def _create_and_render_topup(
             await render_hub(
                 bot,
                 chat_id,
-                texts.ERROR_PAYMENT_SERVICE,
-                get_back_button(back_to),
+                f"{texts.ERROR_PAYMENT_SERVICE}\n{make_rich_nav_row(back_to)}",
+                reply_markup=None,
             )
             return
 
@@ -311,36 +348,11 @@ async def _create_and_render_topup(
                 order_ref=str(order.id)[:8],
             )
         )
-        support_button = (
-            "\n"
-            + make_rich_button_row(
-                make_rich_button(texts.BTN_SUPPORT, url=support_url)
-            )
-            if support_url
-            else ""
-        )
-        invoice_actions = (
-            "\n"
-            + make_rich_button_row(
-                make_rich_button(
-                    texts.BTN_PAYMENT_PAY_ORDER.format(price=int(order.amount_rub)),
-                    url=order.payment_url or "",
-                    style="success",
-                )
-            )
-            + "\n"
-            + make_rich_button_row(
-                make_rich_button(
-                    texts.BTN_PAYMENT_CHECK,
-                    callback_data=f"order_check:{order.id}",
-                    style="primary",
-                ),
-                make_rich_button(
-                    texts.BTN_PAYMENT_CANCEL,
-                    callback_data=f"order_cancel:{order.id}",
-                ),
-            )
-            + support_button
+        invoice_actions = _build_rich_topup_invoice_actions(
+            order_id=order.id,
+            price=int(order.amount_rub),
+            payment_url=order.payment_url or "",
+            support_url=support_url,
         )
         await render_hub(
             bot,
@@ -448,8 +460,8 @@ async def choose_topup_amount(
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            _topup_errors()["topup_blocked"],
-            get_back_button("menu_balance"),
+            f"{_topup_errors()['topup_blocked']}\n{make_rich_nav_row('menu_balance')}",
+            reply_markup=None,
         )
         return
 
@@ -459,11 +471,15 @@ async def choose_topup_amount(
                 telegram_id=getattr(db_user, "telegram_id", None) or callback.from_user.id
             )
         )
+        actions = make_rich_button_row(
+            make_rich_button(texts.BTN_SUPPORT, url=support_url, style="primary")
+        )
+        nav = make_rich_nav_row("menu_balance")
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
-            get_dispute_blocked_keyboard("menu_balance", support_url=support_url),
+            f"{texts.PAYMENT_DISPUTE_BLOCKED_NOTICE}\n{actions}\n{nav}",
+            reply_markup=None,
         )
         return
 
@@ -480,16 +496,17 @@ async def choose_topup_amount(
                 order_ref=str(pending_topup.id)[:8],
             )
         )
+        invoice_actions = _build_rich_topup_invoice_actions(
+            order_id=pending_topup.id,
+            price=int(pending_topup.amount_rub),
+            payment_url=pending_topup.payment_url or "",
+            support_url=support_url,
+        )
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            text,
-            get_order_invoice_keyboard(
-                payment_url=pending_topup.payment_url,
-                order_id=str(pending_topup.id),
-                price=int(pending_topup.amount_rub),
-                support_url=support_url,
-            ),
+            text + invoice_actions,
+            reply_markup=None,
         )
         return
 
@@ -626,14 +643,18 @@ async def request_custom_amount(
         return
     await state.set_state(BalanceStates.enter_custom_amount)
     await state.set_data({})
+    cancel_row = make_rich_button_row(
+        make_rich_button(texts.BTN_PAYMENT_CANCEL, callback_data="menu_balance")
+    )
+    prompt = texts.TOPUP_CUSTOM_AMOUNT_PROMPT.format(
+        minimum=get_settings().BALANCE_MIN_TOPUP_RUB,
+        maximum=get_settings().BALANCE_MAX_CUSTOM_TOPUP_RUB,
+    )
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        texts.TOPUP_CUSTOM_AMOUNT_PROMPT.format(
-            minimum=get_settings().BALANCE_MIN_TOPUP_RUB,
-            maximum=get_settings().BALANCE_MAX_CUSTOM_TOPUP_RUB,
-        ),
-        get_back_button("menu_balance", text=texts.BTN_PAYMENT_CANCEL),
+        f"{prompt}\n{cancel_row}",
+        reply_markup=None,
     )
 
 
@@ -661,6 +682,10 @@ async def accept_custom_amount(
         await state.clear()
         return
 
+    cancel_row = make_rich_button_row(
+        make_rich_button(texts.BTN_PAYMENT_CANCEL, callback_data="menu_balance")
+    )
+
     if not raw.isascii() or not raw.isdigit():
         prompt = texts.TOPUP_CUSTOM_AMOUNT_PROMPT.format(
             minimum=get_settings().BALANCE_MIN_TOPUP_RUB,
@@ -669,8 +694,8 @@ async def accept_custom_amount(
         await render_hub(
             message.bot,
             message.chat.id,
-            f"{texts.TOPUP_INVALID_AMOUNT}\n\n{prompt}",
-            get_back_button("menu_balance", text=texts.BTN_PAYMENT_CANCEL),
+            f"{texts.TOPUP_INVALID_AMOUNT}\n\n{prompt}\n{cancel_row}",
+            reply_markup=None,
         )
         return
     if db_user is None:
@@ -691,8 +716,8 @@ async def accept_custom_amount(
         await render_hub(
             message.bot,
             message.chat.id,
-            f"{err}\n\n{prompt}",
-            get_back_button("menu_balance", text=texts.BTN_PAYMENT_CANCEL),
+            f"{err}\n\n{prompt}\n{cancel_row}",
+            reply_markup=None,
         )
         return
 
@@ -701,8 +726,8 @@ async def accept_custom_amount(
         await render_hub(
             message.bot,
             message.chat.id,
-            f"{err}\n\n{prompt}",
-            get_back_button("menu_balance", text=texts.BTN_PAYMENT_CANCEL),
+            f"{err}\n\n{prompt}\n{cancel_row}",
+            reply_markup=None,
         )
         return
 
@@ -729,8 +754,8 @@ async def resume_topup(
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            _topup_errors()["topup_blocked"],
-            get_back_button("menu_balance"),
+            f"{_topup_errors()['topup_blocked']}\n{make_rich_nav_row('menu_balance')}",
+            reply_markup=None,
         )
         return
 
@@ -740,11 +765,15 @@ async def resume_topup(
                 telegram_id=getattr(db_user, "telegram_id", None) or callback.from_user.id
             )
         )
+        actions = make_rich_button_row(
+            make_rich_button(texts.BTN_SUPPORT, url=support_url, style="primary")
+        )
+        nav = make_rich_nav_row("menu_balance")
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
-            get_dispute_blocked_keyboard("menu_balance", support_url=support_url),
+            f"{texts.PAYMENT_DISPUTE_BLOCKED_NOTICE}\n{actions}\n{nav}",
+            reply_markup=None,
         )
         return
     pending_topup = await _get_pending_topup_order(session, db_user.id)
@@ -768,14 +797,15 @@ async def resume_topup(
             order_ref=str(pending_topup.id)[:8],
         )
     )
+    invoice_actions = _build_rich_topup_invoice_actions(
+        order_id=pending_topup.id,
+        price=int(pending_topup.amount_rub),
+        payment_url=pending_topup.payment_url or "",
+        support_url=support_url,
+    )
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        text,
-        get_order_invoice_keyboard(
-            payment_url=pending_topup.payment_url,
-            order_id=str(pending_topup.id),
-            price=int(pending_topup.amount_rub),
-            support_url=support_url,
-        ),
+        text + invoice_actions,
+        reply_markup=None,
     )

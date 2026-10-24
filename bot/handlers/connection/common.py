@@ -6,11 +6,9 @@ from config.constants import (
 )
 from datetime import timedelta
 
-from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.keyboards import get_back_button
 from database.models import User
 from bot.keyboards import make_rich_nav_row
 from database.repositories.profiles_repo import (
@@ -97,7 +95,7 @@ async def _build_connections_screen(
     profiles: list,
     *,
     read_only: bool = False,
-) -> tuple[str, InlineKeyboardBuilder]:
+) -> tuple[str, None]:
     quota_profiles_count = len([
         p for p in profiles
         if getattr(p, "provisioning_status", "") not in PROFILE_QUOTA_EXCLUDED_STATUSES
@@ -344,8 +342,8 @@ async def _render_connections(
         await render_hub(
             target.bot,
             target.chat.id,
-            texts.ERROR_USER_NOT_FOUND,
-            get_back_button("back_to_main_menu"),
+            f"{texts.ERROR_USER_NOT_FOUND}\n{make_rich_nav_row('back_to_main_menu', include_menu=False)}",
+            reply_markup=None,
         )
         return
 
@@ -415,8 +413,8 @@ async def _render_amnezia_devices(
         await render_hub(
             target.bot,
             target.chat.id,
-            texts.ERROR_USER_NOT_FOUND,
-            get_back_button("back_to_main_menu"),
+            f"{texts.ERROR_USER_NOT_FOUND}\n{make_rich_nav_row('back_to_main_menu', include_menu=False)}",
+            reply_markup=None,
         )
         return
 

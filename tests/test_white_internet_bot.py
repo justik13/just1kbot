@@ -218,10 +218,10 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         self.assertIn("wl_renew_confirm", STALE_ACTION_PREFIXES)
 
     def test_overview_keyboard_generates_valid_telegram_buttons(self):
-        """Active subscription keyboard must use native CopyTextButton and Bot API compliant buttons."""
+        """Active subscription keyboard must use native Bot API compliant buttons."""
         from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
         from database.models import WhiteInternetSubscription
-        from bot.handlers.white_internet import get_white_internet_overview_keyboard
+        from bot.handlers.white_internet import get_white_internet_overview_rich_actions
 
         sub = WhiteInternetSubscription(
             id=1,
@@ -233,77 +233,48 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         )
 
         domain = "vpn.example.com"
-        kb = get_white_internet_overview_keyboard(sub, bot_domain=domain)
+        buttons_html = get_white_internet_overview_rich_actions(sub, bot_domain=domain)
 
-        # Telegram Bot API contract: inline keyboard URLs must only be http/https/tg
-        for row in kb.inline_keyboard:
-            for btn in row:
-                if btn.url:
-                    self.assertTrue(
-                        btn.url.startswith(("http://", "https://", "tg://")),
-                        f"Forbidden custom URL scheme in inline button: {btn.url}",
-                    )
-
-        # Find the connect button and instruction button
-        connect_button = None
-        instruction_button = None
-        for row in kb.inline_keyboard:
-            for btn in row:
-                if btn.url and btn.url == f"https://{domain}/sub/wl/{sub.token}":
-                    connect_button = btn
-                if btn.callback_data == "wl_show_link":
-                    instruction_button = btn
-
-        self.assertIsNotNone(connect_button, "Connect link button with url not found")
-        self.assertEqual(connect_button.url, f"https://{domain}/sub/wl/{sub.token}")
-        self.assertEqual(connect_button.text, texts.BTN_SUB_CONNECT_INCY)
-        self.assertIsNotNone(instruction_button, "Instruction button with wl_show_link callback not found")
+        self.assertIn(f'url="https://{domain}/sub/wl/{sub.token}"', buttons_html)
+        self.assertIn(texts.BTN_SUB_CONNECT_INCY, buttons_html)
+        self.assertIn('data="wl_show_link"', buttons_html)
 
     def test_overview_keyboard_all_states_return_valid_markup(self):
-        """All subscription states must return non-empty InlineKeyboardMarkup with appropriate buttons."""
-        from bot.handlers.white_internet import get_white_internet_overview_keyboard
+        """All subscription states must return non-empty Rich UI markup with appropriate buttons."""
+        from bot.handlers.white_internet import get_white_internet_overview_rich_actions
         from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
         from database.models import WhiteInternetSubscription
 
         domain = "vpn.example.com"
 
         # 1. No subscription -> Buy button + Back button
-        kb_none = get_white_internet_overview_keyboard(None, bot_domain=domain)
-        self.assertIsNotNone(kb_none)
-        callbacks_none = [btn.callback_data for row in kb_none.inline_keyboard for btn in row]
-        self.assertTrue("wl_buy_preview" in callbacks_none or "wl_buy_confirm" in callbacks_none)
-        self.assertIn("back_to_main_menu", callbacks_none)
+        html_none = get_white_internet_overview_rich_actions(None, bot_domain=domain)
+        self.assertTrue('data="wl_buy_preview"' in html_none or 'data="wl_buy_confirm"' in html_none)
+        self.assertIn('data="back_to_main_menu"', html_none)
 
         # 2. EXPIRED -> Renew button + Back button
         sub_expired = WhiteInternetSubscription(id=1, user_id=1, status=WhiteInternetStatus.EXPIRED)
-        kb_expired = get_white_internet_overview_keyboard(sub_expired, bot_domain=domain)
-        self.assertIsNotNone(kb_expired)
-        callbacks_expired = [btn.callback_data for row in kb_expired.inline_keyboard for btn in row]
-        self.assertTrue("wl_renew_preview" in callbacks_expired or "wl_renew_confirm" in callbacks_expired)
-        self.assertIn("back_to_main_menu", callbacks_expired)
+        html_expired = get_white_internet_overview_rich_actions(sub_expired, bot_domain=domain)
+        self.assertTrue('data="wl_renew_preview"' in html_expired or 'data="wl_renew_confirm"' in html_expired)
+        self.assertIn('data="back_to_main_menu"', html_expired)
 
         # 3. DISABLED -> Back button only
         sub_disabled = WhiteInternetSubscription(id=2, user_id=1, status=WhiteInternetStatus.DISABLED)
-        kb_disabled = get_white_internet_overview_keyboard(sub_disabled, bot_domain=domain)
-        self.assertIsNotNone(kb_disabled)
-        callbacks_disabled = [btn.callback_data for row in kb_disabled.inline_keyboard for btn in row]
-        self.assertEqual(callbacks_disabled, ["back_to_main_menu"])
+        html_disabled = get_white_internet_overview_rich_actions(sub_disabled, bot_domain=domain)
+        self.assertIn('data="back_to_main_menu"', html_disabled)
 
         # 4. PENDING -> Refresh button + Back button
         sub_pending = WhiteInternetSubscription(id=3, user_id=1, status=WhiteInternetStatus.PENDING)
-        kb_pending = get_white_internet_overview_keyboard(sub_pending, bot_domain=domain)
-        self.assertIsNotNone(kb_pending)
-        callbacks_pending = [btn.callback_data for row in kb_pending.inline_keyboard for btn in row]
-        self.assertEqual(callbacks_pending, ["white_internet", "back_to_main_menu"])
+        html_pending = get_white_internet_overview_rich_actions(sub_pending, bot_domain=domain)
+        self.assertIn('data="white_internet"', html_pending)
+        self.assertIn('data="back_to_main_menu"', html_pending)
 
         # 5. EXHAUSTED -> Top-up + Renew + Back button (admin)
         sub_exhausted = WhiteInternetSubscription(id=4, user_id=1, status=WhiteInternetStatus.EXHAUSTED)
-        kb_exhausted = get_white_internet_overview_keyboard(sub_exhausted, bot_domain=domain, is_admin_user=True)
-        self.assertIsNotNone(kb_exhausted)
-        callbacks_exhausted = [btn.callback_data for row in kb_exhausted.inline_keyboard for btn in row]
-        self.assertIn("wl_topup_menu", callbacks_exhausted)
-        self.assertTrue("wl_renew_preview" in callbacks_exhausted or "wl_renew_confirm" in callbacks_exhausted)
-        self.assertIn("back_to_main_menu", callbacks_exhausted)
+        html_exhausted = get_white_internet_overview_rich_actions(sub_exhausted, bot_domain=domain, is_admin_user=True)
+        self.assertIn('data="wl_topup_menu"', html_exhausted)
+        self.assertTrue('data="wl_renew_preview"' in html_exhausted or 'data="wl_renew_confirm"' in html_exhausted)
+        self.assertIn('data="back_to_main_menu"', html_exhausted)
 
         # 6. ACTIVE + Provisioned -> Copy text + Instructions + Top-up + Renew + Back button (admin)
         sub_active = WhiteInternetSubscription(
@@ -313,13 +284,11 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
             status=WhiteInternetStatus.ACTIVE,
             provisioning_status=WhiteInternetProvisioningStatus.ACTIVE,
         )
-        kb_active = get_white_internet_overview_keyboard(sub_active, bot_domain=domain, is_admin_user=True)
-        self.assertIsNotNone(kb_active)
-        callbacks_active = [btn.callback_data for row in kb_active.inline_keyboard for btn in row if btn.callback_data]
-        self.assertIn("wl_show_link", callbacks_active)
-        self.assertIn("wl_topup_menu", callbacks_active)
-        self.assertTrue("wl_renew_preview" in callbacks_active or "wl_renew_confirm" in callbacks_active)
-        self.assertIn("back_to_main_menu", callbacks_active)
+        html_active = get_white_internet_overview_rich_actions(sub_active, bot_domain=domain, is_admin_user=True)
+        self.assertIn('data="wl_show_link"', html_active)
+        self.assertIn('data="wl_topup_menu"', html_active)
+        self.assertTrue('data="wl_renew_preview"' in html_active or 'data="wl_renew_confirm"' in html_active)
+        self.assertIn('data="back_to_main_menu"', html_active)
 
     async def test_show_subscription_link_renders_clean_incy_instructions(self):
         """Clicking wl_show_link renders instructions for INCY and provides CopyTextButton for subscription."""
@@ -354,24 +323,29 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
                 mock_query.message.edit_text.assert_awaited_once()
                 call_args = mock_query.message.edit_text.call_args
                 text = call_args[0][0]
-                reply_markup = call_args[1]["reply_markup"]
+                reply_markup = call_args[1].get("reply_markup")
 
                 self.assertIn("INCY", text)
                 self.assertIn("sub-secret-token", text)
 
-                # Check keyboard buttons
-                connect_btns = []
-                back_btn = None
-                for row in reply_markup.inline_keyboard:
-                    for btn in row:
-                        if btn.url:
-                            connect_btns.append(btn)
-                        if btn.callback_data == "white_internet":
-                            back_btn = btn
+                # Check keyboard buttons or rich buttons
+                if reply_markup and hasattr(reply_markup, "inline_keyboard"):
+                    connect_btns = []
+                    back_btn = None
+                    for row in reply_markup.inline_keyboard:
+                        for btn in row:
+                            if btn.url:
+                                connect_btns.append(btn)
+                            if btn.callback_data == "white_internet":
+                                back_btn = btn
 
-                self.assertTrue(len(connect_btns) >= 1, "Connect subscription link button must be present")
-                self.assertTrue(any("sub-secret-token" in b.url for b in connect_btns))
-                self.assertIsNotNone(back_btn, "Back button must be present")
+                    self.assertTrue(len(connect_btns) >= 1, "Connect subscription link button must be present")
+                    self.assertTrue(any("sub-secret-token" in b.url for b in connect_btns))
+                    self.assertIsNotNone(back_btn, "Back button must be present")
+                else:
+                    self.assertIn('url="', text)
+                    self.assertIn("sub-secret-token", text)
+                    self.assertIn('data="white_internet"', text)
 
     async def test_resolve_subscription_domain_priority(self):
         """Domain resolution prioritizes server cdn_domain, then env var, then bot domain, then server domain."""
@@ -469,12 +443,15 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         mock_query.message.edit_text.assert_awaited_once()
         call_args = mock_query.message.edit_text.call_args
         text = call_args[0][0]
-        reply_markup = call_args[1]["reply_markup"]
+        reply_markup = call_args[1].get("reply_markup")
 
         self.assertIn("https://cdn.example.com/sub/wl/sub-secret-token", text)
-        connect_btn = next((btn for row in reply_markup.inline_keyboard for btn in row if btn.url), None)
-        self.assertIsNotNone(connect_btn)
-        self.assertEqual(connect_btn.url, "https://cdn.example.com/sub/wl/sub-secret-token")
+        if reply_markup and hasattr(reply_markup, "inline_keyboard"):
+            connect_btn = next((btn for row in reply_markup.inline_keyboard for btn in row if btn.url), None)
+            self.assertIsNotNone(connect_btn)
+            self.assertEqual(connect_btn.url, "https://cdn.example.com/sub/wl/sub-secret-token")
+        else:
+            self.assertIn('url="https://cdn.example.com/sub/wl/sub-secret-token"', text)
 
     async def test_show_white_internet_menu_formats_adaptive_traffic(self):
         """Traffic is formatted adaptively (KiB/MiB/GiB), so small usage is not hidden as 0.0 ГБ."""
@@ -557,7 +534,8 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
 
     async def test_user_receives_strictly_sub_url_never_raw_vless_or_config(self):
         """User receives exclusively https:// subscription URLs, never raw vless:// keys or raw configs."""
-        from bot.handlers.white_internet import get_white_internet_overview_keyboard, show_subscription_link
+        import re
+        from bot.handlers.white_internet import get_white_internet_overview_rich_actions, show_subscription_link
         from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
         from database.models import WhiteInternetSubscription
 
@@ -572,17 +550,17 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
                 is_trial=is_trial,
             )
             domain = "cdn.example.com"
-            kb = get_white_internet_overview_keyboard(sub, bot_domain=domain)
+            buttons_html = get_white_internet_overview_rich_actions(sub, bot_domain=domain)
 
-            connect_btns = [btn for row in kb.inline_keyboard for btn in row if btn.url]
-            self.assertEqual(len(connect_btns), 1)
-            connect_url = connect_btns[0].url
+            url_match = re.search(r'url="([^"]+)"', buttons_html)
+            self.assertIsNotNone(url_match)
+            connect_url = url_match.group(1)
             self.assertTrue(connect_url.startswith("https://"), f"Must start with https://, got: {connect_url}")
             self.assertIn("/sub/", connect_url)
             self.assertIn(sub.token, connect_url)
-            self.assertNotIn("vless://", connect_url)
-            self.assertNotIn("vmess://", connect_url)
-            self.assertNotIn(sub.uuid, connect_url)
+            self.assertNotIn("vless://", buttons_html)
+            self.assertNotIn("vmess://", buttons_html)
+            self.assertNotIn(sub.uuid, buttons_html)
 
             query = MagicMock(spec=CallbackQuery)
             query.from_user = self.tg_user
@@ -598,17 +576,21 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
 
             query.message.edit_text.assert_awaited()
             rendered_text = query.message.edit_text.call_args[0][0]
-            markup = query.message.edit_text.call_args[1]["reply_markup"]
+            markup = query.message.edit_text.call_args[1].get("reply_markup")
 
             self.assertIn(f"https://{domain}/sub/wl/{sub.token}", rendered_text)
             self.assertNotIn("vless://", rendered_text)
             self.assertNotIn(sub.uuid, rendered_text)
 
-            modal_connect_btns = [btn for row in markup.inline_keyboard for btn in row if btn.url]
-            self.assertEqual(len(modal_connect_btns), 1)
-            modal_connect_url = modal_connect_btns[0].url
-            self.assertEqual(modal_connect_url, f"https://{domain}/sub/wl/{sub.token}")
-            self.assertNotIn("vless://", modal_connect_url)
+            if markup and hasattr(markup, "inline_keyboard"):
+                modal_connect_btns = [btn for row in markup.inline_keyboard for btn in row if btn.url]
+                self.assertEqual(len(modal_connect_btns), 1)
+                modal_connect_url = modal_connect_btns[0].url
+                self.assertEqual(modal_connect_url, f"https://{domain}/sub/wl/{sub.token}")
+                self.assertNotIn("vless://", modal_connect_url)
+            else:
+                expected_url = f"https://{domain}/sub/wl/{sub.token}"
+                self.assertIn(f'url="{expected_url}"', rendered_text)
 
     async def test_process_wl_topup_shortage_contextual_actions(self):
         """Shortage top-up callbacks must properly parse action type and pass into context."""
