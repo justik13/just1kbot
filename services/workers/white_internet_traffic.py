@@ -9,6 +9,7 @@ import logging
 from typing import Any
 
 from aiogram import Bot
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -374,25 +375,30 @@ class WhiteInternetTrafficWorker:
                 if telegram_id:
                     from aiogram.exceptions import TelegramForbiddenError
                     from bot import texts
-                    from utils.telegram import make_rich_button, make_rich_button_row
 
                     alert_text = (
                         texts.WL_TRAFFIC_EXHAUSTED_TRIAL_ALERT
                         if is_sub_trial
                         else texts.WL_TRAFFIC_EXHAUSTED_ALERT
                     )
-                    btn_text = texts.BTN_BUY_ACCESS if is_sub_trial else texts.BTN_WL_TOPUP
-                    btn_data = "white_internet" if is_sub_trial else "wl_topup_menu"
-                    rich_btn = make_rich_button_row(
-                        make_rich_button(btn_text, callback_data=btn_data, style="primary")
-                    )
+                    kb = InlineKeyboardBuilder()
+                    if is_sub_trial:
+                        kb.button(
+                            text=texts.BTN_BUY_ACCESS,
+                            callback_data="white_internet",
+                        )
+                    else:
+                        kb.button(
+                            text=texts.BTN_WL_TOPUP,
+                            callback_data="wl_topup_menu",
+                        )
 
                     for attempt in range(3):
                         try:
                             await self.bot.send_message(
                                 chat_id=telegram_id,
-                                text=f"{alert_text}\n{rich_btn}",
-                                reply_markup=None,
+                                text=alert_text,
+                                reply_markup=kb.as_markup(),
                                 parse_mode="HTML",
                             )
                             break
@@ -425,23 +431,28 @@ class WhiteInternetTrafficWorker:
                 if telegram_id:
                     try:
                         from bot import texts
-                        from utils.telegram import make_rich_button, make_rich_button_row
 
                         alert_text = (
                             texts.WL_TRAFFIC_90P_TRIAL_ALERT
                             if is_sub_trial
                             else texts.WL_TRAFFIC_90P_ALERT
                         )
-                        btn_text = texts.BTN_BUY_ACCESS if is_sub_trial else texts.BTN_WL_TOPUP
-                        btn_data = "white_internet" if is_sub_trial else "wl_topup_menu"
-                        rich_btn = make_rich_button_row(
-                            make_rich_button(btn_text, callback_data=btn_data, style="primary")
-                        )
+                        kb = InlineKeyboardBuilder()
+                        if is_sub_trial:
+                            kb.button(
+                                text=texts.BTN_BUY_ACCESS,
+                                callback_data="white_internet",
+                            )
+                        else:
+                            kb.button(
+                                text=texts.BTN_WL_TOPUP,
+                                callback_data="wl_topup_menu",
+                            )
 
                         await self.bot.send_message(
                             chat_id=telegram_id,
-                            text=f"{alert_text}\n{rich_btn}",
-                            reply_markup=None,
+                            text=alert_text,
+                            reply_markup=kb.as_markup(),
                             parse_mode="HTML",
                         )
                         async with sf() as sess:

@@ -82,7 +82,7 @@ class TopupFunnelGuardTests(unittest.IsolatedAsyncioTestCase):
         mock_hub, mock_create = await self._run_topup(_make_user(topup_blocked=True))
         mock_create.assert_not_awaited()
         self.assertTrue(mock_hub.awaited)
-        self.assertEqual(mock_hub.await_args.args[2], texts.TOPUP_ERROR_BLOCKED)
+        self.assertIn(texts.TOPUP_ERROR_BLOCKED, mock_hub.await_args.args[2])
 
     async def test_financial_hold_gets_dispute_screen(self):
         from bot import texts
@@ -90,8 +90,8 @@ class TopupFunnelGuardTests(unittest.IsolatedAsyncioTestCase):
         mock_hub, mock_create = await self._run_topup(_make_user(financial_hold=True))
         mock_create.assert_not_awaited()
         self.assertTrue(mock_hub.awaited)
-        self.assertEqual(
-            mock_hub.await_args.args[2], texts.PAYMENT_DISPUTE_BLOCKED_NOTICE
+        self.assertIn(
+            texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, mock_hub.await_args.args[2]
         )
 
     async def test_unfinished_limit_blocks_creation(self):

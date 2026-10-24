@@ -43,12 +43,12 @@ class DBSessionMiddleware(BaseMiddleware):
                     except Exception:
                         pass
 
-                    from bot.keyboards import make_rich_nav_row
+                    from bot.keyboards import get_back_button
                     from utils.telegram import spawn_auto_delete
 
                     err_msg = await event.answer(
-                        f"{texts.ERROR_TECHNICAL_MESSAGE}\n{make_rich_nav_row('back_to_main_menu')}",
-                        reply_markup=None,
+                        texts.ERROR_TECHNICAL_MESSAGE,
+                        reply_markup=get_back_button("back_to_main_menu"),
                         parse_mode="HTML",
                     )
                     spawn_auto_delete(

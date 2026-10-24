@@ -9,7 +9,8 @@ import os
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
@@ -87,6 +88,158 @@ def _build_subscription_url(domain: str, token: str, sub_prefix: str | None = No
     if not sub_prefix.startswith("/"):
         sub_prefix = f"/{sub_prefix}"
     return f"https://{domain}{sub_prefix}/{token}"
+
+
+def get_white_internet_overview_keyboard(
+    sub: WhiteInternetSubscription | None,
+    bot_domain: str | None,
+    base_price: int = int(WHITE_INTERNET_BASE_PRICE_RUB),
+    sub_prefix: str | None = None,
+    is_admin_user: bool = False,
+    has_trial_available: bool = False,
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+
+    if sub is None:
+        if has_trial_available:
+            builder.button(
+                text=texts.BTN_WL_ACTIVATE_TRIAL,
+                callback_data="wl_trial_activate",
+                style="success",
+            )
+        builder.button(
+            text=texts.BTN_WL_BUY_ACCESS.format(
+                price=base_price,
+                days=WHITE_INTERNET_BASE_DURATION_DAYS,
+            ),
+            callback_data="wl_buy_preview",
+            style="success" if not has_trial_available else None,
+        )
+        builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
+        builder.adjust(1)
+        return builder.as_markup()
+
+    if sub.status == WhiteInternetStatus.PENDING:
+        builder.button(text=texts.BTN_WL_REFRESH_STATUS, callback_data="white_internet")
+        builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
+        builder.adjust(1)
+        return builder.as_markup()
+
+    if sub.status == WhiteInternetStatus.EXPIRED:
+        sub_limit = max(1, getattr(sub, "device_limit", 1) or 1)
+        renew_price = int(get_white_internet_tier_price(sub_limit, base_price=Decimal(base_price)))
+        if getattr(sub, "is_trial", False):
+            builder.button(
+                text=texts.BTN_WL_CONVERT_TRIAL.format(price=base_price),
+                callback_data="wl_renew_preview",
+                style="success",
+            )
+        else:
+            builder.button(
+                text=texts.BTN_WL_RENEW.format(price=renew_price),
+                callback_data="wl_renew_preview",
+                style="success",
+            )
+        builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
+        builder.adjust(1)
+        return builder.as_markup()
+
+    if sub.status == WhiteInternetStatus.DISABLED:
+        builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
+        builder.adjust(1)
+        return builder.as_markup()
+
+    has_sub_link = bool(
+        sub.status == WhiteInternetStatus.ACTIVE
+        and getattr(sub, "token", None)
+        and bot_domain
+    )
+    if has_sub_link:
+        sub_url = _build_subscription_url(bot_domain, sub.token, sub_prefix=sub_prefix)
+        builder.button(
+            text=texts.BTN_SUB_CONNECT_INCY,
+            url=sub_url,
+            style="success",
+        )
+        builder.button(
+            text=texts.BTN_WL_INCY_INSTRUCTIONS,
+            callback_data="wl_show_link",
+        )
+
+    now = now_utc()
+    is_trial = bool(getattr(sub, "is_trial", False))
+    is_exhausted = sub.status == WhiteInternetStatus.EXHAUSTED
+    can_renew = (
+        is_trial
+        or is_exhausted
+        or sub.expires_at is None
+        or (sub.expires_at - now).total_seconds() <= 30 * 86400
+    )
+    sub_limit = max(1, getattr(sub, "device_limit", 1) or 1)
+    renew_price = int(get_white_internet_tier_price(sub_limit, base_price=Decimal(base_price)))
+
+    if can_renew:
+        if is_trial:
+            builder.button(
+                text=texts.BTN_WL_CONVERT_TRIAL.format(price=base_price),
+                callback_data="wl_renew_preview",
+                style="success",
+            )
+        else:
+            builder.button(
+                text=texts.BTN_WL_RENEW.format(price=renew_price),
+                callback_data="wl_renew_preview",
+            )
+
+    has_topup = False
+    has_add_device = False
+    if not getattr(sub, "is_trial", False):
+        builder.button(text=texts.BTN_WL_TOPUP, callback_data="wl_topup_menu")
+        has_topup = True
+        if sub_limit < WHITE_INTERNET_MAX_DEVICE_LIMIT:
+            builder.button(text=texts.BTN_WL_ADD_DEVICE, callback_data="wl_add_device_menu")
+            has_add_device = True
+
+    has_reset = False
+    if sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED):
+        builder.button(
+            text=texts.BTN_WL_RESET_DEVICES,
+            callback_data="wl_reset_devices",
+            style="danger",
+        )
+        has_reset = True
+
+    builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
+
+    pattern: list[int] = []
+    if has_sub_link:
+        pattern.append(1)
+        pattern.append(1)
+    if can_renew:
+        pattern.append(1)
+    if has_topup and has_add_device:
+        pattern.append(2)
+    elif has_topup:
+        pattern.append(1)
+    if has_reset:
+        pattern.append(1)
+    pattern.append(1)
+
+    builder.adjust(*pattern)
+
+    return builder.as_markup()
+
+
+def get_topup_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for pack_gb, price in sorted(WHITE_INTERNET_TOPUP_PACKS.items()):
+        builder.button(
+            text=texts.BTN_WL_TOPUP_PACK_ITEM.format(gb=pack_gb, price=int(price)),
+            callback_data=f"wl_topup_preview:{pack_gb}",
+        )
+    builder.button(text=texts.BTN_BACK, callback_data="white_internet")
+    builder.adjust(1)
+    return builder.as_markup()
 
 
 def get_white_internet_overview_rich_actions(

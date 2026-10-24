@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import timedelta
 from decimal import Decimal
 import logging
+from typing import Any
 
 from utils.datetime_helpers import now_utc
 
@@ -147,6 +148,7 @@ async def _render_balance(
     trigger_message_id: int | None = None,
     message_effect_id: str | None = None,
     force_new: bool = False,
+    custom_keyboard: Any = None,
 ) -> None:
     snapshot = await get_account_balance(session, user_id=user.id)
     history = await get_account_history(session, user_id=user.id, limit=5)
@@ -185,7 +187,7 @@ async def _render_balance(
         bot,
         chat_id,
         text,
-        reply_markup=None,
+        reply_markup=custom_keyboard,
         trigger_message_id=trigger_message_id,
         message_effect_id=message_effect_id,
         force_new=force_new,

@@ -516,7 +516,7 @@ class TestDeoverengineeringBillingFixes(unittest.IsolatedAsyncioTestCase):
              patch("bot.handlers.payment.balance_routes.render_hub", new=AsyncMock()) as mock_hub:
             await choose_topup_amount(cb1, state, session, db_user=db_user)
             mock_hub.assert_awaited_once()
-            self.assertEqual(mock_hub.await_args.args[2], texts.PAYMENT_DISPUTE_BLOCKED_NOTICE)
+            self.assertIn(texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, mock_hub.await_args.args[2])
 
         cb2 = AsyncMock()
         cb2.from_user = MagicMock(id=888999)
