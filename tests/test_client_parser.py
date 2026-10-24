@@ -7,7 +7,6 @@ import unittest
 from utils.client_parser import parse_client_from_user_agent
 
 
-
 class TestClientParser(unittest.TestCase):
     def test_parse_incy_and_happ(self):
         cases = [
