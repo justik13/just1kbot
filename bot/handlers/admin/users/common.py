@@ -24,6 +24,7 @@ from database.repositories.users_repo import (
     get_user_by_telegram_id,
     get_user_referrals_count,
 )
+from utils.client_parser import parse_client_from_user_agent
 from utils.datetime_helpers import is_expired, now_utc
 from utils.formatters import format_datetime, format_traffic
 from bot.formatters import format_days_left
@@ -517,7 +518,53 @@ async def _get_white_internet_card_info(
             active=active_count, limit=dev_limit
         )
     ]
-    last_seen_ts = max((ts for ts in raw_hwids.values() if isinstance(ts, str)), default=None)
+    cutoff_dt = now - timedelta(hours=white_internet_repo.WHITE_INTERNET_HWID_TTL_HOURS)
+    for hwid, meta_or_ts in sorted(
+        raw_hwids.items(),
+        key=lambda item: str(
+            (item[1].get("last_seen") if isinstance(item[1], dict) else item[1]) or ""
+        ),
+        reverse=True,
+    ):
+        if isinstance(meta_or_ts, dict):
+            raw_ts = meta_or_ts.get("last_seen")
+            model = meta_or_ts.get("model")
+            os_name = meta_or_ts.get("os")
+            client = meta_or_ts.get("client") or parse_client_from_user_agent(meta_or_ts.get("ua"))
+            info_parts = [p for p in (model, os_name) if p]
+            parts = ([f"[{client}]"] if client else []) + info_parts
+            if parts:
+                hwid_display = f"📱 {' '.join(parts)} — {hwid[:8]}…"
+            else:
+                hwid_display = f"📱 {hwid[:8]}…"
+        else:
+            raw_ts = meta_or_ts
+            hwid_display = f"📱 {hwid[:8]}…"
+
+        if isinstance(raw_ts, str):
+            try:
+                from datetime import datetime, timezone
+                dt = datetime.fromisoformat(raw_ts)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                last_conn = format_datetime(dt)
+                is_active = dt >= cutoff_dt
+            except Exception:
+                last_conn = raw_ts
+                is_active = raw_ts >= cutoff_dt.isoformat()
+            status_label = "активно" if is_active else "неактивно"
+            extra_lines.append(f"  • <code>{safe(hwid_display)}</code> — активность: <i>{last_conn}</i> ({status_label})")
+        else:
+            extra_lines.append(f"  • <code>{safe(hwid_display)}</code>")
+
+    last_seen_ts = max(
+        (
+            white_internet_repo.extract_hwid_last_seen(ts)
+            for ts in raw_hwids.values()
+            if white_internet_repo.extract_hwid_last_seen(ts)
+        ),
+        default=None,
+    )
     if last_seen_ts:
         try:
             from datetime import datetime

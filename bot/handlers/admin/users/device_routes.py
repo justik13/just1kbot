@@ -20,6 +20,7 @@ from utils.callbacks import (
     parse_callback_int,
     parse_callback_parts,
 )
+from utils.client_parser import parse_client_from_user_agent
 from utils.datetime_helpers import now_utc
 from bot.formatters import format_admin_breadcrumbs
 from utils.formatters import format_datetime, format_traffic
@@ -159,9 +160,11 @@ async def admin_user_devices(
                 raw_ts = meta_or_ts.get("last_seen")
                 model = meta_or_ts.get("model")
                 os_name = meta_or_ts.get("os")
-                if model or os_name:
-                    info_parts = [p for p in (model, os_name) if p]
-                    hwid_display = f"📱 {' '.join(info_parts)} — {hwid[:8]}…"
+                client = meta_or_ts.get("client") or parse_client_from_user_agent(meta_or_ts.get("ua"))
+                info_parts = [p for p in (model, os_name) if p]
+                parts = ([f"[{client}]"] if client else []) + info_parts
+                if parts:
+                    hwid_display = f"📱 {' '.join(parts)} — {hwid[:8]}…"
                 else:
                     hwid_display = hwid
             else:

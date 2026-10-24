@@ -433,3 +433,71 @@ class TestWhiteInternetWebHwidEnforcement(AioHTTPTestCase):
                             )
                             self.assertEqual(resp.status, 200)
                             mock_register.assert_awaited_once()
+
+    async def test_sub_feed_extracts_device_info_headers_and_client(self):
+        """Verify headers (X-Device-Model, X-Device-Os, X-Ver-Os, User-Agent) extract device_info."""
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 42
+        sub.status = WhiteInternetStatus.ACTIVE
+        sub.user_id = 10
+        sub.expires_at = datetime.now(timezone.utc) + timedelta(days=30)
+        sub.traffic_limit_bytes = 100 * 1024 * 1024
+        sub.traffic_used_bytes = 0
+        sub.traffic_uplink_bytes = 0
+        sub.traffic_downlink_bytes = 0
+        sub.device_limit = 1
+        sub.last_uplink_snapshot = 0
+        sub.last_downlink_snapshot = 0
+        sub.origin_node_id = 1
+        sub.desired_version = 1
+        sub.actual_version = 1
+        sub.last_reconciled_node_epoch = "epoch-xyz"
+
+        server = MagicMock(spec=Server)
+        server.id = 1
+        server.ip = "192.0.2.1"
+        server.port = 443
+        server.protocol = XRAY_PROTOCOL
+        server.health_state = ServerHealthState.ONLINE
+        server.is_active = True
+        server.capabilities = ["xray_origin"]
+        server.xray_instance_epoch = "epoch-xyz"
+        server.extra_data = {"cdn_domain": "cdn.example.com"}
+
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = server
+        mock_session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.example.com"}):
+            with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+                with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                    with patch(
+                        "database.repositories.white_internet_repo.register_hwid_atomic",
+                        new=AsyncMock(return_value=(True, 1, 2)),
+                    ) as mock_register:
+                        resp = await self.client.get(
+                            "/sub/wl/test-token-valid-1234567890abcdef",
+                            headers={
+                                "X-Hwid": "device-valid-1",
+                                "X-Device-Os": "iOS",
+                                "X-Ver-Os": "17.5.1",
+                                "X-Device-Model": "iPhone 15 Pro",
+                                "User-Agent": "INCY/3.7.0",
+                            },
+                        )
+                        self.assertEqual(resp.status, 200)
+                        mock_register.assert_awaited_once()
+                        _, kwargs = mock_register.call_args
+                        self.assertEqual(
+                            kwargs.get("device_info"),
+                            {
+                                "client": "INCY 3.7.0",
+                                "os": "iOS 17.5.1",
+                                "model": "iPhone 15 Pro",
+                                "ua": "INCY/3.7.0",
+                            },
+                        )
