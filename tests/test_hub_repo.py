@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 from database.repositories.hub_repo import (
     add_hub_message_id,
     get_hub_message_ids,
+    get_latest_effect_message_id,
     remove_hub_message_ids,
 )
 
@@ -17,6 +18,16 @@ class HubRepoTests(unittest.IsolatedAsyncioTestCase):
 
         ids = await get_hub_message_ids(mock_session, 12345)
         self.assertEqual(ids, [101, 102, 103])
+        mock_session.execute.assert_called_once()
+
+    async def test_get_latest_effect_message_id(self):
+        mock_session = AsyncMock()
+        mock_res = MagicMock()
+        mock_res.scalar_one_or_none.return_value = 999
+        mock_session.execute.return_value = mock_res
+
+        effect_id = await get_latest_effect_message_id(mock_session, 12345)
+        self.assertEqual(effect_id, 999)
         mock_session.execute.assert_called_once()
 
     async def test_add_hub_message_id(self):

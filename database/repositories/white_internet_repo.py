@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import secrets
+from typing import Any
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -89,6 +90,29 @@ async def get_subscription_by_token(
     ).scalar_one_or_none()
 
 
+
+def parse_hwid_last_seen_dt(val: Any) -> datetime:
+    """Safely parse last_seen from HWID value into an aware UTC datetime for sorting and filtering."""
+    if isinstance(val, dict):
+        raw = val.get("last_seen")
+    else:
+        raw = val
+    if isinstance(raw, datetime):
+        return raw if raw.tzinfo is not None else raw.replace(tzinfo=timezone.utc)
+    if isinstance(raw, (int, float)):
+        try:
+            return datetime.fromtimestamp(raw, tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            pass
+    if isinstance(raw, str):
+        try:
+            dt = datetime.fromisoformat(raw)
+            return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            pass
+    return datetime.min.replace(tzinfo=timezone.utc)
+
+
 def count_active_hwids(
     active_hwids: dict | None,
     now: datetime | None = None,
@@ -98,8 +122,10 @@ def count_active_hwids(
     if not active_hwids or not isinstance(active_hwids, dict):
         return 0
     now = now or now_utc()
-    cutoff = (now - timedelta(hours=ttl_hours)).isoformat()
-    return sum(1 for ts in active_hwids.values() if isinstance(ts, str) and ts >= cutoff)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    cutoff = now - timedelta(hours=ttl_hours)
+    return sum(1 for val in active_hwids.values() if parse_hwid_last_seen_dt(val) >= cutoff)
 
 
 async def get_subscription_by_user_id(
@@ -673,6 +699,7 @@ async def register_hwid_atomic(
     hwid: str,
     max_devices: int,
     ttl_hours: int = WHITE_INTERNET_HWID_TTL_HOURS,
+    device_info: dict | None = None,
 ) -> tuple[bool, int, int]:
     """Atomically registers an HWID for a White Internet subscription under row-level lock.
 
@@ -693,14 +720,16 @@ async def register_hwid_atomic(
     else:
         effective_limit = max(1, max_devices)
 
-    current_hwids: dict[str, str] = dict(sub.active_hwids or {})
+    current_hwids: dict[str, Any] = dict(sub.active_hwids or {})
     now = now_utc()
-    cutoff = (now - timedelta(hours=ttl_hours)).isoformat()
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    cutoff = now - timedelta(hours=ttl_hours)
 
-    # Filter out stale HWIDs
-    active_hwids = {
-        h: ts for h, ts in current_hwids.items()
-        if isinstance(ts, str) and ts >= cutoff
+    # Filter out stale HWIDs (supports both ISO string and enriched dict format)
+    active_hwids: dict[str, Any] = {
+        h: val for h, val in current_hwids.items()
+        if parse_hwid_last_seen_dt(val) >= cutoff
     }
 
     clean_hwid = str(hwid).strip()[:128]
@@ -710,25 +739,68 @@ async def register_hwid_atomic(
 
     # If active devices exceed limit (e.g. after tariff downgrade), prune to effective_limit most recently active
     if len(active_hwids) > effective_limit:
-        sorted_hwids = sorted(active_hwids.items(), key=lambda item: item[1], reverse=True)
+        sorted_hwids = sorted(
+            active_hwids.items(),
+            key=lambda item: parse_hwid_last_seen_dt(item[1]),
+            reverse=True,
+        )
         active_hwids = dict(sorted_hwids[:effective_limit])
 
+    entry: dict[str, Any] = {"last_seen": now.isoformat()}
+    if device_info and isinstance(device_info, dict):
+        for k, v in device_info.items():
+            if isinstance(v, str) and v.strip():
+                entry[k] = v.strip()[:64]
+
     if clean_hwid in active_hwids:
-        # Existing device - refresh timestamp
-        active_hwids[clean_hwid] = now.isoformat()
-        sub.active_hwids = active_hwids
+        # Existing device - refresh activity timestamp and enrich metadata (throttled to 15m)
+        prev = active_hwids[clean_hwid]
+        has_pruned_hwids = len(active_hwids) != len(current_hwids)
+        if isinstance(prev, dict):
+            should_update = True
+            prev_dt = parse_hwid_last_seen_dt(prev)
+            if prev_dt != datetime.min.replace(tzinfo=timezone.utc):
+                if 0 <= (now - prev_dt).total_seconds() < 900 and not has_pruned_hwids:
+                    should_update = False
+            if device_info and isinstance(device_info, dict):
+                for k, v in device_info.items():
+                    if isinstance(v, str) and v.strip() and prev.get(k) != v.strip()[:64]:
+                        should_update = True
+                        break
+
+            if not should_update:
+                return True, len(active_hwids), effective_limit
+
+            updated_entry = {**prev, "last_seen": now.isoformat()}
+            if device_info and isinstance(device_info, dict):
+                for k, v in device_info.items():
+                    if isinstance(v, str) and v.strip():
+                        updated_entry[k] = v.strip()[:64]
+            active_hwids[clean_hwid] = updated_entry
+        elif device_info:
+            active_hwids[clean_hwid] = entry
+        else:
+            prev_dt = parse_hwid_last_seen_dt(prev)
+            if (
+                not has_pruned_hwids
+                and prev_dt != datetime.min.replace(tzinfo=timezone.utc)
+                and 0 <= (now - prev_dt).total_seconds() < 900
+            ):
+                return True, len(active_hwids), effective_limit
+            active_hwids[clean_hwid] = now.isoformat()
+        sub.active_hwids = dict(active_hwids)
         await session.flush()
         return True, len(active_hwids), effective_limit
 
     # New device - check limit
     if len(active_hwids) >= effective_limit:
-        sub.active_hwids = active_hwids
+        sub.active_hwids = dict(active_hwids)
         await session.flush()
         return False, len(active_hwids), effective_limit
 
     # Within limit - register
-    active_hwids[clean_hwid] = now.isoformat()
-    sub.active_hwids = active_hwids
+    active_hwids[clean_hwid] = entry if device_info else now.isoformat()
+    sub.active_hwids = dict(active_hwids)
     await session.flush()
     return True, len(active_hwids), effective_limit
 
@@ -954,9 +1026,13 @@ async def set_device_limit_atomic(
     max_extra_allowed = limit * WHITE_INTERNET_MAX_QUOTA_BYTES
     if (sub.extra_traffic_bytes or 0) > max_extra_allowed:
         sub.extra_traffic_bytes = max_extra_allowed
-    current_hwids: dict[str, str] = dict(sub.active_hwids or {})
+    current_hwids: dict[str, Any] = dict(sub.active_hwids or {})
     if len(current_hwids) > limit:
-        sorted_hwids = sorted(current_hwids.items(), key=lambda item: item[1], reverse=True)
+        sorted_hwids = sorted(
+            current_hwids.items(),
+            key=lambda item: parse_hwid_last_seen_dt(item[1]),
+            reverse=True,
+        )
         sub.active_hwids = dict(sorted_hwids[:limit])
     await session.flush()
     return sub

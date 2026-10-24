@@ -137,6 +137,8 @@ def format_days_left(dt) -> str:
         return texts.TIME_FOREVER
 
     msk_dt = to_msk(dt)
+    if msk_dt is None:
+        return texts.PLACEHOLDER_DASH
     now_msk_dt = now_msk()
     if msk_dt < now_msk_dt:
         return texts.PLACEHOLDER_DASH
@@ -148,3 +150,24 @@ def format_days_left(dt) -> str:
     if days > 0:
         return texts.TIME_DAYS_FORMAT.format(days=days)
     return texts.TIME_HOURS_LEFT.format(hours=hours)
+
+
+def get_server_protocol_badge(server) -> str:
+    """Return protocol badge string for a server ([AWG], [VLESS], [AWG+VLESS], [Origin РФ])."""
+    from database.repositories.servers_repo import (
+        is_awg_capable_server,
+        is_vless_capable_server,
+        is_white_internet_origin_server,
+    )
+
+    has_awg = is_awg_capable_server(server)
+    has_vless = is_vless_capable_server(server)
+    has_wl = is_white_internet_origin_server(server)
+
+    if has_awg and has_vless:
+        return texts.ADMIN_SERVER_PROTO_AWG_VLESS_BADGE
+    if has_vless and not has_wl:
+        return texts.ADMIN_SERVER_PROTO_VLESS_BADGE
+    if has_wl:
+        return texts.ADMIN_SERVER_PROTO_ORIGIN_BADGE
+    return texts.ADMIN_SERVER_PROTO_AWG_BADGE

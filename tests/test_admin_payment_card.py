@@ -19,7 +19,6 @@ class AdminPaymentCardTests(unittest.IsolatedAsyncioTestCase):
         mock_get_payment_by_id,
         mock_is_admin,
     ):
-
         dummy_user = User(
             id=1,
             telegram_id=123456789,
@@ -58,3 +57,7 @@ class AdminPaymentCardTests(unittest.IsolatedAsyncioTestCase):
         mock_get_payment_by_id.assert_awaited_once_with(session, 42)
         callback.message.edit_text.assert_awaited_once()
         callback.answer.assert_awaited_once_with(show_alert=False)
+
+
+if __name__ == '__main__':
+    unittest.main()

@@ -2,9 +2,6 @@
 # Runtime dependencies live in requirements.txt (locked in requirements.lock).
 -r requirements.txt
 
-# SQLite async driver used by scripts/simulate_bot.py standalone testbed.
-aiosqlite>=0.21.0,<1.0.0
-
 # Static analysis and local test runner.
 # ruff pin matches .github/workflows/tests.yml; CI itself runs the suite
 # via unittest discover, pytest is for local use only.

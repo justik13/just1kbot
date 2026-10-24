@@ -27,7 +27,7 @@ def get_post_expiry_keyboard() -> InlineKeyboardMarkup:
 def get_devices_deleted_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text=texts.BTN_BUY_SUBSCRIPTION, callback_data="menu_buy")
-    builder.button(text=texts.BTN_DISMISS, callback_data="dismiss_notification")
+    builder.button(text=texts.BTN_DISMISS_NOTIFICATION, callback_data="dismiss_notification")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -82,8 +82,8 @@ def get_traffic_alert_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
         callback_data=f"admin_user_card:{telegram_id}",
     )
     builder.button(
-        text=texts.BTN_DISMISS_NOTIFICATION,
-        callback_data="dismiss_notification",
+        text=texts.BTN_DISMISS_ALERT,
+        callback_data="admin_dismiss_alert:general",
     )
     builder.adjust(1)
     return builder.as_markup()

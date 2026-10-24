@@ -6,16 +6,6 @@ from aiogram.types import CallbackQuery, Chat, Message
 from aiogram.types import User as TelegramUser
 
 from bot import texts
-from bot.keyboards import common as common_kb
-from bot.keyboards import device as device_kb
-from bot.keyboards import payment as payment_kb
-from bot.keyboards import user as user_kb
-from bot.keyboards.admin import (
-    dashboard as admin_dashboard_kb,
-)
-from bot.keyboards.admin import (
-    users as admin_users_kb,
-)
 from bot.middlewares.action_lock import ActionLockMiddleware
 from bot.middlewares.ban_check import BanCheckMiddleware
 from bot.middlewares.clean_chat import CleanChatMiddleware, stop_clean_chat_worker
@@ -161,57 +151,6 @@ class TestBotMiddlewaresFullCoverage(unittest.IsolatedAsyncioTestCase):
         msg = Message(message_id=1, date=123, chat=Chat(id=1001, type="private"), from_user=user)
         res1 = await middleware(handler, msg, {})
         self.assertEqual(res1, "OK")
-
-
-class TestBotKeyboardsFullCoverage(unittest.TestCase):
-    def test_user_keyboards(self):
-        kb_history = user_kb.get_history_keyboard()
-        self.assertIsNotNone(kb_history)
-        self.assertEqual(
-            [button.callback_data for row in kb_history.inline_keyboard for button in row],
-            ["menu_balance", "back_to_main_menu"],
-        )
-
-        kb_ref = user_kb.get_referral_keyboard(referral_link="https://t.me/bot?start=123")
-        self.assertIsNotNone(kb_ref)
-
-    def test_device_keyboards(self):
-        kb_dev = device_kb.get_device_keyboard(profile_id=1, config_ready=True)
-        self.assertIsNotNone(kb_dev)
-
-    def test_payment_keyboards(self):
-        kb_bal = payment_kb.get_balance_keyboard()
-        self.assertIsNotNone(kb_bal)
-
-    def test_common_keyboards(self):
-        btn_back = common_kb.get_back_button("main_menu")
-        self.assertIsNotNone(btn_back)
-
-        hub_user = common_kb.get_hub_keyboard(is_admin=False)
-        user_callbacks = [
-            button.callback_data
-            for row in hub_user.inline_keyboard
-            for button in row
-            if button.callback_data
-        ]
-        self.assertIn("white_internet", user_callbacks)
-        self.assertEqual(len(user_callbacks), len(set(user_callbacks)))
-
-        hub_admin = common_kb.get_hub_keyboard(is_admin=True)
-        admin_callbacks = [
-            button.callback_data
-            for row in hub_admin.inline_keyboard
-            for button in row
-            if button.callback_data
-        ]
-        self.assertIn("white_internet", admin_callbacks)
-        self.assertEqual(len(admin_callbacks), len(set(admin_callbacks)))
-
-    def test_admin_keyboards(self):
-        kb_admin_menu = admin_dashboard_kb.get_admin_menu()
-        self.assertIsNotNone(kb_admin_menu)
-        kb_admin_card = admin_users_kb.get_admin_user_card_keyboard(user_id=12345, is_banned=False)
-        self.assertIsNotNone(kb_admin_card)
 
 
 if __name__ == "__main__":

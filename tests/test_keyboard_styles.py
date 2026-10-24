@@ -231,6 +231,17 @@ class TestKeyboardRuntimeStyles(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(url.startswith("https://t.me/official_support?text="))
         self.assertIn("999888", url)
 
+    def test_support_handler_keyboard_url_generation(self):
+        """Test _support_keyboard from support handler generates expected contact button URL."""
+        from bot.handlers.support import _support_keyboard
+        from bot import texts
+
+        kb = _support_keyboard(username="official_support", telegram_id=999888)
+        contact_btn = kb.inline_keyboard[0][0]
+        self.assertEqual(contact_btn.text, texts.BTN_CONTACT_SUPPORT)
+        self.assertTrue(contact_btn.url.startswith("https://t.me/official_support?text="))
+        self.assertIn("999888", contact_btn.url)
+
 
 class TestSupportUrlHelpers(unittest.TestCase):
     """Unit tests for utils.support helpers."""

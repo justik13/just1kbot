@@ -86,6 +86,11 @@ class OrderService:
                 metadata=credit_meta,
             )
 
+        # Referral bonus accrues on real-money orders: balance top-ups AND direct
+        # external-gateway purchases (e.g. YooKassa card payments).
+        # Wallet purchases are excluded because they are funded from previously topped-up
+        # (or gifted) balance.
+        if order.service_type == "topup" or order.payment_method != "wallet":
             from services.referral_bonus import grant_referral_bonus_for_topup
 
             grant_result = await grant_referral_bonus_for_topup(
@@ -795,6 +800,16 @@ class OrderService:
                         order.id,
                     )
             else:
+                refund_ref = (
+                    (result.external_id or "").strip()
+                    or f"refund_{order.id}"
+                )
+                if order.payment_method != "wallet":
+                    await reverse_referral_bonus_for_topup(
+                        session,
+                        order_id=order.id,
+                        refund_id=refund_ref,
+                    )
                 if not (order.metadata_ or {}).get("settlement_held"):
                     await FulfillmentService.revoke_order(session, order)
                     logger.info(

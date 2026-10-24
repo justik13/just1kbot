@@ -89,6 +89,45 @@ class BalanceTelegramUXTests(unittest.TestCase):
         self.assertIsNotNone(kb12.inline_keyboard[0][0].disabled)
         self.assertIsNotNone(kb12.inline_keyboard[0][1].disabled)
 
+    def test_audit_keyboard_layout_and_pagination(self):
+        from bot.keyboards.admin.dashboard import get_audit_keyboard
+
+        # Single page: 1 button in 1 row
+        kb_single = get_audit_keyboard(1, 1)
+        self.assertEqual(len(kb_single.inline_keyboard), 1)
+        self.assertEqual(len(kb_single.inline_keyboard[0]), 1)
+        self.assertEqual(kb_single.inline_keyboard[0][0].callback_data, "admin_menu")
+
+        # Multiple pages (page 1 of 3): 2 rows (row 0 has 3 buttons, row 1 has 1 button)
+        kb_multi_p1 = get_audit_keyboard(1, 3)
+        self.assertEqual(len(kb_multi_p1.inline_keyboard), 2)
+        self.assertEqual(len(kb_multi_p1.inline_keyboard[0]), 3)
+        self.assertIsNotNone(kb_multi_p1.inline_keyboard[0][0].disabled)
+        self.assertIsNotNone(kb_multi_p1.inline_keyboard[0][1].disabled)
+        self.assertEqual(kb_multi_p1.inline_keyboard[0][2].callback_data, "admin_audit:2")
+        self.assertEqual(len(kb_multi_p1.inline_keyboard[1]), 1)
+        self.assertEqual(kb_multi_p1.inline_keyboard[1][0].callback_data, "admin_menu")
+
+        # Multiple pages (page 2 of 3): 2 rows
+        kb_multi_p2 = get_audit_keyboard(2, 3)
+        self.assertEqual(len(kb_multi_p2.inline_keyboard), 2)
+        self.assertEqual(len(kb_multi_p2.inline_keyboard[0]), 3)
+        self.assertEqual(kb_multi_p2.inline_keyboard[0][0].callback_data, "admin_audit:1")
+        self.assertIsNotNone(kb_multi_p2.inline_keyboard[0][1].disabled)
+        self.assertEqual(kb_multi_p2.inline_keyboard[0][2].callback_data, "admin_audit:3")
+        self.assertEqual(len(kb_multi_p2.inline_keyboard[1]), 1)
+        self.assertEqual(kb_multi_p2.inline_keyboard[1][0].callback_data, "admin_menu")
+
+        # Multiple pages (page 3 of 3): 2 rows (last page)
+        kb_multi_p3 = get_audit_keyboard(3, 3)
+        self.assertEqual(len(kb_multi_p3.inline_keyboard), 2)
+        self.assertEqual(len(kb_multi_p3.inline_keyboard[0]), 3)
+        self.assertEqual(kb_multi_p3.inline_keyboard[0][0].callback_data, "admin_audit:2")
+        self.assertIsNotNone(kb_multi_p3.inline_keyboard[0][1].disabled)
+        self.assertIsNotNone(kb_multi_p3.inline_keyboard[0][2].disabled)
+        self.assertEqual(len(kb_multi_p3.inline_keyboard[1]), 1)
+        self.assertEqual(kb_multi_p3.inline_keyboard[1][0].callback_data, "admin_menu")
+
     def test_amount_keyboard_always_has_custom_amount(self):
         values = callbacks(get_balance_amounts_keyboard([149, 499]))
         self.assertEqual(

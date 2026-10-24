@@ -1,6 +1,7 @@
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot import texts
 from config.settings import get_settings
@@ -12,6 +13,53 @@ from utils.telegram import (
 )
 
 router = Router()
+
+
+def _support_keyboard(username: str, telegram_id: int | None = None):
+    builder = InlineKeyboardBuilder()
+
+    from utils.support import get_support_url
+
+    text = (
+        texts.SUPPORT_GREETING_TEMPLATE.format(telegram_id=telegram_id)
+        if telegram_id
+        else None
+    )
+    support_url = get_support_url(text=text, username=username)
+
+    builder.button(
+        text=texts.BTN_CONTACT_SUPPORT,
+        url=support_url,
+    )
+
+    builder.button(
+        text=texts.BTN_HELP_INSTRUCTIONS,
+        callback_data="support_help",
+    )
+
+    builder.button(
+        text=texts.SUPPORT,
+        callback_data="faq",
+    )
+
+    builder.button(
+        text=texts.BTN_TOS,
+        url=texts.TOS_AGREEMENT_URL,
+    )
+
+    builder.button(
+        text=texts.BTN_PRIVACY_POLICY,
+        url=texts.PRIVACY_POLICY_URL,
+    )
+
+    builder.button(
+        text=texts.BTN_MAIN_MENU_NAV,
+        callback_data="back_to_main_menu",
+    )
+
+    builder.adjust(1, 2, 2, 1)
+
+    return builder.as_markup()
 
 
 @router.callback_query(F.data == "menu_support")
@@ -65,22 +113,23 @@ async def hub_menu_support(
     )
 
 
-def _extract_device_id(data: str) -> int | None:
-    if ":" in data and "device_" in data:
-        parts = data.split(":")
-        for p in parts:
-            if p.startswith("device_") and p.replace("device_", "").isdigit():
-                return int(p.replace("device_", ""))
-    return None
+def _extract_device_id(data: str | None) -> int | None:
+    if not data or ":device_" not in data:
+        return None
+    try:
+        return int(data.split(":device_")[-1])
+    except (ValueError, TypeError):
+        return None
 
 
 @router.callback_query(F.data.startswith("support_help"))
 async def show_support_help(callback: CallbackQuery):
     await callback.answer(show_alert=False)
     device_id = _extract_device_id(callback.data)
-    suffix = f":device_{device_id}" if device_id else ""
 
     text = texts.SUPPORT_HELP_ROOT_TEXT
+    suffix = f":device_{device_id}" if device_id else ""
+    back_cb = f"manage_device:{device_id}" if device_id else "menu_support"
 
     btn_incy = make_rich_button(texts.BTN_INSTRUCTION_INCY, callback_data=f"help_incy{suffix}", style="primary")
     btn_download = make_rich_button(texts.BTN_DOWNLOAD_AMNEZIA, callback_data=f"help_download{suffix}", style="primary")
@@ -88,8 +137,6 @@ async def show_support_help(callback: CallbackQuery):
     btn_windows = make_rich_button(texts.BTN_INSTRUCTION_WINDOWS, callback_data=f"help_windows{suffix}")
     btn_split = make_rich_button(texts.BTN_SPLIT_TUNNELING, callback_data=f"help_split{suffix}")
     btn_docs = make_rich_button(texts.BTN_AMNEZIA_DOCS, url=texts.AMNEZIA_DOCS)
-
-    back_cb = f"manage_device:{device_id}" if device_id else "menu_support"
     nav_row = make_rich_nav_row(back_cb)
 
     rich_text = (

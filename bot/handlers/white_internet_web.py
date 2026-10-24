@@ -32,6 +32,7 @@ from database.models import Server
 from database.repositories import users_repo, white_internet_repo
 from database.repositories.system_settings_repo import get_system_setting
 from services.white_internet_service import WhiteInternetService
+from utils.client_parser import extract_device_metadata
 from utils.datetime_helpers import now_utc
 from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
 from utils.security import normalize_public_domain
@@ -85,6 +86,9 @@ def _safe_format_device_template(
 def _get_white_internet_update_interval() -> str:
     val = os.getenv("WHITE_INTERNET_PROFILE_UPDATE_INTERVAL", "6").strip()
     return val if val.isdigit() and int(val) > 0 else "6"
+
+
+_extract_device_metadata = extract_device_metadata
 
 
 def _is_browser_request(request: web.Request) -> bool:
@@ -544,9 +548,11 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         if not isinstance(relays, list):
             relays = None
 
-        effective_limit = max(1, getattr(sub, "device_limit", 1) or 1)
+        raw_dev_limit = getattr(sub, "device_limit", None)
+        effective_limit = max(1, raw_dev_limit) if isinstance(raw_dev_limit, int) else 1
+        device_meta = extract_device_metadata(request.headers)
         allowed_hwid, active_count, max_devs = await white_internet_repo.register_hwid_atomic(
-            session, sub.id, raw_hwid, max_devices=effective_limit
+            session, sub.id, raw_hwid, max_devices=effective_limit, device_info=device_meta
         )
         if not allowed_hwid:
             limit_msg = texts.WL_FEED_DEVICE_LIMIT_NOTICE.format(

@@ -52,13 +52,22 @@ async def _update_user_profile_if_changed(
     user: User,
     message: Message,
 ) -> User:
+    if not message.from_user:
+        return user
+
     updates = {}
 
     new_username = message.from_user.username
     new_first_name = message.from_user.first_name
 
-    if new_username is not None and user.username != new_username:
-        updates["username"] = new_username
+    if new_username:
+        clean_username = new_username.strip().lstrip("@")[:32]
+        if clean_username and user.username != clean_username:
+            updates["username"] = clean_username
+        elif not clean_username and user.username is not None:
+            updates["username"] = None
+    elif user.username is not None:
+        updates["username"] = None
 
     if new_first_name is not None and user.first_name != new_first_name:
         updates["first_name"] = new_first_name
@@ -148,11 +157,18 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
         p for p in profiles
         if getattr(p, "provisioning_status", "") not in PROFILE_QUOTA_EXCLUDED_STATUSES
     ])
+    vless_hwid_count = 0
     try:
-        vless_hwid_count = await vless_subscription_repo.get_active_hwid_count(session, db_user.id)
-        if not isinstance(vless_hwid_count, int):
-            vless_hwid_count = 0
-    except Exception:
+        async with session.begin_nested():
+            cnt = await vless_subscription_repo.get_active_hwid_count(session, db_user.id)
+            if isinstance(cnt, int):
+                vless_hwid_count = cnt
+    except Exception as e:
+        logger.warning(
+            "Failed to resolve active VLESS HWID count for user %s: %s",
+            getattr(db_user, "id", None),
+            e,
+        )
         vless_hwid_count = 0
 
     devices_count = quota_profiles_count + vless_hwid_count
@@ -169,23 +185,32 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
             0,
             (wi_sub.traffic_used_bytes or 0) - (wi_sub.traffic_overage_bytes or 0),
         )
-        rem_bytes = max(0, total_quota_bytes - used_quota_bytes)
-        rem_gb = rem_bytes / (1024 ** 3)
+        used_gb = used_quota_bytes / (1024 ** 3)
         tot_gb = total_quota_bytes / (1024 ** 3)
 
-        rem_str = f"{rem_gb:.1f}" if rem_gb < 100 else f"{int(rem_gb)}"
+        if used_gb == 0:
+            used_str = "0"
+        elif 0 < used_gb < 0.1:
+            used_str = "<0.1"
+        elif used_gb < 100 and (used_gb % 1 != 0):
+            used_str = f"{used_gb:.1f}"
+        else:
+            used_str = f"{int(round(used_gb))}"
+
         tot_str = f"{tot_gb:.1f}" if tot_gb % 1 != 0 else f"{int(tot_gb)}"
 
         expiry_str = format_subscription_date(wi_sub.expires_at) if wi_sub.expires_at else texts.PLACEHOLDER_DASH
         days_str = format_days_left(wi_sub.expires_at) if wi_sub.expires_at else texts.ZERO_DAYS_LABEL
         status_icon = "🔴" if wi_sub.status == WhiteInternetStatus.EXHAUSTED else "🟢"
+        wi_device_limit = max(1, getattr(wi_sub, "device_limit", 1) or 1)
 
         white_internet_line = texts.HUB_WHITE_INTERNET_LINE_FORMAT.format(
             status_icon=status_icon,
             expiry=expiry_str,
             days_left=days_str,
             devices_count=wi_active_cnt,
-            traffic_rem=rem_str,
+            device_limit=wi_device_limit,
+            traffic_used=used_str,
             traffic_total=tot_str,
         )
 

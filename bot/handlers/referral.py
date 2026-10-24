@@ -235,24 +235,36 @@ async def _render_referral_leaderboard(
             is_me = leader_tg_id == db_user.telegram_id
             leader_user = leader_users.get(leader_tg_id)
 
+            open_name: str | None = None
             if leader_user and getattr(leader_user, "show_in_leaderboard", False):
                 if leader_user.username and leader_user.username.strip():
-                    display_name = f"@{safe(leader_user.username.strip())}"
+                    raw_uname = leader_user.username.strip().lstrip("@")[:32]
+                    if raw_uname:
+                        open_name = f"@{safe(raw_uname)}"
+                    elif leader_user.first_name and leader_user.first_name.strip():
+                        fname = leader_user.first_name.strip()
+                        if len(fname) > 20:
+                            fname = fname[:19] + "…"
+                        open_name = safe(fname)
                 elif leader_user.first_name and leader_user.first_name.strip():
                     fname = leader_user.first_name.strip()
                     if len(fname) > 20:
                         fname = fname[:19] + "…"
-                    display_name = safe(fname)
-                else:
-                    display_name = mask_telegram_id(leader_tg_id)
-            else:
-                display_name = mask_telegram_id(leader_tg_id)
+                    open_name = safe(fname)
 
-            user_label = (
-                texts.REFERRAL_LEADERBOARD_USER_YOU.format(masked=display_name)
-                if is_me
-                else texts.REFERRAL_LEADERBOARD_USER_OTHER.format(masked=display_name)
-            )
+            if open_name is not None:
+                user_label = (
+                    texts.REFERRAL_LEADERBOARD_USER_OPEN_YOU.format(name=open_name)
+                    if is_me
+                    else texts.REFERRAL_LEADERBOARD_USER_OPEN.format(name=open_name)
+                )
+            else:
+                masked_id = mask_telegram_id(leader_tg_id)
+                user_label = (
+                    texts.REFERRAL_LEADERBOARD_USER_YOU.format(masked=masked_id)
+                    if is_me
+                    else texts.REFERRAL_LEADERBOARD_USER_OTHER.format(masked=masked_id)
+                )
             rows.append(
                 f"<tr><td>{medal.strip() or pos}</td><td>{user_label}</td><td><b>{count}</b></td></tr>"
             )
@@ -271,7 +283,7 @@ async def _render_referral_leaderboard(
 
     is_anonymous = not bool(getattr(db_user, "show_in_leaderboard", False))
     anon_text = texts.BTN_REFERRAL_SHOW_NAME if is_anonymous else texts.BTN_REFERRAL_HIDE_NAME
-    anon_btn = make_rich_button(anon_text, callback_data="toggle_ref_anon", style="primary")
+    anon_btn = make_rich_button(anon_text, callback_data="referral_toggle_anonymity", style="primary")
     nav_row = make_rich_nav_row("menu_referral")
     rendered += f"\n{make_rich_button_row(anon_btn)}\n{nav_row}"
 
@@ -327,8 +339,15 @@ async def referral_toggle_anonymity(
     if callback.from_user:
         raw_username = callback.from_user.username
         raw_first_name = callback.from_user.first_name
-        if raw_username and raw_username != getattr(db_user, "username", None):
-            update_kwargs["username"] = raw_username
+        if raw_username:
+            clean_username = raw_username.strip().lstrip("@")[:32]
+            if clean_username and clean_username != getattr(db_user, "username", None):
+                update_kwargs["username"] = clean_username
+            elif not clean_username and getattr(db_user, "username", None) is not None:
+                update_kwargs["username"] = None
+        elif getattr(db_user, "username", None) is not None:
+            update_kwargs["username"] = None
+
         if raw_first_name and raw_first_name != getattr(db_user, "first_name", None):
             update_kwargs["first_name"] = raw_first_name
 
@@ -381,11 +400,15 @@ async def show_referrals_list(
         start_idx = (page - 1) * page_size
         rendered = texts.REFERRAL_LIST_HEADER
         for idx, referral in enumerate(page_referrals, start=start_idx + 1):
-            safe_user = (
-                f"@{safe(referral.username)}"
-                if referral.username
-                else texts.USER_ID_LABEL.format(user_id=referral.telegram_id)
-            )
+            if referral.username and referral.username.strip():
+                clean_ref_uname = referral.username.strip().lstrip("@")[:32]
+                safe_user = (
+                    f"@{safe(clean_ref_uname)}"
+                    if clean_ref_uname
+                    else texts.USER_ID_LABEL.format(user_id=referral.telegram_id)
+                )
+            else:
+                safe_user = texts.USER_ID_LABEL.format(user_id=referral.telegram_id)
             created_str = referral.created_at.strftime("%d.%m.%Y") if referral.created_at else ""
             rendered += texts.REFERRAL_LIST_ITEM_FORMAT.format(idx=idx, user=safe_user, date=created_str)
 

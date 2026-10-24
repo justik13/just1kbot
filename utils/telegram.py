@@ -591,6 +591,27 @@ def sanitize_reply_markup(reply_markup: InlineKeyboardMarkup | None) -> InlineKe
         else:
             sanitized_rows.append(sanitized_row)
 
+    # 5. Check total buttons: cap at 100 buttons to satisfy Telegram Bot API maximum
+    total_buttons = sum(len(row) for row in sanitized_rows)
+    if total_buttons > 100:
+        has_changes = True
+        logger.error(
+            "KEYBOARD_BUTTON_OVERFLOW: Sanitized keyboard has %s buttons (capped at 100)",
+            total_buttons,
+        )
+        capped_rows: list[list[InlineKeyboardButton]] = []
+        buttons_kept = 0
+        for row in sanitized_rows:
+            if buttons_kept + len(row) <= 100:
+                capped_rows.append(row)
+                buttons_kept += len(row)
+            else:
+                remaining = 100 - buttons_kept
+                if remaining > 0:
+                    capped_rows.append(row[:remaining])
+                break
+        sanitized_rows = capped_rows
+
     if not has_changes:
         return reply_markup
 

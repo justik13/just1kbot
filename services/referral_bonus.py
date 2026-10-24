@@ -174,9 +174,12 @@ async def is_first_topup_eligible(
     order_count = await session.scalar(
         select(func.count(Order.id)).where(
             Order.user_id == user_id,
-            Order.service_type == "topup",
             Order.status == "paid",
             Order.amount_rub >= REFERRAL_ACTIVE_MIN_TOPUP_RUB,
+            or_(
+                Order.service_type == "topup",
+                Order.payment_method != "wallet",
+            ),
         )
     )
     return (count or 0) == 0 and (order_count or 0) == 0

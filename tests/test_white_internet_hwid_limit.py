@@ -433,3 +433,362 @@ class TestWhiteInternetWebHwidEnforcement(AioHTTPTestCase):
                             )
                             self.assertEqual(resp.status, 200)
                             mock_register.assert_awaited_once()
+
+    async def test_sub_feed_extracts_device_info_headers_and_client(self):
+        """Verify headers (X-Device-Model, X-Device-Os, X-Ver-Os, User-Agent) extract device_info."""
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 42
+        sub.status = WhiteInternetStatus.ACTIVE
+        sub.user_id = 10
+        sub.expires_at = datetime.now(timezone.utc) + timedelta(days=30)
+        sub.traffic_limit_bytes = 100 * 1024 * 1024
+        sub.traffic_used_bytes = 0
+        sub.traffic_uplink_bytes = 0
+        sub.traffic_downlink_bytes = 0
+        sub.device_limit = 1
+        sub.last_uplink_snapshot = 0
+        sub.last_downlink_snapshot = 0
+        sub.origin_node_id = 1
+        sub.desired_version = 1
+        sub.actual_version = 1
+        sub.last_reconciled_node_epoch = "epoch-xyz"
+
+        server = MagicMock(spec=Server)
+        server.id = 1
+        server.ip = "192.0.2.1"
+        server.port = 443
+        server.protocol = XRAY_PROTOCOL
+        server.health_state = ServerHealthState.ONLINE
+        server.is_active = True
+        server.capabilities = ["xray_origin"]
+        server.xray_instance_epoch = "epoch-xyz"
+        server.extra_data = {"cdn_domain": "cdn.example.com"}
+
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = server
+        mock_session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.example.com"}):
+            with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+                with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                    with patch(
+                        "database.repositories.white_internet_repo.register_hwid_atomic",
+                        new=AsyncMock(return_value=(True, 1, 2)),
+                    ) as mock_register:
+                        resp = await self.client.get(
+                            "/sub/wl/test-token-valid-1234567890abcdef",
+                            headers={
+                                "X-Hwid": "device-valid-1",
+                                "X-Device-Os": "iOS",
+                                "X-Ver-Os": "17.5.1",
+                                "X-Device-Model": "iPhone 15 Pro",
+                                "User-Agent": "INCY/3.7.0",
+                            },
+                        )
+                        self.assertEqual(resp.status, 200)
+                        mock_register.assert_awaited_once()
+                        _, kwargs = mock_register.call_args
+                        self.assertEqual(
+                            kwargs.get("device_info"),
+                            {
+                                "client": "INCY 3.7.0",
+                                "os": "iOS 17.5.1",
+                                "model": "iPhone 15 Pro",
+                                "ua": "INCY/3.7.0",
+                            },
+                        )
+
+
+class TestWhiteInternetHwidBackwardCompatibility(unittest.IsolatedAsyncioTestCase):
+    def test_count_active_hwids_with_mixed_str_and_dict_and_timezones(self):
+        from database.repositories.white_internet_repo import (
+            count_active_hwids,
+            parse_hwid_last_seen_dt,
+        )
+
+        now = datetime(2026, 10, 24, 12, 0, tzinfo=timezone.utc)
+        active_hwids = {
+            "dev_str_active": (now - timedelta(hours=1)).isoformat(),
+            "dev_str_stale": (now - timedelta(hours=50)).isoformat(),
+            "dev_dict_active": {
+                "last_seen": (now - timedelta(hours=2)).isoformat(),
+                "client": "INCY 3.7.0",
+                "model": "iPhone 17 Pro",
+            },
+            "dev_dict_stale": {
+                "last_seen": (now - timedelta(hours=60)).isoformat(),
+                "client": "Happ 3.6.5",
+            },
+            "dev_tz_offset_active": (now - timedelta(hours=3)).astimezone(timezone(timedelta(hours=3))).isoformat(),
+        }
+
+        count = count_active_hwids(active_hwids, now=now, ttl_hours=48)
+        self.assertEqual(count, 3)
+
+        # Test aware datetime parsing and comparison across timezone offsets
+        dt_utc = parse_hwid_last_seen_dt("2026-10-24T13:00:00+00:00")
+        dt_msk = parse_hwid_last_seen_dt("2026-10-24T15:00:00+03:00")  # 12:00:00 UTC
+        self.assertGreater(dt_utc, dt_msk)
+
+        # Test timestamp overflow handling
+        min_dt = datetime.min.replace(tzinfo=timezone.utc)
+        self.assertEqual(parse_hwid_last_seen_dt(1e25), min_dt)
+        self.assertEqual(parse_hwid_last_seen_dt(-1e25), min_dt)
+
+
+    async def test_set_device_limit_atomic_lru_prunes_correctly_with_mixed_formats(self):
+        from database.repositories.white_internet_repo import set_device_limit_atomic
+
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 99
+        sub.device_limit = 3
+        sub.extra_traffic_bytes = 0
+        sub.is_trial = False
+        sub.active_hwids = {
+            "hwid_oldest": "2026-10-24T10:00:00+00:00",
+            "hwid_middle": {
+                "last_seen": "2026-10-24T11:00:00+00:00",
+                "client": "Happ 3.6.5",
+            },
+            "hwid_newest": {
+                "last_seen": "2026-10-24T12:00:00+00:00",
+                "client": "INCY 3.7.0",
+            },
+        }
+
+        mock_session = AsyncMock()
+        mock_session.get.return_value = sub
+
+        res = await set_device_limit_atomic(mock_session, 99, limit=2)
+        self.assertEqual(res.device_limit, 2)
+        # Should keep newest 2 and prune oldest
+        self.assertIn("hwid_newest", res.active_hwids)
+        self.assertIn("hwid_middle", res.active_hwids)
+        self.assertNotIn("hwid_oldest", res.active_hwids)
+
+
+class TestWhiteInternetHwidThrottling(unittest.IsolatedAsyncioTestCase):
+    """Test suite for 15-minute last_seen activity throttling in White Internet repo."""
+
+    async def test_throttled_when_connecting_within_15_minutes_without_metadata_changes(self):
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 1
+        seen_at = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+        initial_meta = {"last_seen": seen_at, "client": "INCY 3.7.0", "model": "iPhone 15 Pro"}
+        sub.active_hwids = {"device-aaa": dict(initial_meta)}
+
+        mock_session = AsyncMock()
+        mock_session.get.return_value = sub
+
+        allowed, count, max_devs = await white_internet_repo.register_hwid_atomic(
+            mock_session,
+            subscription_id=1,
+            hwid="device-aaa",
+            max_devices=2,
+            device_info={"client": "INCY 3.7.0", "model": "iPhone 15 Pro"},
+        )
+
+        self.assertTrue(allowed)
+        self.assertEqual(count, 1)
+        self.assertEqual(max_devs, 2)
+        # Must be throttled: no flush and timestamp remains unchanged
+        mock_session.flush.assert_not_called()
+        self.assertEqual(sub.active_hwids["device-aaa"]["last_seen"], seen_at)
+
+    async def test_updates_when_connecting_within_15_minutes_with_metadata_changes(self):
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 1
+        seen_at = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+        sub.active_hwids = {
+            "device-aaa": {"last_seen": seen_at, "client": "INCY 3.7.0", "model": "iPhone 15 Pro"}
+        }
+
+        mock_session = AsyncMock()
+        mock_session.get.return_value = sub
+
+        allowed, count, max_devs = await white_internet_repo.register_hwid_atomic(
+            mock_session,
+            subscription_id=1,
+            hwid="device-aaa",
+            max_devices=2,
+            device_info={"client": "INCY 3.8.0", "model": "iPhone 15 Pro"},
+        )
+
+        self.assertTrue(allowed)
+        self.assertEqual(count, 1)
+        mock_session.flush.assert_awaited_once()
+        self.assertEqual(sub.active_hwids["device-aaa"]["client"], "INCY 3.8.0")
+        self.assertNotEqual(sub.active_hwids["device-aaa"]["last_seen"], seen_at)
+
+    async def test_updates_when_connecting_after_15_minutes(self):
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 1
+        seen_at = (datetime.now(timezone.utc) - timedelta(minutes=20)).isoformat()
+        sub.active_hwids = {
+            "device-aaa": {"last_seen": seen_at, "client": "INCY 3.7.0", "model": "iPhone 15 Pro"}
+        }
+
+        mock_session = AsyncMock()
+        mock_session.get.return_value = sub
+
+        allowed, count, max_devs = await white_internet_repo.register_hwid_atomic(
+            mock_session,
+            subscription_id=1,
+            hwid="device-aaa",
+            max_devices=2,
+            device_info={"client": "INCY 3.7.0", "model": "iPhone 15 Pro"},
+        )
+
+        self.assertTrue(allowed)
+        self.assertEqual(count, 1)
+        mock_session.flush.assert_awaited_once()
+        self.assertNotEqual(sub.active_hwids["device-aaa"]["last_seen"], seen_at)
+
+    async def test_throttling_with_timezone_offset_does_not_raise_typeerror(self):
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 1
+        now = datetime.now(timezone.utc)
+        # Timestamp with +03:00 timezone offset, 5 minutes ago in reality
+        msk_tz = timezone(timedelta(hours=3))
+        seen_at_msk = (now - timedelta(minutes=5)).astimezone(msk_tz).isoformat()
+        sub.active_hwids = {
+            "device-aaa": {"last_seen": seen_at_msk, "client": "INCY 3.7.0"}
+        }
+
+        mock_session = AsyncMock()
+        mock_session.get.return_value = sub
+
+        # Should cleanly compute difference without TypeError and throttle
+        allowed, count, max_devs = await white_internet_repo.register_hwid_atomic(
+            mock_session,
+            subscription_id=1,
+            hwid="device-aaa",
+            max_devices=2,
+            device_info={"client": "INCY 3.7.0"},
+        )
+
+        self.assertTrue(allowed)
+        mock_session.flush.assert_not_called()
+
+    async def test_legacy_string_format_throttling(self):
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 1
+        now = datetime.now(timezone.utc)
+        seen_at = (now - timedelta(minutes=5)).isoformat()
+        sub.active_hwids = {"device-aaa": seen_at}
+
+        mock_session = AsyncMock()
+        mock_session.get.return_value = sub
+
+        # Without device_info: throttled
+        allowed, count, max_devs = await white_internet_repo.register_hwid_atomic(
+            mock_session,
+            subscription_id=1,
+            hwid="device-aaa",
+            max_devices=2,
+            device_info=None,
+        )
+        self.assertTrue(allowed)
+        mock_session.flush.assert_not_called()
+
+        # With device_info: upgrades legacy string to enriched dict and flushes
+        allowed2, count2, max_devs2 = await white_internet_repo.register_hwid_atomic(
+            mock_session,
+            subscription_id=1,
+            hwid="device-aaa",
+            max_devices=2,
+            device_info={"client": "Happ 3.6.5"},
+        )
+        self.assertTrue(allowed2)
+        mock_session.flush.assert_awaited_once()
+        self.assertIsInstance(sub.active_hwids["device-aaa"], dict)
+        self.assertEqual(sub.active_hwids["device-aaa"]["client"], "Happ 3.6.5")
+
+    async def test_throttled_device_persists_pruned_stale_devices(self):
+        """Verify that when an existing device reconnects within 15m, any expired devices are still pruned and saved."""
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 1
+        now = datetime.now(timezone.utc)
+        expired_at = (now - timedelta(days=40)).isoformat()
+        seen_at = (now - timedelta(minutes=5)).isoformat()
+        sub.active_hwids = {
+            "device-expired": expired_at,
+            "device-active": {"last_seen": seen_at, "client": "INCY 3.7.0"},
+        }
+
+        mock_session = AsyncMock()
+        mock_session.get.return_value = sub
+
+        allowed, count, max_devs = await white_internet_repo.register_hwid_atomic(
+            mock_session,
+            subscription_id=1,
+            hwid="device-active",
+            max_devices=2,
+            device_info={"client": "INCY 3.7.0"},
+        )
+
+        self.assertTrue(allowed)
+        self.assertEqual(count, 1)
+        mock_session.flush.assert_awaited_once()
+        self.assertNotIn("device-expired", sub.active_hwids)
+        self.assertIn("device-active", sub.active_hwids)
+
+    async def test_throttled_device_persists_excess_devices_after_tariff_downgrade(self):
+        """Verify that limit downgrade excess eviction is saved even if connecting device is within 15m."""
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 1
+        now = datetime.now(timezone.utc)
+        sub.active_hwids = {
+            "device-older": {"last_seen": (now - timedelta(minutes=10)).isoformat()},
+            "device-newer": {"last_seen": (now - timedelta(minutes=2)).isoformat()},
+        }
+
+        mock_session = AsyncMock()
+        mock_session.get.return_value = sub
+
+        # Downgraded to 1 device: device-newer should be kept, device-older pruned and persisted
+        allowed, count, max_devs = await white_internet_repo.register_hwid_atomic(
+            mock_session,
+            subscription_id=1,
+            hwid="device-newer",
+            max_devices=1,
+            device_info=None,
+        )
+
+        self.assertTrue(allowed)
+        self.assertEqual(count, 1)
+        self.assertEqual(max_devs, 1)
+        mock_session.flush.assert_awaited_once()
+        self.assertNotIn("device-older", sub.active_hwids)
+        self.assertIn("device-newer", sub.active_hwids)
+
+    async def test_future_timestamp_resets_on_connection(self):
+        """Verify that an erroneous future timestamp is not frozen by throttling and resets to current server time."""
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 1
+        now = datetime.now(timezone.utc)
+        future_seen = (now + timedelta(hours=2)).isoformat()
+        sub.active_hwids = {
+            "device-aaa": {"last_seen": future_seen, "client": "INCY 3.7.0"}
+        }
+
+        mock_session = AsyncMock()
+        mock_session.get.return_value = sub
+
+        allowed, count, max_devs = await white_internet_repo.register_hwid_atomic(
+            mock_session,
+            subscription_id=1,
+            hwid="device-aaa",
+            max_devices=2,
+            device_info={"client": "INCY 3.7.0"},
+        )
+
+        self.assertTrue(allowed)
+        mock_session.flush.assert_awaited_once()
+        self.assertNotEqual(sub.active_hwids["device-aaa"]["last_seen"], future_seen)
+
+

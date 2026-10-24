@@ -167,17 +167,6 @@ async def dismiss_broadcast_message(callback: CallbackQuery):
             logger.debug(f"dismiss_broadcast_message delete failed: {e}")
 
 
-@router.callback_query(F.data.in_({"menu_profile", "back_to_profile"}))
-async def legacy_profile_callback(
-    callback: CallbackQuery,
-    state: FSMContext,
-    session: AsyncSession,
-    db_user: User | None = None,
-):
-    """Compatibility for old inline keyboards from pre-hub profile versions."""
-    from bot.handlers.start import back_to_main_menu
-    await back_to_main_menu(callback, state, db_user, session)
-
 @router.callback_query()
 async def stale_callback_fallback(
     callback: CallbackQuery,

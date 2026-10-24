@@ -19,6 +19,7 @@ from database.repositories import tariffs_repo, users_repo, vless_subscription_r
 from database.repositories.system_settings_repo import get_system_setting
 from services.subscription import SubscriptionService
 from services.vless_subscription_service import VlessSubscriptionService
+from utils.client_parser import extract_device_metadata
 from utils.datetime_helpers import now_utc
 from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
 
@@ -56,48 +57,7 @@ def _safe_format_vless_template(
 
 
 
-def _extract_device_metadata(request: web.Request) -> dict[str, str]:
-    headers = request.headers
-    raw_os = (
-        headers.get("X-Device-Os")
-        or headers.get("X-Device-OS")
-        or headers.get("X-OS")
-        or headers.get("x-device-os")
-        or ""
-    )
-    raw_ver = (
-        headers.get("X-Ver-Os")
-        or headers.get("X-Ver-OS")
-        or headers.get("x-ver-os")
-        or ""
-    )
-    raw_model = (
-        headers.get("X-Device-Model")
-        or headers.get("X-Device-MODEL")
-        or headers.get("X-Model")
-        or headers.get("x-device-model")
-        or ""
-    )
-    ua = headers.get("User-Agent") or ""
-
-    clean_os = re.sub(r"[^\w\s\.\-]", "", raw_os).strip()[:32]
-    clean_ver = re.sub(r"[^\w\s\.\-]", "", raw_ver).strip()[:16]
-    clean_model = re.sub(r"[^\w\s\.\-,]", "", raw_model).strip()[:48]
-    clean_ua = re.sub(r"[\r\n]", " ", ua).strip()[:64]
-
-    meta: dict[str, str] = {}
-    if clean_os and clean_ver:
-        meta["os"] = f"{clean_os} {clean_ver}"[:32]
-    elif clean_os:
-        meta["os"] = clean_os
-    elif clean_ver:
-        meta["os"] = clean_ver[:32]
-
-    if clean_model:
-        meta["model"] = clean_model
-    if clean_ua:
-        meta["ua"] = clean_ua
-    return meta
+_extract_device_metadata = extract_device_metadata
 
 
 def _get_vless_update_interval() -> str:
@@ -399,7 +359,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             return web.Response(status=503, text="No servers available", headers=retry_headers)
 
         # Atomic HWID registration and state refresh under row locks (populate_existing=True)
-        device_meta = _extract_device_metadata(request)
+        device_meta = extract_device_metadata(request.headers)
         allowed_hwid, active_hwid_count, effective_vless_limit = (
             await vless_subscription_repo.register_hwid_atomic(
                 session, sub.id, raw_hwid, device_info=device_meta

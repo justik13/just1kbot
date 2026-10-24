@@ -275,6 +275,13 @@ async def handle_order_pay_card(
             price=price,
         )
     )
+    support_button = (
+        f'\n<tg-button-row align="center">\n'
+        f'  <tg-button type="url" url="{support_url}">{texts.BTN_SUPPORT}</tg-button>\n'
+        '</tg-button-row>'
+        if support_url
+        else ""
+    )
     invoice_actions = (
         '\n<tg-button-row align="center">\n'
         f'  <tg-button type="url" style="success" url="{order.payment_url or ""}">{texts.BTN_PAYMENT_PAY_ORDER.format(price=price)}</tg-button>\n'
@@ -283,6 +290,7 @@ async def handle_order_pay_card(
         f'  <tg-button type="callback_data" style="primary" data="check_order:{order.id}">{texts.BTN_PAYMENT_CHECK_PAYMENT}</tg-button>\n'
         f'  <tg-button type="callback_data" data="cancel_order:{order.id}">{texts.BTN_PAYMENT_CANCEL_ORDER}</tg-button>\n'
         '</tg-button-row>'
+        + support_button
     )
     await render_hub(
         callback.bot,

@@ -11,6 +11,7 @@ Tests execute shell scenarios in isolated temporary directories:
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,6 +20,7 @@ CLI_PATH = Path(__file__).resolve().parent.parent / "scripts" / "cli.sh"
 SETUP_PATH = Path(__file__).resolve().parent.parent / "scripts" / "setup.sh"
 
 
+@unittest.skipIf(sys.platform == "win32", "Shell behavioural tests run strictly on Linux CI")
 @unittest.skipUnless(shutil.which("bash"), "Bash is required for shell behavioural tests")
 class CliBehaviouralTests(unittest.TestCase):
     def setUp(self):
@@ -1540,6 +1542,8 @@ check_bot_update_on_entry
         self.assertEqual(before, after)
 
 
+@unittest.skipIf(sys.platform == "win32", "Shell behavioural tests run strictly on Linux CI")
+@unittest.skipUnless(shutil.which("bash"), "Bash is required for shell behavioural tests")
 class SetupScriptErrorSemanticsTests(unittest.TestCase):
     """Regression guard: `error()` in scripts/setup.sh must abort the whole
     installer (exit 1). This is what makes the sysctl-overcommit failure path
@@ -1565,6 +1569,8 @@ class SetupScriptErrorSemanticsTests(unittest.TestCase):
         self.assertIn("boom-marker", proc.stderr)
 
 
+@unittest.skipIf(sys.platform == "win32", "Shell behavioural tests run strictly on Linux CI")
+@unittest.skipUnless(shutil.which("bash"), "Bash is required for shell behavioural tests")
 class SetupOvercommitPersistenceTests(unittest.TestCase):
     """`configure_overcommit_memory` must pin the persistence VALUE 1
     UNCONDITIONALLY — including the scenario `runtime=1 + persistent=0`
@@ -1694,6 +1700,8 @@ class SetupOvercommitPersistenceTests(unittest.TestCase):
         self.assertEqual(d_content, "")
 
 
+@unittest.skipIf(sys.platform == "win32", "Shell behavioural tests run strictly on Linux CI")
+@unittest.skipUnless(shutil.which("bash"), "Bash is required for shell behavioural tests")
 class SetupReadinessAndPortGuardTests(unittest.TestCase):
     def setUp(self):
         self.test_dir = tempfile.TemporaryDirectory()
@@ -1910,6 +1918,7 @@ apply_sysctl_hardening
     # -------------------------------------------------------------------------
 
 
+@unittest.skipIf(sys.platform == "win32", "Shell behavioural tests run strictly on Linux CI")
 @unittest.skipUnless(shutil.which("bash"), "Bash is required for shell behavioural tests")
 class SafeUninstallationBehaviouralTests(unittest.TestCase):
     def setUp(self):

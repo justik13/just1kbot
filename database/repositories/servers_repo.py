@@ -26,18 +26,21 @@ CAPACITY_CONSUMING_STATUSES = (
 )
 
 
-def is_xray_server(server) -> bool:
-    """Whether a server belongs to the Xray contour.
+def is_awg_capable_server(server) -> bool:
+    """Whether a server can serve AmneziaWG clients.
 
-    A server counts as Xray when its protocol is the Xray protocol, or when it
-    advertises the ``xray_origin`` capability (relay/origin nodes carry a
-    different protocol but still speak Xray to the edge). This is the single
-    definition of the predicate; callers must not re-derive it from the raw
-    string literals.
+    True if protocol is in AMNEZIA_PROTOCOLS, or 'awg'/'amnezia' capability is present.
     """
-    if getattr(server, "protocol", None) == XRAY_PROTOCOL:
-        return True
-    return XRAY_ORIGIN_CAPABILITY in (getattr(server, "capabilities", None) or [])
+    if not server:
+        return False
+    caps = getattr(server, "capabilities", None) or []
+    if not isinstance(caps, (list, tuple, set)):
+        caps = []
+    raw_proto = getattr(server, "protocol", None)
+    if not isinstance(raw_proto, str) or not raw_proto.strip():
+        raw_proto = XRAY_PROTOCOL if XRAY_ORIGIN_CAPABILITY in caps else AMNEZIA_PROTOCOL
+    proto = raw_proto.strip().lower()
+    return proto in AMNEZIA_PROTOCOLS or any(c in ("awg", "amnezia") for c in caps)
 
 
 def is_vless_capable_server(server) -> bool:
@@ -45,9 +48,39 @@ def is_vless_capable_server(server) -> bool:
 
     True if 'vless' or 'xray_vless' capability is present, or protocol is 'vless'.
     """
-    proto = str(getattr(server, "protocol", "") or "").lower()
+    if not server:
+        return False
     caps = getattr(server, "capabilities", None) or []
-    return "vless" in caps or "xray_vless" in caps or proto == "vless"
+    if not isinstance(caps, (list, tuple, set)):
+        caps = []
+    raw_proto = getattr(server, "protocol", None)
+    proto = raw_proto.strip().lower() if isinstance(raw_proto, str) else ""
+    return "vless" in caps or "xray_vless" in caps or proto == VLESS_PROTOCOL
+
+
+def is_white_internet_origin_server(server) -> bool:
+    """Whether a server is an origin server for White Internet contour."""
+    if not server:
+        return False
+    caps = getattr(server, "capabilities", None) or []
+    if not isinstance(caps, (list, tuple, set)):
+        caps = []
+    raw_proto = getattr(server, "protocol", None)
+    proto = raw_proto.strip().lower() if isinstance(raw_proto, str) else ""
+    if proto in AMNEZIA_PROTOCOLS:
+        return False
+    if XRAY_ORIGIN_CAPABILITY in caps:
+        return True
+    return proto == XRAY_PROTOCOL and not is_vless_capable_server(server)
+
+
+def is_pure_vless_server(server) -> bool:
+    """Whether a server is a pure direct VLESS server (not AWG and not White Internet Origin)."""
+    return (
+        is_vless_capable_server(server)
+        and not is_awg_capable_server(server)
+        and not is_white_internet_origin_server(server)
+    )
 
 
 def get_server_xray_api_url(server) -> str | None:
@@ -70,14 +103,6 @@ def get_server_xray_api_url(server) -> str | None:
         return extra.get("xray_api_url")
 
     return getattr(server, "api_url", None) or extra.get("xray_api_url")
-
-
-
-def is_white_internet_origin_server(server) -> bool:
-    """Whether a server is an origin server for White Internet contour."""
-    caps = getattr(server, "capabilities", None) or []
-    proto = str(getattr(server, "protocol", "") or "").lower()
-    return XRAY_ORIGIN_CAPABILITY in caps or (proto == XRAY_PROTOCOL and "vless" not in caps)
 
 
 def _capacity_consuming_profiles_condition():
@@ -457,7 +482,7 @@ async def get_total_free_ips(session: AsyncSession) -> int:
 
     awg_servers = [
         s for s in active_servers
-        if s.protocol in AMNEZIA_PROTOCOLS and "xray_origin" not in (s.capabilities or [])
+        if is_awg_capable_server(s)
     ]
     if not awg_servers:
         return 0
