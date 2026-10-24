@@ -546,6 +546,12 @@ class TestWhiteInternetHwidBackwardCompatibility(unittest.IsolatedAsyncioTestCas
         dt_msk = parse_hwid_last_seen_dt("2026-10-24T15:00:00+03:00")  # 12:00:00 UTC
         self.assertGreater(dt_utc, dt_msk)
 
+        # Test timestamp overflow handling
+        min_dt = datetime.min.replace(tzinfo=timezone.utc)
+        self.assertEqual(parse_hwid_last_seen_dt(1e25), min_dt)
+        self.assertEqual(parse_hwid_last_seen_dt(-1e25), min_dt)
+
+
     async def test_set_device_limit_atomic_lru_prunes_correctly_with_mixed_formats(self):
         from database.repositories.white_internet_repo import set_device_limit_atomic, update_device_limit_atomic
 

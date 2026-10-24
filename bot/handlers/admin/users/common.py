@@ -540,9 +540,17 @@ async def _get_white_internet_card_info(
         dt = white_internet_repo.parse_hwid_last_seen_dt(meta_or_ts)
         if dt > datetime.min.replace(tzinfo=timezone.utc):
             last_conn = format_datetime(dt)
-            is_active = dt >= cutoff_dt
-            status_label = "активно" if is_active else "неактивно"
-            extra_lines.append(f"  • <code>{safe(hwid_display)}</code> — активность: <i>{last_conn}</i> ({status_label})")
+            status_label = (
+                texts.ADMIN_WI_DEVICE_STATUS_ACTIVE
+                if dt >= cutoff_dt
+                else texts.ADMIN_WI_DEVICE_STATUS_INACTIVE
+            )
+            item_text = texts.ADMIN_WI_DEVICE_ITEM.format(
+                hwid=safe(hwid_display),
+                last_conn=safe(last_conn),
+                status=status_label,
+            )
+            extra_lines.append(f"  {item_text}")
         else:
             extra_lines.append(f"  • <code>{safe(hwid_display)}</code>")
 

@@ -115,7 +115,10 @@ def parse_hwid_last_seen_dt(val: Any) -> datetime:
     if isinstance(raw, datetime):
         return raw if raw.tzinfo is not None else raw.replace(tzinfo=timezone.utc)
     if isinstance(raw, (int, float)):
-        return datetime.fromtimestamp(raw, tz=timezone.utc)
+        try:
+            return datetime.fromtimestamp(raw, tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            pass
     if isinstance(raw, str):
         try:
             dt = datetime.fromisoformat(raw)

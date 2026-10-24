@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 import secrets
 
@@ -25,7 +25,7 @@ from bot.states import AdminStates
 from config.constants import PERMANENT_SUBSCRIPTION_DAYS, WHITE_INTERNET_HWID_TTL_HOURS
 from config.enums import AdminAuditAction, WhiteInternetStatus
 from database.repositories import white_internet_repo
-from database.repositories.white_internet_repo import count_active_hwids
+from database.repositories.white_internet_repo import count_active_hwids, parse_hwid_last_seen_dt
 from database.repositories.idempotency_repo import (
     check_and_record_admin_op,
     make_admin_op_key,
@@ -1407,7 +1407,7 @@ async def admin_wi_devices_view(
 
     raw_hwids = getattr(wi_sub, "active_hwids", None) or {}
     now = now_utc()
-    cutoff = (now - timedelta(hours=WHITE_INTERNET_HWID_TTL_HOURS)).isoformat()
+    cutoff_dt = now - timedelta(hours=WHITE_INTERNET_HWID_TTL_HOURS)
     active_count = count_active_hwids(raw_hwids, now=now)
     dev_limit = max(1, getattr(wi_sub, "device_limit", 1) or 1)
 
@@ -1415,29 +1415,35 @@ async def admin_wi_devices_view(
         devices_list = texts.ADMIN_WI_NO_DEVICES
     else:
         lines = []
-        for hwid, ts in sorted(
+        for hwid, val in sorted(
             raw_hwids.items(),
-            key=lambda item: item[1] if isinstance(item[1], str) else "",
+            key=lambda item: parse_hwid_last_seen_dt(item[1].get("last_seen") if isinstance(item[1], dict) else item[1]),
             reverse=True,
         ):
-            if isinstance(ts, str):
-                try:
-                    dt = datetime.fromisoformat(ts)
-                    last_conn = format_datetime(dt)
-                except Exception:
-                    last_conn = ts
+            raw_ts = val.get("last_seen") if isinstance(val, dict) else val
+            client = val.get("client") if isinstance(val, dict) else None
+            model = val.get("model") if isinstance(val, dict) else None
+            os_name = val.get("os") if isinstance(val, dict) else None
+
+            dt = parse_hwid_last_seen_dt(raw_ts)
+            if dt > datetime.min.replace(tzinfo=timezone.utc):
+                last_conn = format_datetime(dt)
                 status = (
                     texts.ADMIN_WI_DEVICE_STATUS_ACTIVE
-                    if ts >= cutoff
+                    if dt >= cutoff_dt
                     else texts.ADMIN_WI_DEVICE_STATUS_INACTIVE
                 )
             else:
                 last_conn = texts.PLACEHOLDER_DASH
                 status = texts.ADMIN_WI_DEVICE_STATUS_INACTIVE
+
+            parts = [p for p in (f"[{client}]" if client else None, model, os_name) if p]
+            hwid_display = f"📱 {' '.join(parts)} — {hwid[:8]}…" if parts else hwid
+
             lines.append(
                 texts.ADMIN_WI_DEVICE_ITEM.format(
-                    hwid=safe(hwid),
-                    last_conn=last_conn,
+                    hwid=safe(hwid_display),
+                    last_conn=safe(last_conn),
                     status=status,
                 )
             )
