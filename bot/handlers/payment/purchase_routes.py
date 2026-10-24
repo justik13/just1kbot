@@ -27,7 +27,13 @@ from services.order_service import (
     OrderService,
 )
 from utils.datetime_helpers import now_utc
-from utils.telegram import EFFECT_CONFETTI, render_hub, safe_callback_answer
+from utils.telegram import (
+    EFFECT_CONFETTI,
+    make_rich_button,
+    make_rich_button_row,
+    render_hub,
+    safe_callback_answer,
+)
 
 from .common import _render_maintenance
 
@@ -44,13 +50,26 @@ def _uuid_from_callback(data: str) -> uuid.UUID | None:
 
 def _build_purchase_success_actions() -> str:
     return (
-        '\n<tg-button-row align="center">\n'
-        f'  <tg-button type="callback_data" style="success" data="menu_connections">{texts.BTN_PAYMENT_CONNECT_DEVICE}</tg-button>\n'
-        f'  <tg-button type="callback_data" style="primary" data="menu_subscription">{texts.BTN_PAYMENT_TO_SUBSCRIPTION}</tg-button>\n'
-        '</tg-button-row>\n'
-        '<tg-button-row align="center">\n'
-        f'  <tg-button type="callback_data" data="back_to_main_menu">{texts.BTN_MAIN_MENU_NAV}</tg-button>\n'
-        '</tg-button-row>'
+        "\n"
+        + make_rich_button_row(
+            make_rich_button(
+                texts.BTN_PAYMENT_CONNECT_DEVICE,
+                callback_data="menu_connections",
+                style="success",
+            ),
+            make_rich_button(
+                texts.BTN_PAYMENT_TO_SUBSCRIPTION,
+                callback_data="menu_subscription",
+                style="primary",
+            ),
+        )
+        + "\n"
+        + make_rich_button_row(
+            make_rich_button(
+                texts.BTN_MAIN_MENU_NAV,
+                callback_data="back_to_main_menu",
+            )
+        )
     )
 
 
@@ -275,20 +294,34 @@ async def handle_order_pay_card(
         )
     )
     support_button = (
-        f'\n<tg-button-row align="center">\n'
-        f'  <tg-button type="url" url="{support_url}">{texts.BTN_SUPPORT}</tg-button>\n'
-        '</tg-button-row>'
+        "\n"
+        + make_rich_button_row(
+            make_rich_button(texts.BTN_SUPPORT, url=support_url)
+        )
         if support_url
         else ""
     )
     invoice_actions = (
-        '\n<tg-button-row align="center">\n'
-        f'  <tg-button type="url" style="success" url="{order.payment_url or ""}">{texts.BTN_PAYMENT_PAY_ORDER.format(price=price)}</tg-button>\n'
-        '</tg-button-row>\n'
-        '<tg-button-row align="center">\n'
-        f'  <tg-button type="callback_data" style="primary" data="check_order:{order.id}">{texts.BTN_PAYMENT_CHECK}</tg-button>\n'
-        f'  <tg-button type="callback_data" data="cancel_order:{order.id}">{texts.BTN_PAYMENT_CANCEL}</tg-button>\n'
-        '</tg-button-row>'
+        "\n"
+        + make_rich_button_row(
+            make_rich_button(
+                texts.BTN_PAYMENT_PAY_ORDER.format(price=price),
+                url=order.payment_url or "",
+                style="success",
+            )
+        )
+        + "\n"
+        + make_rich_button_row(
+            make_rich_button(
+                texts.BTN_PAYMENT_CHECK,
+                callback_data=f"order_check:{order.id}",
+                style="primary",
+            ),
+            make_rich_button(
+                texts.BTN_PAYMENT_CANCEL,
+                callback_data=f"order_cancel:{order.id}",
+            ),
+        )
         + support_button
     )
     await render_hub(

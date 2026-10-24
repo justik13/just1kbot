@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.keyboards import get_back_button
 from database.models import User
+from bot.keyboards import make_rich_nav_row
 from database.repositories.profiles_repo import (
     PROFILE_QUOTA_EXCLUDED_STATUSES,
     get_user_profiles,
@@ -22,7 +23,6 @@ from utils.formatters import format_traffic
 from utils.telegram import (
     make_rich_button,
     make_rich_button_row,
-    make_rich_nav_row,
     render_hub,
     safe,
 )
@@ -167,8 +167,13 @@ async def _build_connections_screen(
             tariff_name = get_tariff_display_name(device_limit)
 
         sub_button_row = (
-            texts.CONNECTION_SUB_BUTTON_ROW_TEMPLATE.format(sub_url=sub_url)
-            if (sub_url and 1 <= len(sub_url) <= 256)
+            "\n"
+            + make_rich_button_row(
+                make_rich_button(
+                    texts.BTN_SUB_CONNECT_INCY, url=sub_url, style="success"
+                )
+            )
+            if sub_url
             else ""
         )
         rendered = texts.CONNECTION_HUB_ACTIVE_TEXT.format(
@@ -183,8 +188,6 @@ async def _build_connections_screen(
         )
 
         action_rows = []
-        if sub_url and not (1 <= len(sub_url) <= 256):
-            action_rows.append(make_rich_button_row(make_rich_button(texts.BTN_SUB_CONNECT_INCY, url=sub_url, style="success")))
 
         amnezia_btn_text = (
             texts.BTN_AMNEZIA_DEVICES_COUNT.format(count=quota_profiles_count)

@@ -54,6 +54,7 @@ class TestRichButtonsCallbacks(unittest.IsolatedAsyncioTestCase):
 
         repo_root = Path(__file__).resolve().parent.parent
         cb_pattern = re.compile(r'<tg-button\s+[^>]*?type="callback_data"[^>]*?data="([^"]+)"', re.IGNORECASE)
+        mrb_pattern = re.compile(r'make_rich_button\([^)]*?callback_data=["\']([^"\']+)["\']', re.DOTALL)
 
         collected = set()
         for folder in ["bot/texts", "bot/handlers"]:
@@ -66,6 +67,33 @@ class TestRichButtonsCallbacks(unittest.IsolatedAsyncioTestCase):
                         collected.add("menu_subscription")
                     elif "{amt}" in raw_data:
                         collected.add(raw_data.replace("{amt}", "100"))
+                    elif "{order.id}" in raw_data or "{order_id}" in raw_data:
+                        sample_uuid = "123e4567-e89b-12d3-a456-426614174000"
+                        collected.add(re.sub(r"\{order(?:\.id|_id)\}", sample_uuid, raw_data))
+                    elif "{profile_id}" in raw_data or "{profile.id}" in raw_data:
+                        collected.add(re.sub(r"\{profile(?:\.id|_id)\}", "1", raw_data))
+                    elif "{" not in raw_data:
+                        collected.add(raw_data)
+
+                for match in mrb_pattern.finditer(content):
+                    raw_data = match.group(1)
+                    if "ignore" in raw_data or raw_data == "back_to_connections":
+                        # back_to_connections is a standard connections hub router callback
+                        collected.add("back_to_connections")
+                        continue
+                    if "{page" in raw_data:
+                        collected.add(re.sub(r"\{page[^}]*\}", "1", raw_data))
+                    elif "{profile.id}" in raw_data or "{profile_id}" in raw_data:
+                        collected.add(re.sub(r"\{profile(?:\.id|_id)\}", "1", raw_data))
+                    elif "{order.id}" in raw_data or "{order_id}" in raw_data:
+                        collected.add(re.sub(r"\{order(?:\.id|_id)\}", "123e4567-e89b-12d3-a456-426614174000", raw_data))
+                    elif "{shortage}" in raw_data:
+                        collected.add(re.sub(r"\{[^}]*shortage[^}]*\}", "100", raw_data))
+                    elif "{pack_gb}" in raw_data:
+                        collected.add(re.sub(r"\{pack_gb\}", "10", raw_data))
+                    elif "{suffix}" in raw_data:
+                        collected.add(raw_data.replace("{suffix}", ""))
+                        collected.add(raw_data.replace("{suffix}", ":device_1"))
                     elif "{" not in raw_data:
                         collected.add(raw_data)
 
@@ -80,6 +108,8 @@ class TestRichButtonsCallbacks(unittest.IsolatedAsyncioTestCase):
             "ref_leaderboard",
             "wl_buy_base",
             "wl_activate_trial",
+            "check_order",
+            "cancel_order",
         ]
         bot_dir = Path(__file__).resolve().parent.parent / "bot"
         for py_file in bot_dir.rglob("*.py"):

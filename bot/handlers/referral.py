@@ -18,12 +18,12 @@ from database.repositories.users_repo import (
     get_users_by_telegram_ids,
     update_user,
 )
+from bot.keyboards import make_rich_nav_row
 from services.referral_bonus import get_referral_bonus_balance, get_referral_tier
 from utils.formatters import format_datetime
 from utils.telegram import (
     make_rich_button,
     make_rich_button_row,
-    make_rich_nav_row,
     render_hub,
     safe,
 )

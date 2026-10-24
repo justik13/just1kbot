@@ -23,7 +23,7 @@ from database.repositories.users_repo import (
     update_user,
 )
 from services.subscription import SubscriptionService
-from utils.telegram import render_hub, safe
+from utils.telegram import make_rich_button, make_rich_button_row, render_hub, safe
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -244,18 +244,14 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
 
     admin_row = ""
     if is_admin:
-        admin_row = (
-            '\n<tg-button-row align="center">\n'
-            f'  <tg-button type="callback_data" style="primary" data="menu_admin">{texts.BTN_ADMIN}</tg-button>\n'
-            '</tg-button-row>'
+        admin_row = "\n" + make_rich_button_row(
+            make_rich_button(texts.BTN_ADMIN, callback_data="menu_admin", style="primary")
         )
 
     mtproto_row = ""
     if mtproto_url:
-        mtproto_row = (
-            '\n<tg-button-row align="center">\n'
-            f'  <tg-button type="url" url="{mtproto_url}">{texts.BTN_MTPROTO_PROXY}</tg-button>\n'
-            '</tg-button-row>'
+        mtproto_row = "\n" + make_rich_button_row(
+            make_rich_button(texts.BTN_MTPROTO_PROXY, url=mtproto_url)
         )
 
     text = texts.HUB_HEADER.format(

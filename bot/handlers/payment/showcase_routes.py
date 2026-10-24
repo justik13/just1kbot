@@ -33,11 +33,11 @@ from bot.formatters import (
     get_tariff_display_name,
     get_tariff_group_name,
 )
+from bot.keyboards import make_rich_nav_row
 from bot.keyboards.payment import format_dynamic_tariff_button
 from utils.telegram import (
     make_rich_button,
     make_rich_button_row,
-    make_rich_nav_row,
     render_hub,
 )
 

@@ -28,6 +28,7 @@ from database.repositories.account_ledger_repo import (
     get_account_history,
     get_account_history_count,
 )
+from bot.keyboards import make_rich_nav_row
 from database.repositories.tariffs_repo import get_active_tariffs
 from integrations.payment_gateways.base import PaymentCreationAmbiguousError
 from services.maintenance_service import MaintenanceService
@@ -37,7 +38,6 @@ from utils.formatters import format_datetime
 from utils.telegram import (
     make_rich_button,
     make_rich_button_row,
-    make_rich_nav_row,
     render_hub,
     safe_callback_answer,
 )
@@ -312,20 +312,34 @@ async def _create_and_render_topup(
             )
         )
         support_button = (
-            f'\n<tg-button-row align="center">\n'
-            f'  <tg-button type="url" url="{support_url}">{texts.BTN_SUPPORT}</tg-button>\n'
-            '</tg-button-row>'
+            "\n"
+            + make_rich_button_row(
+                make_rich_button(texts.BTN_SUPPORT, url=support_url)
+            )
             if support_url
             else ""
         )
         invoice_actions = (
-            '\n<tg-button-row align="center">\n'
-            f'  <tg-button type="url" style="success" url="{order.payment_url or ""}">{texts.BTN_PAYMENT_PAY_ORDER.format(price=int(order.amount_rub))}</tg-button>\n'
-            '</tg-button-row>\n'
-            '<tg-button-row align="center">\n'
-            f'  <tg-button type="callback_data" style="primary" data="check_order:{order.id}">{texts.BTN_PAYMENT_CHECK}</tg-button>\n'
-            f'  <tg-button type="callback_data" data="cancel_order:{order.id}">{texts.BTN_PAYMENT_CANCEL}</tg-button>\n'
-            '</tg-button-row>'
+            "\n"
+            + make_rich_button_row(
+                make_rich_button(
+                    texts.BTN_PAYMENT_PAY_ORDER.format(price=int(order.amount_rub)),
+                    url=order.payment_url or "",
+                    style="success",
+                )
+            )
+            + "\n"
+            + make_rich_button_row(
+                make_rich_button(
+                    texts.BTN_PAYMENT_CHECK,
+                    callback_data=f"order_check:{order.id}",
+                    style="primary",
+                ),
+                make_rich_button(
+                    texts.BTN_PAYMENT_CANCEL,
+                    callback_data=f"order_cancel:{order.id}",
+                ),
+            )
             + support_button
         )
         await render_hub(

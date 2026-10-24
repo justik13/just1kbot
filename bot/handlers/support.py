@@ -4,11 +4,11 @@ from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot import texts
+from bot.keyboards import make_rich_nav_row
 from config.settings import get_settings
 from utils.telegram import (
     make_rich_button,
     make_rich_button_row,
-    make_rich_nav_row,
     render_hub,
 )
 

@@ -39,6 +39,7 @@ from database.repositories.white_internet_repo import (
     WhiteInternetResetCooldownError,
     count_active_hwids,
 )
+from bot.keyboards import make_rich_nav_row
 from services.maintenance_service import MaintenanceService
 from services.white_internet_service import (
     WhiteInternetService,
@@ -48,7 +49,6 @@ from utils.admin import is_admin
 from utils.telegram import (
     make_rich_button,
     make_rich_button_row,
-    make_rich_nav_row,
     render_hub,
     safe_callback_answer,
 )
@@ -372,7 +372,6 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
             text = texts.WL_OVERVIEW_TRIAL_NO_SUB.format(
                 days=WHITE_INTERNET_TRIAL_DURATION_DAYS,
                 traffic=int(WHITE_INTERNET_TRIAL_TRAFFIC_BYTES / (1024**3)),
-                price=base_price_int,
             )
         else:
             text = texts.WL_OVERVIEW_NO_SUB.format(
