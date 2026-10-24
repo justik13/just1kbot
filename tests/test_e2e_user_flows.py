@@ -254,7 +254,7 @@ class E2EUserFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
             and getattr(r, "text", None) != "🧹"
         )
         content = getattr(req, "text", "") or getattr(getattr(req, "rich_message", None), "html", "")
-        self.assertIn("Главное меню", content)
+        self.assertIn("Личный кабинет", content)
         self.assertNotIn("Добро пожаловать", content)
 
 
