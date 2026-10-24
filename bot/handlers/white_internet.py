@@ -8,6 +8,7 @@ import logging
 import os
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import (
     CallbackQuery,
     InlineKeyboardMarkup,
@@ -426,71 +427,35 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
         if sub.status == WhiteInternetStatus.ACTIVE and not sub_domain:
             text += texts.WL_DOMAIN_UNCONFIGURED_BANNER
 
-        action_rows = []
-        action_rows.append(
-            make_rich_button_row(
-                make_rich_button(texts.BTN_WL_INCY_INSTRUCTIONS, callback_data="wl_show_link", style="primary")
-            )
-        )
-        is_trial = bool(getattr(sub, "is_trial", False))
-        is_exhausted = sub.status == WhiteInternetStatus.EXHAUSTED
-        can_renew = (
-            is_trial
-            or is_exhausted
-            or sub.expires_at is None
-            or (sub.expires_at - now).total_seconds() <= 30 * 86400
-        )
-        sub_limit = max(1, getattr(sub, "device_limit", 1) or 1)
-        renew_price = int(get_white_internet_tier_price(sub_limit, base_price=Decimal(base_price_int)))
-        if can_renew:
-            if is_trial:
-                renew_btn = make_rich_button(
-                    texts.BTN_WL_CONVERT_TRIAL.format(price=base_price_int),
-                    callback_data="wl_renew_preview",
-                    style="success",
-                )
-            else:
-                renew_btn = make_rich_button(
-                    texts.BTN_WL_RENEW.format(price=renew_price),
-                    callback_data="wl_renew_preview",
-                    style="success",
-                )
-            action_rows.append(make_rich_button_row(renew_btn))
-
-        addon_btns = []
-        if not getattr(sub, "is_trial", False):
-            addon_btns.append(make_rich_button(texts.BTN_WL_TOPUP, callback_data="wl_topup_menu"))
-            if effective_device_limit < WHITE_INTERNET_MAX_DEVICE_LIMIT:
-                addon_btns.append(make_rich_button(texts.BTN_WL_ADD_DEVICE, callback_data="wl_add_device_menu"))
-        if addon_btns:
-            action_rows.append(make_rich_button_row(*addon_btns))
-
-        if sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED):
-            action_rows.append(
-                make_rich_button_row(
-                    make_rich_button(texts.BTN_WL_RESET_DEVICES, callback_data="wl_reset_devices", style="danger")
-                )
-            )
-
-        action_rows.append(make_rich_nav_row(include_menu=True))
-        text += "\n" + "\n".join(action_rows)
-
-    if sub is None:
-        text += f"\n{make_rich_nav_row(include_menu=True)}"
-
+    is_admin_user = is_admin(query.from_user.id)
+    kb = get_white_internet_overview_keyboard(
+        sub,
+        sub_domain,
+        base_price=base_price_int,
+        sub_prefix=sub_prefix,
+        is_admin_user=is_admin_user,
+        has_trial_available=has_trial_available,
+    )
     try:
-        await render_hub(
-            query.bot,
-            query.message.chat.id,
-            text,
-            reply_markup=None,
-        )
+        await query.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
         try:
             await query.answer(texts.WL_ALERT_TRAFFIC_UPDATED, show_alert=False)
         except Exception:
             pass
+    except TelegramBadRequest as exc:
+        if "not_modified" in str(exc).lower().replace(" ", "_"):
+            try:
+                await query.answer(texts.WL_ALERT_TRAFFIC_UP_TO_DATE, show_alert=False)
+            except Exception:
+                pass
+        else:
+            logger.warning("TelegramBadRequest editing white internet menu: %s", exc)
+            try:
+                await query.answer()
+            except Exception:
+                pass
     except Exception as exc:
-        logger.debug("Failed render_hub for white_internet: %s", exc)
+        logger.warning("Unexpected error editing white internet menu: %s", exc)
         try:
             await query.answer()
         except Exception:
@@ -1103,17 +1068,21 @@ async def show_subscription_link(query: CallbackQuery, session: AsyncSession):
         return
 
     sub_url = _build_subscription_url(sub_domain, sub.token, sub_prefix=sub_prefix)
-    connect_btn = make_rich_button(texts.BTN_SUB_CONNECT_INCY, url=sub_url, style="success")
-    nav_row = make_rich_nav_row("white_internet")
 
-    rich_text = (
-        texts.WL_SHOW_LINK_TEXT.format(url=html.escape(sub_url))
-        + "\n"
-        + make_rich_button_row(connect_btn)
-        + "\n"
-        + nav_row
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text=texts.BTN_SUB_CONNECT_INCY,
+        url=sub_url,
+        style="success",
     )
-    await render_hub(query.bot, query.message.chat.id, rich_text, reply_markup=None)
+    kb.button(text=texts.BTN_BACK, callback_data="white_internet")
+    kb.adjust(1)
+
+    await query.message.edit_text(
+        texts.WL_SHOW_LINK_TEXT.format(url=html.escape(sub_url)),
+        reply_markup=kb.as_markup(),
+        parse_mode="HTML",
+    )
 
 
 @router.callback_query(F.data == "wl_reset_devices")

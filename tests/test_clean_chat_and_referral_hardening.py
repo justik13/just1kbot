@@ -336,9 +336,12 @@ class TestReferralPaginationClamping(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Всего приглашено: 21", text)
 
         # Verify pagination button shows 3/3
-        buttons = [btn for row in markup.inline_keyboard for btn in row]
-        page_btn = next((b for b in buttons if "3/3" in b.text), None)
-        self.assertIsNotNone(page_btn, "Pagination indicator must show 3/3")
+        if markup and getattr(markup, "inline_keyboard", None):
+            buttons = [btn for row in markup.inline_keyboard for btn in row]
+            page_btn = next((b for b in buttons if "3/3" in b.text), None)
+            self.assertIsNotNone(page_btn, "Pagination indicator must show 3/3")
+        else:
+            self.assertIn("3/3", text)
 
 
 class TestShareButtonAndKeyboards(unittest.TestCase):

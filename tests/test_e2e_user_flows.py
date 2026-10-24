@@ -211,7 +211,8 @@ class E2EUserFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
             if r.__class__.__name__ == "EditMessageText"
         )
         self.assertEqual(req.__class__.__name__, "EditMessageText")
-        self.assertIn("Баланс:", req.text)
+        content = req.text or getattr(getattr(req, "rich_message", None), "html", "")
+        self.assertIn("Баланс", content)
         
         # 3. User tries to buy tariff from showcase
         update = self._create_callback_update("payment_showcase")
@@ -221,7 +222,8 @@ class E2EUserFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
             for r in reversed(self.session.requests)
             if r.__class__.__name__ == "EditMessageText"
         )
-        self.assertIn("Базовый", str(req.reply_markup))
+        buttons_content = str(req.reply_markup) + str(getattr(getattr(req, "rich_message", None), "html", ""))
+        self.assertIn("Базовый", buttons_content)
         
         # Emulate clicking on the tariff to quote
         update = self._create_callback_update(f"select_tariff:{self.tariff.id}:showcase")

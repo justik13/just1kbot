@@ -893,24 +893,36 @@ class TestWhiteInternetHubNavigation(unittest.IsolatedAsyncioTestCase):
         with patch("bot.handlers.support.render_hub", new_callable=AsyncMock) as mock_render:
             await show_support_help(query)
             mock_render.assert_awaited_once()
-            _, _, rendered_text, markup = mock_render.call_args[0]
-            self.assertEqual(rendered_text, texts.SUPPORT_HELP_ROOT_TEXT)
-            all_buttons = [btn for row in markup.inline_keyboard for btn in row]
-            incy_btn = next((b for b in all_buttons if b.text == texts.BTN_INSTRUCTION_INCY), None)
-            self.assertIsNotNone(incy_btn)
-            self.assertEqual(incy_btn.callback_data, "help_incy")
+            call_args = mock_render.call_args
+            rendered_text = call_args[0][2]
+            markup = call_args[0][3] if len(call_args[0]) > 3 else call_args[1].get("reply_markup")
+            self.assertIn(texts.SUPPORT_HELP_ROOT_TEXT, rendered_text)
+            if markup and getattr(markup, "inline_keyboard", None):
+                all_buttons = [btn for row in markup.inline_keyboard for btn in row]
+                incy_btn = next((b for b in all_buttons if b.text == texts.BTN_INSTRUCTION_INCY), None)
+                self.assertIsNotNone(incy_btn)
+                self.assertEqual(incy_btn.callback_data, "help_incy")
+            else:
+                self.assertIn(texts.BTN_INSTRUCTION_INCY, rendered_text)
+                self.assertIn('data="help_incy"', rendered_text)
 
         # Test show_help_incy callback
         query.data = "help_incy"
         with patch("bot.handlers.support.render_hub", new_callable=AsyncMock) as mock_render:
             await show_help_incy(query)
             mock_render.assert_awaited_once()
-            _, _, rendered_text, markup = mock_render.call_args[0]
-            self.assertEqual(rendered_text, texts.SUPPORT_INCY_INSTRUCTION_TEXT)
-            all_buttons = [btn for row in markup.inline_keyboard for btn in row]
-            wi_btn = next((b for b in all_buttons if b.text == texts.BTN_WHITE_INTERNET), None)
-            self.assertIsNotNone(wi_btn)
-            self.assertEqual(wi_btn.callback_data, "white_internet")
+            call_args = mock_render.call_args
+            rendered_text = call_args[0][2]
+            markup = call_args[0][3] if len(call_args[0]) > 3 else call_args[1].get("reply_markup")
+            self.assertIn(texts.SUPPORT_INCY_INSTRUCTION_TEXT, rendered_text)
+            if markup and getattr(markup, "inline_keyboard", None):
+                all_buttons = [btn for row in markup.inline_keyboard for btn in row]
+                wi_btn = next((b for b in all_buttons if b.text == texts.BTN_WHITE_INTERNET), None)
+                self.assertIsNotNone(wi_btn)
+                self.assertEqual(wi_btn.callback_data, "white_internet")
+            else:
+                self.assertIn(texts.BTN_WHITE_INTERNET, rendered_text)
+                self.assertIn('data="white_internet"', rendered_text)
 
     def test_hub_white_internet_line_emoji_is_unified(self):
         """HUB_WHITE_INTERNET_LINE_FORMAT uses the unified ⚪️ emoji."""

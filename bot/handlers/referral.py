@@ -276,7 +276,7 @@ async def _render_referral_leaderboard(
         rendered += texts.REFERRAL_LEADERBOARD_NOT_RANKED
 
     is_anonymous = not bool(getattr(db_user, "show_in_leaderboard", False))
-    anon_text = texts.BTN_REFERRAL_SHOW_NAME if is_anonymous else texts.BTN_REFERRAL_HIDE_NAME
+    anon_text = texts.BTN_LEADERBOARD_ANONYMOUS_ON if is_anonymous else texts.BTN_LEADERBOARD_ANONYMOUS_OFF
     anon_btn = make_rich_button(anon_text, callback_data="referral_toggle_anonymity", style="primary")
     nav_row = make_rich_nav_row("menu_referral")
     rendered += f"\n{make_rich_button_row(anon_btn)}\n{nav_row}"

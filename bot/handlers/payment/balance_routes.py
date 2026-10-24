@@ -159,23 +159,18 @@ async def _render_balance(
     pending_topup = await _get_pending_topup_order(session, user.id)
 
     rows = [
-        f"<tr><td>Основной:</td><td><b>{int(snapshot.real_available)} ₽</b></td></tr>"
+        texts.BALANCE_ROW_MAIN.format(amount=int(snapshot.real_available))
     ]
     if snapshot.bonus_available > 0:
         rows.append(
-            f"<tr><td>Бонусный:</td><td><b>+{int(snapshot.bonus_available)} ₽ 🎁</b></td></tr>"
+            texts.BALANCE_ROW_BONUS.format(amount=int(snapshot.bonus_available))
         )
     if snapshot.debt > 0:
         rows.append(
-            f"<tr><td>Задолженность:</td><td><b>−{int(snapshot.debt)} ₽</b></td></tr>"
+            texts.BALANCE_ROW_DEBT.format(amount=int(snapshot.debt))
         )
     prefix = f"{notice}\n\n" if notice else ""
-    rich_actions = (
-        '\n<tg-button-row align="center">\n'
-        '  <tg-button type="callback_data" style="success" data="balance_topup">➕ Пополнить счёт</tg-button>\n'
-        '  <tg-button type="callback_data" style="primary" data="balance_history:0">🧾 История</tg-button>\n'
-        '</tg-button-row>'
-    )
+    rich_actions = texts.BALANCE_RICH_ACTIONS
     if pending_topup is not None:
         rich_actions += (
             '\n<tg-button-row align="center">\n'
@@ -184,7 +179,7 @@ async def _render_balance(
         )
     nav_row = make_rich_nav_row(include_menu=True)
     text = (
-        f"{prefix}<p>💰 <b>Баланс</b></p>\n"
+        f"{prefix}{texts.BALANCE_SCREEN_TITLE}"
         f"<table>{''.join(rows)}</table>"
         + texts.BALANCE_HISTORY_SECTION_TITLE
         + _history_lines(history)
@@ -328,7 +323,7 @@ async def _create_and_render_topup(
             f'  <tg-button type="url" style="success" url="{order.payment_url or ""}">{texts.BTN_PAYMENT_PAY_ORDER.format(price=int(order.amount_rub))}</tg-button>\n'
             '</tg-button-row>\n'
             '<tg-button-row align="center">\n'
-            f'  <tg-button type="callback_data" style="primary" data="check_order:{order.id}">{texts.BTN_PAYMENT_CHECK_PAYMENT}</tg-button>\n'
+            f'  <tg-button type="callback_data" style="primary" data="check_order:{order.id}">{texts.BTN_PAYMENT_CHECK}</tg-button>\n'
             f'  <tg-button type="callback_data" data="cancel_order:{order.id}">{texts.BTN_PAYMENT_CANCEL_ORDER}</tg-button>\n'
             '</tg-button-row>'
             + support_button
@@ -563,9 +558,7 @@ async def choose_topup_amount(
         rich_rows.append(
             f'<tg-button-row align="center">\n  {" ".join(btn_elements[i:i+3])}\n</tg-button-row>'
         )
-    rich_rows.append(
-        '<tg-button-row align="center">\n  <tg-button type="callback_data" style="primary" data="balance_custom_amount">✏️ Другая сумма</tg-button>\n</tg-button-row>'
-    )
+    rich_rows.append(texts.BALANCE_CUSTOM_AMOUNT_ROW)
     rich_rows.append(make_rich_nav_row("menu_balance"))
     rich_presets = "\n" + "\n".join(rich_rows)
 

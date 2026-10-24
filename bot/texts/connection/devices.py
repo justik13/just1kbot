@@ -210,7 +210,7 @@ AMNEZIA_SCREEN_HINT_LIMIT = "\n\n⚠️ <i>Общий лимит устройс�
 AMNEZIA_SCREEN_TEXT = """<p>🛡 <b>Устройства Amnezia</b></p>
 <p><i>Подключение и файлы конфигураций для приложений Amnezia.</i></p>
 <table>
-  <tr><td>Устройства:</td><td><b>{active} / {limit}</b></td></tr>
+  <tr><td>Устройства:</td><td><b>{active} из {limit}</b></td></tr>
   <tr><td>Разбивка:</td><td>по ссылке: {vless_count} · Amnezia: {amnezia_count}</td></tr>
 </table>
 {profiles_block}
@@ -219,7 +219,7 @@ AMNEZIA_SCREEN_TEXT = """<p>🛡 <b>Устройства Amnezia</b></p>
 AMNEZIA_SCREEN_EMPTY_TEXT = """<p>🛡 <b>Устройства Amnezia</b></p>
 <p><i>Подключение и файлы конфигураций для приложений Amnezia.</i></p>
 <table>
-  <tr><td>Устройства:</td><td><b>{active} / {limit}</b></td></tr>
+  <tr><td>Устройства:</td><td><b>{active} из {limit}</b></td></tr>
   <tr><td>Разбивка:</td><td>по ссылке: {vless_count} · Amnezia: 0</td></tr>
 </table>
 
