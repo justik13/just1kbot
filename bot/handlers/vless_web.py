@@ -19,6 +19,7 @@ from database.repositories import tariffs_repo, users_repo, vless_subscription_r
 from database.repositories.system_settings_repo import get_system_setting
 from services.subscription import SubscriptionService
 from services.vless_subscription_service import VlessSubscriptionService
+from utils.client_parser import parse_client_from_user_agent
 from utils.datetime_helpers import now_utc
 from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
 
@@ -83,9 +84,13 @@ def _extract_device_metadata(request: web.Request) -> dict[str, str]:
     clean_os = re.sub(r"[^\w\s\.\-]", "", raw_os).strip()[:32]
     clean_ver = re.sub(r"[^\w\s\.\-]", "", raw_ver).strip()[:16]
     clean_model = re.sub(r"[^\w\s\.\-,]", "", raw_model).strip()[:48]
-    clean_ua = re.sub(r"[\r\n]", " ", ua).strip()[:64]
 
     meta: dict[str, str] = {}
+    client = parse_client_from_user_agent(ua)
+    if client:
+        meta["client"] = client[:64]
+
+    clean_ua = re.sub(r"[\r\n]", " ", ua).strip()[:64]
     if clean_os and clean_ver:
         meta["os"] = f"{clean_os} {clean_ver}"[:32]
     elif clean_os:

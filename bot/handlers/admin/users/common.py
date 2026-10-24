@@ -1,5 +1,5 @@
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery
@@ -24,6 +24,7 @@ from database.repositories.users_repo import (
     get_user_by_telegram_id,
     get_user_referrals_count,
 )
+from utils.client_parser import parse_client_from_user_agent
 from utils.datetime_helpers import is_expired, now_utc
 from utils.formatters import format_datetime, format_traffic
 from bot.formatters import format_days_left
@@ -517,15 +518,52 @@ async def _get_white_internet_card_info(
             active=active_count, limit=dev_limit
         )
     ]
-    last_seen_ts = max((ts for ts in raw_hwids.values() if isinstance(ts, str)), default=None)
-    if last_seen_ts:
-        try:
-            from datetime import datetime
-            dt = datetime.fromisoformat(last_seen_ts)
-            last_seen_str = format_datetime(dt)
-        except Exception:
-            last_seen_str = last_seen_ts
-        extra_lines.append(texts.ADMIN_USER_CARD_WL_LAST_SEEN.format(last_seen=last_seen_str))
+    cutoff_dt = now - timedelta(hours=white_internet_repo.WHITE_INTERNET_HWID_TTL_HOURS)
+    for hwid, meta_or_ts in sorted(
+        raw_hwids.items(),
+        key=lambda item: white_internet_repo.parse_hwid_last_seen_dt(item[1]),
+        reverse=True,
+    ):
+        if isinstance(meta_or_ts, dict):
+            model = meta_or_ts.get("model")
+            os_name = meta_or_ts.get("os")
+            client = meta_or_ts.get("client") or parse_client_from_user_agent(meta_or_ts.get("ua"))
+            info_parts = [p for p in (model, os_name) if p]
+            parts = ([f"[{client}]"] if client else []) + info_parts
+            if parts:
+                hwid_display = f"📱 {' '.join(parts)} — {hwid[:8]}…"
+            else:
+                hwid_display = f"📱 {hwid[:8]}…"
+        else:
+            hwid_display = f"📱 {hwid[:8]}…"
+
+        dt = white_internet_repo.parse_hwid_last_seen_dt(meta_or_ts)
+        if dt > datetime.min.replace(tzinfo=timezone.utc):
+            last_conn = format_datetime(dt)
+            status_label = (
+                texts.ADMIN_WI_DEVICE_STATUS_ACTIVE
+                if dt >= cutoff_dt
+                else texts.ADMIN_WI_DEVICE_STATUS_INACTIVE
+            )
+            item_text = texts.ADMIN_WI_DEVICE_ITEM.format(
+                hwid=safe(hwid_display),
+                last_conn=safe(last_conn),
+                status=status_label,
+            )
+            extra_lines.append(f"  {item_text}")
+        else:
+            extra_lines.append(f"  • <code>{safe(hwid_display)}</code>")
+
+    active_dts = [
+        white_internet_repo.parse_hwid_last_seen_dt(ts)
+        for ts in raw_hwids.values()
+    ]
+    max_dt = max(
+        (dt for dt in active_dts if dt > datetime.min.replace(tzinfo=timezone.utc)),
+        default=None,
+    )
+    if max_dt:
+        extra_lines.append(texts.ADMIN_USER_CARD_WL_LAST_SEEN.format(last_seen=format_datetime(max_dt)))
     else:
         extra_lines.append(texts.ADMIN_USER_CARD_WL_LAST_SEEN.format(last_seen=texts.PLACEHOLDER_DASH))
     prov_status = getattr(sub, "provisioning_status", None)

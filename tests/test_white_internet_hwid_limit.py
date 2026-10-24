@@ -433,3 +433,140 @@ class TestWhiteInternetWebHwidEnforcement(AioHTTPTestCase):
                             )
                             self.assertEqual(resp.status, 200)
                             mock_register.assert_awaited_once()
+
+    async def test_sub_feed_extracts_device_info_headers_and_client(self):
+        """Verify headers (X-Device-Model, X-Device-Os, X-Ver-Os, User-Agent) extract device_info."""
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 42
+        sub.status = WhiteInternetStatus.ACTIVE
+        sub.user_id = 10
+        sub.expires_at = datetime.now(timezone.utc) + timedelta(days=30)
+        sub.traffic_limit_bytes = 100 * 1024 * 1024
+        sub.traffic_used_bytes = 0
+        sub.traffic_uplink_bytes = 0
+        sub.traffic_downlink_bytes = 0
+        sub.device_limit = 1
+        sub.last_uplink_snapshot = 0
+        sub.last_downlink_snapshot = 0
+        sub.origin_node_id = 1
+        sub.desired_version = 1
+        sub.actual_version = 1
+        sub.last_reconciled_node_epoch = "epoch-xyz"
+
+        server = MagicMock(spec=Server)
+        server.id = 1
+        server.ip = "192.0.2.1"
+        server.port = 443
+        server.protocol = XRAY_PROTOCOL
+        server.health_state = ServerHealthState.ONLINE
+        server.is_active = True
+        server.capabilities = ["xray_origin"]
+        server.xray_instance_epoch = "epoch-xyz"
+        server.extra_data = {"cdn_domain": "cdn.example.com"}
+
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = server
+        mock_session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.example.com"}):
+            with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+                with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                    with patch(
+                        "database.repositories.white_internet_repo.register_hwid_atomic",
+                        new=AsyncMock(return_value=(True, 1, 2)),
+                    ) as mock_register:
+                        resp = await self.client.get(
+                            "/sub/wl/test-token-valid-1234567890abcdef",
+                            headers={
+                                "X-Hwid": "device-valid-1",
+                                "X-Device-Os": "iOS",
+                                "X-Ver-Os": "17.5.1",
+                                "X-Device-Model": "iPhone 15 Pro",
+                                "User-Agent": "INCY/3.7.0",
+                            },
+                        )
+                        self.assertEqual(resp.status, 200)
+                        mock_register.assert_awaited_once()
+                        _, kwargs = mock_register.call_args
+                        self.assertEqual(
+                            kwargs.get("device_info"),
+                            {
+                                "client": "INCY 3.7.0",
+                                "os": "iOS 17.5.1",
+                                "model": "iPhone 15 Pro",
+                                "ua": "INCY/3.7.0",
+                            },
+                        )
+
+
+class TestWhiteInternetHwidBackwardCompatibility(unittest.IsolatedAsyncioTestCase):
+    def test_count_active_hwids_with_mixed_str_and_dict_and_timezones(self):
+        from database.repositories.white_internet_repo import (
+            count_active_hwids,
+            parse_hwid_last_seen_dt,
+        )
+
+        now = datetime(2026, 10, 24, 12, 0, tzinfo=timezone.utc)
+        active_hwids = {
+            "dev_str_active": (now - timedelta(hours=1)).isoformat(),
+            "dev_str_stale": (now - timedelta(hours=50)).isoformat(),
+            "dev_dict_active": {
+                "last_seen": (now - timedelta(hours=2)).isoformat(),
+                "client": "INCY 3.7.0",
+                "model": "iPhone 17 Pro",
+            },
+            "dev_dict_stale": {
+                "last_seen": (now - timedelta(hours=60)).isoformat(),
+                "client": "Happ 3.6.5",
+            },
+            "dev_tz_offset_active": (now - timedelta(hours=3)).astimezone(timezone(timedelta(hours=3))).isoformat(),
+        }
+
+        count = count_active_hwids(active_hwids, now=now, ttl_hours=48)
+        self.assertEqual(count, 3)
+
+        # Test aware datetime parsing and comparison across timezone offsets
+        dt_utc = parse_hwid_last_seen_dt("2026-10-24T13:00:00+00:00")
+        dt_msk = parse_hwid_last_seen_dt("2026-10-24T15:00:00+03:00")  # 12:00:00 UTC
+        self.assertGreater(dt_utc, dt_msk)
+
+        # Test timestamp overflow handling
+        min_dt = datetime.min.replace(tzinfo=timezone.utc)
+        self.assertEqual(parse_hwid_last_seen_dt(1e25), min_dt)
+        self.assertEqual(parse_hwid_last_seen_dt(-1e25), min_dt)
+
+
+    async def test_set_device_limit_atomic_lru_prunes_correctly_with_mixed_formats(self):
+        from database.repositories.white_internet_repo import set_device_limit_atomic
+
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 99
+        sub.device_limit = 3
+        sub.extra_traffic_bytes = 0
+        sub.is_trial = False
+        sub.active_hwids = {
+            "hwid_oldest": "2026-10-24T10:00:00+00:00",
+            "hwid_middle": {
+                "last_seen": "2026-10-24T11:00:00+00:00",
+                "client": "Happ 3.6.5",
+            },
+            "hwid_newest": {
+                "last_seen": "2026-10-24T12:00:00+00:00",
+                "client": "INCY 3.7.0",
+            },
+        }
+
+        mock_session = AsyncMock()
+        mock_session.get.return_value = sub
+
+        res = await set_device_limit_atomic(mock_session, 99, limit=2)
+        self.assertEqual(res.device_limit, 2)
+        # Should keep newest 2 and prune oldest
+        self.assertIn("hwid_newest", res.active_hwids)
+        self.assertIn("hwid_middle", res.active_hwids)
+        self.assertNotIn("hwid_oldest", res.active_hwids)
+

@@ -1416,7 +1416,15 @@ class TestWhiteInternetAdminSubscriptionMenuMutators(unittest.IsolatedAsyncioTes
         callback.message.edit_text = AsyncMock()
         callback.answer = AsyncMock()
 
-        self.sub.active_hwids = {"device1": now_utc().isoformat()}
+        self.sub.active_hwids = {
+            "device1": now_utc().isoformat(),
+            "1234567890abcdef": {
+                "last_seen": now_utc().isoformat(),
+                "client": "INCY 3.7.0",
+                "model": "iPhone 15 Pro",
+                "os": "iOS 17.5.1",
+            },
+        }
 
         with patch("bot.handlers.admin.users.subscription_menu_routes.is_admin", return_value=True), \
              patch("bot.handlers.admin.users.subscription_menu_routes.get_user_by_telegram_id", new=AsyncMock(return_value=self.user)), \
@@ -1425,6 +1433,9 @@ class TestWhiteInternetAdminSubscriptionMenuMutators(unittest.IsolatedAsyncioTes
             await admin_wi_devices_view(callback, self.session)
             callback.answer.assert_awaited_once_with(show_alert=False)
             callback.message.edit_text.assert_awaited_once()
+            call_text = callback.message.edit_text.call_args[0][0]
+            self.assertIn("device1", call_text)
+            self.assertIn("[INCY 3.7.0] iPhone 15 Pro iOS 17.5.1 — 12345678…", call_text)
 
     async def test_admin_wi_devices_view_user_not_found(self):
         """admin_wi_devices_view answers with error alert once if user is not found."""
