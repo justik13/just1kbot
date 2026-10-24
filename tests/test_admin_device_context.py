@@ -274,6 +274,41 @@ class TestAdminDeviceContext(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("[Mozilla", rendered)
         self.assertNotIn("[Chrome", rendered)
 
+    async def test_vless_device_third_party_browser_does_not_render_client_tag(self):
+        user = SimpleNamespace(id=7, telegram_id=123456789)
+        vless_sub = SimpleNamespace(
+            token="test-token-1234567890abcdef",
+            active_hwids={
+                "c7769cae12345678": {
+                    "last_seen": "2026-10-23T20:30:00+00:00",
+                    "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 YaBrowser/24.1.0.0 Safari/537.36",
+                    "model": "iPhone 17 Pro Max",
+                    "os": "iOS 27.0.1",
+                }
+            },
+        )
+        callback = MagicMock()
+        callback.from_user.id = 100
+        callback.data = "admin_user_devices:123456789"
+        callback.answer = AsyncMock()
+        callback.message.edit_text = AsyncMock()
+        session = MagicMock()
+
+        with (
+            patch.object(device_routes, "is_admin", return_value=True),
+            patch.object(device_routes, "_get_user_with_profiles", new=AsyncMock(return_value=user)),
+            patch.object(device_routes, "get_user_profiles", new=AsyncMock(return_value=[])),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_user_id", new=AsyncMock(return_value=vless_sub)),
+            patch("services.vless_subscription_service.VlessSubscriptionService.build_subscription_url", return_value="https://example.com/sub/access/token"),
+            patch.object(device_routes, "get_admin_user_devices_keyboard", return_value=MagicMock()),
+        ):
+            await device_routes.admin_user_devices(callback, session)
+
+        rendered = callback.message.edit_text.await_args.args[0]
+        self.assertIn("📱 iPhone 17 Pro Max iOS 27.0.1 — c7769cae…", rendered)
+        self.assertNotIn("[YaBrowser", rendered)
+        self.assertNotIn("YaBrowser", rendered)
+
 
 if __name__ == "__main__":
     unittest.main()
