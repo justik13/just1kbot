@@ -321,7 +321,9 @@ class TestAdminBroadcastFilters(unittest.TestCase):
                     if model == BroadcastProgress:
                         return self.progress
                     if model == User:
-                        return self.user
+                        if ident == self.user.id:
+                            return self.user
+                        return None
                     return None
 
                 async def commit(self):

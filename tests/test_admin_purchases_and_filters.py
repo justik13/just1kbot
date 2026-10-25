@@ -348,6 +348,84 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("orders.status = :status_1", stmt_sql)
         self.assertIn("orders.service_type IN", stmt_sql)
 
+    async def test_purchases_repo_audit_target_id_max_int32_boundary(self):
+        """Test boundary conditions for MAX_INT32 fallback in purchases_repo."""
+        from database.repositories.users_repo import MAX_INT32
+
+        session = AsyncMock()
+        now = now_utc()
+
+        # 1. target_id == MAX_INT32 (boundary: valid int32 user ID)
+        log_at_boundary = AuditLog(
+            id=101,
+            admin_id=1,
+            action="ADMIN_SUB_GRANT",
+            target_type="User",
+            target_id=MAX_INT32,
+            details="days=30",
+            created_at=now,
+        )
+        user_boundary = User(id=MAX_INT32, telegram_id=999999999, username="max_int32_user")
+
+        res_orders = MagicMock()
+        res_orders.scalars().all.return_value = []
+        res_audit = MagicMock()
+        res_audit.scalars().all.return_value = [log_at_boundary]
+
+        session.execute.side_effect = [res_orders, res_audit]
+        session.scalar.return_value = None
+        session.get.return_value = user_boundary
+
+        entries, total = await get_purchase_logs_paginated(session, page=1, per_page=10)
+        self.assertEqual(total, 1)
+        self.assertEqual(entries[0].user_id, MAX_INT32)
+        session.get.assert_awaited_with(User, MAX_INT32)
+
+        # 2. target_id == MAX_INT32 + 1 (overflow: must NOT call session.get(User, ...))
+        session.reset_mock()
+        log_overflow = AuditLog(
+            id=102,
+            admin_id=1,
+            action="ADMIN_SUB_GRANT",
+            target_type="User",
+            target_id=MAX_INT32 + 1,
+            details="days=30",
+            created_at=now,
+        )
+
+        res_orders2 = MagicMock()
+        res_orders2.scalars().all.return_value = []
+        res_audit2 = MagicMock()
+        res_audit2.scalars().all.return_value = [log_overflow]
+
+        session.execute.side_effect = [res_orders2, res_audit2]
+        session.scalar.return_value = None
+
+        entries2, total2 = await get_purchase_logs_paginated(session, page=1, per_page=10)
+        self.assertEqual(total2, 1)
+        self.assertEqual(entries2[0].user_id, MAX_INT32 + 1)
+        session.get.assert_not_called()
+
+        # 3. get_purchase_log_by_id with MAX_INT32 + 1 also must not call session.get(User, ...)
+        session.reset_mock()
+        session.get.return_value = log_overflow
+        session.scalar.return_value = None
+
+        entry_by_id = await get_purchase_log_by_id(session, "audit_102")
+        self.assertIsNotNone(entry_by_id)
+        for call in session.get.await_args_list:
+            self.assertNotEqual(call.args[0], User)
+
+        # 4. get_purchase_log_by_id with MAX_INT32 calls session.get(User, MAX_INT32)
+        session.reset_mock()
+        session.get.side_effect = lambda model, ident: log_at_boundary if model == AuditLog else user_boundary
+        session.scalar.return_value = None
+
+        entry_boundary_by_id = await get_purchase_log_by_id(session, "audit_101")
+        self.assertIsNotNone(entry_boundary_by_id)
+        self.assertEqual(entry_boundary_by_id.user_id, MAX_INT32)
+        session.get.assert_any_await(User, MAX_INT32)
+
     async def test_show_order_card_yookassa_pending_diagnostics(self):
         import uuid
         from datetime import datetime, timedelta, timezone
