@@ -488,6 +488,21 @@ class TextsConsistencyTests(unittest.TestCase):
             "s",
             "tg-spoiler",
             "blockquote",
+            "p",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "table",
+            "thead",
+            "tbody",
+            "tr",
+            "th",
+            "td",
+            "tg-button-row",
+            "tg-button",
         }
 
         tag_pattern = re.compile(r"<(/?[a-zA-Z0-9_-]+)(?:\s+[^>]*)?>")
@@ -695,6 +710,24 @@ class TextsConsistencyTests(unittest.TestCase):
         self.assertTrue(hasattr(texts, "WL_PREVIEW_BALANCE_SHORTAGE"))
         self.assertTrue(hasattr(texts, "BTN_INSTRUCTION_INCY"))
         self.assertTrue(hasattr(texts, "SUPPORT_INCY_INSTRUCTION_TEXT"))
+    def test_reset_confirm_and_share_texts_exist(self):
+        self.assertTrue(hasattr(texts, "WL_RESET_DEVICES_CONFIRM_CARD"))
+        self.assertTrue(hasattr(texts, "VLESS_RESET_CONFIRM_CARD"))
+        self.assertTrue(hasattr(texts, "BTN_CONFIRM_RESET"))
+        self.assertTrue(hasattr(texts, "BTN_SHARE_REFERRAL"))
+        self.assertTrue(hasattr(texts, "REFERRAL_SHARE_TEXT"))
+        self.assertTrue(hasattr(texts, "PAYMENT_PURCHASE_SUCCESS_CARD"))
+        # Check that purchase success card has only ONE <tg-button-row>
+        self.assertEqual(texts.PAYMENT_PURCHASE_SUCCESS_CARD.count("<tg-button-row"), 1)
+        # Check that error texts do not contain pseudo-graphic dividers
+        self.assertNotIn("━━━━━━━━━━━━━━━━", texts.ERROR_SERVER_DISABLED)
+        self.assertNotIn("━━━━━━━━━━━━━━━━", texts.ERROR_SERVER_FULL)
+        self.assertNotIn("━━━━━━━━━━━━━━━━", texts.ERROR_SERVER_UNAVAILABLE)
+        # Check discount button texts have no trailing fire emoji
+        self.assertFalse(texts.BTN_DURATION_HALF_YEAR_DISCOUNT.endswith("🔥"))
+        self.assertFalse(texts.BTN_DURATION_YEAR_DISCOUNT.endswith("🔥"))
+
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -198,12 +198,12 @@ async def global_error_handler(
             except Exception:
                 pass
 
-            from bot.keyboards.common import get_back_button
+            from bot.keyboards import make_rich_nav_row
             from utils.telegram import spawn_auto_delete
 
             err_msg = await msg.answer(
-                texts.ERROR_TECHNICAL_MESSAGE,
-                reply_markup=get_back_button("back_to_main_menu"),
+                f"{texts.ERROR_TECHNICAL_MESSAGE}\n{make_rich_nav_row('back_to_main_menu')}",
+                reply_markup=None,
                 parse_mode="HTML",
             )
             spawn_auto_delete(

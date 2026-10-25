@@ -17,6 +17,7 @@ from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     InputFile,
+    InputRichMessage,
     LinkPreviewOptions,
 )
 from cachetools import TTLCache
@@ -28,6 +29,73 @@ from database.repositories import hub_repo
 from utils.text_limits import split_text_by_lines
 
 logger = logging.getLogger(__name__)
+
+_RICH_TAGS_PATTERN = re.compile(
+    r"<(?:table|thead|tbody|tr|th|td|p|h[1-6]|hr|blockquote|tg-button|tg-button-row|details|summary)(?:[\s/>]|$)",
+    re.IGNORECASE,
+)
+
+
+def has_rich_tags(text: str | None) -> bool:
+    """Return True if text contains Bot API 10.3 / aiogram 3.31.0 rich formatting tags."""
+    if not text:
+        return False
+    return bool(_RICH_TAGS_PATTERN.search(text))
+
+
+def make_rich_button(
+    text: str,
+    *,
+    callback_data: str | None = None,
+    url: str | None = None,
+    copy_text: str | None = None,
+    style: str | None = None,
+) -> str:
+    """Build a Telegram Bot API 10.3 <tg-button> element."""
+    escaped_text = html.escape(str(text))
+    attrs = []
+    if callback_data:
+        attrs.append('type="callback_data"')
+        attrs.append(f'data="{html.escape(str(callback_data), quote=True)}"')
+    elif url:
+        attrs.append('type="url"')
+        attrs.append(f'url="{html.escape(str(url), quote=True)}"')
+    elif copy_text:
+        attrs.append('type="copy_text"')
+        attrs.append(f'text="{html.escape(str(copy_text), quote=True)}"')
+    else:
+        attrs.append('type="callback_data"')
+        attrs.append('data="ignore"')
+
+    if style:
+        attrs.append(f'style="{html.escape(str(style), quote=True)}"')
+
+    return f'<tg-button {" ".join(attrs)}>{escaped_text}</tg-button>'
+
+
+def make_rich_button_row(*buttons: str, align: str = "center") -> str:
+    """Wrap buttons into a <tg-button-row> container."""
+    non_empty = [b.strip() for b in buttons if b and b.strip()]
+    if not non_empty:
+        return ""
+    joined = " ".join(non_empty)
+    return f'<tg-button-row align="{align}">{joined}</tg-button-row>'
+
+
+def make_rich_nav_row(
+    back_callback: str | None = None,
+    *,
+    include_menu: bool = True,
+    back_label: str = "«",
+    menu_label: str = "☰",
+) -> str:
+    """Build standardized navigation bottom row."""
+    btns = []
+    if back_callback:
+        btns.append(make_rich_button(back_label, callback_data=back_callback))
+    if include_menu:
+        btns.append(make_rich_button(menu_label, callback_data="back_to_main_menu"))
+    return make_rich_button_row(*btns)
 
 # ==============================================================================
 # Telegram Message Effect IDs (Telegram Bot API 7.4+)
@@ -140,13 +208,14 @@ async def _safe_delete_batch(
                 lambda c=chunk: bot.delete_messages(chat_id=chat_id, message_ids=c)
             )
             deleted_ids.extend(chunk)
-        except TelegramBadRequest as e:
-            logger.warning(
-                "TelegramBadRequest on delete_messages %s in %s: %s; falling back to individual deletions",
-                chunk,
-                chat_id,
-                e,
-            )
+        except (TelegramBadRequest, AttributeError) as e:
+            if isinstance(e, TelegramBadRequest):
+                logger.warning(
+                    "TelegramBadRequest on delete_messages %s in %s: %s; falling back to individual deletions",
+                    chunk,
+                    chat_id,
+                    e,
+                )
             await _delete_individually(chunk)
         except Exception as e:
             failed_ids.extend(chunk)
@@ -457,8 +526,13 @@ def sanitize_reply_markup(reply_markup: InlineKeyboardMarkup | None) -> InlineKe
             if not btn_text.strip():
                 updates["text"] = "—"
 
-            # 2. Check disabled button: strip redundant callback_data / copy_text if button is disabled
-            is_disabled = isinstance(getattr(btn, "disabled", None), DisabledButton)
+            # 2. Check disabled button: normalize boolean disabled=True/False and strip redundant callback_data
+            btn_disabled = getattr(btn, "disabled", None)
+            is_disabled = (btn_disabled is True) or isinstance(btn_disabled, DisabledButton)
+            if btn_disabled is True:
+                updates["disabled"] = DisabledButton()
+            elif btn_disabled is False:
+                updates["disabled"] = None
 
             if is_disabled:
                 if getattr(btn, "callback_data", None) is not None:
@@ -585,16 +659,46 @@ async def render_hub(
 
         if target_edit_id is not None:
             try:
-                await _retry_flood(
-                    lambda: bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=target_edit_id,
-                        text=text_parts[0],
-                        reply_markup=reply_markup,
-                        parse_mode=parse_mode,
-                        link_preview_options=link_preview_opts,
+                if parse_mode == "HTML" and has_rich_tags(text_parts[0]):
+                    try:
+                        await _retry_flood(
+                            lambda: bot.edit_message_text(
+                                chat_id=chat_id,
+                                message_id=target_edit_id,
+                                text=None,
+                                rich_message=InputRichMessage(html=text_parts[0]),
+                                reply_markup=reply_markup,
+                            )
+                        )
+                    except (TelegramBadRequest, TypeError, AttributeError) as rich_err:
+                        if (
+                            isinstance(rich_err, TelegramBadRequest)
+                            and "message is not modified" in str(rich_err).lower()
+                        ):
+                            raise
+                        logger.debug("render_hub edit rich_message failed: %s; falling back", rich_err)
+                        plain_fallback = strip_html_tags(text_parts[0])
+                        await _retry_flood(
+                            lambda: bot.edit_message_text(
+                                chat_id=chat_id,
+                                message_id=target_edit_id,
+                                text=plain_fallback,
+                                reply_markup=reply_markup,
+                                parse_mode=None,
+                                link_preview_options=link_preview_opts,
+                            )
+                        )
+                else:
+                    await _retry_flood(
+                        lambda: bot.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=target_edit_id,
+                            text=text_parts[0],
+                            reply_markup=reply_markup,
+                            parse_mode=parse_mode,
+                            link_preview_options=link_preview_opts,
+                        )
                     )
-                )
                 stale_ids = [mid for mid in old_ids if mid != target_edit_id]
                 stale_failed: list[int] = []
                 if stale_ids:
@@ -684,91 +788,128 @@ async def render_hub(
                 is_last = index == len(text_parts) - 1
                 markup = reply_markup if is_last else None
                 effect = message_effect_id if index == 0 else None
-                try:
-                    message = await _send_with_resilience(
-                        lambda p=part, m=markup, eff=effect: bot.send_message(
+                part_is_rich = parse_mode == "HTML" and has_rich_tags(part) and hasattr(bot, "send_rich_message")
+                sent_via_rich = False
+                if part_is_rich:
+                    try:
+                        message = await _send_with_resilience(
+                            lambda p=part, m=markup, eff=effect: bot.send_rich_message(
+                                chat_id=chat_id,
+                                rich_message=InputRichMessage(html=p),
+                                reply_markup=m,
+                                message_effect_id=eff,
+                            ),
                             chat_id=chat_id,
-                            text=p,
-                            reply_markup=m,
-                            parse_mode=parse_mode,
-                            link_preview_options=link_preview_opts,
-                            message_effect_id=eff,
-                        ),
-                        chat_id=chat_id,
-                        context="render_hub",
-                    )
-                except TelegramBadRequest as exc:
-                    error = str(exc).lower()
-                    if effect and _is_message_effect_error(exc):
-                        try:
-                            message = await _send_with_resilience(
-                                lambda p=part, m=markup: bot.send_message(
-                                    chat_id=chat_id,
-                                    text=p,
-                                    reply_markup=m,
-                                    parse_mode=parse_mode,
-                                    link_preview_options=link_preview_opts,
-                                ),
-                                chat_id=chat_id,
-                                context="render_hub_no_effect",
-                            )
-                        except TelegramBadRequest as inner_exc:
-                            inner_error = str(inner_exc).lower()
-                            if "parse" in inner_error or "entities" in inner_error:
-                                logger.warning(
-                                    "HTML parse failed in render_hub retry for chat %s; using plain text",
-                                    chat_id,
-                                )
-                                plain = html.unescape(re.sub(r"<[^>]+>", "", part))
-                                message = await _send_with_resilience(
-                                    lambda p=plain, m=markup: bot.send_message(
-                                        chat_id=chat_id,
-                                        text=p,
-                                        reply_markup=m,
-                                        link_preview_options=link_preview_opts,
-                                        parse_mode=None,
-                                    ),
-                                    chat_id=chat_id,
-                                    context="render_hub_plain_retry",
-                                )
-                            else:
-                                raise
-                    elif "parse" in error or "entities" in error:
-                        logger.warning(
-                            "HTML parse failed in render_hub for chat %s; using plain text",
-                            chat_id,
+                            context="render_hub_rich",
                         )
-                        plain = html.unescape(re.sub(r"<[^>]+>", "", part))
-                        try:
-                            message = await _send_with_resilience(
-                                lambda p=plain, m=markup, eff=effect: bot.send_message(
-                                    chat_id=chat_id,
-                                    text=p,
-                                    reply_markup=m,
-                                    link_preview_options=link_preview_opts,
-                                    parse_mode=None,
-                                    message_effect_id=eff,
-                                ),
-                                chat_id=chat_id,
-                                context="render_hub_plain",
-                            )
-                        except TelegramBadRequest as effect_exc:
-                            if effect and _is_message_effect_error(effect_exc):
+                        sent_via_rich = True
+                    except (TelegramBadRequest, TypeError, AttributeError) as r_err:
+                        if effect and _is_message_effect_error(r_err):
+                            try:
                                 message = await _send_with_resilience(
-                                    lambda p=plain, m=markup: bot.send_message(
+                                    lambda p=part, m=markup: bot.send_rich_message(
+                                        chat_id=chat_id,
+                                        rich_message=InputRichMessage(html=p),
+                                        reply_markup=m,
+                                    ),
+                                    chat_id=chat_id,
+                                    context="render_hub_rich_no_effect",
+                                )
+                                sent_via_rich = True
+                            except (TelegramBadRequest, TypeError, AttributeError) as inner_r_err:
+                                logger.debug(
+                                    "render_hub send_rich_message without effect failed: %s; falling back",
+                                    inner_r_err,
+                                )
+                        else:
+                            logger.debug("render_hub send_rich_message failed: %s; falling back", r_err)
+
+                if not sent_via_rich:
+                    try:
+                        message = await _send_with_resilience(
+                            lambda p=part, m=markup, eff=effect: bot.send_message(
+                                chat_id=chat_id,
+                                text=p,
+                                reply_markup=m,
+                                parse_mode=parse_mode,
+                                link_preview_options=link_preview_opts,
+                                message_effect_id=eff,
+                            ),
+                            chat_id=chat_id,
+                            context="render_hub",
+                        )
+                    except TelegramBadRequest as exc:
+                        error = str(exc).lower()
+                        if effect and _is_message_effect_error(exc):
+                            try:
+                                message = await _send_with_resilience(
+                                    lambda p=part, m=markup: bot.send_message(
+                                        chat_id=chat_id,
+                                        text=p,
+                                        reply_markup=m,
+                                        parse_mode=parse_mode,
+                                        link_preview_options=link_preview_opts,
+                                    ),
+                                    chat_id=chat_id,
+                                    context="render_hub_no_effect",
+                                )
+                            except TelegramBadRequest as inner_exc:
+                                inner_error = str(inner_exc).lower()
+                                if "parse" in inner_error or "entities" in inner_error:
+                                    logger.warning(
+                                        "HTML parse failed in render_hub retry for chat %s; using plain text",
+                                        chat_id,
+                                    )
+                                    plain = html.unescape(re.sub(r"<[^>]+>", "", part))
+                                    message = await _send_with_resilience(
+                                        lambda p=plain, m=markup: bot.send_message(
+                                            chat_id=chat_id,
+                                            text=p,
+                                            reply_markup=m,
+                                            link_preview_options=link_preview_opts,
+                                            parse_mode=None,
+                                        ),
+                                        chat_id=chat_id,
+                                        context="render_hub_plain_retry",
+                                    )
+                                else:
+                                    raise
+                        elif "parse" in error or "entities" in error:
+                            logger.warning(
+                                "HTML parse failed in render_hub for chat %s; using plain text",
+                                chat_id,
+                            )
+                            plain = html.unescape(re.sub(r"<[^>]+>", "", part))
+                            try:
+                                message = await _send_with_resilience(
+                                    lambda p=plain, m=markup, eff=effect: bot.send_message(
                                         chat_id=chat_id,
                                         text=p,
                                         reply_markup=m,
                                         link_preview_options=link_preview_opts,
                                         parse_mode=None,
+                                        message_effect_id=eff,
                                     ),
                                     chat_id=chat_id,
-                                    context="render_hub_plain_no_effect",
+                                    context="render_hub_plain",
                                 )
-                            else:
-                                raise
-                    else:
-                        raise
+                            except TelegramBadRequest as effect_exc:
+                                if effect and _is_message_effect_error(effect_exc):
+                                    message = await _send_with_resilience(
+                                        lambda p=plain, m=markup: bot.send_message(
+                                            chat_id=chat_id,
+                                            text=p,
+                                            reply_markup=m,
+                                            link_preview_options=link_preview_opts,
+                                            parse_mode=None,
+                                        ),
+                                        chat_id=chat_id,
+                                        context="render_hub_plain_no_effect",
+                                    )
+                                else:
+                                    raise
+                        else:
+                            raise
                 sent_ids.append(message.message_id)
                 # Append BEFORE storing: if the store raises, the id is already
                 # in sent_ids so the BaseException cleanup deletes the delivered
@@ -878,38 +1019,58 @@ async def _append_hub_message_unlocked(
             is_last = (i == len(text_parts) - 1)
             kb = reply_markup if is_last else None
 
-            try:
-                msg = await _send_with_resilience(
-                    lambda p=part, k=kb: bot.send_message(
-                        chat_id=chat_id,
-                        text=p,
-                        reply_markup=k,
-                        parse_mode=parse_mode,
-                    ),
-                    chat_id=chat_id,
-                    context="append_hub_message",
-                )
-            except TelegramBadRequest as e:
-                err_str = str(e).lower()
-                if "parse" in err_str or "entities" in err_str:
-                    logger.warning(
-                        "HTML parse failed in append_hub_message for chat %s, fallback to plain text: %s",
-                        chat_id,
-                        e,
-                    )
-                    plain = html.unescape(re.sub(r"<[^>]+>", "", part))
+            part_is_rich = parse_mode == "HTML" and has_rich_tags(part) and hasattr(bot, "send_rich_message")
+            sent_via_rich = False
+            if part_is_rich:
+                try:
                     msg = await _send_with_resilience(
-                        lambda p=plain, k=kb: bot.send_message(
+                        lambda p=part, k=kb: bot.send_rich_message(
+                            chat_id=chat_id,
+                            rich_message=InputRichMessage(html=p),
+                            reply_markup=k,
+                        ),
+                        chat_id=chat_id,
+                        context="append_hub_message_rich",
+                    )
+                    sent_via_rich = True
+                except (TelegramBadRequest, TypeError, AttributeError):
+                    pass
+
+            if not sent_via_rich:
+                fallback_text = strip_html_tags(part) if part_is_rich else part
+                fallback_mode = None if part_is_rich else parse_mode
+                try:
+                    msg = await _send_with_resilience(
+                        lambda p=fallback_text, k=kb, pm=fallback_mode: bot.send_message(
                             chat_id=chat_id,
                             text=p,
                             reply_markup=k,
-                            parse_mode=None,
+                            parse_mode=pm,
                         ),
                         chat_id=chat_id,
-                        context="append_hub_message_plain",
+                        context="append_hub_message",
                     )
-                else:
-                    raise
+                except TelegramBadRequest as e:
+                    err_str = str(e).lower()
+                    if "parse" in err_str or "entities" in err_str:
+                        logger.warning(
+                            "HTML parse failed in append_hub_message for chat %s, fallback to plain text: %s",
+                            chat_id,
+                            e,
+                        )
+                        plain = html.unescape(re.sub(r"<[^>]+>", "", strip_html_tags(part)))
+                        msg = await _send_with_resilience(
+                            lambda p=plain, k=kb: bot.send_message(
+                                chat_id=chat_id,
+                                text=p,
+                                reply_markup=k,
+                                parse_mode=None,
+                            ),
+                            chat_id=chat_id,
+                            context="append_hub_message_plain",
+                        )
+                    else:
+                        raise
 
             sent_ids.append(msg.message_id)
             # Same ordering contract as render_hub: id must be in sent_ids
@@ -997,8 +1158,16 @@ def strip_html_tags(text: str) -> str:
     text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
     text = re.sub(r"</p>", "\n", text, flags=re.IGNORECASE)
     text = re.sub(r"<p(?:\s+[^>]*?)?>", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"</?tr(?:\s+[^>]*?)?>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<hr\s*/?>", "\n---\n", text, flags=re.IGNORECASE)
     text = re.sub(
-        r"</?(?:b|strong|i|em|u|ins|s|strike|del|span|tg-spoiler|tg-emoji|tg-time|code|pre|blockquote|expandable-blockquote)(?:\s+[^>]*?)?>",
+        r"<tg-button(?:\s+[^>]*?)?>(.*?)</tg-button>",
+        r"[\1]",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    text = re.sub(
+        r"</?(?:b|strong|i|em|u|ins|s|strike|del|span|tg-spoiler|tg-emoji|tg-time|code|pre|blockquote|expandable-blockquote|table|thead|tbody|th|td|h[1-6]|details|summary|tg-button-row)(?:\s+[^>]*?)?>",
         "",
         text,
         flags=re.IGNORECASE,
@@ -1050,6 +1219,33 @@ async def safe_send_message(
                 p_eff: str | None,
                 p_markup: InlineKeyboardMarkup | None = markup,
             ):
+                if p_mode == "HTML" and has_rich_tags(p_text) and hasattr(bot, "send_rich_message"):
+                    try:
+                        return await _send_with_resilience(
+                            lambda: bot.send_rich_message(
+                                chat_id=chat_id,
+                                rich_message=InputRichMessage(html=p_text),
+                                reply_markup=p_markup,
+                                message_effect_id=p_eff,
+                            ),
+                            chat_id=chat_id,
+                            context="safe_send_message_rich",
+                        )
+                    except (TelegramBadRequest, TypeError, AttributeError) as r_err:
+                        if p_eff and _is_message_effect_error(r_err):
+                            try:
+                                return await _send_with_resilience(
+                                    lambda: bot.send_rich_message(
+                                        chat_id=chat_id,
+                                        rich_message=InputRichMessage(html=p_text),
+                                        reply_markup=p_markup,
+                                    ),
+                                    chat_id=chat_id,
+                                    context="safe_send_message_rich_no_effect",
+                                )
+                            except (TelegramBadRequest, TypeError, AttributeError):
+                                pass
+                        logger.debug("safe_send_message rich_message failed: %s, falling back", r_err)
                 return await _send_with_resilience(
                     lambda: bot.send_message(
                         chat_id=chat_id,

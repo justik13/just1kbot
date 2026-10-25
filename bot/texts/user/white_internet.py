@@ -8,7 +8,7 @@ BTN_WL_CONNECT_CLIENT = "📱 Подключить в приложении"
 BTN_WL_INCY_INSTRUCTIONS = "📱 Инструкция по подключению в INCY"
 BTN_WL_REFRESH_STATUS = "🔄 Обновить статус"
 BTN_WL_TOPUP = "➕ Докупить трафик"
-BTN_WL_ADD_DEVICE = "📱 Доб. устр. (+200 ₽ / +50 ГБ)"
+BTN_WL_ADD_DEVICE = "📱 Добавить устройство (+200 ₽)"
 BTN_WL_ADD_DEVICE_CONFIRM = "✅ Подтвердить (+200 ₽)"
 BTN_WL_RENEW = "🔄 Продлить на 30 дней ({price} ₽)"
 BTN_WL_CONVERT_TRIAL = "🚀 Перейти на полный тариф ({price} ₽)"
@@ -20,6 +20,12 @@ BTN_WL_RETURN_TO_SERVICE = "🚀 Вернуться к Белому Интерн
 BTN_WL_TOPUP_PACK_ITEM = "+{gb} ГБ — {price} ₽"
 BTN_WL_RESET_DEVICES = "🔄 Сбросить устройства"
 WL_ALERT_DEVICES_RESET = "Привязка устройств сброшена! Теперь вы можете подключить новое устройство."
+WL_RESET_DEVICES_CONFIRM_CARD = (
+    "<p>⚠️ <b>Сброс устройств Белого Интернета</b></p>\n\n"
+    "Вы уверены, что хотите сбросить привязанные устройства?\n\n"
+    "После сброса текущие привязки будут очищены, и вы сможете подключить новые устройства.\n\n"
+    "<blockquote>⏳ Сброс можно выполнять не чаще одного раза в 15 минут.</blockquote>"
+)
 WL_RESET_DEVICES_FAILED = "Не удалось сбросить устройства. Попробуйте позже."
 WL_RESET_COOLDOWN_ALERT = "⏳ Сброс устройств возможен не чаще одного раза в 15 минут. Подождите ещё {seconds} сек."
 WL_RENEWAL_HORIZON_EXCEEDED = "Подписка уже продлена на максимальный срок (до 2 месяцев вперед)."
@@ -68,18 +74,20 @@ WL_OVERVIEW_TRIAL_NO_SUB = (
 )
 
 WL_OVERVIEW_ACTIVE = (
-    "⚪️ <b>Белый Интернет</b>\n\n"
-    "<b>Статус:</b> {status}\n"
-    "<b>Срок действия:</b> до {expiry}\n\n"
-    "<b>Остаток трафика:</b> {available}\n"
-    "<b>Использовано:</b> {used} из {total}\n"
-    "<code>[{progress}]</code>\n\n"
-    "📱 <b>Устройства:</b> {active_devices} из {device_limit}{sub_url_block}"
+    "<p>⚪️ <b>Белый Интернет</b></p>\n"
+    "<table>"
+    "<tr><td>Статус:</td><td>{status}</td></tr>"
+    "<tr><td>Срок:</td><td>до {expiry}</td></tr>"
+    "<tr><td>Остаток:</td><td><b>{available}</b></td></tr>"
+    "<tr><td>Использовано:</td><td>{used} из {total}</td></tr>"
+    "<tr><td>Устройства:</td><td><b>{active_devices} из {device_limit}</b></td></tr>"
+    "</table>\n"
+    "<p><code>[{progress}]</code></p>{sub_url_block}"
 )
 WL_OVERVIEW_SUB_URL_BLOCK = (
-    "\n\n📋 <b>Ваша ссылка на подписку:</b>\n"
+    "\n<p>📋 <b>Ваша ссылка на подписку:</b></p>\n"
     "<code>{sub_url}</code>\n"
-    "<i>(нажмите на ссылку для копирования)</i>"
+    "<p><i>(нажмите на ссылку для копирования)</i></p>"
 )
 
 WL_TOPUP_MENU_TEXT = (
@@ -93,7 +101,7 @@ WL_ALERT_TRAFFIC_UP_TO_DATE = "Данные о трафике актуальны
 WL_ALERT_TRAFFIC_UPDATED = "Данные о трафике обновлены."
 
 WL_INCY_INSTRUCTIONS_TEXT = (
-    "📱 <b>Подключение Белого Интернета в приложении INCY</b>\n\n"
+    "<p>📱 <b>Подключение Белого Интернета в приложении INCY</b></p>\n\n"
     "1️⃣ <b>Установите приложение INCY:</b>\n"
     "   🍏 <a href=\"https://apps.apple.com/app/incy/id6756943388\">Скачать в App Store (для iPhone / iPad)</a>\n"
     "   🤖 <a href=\"https://play.google.com/store/apps/details?id=llc.itdev.incy\">Скачать в Google Play (для Android)</a>\n"

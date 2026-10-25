@@ -35,7 +35,7 @@ BTN_BROADCAST_START = "🚀 Запустить рассылку ({count})"
 
 BTN_BROADCAST_TEST_ADMIN = "🧪 Тест админу"
 
-BTN_BUY_ACCESS = "🚀 Купить доступ"
+BTN_BUY_ACCESS = "🚀 Оформить доступ"
 
 BTN_BUY_SUBSCRIPTION = "🛒 Купить подписку"
 
@@ -43,9 +43,13 @@ BTN_CANCEL = "Отмена"
 
 BTN_CONFIRM = "✅ Подтвердить"
 
+BTN_CONFIRM_RESET = "Подтвердить сброс"
+
 BTN_CONNECTIONS = "🔌 Подключения"
 
 BTN_CONTACT_SUPPORT = "💬 Написать в поддержку"
+
+BTN_COPY_KEY = "📋 Скопировать ключ"
 
 BTN_DISMISS = "✅ Прочитано"
 

@@ -6,20 +6,24 @@ from config.constants import (
 )
 from datetime import timedelta
 
-from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.keyboards import get_back_button
 from database.models import User
+from bot.keyboards import make_rich_nav_row
 from database.repositories.profiles_repo import (
     PROFILE_QUOTA_EXCLUDED_STATUSES,
     get_user_profiles,
 )
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc
-from utils.formatters import format_datetime, format_traffic
-from utils.telegram import render_hub, safe
+from utils.formatters import format_traffic
+from utils.telegram import (
+    make_rich_button,
+    make_rich_button_row,
+    render_hub,
+    safe,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +95,7 @@ async def _build_connections_screen(
     profiles: list,
     *,
     read_only: bool = False,
-) -> tuple[str, InlineKeyboardBuilder]:
+) -> tuple[str, None]:
     quota_profiles_count = len([
         p for p in profiles
         if getattr(p, "provisioning_status", "") not in PROFILE_QUOTA_EXCLUDED_STATUSES
@@ -136,6 +140,10 @@ async def _build_connections_screen(
         rendered = texts.CONNECTION_HUB_EXPIRED_TEXT.format(
             grace_notice=grace_notice,
         )
+        rendered += "\n" + make_rich_button_row(
+            make_rich_button(texts.BTN_BUY_ACCESS, callback_data="menu_buy", style="success")
+        )
+        rendered += "\n" + make_rich_nav_row(include_menu=True)
     else:
         from bot.formatters import format_subscription_date, get_tariff_display_name
         expiry_str = (
@@ -156,6 +164,16 @@ async def _build_connections_screen(
         if not tariff_name:
             tariff_name = get_tariff_display_name(device_limit)
 
+        sub_button_row = (
+            "\n"
+            + make_rich_button_row(
+                make_rich_button(
+                    texts.BTN_SUB_CONNECT_INCY, url=sub_url, style="success"
+                )
+            )
+            if sub_url
+            else ""
+        )
         rendered = texts.CONNECTION_HUB_ACTIVE_TEXT.format(
             expiry=expiry_str,
             tariff=tariff_name,
@@ -164,50 +182,39 @@ async def _build_connections_screen(
             vless_count=vless_hwid_count,
             amnezia_count=quota_profiles_count,
             sub_url=sub_url,
+            sub_button_row=sub_button_row,
         )
 
-    builder = InlineKeyboardBuilder()
+        action_rows = []
 
-    has_sub_btn = bool(sub_url and 1 <= len(sub_url) <= 256)
-    if not read_only:
-        if has_sub_btn:
-            builder.button(
-                text=texts.BTN_SUB_CONNECT_INCY,
-                url=sub_url,
-                style="success",
-            )
-        builder.button(
-            text=texts.BTN_INCY_INSTRUCTIONS,
-            callback_data="vless_sub_feed_info",
-        )
-        if vless_hwid_count > 0:
-            builder.button(
-                text=texts.BTN_VLESS_RESET_HWID,
-                callback_data="vless_sub_reset",
-                style="danger",
-            )
         amnezia_btn_text = (
             texts.BTN_AMNEZIA_DEVICES_COUNT.format(count=quota_profiles_count)
             if quota_profiles_count > 0
             else texts.BTN_AMNEZIA_DEVICES
         )
-        builder.button(
-            text=amnezia_btn_text,
-            callback_data="amnezia_devices",
-            style="success",
+        action_rows.append(
+            make_rich_button_row(
+                make_rich_button(texts.BTN_INCY_INSTRUCTIONS, callback_data="vless_sub_feed_info", style="primary"),
+                make_rich_button(amnezia_btn_text, callback_data="amnezia_devices", style="success"),
+            )
         )
 
-    builder.button(
-        text=texts.CONNECTION_CONFIG_COMMON_STATUS_SERVEROV,
-        url="https://status.just1k.pro/status/just1kbot",
-    )
-    builder.button(
-        text=texts.BTN_MAIN_MENU_NAV,
-        callback_data="back_to_main_menu",
-    )
+        if vless_hwid_count > 0:
+            action_rows.append(
+                make_rich_button_row(
+                    make_rich_button(texts.BTN_VLESS_RESET_HWID, callback_data="vless_sub_reset", style="danger")
+                )
+            )
 
-    builder.adjust(1)
-    return rendered, builder
+        action_rows.append(
+            make_rich_button_row(
+                make_rich_button(texts.CONNECTION_CONFIG_COMMON_STATUS_SERVEROV, url="https://status.just1k.pro/status/just1kbot"),
+                make_rich_button(texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu"),
+            )
+        )
+        rendered += "\n" + "\n".join(action_rows)
+
+    return rendered, None
 
 
 async def _build_amnezia_screen(
@@ -216,7 +223,7 @@ async def _build_amnezia_screen(
     profiles: list,
     *,
     read_only: bool = False,
-) -> tuple[str, InlineKeyboardBuilder]:
+) -> tuple[str, None]:
     quota_profiles_count = len([
         p for p in profiles
         if getattr(p, "provisioning_status", "") not in PROFILE_QUOTA_EXCLUDED_STATUSES
@@ -231,22 +238,32 @@ async def _build_amnezia_screen(
         user,
     )
 
-    builder = InlineKeyboardBuilder()
-
     if not profiles:
         action_hint = (
             texts.AMNEZIA_SCREEN_HINT_ADD
             if (not read_only and total_active_devices < device_limit)
             else (texts.AMNEZIA_SCREEN_HINT_LIMIT if not read_only else "")
         )
+        add_device_row = (
+            texts.AMNEZIA_ADD_DEVICE_ROW
+            if (not read_only and total_active_devices < device_limit)
+            else ""
+        )
         rendered = texts.AMNEZIA_SCREEN_EMPTY_TEXT.format(
             active=total_active_devices,
             limit=device_limit,
             vless_count=vless_hwid_count,
             action_hint=action_hint,
+            add_device_row=add_device_row,
         )
+        nav_row = make_rich_button_row(
+            make_rich_button(texts.BTN_BACK_TO_CONNECTION, callback_data="back_to_connections"),
+            make_rich_button(texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu"),
+        )
+        rendered += f"\n{nav_row}"
     else:
-        profiles_block = "\n"
+        row_items = []
+        device_rows = []
         for profile in profiles:
             server = profile.server
 
@@ -254,9 +271,10 @@ async def _build_amnezia_screen(
             server_name = server.name if server else texts.LABEL_UNKNOWN_CAP
             raw_device_name = profile.device_name or texts.DEVICE_DEFAULT_NAME_TEMPLATE.format(slot=1)
             btn_text = f"{flag} {raw_device_name}"
-            builder.button(
-                text=btn_text,
-                callback_data=f"manage_device:{profile.id}",
+            device_rows.append(
+                make_rich_button_row(
+                    make_rich_button(btn_text, callback_data=f"manage_device:{profile.id}", style="primary")
+                )
             )
 
             location_label = f"{flag} {safe(server_name)}"
@@ -268,14 +286,8 @@ async def _build_amnezia_screen(
             )
             dev_bytes = (getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0) + archived_bytes
             traffic_str = format_traffic(dev_bytes)
-            last_conn_str = format_datetime(profile.last_connected) if getattr(profile, "last_connected", None) else texts.CONNECTION_CONFIG_COMMON_NE_BYLO_AKTIVNOSTEY
 
-            profiles_block += texts.CONNECTION_DEVICE_ROW_FORMAT.format(
-                device_name=safe(profile.device_name),
-                location=location_label,
-                traffic=traffic_str,
-                last_conn=last_conn_str,
-            )
+            status_suffix = ""
             labels = {
                 "pending_create": texts.DEVICE_STATUS_CREATING,
                 "pending_update": texts.PROVISIONING_UPDATING,
@@ -286,7 +298,13 @@ async def _build_amnezia_screen(
                 "delete_failed": texts.PROVISIONING_DELETE_FAILED,
             }
             if profile.provisioning_status in labels:
-                profiles_block += texts.DEVICE_STATUS_LINE_FORMAT.format(v0=labels[profile.provisioning_status])
+                status_suffix = f" ({labels[profile.provisioning_status]})"
+
+            row_items.append(
+                f"<tr><td>📱 {safe(profile.device_name)}{status_suffix}</td><td>{location_label}</td><td>{traffic_str}</td></tr>"
+            )
+
+        profiles_block = "\n" + texts.AMNEZIA_DEVICES_TABLE_TEMPLATE.format(rows="".join(row_items))
 
         rendered = texts.AMNEZIA_SCREEN_TEXT.format(
             active=total_active_devices,
@@ -296,35 +314,23 @@ async def _build_amnezia_screen(
             profiles_block=profiles_block,
         )
 
-    action_buttons_count = 0
-    if not read_only and total_active_devices < device_limit:
-        builder.button(
-            text=texts.BTN_ADD_DEVICE,
-            callback_data="add_device",
+        action_rows = []
+        if not read_only and total_active_devices < device_limit and profiles:
+            action_rows.append(
+                make_rich_button_row(
+                    make_rich_button(texts.BTN_ADD_DEVICE, callback_data="add_device", style="success")
+                )
+            )
+
+        action_rows.append(
+            make_rich_button_row(
+                make_rich_button(texts.BTN_BACK_TO_CONNECTION, callback_data="back_to_connections"),
+                make_rich_button(texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu"),
+            )
         )
-        action_buttons_count += 1
+        rendered += "\n" + "\n".join(device_rows) + "\n" + "\n".join(action_rows)
 
-    builder.button(
-        text=texts.BTN_BACK_TO_CONNECTION,
-        callback_data="back_to_connections",
-    )
-    action_buttons_count += 1
-
-    builder.button(
-        text=texts.BTN_MAIN_MENU_NAV,
-        callback_data="back_to_main_menu",
-    )
-    action_buttons_count += 1
-
-    # 2 columns for device buttons as requested by user
-    device_count = len(profiles)
-    sizes = [2] * (device_count // 2)
-    if device_count % 2 == 1:
-        sizes.append(1)
-    sizes.extend([1] * action_buttons_count)
-
-    builder.adjust(*sizes)
-    return rendered, builder
+    return rendered, None
 
 
 async def _render_connections(
@@ -336,8 +342,8 @@ async def _render_connections(
         await render_hub(
             target.bot,
             target.chat.id,
-            texts.ERROR_USER_NOT_FOUND,
-            get_back_button("back_to_main_menu"),
+            f"{texts.ERROR_USER_NOT_FOUND}\n{make_rich_nav_row('back_to_main_menu', include_menu=False)}",
+            reply_markup=None,
         )
         return
 
@@ -354,47 +360,35 @@ async def _render_connections(
 
     if not has_access:
         if visible_profiles_count > 0:
-            rendered, builder = await _build_amnezia_screen(
+            rendered, _ = await _build_amnezia_screen(
                 user,
                 session,
                 visible_profiles,
                 read_only=True,
             )
-
-            builder.button(
-                text=texts.BTN_BUY_ACCESS,
-                callback_data="menu_buy",
-            )
-            builder.adjust(1)
-
+            buy_btn = make_rich_button(texts.BTN_BUY_ACCESS, callback_data="menu_buy", style="success")
+            nav_row = make_rich_nav_row(include_menu=True)
+            rendered += f"\n{make_rich_button_row(buy_btn)}\n{nav_row}"
             await render_hub(
                 target.bot,
                 target.chat.id,
                 rendered,
-                builder.as_markup(),
+                reply_markup=None,
             )
             return
 
-        builder = InlineKeyboardBuilder()
-        builder.button(
-            text=texts.BTN_BUY_ACCESS,
-            callback_data="menu_buy",
-        )
-        builder.button(
-            text=texts.BTN_MAIN_MENU_NAV,
-            callback_data="back_to_main_menu",
-        )
-        builder.adjust(1)
-
+        buy_btn = make_rich_button(texts.BTN_BUY_ACCESS, callback_data="menu_buy", style="success")
+        nav_row = make_rich_nav_row(include_menu=True)
+        rendered = texts.ERROR_NO_SUBSCRIPTION + f"\n{make_rich_button_row(buy_btn)}\n{nav_row}"
         await render_hub(
             target.bot,
             target.chat.id,
-            texts.ERROR_NO_SUBSCRIPTION,
-            builder.as_markup(),
+            rendered,
+            reply_markup=None,
         )
         return
 
-    rendered, builder = await _build_connections_screen(
+    rendered, _ = await _build_connections_screen(
         user,
         session,
         visible_profiles,
@@ -405,7 +399,7 @@ async def _render_connections(
         target.bot,
         target.chat.id,
         rendered,
-        builder.as_markup(),
+        reply_markup=None,
         trigger_message_id=getattr(target, "message_id", None),
     )
 
@@ -419,8 +413,8 @@ async def _render_amnezia_devices(
         await render_hub(
             target.bot,
             target.chat.id,
-            texts.ERROR_USER_NOT_FOUND,
-            get_back_button("back_to_main_menu"),
+            f"{texts.ERROR_USER_NOT_FOUND}\n{make_rich_nav_row('back_to_main_menu', include_menu=False)}",
+            reply_markup=None,
         )
         return
 
@@ -433,7 +427,7 @@ async def _render_amnezia_devices(
         user.id,
     )
 
-    rendered, builder = await _build_amnezia_screen(
+    rendered, _ = await _build_amnezia_screen(
         user,
         session,
         visible_profiles,
@@ -444,7 +438,7 @@ async def _render_amnezia_devices(
         target.bot,
         target.chat.id,
         rendered,
-        builder.as_markup(),
+        reply_markup=None,
         trigger_message_id=getattr(target, "message_id", None),
     )
 

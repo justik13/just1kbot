@@ -6,15 +6,13 @@ from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     CallbackQuery,
-    InlineKeyboardMarkup,
     Message,
     ReplyKeyboardRemove,
 )
-from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.keyboards.common import get_hub_keyboard
+from bot.keyboards import make_rich_nav_row
 from bot.middlewares.user_context import invalidate_user_cache
 from config.settings import get_settings
 from database.models import User
@@ -24,7 +22,7 @@ from database.repositories.users_repo import (
     update_user,
 )
 from services.subscription import SubscriptionService
-from utils.telegram import render_hub, safe
+from utils.telegram import make_rich_button, make_rich_button_row, render_hub, safe
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -114,7 +112,7 @@ async def _ensure_bot_unblocked(
     )
 
 
-async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[str, InlineKeyboardMarkup]:
+async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[str, None]:
     from database.repositories.profiles_repo import (
         PROFILE_QUOTA_EXCLUDED_STATUSES,
         get_user_profiles,
@@ -150,9 +148,9 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
         and wi_sub.expires_at > now
     )
 
-    status_str = texts.STATUS_SUBSCRIPTION_ACTIVE if is_active else texts.STATUS_SUBSCRIPTION_INACTIVE
     valid_until_str = format_subscription_date(db_user.subscription_end) if db_user.subscription_end else texts.PLACEHOLDER_DASH
     days_left_str = format_days_left(db_user.subscription_end) if db_user.subscription_end else texts.ZERO_DAYS_LABEL
+    status_str = texts.STATUS_SUBSCRIPTION_ACTIVE if is_active else texts.STATUS_SUBSCRIPTION_INACTIVE
 
     quota_profiles_count = len([
         p for p in profiles
@@ -237,6 +235,24 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
         else ""
     )
 
+    from database.repositories.system_settings_repo import get_system_setting
+    mtproto_url = await get_system_setting(session, "mtproto_proxy_url")
+
+    buy_or_sub_action = "menu_subscription" if is_active else "menu_buy"
+    buy_or_sub_text = texts.BTN_MY_SUBSCRIPTION if is_active else texts.BTN_BUY_ACCESS
+
+    admin_row = ""
+    if is_admin:
+        admin_row = "\n" + make_rich_button_row(
+            make_rich_button(texts.BTN_ADMIN, callback_data="menu_admin", style="primary")
+        )
+
+    mtproto_row = ""
+    if mtproto_url:
+        mtproto_row = "\n" + make_rich_button_row(
+            make_rich_button(texts.BTN_MTPROTO_PROXY, url=mtproto_url)
+        )
+
     text = texts.HUB_HEADER.format(
         name=name,
         telegram_id=db_user.telegram_id,
@@ -249,18 +265,13 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
         real_balance=int(balance.real_available),
         bonus_line=bonus_line,
         inviter_line=inviter_line,
+        buy_or_sub_action=buy_or_sub_action,
+        buy_or_sub_text=buy_or_sub_text,
+        admin_row=admin_row,
+        mtproto_row=mtproto_row,
     )
 
-    from database.repositories.system_settings_repo import get_system_setting
-    mtproto_url = await get_system_setting(session, "mtproto_proxy_url")
-
-    kb = get_hub_keyboard(
-        is_admin=is_admin,
-        is_active=is_active,
-        mtproto_url=mtproto_url,
-    )
-
-    return text, kb
+    return text, None
 
 
 @router.message(CommandStart(), StateFilter("*"))
@@ -324,14 +335,13 @@ async def cmd_start(
 
         async def _send_onboarding_push() -> None:
             try:
-                from bot.keyboards.notifications import get_referral_onboarding_keyboard
                 from utils.telegram import EFFECT_LIKE, safe_send_message
 
                 await safe_send_message(
                     bot_inst,
                     ref_tg_id,
                     texts.REFERRAL_ONBOARDING_NOTIFICATION,
-                    reply_markup=get_referral_onboarding_keyboard(),
+                    reply_markup=None,
                     message_effect_id=EFFECT_LIKE,
                 )
             except Exception as e:
@@ -344,14 +354,12 @@ async def cmd_start(
         queue_post_commit_task(session, _send_onboarding_push)
 
     if is_new_user:
-        builder = InlineKeyboardBuilder()
-        builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
-
+        nav_row = make_rich_nav_row(include_menu=True)
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.WELCOME_TEXT,
-            builder.as_markup(),
+            f"{texts.WELCOME_TEXT}\n{nav_row}",
+            reply_markup=None,
             force_new=True,
             session=session,
         )

@@ -206,5 +206,86 @@ class TestRenderHubEffects(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(has_copy_long)
 
-if __name__ == '__main__':
+    async def test_render_hub_send_rich_message_effect_fallback_retries_without_effect(self):
+        bot = MagicMock()
+        bot.send_rich_message = AsyncMock(
+            side_effect=[
+                TelegramBadRequest(method=MagicMock(), message="Bad Request: message effect invalid"),
+                MagicMock(message_id=5050),
+            ]
+        )
+        bot.send_message = AsyncMock()
+
+        kb = InlineKeyboardBuilder().as_markup()
+
+        with patch("utils.telegram._load_hub_ids_from_db", new=AsyncMock(return_value=[])), \
+             patch("utils.telegram._store_hub_id_in_db", new=AsyncMock()), \
+             patch("utils.telegram._delete_hub_messages", new=AsyncMock()):
+
+            mid = await render_hub(
+                bot,
+                chat_id=12345,
+                text="<p>Celebration</p><table><tr><td>Item</td><td>Value</td></tr></table>",
+                reply_markup=kb,
+                message_effect_id="5046509860389126442",
+            )
+
+            # send_rich_message must be retried without effect rather than degrading to send_message
+            self.assertEqual(bot.send_rich_message.call_count, 2)
+            first_call = bot.send_rich_message.call_args_list[0]
+            self.assertEqual(first_call.kwargs.get("message_effect_id"), "5046509860389126442")
+            second_call = bot.send_rich_message.call_args_list[1]
+            self.assertIsNone(second_call.kwargs.get("message_effect_id"))
+            bot.send_message.assert_not_called()
+            self.assertEqual(mid, 5050)
+
+    async def test_render_hub_edit_rich_message_passes_text_none(self):
+        bot = MagicMock()
+        bot.edit_message_text = AsyncMock(return_value=MagicMock(message_id=100))
+
+        kb = InlineKeyboardBuilder().as_markup()
+
+        with patch("utils.telegram._load_hub_ids_from_db", new=AsyncMock(return_value=[100])), \
+             patch("utils.telegram._store_hub_id_in_db", new=AsyncMock()), \
+             patch("utils.telegram._delete_hub_messages", new=AsyncMock()):
+
+            mid = await render_hub(
+                bot,
+                chat_id=12345,
+                text="<p>Rich edit</p><table><tr><td>Key</td><td>Val</td></tr></table>",
+                reply_markup=kb,
+            )
+
+            self.assertEqual(mid, 100)
+            bot.edit_message_text.assert_called_once()
+            call_kwargs = bot.edit_message_text.call_args.kwargs
+            # text must be None so aiogram doesn't serialize text with HTML entity parser
+            self.assertIsNone(call_kwargs.get("text"))
+            self.assertIsNotNone(call_kwargs.get("rich_message"))
+
+    async def test_render_hub_edit_rich_message_re_raises_not_modified(self):
+        bot = MagicMock()
+        bot.edit_message_text = AsyncMock(
+            side_effect=TelegramBadRequest(method=MagicMock(), message="Bad Request: message is not modified")
+        )
+
+        kb = InlineKeyboardBuilder().as_markup()
+
+        with patch("utils.telegram._load_hub_ids_from_db", new=AsyncMock(return_value=[100])), \
+             patch("utils.telegram._store_hub_id_in_db", new=AsyncMock()), \
+             patch("utils.telegram._delete_hub_messages", new=AsyncMock()):
+
+            mid = await render_hub(
+                bot,
+                chat_id=12345,
+                text="<p>Same text</p><table><tr><td>Key</td><td>Val</td></tr></table>",
+                reply_markup=kb,
+            )
+
+            # Caught by outer "message is not modified" handler and cleanly returns existing message ID
+            self.assertEqual(mid, 100)
+            self.assertEqual(bot.edit_message_text.call_count, 1)
+
+
+if __name__ == "__main__":
     unittest.main()

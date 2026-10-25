@@ -4,19 +4,10 @@ import logging
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
-from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.keyboards import (
-    get_back_button,
-    get_change_tariff_keyboard,
-    get_dispute_blocked_keyboard,
-    get_order_checkout_keyboard,
-    get_renew_keyboard,
-    get_same_tariff_keyboard,
-    get_tariff_duration_keyboard,
-)
+from bot.keyboards import make_rich_nav_row
 from utils.support import get_support_url
 from config.constants import REFERRAL_WELCOME_DISCOUNT_PERCENT
 from database.repositories.account_ledger_repo import get_account_balance
@@ -35,7 +26,12 @@ from bot.formatters import (
     get_tariff_display_name,
     get_tariff_group_name,
 )
-from utils.telegram import render_hub
+from bot.keyboards.payment import format_dynamic_tariff_button
+from utils.telegram import (
+    make_rich_button,
+    make_rich_button_row,
+    render_hub,
+)
 
 from .common import (
     _check_tariff_change_allowed,
@@ -52,12 +48,58 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
-_START_KEYBOARD_BUILDER = InlineKeyboardBuilder()
-_START_KEYBOARD_BUILDER.button(
-    text=texts.BTN_PAYMENT_START_ONBOARDING, callback_data="back_to_main_menu"
-)
-_START_KEYBOARD_BUILDER.adjust(1)
-_START_KEYBOARD = _START_KEYBOARD_BUILDER.as_markup()
+def _make_checkout_rich_buttons(tariff_id: int, price: int, can_pay_wallet: bool, back_callback: str) -> str:
+    rows = []
+    if price == 0:
+        rows.append(
+            make_rich_button_row(
+                make_rich_button(
+                    texts.BTN_PAYMENT_CONFIRM_FREE_CHANGE,
+                    callback_data=f"order_pay_wallet:{tariff_id}",
+                    style="success",
+                )
+            )
+        )
+    elif can_pay_wallet:
+        rows.append(
+            make_rich_button_row(
+                make_rich_button(
+                    texts.BTN_PAYMENT_BUY_FROM_BALANCE,
+                    callback_data=f"order_pay_wallet:{tariff_id}",
+                    style="success",
+                )
+            )
+        )
+        rows.append(
+            make_rich_button_row(
+                make_rich_button(
+                    texts.BTN_PAYMENT_PAY_CARD.format(price=price),
+                    callback_data=f"order_pay_card:{tariff_id}",
+                    style="primary",
+                )
+            )
+        )
+    else:
+        rows.append(
+            make_rich_button_row(
+                make_rich_button(
+                    texts.BTN_PAYMENT_PAY_CARD.format(price=price),
+                    callback_data=f"order_pay_card:{tariff_id}",
+                    style="success",
+                )
+            )
+        )
+        rows.append(
+            make_rich_button_row(
+                make_rich_button(
+                    texts.BUTTON_TOPUP,
+                    callback_data="balance_topup",
+                    style="primary",
+                )
+            )
+        )
+    rows.append(make_rich_nav_row(back_callback))
+    return "\n" + "\n".join(rows)
 
 
 @router.callback_query(F.data.in_(["menu_buy", "menu_subscription"]))
@@ -71,11 +113,16 @@ async def hub_menu_payment(
     await state.clear()
 
     if not db_user:
+        start_row = make_rich_button_row(
+            make_rich_button(
+                texts.BTN_PAYMENT_START_ONBOARDING, callback_data="back_to_main_menu"
+            )
+        )
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            texts.PAYMENT_USER_NOT_REGISTERED,
-            _START_KEYBOARD,
+            f"{texts.PAYMENT_USER_NOT_REGISTERED}\n{start_row}",
+            reply_markup=None,
         )
         return
 
@@ -145,8 +192,8 @@ async def select_tariff(
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            texts.PAYMENT_USER_NOT_REGISTERED,
-            _START_KEYBOARD,
+            texts.PAYMENT_USER_NOT_REGISTERED + f"\n{make_rich_nav_row(include_menu=True)}",
+            reply_markup=None,
         )
         return
 
@@ -164,11 +211,18 @@ async def select_tariff(
         support_url = get_support_url(
             texts.SUPPORT_DISPUTE_GREETING_TEMPLATE.format(telegram_id=user_tg_id)
         )
+        dispute_actions = (
+            "\n"
+            + make_rich_button_row(
+                make_rich_button(texts.BTN_SUPPORT, url=support_url)
+            )
+            + f"\n{make_rich_nav_row(back_to)}"
+        )
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
-            get_dispute_blocked_keyboard(back_to, support_url=support_url),
+            texts.PAYMENT_DISPUTE_BLOCKED_NOTICE + dispute_actions,
+            reply_markup=None,
         )
         await callback.answer(show_alert=False)
         return
@@ -178,8 +232,8 @@ async def select_tariff(
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            texts.PAYMENT_DEBT_BLOCKED_NOTICE,
-            get_back_button(back_to),
+            texts.PAYMENT_DEBT_BLOCKED_NOTICE + f"\n{make_rich_nav_row(back_to)}",
+            reply_markup=None,
         )
         await callback.answer(show_alert=False)
         return
@@ -197,11 +251,22 @@ async def select_tariff(
         db_user.current_tariff_id == tariff.id
         or getattr(tariff, "device_limit", None) == current_limit
     ):
+        same_actions = (
+            "\n"
+            + make_rich_button_row(
+                make_rich_button(texts.BTN_PAYMENT_RENEW_SAME, callback_data="payment_quick_renew", style="success")
+            )
+            + "\n"
+            + make_rich_button_row(
+                make_rich_button(texts.BTN_PAYMENT_CHANGE_TARIFF, callback_data="payment_change_tariff", style="primary")
+            )
+            + f"\n{make_rich_nav_row(back_to)}"
+        )
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            texts.PAYMENT_SHOWCASE,
-            get_same_tariff_keyboard(),
+            texts.PAYMENT_SHOWCASE + same_actions,
+            reply_markup=None,
         )
         await callback.answer(show_alert=False)
         return
@@ -220,8 +285,9 @@ async def select_tariff(
                 texts.PAYMENT_DOWNGRADE_BLOCKED_PROFILES.format(
                     profiles_count=format_plural(total_devices, texts.NOUN_DEVICES),
                     new_limit=format_plural(device_limit, texts.NOUN_DEVICES),
-                ),
-                get_back_button(back_to),
+                )
+                + f"\n{make_rich_nav_row(back_to)}",
+                reply_markup=None,
             )
             await callback.answer(show_alert=False)
             return
@@ -254,16 +320,17 @@ async def select_tariff(
             balance_after=balance_after,
             shortage_line=shortage_line,
         )
+        rich_text = text + _make_checkout_rich_buttons(
+            tariff_id=tariff.id,
+            price=price,
+            can_pay_wallet=(balance_before >= price),
+            back_callback=back_to,
+        )
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            text,
-            get_order_checkout_keyboard(
-                tariff_id=tariff.id,
-                price=price,
-                can_pay_wallet=(balance_before >= price),
-                back_callback=back_to,
-            ),
+            rich_text,
+            reply_markup=None,
         )
         await callback.answer(show_alert=False)
         return
@@ -276,8 +343,8 @@ async def select_tariff(
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            error_text,
-            get_back_button(back_to),
+            f"{error_text}\n{make_rich_nav_row(back_to)}",
+            reply_markup=None,
         )
         await callback.answer(show_alert=False)
         return
@@ -331,16 +398,17 @@ async def select_tariff(
         )
     )
 
+    rich_text = text + _make_checkout_rich_buttons(
+        tariff_id=tariff.id,
+        price=price,
+        can_pay_wallet=(balance_before >= price),
+        back_callback=back_to,
+    )
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        text,
-        get_order_checkout_keyboard(
-            tariff_id=tariff.id,
-            price=price,
-            can_pay_wallet=(balance_before >= price),
-            back_callback=back_to,
-        ),
+        rich_text,
+        reply_markup=None,
     )
 
     await callback.answer(show_alert=False)
@@ -353,11 +421,16 @@ async def render_quick_renew(
     db_user=None,
 ) -> None:
     if not db_user:
+        start_row = make_rich_button_row(
+            make_rich_button(
+                texts.BTN_PAYMENT_START_ONBOARDING, callback_data="back_to_main_menu"
+            )
+        )
         await render_hub(
             bot,
             chat_id,
-            texts.PAYMENT_USER_NOT_REGISTERED,
-            _START_KEYBOARD,
+            f"{texts.PAYMENT_USER_NOT_REGISTERED}\n{start_row}",
+            reply_markup=None,
         )
         return
 
@@ -369,8 +442,8 @@ async def render_quick_renew(
         await render_hub(
             bot,
             chat_id,
-            message,
-            get_back_button("menu_subscription"),
+            f"{message}\n{make_rich_nav_row('menu_subscription')}",
+            reply_markup=None,
         )
         return
 
@@ -379,8 +452,8 @@ async def render_quick_renew(
         await render_hub(
             bot,
             chat_id,
-            texts.PAYMENT_NO_TARIFFS,
-            get_back_button("menu_subscription"),
+            f"{texts.PAYMENT_NO_TARIFFS}\n{make_rich_nav_row('menu_subscription')}",
+            reply_markup=None,
         )
         return
 
@@ -419,18 +492,48 @@ async def render_quick_renew(
             getattr(current_tariff, "duration_days", 30) if current_tariff else 30
         )
         is_active = await _is_subscription_active(db_user)
-        keyboard = get_change_tariff_keyboard(
-            tariffs,
-            current_limit,
-            is_subscription_active=is_active,
-            current_tariff_id=getattr(db_user, "current_tariff_id", None),
-            current_duration_days=current_duration_days,
-        )
+
+        grouped: dict[int, list] = {}
+        for t in tariffs:
+            if t.id == getattr(db_user, "current_tariff_id", None):
+                continue
+            limit = getattr(t, "device_limit", 2)
+            if limit not in grouped:
+                grouped[limit] = []
+            grouped[limit].append(t)
+
+        tariff_rows = []
+        for limit in sorted(grouped.keys()):
+            group_name = get_tariff_group_name(limit)
+            if is_active and limit < current_limit:
+                group_name += texts.PAYMENT_STATUS_DOWNGRADE_BADGE
+            elif limit == current_limit:
+                group_name += texts.PAYMENT_STATUS_ACTIVE_BADGE
+            elif limit > current_limit:
+                group_name += texts.PAYMENT_STATUS_UPGRADE_BADGE
+
+            group_tariffs = grouped[limit]
+            best_tariff = next(
+                (t for t in group_tariffs if getattr(t, "duration_days", None) == current_duration_days),
+                min(group_tariffs, key=lambda t: getattr(t, "duration_days", 30)),
+            )
+            tariff_rows.append(
+                make_rich_button_row(
+                    make_rich_button(
+                        group_name,
+                        callback_data=f"select_tariff:{best_tariff.id}:change",
+                        style="primary",
+                    )
+                )
+            )
+        back_target = "menu_subscription" if is_active else "back_to_main_menu"
+        nav_row = make_rich_nav_row(back_target)
+        full_text = texts.PAYMENT_ARCHIVED_TARIFF_NOTICE + "\n" + "\n".join(tariff_rows) + f"\n{nav_row}"
         await render_hub(
             bot,
             chat_id,
-            texts.PAYMENT_ARCHIVED_TARIFF_NOTICE,
-            keyboard,
+            full_text,
+            reply_markup=None,
         )
         return
 
@@ -441,10 +544,28 @@ async def render_quick_renew(
         valid_until=format_subscription_date(db_user.subscription_end),
     )
 
-    keyboard = get_renew_keyboard(renew_tariffs)
+    duration_rows = []
+    tariffs_sorted = sorted(renew_tariffs, key=lambda t: getattr(t, "duration_days", 0))
+    base_tariff = next(
+        (t for t in tariffs_sorted if getattr(t, "duration_days", 0) == 30),
+        tariffs_sorted[0] if tariffs_sorted else None,
+    )
+    for t in tariffs_sorted:
+        btn_label = format_dynamic_tariff_button(t, base_tariff)
+        duration_rows.append(
+            make_rich_button_row(
+                make_rich_button(
+                    btn_label,
+                    callback_data=f"select_tariff:{t.id}:renew",
+                    style="primary",
+                )
+            )
+        )
+    nav_row = make_rich_nav_row("menu_subscription")
+    full_text = text + "\n" + "\n".join(duration_rows) + f"\n{nav_row}"
 
     await render_hub(
-        bot, chat_id, text, keyboard
+        bot, chat_id, full_text, reply_markup=None
     )
 
 
@@ -472,11 +593,16 @@ async def show_change_tariff(
     await callback.answer(show_alert=False)
 
     if not db_user:
+        start_row = make_rich_button_row(
+            make_rich_button(
+                texts.BTN_PAYMENT_START_ONBOARDING, callback_data="back_to_main_menu"
+            )
+        )
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            texts.PAYMENT_USER_NOT_REGISTERED,
-            _START_KEYBOARD,
+            f"{texts.PAYMENT_USER_NOT_REGISTERED}\n{start_row}",
+            reply_markup=None,
         )
         return
 
@@ -498,8 +624,8 @@ async def show_change_tariff(
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            texts.PAYMENT_NO_TARIFFS,
-            get_back_button("menu_subscription"),
+            f"{texts.PAYMENT_NO_TARIFFS}\n{make_rich_nav_row('menu_subscription')}",
+            reply_markup=None,
         )
         return
 
@@ -508,8 +634,8 @@ async def show_change_tariff(
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            texts.PAYMENT_CHANGE_TARIFF_UNAVAILABLE_NO_SUB,
-            get_back_button("menu_subscription"),
+            f"{texts.PAYMENT_CHANGE_TARIFF_UNAVAILABLE_NO_SUB}\n{make_rich_nav_row('menu_subscription')}",
+            reply_markup=None,
         )
         return
 
@@ -524,16 +650,45 @@ async def show_change_tariff(
     current_tariff = await get_tariff_by_id(session, db_user.current_tariff_id) if getattr(db_user, "current_tariff_id", None) else None
     current_duration_days = getattr(current_tariff, "duration_days", 30) if current_tariff else 30
 
-    keyboard = get_change_tariff_keyboard(
-        tariffs,
-        current_limit,
-        is_subscription_active=is_active,
-        current_tariff_id=db_user.current_tariff_id,
-        current_duration_days=current_duration_days,
-    )
+    grouped: dict[int, list] = {}
+    for t in tariffs:
+        if t.id == getattr(db_user, "current_tariff_id", None):
+            continue
+        limit = getattr(t, "device_limit", 2)
+        if limit not in grouped:
+            grouped[limit] = []
+        grouped[limit].append(t)
+
+    tariff_rows = []
+    for limit in sorted(grouped.keys()):
+        group_name = get_tariff_group_name(limit)
+        if is_active and limit < current_limit:
+            group_name += texts.PAYMENT_STATUS_DOWNGRADE_BADGE
+        elif limit == current_limit:
+            group_name += texts.PAYMENT_STATUS_ACTIVE_BADGE
+        elif limit > current_limit:
+            group_name += texts.PAYMENT_STATUS_UPGRADE_BADGE
+
+        group_tariffs = grouped[limit]
+        best_tariff = next(
+            (t for t in group_tariffs if getattr(t, "duration_days", None) == current_duration_days),
+            min(group_tariffs, key=lambda t: getattr(t, "duration_days", 30)),
+        )
+        tariff_rows.append(
+            make_rich_button_row(
+                make_rich_button(
+                    group_name,
+                    callback_data=f"select_tariff:{best_tariff.id}:change",
+                    style="primary",
+                )
+            )
+        )
+    back_target = "menu_subscription" if is_active else "back_to_main_menu"
+    nav_row = make_rich_nav_row(back_target)
+    full_text = text + "\n" + "\n".join(tariff_rows) + f"\n{nav_row}"
 
     await render_hub(
-        callback.bot, callback.message.chat.id, text, keyboard
+        callback.bot, callback.message.chat.id, full_text, reply_markup=None
     )
 
 
@@ -555,7 +710,12 @@ async def render_tariff_duration_selection(
         session, user_tg_id
     ):
         message = await MaintenanceService.get_message(session) or texts.MAINTENANCE_DEFAULT_MESSAGE
-        await render_hub(bot, chat_id, message, get_back_button(back_to))
+        await render_hub(
+            bot,
+            chat_id,
+            f"{message}\n{make_rich_nav_row(back_to)}",
+            reply_markup=None,
+        )
         return
 
     if db_user:
@@ -570,11 +730,8 @@ async def render_tariff_duration_selection(
             await render_hub(
                 bot,
                 chat_id,
-                texts.PAYMENT_DOWNGRADE_BLOCKED_PROFILES.format(
-                    profiles_count=format_plural(total_devices, texts.NOUN_DEVICES),
-                    new_limit=format_plural(device_limit, texts.NOUN_DEVICES),
-                ),
-                get_back_button(back_to),
+                f"{texts.PAYMENT_DOWNGRADE_BLOCKED_PROFILES.format(profiles_count=format_plural(total_devices, texts.NOUN_DEVICES), new_limit=format_plural(device_limit, texts.NOUN_DEVICES))}\n{make_rich_nav_row(back_to)}",
+                reply_markup=None,
             )
             return
 
@@ -594,18 +751,33 @@ async def render_tariff_duration_selection(
         await render_hub(
             bot,
             chat_id,
-            texts.PAYMENT_NO_TARIFFS,
-            get_back_button(back_to),
+            f"{texts.PAYMENT_NO_TARIFFS}\n{make_rich_nav_row(back_to)}",
+            reply_markup=None,
         )
         return
 
     description = f"<b>{get_tariff_group_name(device_limit)}</b>\n\n"
     text = description + texts.PAYMENT_DURATION_HEADER
 
-    keyboard = get_tariff_duration_keyboard(type_tariffs, source=source)
+    duration_rows = []
+    base_tariff = min(type_tariffs, key=lambda t: getattr(t, "duration_days", 30))
+    tariffs_sorted = sorted(type_tariffs, key=lambda t: getattr(t, "duration_days", 0))
+    for t in tariffs_sorted:
+        btn_label = format_dynamic_tariff_button(t, base_tariff)
+        duration_rows.append(
+            make_rich_button_row(
+                make_rich_button(
+                    btn_label,
+                    callback_data=f"select_tariff:{t.id}:{source}",
+                    style="primary",
+                )
+            )
+        )
+    nav_row = make_rich_nav_row(back_to)
+    full_text = text + "\n" + "\n".join(duration_rows) + f"\n{nav_row}"
 
     await render_hub(
-        bot, chat_id, text, keyboard
+        bot, chat_id, full_text, reply_markup=None
     )
 
 

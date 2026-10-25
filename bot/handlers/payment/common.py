@@ -1,11 +1,9 @@
 import logging
 
 from aiogram.types import CallbackQuery
-from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.keyboards import get_back_button, get_tariff_showcase_keyboard
 from database.repositories.profiles_repo import (
     get_user_profiles,
     get_user_profiles_count,
@@ -18,8 +16,14 @@ from bot.formatters import (
     format_days_left,
     format_subscription_date,
     get_tariff_display_name,
+    get_tariff_group_name,
 )
-from utils.telegram import render_hub
+from bot.keyboards import make_rich_nav_row
+from utils.telegram import (
+    make_rich_button,
+    make_rich_button_row,
+    render_hub,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -81,8 +85,8 @@ async def render_tariff_showcase(
         await render_hub(
             bot,
             chat_id,
-            texts.PAYMENT_NO_TARIFFS,
-            get_back_button("back_to_main_menu"),
+            f"{texts.PAYMENT_NO_TARIFFS}\n{make_rich_nav_row('back_to_main_menu')}",
+            reply_markup=None,
             session=session,
         )
         return
@@ -92,12 +96,43 @@ async def render_tariff_showcase(
         if limit not in grouped:
             grouped[limit] = []
         grouped[limit].append(tariff)
-    keyboard = get_tariff_showcase_keyboard(grouped)
+    rows = []
+    for limit, group_tariffs in sorted(grouped.items()):
+        name = get_tariff_display_name(limit)
+        min_price = min(int(t.price_rub) for t in group_tariffs)
+        rows.append(
+            texts.PAYMENT_SHOWCASE_TABLE_ROW_TEMPLATE.format(
+                name=name, limit=limit, min_price=min_price
+            )
+        )
+    table = texts.PAYMENT_SHOWCASE_TABLE_TEMPLATE.format(rows="".join(rows))
+    text = f"{texts.PAYMENT_SHOWCASE_HEADER}\n{table}"
+
+    tariff_buttons = []
+    for limit in sorted(grouped.keys()):
+        group_name = get_tariff_group_name(limit)
+        group_tariffs = grouped.get(limit) or []
+        if group_tariffs:
+            min_price = min(int(t.price_rub) for t in group_tariffs)
+            btn_text = texts.BTN_TARIFF_SHOWCASE_ITEM.format(group_name=group_name, min_price=min_price)
+        else:
+            btn_text = group_name
+        tariff_buttons.append(
+            make_rich_button_row(
+                make_rich_button(
+                    btn_text,
+                    callback_data=f"select_tariff_type:{limit}:showcase",
+                    style="primary",
+                )
+            )
+        )
+    nav_row = make_rich_nav_row(include_menu=True)
+    full_text = f"{text}\n" + "\n".join(tariff_buttons) + f"\n{nav_row}"
     await render_hub(
         bot,
         chat_id,
-        texts.PAYMENT_SHOWCASE_HEADER,
-        keyboard,
+        full_text,
+        reply_markup=None,
         session=session,
     )
 
@@ -130,24 +165,13 @@ async def _show_hub(
         devices_count=total_devices,
         device_limit=device_limit,
     )
+    nav_row = make_rich_nav_row(include_menu=True)
+    full_text = f"{text}\n{nav_row}"
 
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text=texts.BTN_PAYMENT_RENEW_SUBSCRIPTION,
-        callback_data="payment_quick_renew",
-        style="success",
-    )
-    builder.button(
-        text=texts.BTN_CHANGE_TARIFF, callback_data="payment_change_tariff"
-    )
-    builder.button(
-        text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu"
-    )
-    builder.adjust(1, 1, 1)
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        text,
-        builder.as_markup(),
+        full_text,
+        reply_markup=None,
         session=session,
     )

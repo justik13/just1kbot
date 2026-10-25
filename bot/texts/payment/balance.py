@@ -25,7 +25,7 @@ BALANCE_HISTORY_SECTION_TITLE = """
 <b>Последние операции</b>
 """
 
-BALANCE_HISTORY_TITLE = """🧾 <b>История операций</b>
+BALANCE_HISTORY_TITLE = """<p>🧾 <b>История операций</b></p>
 
 {history}"""
 
@@ -55,13 +55,13 @@ BALANCE_TOPUP_CANCELLED_NO_DEBIT = """{value_0}💰 <b>Баланс</b>
 
 """
 
-BALANCE_TOPUP_CARD = """💳 <b>Пополнение баланса</b>
-
-Сумма: <b>{value_0} ₽</b>
-Текущий баланс: <b>{value_1} ₽</b>
-
-Ссылка ведёт на защищённую страницу ЮKassa.
-Если возникла задержка зачисления — напишите в поддержку."""
+BALANCE_TOPUP_CARD = """<p>💳 <b>Пополнение баланса</b></p>
+<table>
+  <tr><td>К оплате:</td><td><b>{value_0} ₽</b></td></tr>
+  <tr><td>Текущий баланс:</td><td><b>{value_1} ₽</b></td></tr>
+</table>
+<blockquote>Ссылка ведёт на защищённую страницу ЮKassa.
+Если возникла задержка зачисления — напишите в поддержку.</blockquote>"""
 
 BALANCE_TOTAL_AVAILABLE_LABEL = "💰 Баланс: <b>{int_balance_real_available} ₽</b>"
 
@@ -73,9 +73,26 @@ BALANCE_VY_POLUCHITE_20_OT_SUMMY_POPOL = """Ваш пригласивший по
 
 HISTORY_EMPTY = "<i>История пуста. У вас пока не было пополнений.</i>"
 
-HISTORY_HEADER = """🧾 <b>История пополнений</b>
+HISTORY_HEADER = """<p>🧾 <b>История пополнений</b></p>
 """
 
 HISTORY_LIMIT_NOTE = """
 <i>Показаны последние 10 из {count} пополнений</i>"""
+
+BALANCE_HISTORY_TABLE_TEMPLATE = "<table><tr><th>Дата</th><th>Операция</th><th>Сумма</th></tr>{rows}</table>"
+BALANCE_SCREEN_TITLE = "<p>💰 <b>Баланс</b></p>\n"
+BALANCE_ROW_MAIN = "<tr><td>Основной:</td><td><b>{amount} ₽</b></td></tr>"
+BALANCE_ROW_BONUS = "<tr><td>Бонусный:</td><td><b>+{amount} ₽ 🎁</b></td></tr>"
+BALANCE_ROW_DEBT = "<tr><td>Задолженность:</td><td><b>−{amount} ₽</b></td></tr>"
+BALANCE_RICH_ACTIONS = (
+    '\n<tg-button-row align="center">\n'
+    '  <tg-button type="callback_data" style="success" data="balance_topup">➕ Пополнить счёт</tg-button>\n'
+    '  <tg-button type="callback_data" style="primary" data="balance_history:0">🧾 История</tg-button>\n'
+    '</tg-button-row>'
+)
+BALANCE_CUSTOM_AMOUNT_ROW = (
+    '<tg-button-row align="center">\n'
+    '  <tg-button type="callback_data" style="primary" data="balance_custom_amount">✏️ Другая сумма</tg-button>\n'
+    '</tg-button-row>'
+)
 

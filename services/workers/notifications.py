@@ -7,10 +7,6 @@ from aiogram.exceptions import TelegramForbiddenError
 from cachetools import TTLCache
 from sqlalchemy import or_, select, update
 
-from bot.keyboards.notifications import (
-    get_post_expiry_keyboard,
-    get_pre_expiry_keyboard,
-)
 from bot.texts.runtime.notifications import (
     NOTIFY_1D,
     NOTIFY_2H,
@@ -269,7 +265,7 @@ async def _send_pre_expiry_notifications(
                     await bot.send_message(
                         user.telegram_id,
                         msg,
-                        reply_markup=get_pre_expiry_keyboard(),
+                        reply_markup=None,
                         parse_mode="HTML",
                     )
 
@@ -422,7 +418,7 @@ async def _send_post_expiry_notifications(
                     await bot.send_message(
                         user.telegram_id,
                         msg,
-                        reply_markup=get_post_expiry_keyboard(),
+                        reply_markup=None,
                         parse_mode="HTML",
                     )
 
@@ -459,12 +455,10 @@ async def _send_white_internet_notifications(
     if bot is None:
         return
 
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
     from config.enums import WhiteInternetStatus
     from database.models import User, WhiteInternetSubscription
     from utils.formatters import format_tg_time
     from bot.texts.runtime.notifications import (
-        BTN_EXTEND_WHITE_INTERNET,
         NOTIFY_WI_1D,
         NOTIFY_WI_2H,
         NOTIFY_WI_3D,
@@ -612,15 +606,12 @@ async def _send_white_internet_notifications(
                         await session.flush()
                     continue
 
-                kb = InlineKeyboardBuilder()
-                kb.button(text=BTN_EXTEND_WHITE_INTERNET, callback_data="wl_renew_preview")
-
                 try:
                     await global_send_limiter.acquire()
                     await bot.send_message(
                         user.telegram_id,
                         msg,
-                        reply_markup=kb.as_markup(),
+                        reply_markup=None,
                         parse_mode="HTML",
                     )
                     if notify_type == "expired":

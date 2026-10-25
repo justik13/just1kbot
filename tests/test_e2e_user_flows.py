@@ -198,8 +198,14 @@ class E2EUserFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
         await self.dp.feed_update(bot=self.bot, update=update)
         
         # Verify response
-        req = next(r for r in reversed(self.session.requests) if r.__class__.__name__ == "SendMessage")
-        self.assertIn("Добро пожаловать", req.text)
+        req = next(
+            r
+            for r in reversed(self.session.requests)
+            if r.__class__.__name__ in ("SendMessage", "SendRichMessage")
+            and getattr(r, "text", None) != "🧹"
+        )
+        content = getattr(req, "text", "") or getattr(getattr(req, "rich_message", None), "html", "")
+        self.assertIn("Добро пожаловать", content)
 
         # 2. User checks balance
         update = self._create_callback_update("menu_balance")
@@ -208,10 +214,10 @@ class E2EUserFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
         req = next(
             r
             for r in reversed(self.session.requests)
-            if r.__class__.__name__ == "EditMessageText"
+            if r.__class__.__name__ in ("EditMessageText", "SendMessage", "SendRichMessage")
         )
-        self.assertEqual(req.__class__.__name__, "EditMessageText")
-        self.assertIn("Баланс:", req.text)
+        content = getattr(req, "text", "") or getattr(getattr(req, "rich_message", None), "html", "")
+        self.assertIn("Баланс", content)
         
         # 3. User tries to buy tariff from showcase
         update = self._create_callback_update("payment_showcase")
@@ -219,25 +225,37 @@ class E2EUserFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
         req = next(
             r
             for r in reversed(self.session.requests)
-            if r.__class__.__name__ == "EditMessageText"
+            if r.__class__.__name__ in ("EditMessageText", "SendMessage", "SendRichMessage")
         )
-        self.assertIn("Базовый", str(req.reply_markup))
+        buttons_content = str(req.reply_markup) + str(getattr(getattr(req, "rich_message", None), "html", ""))
+        self.assertIn("Базовый", buttons_content)
         
         # Emulate clicking on the tariff to quote
         update = self._create_callback_update(f"select_tariff:{self.tariff.id}:showcase")
         await self.dp.feed_update(bot=self.bot, update=update)
-        req = next(r for r in reversed(self.session.requests) if r.__class__.__name__ in ("EditMessageText", "SendMessage") and hasattr(r, "text") and r.text)
-        self.assertIn("Базовый", req.text)
-        self.assertIn("150", req.text)
+        req = next(
+            r
+            for r in reversed(self.session.requests)
+            if r.__class__.__name__ in ("EditMessageText", "SendMessage", "SendRichMessage")
+        )
+        content = getattr(req, "text", "") or getattr(getattr(req, "rich_message", None), "html", "")
+        self.assertIn("Базовый", content)
+        self.assertIn("150", content)
         # Here they should see "Не хватает" (insufficient funds)
-        self.assertIn("Не хватает", req.text)
+        self.assertIn("Не хватает", content)
 
         # 4. Existing user sends /start again -> gets Hub directly without welcome
         update = self._create_message_update("/start")
         await self.dp.feed_update(bot=self.bot, update=update)
-        req = next(r for r in reversed(self.session.requests) if r.__class__.__name__ == "SendMessage")
-        self.assertIn("Главное меню", req.text)
-        self.assertNotIn("Добро пожаловать", req.text)
+        req = next(
+            r
+            for r in reversed(self.session.requests)
+            if r.__class__.__name__ in ("SendMessage", "SendRichMessage")
+            and getattr(r, "text", None) != "🧹"
+        )
+        content = getattr(req, "text", "") or getattr(getattr(req, "rich_message", None), "html", "")
+        self.assertIn("Личный кабинет", content)
+        self.assertNotIn("Добро пожаловать", content)
 
 
 if __name__ == "__main__":

@@ -66,11 +66,12 @@ DEVICE_DELETE_IN_PROGRESS = "⏳ Уже удаляем устройство..."
 
 DEVICE_DELETING_PROGRESS = "⏳ Удаляю устройство..."
 
-DEVICE_MANAGE_HEADER = """📱 <b>{device_name}</b>
-
-🌍 Локация: <b>{country_display}</b>
-📊 Трафик: <b>{traffic_total}</b>
-⏱ Активность: <b>{last_connected}</b>"""
+DEVICE_MANAGE_HEADER = """<p>📱 <b>{device_name}</b></p>
+<table>
+  <tr><td>Локация:</td><td><b>{country_display}</b></td></tr>
+  <tr><td>Трафик:</td><td><b>{traffic_total}</b></td></tr>
+  <tr><td>Активность:</td><td><b>{last_connected}</b></td></tr>
+</table>"""
 
 DEVICE_NAME_DUPLICATE = """⚠️ <b>Устройство с таким именем уже существует</b>
 
@@ -156,6 +157,10 @@ VLESS_SUB_SCREEN_TEXT = """⚡️ <b>Основное подключение п�
 
 📋 <b>Ваша ссылка на подписку:</b>
 <code>{sub_url}</code>
+<p><i>(нажмите на ссылку, чтобы скопировать)</i></p>
+<tg-button-row align="center">
+  <tg-button type="url" style="success" url="{sub_url}">🚀 Подключить в INCY</tg-button>
+</tg-button-row>
 
 📱 <b>Как подключить:</b>
 1. Установите приложение <b>INCY</b> на телефон или планшет.
@@ -168,6 +173,13 @@ VLESS_SUB_SCREEN_TEXT = """⚡️ <b>Основное подключение п�
 BTN_VLESS_RESET_HWID = "🔄 Сбросить привязку устройств"
 VLESS_RESET_SUCCESS = "✅ Привязка устройств по ссылке сброшена."
 VLESS_RESET_EMPTY = "ℹ️ У вас нет привязанных устройств по ссылке."
+VLESS_RESET_CONFIRM_CARD = (
+    "<p>⚠️ <b>Сброс привязки устройств</b></p>\n\n"
+    "Вы уверены, что хотите сбросить привязку устройств по ссылке?\n\n"
+    "После подтверждения текущие устройства будут отключены от подключения по ссылке, "
+    "и вы сможете подключить новые устройства.\n\n"
+    "<i>Это действие необратимо.</i>"
+)
 VLESS_DEFAULT_SERVER_DESCRIPTION = "Прямой доступ"
 
 BTN_AMNEZIA_DEVICES = "🛡 Устройства Amnezia"
@@ -175,28 +187,23 @@ BTN_AMNEZIA_DEVICES_COUNT = "🛡 Устройства Amnezia ({count})"
 BTN_BACK_TO_CONNECTION = "◀️ Назад к подключению"
 BTN_ADD_DEVICE = "➕ Добавить устройство"
 
-CONNECTION_HUB_ACTIVE_TEXT = """🌐 <b>Подключение</b>
+CONNECTION_HUB_ACTIVE_TEXT = """<p>🌐 <b>Подключение</b></p>
+<table>
+  <tr><td>Статус:</td><td>🟢 <b>Активна</b></td></tr>
+  <tr><td>Срок:</td><td>до {expiry}</td></tr>
+  <tr><td>Тариф:</td><td><b>{tariff}</b></td></tr>
+  <tr><td>Устройства:</td><td><b>{active} / {limit}</b></td></tr>
+  <tr><td>Разбивка:</td><td>по ссылке: {vless_count} · Amnezia: {amnezia_count}</td></tr>
+</table>
 
-<b>Статус:</b> 🟢 Активна
-<b>Срок действия:</b> до {expiry}
-<b>Тариф:</b> {tariff}
-
-📱 <b>Устройства:</b> {active} из {limit}
-<i>(по ссылке: {vless_count} • Amnezia: {amnezia_count})</i>
-
-⚡️ <b>Основное подключение по ссылке (INCY):</b>
-Единая ссылка дает доступ сразу ко всем серверам с автообновлением без ручной настройки отдельных ключей. Рекомендуется для всех основных устройств.
-
-📋 <b>Ваша ссылка на подписку:</b>
+<p>⚡️ <b>Ссылка для подключения (INCY):</b></p>
 <code>{sub_url}</code>
-<i>(нажмите на ссылку для копирования)</i>
+<p><i>(нажмите на ссылку, чтобы скопировать)</i></p>{sub_button_row}"""
 
-🛡 <b>Устройства Amnezia:</b>
-<i>Для приложений Amnezia или роутеров перейдите в раздел ниже.</i>"""
-
-CONNECTION_HUB_EXPIRED_TEXT = """🌐 <b>Подключение</b>
-
-<b>Статус:</b> 🔴 Не активна
+CONNECTION_HUB_EXPIRED_TEXT = """<p>🌐 <b>Подключение</b></p>
+<table>
+  <tr><td>Статус:</td><td>🔴 <b>Не активна</b></td></tr>
+</table>
 {grace_notice}
 <i>Для возобновления доступа продлите подписку.</i>"""
 
@@ -207,21 +214,23 @@ VLESS_WEB_TOO_MANY_REQUESTS = "Слишком много запросов к п�
 AMNEZIA_SCREEN_HINT_ADD = "\n\n<i>Нажмите кнопку ниже, чтобы создать первое устройство.</i>"
 AMNEZIA_SCREEN_HINT_LIMIT = "\n\n⚠️ <i>Общий лимит устройств исчерпан. Для добавления перейдите на тариф с большим количеством устройств или отключите неиспользуемые.</i>"
 
-AMNEZIA_SCREEN_TEXT = """🛡 <b>Устройства Amnezia</b>
-
-Подключение и файлы конфигураций для приложений Amnezia.
-
-📱 <b>Устройства:</b> {active} из {limit} <i>(по ссылке: {vless_count} • Amnezia: {amnezia_count})</i>
+AMNEZIA_SCREEN_TEXT = """<p>🛡 <b>Устройства Amnezia</b></p>
+<p><i>Подключение и файлы конфигураций для приложений Amnezia.</i></p>
+<table>
+  <tr><td>Устройства:</td><td><b>{active} из {limit}</b></td></tr>
+  <tr><td>Разбивка:</td><td>по ссылке: {vless_count} · Amnezia: {amnezia_count}</td></tr>
+</table>
 {profiles_block}
 <i>Нажмите на устройство ниже для управления:</i>"""
 
-AMNEZIA_SCREEN_EMPTY_TEXT = """🛡 <b>Устройства Amnezia</b>
+AMNEZIA_SCREEN_EMPTY_TEXT = """<p>🛡 <b>Устройства Amnezia</b></p>
+<p><i>Подключение и файлы конфигураций для приложений Amnezia.</i></p>
+<table>
+  <tr><td>Устройства:</td><td><b>{active} из {limit}</b></td></tr>
+  <tr><td>Разбивка:</td><td>по ссылке: {vless_count} · Amnezia: 0</td></tr>
+</table>
 
-Подключение и файлы конфигураций для приложений Amnezia.
-
-📱 <b>Устройства:</b> {active} из {limit} <i>(по ссылке: {vless_count} • Amnezia: 0)</i>
-
-<i>У вас пока нет добавленных устройств Amnezia.</i>{action_hint}"""
+<p><i>У вас пока нет добавленных устройств Amnezia.</i></p>{action_hint}{add_device_row}"""
 
 VLESS_FEED_EXPIRED_TITLE = "⚠️ Подписка закончилась"
 VLESS_FEED_EXPIRED_NOTICE = "⚠️ Подписка закончилась. Продлите доступ: @{bot_username}"
@@ -240,6 +249,19 @@ LANDING_INACTIVE_DESC_EXPIRED = "Срок действия доступа под
 LANDING_INACTIVE_BADGE_EXHAUSTED = "Лимит исчерпан"
 LANDING_INACTIVE_TITLE_EXHAUSTED = "Трафик исчерпан"
 LANDING_INACTIVE_DESC_EXHAUSTED = "Включенный пакет трафика закончился. Для продолжения работы перейдите в бота."
+
+CONNECTION_SUB_BUTTON_ROW_TEMPLATE = (
+    '\n<tg-button-row align="center">\n'
+    '  <tg-button type="url" style="success" url="{sub_url}">🚀 Подключить в INCY</tg-button>\n'
+    '</tg-button-row>'
+)
+AMNEZIA_ADD_DEVICE_ROW = (
+    '\n<tg-button-row align="center">\n'
+    '  <tg-button type="callback_data" style="success" data="add_device">➕ Добавить устройство</tg-button>\n'
+    '</tg-button-row>'
+)
+AMNEZIA_DEVICES_TABLE_TEMPLATE = "<table><tr><th>Устройство</th><th>Локация</th><th>Трафик</th></tr>{rows}</table>"
+CONNECTION_DEVICE_VIEW_COPY_KEY_BUTTON_ROW = ""
 
 
 

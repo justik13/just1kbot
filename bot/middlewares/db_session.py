@@ -43,7 +43,7 @@ class DBSessionMiddleware(BaseMiddleware):
                     except Exception:
                         pass
 
-                    from bot.keyboards.common import get_back_button
+                    from bot.keyboards import get_back_button
                     from utils.telegram import spawn_auto_delete
 
                     err_msg = await event.answer(

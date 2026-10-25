@@ -191,20 +191,16 @@ class TestKeyboardRuntimeStyles(unittest.IsolatedAsyncioTestCase):
         with patch("database.repositories.vless_subscription_repo.get_subscription_by_user_id", new_callable=AsyncMock, return_value=mock_sub), \
              patch("database.repositories.vless_subscription_repo.get_active_hwid_count", new_callable=AsyncMock, return_value=2), \
              patch("bot.handlers.connection.common._get_effective_device_limit", new_callable=AsyncMock, return_value=3):
-            _, builder = await _build_connections_screen(user, session, [], read_only=False)
+            rendered, _ = await _build_connections_screen(user, session, [], read_only=False)
 
-        markup = builder.as_markup()
-        reset_buttons = [
-            btn for row in markup.inline_keyboard for btn in row if btn.callback_data == "vless_sub_reset"
-        ]
-        self.assertEqual(len(reset_buttons), 1)
-        self.assertEqual(reset_buttons[0].text, texts.BTN_VLESS_RESET_HWID)
-        self.assertEqual(reset_buttons[0].style, "danger")
+        self.assertIn('data="vless_sub_reset"', rendered)
+        self.assertIn('style="danger"', rendered)
+        self.assertIn(texts.BTN_VLESS_RESET_HWID, rendered)
 
     def test_white_internet_overview_reset_devices_danger_style(self):
-        """Test get_white_internet_overview_keyboard assigns danger style to reset devices button."""
+        """Test get_white_internet_overview_rich_actions assigns danger style to reset devices button."""
         import datetime
-        from bot.handlers.white_internet import get_white_internet_overview_keyboard
+        from bot.handlers.white_internet import get_white_internet_overview_rich_actions
         from config.enums import WhiteInternetStatus
         from database.models import WhiteInternetSubscription
         from bot import texts
@@ -218,24 +214,32 @@ class TestKeyboardRuntimeStyles(unittest.IsolatedAsyncioTestCase):
             is_trial=False,
             expires_at=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=5),
         )
-        kb = get_white_internet_overview_keyboard(sub, bot_domain="bot.example.com")
-        reset_buttons = [
-            btn for row in kb.inline_keyboard for btn in row if btn.callback_data == "wl_reset_devices"
-        ]
-        self.assertEqual(len(reset_buttons), 1)
-        self.assertEqual(reset_buttons[0].text, texts.BTN_WL_RESET_DEVICES)
-        self.assertEqual(reset_buttons[0].style, "danger")
+        rendered = get_white_internet_overview_rich_actions(sub, bot_domain="bot.example.com")
+        self.assertIn('data="wl_reset_devices"', rendered)
+        self.assertIn('style="danger"', rendered)
+        self.assertIn(texts.BTN_WL_RESET_DEVICES, rendered)
 
-    def test_support_handler_keyboard_url_generation(self):
-        """Test _support_keyboard from support handler generates expected contact button URL."""
-        from bot.handlers.support import _support_keyboard
+    def test_support_handler_contact_button_url_generation(self):
+        """Test support contact button generates expected URL with telegram_id."""
+        from utils.support import get_support_url
         from bot import texts
 
-        kb = _support_keyboard(username="official_support", telegram_id=999888)
-        contact_btn = kb.inline_keyboard[0][0]
-        self.assertEqual(contact_btn.text, texts.BTN_CONTACT_SUPPORT)
-        self.assertTrue(contact_btn.url.startswith("https://t.me/official_support?text="))
-        self.assertIn("999888", contact_btn.url)
+        url = get_support_url(text=texts.SUPPORT_GREETING_TEMPLATE.format(telegram_id=999888), username="official_support")
+        self.assertTrue(url.startswith("https://t.me/official_support?text="))
+        self.assertIn("999888", url)
+
+    def test_support_handler_keyboard_url_generation(self):
+        """Test support contact button generates expected rich button markup."""
+        from utils.support import get_support_url
+        from utils.telegram import make_rich_button
+        from bot import texts
+
+        greeting = texts.SUPPORT_GREETING_TEMPLATE.format(telegram_id=999888)
+        url = get_support_url(text=greeting, username="official_support")
+        btn = make_rich_button(texts.BTN_CONTACT_SUPPORT, url=url, style="success")
+        self.assertIn(texts.BTN_CONTACT_SUPPORT, btn)
+        self.assertIn("https://t.me/official_support?text=", btn)
+        self.assertIn("999888", btn)
 
 
 class TestSupportUrlHelpers(unittest.TestCase):

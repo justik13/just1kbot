@@ -11,10 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from bot.formatters import get_tariff_display_name
-from bot.keyboards import (
-    get_order_invoice_keyboard,
-    get_payment_success_keyboard,
-)
 from utils.support import get_support_url
 from database.models import Order, User
 from database.repositories.account_ledger_repo import get_account_balance
@@ -31,7 +27,13 @@ from services.order_service import (
     OrderService,
 )
 from utils.datetime_helpers import now_utc
-from utils.telegram import EFFECT_CONFETTI, render_hub, safe_callback_answer
+from utils.telegram import (
+    EFFECT_CONFETTI,
+    make_rich_button,
+    make_rich_button_row,
+    render_hub,
+    safe_callback_answer,
+)
 
 from .common import _render_maintenance
 
@@ -121,7 +123,7 @@ async def handle_order_pay_wallet(
             real_balance=int(balance.real_available),
             bonus_balance=int(balance.bonus_available),
         ),
-        get_payment_success_keyboard(),
+        reply_markup=None,
         message_effect_id=EFFECT_CONFETTI,
         force_new=True,
     )
@@ -219,7 +221,7 @@ async def handle_order_pay_card(
                     real_balance=int(balance.real_available),
                     bonus_balance=int(balance.bonus_available),
                 ),
-                get_payment_success_keyboard(),
+                reply_markup=None,
                 message_effect_id=EFFECT_CONFETTI,
                 force_new=True,
             )
@@ -266,16 +268,42 @@ async def handle_order_pay_card(
             price=price,
         )
     )
+    support_button = (
+        "\n"
+        + make_rich_button_row(
+            make_rich_button(texts.BTN_SUPPORT, url=support_url)
+        )
+        if support_url
+        else ""
+    )
+    invoice_actions = (
+        "\n"
+        + make_rich_button_row(
+            make_rich_button(
+                texts.BTN_PAYMENT_PAY_ORDER.format(price=price),
+                url=order.payment_url or "",
+                style="success",
+            )
+        )
+        + "\n"
+        + make_rich_button_row(
+            make_rich_button(
+                texts.BTN_PAYMENT_CHECK,
+                callback_data=f"order_check:{order.id}",
+                style="primary",
+            ),
+            make_rich_button(
+                texts.BTN_PAYMENT_CANCEL,
+                callback_data=f"order_cancel:{order.id}",
+            ),
+        )
+        + support_button
+    )
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        text,
-        get_order_invoice_keyboard(
-            payment_url=order.payment_url or "",
-            order_id=str(order.id),
-            price=price,
-            support_url=support_url,
-        ),
+        text + invoice_actions,
+        reply_markup=None,
     )
     await safe_callback_answer(callback)
 
@@ -347,12 +375,12 @@ async def handle_order_check(
             return
 
         balance = await get_account_balance(session, user_id=db_user.id)
-        text, keyboard = build_tariff_success_card(order, balance)
+        text, _ = build_tariff_success_card(order, balance)
         await render_hub(
             callback.bot,
             callback.message.chat.id,
             text,
-            keyboard,
+            reply_markup=None,
             message_effect_id=EFFECT_CONFETTI,
             force_new=True,
         )
@@ -411,12 +439,12 @@ async def handle_order_check(
                 return
 
             balance = await get_account_balance(session, user_id=db_user.id)
-            text, keyboard = build_tariff_success_card(paid_order, balance)
+            text, _ = build_tariff_success_card(paid_order, balance)
             await render_hub(
                 callback.bot,
                 callback.message.chat.id,
                 text,
-                keyboard,
+                reply_markup=None,
                 message_effect_id=EFFECT_CONFETTI,
                 force_new=True,
             )

@@ -2,7 +2,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.keyboards import get_back_button
+from bot.keyboards import make_rich_nav_row
 from services.maintenance_service import MaintenanceService
 from services.subscription import SubscriptionService
 from utils.telegram import render_hub
@@ -33,9 +33,10 @@ async def render_maintenance(
     message = await MaintenanceService.get_message(session)
     if not message:
         message = texts.MAINTENANCE_DEFAULT_MESSAGE
+    full_text = f"{message}\n{make_rich_nav_row(back_to)}"
     await render_hub(
         bot,
         chat_id,
-        message,
-        get_back_button(back_to),
+        full_text,
+        reply_markup=None,
     )

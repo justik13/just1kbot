@@ -282,6 +282,27 @@ class SafeSendMessageTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Detailed incident report & diagnostic logs", plain)
         self.assertIn("Visit dashboard (https://example.com) for info.", plain)
 
+    def test_strip_html_tags_with_rich_buttons_and_tables(self):
+        """strip_html_tags converts tg-button to [label] and strips tables and headers."""
+        sample_html = (
+            "<h2>🏠 Личный кабинет</h2>\n"
+            "<p><b>Баланс:</b> 500 ₽</p>\n"
+            '<tg-button-row align="center">\n'
+            '  <tg-button type="callback_data" style="success" data="menu_buy">Купить</tg-button>\n'
+            '  <tg-button type="callback_data" style="primary" data="menu_balance">Пополнить</tg-button>\n'
+            "</tg-button-row>\n"
+            "<hr/>\n"
+            "<table><tr><td>A</td><td>B</td></tr></table>"
+        )
+        plain = strip_html_tags(sample_html)
+        self.assertNotIn("<h2>", plain)
+        self.assertNotIn("<tg-button", plain)
+        self.assertNotIn("<tg-button-row", plain)
+        self.assertNotIn("<table>", plain)
+        self.assertIn("[Купить]", plain)
+        self.assertIn("[Пополнить]", plain)
+        self.assertIn("Баланс: 500 ₽", plain)
+
     async def test_extract_msg_id_rejects_bool(self):
         """safe_send_message rejects boolean True/False as message_id and strictly returns None."""
         self.mock_bot.send_message.return_value = True
@@ -430,3 +451,45 @@ class SafeSendMessageTests(unittest.IsolatedAsyncioTestCase):
             # search_user_flexible must not be called for overlong queries
             mock_search.assert_not_called()
             state.clear.assert_called_once()
+
+    async def test_safe_send_message_rich_tags_routes_to_send_rich_message(self):
+        """Messages with rich tags (p, table, h1, etc.) route to bot.send_rich_message."""
+        fake_msg = MagicMock(spec=Message)
+        fake_msg.message_id = 777
+        self.mock_bot.send_rich_message = AsyncMock(return_value=fake_msg)
+
+        res = await safe_send_message(
+            self.mock_bot,
+            chat_id=self.chat_id,
+            text="<p>Heading</p><table><tr><td>A</td><td>B</td></tr></table>",
+            parse_mode="HTML",
+        )
+
+        self.assertEqual(res, 777)
+        self.mock_bot.send_rich_message.assert_called_once()
+        self.mock_bot.send_message.assert_not_called()
+
+    async def test_safe_send_message_rich_effect_failure_retries_without_effect(self):
+        """When send_rich_message encounters an effect error, it retries send_rich_message without effect."""
+        fake_msg = MagicMock(spec=Message)
+        fake_msg.message_id = 888
+        self.mock_bot.send_rich_message = AsyncMock(
+            side_effect=[
+                TelegramBadRequest(method="send_rich_message", message="Bad Request: message_effect_id_invalid"),
+                fake_msg,
+            ]
+        )
+
+        res = await safe_send_message(
+            self.mock_bot,
+            chat_id=self.chat_id,
+            text="<p>Success</p><table><tr><td>Data</td></tr></table>",
+            parse_mode="HTML",
+            message_effect_id="5046509860389126442",
+        )
+
+        self.assertEqual(res, 888)
+        self.assertEqual(self.mock_bot.send_rich_message.call_count, 2)
+        second_call = self.mock_bot.send_rich_message.call_args_list[1]
+        self.assertIsNone(second_call.kwargs.get("message_effect_id"))
+        self.mock_bot.send_message.assert_not_called()

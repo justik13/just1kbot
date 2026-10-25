@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.keyboards import get_back_button
+from bot.keyboards import make_rich_nav_row
 from bot.states import DeviceManagementStates
 from database.models import User, VPNProfile
 from database.repositories.profiles_repo import (
@@ -18,7 +18,13 @@ from database.repositories.profiles_repo import (
 )
 from services.subscription import SubscriptionService
 from utils.callbacks import parse_callback_id
-from utils.telegram import EFFECT_LIKE, render_hub, safe
+from utils.telegram import (
+    EFFECT_LIKE,
+    make_rich_button,
+    make_rich_button_row,
+    render_hub,
+    safe,
+)
 
 from .common import DEVICE_NAME_REGEX
 from .device_view_routes import render_device_screen
@@ -80,11 +86,14 @@ async def rename_device_start(
     await state.update_data(profile_id=profile_id)
     await state.set_state(DeviceManagementStates.rename_device)
 
+    nav = make_rich_button_row(
+        make_rich_button(texts.BTN_BACK_TO_DEVICE, callback_data=f"manage_device:{profile_id}")
+    )
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        texts.DEVICE_RENAME_PROMPT,
-        get_back_button(f"manage_device:{profile_id}", text=texts.BTN_BACK_TO_DEVICE),
+        f"{texts.DEVICE_RENAME_PROMPT}\n{nav}",
+        None,
     )
 
 
@@ -111,8 +120,8 @@ async def rename_device_process(
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.ERROR_ACCESS_DENIED,
-            get_back_button("back_to_connections"),
+            f"{texts.ERROR_ACCESS_DENIED}\n{make_rich_nav_row('back_to_connections')}",
+            None,
         )
         return
 
@@ -122,8 +131,8 @@ async def rename_device_process(
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.ERROR_ACCESS_DENIED,
-            get_back_button("back_to_connections"),
+            f"{texts.ERROR_ACCESS_DENIED}\n{make_rich_nav_row('back_to_connections')}",
+            None,
         )
         return
 
@@ -143,8 +152,8 @@ async def rename_device_process(
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.ERROR_ACCESS_DENIED,
-            get_back_button("back_to_connections"),
+            f"{texts.ERROR_ACCESS_DENIED}\n{make_rich_nav_row('back_to_connections')}",
+            None,
         )
         return
 
@@ -156,11 +165,14 @@ async def rename_device_process(
             msg = texts.DEVICE_CREATE_IN_PROGRESS
         else:
             msg = texts.DEVICE_SELF_HEALING_IN_PROGRESS
+        nav = make_rich_button_row(
+            make_rich_button(texts.BTN_BACK_TO_DEVICE, callback_data=f"manage_device:{profile.id}")
+        )
         await render_hub(
             message.bot,
             message.chat.id,
-            msg,
-            get_back_button(f"manage_device:{profile.id}"),
+            f"{msg}\n{nav}",
+            None,
         )
         return
 
@@ -175,8 +187,8 @@ async def rename_device_process(
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.DEVICE_ACCESS_INACTIVE,
-            get_back_button("back_to_connections"),
+            f"{texts.DEVICE_ACCESS_INACTIVE}\n{make_rich_nav_row('back_to_connections')}",
+            None,
         )
         return
 
@@ -184,11 +196,14 @@ async def rename_device_process(
 
     if await DeviceService.has_active_migration(session, profile.id):
         await state.clear()
+        nav = make_rich_button_row(
+            make_rich_button(texts.BTN_BACK_TO_DEVICE, callback_data=f"manage_device:{profile.id}")
+        )
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.DEVICE_MIGRATE_IN_PROGRESS,
-            get_back_button(f"manage_device:{profile.id}", text=texts.BTN_BACK_TO_DEVICE),
+            f"{texts.DEVICE_MIGRATE_IN_PROGRESS}\n{nav}",
+            None,
         )
         return
 
@@ -202,31 +217,40 @@ async def rename_device_process(
     cleaned_base = re.sub(r'\s*#\d+$', '', raw_text).strip()
     if not cleaned_base:
         err = texts.CONNECTION_ACTIONS_DEVICE_RENAME_IMYA_NE_MOZHET_BYT_PUSTYM_VVED
+        nav = make_rich_button_row(
+            make_rich_button(texts.BTN_BACK_TO_DEVICE, callback_data=f"manage_device:{profile.id}")
+        )
         await render_hub(
             message.bot,
             message.chat.id,
-            f"{err}\n\n{texts.DEVICE_RENAME_PROMPT}",
-            get_back_button(f"manage_device:{profile.id}", text=texts.BTN_BACK_TO_DEVICE),
+            f"{err}\n\n{texts.DEVICE_RENAME_PROMPT}\n{nav}",
+            None,
         )
         return
 
     if len(cleaned_base) > 16:
         err = texts.CONNECTION_ACTIONS_DEVICE_RENAME_IMYA_SLISHKOM_DLINNOE_IZ_16_SI.format(len_cleaned_base=len(cleaned_base))
+        nav = make_rich_button_row(
+            make_rich_button(texts.BTN_BACK_TO_DEVICE, callback_data=f"manage_device:{profile.id}")
+        )
         await render_hub(
             message.bot,
             message.chat.id,
-            f"{err}\n\n{texts.DEVICE_RENAME_PROMPT}",
-            get_back_button(f"manage_device:{profile.id}", text=texts.BTN_BACK_TO_DEVICE),
+            f"{err}\n\n{texts.DEVICE_RENAME_PROMPT}\n{nav}",
+            None,
         )
         return
 
     if not DEVICE_NAME_REGEX.match(cleaned_base):
         err = texts.CONNECTION_ACTIONS_DEVICE_RENAME_IMYA_SODERZHIT_NEDOPUSTIMYE_SI
+        nav = make_rich_button_row(
+            make_rich_button(texts.BTN_BACK_TO_DEVICE, callback_data=f"manage_device:{profile.id}")
+        )
         await render_hub(
             message.bot,
             message.chat.id,
-            f"{err}\n\n{texts.DEVICE_RENAME_PROMPT}",
-            get_back_button(f"manage_device:{profile.id}", text=texts.BTN_BACK_TO_DEVICE),
+            f"{err}\n\n{texts.DEVICE_RENAME_PROMPT}\n{nav}",
+            None,
         )
         return
 
@@ -241,11 +265,14 @@ async def rename_device_process(
             and p.device_name.lower() == new_name.lower()
         ):
             err = texts.CONNECTION_ACTIONS_DEVICE_RENAME_DEVICE_S_IMENEM_UZHE_SUSHC.format(safe_new_name=safe(new_name))
+            nav = make_rich_button_row(
+                make_rich_button(texts.BTN_BACK_TO_DEVICE, callback_data=f"manage_device:{profile.id}")
+            )
             await render_hub(
                 message.bot,
                 message.chat.id,
-                f"{err}\n\n{texts.DEVICE_RENAME_PROMPT}",
-                get_back_button(f"manage_device:{profile.id}", text=texts.BTN_BACK_TO_DEVICE),
+                f"{err}\n\n{texts.DEVICE_RENAME_PROMPT}\n{nav}",
+                None,
             )
             return
 
@@ -276,11 +303,14 @@ async def rename_device_process(
             )
     except IntegrityError:
         err = texts.CONNECTION_ACTIONS_DEVICE_RENAME_DEVICE_S_IMENEM_UZHE_SUSHC.format(safe_new_name=safe(new_name))
+        nav = make_rich_button_row(
+            make_rich_button(texts.BTN_BACK_TO_DEVICE, callback_data=f"manage_device:{profile.id}")
+        )
         await render_hub(
             message.bot,
             message.chat.id,
-            f"{err}\n\n{texts.DEVICE_RENAME_PROMPT}",
-            get_back_button(f"manage_device:{profile.id}", text=texts.BTN_BACK_TO_DEVICE),
+            f"{err}\n\n{texts.DEVICE_RENAME_PROMPT}\n{nav}",
+            None,
         )
         return
 

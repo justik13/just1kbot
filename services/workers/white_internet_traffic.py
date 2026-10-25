@@ -9,6 +9,7 @@ import logging
 from typing import Any
 
 from aiogram import Bot
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -373,7 +374,6 @@ class WhiteInternetTrafficWorker:
 
                 if telegram_id:
                     from aiogram.exceptions import TelegramForbiddenError
-                    from aiogram.utils.keyboard import InlineKeyboardBuilder
                     from bot import texts
 
                     alert_text = (
@@ -383,9 +383,15 @@ class WhiteInternetTrafficWorker:
                     )
                     kb = InlineKeyboardBuilder()
                     if is_sub_trial:
-                        kb.button(text=texts.BTN_BUY_ACCESS, callback_data="white_internet")
+                        kb.button(
+                            text=texts.BTN_BUY_ACCESS,
+                            callback_data="white_internet",
+                        )
                     else:
-                        kb.button(text=texts.BTN_WL_TOPUP, callback_data="wl_topup_menu")
+                        kb.button(
+                            text=texts.BTN_WL_TOPUP,
+                            callback_data="wl_topup_menu",
+                        )
 
                     for attempt in range(3):
                         try:
@@ -424,7 +430,6 @@ class WhiteInternetTrafficWorker:
 
                 if telegram_id:
                     try:
-                        from aiogram.utils.keyboard import InlineKeyboardBuilder
                         from bot import texts
 
                         alert_text = (
@@ -434,9 +439,15 @@ class WhiteInternetTrafficWorker:
                         )
                         kb = InlineKeyboardBuilder()
                         if is_sub_trial:
-                            kb.button(text=texts.BTN_BUY_ACCESS, callback_data="white_internet")
+                            kb.button(
+                                text=texts.BTN_BUY_ACCESS,
+                                callback_data="white_internet",
+                            )
                         else:
-                            kb.button(text=texts.BTN_WL_TOPUP, callback_data="wl_topup_menu")
+                            kb.button(
+                                text=texts.BTN_WL_TOPUP,
+                                callback_data="wl_topup_menu",
+                            )
 
                         await self.bot.send_message(
                             chat_id=telegram_id,

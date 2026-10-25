@@ -97,3 +97,21 @@ def get_back_button(
     builder.button(text=button_text, callback_data=callback_data)
 
     return builder.as_markup()
+
+
+def make_rich_nav_row(
+    back_callback: str | None = None,
+    *,
+    include_menu: bool = True,
+    back_label: str | None = None,
+    menu_label: str | None = None,
+) -> str:
+    """Build standardized navigation bottom row with localized texts.BTN_BACK / BTN_MAIN_MENU_NAV."""
+    from utils.telegram import make_rich_button, make_rich_button_row
+
+    btns = []
+    if back_callback:
+        btns.append(make_rich_button(back_label or texts.BTN_BACK, callback_data=back_callback))
+    if include_menu:
+        btns.append(make_rich_button(menu_label or texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu"))
+    return make_rich_button_row(*btns)

@@ -60,9 +60,11 @@ LOCKED_ACTION_PREFIXES = (
     "wl_topup_pack_",
     "wl_topup_shortage:",
     "wl_reset_devices",
+    "wl_reset_devices_confirm",
     "wl_add_device_confirm",
     # Подключение по ссылке (VLESS).
     "vless_sub_reset",
+    "vless_reset_confirm",
     "admin_vless_hwid_reset:",
     "admin_vless_token_rotate:",
     # Админские действия Белый Интернет.

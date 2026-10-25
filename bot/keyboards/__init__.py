@@ -33,7 +33,7 @@ from .admin.users import (
     get_admin_wi_devices_keyboard,
     get_admin_wi_extend_days_keyboard,
 )
-from .common import get_back_button, get_hub_keyboard
+from .common import get_back_button, get_hub_keyboard, make_rich_nav_row
 from .device import (
     get_alt_connection_keyboard,
     get_device_delete_confirm_keyboard,
@@ -127,4 +127,5 @@ __all__ = [
     # admin broadcast
     "get_broadcast_result_keyboard",
     "get_broadcast_close_keyboard",
+    "make_rich_nav_row",
 ]

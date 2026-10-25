@@ -2256,6 +2256,92 @@ class TestVlessFeedDynamicBotUrls(AioHTTPTestCase):
             self.assertNotIn("just1kbot", resp.headers.get("Support-Url", ""))
             self.assertNotIn("just1kbot", resp.headers.get("Profile-Web-Page-Url", ""))
 
+class TestVlessResetRoutes(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        from aiogram.fsm.context import FSMContext
+        from aiogram.types import CallbackQuery
 
+        self.CallbackQuery = CallbackQuery
+        self.user = User(id=42, telegram_id=999888, username="testuser")
+        self.session = AsyncMock()
+        self.state = MagicMock(spec=FSMContext)
+        self.state.clear = AsyncMock()
 
+    async def test_vless_sub_reset_shows_confirmation(self):
+        from bot.handlers.connection.device_view_routes import vless_sub_reset
 
+        callback = MagicMock(spec=self.CallbackQuery)
+        callback.from_user = MagicMock(id=999888)
+        callback.bot = MagicMock()
+        callback.message = MagicMock()
+        callback.message.chat = MagicMock(id=999888)
+        callback.answer = AsyncMock()
+
+        sub = MagicMock(spec=VlessSubscription)
+        sub.id = 1
+        sub.user_id = 42
+        sub.active_hwids = {"hwid-1": "2026-01-01T00:00:00Z"}
+
+        with (
+            patch("services.maintenance_service.MaintenanceService.can_user_perform_action", new=AsyncMock(return_value=True)),
+            patch("services.subscription.SubscriptionService.check_vpn_access", return_value=True),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)),
+            patch("bot.handlers.connection.device_view_routes.render_hub", new=AsyncMock()) as mock_render,
+        ):
+            await vless_sub_reset(callback, self.state, self.session, db_user=self.user)
+            callback.answer.assert_awaited_once_with(show_alert=False)
+            mock_render.assert_awaited_once()
+            rendered_text = mock_render.call_args[0][2]
+            self.assertIn("vless_reset_confirm", rendered_text)
+            self.assertIn("back_to_connections", rendered_text)
+
+    async def test_vless_sub_reset_empty_shows_alert(self):
+        from bot.handlers.connection.device_view_routes import vless_sub_reset
+
+        callback = MagicMock(spec=self.CallbackQuery)
+        callback.from_user = MagicMock(id=999888)
+        callback.answer = AsyncMock()
+
+        sub = MagicMock(spec=VlessSubscription)
+        sub.id = 1
+        sub.user_id = 42
+        sub.active_hwids = {}
+
+        with (
+            patch("services.maintenance_service.MaintenanceService.can_user_perform_action", new=AsyncMock(return_value=True)),
+            patch("services.subscription.SubscriptionService.check_vpn_access", return_value=True),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)),
+            patch("bot.handlers.connection.device_view_routes.render_hub", new=AsyncMock()) as mock_render,
+        ):
+            await vless_sub_reset(callback, self.state, self.session, db_user=self.user)
+            callback.answer.assert_awaited_once_with(texts.VLESS_RESET_EMPTY, show_alert=True)
+            mock_render.assert_not_called()
+
+    async def test_vless_reset_confirm_executes_reset(self):
+        from bot.handlers.connection.device_view_routes import vless_reset_confirm
+
+        callback = MagicMock(spec=self.CallbackQuery)
+        callback.from_user = MagicMock(id=999888)
+        callback.message = MagicMock()
+        callback.answer = AsyncMock()
+
+        sub = MagicMock(spec=VlessSubscription)
+        sub.id = 1
+        sub.user_id = 42
+        sub.version = 3
+        sub.active_hwids = {"hwid-1": "2026-01-01T00:00:00Z"}
+
+        with (
+            patch("services.maintenance_service.MaintenanceService.can_user_perform_action", new=AsyncMock(return_value=True)),
+            patch("services.subscription.SubscriptionService.check_vpn_access", return_value=True),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_user_id", new=AsyncMock(return_value=sub)),
+            patch("database.repositories.vless_subscription_repo.reset_hwids", new=AsyncMock(return_value=("old-uuid-123", "new-uuid-456"))),
+            patch("services.vless_subscription_service.VlessSubscriptionService.deprovision_background") as mock_deprovision,
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background") as mock_sync,
+            patch("bot.handlers.connection.device_view_routes._render_connections", new=AsyncMock()) as mock_render_conn,
+        ):
+            await vless_reset_confirm(callback, self.state, self.session, db_user=self.user)
+            mock_deprovision.assert_called_once_with("old-uuid-123", version=sub.version, sub_id=sub.id, session=self.session)
+            mock_sync.assert_called_once_with(self.user.id, is_active=True, session=self.session)
+            callback.answer.assert_awaited_once_with(texts.VLESS_RESET_SUCCESS, show_alert=True)
+            mock_render_conn.assert_awaited_once_with(callback.message, self.user, self.session)

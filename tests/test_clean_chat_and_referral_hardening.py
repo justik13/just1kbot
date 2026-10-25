@@ -336,12 +336,15 @@ class TestReferralPaginationClamping(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Всего приглашено: 21", text)
 
         # Verify pagination button shows 3/3
-        buttons = [btn for row in markup.inline_keyboard for btn in row]
-        page_btn = next((b for b in buttons if "3/3" in b.text), None)
-        self.assertIsNotNone(page_btn, "Pagination indicator must show 3/3")
+        if markup and getattr(markup, "inline_keyboard", None):
+            buttons = [btn for row in markup.inline_keyboard for btn in row]
+            page_btn = next((b for b in buttons if "3/3" in b.text), None)
+            self.assertIsNotNone(page_btn, "Pagination indicator must show 3/3")
+        else:
+            self.assertIn("3/3", text)
 
 
-class TestShareButtonAndKeyboards(unittest.TestCase):
+class TestShareButtonAndKeyboards(unittest.IsolatedAsyncioTestCase):
     def test_referral_keyboard_includes_encoded_share_button(self):
         from bot import texts
 
@@ -357,6 +360,53 @@ class TestShareButtonAndKeyboards(unittest.TestCase):
         self.assertIn("&text=", share_btn.url)
         self.assertIn(quote(texts.REFERRAL_SHARE_TEXT, safe=""), share_btn.url)
 
+    async def test_show_referral_renders_share_button(self):
+        from aiogram.types import CallbackQuery
+        from bot import texts
+        from bot.handlers.referral import show_referral
+
+        callback = MagicMock(spec=CallbackQuery)
+        callback.data = "referral"
+        callback.from_user = MagicMock(id=12345)
+        callback.message = MagicMock()
+        callback.message.chat = MagicMock(id=12345)
+        callback.message.message_id = 101
+        callback.answer = AsyncMock()
+
+        mock_bot_user = MagicMock()
+        mock_bot_user.username = "test_bot"
+        callback.bot = MagicMock()
+        callback.bot.get_me = AsyncMock(return_value=mock_bot_user)
+
+        state = MagicMock(spec=FSMContext)
+        state.clear = AsyncMock()
+        session = AsyncMock()
+        db_user = User(id=1, telegram_id=12345, username="testuser")
+
+        with (
+            patch("bot.handlers.referral.get_user_active_referrals_count", AsyncMock(return_value=2)),
+            patch("bot.handlers.referral.get_user_referrals_count", AsyncMock(return_value=5)),
+            patch("bot.handlers.referral.get_referral_bonus_balance", AsyncMock(return_value=150)),
+            patch("bot.handlers.referral.get_user_referral_rank", AsyncMock(return_value=(1, 5))),
+            patch("bot.handlers.referral._get_inviter_line", AsyncMock(return_value=None)),
+            patch("bot.handlers.referral.render_hub", new_callable=AsyncMock) as mock_render,
+        ):
+            await show_referral(callback, state, session, db_user=db_user)
+
+            callback.answer.assert_awaited_once_with(show_alert=False)
+            state.clear.assert_awaited_once()
+            mock_render.assert_awaited_once()
+            rendered_text = mock_render.call_args[0][2]
+
+            self.assertIn("https://t.me/test_bot?start=ref_12345", rendered_text)
+            self.assertIn(texts.BTN_SHARE_REFERRAL, rendered_text)
+            self.assertIn("https://t.me/share/url?url=", rendered_text)
+            self.assertIn(quote("https://t.me/test_bot?start=ref_12345", safe=""), rendered_text)
+            self.assertIn(quote(texts.REFERRAL_SHARE_TEXT, safe=""), rendered_text)
+            self.assertIn('data="referrals_list"', rendered_text)
+            self.assertIn('data="referral_leaderboard"', rendered_text)
+
 
 if __name__ == "__main__":
     unittest.main()
+

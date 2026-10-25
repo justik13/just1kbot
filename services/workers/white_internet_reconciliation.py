@@ -67,14 +67,15 @@ class WhiteInternetReconciliationWorker:
             user = await session.get(User, user_id)
             if not user or not user.telegram_id:
                 return
-            from aiogram.utils.keyboard import InlineKeyboardBuilder
             from bot import texts
-            kb = InlineKeyboardBuilder()
-            kb.button(text=texts.BTN_WL_CONNECT_CLIENT, callback_data="white_internet")
+            from utils.telegram import make_rich_button, make_rich_button_row
+            rich_btn = make_rich_button_row(
+                make_rich_button(texts.BTN_WL_CONNECT_CLIENT, callback_data="white_internet", style="primary")
+            )
             await self.bot.send_message(
                 chat_id=user.telegram_id,
-                text=texts.WL_AUTO_PUSH_READY,
-                reply_markup=kb.as_markup(),
+                text=f"{texts.WL_AUTO_PUSH_READY}\n{rich_btn}",
+                reply_markup=None,
                 parse_mode="HTML",
             )
         except Exception as exc:

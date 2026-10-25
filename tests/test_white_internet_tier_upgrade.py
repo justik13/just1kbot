@@ -541,7 +541,7 @@ class TestWhiteInternetKeyboardAndDecoupling(unittest.TestCase):
                         )
 
     def test_keyboard_renewal_button_and_admin_buttons(self):
-        from bot.handlers.white_internet import get_white_internet_overview_keyboard
+        from bot.handlers.white_internet import get_white_internet_overview_rich_actions
 
         now = datetime.now(timezone.utc)
 
@@ -554,18 +554,17 @@ class TestWhiteInternetKeyboardAndDecoupling(unittest.TestCase):
             token="token123",
             is_trial=False,
         )
-        kb_user = get_white_internet_overview_keyboard(
+        rendered_user = get_white_internet_overview_rich_actions(
             sub_soon, bot_domain="test.domain", is_admin_user=False
         )
-        buttons_user = [btn.text for row in kb_user.inline_keyboard for btn in row]
 
         # Must have renewal button for 450 ₽
-        self.assertTrue(any("450" in text for text in buttons_user))
+        self.assertIn("450", rendered_user)
         # Paid user HAS topup and add device (self-service up to max 3 devices)
-        self.assertTrue(any("Докупить трафик" in text for text in buttons_user))
-        self.assertTrue(any(texts.BTN_WL_ADD_DEVICE in text for text in buttons_user))
+        self.assertIn("Докупить трафик", rendered_user)
+        self.assertIn(texts.BTN_WL_ADD_DEVICE, rendered_user)
         # Refresh button must NEVER be present
-        self.assertFalse(any("Обновить расход" in text for text in buttons_user))
+        self.assertNotIn("Обновить расход", rendered_user)
 
         # Paid user at max limit (3 devices) cannot add more devices
         sub_max = WhiteInternetSubscription(
@@ -576,12 +575,11 @@ class TestWhiteInternetKeyboardAndDecoupling(unittest.TestCase):
             token="tokenmax",
             is_trial=False,
         )
-        kb_max = get_white_internet_overview_keyboard(
+        rendered_max = get_white_internet_overview_rich_actions(
             sub_max, bot_domain="test.domain", is_admin_user=False
         )
-        buttons_max = [btn.text for row in kb_max.inline_keyboard for btn in row]
-        self.assertTrue(any("Докупить трафик" in text for text in buttons_max))
-        self.assertFalse(any(texts.BTN_WL_ADD_DEVICE in text for text in buttons_max))
+        self.assertIn("Докупить трафик", rendered_max)
+        self.assertNotIn(texts.BTN_WL_ADD_DEVICE, rendered_max)
 
         # Trial user cannot topup or add device
         sub_trial = WhiteInternetSubscription(
@@ -592,12 +590,11 @@ class TestWhiteInternetKeyboardAndDecoupling(unittest.TestCase):
             token="tokentrial",
             is_trial=True,
         )
-        kb_trial = get_white_internet_overview_keyboard(
+        rendered_trial = get_white_internet_overview_rich_actions(
             sub_trial, bot_domain="test.domain", is_admin_user=False
         )
-        buttons_trial = [btn.text for row in kb_trial.inline_keyboard for btn in row]
-        self.assertFalse(any("Докупить трафик" in text for text in buttons_trial))
-        self.assertFalse(any(texts.BTN_WL_ADD_DEVICE in text for text in buttons_trial))
+        self.assertNotIn("Докупить трафик", rendered_trial)
+        self.assertNotIn(texts.BTN_WL_ADD_DEVICE, rendered_trial)
 
         # 2. Sub expiring in 45 days -> Renewal button MUST NOT be present (> 30 days remaining)
         sub_far = WhiteInternetSubscription(
@@ -607,19 +604,17 @@ class TestWhiteInternetKeyboardAndDecoupling(unittest.TestCase):
             device_limit=1,
             token="token123",
         )
-        kb_far = get_white_internet_overview_keyboard(
+        rendered_far = get_white_internet_overview_rich_actions(
             sub_far, bot_domain="test.domain", is_admin_user=False
         )
-        buttons_far = [btn.text for row in kb_far.inline_keyboard for btn in row]
-        self.assertFalse(any("Продлить" in text for text in buttons_far))
+        self.assertNotIn("Продлить", rendered_far)
 
         # 3. Admin user on sub with 1 device -> Has topup and add-device buttons
-        kb_admin = get_white_internet_overview_keyboard(
+        rendered_admin = get_white_internet_overview_rich_actions(
             sub_far, bot_domain="test.domain", is_admin_user=True
         )
-        buttons_admin = [btn.text for row in kb_admin.inline_keyboard for btn in row]
-        self.assertTrue(any("Докупить трафик" in text for text in buttons_admin))
-        self.assertTrue(any(texts.BTN_WL_ADD_DEVICE in text for text in buttons_admin))
+        self.assertIn("Докупить трафик", rendered_admin)
+        self.assertIn(texts.BTN_WL_ADD_DEVICE, rendered_admin)
 
         # 4. Admin user on sub with 3 devices -> Has topup, but NOT add-device button
         sub_max = WhiteInternetSubscription(
@@ -629,14 +624,13 @@ class TestWhiteInternetKeyboardAndDecoupling(unittest.TestCase):
             device_limit=3,
             token="token123",
         )
-        kb_admin_max = get_white_internet_overview_keyboard(
+        rendered_admin_max = get_white_internet_overview_rich_actions(
             sub_max, bot_domain="test.domain", is_admin_user=True
         )
-        buttons_admin_max = [btn.text for row in kb_admin_max.inline_keyboard for btn in row]
-        self.assertTrue(any("Докупить трафик" in text for text in buttons_admin_max))
-        self.assertFalse(any(texts.BTN_WL_ADD_DEVICE in text for text in buttons_admin_max))
+        self.assertIn("Докупить трафик", rendered_admin_max)
+        self.assertNotIn(texts.BTN_WL_ADD_DEVICE, rendered_admin_max)
         # Renewal for 3 devices must be 650 ₽
-        self.assertTrue(any("650" in text for text in buttons_admin_max))
+        self.assertIn("650", rendered_admin_max)
 
 
 class TestAuditRemediations(unittest.IsolatedAsyncioTestCase):
