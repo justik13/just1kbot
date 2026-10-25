@@ -426,6 +426,30 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(entry_boundary_by_id.user_id, MAX_INT32)
         session.get.assert_any_await(User, MAX_INT32)
 
+        # 5. target_id <= 0 (e.g. 0): must NOT call session.get(User, ...)
+        session.reset_mock()
+        log_zero = AuditLog(
+            id=103,
+            admin_id=1,
+            action="ADMIN_SUB_GRANT",
+            target_type="User",
+            target_id=0,
+            details="days=30",
+            created_at=now,
+        )
+        res_orders3 = MagicMock()
+        res_orders3.scalars().all.return_value = []
+        res_audit3 = MagicMock()
+        res_audit3.scalars().all.return_value = [log_zero]
+
+        session.execute.side_effect = [res_orders3, res_audit3]
+        session.scalar.return_value = None
+
+        entries3, total3 = await get_purchase_logs_paginated(session, page=1, per_page=10)
+        self.assertEqual(total3, 1)
+        self.assertEqual(entries3[0].user_id, 0)
+        session.get.assert_not_called()
+
     async def test_show_order_card_yookassa_pending_diagnostics(self):
         import uuid
         from datetime import datetime, timedelta, timezone

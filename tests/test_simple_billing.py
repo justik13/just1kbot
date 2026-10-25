@@ -319,6 +319,54 @@ class TestFulfillmentService(unittest.IsolatedAsyncioTestCase):
 
     @patch("services.fulfillment_service.invalidate_user_cache")
     @patch("services.fulfillment_service.SubscriptionService.sync_access_state")
+    async def test_fulfill_tariff_change_resets_all_7_notification_fields(self, mock_sync, mock_cache):
+        session = AsyncMock(spec=AsyncSession)
+        now = datetime.now(timezone.utc)
+        user = User(
+            id=10,
+            telegram_id=12345678,
+            subscription_end=now + timedelta(days=5),
+            current_tariff_id=1,
+            device_limit=2,
+            notified_3d=True,
+            notified_1d=True,
+            notified_2h=True,
+            notified_expired=True,
+            notified_grace_12h=True,
+            notification_retry_count=2,
+            last_notification_attempt=now - timedelta(hours=2),
+        )
+        session.get.return_value = user
+
+        order = Order(
+            id=uuid.uuid4(),
+            user_id=10,
+            service_type="awg",
+            duration_days=30,
+            device_limit=4,
+            tariff_id=2,
+            amount_rub=Decimal("350.00"),
+            status="paid",
+            metadata_={"is_tariff_change": True},
+        )
+
+        await FulfillmentService.fulfill_order(session, order)
+
+        # Confirm all 7 notification fields are reset on tariff change
+        self.assertFalse(user.notified_3d)
+        self.assertFalse(user.notified_1d)
+        self.assertFalse(user.notified_2h)
+        self.assertFalse(user.notified_expired)
+        self.assertFalse(user.notified_grace_12h)
+        self.assertEqual(user.notification_retry_count, 0)
+        self.assertIsNone(user.last_notification_attempt)
+        self.assertEqual(user.current_tariff_id, 2)
+        self.assertEqual(user.device_limit, 4)
+        mock_sync.assert_called_once_with(session, user)
+        mock_cache.assert_called_once_with(12345678)
+
+    @patch("services.fulfillment_service.invalidate_user_cache")
+    @patch("services.fulfillment_service.SubscriptionService.sync_access_state")
     async def test_revoke_awg_order(self, mock_sync, mock_cache):
         session = AsyncMock(spec=AsyncSession)
         end_date = datetime.now(timezone.utc) + timedelta(days=40)
