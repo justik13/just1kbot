@@ -43,6 +43,8 @@ BTN_CANCEL = "Отмена"
 
 BTN_CONFIRM = "✅ Подтвердить"
 
+BTN_CONFIRM_RESET = "Подтвердить сброс"
+
 BTN_CONNECTIONS = "🔌 Подключения"
 
 BTN_CONTACT_SUPPORT = "💬 Написать в поддержку"

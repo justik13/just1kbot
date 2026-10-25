@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal
 import html
 import logging
@@ -18,6 +19,7 @@ from config.constants import (
     WHITE_INTERNET_BASE_DURATION_DAYS,
     WHITE_INTERNET_BASE_PRICE_RUB,
     WHITE_INTERNET_BASE_TRAFFIC_BYTES,
+    WHITE_INTERNET_DEVICE_RESET_COOLDOWN_SECONDS,
     WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB,
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
     WHITE_INTERNET_SUB_PATH_PREFIX,
@@ -1260,6 +1262,71 @@ async def show_subscription_link(query: CallbackQuery, session: AsyncSession):
 
 @router.callback_query(F.data == "wl_reset_devices")
 async def handle_wl_reset_devices(query: CallbackQuery, session: AsyncSession):
+    if not await MaintenanceService.can_user_perform_action(session, query.from_user.id):
+        try:
+            await query.answer(texts.MAINTENANCE_DEFAULT_MESSAGE, show_alert=True)
+        except Exception:
+            pass
+        return
+    user = await get_user_by_telegram_id(session, query.from_user.id)
+    if user is None:
+        try:
+            await query.answer(texts.WL_USER_NOT_FOUND, show_alert=True)
+        except Exception:
+            pass
+        return
+
+    sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
+    if sub is None:
+        try:
+            await query.answer(texts.WL_USER_NOT_FOUND, show_alert=True)
+        except Exception:
+            pass
+        return
+
+    now = now_utc()
+    last_reset = getattr(sub, "last_device_reset_at", None)
+    if isinstance(last_reset, datetime):
+        if last_reset.tzinfo is None:
+            last_reset = last_reset.replace(tzinfo=timezone.utc)
+        elapsed = (now - last_reset).total_seconds()
+        if elapsed < WHITE_INTERNET_DEVICE_RESET_COOLDOWN_SECONDS:
+            remaining = int(WHITE_INTERNET_DEVICE_RESET_COOLDOWN_SECONDS - elapsed)
+            try:
+                await query.answer(
+                    texts.WL_RESET_COOLDOWN_ALERT.format(seconds=remaining),
+                    show_alert=True,
+                )
+            except Exception:
+                pass
+            return
+
+    try:
+        await query.answer(show_alert=False)
+    except Exception:
+        pass
+
+    action = make_rich_button_row(
+        make_rich_button(
+            texts.BTN_CONFIRM_RESET,
+            callback_data="wl_reset_devices_confirm",
+            style="danger",
+        ),
+        make_rich_button(
+            texts.BTN_CANCEL,
+            callback_data="white_internet",
+            style="primary",
+        ),
+    )
+    full_text = f"{texts.WL_RESET_DEVICES_CONFIRM_CARD}\n{action}"
+    try:
+        await query.message.edit_text(full_text, reply_markup=None, parse_mode="HTML")
+    except TelegramBadRequest:
+        pass
+
+
+@router.callback_query(F.data == "wl_reset_devices_confirm")
+async def handle_wl_reset_devices_confirm(query: CallbackQuery, session: AsyncSession):
     if not await MaintenanceService.can_user_perform_action(session, query.from_user.id):
         try:
             await query.answer(texts.MAINTENANCE_DEFAULT_MESSAGE, show_alert=True)

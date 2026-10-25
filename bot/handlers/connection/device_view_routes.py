@@ -742,6 +742,73 @@ async def vless_sub_reset(
         return
 
     from database.repositories import vless_subscription_repo
+
+    sub = await vless_subscription_repo.get_subscription_by_user_id(session, db_user.id)
+    if not sub or not sub.active_hwids:
+        try:
+            await callback.answer(texts.VLESS_RESET_EMPTY, show_alert=True)
+        except Exception:
+            pass
+        return
+
+    try:
+        await callback.answer(show_alert=False)
+    except Exception:
+        pass
+
+    action = make_rich_button_row(
+        make_rich_button(
+            texts.BTN_CONFIRM_RESET,
+            callback_data="vless_reset_confirm",
+            style="danger",
+        ),
+        make_rich_button(
+            texts.BTN_CANCEL,
+            callback_data="back_to_connections",
+            style="primary",
+        ),
+    )
+    full_text = f"{texts.VLESS_RESET_CONFIRM_CARD}\n{action}"
+    await render_hub(
+        callback.bot,
+        callback.message.chat.id,
+        full_text,
+        None,
+    )
+
+
+@router.callback_query(F.data == "vless_reset_confirm")
+async def vless_reset_confirm(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User | None = None,
+):
+    await state.clear()
+
+    from services.maintenance_service import MaintenanceService
+    if not await MaintenanceService.can_user_perform_action(session, callback.from_user.id):
+        try:
+            await callback.answer(texts.MAINTENANCE_DEFAULT_MESSAGE, show_alert=True)
+        except Exception:
+            pass
+        return
+
+    if not db_user:
+        try:
+            await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        except Exception:
+            pass
+        return
+
+    if not SubscriptionService.check_vpn_access(db_user):
+        try:
+            await callback.answer(texts.ERROR_NO_SUBSCRIPTION, show_alert=True)
+        except Exception:
+            pass
+        return
+
+    from database.repositories import vless_subscription_repo
     from services.vless_subscription_service import VlessSubscriptionService
 
     sub = await vless_subscription_repo.get_subscription_by_user_id(session, db_user.id)

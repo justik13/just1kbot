@@ -1,4 +1,6 @@
+import html
 import logging
+from urllib.parse import quote
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
@@ -171,6 +173,8 @@ async def show_referral(
 
     bot_info = await callback.bot.get_me()
     referral_link = f"https://t.me/{bot_info.username}?start=ref_{db_user.telegram_id}"
+    share_url = f"https://t.me/share/url?url={quote(referral_link, safe='')}&text={quote(texts.REFERRAL_SHARE_TEXT, safe='')}"
+    escaped_share_url = html.escape(share_url, quote=True)
 
     inviter_line = await _get_inviter_line(session, db_user)
     if inviter_line:
@@ -191,6 +195,8 @@ async def show_referral(
             tier_progress_line=tier_progress_line,
             referral_link=referral_link,
             inviter_line=inviter_line,
+            share_url=escaped_share_url,
+            share_btn_text=texts.BTN_SHARE_REFERRAL,
         )
         + f"\n{nav_row}"
     )

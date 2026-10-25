@@ -48,31 +48,6 @@ def _uuid_from_callback(data: str) -> uuid.UUID | None:
         return None
 
 
-def _build_purchase_success_actions() -> str:
-    return (
-        "\n"
-        + make_rich_button_row(
-            make_rich_button(
-                texts.BTN_PAYMENT_CONNECT_DEVICE,
-                callback_data="menu_connections",
-                style="success",
-            ),
-            make_rich_button(
-                texts.BTN_PAYMENT_TO_SUBSCRIPTION,
-                callback_data="menu_subscription",
-                style="primary",
-            ),
-        )
-        + "\n"
-        + make_rich_button_row(
-            make_rich_button(
-                texts.BTN_MAIN_MENU_NAV,
-                callback_data="back_to_main_menu",
-            )
-        )
-    )
-
-
 @router.callback_query(F.data.startswith("order_pay_wallet:"))
 async def handle_order_pay_wallet(
     callback: CallbackQuery,
@@ -147,7 +122,7 @@ async def handle_order_pay_wallet(
             charged=int(order.amount_rub),
             real_balance=int(balance.real_available),
             bonus_balance=int(balance.bonus_available),
-        ) + _build_purchase_success_actions(),
+        ),
         reply_markup=None,
         message_effect_id=EFFECT_CONFETTI,
         force_new=True,
@@ -245,7 +220,7 @@ async def handle_order_pay_card(
                     charged=int(order.amount_rub),
                     real_balance=int(balance.real_available),
                     bonus_balance=int(balance.bonus_available),
-                ) + _build_purchase_success_actions(),
+                ),
                 reply_markup=None,
                 message_effect_id=EFFECT_CONFETTI,
                 force_new=True,

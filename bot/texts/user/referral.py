@@ -80,6 +80,9 @@ REFERRAL_TEXT_BALANCE = """<p>🤝 <b>Реферальная программа<
 <code>{referral_link}</code>
 <p><i>(нажмите на ссылку, чтобы скопировать)</i></p>{inviter_line}
 <tg-button-row align="center">
+  <tg-button type="url" style="primary" url="{share_url}">{share_btn_text}</tg-button>
+</tg-button-row>
+<tg-button-row align="center">
   <tg-button type="callback_data" style="primary" data="referrals_list">👥 Мои рефералы ({invited_count})</tg-button>
   <tg-button type="callback_data" style="primary" data="referral_leaderboard">🏆 Топ-5 лидеров</tg-button>
 </tg-button-row>"""

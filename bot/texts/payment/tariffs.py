@@ -1,13 +1,13 @@
 """Domain texts for payment/tariffs.py."""
 from __future__ import annotations
 
-BTN_DURATION_HALF_YEAR_DISCOUNT = "⚡️ {days} дн. — {display_price} ₽ (-{discount_pct}%) 🔥"
+BTN_DURATION_HALF_YEAR_DISCOUNT = "⚡️ {days} дн. — {display_price} ₽ (-{discount_pct}%)"
 
 BTN_DURATION_MONTH_DISCOUNT = "⏱ {days} дн. — {display_price} ₽ (-{discount_pct}%)"
 
 BTN_DURATION_STANDARD = "⏱ {days} дн. — {display_price} ₽"
 
-BTN_DURATION_YEAR_DISCOUNT = "💎 {days} дн. — {display_price} ₽ (-{discount_pct}%) 🔥"
+BTN_DURATION_YEAR_DISCOUNT = "💎 {days} дн. — {display_price} ₽ (-{discount_pct}%)"
 
 BTN_PAYMENT_BUY_FROM_BALANCE = "💰 Купить с баланса"
 
