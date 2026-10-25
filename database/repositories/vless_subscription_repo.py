@@ -270,6 +270,31 @@ async def register_hwid_atomic(
     if effective_limit <= 0:
         return False, len(active_hwids), 0
 
+    # If active devices exceed limit (e.g. after tariff downgrade or new AWG profile),
+    # prune to effective_limit most recently active devices (consistent with white_internet_repo)
+    if len(active_hwids) > effective_limit:
+        def _parse_last_seen(item_val: Any) -> datetime:
+            if isinstance(item_val, dict):
+                ts = item_val.get("last_seen")
+            else:
+                ts = item_val
+            if isinstance(ts, datetime):
+                return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+            if isinstance(ts, str):
+                try:
+                    dt = datetime.fromisoformat(ts)
+                    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+                except Exception:
+                    pass
+            return datetime.min.replace(tzinfo=timezone.utc)
+
+        sorted_hwids = sorted(
+            active_hwids.items(),
+            key=lambda item: _parse_last_seen(item[1]),
+            reverse=True,
+        )
+        active_hwids = dict(sorted_hwids[:effective_limit])
+
     entry: dict[str, Any] = {"last_seen": now.isoformat()}
     if device_info and isinstance(device_info, dict):
         for k, v in device_info.items():

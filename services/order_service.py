@@ -799,6 +799,19 @@ class OrderService:
                         "Order %s topup has no payment_credit in ledger; skipping refund debit",
                         order.id,
                     )
+                user = await session.get(User, order.user_id, with_for_update=True)
+                if user:
+                    user.financial_hold = True
+                    user.financial_block_reason = f"topup_refund_{order.id}"
+                    from services.subscription import SubscriptionService
+                    from services.user_cache import invalidate_user_cache
+                    from services.white_internet_service import WhiteInternetService
+
+                    await SubscriptionService.sync_access_state(session, user)
+                    await WhiteInternetService.deactivate_user_subscriptions(
+                        session, user.id, reason="order_refunded"
+                    )
+                    invalidate_user_cache(user.telegram_id)
             else:
                 refund_ref = (
                     (result.external_id or "").strip()

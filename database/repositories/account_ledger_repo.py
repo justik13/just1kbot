@@ -113,15 +113,17 @@ async def get_account_balance(
             bonus_available=ZERO,
         )
 
-    bonus_credited = Decimal(
-        await session.scalar(
-            select(func.coalesce(func.sum(AccountLedgerEntry.amount), 0)).where(
-                AccountLedgerEntry.user_id == user_id,
-                AccountLedgerEntry.entry_type == "admin_adjustment",
-                AccountLedgerEntry.amount > 0,
+    bonus_credited = max(
+        ZERO,
+        Decimal(
+            await session.scalar(
+                select(func.coalesce(func.sum(AccountLedgerEntry.amount), 0)).where(
+                    AccountLedgerEntry.user_id == user_id,
+                    AccountLedgerEntry.entry_type == "admin_adjustment",
+                )
             )
-        )
-        or ZERO
+            or ZERO
+        ),
     )
 
     if bonus_credited <= ZERO:
@@ -475,6 +477,27 @@ async def _batch_credit_capacities(
                     refund_by_payment.get(p_id, ZERO) + abs(Decimal(sum_amt))
                 )
 
+    user_id = credits[0].user_id if credits else None
+    rev_adj: dict[int, Decimal] = {}
+    if user_id is not None:
+        adj_rows = (
+            await session.execute(
+                select(AccountLedgerEntry.metadata_, AccountLedgerEntry.amount).where(
+                    AccountLedgerEntry.user_id == user_id,
+                    AccountLedgerEntry.entry_type == "admin_adjustment",
+                    AccountLedgerEntry.amount < 0,
+                )
+            )
+        ).all()
+        for meta, amt in adj_rows:
+            orig = (meta or {}).get("original_credit_id")
+            if orig is not None:
+                try:
+                    orig_id = int(orig)
+                    rev_adj[orig_id] = rev_adj.get(orig_id, ZERO) + abs(Decimal(amt))
+                except (ValueError, TypeError):
+                    pass
+
     capacities: dict[int, Decimal] = {}
     for credit in credits:
         used = used_by_credit.get(credit.id, ZERO)
@@ -483,7 +506,8 @@ async def _batch_credit_capacities(
             ext_debit += refund_by_order.get(credit.order_id, ZERO)
         if credit.payment_id is not None:
             ext_debit += refund_by_payment.get(credit.payment_id, ZERO)
-        capacities[credit.id] = Decimal(credit.amount) - used - ext_debit
+        adj_debit = rev_adj.get(credit.id, ZERO)
+        capacities[credit.id] = Decimal(credit.amount) - used - ext_debit - adj_debit
 
     return capacities
 

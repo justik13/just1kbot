@@ -18,6 +18,7 @@ from database.models import (
     Order,
     User,
 )
+from database.repositories.users_repo import MAX_INT32
 
 
 @dataclass
@@ -299,7 +300,7 @@ async def get_purchase_logs_paginated(
                 u = await session.scalar(
                     select(User).where(User.telegram_id == log.target_id)
                 )
-                if not u:
+                if not u and isinstance(log.target_id, int) and 0 < log.target_id <= MAX_INT32:
                     u = await session.get(User, log.target_id)
                 user_cache[log.target_id] = u
             else:
@@ -412,7 +413,7 @@ async def get_purchase_log_by_id(
             u = await session.scalar(
                 select(User).where(User.telegram_id == log.target_id)
             )
-            if not u:
+            if not u and isinstance(log.target_id, int) and 0 < log.target_id <= MAX_INT32:
                 u = await session.get(User, log.target_id)
         tg_id = u.telegram_id if u else (log.target_id or 0)
         username = u.username if u else None

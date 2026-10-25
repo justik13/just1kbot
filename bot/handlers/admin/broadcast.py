@@ -612,7 +612,7 @@ async def _send_broadcast_to_users_with_resume(
                             progress.fail_count = (progress.fail_count or 0) + 1
                         await session.commit()
                     if is_forbidden:
-                        db_user = await session.get(User, uid)
+                        db_user = await session.get(User, internal_id)
                         if db_user:
                             db_user.is_bot_blocked = True
                             await session.commit()

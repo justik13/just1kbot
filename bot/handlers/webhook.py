@@ -160,31 +160,38 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
             if order and order.status == "paid" and getattr(order, "_newly_paid", False):
                 bot = request.app.get("bot")
                 if bot:
-                    from database.models import User
-                    from bot.handlers.payment.credit_notify import (
-                        notify_order_credited,
-                    )
+                    from database.connection import queue_post_commit_task
+                    from database.models import Order as OrderModel, User
+                    from bot.handlers.payment.credit_notify import notify_order_credited
                     from services.order_notifications import (
                         mark_notified,
                         mark_notify_pending,
                     )
 
-                    user = await session.get(User, order.user_id)
-                    try:
-                        delivered = await notify_order_credited(
-                            bot, session, order, user
-                        )
-                    except Exception as exc:
-                        logger.warning(
-                            "Could not notify user of order fulfillment: %s", exc
-                        )
-                        delivered = False
-                    if delivered:
-                        mark_notified(order)
-                    else:
-                        # Keep the debt: the credit-notify worker retries
-                        # the push for users who already left the screen.
-                        mark_notify_pending(order)
+                    order_id = order.id
+                    user_id = order.user_id
+                    mark_notify_pending(order)
+
+                    async def _dispatch_webhook_notify() -> None:
+                        try:
+                            async with session_scope() as notify_session:
+                                post_order = await notify_session.get(OrderModel, order_id)
+                                post_user = await notify_session.get(User, user_id)
+                                if not post_order or not post_user:
+                                    return
+                                delivered = await notify_order_credited(
+                                    bot, notify_session, post_order, post_user
+                                )
+                                if delivered:
+                                    mark_notified(post_order)
+                                    await notify_session.flush()
+                        except Exception as exc:
+                            logger.warning(
+                                "Could not notify user of order fulfillment in post-commit task: %s",
+                                exc,
+                            )
+
+                    queue_post_commit_task(session, _dispatch_webhook_notify)
                     await session.flush()
 
             if existing_event:
