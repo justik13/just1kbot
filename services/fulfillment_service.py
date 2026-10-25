@@ -52,6 +52,13 @@ class FulfillmentService:
                 user.device_limit = order.device_limit
             if order.tariff_id:
                 user.current_tariff_id = order.tariff_id
+            user.notified_3d = False
+            user.notified_1d = False
+            user.notified_2h = False
+            user.notified_expired = False
+            user.notified_grace_12h = False
+            user.notification_retry_count = 0
+            user.last_notification_attempt = None
             await SubscriptionService.sync_access_state(session, user)
             invalidate_user_cache(user.telegram_id)
             logger.info(

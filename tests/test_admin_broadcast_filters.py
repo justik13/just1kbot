@@ -310,6 +310,7 @@ class TestAdminBroadcastFilters(unittest.TestCase):
                 def __init__(self):
                     self.progress = initial_progress
                     self.user = fake_user
+                    self.requested_user_ident = None
 
                 async def __aenter__(self):
                     return self
@@ -321,7 +322,10 @@ class TestAdminBroadcastFilters(unittest.TestCase):
                     if model == BroadcastProgress:
                         return self.progress
                     if model == User:
-                        return self.user
+                        self.requested_user_ident = ident
+                        if ident == self.user.id:
+                            return self.user
+                        return None
                     return None
 
                 async def commit(self):
@@ -338,6 +342,7 @@ class TestAdminBroadcastFilters(unittest.TestCase):
 
                 await _send_broadcast_to_users_with_resume(mock_bot, progress_id, admin_id)
 
+                self.assertEqual(fake_sess.requested_user_ident, 101)
                 self.assertEqual(fake_sess.progress.fail_count, 1)
                 self.assertTrue(fake_user.is_bot_blocked)
 
