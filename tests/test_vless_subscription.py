@@ -2254,6 +2254,7 @@ class TestVlessFeedDynamicBotUrls(AioHTTPTestCase):
             # Profile-Web-Page-Url must point to the dynamically resolved bot username
             self.assertEqual(resp.headers.get("Profile-Web-Page-Url"), "https://t.me/just1k13bot")
             self.assertNotIn("just1kbot", resp.headers.get("Support-Url", ""))
+            self.assertNotIn("just1kbot", resp.headers.get("Profile-Web-Page-Url", ""))
 
 class TestVlessResetRoutes(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
