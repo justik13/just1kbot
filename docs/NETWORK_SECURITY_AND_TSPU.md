@@ -151,7 +151,7 @@
 
 1. **Формула клиентской ссылки:**
    ```text
-   vless://{uuid}@{domain}:443?encryption=none&security=tls&sni={domain}&alpn=http%2F1.1&fp=chrome&type=tcp&flow=xtls-rprx-vision#{fragment}
+   vless://{uuid}@{domain}:443?encryption=none&security=tls&sni={domain}&alpn=http/1.1&fp=chrome&type=tcp&flow=xtls-rprx-vision#{fragment}
    ```
 2. **Защита потока (XTLS-Vision):**  
    Параметр `flow=xtls-rprx-vision` перехватывает вложенные рукопожатия TLS пользователя и добавляет криптографический паддинг к первым пакетам данных, сбивая сигнатурный анализ L4–L7 ТСПУ («TLS внутри TLS»).
