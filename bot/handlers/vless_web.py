@@ -169,12 +169,49 @@ def _resolve_channel_url(first_extra: dict | None, default_bot_url: str) -> str:
     return _sanitize_header_url(default_bot_url)
 
 
+async def _resolve_clean_tariff_name(
+    session,
+    user,
+    total_device_limit: int | None = None,
+) -> str:
+    """Resolve human-readable tariff name for user, sanitized for headers and UI display."""
+    tariff_name = None
+    if getattr(user, "current_tariff_id", None):
+        user_tariff = await tariffs_repo.get_tariff_by_id(session, user.current_tariff_id)
+        if (
+            user_tariff
+            and getattr(user_tariff, "name", None)
+            and (getattr(user_tariff, "service_type", None) or "standard") in ("standard", "awg")
+        ):
+            tariff_name = user_tariff.name
+    if not tariff_name:
+        if total_device_limit is None:
+            total_device_limit = await SubscriptionService.get_effective_device_limit(session, user)
+        tariff_name = get_tariff_display_name(total_device_limit)
+    return re.sub(r"^[^\w\u0400-\u04ffa-zA-Z0-9]+", "", str(tariff_name)).strip()[:40]
+
+
+def _format_device_count_ru(count: int) -> str:
+    """Format device count with proper Russian grammatical declension in uppercase."""
+    n = abs(count)
+    if n % 10 == 1 and n % 100 != 11:
+        word = texts.LANDING_DEVICE_WORD_SINGULAR
+    elif 2 <= n % 10 <= 4 and (n % 100 < 10 or n % 100 >= 20):
+        word = texts.LANDING_DEVICE_WORD_FEW
+    else:
+        word = texts.LANDING_DEVICE_WORD_MANY
+    return f"{count} {word}"
+
+
 def _render_vless_landing_html(
     bot_username: str = "",
     is_active: bool = True,
     status_badge: str | None = None,
     status_title: str | None = None,
     status_description: str | None = None,
+    page_title: str | None = None,
+    tier: str = "basic",
+    tariff_badge: str | None = None,
 ) -> str:
     """Render universal landing page for INCY 1-click import and installation guidance."""
     clean_bot = html.escape(bot_username.strip().lstrip("@")) if bot_username else "just1k13bot"
@@ -191,7 +228,13 @@ def _render_vless_landing_html(
             .replace("{status_title}", html.escape(title))
             .replace("{status_description}", html.escape(desc))
         )
-    return _LANDING_ACTIVE_HTML
+    badge_html = f'<div class="tier-badge">{html.escape(tariff_badge)}</div>' if tariff_badge else ""
+    effective_title = page_title or texts.LANDING_VLESS_PAGE_TITLE
+    return (
+        _LANDING_ACTIVE_HTML.replace("{page_title}", html.escape(effective_title))
+        .replace("{tier}", html.escape(tier))
+        .replace("{tariff_badge_html}", badge_html)
+    )
 
 
 
@@ -337,7 +380,29 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         if not raw_hwid:
             bot_username = await _resolve_bot_username(request)
             if _is_browser_request(request):
-                html_body = _render_vless_landing_html(bot_username=bot_username, is_active=True)
+                total_limit = await SubscriptionService.get_effective_device_limit(session, user)
+                tariff_clean = await _resolve_clean_tariff_name(session, user, total_limit)
+                page_title = texts.LANDING_VLESS_PAGE_TITLE
+                tariff_lower = tariff_clean.lower()
+                device_str = _format_device_count_ru(total_limit)
+                if total_limit > 5 or "pro" in tariff_lower:
+                    tier = "pro"
+                    prefix = texts.LANDING_TIER_PRO if ("pro" in tariff_lower or not tariff_clean) else tariff_clean.upper()
+                elif total_limit > 2 or texts.TARIFF_KEYWORD_FAMILY in tariff_lower:
+                    tier = "family"
+                    prefix = texts.LANDING_TIER_FAMILY if (texts.TARIFF_KEYWORD_FAMILY in tariff_lower or not tariff_clean) else tariff_clean.upper()
+                else:
+                    tier = "basic"
+                    prefix = texts.LANDING_TIER_BASIC if (texts.TARIFF_KEYWORD_BASIC in tariff_lower or not tariff_clean) else tariff_clean.upper()
+                tariff_badge = f"{prefix} • {device_str}"
+
+                html_body = _render_vless_landing_html(
+                    bot_username=bot_username,
+                    is_active=True,
+                    page_title=page_title,
+                    tier=tier,
+                    tariff_badge=tariff_badge,
+                )
                 landing_headers = {
                     **common_headers,
                     "Content-Type": "text/html; charset=utf-8",
@@ -449,19 +514,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             await VlessSubscriptionService.get_combined_quota(session, user)
         )
 
-        tariff_name = None
-        if getattr(user, "current_tariff_id", None):
-            user_tariff = await tariffs_repo.get_tariff_by_id(session, user.current_tariff_id)
-            if (
-                user_tariff
-                and getattr(user_tariff, "name", None)
-                and (getattr(user_tariff, "service_type", None) or "standard") in ("standard", "awg")
-            ):
-                tariff_name = user_tariff.name
-        if not tariff_name:
-            tariff_name = get_tariff_display_name(total_device_limit)
-        # Strip decorative emoji prefixes and truncate cleanly to preserve following quota text
-        tariff_clean = re.sub(r"^[^\w\u0400-\u04ffa-zA-Z0-9]+", "", str(tariff_name)).strip()[:40]
+        tariff_clean = await _resolve_clean_tariff_name(session, user, total_device_limit)
 
         announce = await get_system_setting(session, "vless_announce", None)
         if not isinstance(announce, str) or not announce.strip():

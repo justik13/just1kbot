@@ -133,6 +133,9 @@ def _render_white_internet_landing_html(
     status_badge: str | None = None,
     status_title: str | None = None,
     status_description: str | None = None,
+    page_title: str | None = None,
+    tier: str = "white_internet",
+    tariff_badge: str | None = None,
 ) -> str:
     """Render universal landing page for INCY 1-click import."""
     clean_bot = html.escape(bot_username.strip().lstrip("@")) if bot_username else "just1k13bot"
@@ -149,7 +152,14 @@ def _render_white_internet_landing_html(
             .replace("{status_title}", html.escape(title))
             .replace("{status_description}", html.escape(desc))
         )
-    return _LANDING_ACTIVE_HTML
+    effective_badge = tariff_badge or texts.LANDING_SPECIAL_ACCESS_BADGE
+    effective_title = page_title or texts.LANDING_WHITE_INTERNET_PAGE_TITLE
+    badge_html = f'<div class="tier-badge">{html.escape(effective_badge)}</div>' if effective_badge else ""
+    return (
+        _LANDING_ACTIVE_HTML.replace("{page_title}", html.escape(effective_title))
+        .replace("{tier}", html.escape(tier))
+        .replace("{tariff_badge_html}", badge_html)
+    )
 
 
 def _render_white_internet_pending_landing_html(bot_username: str = "") -> str:
@@ -481,7 +491,13 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         # HWID (Device ID) enforcement: browser gets 1-click landing, app must provide HWID
         if not raw_hwid:
             if _is_browser_request(request):
-                html_body = _render_white_internet_landing_html(bot_username=bot_user, is_active=True)
+                html_body = _render_white_internet_landing_html(
+                    bot_username=bot_user,
+                    is_active=True,
+                    page_title=texts.LANDING_WHITE_INTERNET_PAGE_TITLE,
+                    tier="white_internet",
+                    tariff_badge=texts.LANDING_SPECIAL_ACCESS_BADGE,
+                )
                 return web.Response(status=200, text=html_body, headers=landing_headers)
             headers = dict(common_headers)
             headers["x-hwid-required"] = "true"
