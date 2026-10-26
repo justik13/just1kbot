@@ -2625,9 +2625,9 @@ class TestSimpleBillingAuditFixes(unittest.IsolatedAsyncioTestCase):
         with patch("services.order_service.get_payment_gateway", return_value=mock_gw):
             session = AsyncMock(spec=AsyncSession)
             now = now_utc()
-            # User currently has 2 devices (300 RUB), upgrading to 3 devices (450 RUB), 15 days left
-            curr_tariff = Tariff(id=1, name="Standard", price_rub=Decimal("300.00"), duration_days=30, device_limit=2)
-            target_tariff = Tariff(id=2, name="Pro", price_rub=Decimal("450.00"), duration_days=30, device_limit=3)
+            # User currently has 2 devices (300 RUB), upgrading to 5 devices (450 RUB), 15 days left
+            curr_tariff = Tariff(id=1, name="Базовый", price_rub=Decimal("300.00"), duration_days=30, device_limit=2)
+            target_tariff = Tariff(id=2, name="Семейный", price_rub=Decimal("450.00"), duration_days=30, device_limit=5)
             user = User(
                 id=42,
                 current_tariff_id=1,

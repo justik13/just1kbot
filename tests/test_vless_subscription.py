@@ -37,7 +37,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             telegram_id=999,
             is_banned=False,
             is_deleted=False,
-            device_limit=3,
+            device_limit=2,
             subscription_end=now + timedelta(days=30),
         )
         self.default_sub = VlessSubscription(
@@ -357,8 +357,8 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             patch("bot.handlers.vless_web.session_scope", fake_session_scope),
             patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
             patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
-            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=3),
-            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 3)),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=2),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 2)),
             patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background") as mock_sync,
             patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
         ):
@@ -377,11 +377,51 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             self.assertEqual(resp.headers.get("Content-Disposition"), 'inline; filename="Just1k.txt"; filename*=UTF-8\'\'Just1k.txt')
             self.assertEqual(resp.headers.get("Sort-Order"), "none")
             self.assertEqual(resp.headers.get("x-hwid-active"), "true")
-            self.assertEqual(resp.headers.get("Device-Limit"), "3")
+            self.assertEqual(resp.headers.get("Device-Limit"), "2")
             self.assertEqual(resp.headers.get("Device-Active-Count"), "1")
             self.assertEqual(resp.headers.get("Hide-Url"), "1")
             self.assertEqual(resp.headers.get("No-Limit-Enabled"), "1")
             self.assertIn("t.me/", resp.headers.get("Support-Url", ""))
+            self.assertIn("upload=0; download=0; total=0;", resp.headers.get("Subscription-Userinfo", ""))
+
+    async def test_feed_subscription_userinfo_reflects_traffic_counters(self):
+        """Subscription-Userinfo header reflects accumulated upload and download traffic from VlessSubscription."""
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        traffic_sub = VlessSubscription(
+            id=15,
+            user_id=42,
+            token="traffic-token-valid-length-12345678",
+            uuid="11111111-2222-3333-4444-555555555555",
+            is_active=True,
+            active_hwids={},
+            traffic_up=2048,
+            traffic_down=8192,
+        )
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=traffic_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=2),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 2)),
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
+        ):
+            headers = {"X-Hwid": "test-client-hwid-99"}
+            resp = await self.client.get("/sub/access/traffic-token-valid-length-12345678", headers=headers)
+            self.assertEqual(resp.status, 200)
+
+            userinfo = resp.headers.get("Subscription-Userinfo", "")
+            self.assertIn("upload=2048", userinfo)
+            self.assertIn("download=8192", userinfo)
+            self.assertIn("total=0", userinfo)
+            self.assertIn("expire=", userinfo)
 
     async def test_empty_servers_returns_503(self):
         mock_session = AsyncMock()
@@ -395,8 +435,8 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             patch("bot.handlers.vless_web.session_scope", fake_session_scope),
             patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
             patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
-            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=3),
-            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 3)) as mock_register,
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=2),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 2)) as mock_register,
             patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
             patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[]),
         ):
@@ -430,8 +470,8 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             patch("bot.handlers.vless_web.session_scope", fake_session_scope),
             patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
             patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
-            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=3),
-            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 3)) as mock_register,
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=2),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 2)) as mock_register,
             patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
             patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[bad_server]),
         ):
@@ -456,13 +496,13 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
         async def fake_register_hwid(session, sub_id, hwid, effective_limit=None, ttl_hours=48, device_info=None):
             nonlocal captured_meta
             captured_meta = device_info or {}
-            return True, 1, 3
+            return True, 1, 2
 
         with (
             patch("bot.handlers.vless_web.session_scope", fake_session_scope),
             patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
             patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
-            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=3),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=2),
             patch("database.repositories.vless_subscription_repo.register_hwid_atomic", side_effect=fake_register_hwid),
             patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
             patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
@@ -523,7 +563,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             is_banned=False,
             is_deleted=False,
             financial_hold=False,
-            device_limit=3,
+            device_limit=2,
             subscription_end=datetime.now(timezone.utc) - timedelta(hours=2),
         )
 
@@ -531,8 +571,8 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             patch("bot.handlers.vless_web.session_scope", fake_session_scope),
             patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
             patch("database.repositories.users_repo.get_user_by_id", return_value=grace_user),
-            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=3),
-            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 3)),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=2),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 2)),
             patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
             patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
         ):
@@ -566,8 +606,8 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             patch("bot.handlers.vless_web.session_scope", fake_session_scope),
             patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=recent_sub),
             patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
-            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=3),
-            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 3)),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=2),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 2)),
             patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background") as mock_sync,
             patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
         ):
@@ -593,7 +633,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             telegram_id=999,
             is_banned=False,
             is_deleted=False,
-            device_limit=3,
+            device_limit=2,
             subscription_end=now - timedelta(hours=80),
         )
 
@@ -779,7 +819,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             is_banned=False,
             is_deleted=False,
             financial_hold=False,
-            device_limit=3,
+            device_limit=2,
             subscription_end=datetime.now(timezone.utc) - timedelta(hours=2),
         )
 
@@ -787,8 +827,8 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             patch("bot.handlers.vless_web.session_scope", fake_session_scope),
             patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
             patch("database.repositories.users_repo.get_user_by_id", return_value=expired_grace_user),
-            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=3),
-            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 3)),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=2),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 2)),
             patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
             patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
         ):
@@ -841,8 +881,8 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             patch("bot.handlers.vless_web.session_scope", fake_session_scope),
             patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
             patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
-            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=3),
-            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 3)),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=2),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 2)),
             patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
             patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
             patch("bot.handlers.vless_web.get_system_setting", side_effect=fake_get_setting),
@@ -892,8 +932,8 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             patch("bot.handlers.vless_web.session_scope", fake_session_scope),
             patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
             patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
-            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=3),
-            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 3)),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=2),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 2)),
             patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
             patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
             patch("bot.handlers.vless_web.get_system_setting", side_effect=fake_get_setting),
@@ -1239,8 +1279,8 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             patch("bot.handlers.vless_web.session_scope", fake_session_scope),
             patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
             patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
-            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=3),
-            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 3)) as mock_register,
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=2),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 2)) as mock_register,
             patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
             patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
         ):
@@ -1599,6 +1639,7 @@ class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
             uuid="abc-uuid",
             is_active=True,
             active_hwids={"dev1": now.isoformat()},
+            node_traffic_snapshots={"1": {"epoch": "e1", "up": 100, "down": 200}},
         )
         mock_session = AsyncMock()
         mock_session.scalar = AsyncMock(return_value=sub)
@@ -1606,6 +1647,7 @@ class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
 
         old_uuid, new_uuid = await vless_subscription_repo.reset_hwids(mock_session, sub.id)
         self.assertEqual(sub.active_hwids, {})
+        self.assertEqual(sub.node_traffic_snapshots, {})
         self.assertEqual(old_uuid, "abc-uuid")
         self.assertNotEqual(new_uuid, "abc-uuid")
         self.assertEqual(sub.uuid, new_uuid)
@@ -2184,7 +2226,7 @@ class TestVlessFeedDynamicBotUrls(AioHTTPTestCase):
             telegram_id=999,
             is_banned=False,
             is_deleted=False,
-            device_limit=3,
+            device_limit=2,
             subscription_end=now + timedelta(days=30),
         )
         self.default_sub = VlessSubscription(
@@ -2235,8 +2277,8 @@ class TestVlessFeedDynamicBotUrls(AioHTTPTestCase):
             patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
             patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
             patch("services.subscription.SubscriptionService.check_vpn_access", return_value=True),
-            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=3),
-            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 3)),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=2),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 2)),
             patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
             patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
             patch("config.settings.get_settings") as mock_settings,

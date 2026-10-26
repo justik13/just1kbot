@@ -79,7 +79,7 @@ class E2ECriticalFlowsFullCoverageTests(unittest.IsolatedAsyncioTestCase):
             tariff = Tariff(
                 name="Monthly Standard",
                 duration_days=30,
-                device_limit=3,
+                device_limit=2,
                 price_rub=250,
                 is_active=True,
                 sort_order=1,

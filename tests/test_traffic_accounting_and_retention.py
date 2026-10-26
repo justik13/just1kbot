@@ -208,6 +208,7 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
             total_wi_traffic_bytes=2000000000,
             avg_traffic_bytes_active=1000000000,
             avg_monthly_awg_bytes=800000000,
+            avg_monthly_vless_bytes=200000000,
             avg_monthly_wi_bytes=300000000,
         )
         mock_res = MagicMock()
@@ -218,6 +219,7 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stats["total"], 10)
         self.assertEqual(stats["active"], 5)
         self.assertEqual(stats["avg_monthly_awg_bytes"], 800000000)
+        self.assertEqual(stats["avg_monthly_vless_bytes"], 200000000)
         self.assertEqual(stats["avg_monthly_wi_bytes"], 300000000)
         self.assertEqual(stats["total_wi_traffic_bytes"], 2000000000)
 
@@ -259,31 +261,6 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("/мес", sent_text)
         # WI total must render the 50 GB from total_wi_traffic_bytes
         self.assertIn("50", sent_text)
-
-    def test_proc_net_dev_parsing(self):
-        """Host network interface bytes correctly parses /proc/net/dev excluding virtual ifaces."""
-        proc_dev_content = (
-            "Inter-|   Receive                                                |  Transmit\n"
-            " face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed\n"
-            "    lo: 1000       10    0    0    0     0          0         0     1000       10    0    0    0     0       0          0\n"
-            "docker0: 5000       20    0    0    0     0          0         0     5000       20    0    0    0     0       0          0\n"
-            "  eth0: 200000     100    0    0    0     0          0         0   400000      150    0    0    0     0       0          0\n"
-        )
-        tx_raw = 0
-        rx_raw = 0
-        for line in proc_dev_content.splitlines():
-            if ":" not in line:
-                continue
-            name, stats = line.split(":", 1)
-            name = name.strip()
-            if name == "lo" or name.startswith(("docker", "veth", "br-", "wg", "awg", "tun", "tap")):
-                continue
-            cols = stats.split()
-            if len(cols) >= 9:
-                rx_raw += int(cols[0])
-                tx_raw += int(cols[8])
-        self.assertEqual(tx_raw, 400000)
-        self.assertEqual(rx_raw, 200000)
 
     async def test_manage_device_view_sums_archived_traffic(self):
         """render_device_screen includes archived traffic for this device slot."""
@@ -648,8 +625,10 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Пк #2", legacy_archived)
         self.assertEqual(legacy_archived["slot_2"], 5000)
 
-    def test_server_card_cycles_decoupled(self):
-        """Server card evaluates client and host cycles independently."""
+    async def test_server_card_cycles_decoupled(self):
+        """Server card evaluates client and host cycles independently via _show_server_card."""
+        from types import SimpleNamespace
+        from bot.handlers.admin.servers import common
         from utils.datetime_helpers import now_utc
 
         now = now_utc()
@@ -657,19 +636,37 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         old_cycle = "2020-01"
 
         # Case 1: Host has new cycle, client has old cycle
-        server_extra = {
-            "traffic_cycle": old_cycle,
-            "monthly_traffic_bytes": 1000000,
-            "host_traffic_cycle": current_cycle,
-            "host_monthly_traffic_bytes": 500000,
-        }
-        client_cycle = server_extra.get("traffic_cycle")
-        host_cycle = server_extra.get("host_traffic_cycle")
-        m_bytes = int(server_extra.get("monthly_traffic_bytes", 0) or 0) if client_cycle == current_cycle else 0
-        h_bytes = int(server_extra.get("host_monthly_traffic_bytes", 0) or 0) if host_cycle == current_cycle else 0
+        server = SimpleNamespace(
+            id=1,
+            name="Test Node",
+            country_flag="🇩🇪",
+            is_active=True,
+            disabled_reason=None,
+            disabled_at=None,
+            last_successful_check=None,
+            max_clients=240,
+            protocol="vless",
+            api_url="https://vless.example.com",
+            extra_data={
+                "traffic_cycle": old_cycle,
+                "monthly_traffic_bytes": 1000000,
+                "host_traffic_cycle": current_cycle,
+                "host_monthly_traffic_bytes": 500000,
+            },
+        )
+        callback = MagicMock()
+        callback.message = AsyncMock()
+        session = AsyncMock()
 
-        self.assertEqual(m_bytes, 0)
-        self.assertEqual(h_bytes, 500000)
+        with patch("bot.handlers.admin.servers.common.get_server_peer_counts", new=AsyncMock(return_value={1: 0})), \
+             patch("services.slots_cache.get_cached_peer_count", return_value=None), \
+             patch("database.repositories.vless_subscription_repo.get_active_vless_counts", new=AsyncMock(return_value=(0, 0))):
+            await common._show_server_card(callback, session, server)
+
+        rendered = callback.message.edit_text.call_args[0][0]
+        # Client traffic from old cycle evaluates to 0 B, host traffic from current cycle is shown
+        self.assertIn("0 B", rendered)
+        self.assertIn("хостинг:", rendered)
 
     def test_traffic_worker_bulk_update_excludes_deleting_profiles(self):
         """Traffic worker bulk update statement contains strict provisioning_status guards."""
@@ -1305,7 +1302,7 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         from bot.handlers.connection.device_view_routes import render_vless_sub_screen
         from database.models import User, VlessSubscription
 
-        user = User(id=1, telegram_id=987654321, subscription_end=datetime.now(timezone.utc))
+        user = User(id=1, telegram_id=987654321, device_limit=2, subscription_end=datetime.now(timezone.utc))
         sub = VlessSubscription(
             id=10,
             user_id=1,
@@ -1320,7 +1317,7 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("database.repositories.vless_subscription_repo.get_or_create_subscription", AsyncMock(return_value=sub)), \
              patch("services.vless_subscription_service.VlessSubscriptionService.build_subscription_url", return_value="https://test.domain/sub/vless-token-xyz"), \
-             patch("services.subscription.SubscriptionService.get_effective_device_limit", AsyncMock(return_value=3)), \
+             patch("services.subscription.SubscriptionService.get_effective_device_limit", AsyncMock(return_value=2)), \
              patch("services.vless_subscription_service.VlessSubscriptionService.get_combined_quota", AsyncMock(return_value=(1, 0, 1))), \
              patch("bot.handlers.connection.device_view_routes.render_hub", AsyncMock()) as mock_render:
 
@@ -1328,7 +1325,7 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
             mock_render.assert_called_once()
             called_text = mock_render.call_args[0][2]
             self.assertIn("📈 <b>Использовано трафика:</b> 6.0 GiB", called_text)
-            self.assertIn("📊 <b>Занято устройств:</b> 1 из 3", called_text)
+            self.assertIn("📊 <b>Занято устройств:</b> 1 из 2", called_text)
 
     async def test_record_vless_traffic_atomic_uuid_mismatch_fencing(self):
         """When subscription UUID rotated concurrently, atomic recording aborts without mutating state."""
@@ -1469,6 +1466,49 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
 
         sent_text = callback.message.edit_text.call_args[0][0]
         self.assertIn("3.0 GiB/мес", sent_text)
+
+    async def test_record_vless_traffic_atomic_monthly_cycle_rollover(self):
+        """Monthly rollover updates User metrics with cycle-aware case expression."""
+        from database.models import VlessSubscription
+        from database.repositories.vless_subscription_repo import record_vless_traffic_atomic
+
+        sub = VlessSubscription(
+            id=100,
+            user_id=10,
+            token="vless-token-1",
+            uuid="vless-uuid-1",
+            traffic_down=1000,
+            traffic_up=200,
+            node_traffic_snapshots={
+                "1": {"epoch": "epoch-srv-1", "up": 200, "down": 1000, "updated_at": 1729000000}
+            },
+        )
+
+        now = datetime(2026, 11, 1, 0, 5, tzinfo=timezone.utc)
+        mock_session = AsyncMock()
+        mock_session.scalar.side_effect = [sub, sub]
+
+        delta_total, delta_down, delta_up = await record_vless_traffic_atomic(
+            session=mock_session,
+            subscription_id=100,
+            server_id=1,
+            node_epoch="epoch-srv-1",
+            raw_uplink=300,
+            raw_downlink=1500,
+            expected_uuid="vless-uuid-1",
+            now=now,
+        )
+
+        self.assertEqual(delta_total, 600)
+        self.assertEqual(delta_down, 500)
+        self.assertEqual(delta_up, 100)
+        self.assertEqual(sub.traffic_down, 1500)
+        self.assertEqual(sub.traffic_up, 300)
+
+        # Ensure update(User) was executed on session
+        self.assertTrue(mock_session.execute.called)
+        update_stmt = mock_session.execute.call_args[0][0]
+        self.assertEqual(update_stmt.table.name, "users")
 
 
 if __name__ == "__main__":
