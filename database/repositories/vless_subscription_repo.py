@@ -456,6 +456,7 @@ async def record_vless_traffic_atomic(
     raw_uplink: int,
     raw_downlink: int,
     *,
+    expected_uuid: str | None = None,
     now: datetime | None = None,
 ) -> tuple[int, int, int]:
     """Atomically record and calculate monotonic traffic deltas for a VLESS subscription on a specific server node.
@@ -478,6 +479,9 @@ async def record_vless_traffic_atomic(
     if not sub_meta:
         return 0, 0, 0
 
+    if expected_uuid and sub_meta.uuid != expected_uuid:
+        return 0, 0, 0
+
     # 2. Lock User FIRST (hierarchy)
     if sub_meta.user_id:
         await session.execute(
@@ -496,6 +500,9 @@ async def record_vless_traffic_atomic(
     if not sub:
         return 0, 0, 0
 
+    if expected_uuid and sub.uuid != expected_uuid:
+        return 0, 0, 0
+
     snapshots = dict(sub.node_traffic_snapshots or {})
     prev_snap = snapshots.get(str_server_id)
 
@@ -506,7 +513,10 @@ async def record_vless_traffic_atomic(
     current_up = max(0, int(raw_uplink or 0))
     current_down = max(0, int(raw_downlink or 0))
 
-    if prev_epoch != str_epoch:
+    if str_server_id not in snapshots:
+        delta_up = 0
+        delta_down = 0
+    elif prev_epoch != str_epoch:
         delta_up = current_up
         delta_down = current_down
     else:

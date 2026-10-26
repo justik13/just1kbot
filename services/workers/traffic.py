@@ -69,7 +69,6 @@ async def traffic_sync_loop(
     while not event.is_set():
         try:
             await _traffic_sync_once(bot)
-            await _vless_traffic_sync_once(bot)
             _consecutive_crashes = 0
         except asyncio.CancelledError:
             logger.info("Traffic sync worker cancelled")
@@ -96,6 +95,14 @@ async def traffic_sync_loop(
             except asyncio.TimeoutError:
                 pass
             continue
+
+        try:
+            await _vless_traffic_sync_once(bot)
+        except asyncio.CancelledError:
+            logger.info("Traffic sync worker cancelled")
+            break
+        except Exception as e:
+            logger.error("VLESS traffic sync pass failed: %s", e, exc_info=True)
 
         try:
             await asyncio.wait_for(
@@ -594,7 +601,7 @@ async def _vless_traffic_sync_once(bot: Bot | None = None):
             continue
 
         node_epoch, node_boot_id, node_starttime, users_stats = snapshot[:4]
-        if not node_epoch or not isinstance(users_stats, dict) or not users_stats:
+        if not node_epoch:
             continue
 
         host_tx = getattr(snapshot, "host_tx_bytes", 0) or 0
@@ -602,42 +609,39 @@ async def _vless_traffic_sync_once(bot: Bot | None = None):
         server_delta = 0
 
         # Process traffic deduction/accumulation per matching VlessSubscription
-        async with session_scope() as session:
+        if isinstance(users_stats, dict) and users_stats:
             matching_uuids = [u for u in users_stats.keys() if isinstance(u, str) and u.strip()]
-            if not matching_uuids:
-                continue
+            if matching_uuids:
+                async with session_scope() as session:
+                    subs_stmt = (
+                        select(VlessSubscription.id, VlessSubscription.uuid, VlessSubscription.user_id)
+                        .where(VlessSubscription.uuid.in_(matching_uuids))
+                    )
+                    candidate_subs = (await session.execute(subs_stmt)).all()
+                    for sub_id, sub_uuid, _sub_uid in candidate_subs:
+                        stats = users_stats.get(sub_uuid)
+                        if not isinstance(stats, dict):
+                            continue
+                        raw_up = stats.get("uplink", 0)
+                        raw_down = stats.get("downlink", 0)
+                        try:
+                            uplink = max(0, int(raw_up) if raw_up is not None else 0)
+                            downlink = max(0, int(raw_down) if raw_down is not None else 0)
+                        except (ValueError, TypeError):
+                            continue
 
-            subs_stmt = (
-                select(VlessSubscription.id, VlessSubscription.uuid, VlessSubscription.user_id)
-                .where(VlessSubscription.uuid.in_(matching_uuids))
-            )
-            candidate_subs = (await session.execute(subs_stmt)).all()
-            if not candidate_subs:
-                continue
-
-            for sub_id, sub_uuid, _sub_uid in candidate_subs:
-                stats = users_stats.get(sub_uuid)
-                if not isinstance(stats, dict):
-                    continue
-                raw_up = stats.get("uplink", 0)
-                raw_down = stats.get("downlink", 0)
-                try:
-                    uplink = max(0, int(raw_up) if raw_up is not None else 0)
-                    downlink = max(0, int(raw_down) if raw_down is not None else 0)
-                except (ValueError, TypeError):
-                    continue
-
-                delta_total, _delta_down, _delta_up = await vless_subscription_repo.record_vless_traffic_atomic(
-                    session=session,
-                    subscription_id=sub_id,
-                    server_id=server_id,
-                    node_epoch=str(node_epoch),
-                    raw_uplink=uplink,
-                    raw_downlink=downlink,
-                    now=current_time,
-                )
-                if delta_total > 0:
-                    server_delta += delta_total
+                        delta_total, _delta_down, _delta_up = await vless_subscription_repo.record_vless_traffic_atomic(
+                            session=session,
+                            subscription_id=sub_id,
+                            server_id=server_id,
+                            node_epoch=str(node_epoch),
+                            raw_uplink=uplink,
+                            raw_downlink=downlink,
+                            expected_uuid=sub_uuid,
+                            now=current_time,
+                        )
+                        if delta_total > 0:
+                            server_delta += delta_total
 
         # In a separate transaction, update Server extra_data (isolated from User/Subscription locks)
         if server_delta > 0 or host_tx > 0 or host_rx > 0:
