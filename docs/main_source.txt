@@ -13,6 +13,8 @@ https://incy.cc/
 https://github.com/INCY-DEV/incy-platforms
 https://github.com/orgs/INCY-DEV/repositories
 https://docs.incy.cc/
+https://docs.incy.cc/llms.txt
+https://docs.incy.cc/ai-mcp/
 https://feedback.incy.cc/
 https://github.com/frkn-dev/fcore
 https://github.com/frkn-dev/selfhosted
