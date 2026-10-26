@@ -79,6 +79,7 @@ async def get_or_create_subscription(
         version=1,
         active_hwids={},
         pending_revoked_uuids=[],
+        node_traffic_snapshots={"_fresh": True},
     )
     try:
         async with session.begin_nested():
@@ -346,7 +347,7 @@ async def reset_hwids(
         sub.uuid = new_uuid
         sub.version = (getattr(sub, "version", 1) or 1) + 1
         sub.active_hwids = {}
-        sub.node_traffic_snapshots = {}
+        sub.node_traffic_snapshots = {"_fresh": True}
         pending = list(getattr(sub, "pending_revoked_uuids", None) or [])
         if old_uuid and old_uuid not in pending:
             pending.append(old_uuid)
@@ -383,9 +384,9 @@ async def rotate_token(
     sub.token = token
     sub.uuid = new_uuid
     sub.version = (getattr(sub, "version", 1) or 1) + 1
+    sub.node_traffic_snapshots = {"_fresh": True}
     if reset_hwids:
         sub.active_hwids = {}
-        sub.node_traffic_snapshots = {}
     pending = list(getattr(sub, "pending_revoked_uuids", None) or [])
     if old_uuid and old_uuid not in pending:
         pending.append(old_uuid)
@@ -514,8 +515,12 @@ async def record_vless_traffic_atomic(
     current_down = max(0, int(raw_downlink or 0))
 
     if str_server_id not in snapshots:
-        delta_up = 0
-        delta_down = 0
+        if snapshots.get("_fresh"):
+            delta_up = current_up
+            delta_down = current_down
+        else:
+            delta_up = 0
+            delta_down = 0
     elif prev_epoch != str_epoch:
         delta_up = current_up
         delta_down = current_down

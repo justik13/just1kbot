@@ -1647,7 +1647,7 @@ class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
 
         old_uuid, new_uuid = await vless_subscription_repo.reset_hwids(mock_session, sub.id)
         self.assertEqual(sub.active_hwids, {})
-        self.assertEqual(sub.node_traffic_snapshots, {})
+        self.assertEqual(sub.node_traffic_snapshots, {"_fresh": True})
         self.assertEqual(old_uuid, "abc-uuid")
         self.assertNotEqual(new_uuid, "abc-uuid")
         self.assertEqual(sub.uuid, new_uuid)

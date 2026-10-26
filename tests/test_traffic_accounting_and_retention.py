@@ -1332,7 +1332,16 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         from database.models import VlessSubscription
         from database.repositories.vless_subscription_repo import record_vless_traffic_atomic
 
-        sub = VlessSubscription(
+        sub_initial = VlessSubscription(
+            id=100,
+            user_id=10,
+            token="vless-token-1",
+            uuid="old-uuid-before-rotation",
+            traffic_down=100,
+            traffic_up=50,
+            node_traffic_snapshots={},
+        )
+        sub_locked = VlessSubscription(
             id=100,
             user_id=10,
             token="vless-token-1",
@@ -1342,7 +1351,7 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
             node_traffic_snapshots={},
         )
         mock_session = AsyncMock()
-        mock_session.scalar.side_effect = [sub, sub]
+        mock_session.scalar.side_effect = [sub_initial, sub_locked]
 
         delta_total, delta_down, delta_up = await record_vless_traffic_atomic(
             session=mock_session,
@@ -1357,9 +1366,74 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(delta_total, 0)
         self.assertEqual(delta_down, 0)
         self.assertEqual(delta_up, 0)
-        self.assertEqual(sub.traffic_down, 100)
-        self.assertEqual(sub.traffic_up, 50)
-        self.assertEqual(sub.node_traffic_snapshots, {})
+        self.assertEqual(sub_locked.traffic_down, 100)
+        self.assertEqual(sub_locked.traffic_up, 50)
+        self.assertEqual(sub_locked.node_traffic_snapshots, {})
+
+    async def test_record_vless_traffic_atomic_fresh_subscription_credits_initial_delta(self):
+        """Fresh subscription with _fresh marker credits initial non-zero traffic rather than discarding as baseline."""
+        from database.models import VlessSubscription
+        from database.repositories.vless_subscription_repo import record_vless_traffic_atomic
+
+        sub = VlessSubscription(
+            id=101,
+            user_id=11,
+            token="vless-fresh-tok",
+            uuid="vless-fresh-uuid",
+            traffic_down=0,
+            traffic_up=0,
+            node_traffic_snapshots={"_fresh": True},
+        )
+        mock_session = AsyncMock()
+        mock_session.scalar.side_effect = [sub, sub]
+
+        delta_total, delta_down, delta_up = await record_vless_traffic_atomic(
+            session=mock_session,
+            subscription_id=101,
+            server_id=1,
+            node_epoch="epoch-srv-1",
+            raw_uplink=2000,
+            raw_downlink=8000,
+            expected_uuid="vless-fresh-uuid",
+            now=datetime(2026, 10, 5, 12, 0, tzinfo=timezone.utc),
+        )
+        self.assertEqual(delta_total, 10000)
+        self.assertEqual(delta_down, 8000)
+        self.assertEqual(delta_up, 2000)
+        self.assertEqual(sub.traffic_down, 8000)
+        self.assertEqual(sub.traffic_up, 2000)
+        self.assertEqual(sub.node_traffic_snapshots["1"]["up"], 2000)
+        self.assertEqual(sub.node_traffic_snapshots["1"]["down"], 8000)
+
+    async def test_traffic_sync_loop_awg_error_does_not_skip_vless(self):
+        """Errors in _traffic_sync_once do not skip _vless_traffic_sync_once in the current pass."""
+        from services.workers.traffic import traffic_sync_loop
+
+        stop_event = asyncio.Event()
+
+        awg_call_count = 0
+        vless_call_count = 0
+
+        async def fake_failing_awg_sync(bot):
+            nonlocal awg_call_count
+            awg_call_count += 1
+            raise RuntimeError("AWG transient DB timeout")
+
+        async def fake_vless_sync(bot):
+            nonlocal vless_call_count
+            vless_call_count += 1
+            stop_event.set()
+
+        with patch("services.workers.traffic._traffic_sync_once", side_effect=fake_failing_awg_sync), \
+             patch("services.workers.traffic._vless_traffic_sync_once", side_effect=fake_vless_sync), \
+             patch("services.workers.traffic.WORKER_START_DELAY", 0.0), \
+             patch("services.workers.traffic.WORKER_ERROR_SLEEP_INTERVAL", 0.01), \
+             patch("services.workers.traffic.TRAFFIC_SYNC_INTERVAL", 0.01):
+            task = asyncio.create_task(traffic_sync_loop(None, stop_event))
+            await asyncio.wait_for(task, timeout=2.0)
+
+        self.assertEqual(awg_call_count, 1)
+        self.assertEqual(vless_call_count, 1)
 
     async def test_traffic_sync_loop_vless_error_isolation(self):
         """Errors in _vless_traffic_sync_once are logged and do not crash or back off traffic_sync_loop."""
@@ -1386,6 +1460,73 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(task, timeout=2.0)
 
         self.assertEqual(call_count, 2)
+
+    async def test_vless_sync_node_error_isolation_continues_next_server(self):
+        """Failure processing one server's DB transaction does not abort remaining servers in the pass."""
+        from config.enums import ServerHealthState, ServerLifecycleStatus
+        from database.models import Server
+        from services.workers.traffic import _vless_traffic_sync_once
+
+        srv_fail = Server(
+            id=1,
+            name="node-fail",
+            api_url="http://1.1.1.1:8080",
+            api_key="key1",
+            protocol="vless",
+            is_active=True,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            health_state=ServerHealthState.ONLINE,
+            extra_data={"xray_api_url": "http://1.1.1.1:8080", "xray_api_key": "key1"},
+        )
+        srv_ok = Server(
+            id=2,
+            name="node-ok",
+            api_url="http://2.2.2.2:8080",
+            api_key="key2",
+            protocol="vless",
+            is_active=True,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            health_state=ServerHealthState.ONLINE,
+            extra_data={"xray_api_url": "http://2.2.2.2:8080", "xray_api_key": "key2"},
+        )
+
+        class DummySnapshot:
+            host_tx_bytes = 1000
+            host_rx_bytes = 2000
+            def __getitem__(self, idx):
+                items = ("epoch-node", "boot-1", 1700000000, {})
+                return items[idx]
+
+        call_count = 0
+        def session_scope_side_effect():
+            nonlocal call_count
+            call_count += 1
+            mock_sess = AsyncMock()
+            if call_count == 1:
+                # server listing
+                mock_sess.execute.return_value = MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[srv_fail, srv_ok]))))
+            elif call_count == 2:
+                # srv_fail extra_data update fails!
+                mock_sess.get.side_effect = RuntimeError("Simulated DB lock conflict on srv 1")
+            elif call_count == 3:
+                # srv_ok extra_data update succeeds!
+                mock_sess.get.return_value = srv_ok
+            @asynccontextmanager
+            async def _scope():
+                yield mock_sess
+            return _scope()
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.get_traffic_snapshot.return_value = DummySnapshot()
+
+        with patch("services.workers.traffic.session_scope", side_effect=session_scope_side_effect), \
+             patch("services.xray_node_client.XrayNodeClient", return_value=mock_client):
+            await _vless_traffic_sync_once(None)
+
+        # srv_ok was processed despite srv_fail error!
+        self.assertEqual(srv_ok.extra_data["host_monthly_traffic_bytes"], 0)
+        self.assertEqual(srv_ok.extra_data["host_last_raw_bytes"], 3000)
 
     async def test_vless_sync_updates_host_traffic_without_active_users(self):
         """Host network interface bytes update server extra_data even when no users exist on node."""
