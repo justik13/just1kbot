@@ -245,14 +245,7 @@ LANDING_INACTIVE_DESC_EXHAUSTED = "Включенный пакет трафик�
 LANDING_VLESS_PAGE_TITLE = "Стандартная подписка"
 LANDING_WHITE_INTERNET_PAGE_TITLE = "Белый Интернет"
 LANDING_SPECIAL_ACCESS_BADGE = "СПЕЦИАЛЬНЫЙ ДОСТУП"
-LANDING_TIER_BASIC = "БАЗОВЫЙ"
-LANDING_TIER_FAMILY = "СЕМЕЙНЫЙ"
-LANDING_TIER_PRO = "PRO"
-LANDING_DEVICE_WORD_SINGULAR = "УСТРОЙСТВО"
-LANDING_DEVICE_WORD_FEW = "УСТРОЙСТВА"
-LANDING_DEVICE_WORD_MANY = "УСТРОЙСТВ"
-TARIFF_KEYWORD_FAMILY = "семейн"
-TARIFF_KEYWORD_BASIC = "базов"
+LANDING_DEVICE_FORMS_LABELS = ("УСТРОЙСТВО", "УСТРОЙСТВА", "УСТРОЙСТВ")
 
 
 

@@ -13,7 +13,7 @@ import urllib.parse
 from aiohttp import web
 
 from bot import texts
-from bot.formatters import get_tariff_display_name
+from bot.formatters import format_plural, get_tariff_display_name
 from database.connection import session_scope
 from database.repositories import tariffs_repo, users_repo, vless_subscription_repo
 from database.repositories.system_settings_repo import get_system_setting
@@ -189,18 +189,6 @@ async def _resolve_clean_tariff_name(
             total_device_limit = await SubscriptionService.get_effective_device_limit(session, user)
         tariff_name = get_tariff_display_name(total_device_limit)
     return re.sub(r"^[^\w\u0400-\u04ffa-zA-Z0-9]+", "", str(tariff_name)).strip()[:40]
-
-
-def _format_device_count_ru(count: int) -> str:
-    """Format device count with proper Russian grammatical declension in uppercase."""
-    n = abs(count)
-    if n % 10 == 1 and n % 100 != 11:
-        word = texts.LANDING_DEVICE_WORD_SINGULAR
-    elif 2 <= n % 10 <= 4 and (n % 100 < 10 or n % 100 >= 20):
-        word = texts.LANDING_DEVICE_WORD_FEW
-    else:
-        word = texts.LANDING_DEVICE_WORD_MANY
-    return f"{count} {word}"
 
 
 def _render_vless_landing_html(
@@ -383,17 +371,15 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                 total_limit = await SubscriptionService.get_effective_device_limit(session, user)
                 tariff_clean = await _resolve_clean_tariff_name(session, user, total_limit)
                 page_title = texts.LANDING_VLESS_PAGE_TITLE
-                tariff_lower = tariff_clean.lower()
-                device_str = _format_device_count_ru(total_limit)
-                if total_limit > 5 or "pro" in tariff_lower:
+                if total_limit > 5:
                     tier = "pro"
-                    prefix = texts.LANDING_TIER_PRO if ("pro" in tariff_lower or not tariff_clean) else tariff_clean.upper()
-                elif total_limit > 2 or texts.TARIFF_KEYWORD_FAMILY in tariff_lower:
+                elif total_limit > 2:
                     tier = "family"
-                    prefix = texts.LANDING_TIER_FAMILY if (texts.TARIFF_KEYWORD_FAMILY in tariff_lower or not tariff_clean) else tariff_clean.upper()
                 else:
                     tier = "basic"
-                    prefix = texts.LANDING_TIER_BASIC if (texts.TARIFF_KEYWORD_BASIC in tariff_lower or not tariff_clean) else tariff_clean.upper()
+
+                prefix = tariff_clean.upper() if tariff_clean else tier.upper()
+                device_str = format_plural(total_limit, texts.LANDING_DEVICE_FORMS_LABELS)
                 tariff_badge = f"{prefix} • {device_str}"
 
                 html_body = _render_vless_landing_html(
