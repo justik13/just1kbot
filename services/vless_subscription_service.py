@@ -104,7 +104,7 @@ class VlessSubscriptionService:
 
             link = (
                 f"vless://{subscription.uuid}@{domain}:{port}"
-                f"?encryption=none&security=tls&sni={domain}&alpn=http%2F1.1&fp=chrome"
+                f"?encryption=none&security=tls&sni={domain}&alpn=http/1.1&fp=chrome"
                 f"&type=tcp&flow=xtls-rprx-vision#{fragment}"
             )
             links.append(link)

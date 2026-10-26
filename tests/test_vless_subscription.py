@@ -1741,7 +1741,7 @@ class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(links[0].startswith("vless://12345678-1234-5678-1234-567812345678@de.example.com:443"))
         self.assertIn("flow=xtls-rprx-vision", links[0])
         self.assertIn("security=tls", links[0])
-        self.assertIn("alpn=http%2F1.1", links[0])
+        self.assertIn("alpn=http/1.1", links[0])
         self.assertIn("fp=chrome", links[0])
         expected_tag = urllib.parse.quote("🇩🇪 DE Server")
         self.assertIn(f"#{expected_tag}", links[0])
