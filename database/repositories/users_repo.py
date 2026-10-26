@@ -203,6 +203,15 @@ async def get_dashboard_stats(session: AsyncSession) -> dict:
         func.coalesce(
             func.avg(
                 case(
+                    (User.traffic_cycle == current_cycle, User.monthly_vless_bytes),
+                    else_=0,
+                )
+            ).filter(User.subscription_end > now),
+            0,
+        ).label("avg_monthly_vless_bytes"),
+        func.coalesce(
+            func.avg(
+                case(
                     (User.traffic_cycle == current_cycle, User.monthly_wi_bytes),
                     else_=0,
                 )
@@ -225,6 +234,7 @@ async def get_dashboard_stats(session: AsyncSession) -> dict:
         "total_wi_traffic_bytes": int(row.total_wi_traffic_bytes or 0),
         "avg_traffic_bytes_active": int(row.avg_traffic_bytes_active or 0),
         "avg_monthly_awg_bytes": int(row.avg_monthly_awg_bytes or 0),
+        "avg_monthly_vless_bytes": int(row.avg_monthly_vless_bytes or 0),
         "avg_monthly_wi_bytes": int(row.avg_monthly_wi_bytes or 0),
     }
 

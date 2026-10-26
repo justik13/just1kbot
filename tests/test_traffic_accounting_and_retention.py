@@ -1123,7 +1123,7 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(prof_lock_idx, op_lock_idx)
 
     def test_format_user_card_renders_separate_monthly_traffic(self):
-        """User card renders total traffic and separate AWG and White Internet monthly lines."""
+        """User card renders total traffic and separate AWG, VLESS and White Internet monthly lines."""
         from bot.handlers.admin.users.common import format_user_card_text
 
         now = datetime(2026, 10, 5, 12, 0, tzinfo=timezone.utc)
@@ -1135,6 +1135,7 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
             total_traffic_bytes=15 * 1024 * 1024 * 1024,
             total_wi_traffic_bytes=5 * 1024 * 1024 * 1024,
             monthly_awg_bytes=10 * 1024 * 1024 * 1024,
+            monthly_vless_bytes=3 * 1024 * 1024 * 1024,
             monthly_wi_bytes=2 * 1024 * 1024 * 1024,
             traffic_cycle="2026-10",
         )
@@ -1148,6 +1149,7 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("<b>Трафик туннелей:</b> 20.0 GiB", card_text)
         self.assertIn("• <b>AWG (за месяц):</b> 10.0 GiB", card_text)
+        self.assertIn("• <b>VLESS (за месяц):</b> 3.0 GiB", card_text)
         self.assertIn("• <b>Белый Интернет (за месяц):</b> 2.0 GiB", card_text)
 
     def test_format_user_card_resets_monthly_traffic_on_cycle_rotation(self):
@@ -1163,6 +1165,7 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
             total_traffic_bytes=10 * 1024 * 1024 * 1024,
             total_wi_traffic_bytes=3 * 1024 * 1024 * 1024,
             monthly_awg_bytes=10 * 1024 * 1024 * 1024,
+            monthly_vless_bytes=3 * 1024 * 1024 * 1024,
             monthly_wi_bytes=3 * 1024 * 1024 * 1024,
             traffic_cycle="2026-09",
         )
@@ -1176,7 +1179,151 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("<b>Трафик туннелей:</b> 13.0 GiB", card_text)
         self.assertIn("• <b>AWG (за месяц):</b> 0 B", card_text)
+        self.assertIn("• <b>VLESS (за месяц):</b> 0 B", card_text)
         self.assertIn("• <b>Белый Интернет (за месяц):</b> 0 B", card_text)
+
+    async def test_record_vless_traffic_atomic_multi_server_isolation(self):
+        """Monotonic VLESS traffic accounting maintains isolated baselines per server node without counter flip-flop."""
+        from database.models import VlessSubscription
+        from database.repositories.vless_subscription_repo import record_vless_traffic_atomic
+
+        sub = VlessSubscription(
+            id=100,
+            user_id=10,
+            token="vless-token-1",
+            uuid="vless-uuid-1",
+            traffic_down=0,
+            traffic_up=0,
+            node_traffic_snapshots={},
+        )
+
+        now = datetime(2026, 10, 5, 12, 0, tzinfo=timezone.utc)
+
+        mock_session = AsyncMock()
+        mock_session.scalar.side_effect = [sub, sub]
+
+        # 1. First snapshot from Server 1 (epoch 1, up 100, down 400)
+        delta_total, delta_down, delta_up = await record_vless_traffic_atomic(
+            session=mock_session,
+            subscription_id=100,
+            server_id=1,
+            node_epoch="epoch-srv-1",
+            raw_uplink=100,
+            raw_downlink=400,
+            now=now,
+        )
+        self.assertEqual(delta_total, 500)
+        self.assertEqual(delta_down, 400)
+        self.assertEqual(delta_up, 100)
+        self.assertEqual(sub.traffic_down, 400)
+        self.assertEqual(sub.traffic_up, 100)
+        self.assertIn("1", sub.node_traffic_snapshots)
+        self.assertEqual(sub.node_traffic_snapshots["1"]["up"], 100)
+        self.assertEqual(sub.node_traffic_snapshots["1"]["down"], 400)
+
+        # 2. Snapshot from Server 2 (epoch 2, up 50, down 150)
+        mock_session.scalar.side_effect = [sub, sub]
+        delta_total, delta_down, delta_up = await record_vless_traffic_atomic(
+            session=mock_session,
+            subscription_id=100,
+            server_id=2,
+            node_epoch="epoch-srv-2",
+            raw_uplink=50,
+            raw_downlink=150,
+            now=now,
+        )
+        self.assertEqual(delta_total, 200)
+        self.assertEqual(delta_down, 150)
+        self.assertEqual(delta_up, 50)
+        self.assertEqual(sub.traffic_down, 550)
+        self.assertEqual(sub.traffic_up, 150)
+        self.assertIn("2", sub.node_traffic_snapshots)
+
+        # 3. Subsequent snapshot from Server 1 (still epoch 1, up 120, down 500)
+        # Deltas must be delta_up=20, delta_down=100 (relative to Server 1's previous snapshot, NOT Server 2)
+        mock_session.scalar.side_effect = [sub, sub]
+        delta_total, delta_down, delta_up = await record_vless_traffic_atomic(
+            session=mock_session,
+            subscription_id=100,
+            server_id=1,
+            node_epoch="epoch-srv-1",
+            raw_uplink=120,
+            raw_downlink=500,
+            now=now,
+        )
+        self.assertEqual(delta_total, 120)
+        self.assertEqual(delta_down, 100)
+        self.assertEqual(delta_up, 20)
+        self.assertEqual(sub.traffic_down, 650)
+        self.assertEqual(sub.traffic_up, 170)
+
+    async def test_record_vless_traffic_atomic_epoch_drift_rebase(self):
+        """When node epoch changes (e.g. Xray restart), baseline is rebased without negative deltas."""
+        from database.models import VlessSubscription
+        from database.repositories.vless_subscription_repo import record_vless_traffic_atomic
+
+        sub = VlessSubscription(
+            id=100,
+            user_id=10,
+            token="vless-token-1",
+            uuid="vless-uuid-1",
+            traffic_down=1000,
+            traffic_up=200,
+            node_traffic_snapshots={
+                "1": {"epoch": "old-epoch", "up": 200, "down": 1000, "updated_at": 1729000000}
+            },
+        )
+
+        now = datetime(2026, 10, 5, 12, 0, tzinfo=timezone.utc)
+        mock_session = AsyncMock()
+        mock_session.scalar.side_effect = [sub, sub]
+
+        # New epoch on server 1, counters start fresh at 30 and 70
+        delta_total, delta_down, delta_up = await record_vless_traffic_atomic(
+            session=mock_session,
+            subscription_id=100,
+            server_id=1,
+            node_epoch="new-epoch",
+            raw_uplink=30,
+            raw_downlink=70,
+            now=now,
+        )
+        self.assertEqual(delta_total, 100)
+        self.assertEqual(delta_down, 70)
+        self.assertEqual(delta_up, 30)
+        self.assertEqual(sub.traffic_down, 1070)
+        self.assertEqual(sub.traffic_up, 230)
+        self.assertEqual(sub.node_traffic_snapshots["1"]["epoch"], "new-epoch")
+
+    async def test_render_vless_sub_screen_renders_traffic_total(self):
+        """render_vless_sub_screen formats and displays accumulated VLESS traffic."""
+        from bot.handlers.connection.device_view_routes import render_vless_sub_screen
+        from database.models import User, VlessSubscription
+
+        user = User(id=1, telegram_id=987654321, subscription_end=datetime.now(timezone.utc))
+        sub = VlessSubscription(
+            id=10,
+            user_id=1,
+            token="vless-token-xyz",
+            uuid="vless-uuid-xyz",
+            traffic_down=5 * 1024 * 1024 * 1024,
+            traffic_up=1 * 1024 * 1024 * 1024,
+        )
+
+        mock_bot = AsyncMock()
+        mock_session = AsyncMock()
+
+        with patch("database.repositories.vless_subscription_repo.get_or_create_subscription", AsyncMock(return_value=sub)), \
+             patch("services.vless_subscription_service.VlessSubscriptionService.build_subscription_url", return_value="https://test.domain/sub/vless-token-xyz"), \
+             patch("services.subscription.SubscriptionService.get_effective_device_limit", AsyncMock(return_value=3)), \
+             patch("services.vless_subscription_service.VlessSubscriptionService.get_combined_quota", AsyncMock(return_value=(1, 0, 1))), \
+             patch("bot.handlers.connection.device_view_routes.render_hub", AsyncMock()) as mock_render:
+
+            await render_vless_sub_screen(mock_bot, 987654321, user, mock_session)
+            mock_render.assert_called_once()
+            called_text = mock_render.call_args[0][2]
+            self.assertIn("📈 <b>Использовано трафика:</b> 6.0 GiB", called_text)
+            self.assertIn("📊 <b>Занято устройств:</b> 1 из 3", called_text)
 
 
 if __name__ == "__main__":

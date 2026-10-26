@@ -69,6 +69,7 @@ async def traffic_sync_loop(
     while not event.is_set():
         try:
             await _traffic_sync_once(bot)
+            await _vless_traffic_sync_once(bot)
             _consecutive_crashes = 0
         except asyncio.CancelledError:
             logger.info("Traffic sync worker cancelled")
@@ -412,6 +413,11 @@ async def _process_server_traffic(
                                 (User.traffic_cycle == current_cycle, func.coalesce(User.monthly_awg_bytes, 0) + u_delta),
                                 else_=u_delta,
                             ),
+                            monthly_vless_bytes=case(
+                                (User.traffic_cycle > current_cycle, User.monthly_vless_bytes),
+                                (User.traffic_cycle == current_cycle, func.coalesce(User.monthly_vless_bytes, 0)),
+                                else_=0,
+                            ),
                             monthly_wi_bytes=case(
                                 (User.traffic_cycle > current_cycle, User.monthly_wi_bytes),
                                 (User.traffic_cycle == current_cycle, func.coalesce(User.monthly_wi_bytes, 0)),
@@ -532,3 +538,127 @@ async def _send_quota_alert(
                 )
     except Exception as e:
         logger.error("Failed to send quota alert: %s", e)
+
+
+async def _vless_traffic_sync_once(bot: Bot | None = None):
+    from config.enums import ServerHealthState, ServerLifecycleStatus
+    from database.models import VlessSubscription
+    from database.repositories import vless_subscription_repo
+    from database.repositories.servers_repo import get_server_xray_api_url, is_vless_capable_server
+    from services.xray_node_client import XrayNodeClient
+
+    server_targets: list[tuple[int, str, str, str]] = []
+    async with session_scope() as session:
+        stmt = (
+            select(Server)
+            .where(
+                Server.is_active.is_(True),
+                Server.lifecycle_status == ServerLifecycleStatus.ACTIVE,
+                Server.health_state.in_(
+                    [ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION]
+                ),
+            )
+            .order_by(Server.id.asc())
+        )
+        candidates = (await session.execute(stmt)).scalars().all()
+        for srv in candidates:
+            if not is_vless_capable_server(srv):
+                continue
+            api_url = get_server_xray_api_url(srv)
+            api_key = srv.api_key
+            if api_url and api_key:
+                server_targets.append((srv.id, api_url, api_key, srv.name))
+
+    if not server_targets:
+        return
+
+    # Network I/O outside DB transactions
+    async def _fetch_vless_snapshot(srv_id: int, api_url: str, api_key: str, srv_name: str):
+        try:
+            async with XrayNodeClient(timeout=5.0) as client:
+                snapshot = await client.get_traffic_snapshot(api_url, api_key)
+                return srv_id, srv_name, snapshot, None
+        except Exception as exc:
+            logger.warning("Failed to fetch VLESS traffic snapshot from %s (%d): %s", srv_name, srv_id, exc)
+            return srv_id, srv_name, None, exc
+
+    tasks = [_fetch_vless_snapshot(s_id, url, key, name) for s_id, url, key, name in server_targets]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    current_time = now_utc()
+    for item in results:
+        if isinstance(item, Exception) or not item:
+            continue
+        server_id, server_name, snapshot, err = item
+        if err is not None or snapshot is None:
+            continue
+
+        node_epoch, node_boot_id, node_starttime, users_stats = snapshot[:4]
+        if not node_epoch or not isinstance(users_stats, dict) or not users_stats:
+            continue
+
+        host_tx = getattr(snapshot, "host_tx_bytes", 0) or 0
+        host_rx = getattr(snapshot, "host_rx_bytes", 0) or 0
+        server_delta = 0
+
+        # Process traffic deduction/accumulation per matching VlessSubscription
+        async with session_scope() as session:
+            matching_uuids = [u for u in users_stats.keys() if isinstance(u, str) and u.strip()]
+            if not matching_uuids:
+                continue
+
+            subs_stmt = (
+                select(VlessSubscription.id, VlessSubscription.uuid, VlessSubscription.user_id)
+                .where(VlessSubscription.uuid.in_(matching_uuids))
+            )
+            candidate_subs = (await session.execute(subs_stmt)).all()
+            if not candidate_subs:
+                continue
+
+            for sub_id, sub_uuid, _sub_uid in candidate_subs:
+                stats = users_stats.get(sub_uuid)
+                if not isinstance(stats, dict):
+                    continue
+                raw_up = stats.get("uplink", 0)
+                raw_down = stats.get("downlink", 0)
+                try:
+                    uplink = max(0, int(raw_up) if raw_up is not None else 0)
+                    downlink = max(0, int(raw_down) if raw_down is not None else 0)
+                except (ValueError, TypeError):
+                    continue
+
+                delta_total, _delta_down, _delta_up = await vless_subscription_repo.record_vless_traffic_atomic(
+                    session=session,
+                    subscription_id=sub_id,
+                    server_id=server_id,
+                    node_epoch=str(node_epoch),
+                    raw_uplink=uplink,
+                    raw_downlink=downlink,
+                    now=current_time,
+                )
+                if delta_total > 0:
+                    server_delta += delta_total
+
+        # In a separate transaction, update Server extra_data (isolated from User/Subscription locks)
+        if server_delta > 0 or host_tx > 0 or host_rx > 0:
+            current_cycle = current_time.strftime("%Y-%m")
+            async with session_scope() as session:
+                server_obj = await session.get(Server, server_id, with_for_update=True)
+                if server_obj:
+                    raw_extra = getattr(server_obj, "extra_data", None)
+                    extra = dict(raw_extra) if isinstance(raw_extra, dict) else {}
+                    changed = False
+                    if server_delta > 0:
+                        saved_cycle = extra.get("traffic_cycle")
+                        if saved_cycle != current_cycle:
+                            extra["traffic_cycle"] = current_cycle
+                            extra["monthly_traffic_bytes"] = server_delta
+                        else:
+                            extra["monthly_traffic_bytes"] = int(extra.get("monthly_traffic_bytes", 0)) + server_delta
+                        changed = True
+                    if host_tx > 0 or host_rx > 0:
+                        if accumulate_host_traffic_cycle(extra, host_tx, host_rx, current_cycle):
+                            changed = True
+                    if changed:
+                        server_obj.extra_data = extra
+

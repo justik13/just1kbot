@@ -563,11 +563,13 @@ async def render_vless_sub_screen(
 
     effective_limit = await SubscriptionService.get_effective_device_limit(session, user)
     total_active, _awg_active, vless_active = await VlessSubscriptionService.get_combined_quota(session, user)
+    dev_traffic = (getattr(sub, "traffic_down", 0) or 0) + (getattr(sub, "traffic_up", 0) or 0)
 
     text = texts.VLESS_SUB_SCREEN_TEXT.format(
         sub_url=sub_url,
         active=total_active,
         limit=effective_limit,
+        traffic_total=format_traffic(dev_traffic),
     )
 
     builder = InlineKeyboardBuilder()

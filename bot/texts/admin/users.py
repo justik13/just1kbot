@@ -16,6 +16,7 @@ ADMIN_BTN_BACK_TO_CARD = "← К карточке"
 ADMIN_BTN_BACK_TO_SUB = "← К подписке"
 ADMIN_USER_TRAFFIC_MONTHLY_BREAKDOWN = (
     "\n• <b>AWG (за месяц):</b> {monthly_awg}"
+    "\n• <b>VLESS (за месяц):</b> {monthly_vless}"
     "\n• <b>Белый Интернет (за месяц):</b> {monthly_wi}"
 )
 

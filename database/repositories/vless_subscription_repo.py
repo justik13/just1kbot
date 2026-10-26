@@ -9,9 +9,10 @@ import secrets
 from typing import Any
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from database.models import User, VlessSubscription
 from utils.datetime_helpers import now_utc
@@ -345,6 +346,7 @@ async def reset_hwids(
         sub.uuid = new_uuid
         sub.version = (getattr(sub, "version", 1) or 1) + 1
         sub.active_hwids = {}
+        sub.node_traffic_snapshots = {}
         pending = list(getattr(sub, "pending_revoked_uuids", None) or [])
         if old_uuid and old_uuid not in pending:
             pending.append(old_uuid)
@@ -383,6 +385,7 @@ async def rotate_token(
     sub.version = (getattr(sub, "version", 1) or 1) + 1
     if reset_hwids:
         sub.active_hwids = {}
+        sub.node_traffic_snapshots = {}
     pending = list(getattr(sub, "pending_revoked_uuids", None) or [])
     if old_uuid and old_uuid not in pending:
         pending.append(old_uuid)
@@ -443,6 +446,127 @@ async def bump_subscription_version(
         sub.version = (sub.version or 1) + 1
         await session.flush()
     return sub
+
+
+async def record_vless_traffic_atomic(
+    session: AsyncSession,
+    subscription_id: int,
+    server_id: int,
+    node_epoch: str,
+    raw_uplink: int,
+    raw_downlink: int,
+    *,
+    now: datetime | None = None,
+) -> tuple[int, int, int]:
+    """Atomically record and calculate monotonic traffic deltas for a VLESS subscription on a specific server node.
+
+    Locks User FIRST, then VlessSubscription SECOND (canonical hierarchy: User -> Subscription).
+    Updates vless_subscriptions.traffic_down/up, node_traffic_snapshots,
+    and updates User.total_traffic_bytes and User.monthly_vless_bytes with monthly cycle rotation.
+
+    Returns:
+        tuple[total_delta, delta_down, delta_up]
+    """
+    now = now or now_utc()
+    str_server_id = str(server_id)
+    str_epoch = str(node_epoch)
+
+    # 1. Fetch subscription metadata to find user_id
+    sub_meta = await session.scalar(
+        select(VlessSubscription).where(VlessSubscription.id == subscription_id)
+    )
+    if not sub_meta:
+        return 0, 0, 0
+
+    # 2. Lock User FIRST (hierarchy)
+    if sub_meta.user_id:
+        await session.execute(
+            select(User.id)
+            .where(User.id == sub_meta.user_id)
+            .with_for_update()
+        )
+
+    # 3. Lock VlessSubscription SECOND
+    sub = await session.scalar(
+        select(VlessSubscription)
+        .where(VlessSubscription.id == subscription_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if not sub:
+        return 0, 0, 0
+
+    snapshots = dict(sub.node_traffic_snapshots or {})
+    prev_snap = snapshots.get(str_server_id)
+
+    prev_epoch = prev_snap.get("epoch") if isinstance(prev_snap, dict) else None
+    prev_up = int(prev_snap.get("up", 0)) if isinstance(prev_snap, dict) else 0
+    prev_down = int(prev_snap.get("down", 0)) if isinstance(prev_snap, dict) else 0
+
+    current_up = max(0, int(raw_uplink or 0))
+    current_down = max(0, int(raw_downlink or 0))
+
+    if prev_epoch != str_epoch:
+        delta_up = current_up
+        delta_down = current_down
+    else:
+        delta_up = (current_up - prev_up) if current_up >= prev_up else current_up
+        delta_down = (current_down - prev_down) if current_down >= prev_down else current_down
+
+    delta_up = max(0, delta_up)
+    delta_down = max(0, delta_down)
+    total_delta = delta_up + delta_down
+
+    if (
+        total_delta > 0
+        or prev_epoch != str_epoch
+        or prev_up != current_up
+        or prev_down != current_down
+        or str_server_id not in snapshots
+    ):
+        sub.traffic_up = (sub.traffic_up or 0) + delta_up
+        sub.traffic_down = (sub.traffic_down or 0) + delta_down
+        snapshots[str_server_id] = {
+            "epoch": str_epoch,
+            "up": current_up,
+            "down": current_down,
+            "updated_at": int(now.timestamp()),
+        }
+        sub.node_traffic_snapshots = snapshots
+        flag_modified(sub, "node_traffic_snapshots")
+
+        if total_delta > 0 and sub.user_id:
+            current_cycle = now.strftime("%Y-%m")
+            await session.execute(
+                update(User)
+                .where(User.id == sub.user_id)
+                .values(
+                    total_traffic_bytes=User.total_traffic_bytes + total_delta,
+                    monthly_vless_bytes=case(
+                        (User.traffic_cycle > current_cycle, User.monthly_vless_bytes),
+                        (User.traffic_cycle == current_cycle, func.coalesce(User.monthly_vless_bytes, 0) + total_delta),
+                        else_=total_delta,
+                    ),
+                    monthly_awg_bytes=case(
+                        (User.traffic_cycle > current_cycle, User.monthly_awg_bytes),
+                        (User.traffic_cycle == current_cycle, func.coalesce(User.monthly_awg_bytes, 0)),
+                        else_=0,
+                    ),
+                    monthly_wi_bytes=case(
+                        (User.traffic_cycle > current_cycle, User.monthly_wi_bytes),
+                        (User.traffic_cycle == current_cycle, func.coalesce(User.monthly_wi_bytes, 0)),
+                        else_=0,
+                    ),
+                    traffic_cycle=case(
+                        (User.traffic_cycle > current_cycle, User.traffic_cycle),
+                        else_=current_cycle,
+                    ),
+                )
+            )
+        await session.flush()
+
+    return total_delta, delta_down, delta_up
+
 
 
 
