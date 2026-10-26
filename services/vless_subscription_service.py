@@ -173,9 +173,7 @@ class VlessSubscriptionService:
             ],
             "ProxySites": [],
             "ProxyIp": [],
-            "BlockSites": [
-                "geosite:category-ads-all",
-            ],
+            "BlockSites": [],
             "BlockIp": [],
             "FakeDNS": "false",
         }
