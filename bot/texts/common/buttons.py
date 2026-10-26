@@ -122,7 +122,7 @@ BTN_PAYMENT_CANCEL = BTN_CANCEL_ACTION
 
 BTN_PAYMENT_CHECK = "🔄 Проверить оплату"
 
-BTN_RENEW_ACCESS = "💳 Продлить доступ"
+BTN_RENEW_ACCESS = "💎 Продлить Стандартную"
 
 
 BTN_SERVERS = "🖥 Серверы"
