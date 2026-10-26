@@ -31,11 +31,11 @@ from database.connection import session_scope
 from database.models import Server
 from database.repositories import users_repo, white_internet_repo
 from database.repositories.system_settings_repo import get_system_setting
-from services.vless_subscription_service import VlessSubscriptionService
 from services.white_internet_service import WhiteInternetService
 from utils.client_parser import extract_device_metadata
 from utils.datetime_helpers import now_utc
 from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
+from utils.incy_routing import generate_incy_routing_header
 from utils.security import normalize_public_domain
 
 logger = logging.getLogger(__name__)
@@ -691,7 +691,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             routing_enabled = bool(routing_setting)
 
         if routing_enabled:
-            response_headers["Routing"] = VlessSubscriptionService.generate_incy_routing_header(
+            response_headers["Routing"] = generate_incy_routing_header(
                 profile_name="✦ Just1k WL",
                 direct_ru=False,
             )
