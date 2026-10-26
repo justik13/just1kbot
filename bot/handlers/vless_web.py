@@ -518,7 +518,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             "No-Limit-Enabled": "1",
         }
         if routing_enabled:
-            response_headers["Routing"] = VlessSubscriptionService.generate_incy_routing_header(profile_title_base)
+            response_headers["Routing"] = VlessSubscriptionService.generate_incy_routing_header()
             response_headers["routing-geo-update-interval"] = "168"
         else:
             response_headers["Routing"] = "off"
