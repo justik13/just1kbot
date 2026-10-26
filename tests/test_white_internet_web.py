@@ -438,6 +438,9 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     self.assertEqual(resp.headers.get("no-limit-enabled"), "1")
                     self.assertIn("upload=500", resp.headers.get("Subscription-Userinfo", ""))
                     self.assertIn("download=500", resp.headers.get("Subscription-Userinfo", ""))
+                    self.assertIn("Routing", resp.headers)
+                    self.assertTrue(resp.headers["Routing"].startswith("incy://routing/onadd/"))
+                    self.assertEqual(resp.headers.get("routing-geo-update-interval"), "168")
 
                     body_b64 = await resp.text()
                     decoded_lines = base64.b64decode(body_b64).decode("utf-8").splitlines()

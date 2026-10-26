@@ -31,6 +31,7 @@ from database.connection import session_scope
 from database.models import Server
 from database.repositories import users_repo, white_internet_repo
 from database.repositories.system_settings_repo import get_system_setting
+from services.vless_subscription_service import VlessSubscriptionService
 from services.white_internet_service import WhiteInternetService
 from utils.client_parser import extract_device_metadata
 from utils.datetime_helpers import now_utc
@@ -683,6 +684,21 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                 "x-hwid-active": "true",
             }
         )
+        routing_setting = await get_system_setting(session, "white_internet_routing_enabled", True)
+        if isinstance(routing_setting, str):
+            routing_enabled = routing_setting.lower() in ("1", "true", "yes", "on")
+        else:
+            routing_enabled = bool(routing_setting)
+
+        if routing_enabled:
+            response_headers["Routing"] = VlessSubscriptionService.generate_incy_routing_header(
+                profile_name="✦ Just1k WL",
+                direct_ru=False,
+            )
+            response_headers["routing-geo-update-interval"] = "168"
+        else:
+            response_headers["Routing"] = "off"
+
         sanitized_support = _sanitize_header_url(support_url)
         sanitized_channel = _sanitize_header_url(channel_url)
         sanitized_announce = _sanitize_header_url(effective_announce_url, fallback=sanitized_channel)
