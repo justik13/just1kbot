@@ -3,6 +3,7 @@
 import base64
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+import json
 import os
 import unittest
 import urllib.parse
@@ -840,8 +841,10 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
             self.assertEqual(resp.status, 200)
 
-            # Within grace window, user receives standard access feed without emergency headers
-            self.assertNotIn("Routing", resp.headers)
+            # Within grace window, user receives standard access feed with routing header
+            self.assertIn("Routing", resp.headers)
+            self.assertTrue(resp.headers["Routing"].startswith("incy://routing/onadd/"))
+            self.assertEqual("168", resp.headers.get("routing-geo-update-interval"))
             self.assertNotIn("Announce", resp.headers)
 
             # Profile-Title must be single-line strictly <= 25 characters
@@ -1366,6 +1369,98 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
         resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
         self.assertEqual(resp.status, 400)
         self.assertEqual(resp.headers.get("x-hwid-required"), "true")
+
+    async def test_feed_includes_incy_direct_ru_routing_header(self):
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=2),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 2)),
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
+        ):
+            headers = {
+                "X-Hwid": "test-client-hwid-99",
+                "X-Device-Os": "Windows 11",
+                "X-Device-Model": "PC",
+            }
+            resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
+            self.assertEqual(resp.status, 200)
+
+            # Routing header must be present with onadd scheme
+            self.assertIn("Routing", resp.headers)
+            raw_routing = resp.headers["Routing"]
+            self.assertTrue(raw_routing.startswith("incy://routing/onadd/"))
+            self.assertEqual("168", resp.headers.get("routing-geo-update-interval"))
+
+            # Decode base64 profile and verify JSON structure
+            b64_payload = raw_routing.removeprefix("incy://routing/onadd/")
+            profile_json = json.loads(base64.b64decode(b64_payload).decode("utf-8"))
+
+            self.assertEqual("✦ Just1k", profile_json.get("Name"))
+            self.assertEqual("true", profile_json.get("GlobalProxy"))
+            self.assertEqual("IPIfNonMatch", profile_json.get("DomainStrategy"))
+
+            # Secure DoH DNS without unencrypted UDP or RU DNS leaks
+            self.assertEqual("DoH", profile_json.get("RemoteDNSType"))
+            self.assertEqual("https://cloudflare-dns.com/dns-query", profile_json.get("RemoteDNSDomain"))
+            self.assertEqual("1.1.1.1", profile_json.get("RemoteDNSIP"))
+            self.assertEqual("DoH", profile_json.get("DomesticDNSType"))
+            self.assertEqual("https://dns.google/dns-query", profile_json.get("DomesticDNSDomain"))
+            self.assertEqual("8.8.8.8", profile_json.get("DomesticDNSIP"))
+
+            # Direct sites and IP rules for Russia
+            direct_sites = profile_json.get("DirectSites", [])
+            self.assertIn("geosite:ru", direct_sites)
+            self.assertIn("domain:ru", direct_sites)
+            self.assertIn("domain:su", direct_sites)
+            self.assertIn("domain:xn--p1ai", direct_sites)
+
+            direct_ip = profile_json.get("DirectIp", [])
+            self.assertIn("geoip:ru", direct_ip)
+            self.assertIn("10.0.0.0/8", direct_ip)
+            self.assertIn("192.168.0.0/16", direct_ip)
+
+            # Ads blocking rule
+            block_sites = profile_json.get("BlockSites", [])
+            self.assertIn("geosite:category-ads-all", block_sites)
+
+    async def test_feed_routing_can_be_disabled_via_system_setting(self):
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        settings_dict = {"vless_routing_enabled": "false"}
+
+        async def fake_get_setting(_session, key, default=None):
+            return settings_dict.get(key, default)
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=2),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 2)),
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
+            patch("bot.handlers.vless_web.get_system_setting", side_effect=fake_get_setting),
+        ):
+            headers = {"X-Hwid": "test-client-hwid-99"}
+            resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
+            self.assertEqual(resp.status, 200)
+            self.assertEqual("off", resp.headers.get("Routing"))
+            self.assertNotIn("routing-geo-update-interval", resp.headers)
 
 
 class TestVlessSubscriptionRepoLogic(unittest.IsolatedAsyncioTestCase):
@@ -2115,6 +2210,26 @@ class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(len(links), 1)
         self.assertIn("@valid.example.com:443", links[0])
+
+    def test_generate_incy_routing_header_structure_and_limits(self):
+        # Default name
+        header_default = VlessSubscriptionService.generate_incy_routing_header()
+        self.assertTrue(header_default.startswith("incy://routing/onadd/"))
+        payload_default = header_default.removeprefix("incy://routing/onadd/")
+        data_default = json.loads(base64.b64decode(payload_default).decode("utf-8"))
+        self.assertEqual("✦ Just1k", data_default["Name"])
+        self.assertEqual("true", data_default["GlobalProxy"])
+        self.assertEqual("IPIfNonMatch", data_default["DomainStrategy"])
+        self.assertEqual("DoH", data_default["RemoteDNSType"])
+        self.assertEqual("DoH", data_default["DomesticDNSType"])
+
+        # Name truncation to 25 chars
+        long_name = "Super Very Long Custom Profile Name Exceeding Limit"
+        header_custom = VlessSubscriptionService.generate_incy_routing_header(long_name)
+        payload_custom = header_custom.removeprefix("incy://routing/onadd/")
+        data_custom = json.loads(base64.b64decode(payload_custom).decode("utf-8"))
+        self.assertEqual(long_name[:25], data_custom["Name"])
+        self.assertLessEqual(len(data_custom["Name"]), 25)
 
 
 class TestVlessSubscriptionDomainAndBotResolution(unittest.TestCase):

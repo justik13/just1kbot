@@ -485,6 +485,12 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         else:
             show_devices = bool(show_devices_setting)
 
+        routing_setting = await get_system_setting(session, "vless_routing_enabled", True)
+        if isinstance(routing_setting, str):
+            routing_enabled = routing_setting.lower() in ("1", "true", "yes", "on")
+        else:
+            routing_enabled = bool(routing_setting)
+
         profile_title_base = str(profile_title).strip().replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
         if show_devices:
             suffix = f" [{total_active_devices}/{total_device_limit}]"
@@ -511,6 +517,12 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             "Hide-Url": "1",
             "No-Limit-Enabled": "1",
         }
+        if routing_enabled:
+            response_headers["Routing"] = VlessSubscriptionService.generate_incy_routing_header(profile_title_base)
+            response_headers["routing-geo-update-interval"] = "168"
+        else:
+            response_headers["Routing"] = "off"
+
         sanitized_support = _sanitize_header_url(support_url)
         sanitized_channel = _sanitize_header_url(channel_url)
         sanitized_announce = _sanitize_header_url(clean_announce_url, fallback=sanitized_channel)
