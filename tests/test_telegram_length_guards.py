@@ -560,6 +560,37 @@ class TestTelegramBotApi103KeyboardAudit(unittest.IsolatedAsyncioTestCase):
                     if btn.callback_data is not None:
                         self.assertLessEqual(len(btn.callback_data.encode("utf-8")), 64)
 
+    def test_standard_subscription_notification_lengths_and_branding(self):
+        """Standard subscription notifications must be concise (< 500 chars) and explicitly branded."""
+        from bot.keyboards.notifications import get_pre_expiry_keyboard
+        from bot.texts.runtime.notifications import (
+            NOTIFY_1D,
+            NOTIFY_2H,
+            NOTIFY_3D,
+            NOTIFY_DEVICES_DELETED,
+            NOTIFY_EXPIRED,
+            NOTIFY_GRACE_12H,
+        )
+
+        texts_to_check = [
+            NOTIFY_1D,
+            NOTIFY_2H,
+            NOTIFY_3D,
+            NOTIFY_DEVICES_DELETED,
+            NOTIFY_EXPIRED.format(countdown="12 ч."),
+            NOTIFY_GRACE_12H,
+        ]
+
+        for text in texts_to_check:
+            self.assertLessEqual(len(text), 500, f"Notification text too long: {len(text)} chars")
+            self.assertIn("Стандартн", text, "Notification must identify Standard subscription")
+
+        kb = get_pre_expiry_keyboard()
+        first_btn = kb.inline_keyboard[0][0]
+        self.assertEqual(first_btn.callback_data, "menu_subscription")
+        self.assertIn("Стандартн", first_btn.text)
+        self.assertLessEqual(len(first_btn.text), 35)
+
 
 if __name__ == '__main__':
     unittest.main()
