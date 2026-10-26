@@ -14,7 +14,7 @@ def generate_incy_routing_header(
 ) -> str:
     """Construct incy://routing/onadd/<base64> deep link header for split tunneling.
 
-    - If direct_ru=True (Standard VLESS): routes geosite:ru, domain:ru, geoip:ru directly
+    - If direct_ru=True (Standard VLESS): routes domain:ru, domain:su, domain:xn--p1ai, geoip:ru directly
       via user's home ISP, sending foreign destinations through the VLESS tunnel.
     - If direct_ru=False (White Internet / CDN relay): sends all domain traffic through
       the Yandex CDN tunnel to the Moscow Origin server (where Origin routes RU directly
@@ -38,7 +38,6 @@ def generate_incy_routing_header(
     ]
     direct_sites = (
         [
-            "geosite:ru",
             "domain:ru",
             "domain:su",
             "domain:xn--p1ai",
