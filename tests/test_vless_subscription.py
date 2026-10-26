@@ -211,7 +211,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             self.assertIn("text/html", resp.headers.get("Content-Type", ""))
             body = await resp.text()
             self.assertIn("incy://add/", body)
-            self.assertIn("Подключение к сервису", body)
+            self.assertIn(texts.LANDING_VLESS_PAGE_TITLE, body)
             self.assertIn("apps.apple.com/app/incy", body)
 
     async def test_browser_request_financial_hold_returns_paused_landing(self):
