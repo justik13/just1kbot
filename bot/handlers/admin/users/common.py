@@ -101,14 +101,16 @@ def format_user_card_text(
     awg_total = getattr(user, "total_traffic_bytes", 0) or 0
     wi_total = getattr(user, "total_wi_traffic_bytes", 0) or 0
     awg_m = getattr(user, "monthly_awg_bytes", 0) or 0
+    vless_m = getattr(user, "monthly_vless_bytes", 0) or 0
     wi_m = getattr(user, "monthly_wi_bytes", 0) or 0
     current_cycle = now.strftime("%Y-%m")
     if getattr(user, "traffic_cycle", None) != current_cycle:
-        awg_m, wi_m = 0, 0
+        awg_m, vless_m, wi_m = 0, 0, 0
 
     total_traffic_str = format_traffic(awg_total + wi_total)
     total_traffic_str += texts.ADMIN_USER_TRAFFIC_MONTHLY_BREAKDOWN.format(
         monthly_awg=format_traffic(awg_m),
+        monthly_vless=format_traffic(vless_m),
         monthly_wi=format_traffic(wi_m),
     )
 

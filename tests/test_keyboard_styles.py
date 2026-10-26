@@ -190,7 +190,7 @@ class TestKeyboardRuntimeStyles(unittest.IsolatedAsyncioTestCase):
 
         with patch("database.repositories.vless_subscription_repo.get_subscription_by_user_id", new_callable=AsyncMock, return_value=mock_sub), \
              patch("database.repositories.vless_subscription_repo.get_active_hwid_count", new_callable=AsyncMock, return_value=2), \
-             patch("bot.handlers.connection.common._get_effective_device_limit", new_callable=AsyncMock, return_value=3):
+             patch("bot.handlers.connection.common._get_effective_device_limit", new_callable=AsyncMock, return_value=2):
             _, builder = await _build_connections_screen(user, session, [], read_only=False)
 
         markup = builder.as_markup()

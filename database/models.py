@@ -177,6 +177,9 @@ class User(Base):
     monthly_awg_bytes: Mapped[int] = mapped_column(
         BigInteger, default=0, server_default=text("0")
     )
+    monthly_vless_bytes: Mapped[int] = mapped_column(
+        BigInteger, default=0, server_default=text("0")
+    )
     monthly_wi_bytes: Mapped[int] = mapped_column(
         BigInteger, default=0, server_default=text("0")
     )
@@ -1309,6 +1312,16 @@ class VlessSubscription(Base):
     )
     pending_revoked_uuids: Mapped[list[str]] = mapped_column(
         JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+
+    traffic_down: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default=text("0")
+    )
+    traffic_up: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default=text("0")
+    )
+    node_traffic_snapshots: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
     )
 
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

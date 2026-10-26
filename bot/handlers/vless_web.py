@@ -312,13 +312,15 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             b64_payload = base64.b64encode(notice_link.encode("utf-8")).decode("utf-8")
             b64_title = base64.b64encode(texts.VLESS_FEED_EXPIRED_TITLE.encode("utf-8")).decode("utf-8")
             expire_ts = int(user.subscription_end.timestamp()) if getattr(user, "subscription_end", None) else 0
+            sub_up = max(0, int(getattr(sub, "traffic_up", 0) or 0))
+            sub_down = max(0, int(getattr(sub, "traffic_down", 0) or 0))
             sanitized_support = _sanitize_header_url(support_url)
             sanitized_channel = _sanitize_header_url(channel_url)
             response_headers = {
                 **common_headers,
                 "Content-Type": "text/plain; charset=utf-8",
                 "Profile-Update-Interval": _get_vless_update_interval(),
-                "Subscription-Userinfo": f"upload=0; download=0; total=0; expire={expire_ts}",
+                "Subscription-Userinfo": f"upload={sub_up}; download={sub_down}; total=0; expire={expire_ts}",
                 "Profile-Title": f"base64:{b64_title}",
                 "Hide-Url": "1",
                 "No-Limit-Enabled": "1",
@@ -388,11 +390,13 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             b64_payload = base64.b64encode(notice_link.encode("utf-8")).decode("utf-8")
             b64_title = base64.b64encode(texts.VLESS_FEED_DEVICE_LIMIT_TITLE.encode("utf-8")).decode("utf-8")
             expire_ts = int(user.subscription_end.timestamp()) if getattr(user, "subscription_end", None) else 0
+            sub_up = max(0, int(getattr(sub, "traffic_up", 0) or 0))
+            sub_down = max(0, int(getattr(sub, "traffic_down", 0) or 0))
             headers = dict(common_headers)
             headers.update({
                 "Content-Type": "text/plain; charset=utf-8",
                 "Profile-Update-Interval": _get_vless_update_interval(),
-                "Subscription-Userinfo": f"upload=0; download=0; total=0; expire={expire_ts}",
+                "Subscription-Userinfo": f"upload={sub_up}; download={sub_down}; total=0; expire={expire_ts}",
                 "Profile-Title": f"base64:{b64_title}",
                 "Device-Limit-Exceeded": "1",
                 "Device-Limit": str(total_device_limit),
@@ -490,13 +494,15 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         else:
             full_title = profile_title_base[:25]
 
+        upload_bytes = max(0, int(getattr(sub, "traffic_up", 0) or 0))
+        download_bytes = max(0, int(getattr(sub, "traffic_down", 0) or 0))
         b64_title = base64.b64encode(full_title.encode("utf-8")).decode("ascii")
         response_headers = {
             **common_headers,
             "Content-Type": "text/plain; charset=utf-8",
             "Content-Disposition": 'inline; filename="Just1k.txt"; filename*=UTF-8\'\'Just1k.txt',
             "Profile-Update-Interval": _get_vless_update_interval(),
-            "Subscription-Userinfo": f"upload=0; download=0; total=0; expire={expire_ts}",
+            "Subscription-Userinfo": f"upload={upload_bytes}; download={download_bytes}; total=0; expire={expire_ts}",
             "Device-Limit": str(effective_vless_limit),
             "Device-Active-Count": str(active_hwid_count),
             "Profile-Title": f"base64:{b64_title}",

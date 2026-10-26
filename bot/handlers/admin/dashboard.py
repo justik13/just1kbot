@@ -273,7 +273,7 @@ async def _show_admin_dashboard(
         )
 
     awg_total_str = format_traffic(stats.get("total_traffic_bytes", 0))
-    avg_m_awg = stats.get("avg_monthly_awg_bytes", 0)
+    avg_m_awg = stats.get("avg_monthly_awg_bytes", 0) + stats.get("avg_monthly_vless_bytes", 0)
     if avg_m_awg > 0:
         awg_avg_str = f"{format_traffic(avg_m_awg)}{texts.DASHBOARD_PER_MONTH_SUFFIX}"
     else:
