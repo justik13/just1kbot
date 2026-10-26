@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#050505">
     <meta name="color-scheme" content="dark">
-    <title>Подключение к сервису</title>
+    <title>{page_title}</title>
     <style>
         :root {
             --bg-color: #050505;
@@ -24,6 +24,30 @@
             --success: #10b981;
             --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
             --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+
+            /* Tier illumination tokens (default: basic) */
+            --tier-glow-color: rgba(16, 185, 129, 0.07);
+            --tier-highlight-line: rgba(52, 211, 153, 0.32);
+            --tier-badge-glow: rgba(16, 185, 129, 0.14);
+            --tier-accent: #34d399;
+        }
+        body[data-tier="pro"] {
+            --tier-glow-color: rgba(99, 102, 241, 0.08);
+            --tier-highlight-line: rgba(129, 140, 248, 0.30);
+            --tier-badge-glow: rgba(99, 102, 241, 0.16);
+            --tier-accent: #818cf8;
+        }
+        body[data-tier="family"] {
+            --tier-glow-color: rgba(59, 130, 246, 0.08);
+            --tier-highlight-line: rgba(96, 165, 250, 0.35);
+            --tier-badge-glow: rgba(59, 130, 246, 0.16);
+            --tier-accent: #60a5fa;
+        }
+        body[data-tier="white_internet"] {
+            --tier-glow-color: rgba(255, 255, 255, 0.08);
+            --tier-highlight-line: rgba(255, 255, 255, 0.40);
+            --tier-badge-glow: rgba(255, 255, 255, 0.16);
+            --tier-accent: #ffffff;
         }
         * {
             box-sizing: border-box;
@@ -35,7 +59,9 @@
         }
         body {
             background-color: var(--bg-color);
-            background-image: radial-gradient(ellipse 90% 50% at 50% -10%, rgba(255, 255, 255, 0.07), transparent 70%);
+            background-image:
+                radial-gradient(ellipse 90% 55% at 50% -10%, var(--tier-glow-color), transparent 70%),
+                radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.03) 0%, transparent 75%);
             color: var(--text-main);
             min-height: 100vh;
             min-height: 100dvh;
@@ -52,11 +78,22 @@
             border-radius: 24px;
             padding: 28px 24px 24px;
             text-align: center;
+            overflow: hidden;
             box-shadow:
                 0 24px 48px -12px rgba(0, 0, 0, 0.9),
                 0 0 0 1px var(--border-subtle),
                 inset 0 1px 0 rgba(255, 255, 255, 0.08);
             animation: cardEnter 280ms var(--ease-out) both;
+        }
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 15%;
+            right: 15%;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--tier-highlight-line), transparent);
+            pointer-events: none;
         }
         @keyframes cardEnter {
             from {
@@ -119,15 +156,32 @@
             box-shadow:
                 inset 0 1px 0 rgba(255, 255, 255, 0.16),
                 0 0 0 1px var(--border-subtle),
-                0 8px 20px rgba(0, 0, 0, 0.5);
+                0 8px 20px rgba(0, 0, 0, 0.5),
+                0 0 24px var(--tier-badge-glow);
             display: flex;
             align-items: center;
             justify-content: center;
-            color: var(--text-main);
+            color: var(--tier-accent);
         }
         .icon-badge svg {
             width: 24px;
             height: 24px;
+            stroke: var(--tier-accent);
+        }
+        .tier-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 4px 10px;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.035);
+            border: 1px solid var(--tier-highlight-line);
+            color: var(--tier-accent);
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            margin-bottom: 8px;
         }
         h1 {
             font-size: clamp(20px, 5vw, 23px);
@@ -135,6 +189,7 @@
             letter-spacing: -0.025em;
             color: var(--text-main);
             margin-bottom: 6px;
+            line-height: 1.3;
         }
         p.subtitle {
             font-size: 14px;
@@ -190,9 +245,9 @@
             margin-bottom: 0;
         }
         .btn-secondary.copied {
-            border-color: rgba(16, 185, 129, 0.4);
-            background-color: rgba(16, 185, 129, 0.08);
-            color: #34d399;
+            border-color: var(--tier-highlight-line);
+            background-color: rgba(255, 255, 255, 0.04);
+            color: var(--tier-accent);
         }
         #copyBtnContent {
             display: inline-flex;
@@ -213,17 +268,21 @@
             left: 50%;
             bottom: max(20px, env(safe-area-inset-bottom));
             z-index: 50;
+            width: max-content;
+            max-width: min(380px, calc(100vw - 32px));
             padding: 9px 16px;
-            border-radius: 999px;
+            border-radius: 18px;
             background: rgba(20, 20, 23, 0.94);
-            border: 1px solid rgba(16, 185, 129, 0.35);
+            border: 1px solid var(--tier-highlight-line);
             box-shadow: 0 12px 28px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.08);
             backdrop-filter: blur(10px);
             -webkit-backdrop-filter: blur(10px);
             font-size: 13px;
-            color: #34d399;
+            line-height: 1.35;
+            text-align: center;
+            color: var(--tier-accent);
             font-weight: 500;
-            white-space: nowrap;
+            white-space: normal;
             opacity: 0;
             transform: translateX(-50%) translateY(10px) scale(0.95);
             pointer-events: none;
@@ -368,7 +427,7 @@
         }
     </style>
 </head>
-<body>
+<body data-tier="{tier}">
     <div class="card">
         <div class="stagger-1">
             <div class="header-top">
@@ -377,12 +436,13 @@
                     <span>Активный доступ</span>
                 </div>
                 <div class="icon-badge" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
                     </svg>
                 </div>
             </div>
-            <h1>Подключение к сервису</h1>
+            {tariff_badge_html}
+            <h1>{page_title}</h1>
             <p class="subtitle">Открытие приложения для автоматической настройки доступа.</p>
         </div>
 
@@ -444,12 +504,12 @@
                 </li>
                 <li>
                     <span class="step-num">2</span>
-                    <span>Нажмите кнопку <strong>«Открыть в приложении INCY»</strong>.</span>
+                    <span>Нажмите кнопку <strong>«Открыть в приложении INCY»</strong> (или скопируйте ссылку и нажмите <strong>«Вставить»</strong> в приложении).</span>
                 </li>
             </ol>
         </div>
     </div>
-    <div id="copyToast" class="copy-toast" aria-live="polite">Ссылка скопирована в буфер!</div>
+    <div id="copyToast" class="copy-toast" aria-live="polite">Ссылка скопирована! Откройте INCY и нажмите «Вставить»</div>
 
     <script>
         const subUrl = window.location.href;
@@ -494,7 +554,7 @@
                 const toast = document.getElementById("copyToast");
                 setCopyButtonState("Ссылка скопирована", true);
                 if (toast) {
-                    toast.textContent = "Ссылка скопирована в буфер!";
+                    toast.textContent = "Ссылка скопирована! Откройте INCY и нажмите «Вставить»";
                     toast.classList.add("visible");
                 }
                 if (copyResetTimer) clearTimeout(copyResetTimer);

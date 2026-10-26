@@ -242,6 +242,11 @@ LANDING_INACTIVE_BADGE_EXHAUSTED = "Лимит исчерпан"
 LANDING_INACTIVE_TITLE_EXHAUSTED = "Трафик исчерпан"
 LANDING_INACTIVE_DESC_EXHAUSTED = "Включенный пакет трафика закончился. Для продолжения работы перейдите в бота."
 
+LANDING_VLESS_PAGE_TITLE = "Стандартная подписка"
+LANDING_WHITE_INTERNET_PAGE_TITLE = "Белый Интернет"
+LANDING_SPECIAL_ACCESS_BADGE = "СПЕЦИАЛЬНЫЙ ДОСТУП"
+LANDING_DEVICE_FORMS_LABELS = ("УСТРОЙСТВО", "УСТРОЙСТВА", "УСТРОЙСТВ")
+
 
 
 

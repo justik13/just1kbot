@@ -211,7 +211,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             self.assertIn("text/html", resp.headers.get("Content-Type", ""))
             body = await resp.text()
             self.assertIn("incy://add/", body)
-            self.assertIn("Подключение к сервису", body)
+            self.assertIn(texts.LANDING_VLESS_PAGE_TITLE, body)
             self.assertIn("apps.apple.com/app/incy", body)
 
     async def test_browser_request_financial_hold_returns_paused_landing(self):
@@ -840,8 +840,10 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
             self.assertEqual(resp.status, 200)
 
-            # Within grace window, user receives standard access feed without emergency headers
-            self.assertNotIn("Routing", resp.headers)
+            # Within grace window, user receives standard access feed with routing header
+            self.assertIn("Routing", resp.headers)
+            self.assertTrue(resp.headers["Routing"].startswith("incy://routing/onadd/"))
+            self.assertEqual("168", resp.headers.get("routing-geo-update-interval"))
             self.assertNotIn("Announce", resp.headers)
 
             # Profile-Title must be single-line strictly <= 25 characters
