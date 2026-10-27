@@ -16,12 +16,19 @@ from bot.formatters import format_admin_breadcrumbs
 from bot.handlers.admin.users.common import format_subscription_days_text
 from bot.keyboards import get_back_button
 from bot.states import AdminStates
-from config.constants import AMNEZIA_PROTOCOLS, XRAY_PROTOCOL, AdminAuditAction
+from config.constants import AdminAuditAction
 from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
 from database.connection import session_scope
-from database.models import Server, User, VPNProfile, WhiteInternetSubscription
+from database.models import Server, User, VlessSubscription, VPNProfile, WhiteInternetSubscription
 from database.repositories import white_internet_repo
-from database.repositories.servers_repo import get_all_servers, get_server_by_id
+from database.repositories.servers_repo import (
+    get_all_servers,
+    get_server_by_id,
+    is_awg_capable_server,
+    is_pure_vless_server,
+    is_vless_capable_server,
+    is_white_internet_origin_server,
+)
 from services.audit_service import AuditService
 from services.subscription import SubscriptionService
 from utils.admin import is_admin
@@ -54,17 +61,14 @@ def _start_mass_extend_task(coro) -> asyncio.Task:
     return task
 
 
-def _build_mass_extend_audience_filter(target_aud: str, now: datetime):
+def _build_mass_extend_audience_filter(target_aud: str, now: datetime, server: Server | None = None):
     """Builds SQL condition for target audience of mass extension."""
     if target_aud == "active_standard":
         return User.subscription_end > now
     elif target_aud == "active_wi":
         return User.id.in_(
             select(WhiteInternetSubscription.user_id).where(
-                WhiteInternetSubscription.status.in_([
-                    WhiteInternetStatus.ACTIVE,
-                    WhiteInternetStatus.EXHAUSTED,
-                ]),
+                WhiteInternetSubscription.status == WhiteInternetStatus.ACTIVE,
                 WhiteInternetSubscription.expires_at > now,
                 WhiteInternetSubscription.is_trial.is_(False),
                 WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
@@ -72,47 +76,54 @@ def _build_mass_extend_audience_filter(target_aud: str, now: datetime):
         )
     elif target_aud == "active_all":
         wi_subq = select(WhiteInternetSubscription.user_id).where(
-            WhiteInternetSubscription.status.in_([
-                WhiteInternetStatus.ACTIVE,
-                WhiteInternetStatus.EXHAUSTED,
-            ]),
+            WhiteInternetSubscription.status == WhiteInternetStatus.ACTIVE,
             WhiteInternetSubscription.expires_at > now,
             WhiteInternetSubscription.is_trial.is_(False),
             WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
         )
         return or_(User.subscription_end > now, User.id.in_(wi_subq))
     elif target_aud.startswith("server_"):
-        try:
-            server_id = int(target_aud.split("_")[1])
-        except (IndexError, ValueError):
-            server_id = -1
-        server_proto_subq = select(Server.protocol).where(Server.id == server_id).scalar_subquery()
-        awg_cond = (
-            (server_proto_subq.in_(AMNEZIA_PROTOCOLS))
-            & (User.subscription_end > now)
-            & User.profiles.any(
-                (VPNProfile.server_id == server_id)
-                & (VPNProfile.is_active.is_(True))
-                & (VPNProfile.desired_is_active.is_(True))
-                & (VPNProfile.provisioning_status.notin_(("deleting", "create_failed", "create_cleanup_pending")))
-            )
-        )
-        xray_cond = (
-            (server_proto_subq == XRAY_PROTOCOL)
-            & User.id.in_(
-                select(WhiteInternetSubscription.user_id).where(
-                    WhiteInternetSubscription.origin_node_id == server_id,
-                    WhiteInternetSubscription.status.in_([
-                        WhiteInternetStatus.ACTIVE,
-                        WhiteInternetStatus.EXHAUSTED,
-                    ]),
-                    WhiteInternetSubscription.expires_at > now,
-                    WhiteInternetSubscription.is_trial.is_(False),
-                    WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
+        if not server:
+            return User.id == -1
+
+        conds = []
+        if is_awg_capable_server(server):
+            conds.append(
+                (User.subscription_end > now)
+                & User.profiles.any(
+                    (VPNProfile.server_id == server.id)
+                    & (VPNProfile.is_active.is_(True))
+                    & (VPNProfile.desired_is_active.is_(True))
+                    & (VPNProfile.provisioning_status.notin_(("deleting", "create_failed", "create_cleanup_pending")))
                 )
             )
-        )
-        return or_(awg_cond, xray_cond)
+        if is_vless_capable_server(server):
+            if is_pure_vless_server(server):
+                conds.append(
+                    (User.subscription_end > now)
+                    & User.vless_subscription.has(VlessSubscription.is_active.is_(True))
+                )
+            else:
+                conds.append(
+                    (User.subscription_end > now)
+                    & User.vless_subscription.has(
+                        (VlessSubscription.is_active.is_(True))
+                        & VlessSubscription.node_traffic_snapshots.has_key(str(server.id))
+                    )
+                )
+        if is_white_internet_origin_server(server):
+            conds.append(
+                User.id.in_(
+                    select(WhiteInternetSubscription.user_id).where(
+                        WhiteInternetSubscription.origin_node_id == server.id,
+                        WhiteInternetSubscription.status == WhiteInternetStatus.ACTIVE,
+                        WhiteInternetSubscription.expires_at > now,
+                        WhiteInternetSubscription.is_trial.is_(False),
+                        WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
+                    )
+                )
+            )
+        return or_(*conds) if conds else (User.id == -1)
     else:
         return User.subscription_end > now
 
@@ -335,6 +346,7 @@ async def process_mass_extend_reason(
     days_text = format_subscription_days_text(days)
 
     now = now_utc()
+    server = None
     if target_aud.startswith("server_"):
         try:
             server_id = int(target_aud.split("_")[1])
@@ -348,7 +360,7 @@ async def process_mass_extend_reason(
         aud_label = texts.ADMIN_MASS_EXTEND_AUDIENCE_LABELS.get(target_aud, target_aud)
 
     base_cond = (User.is_deleted.is_(False)) & (User.is_banned.is_(False))
-    aud_cond = _build_mass_extend_audience_filter(target_aud, now)
+    aud_cond = _build_mass_extend_audience_filter(target_aud, now, server=server)
     stmt = select(func.count(User.id)).where(base_cond, aud_cond)
 
     user_count = int((await session.scalar(stmt)) or 0)
@@ -388,7 +400,7 @@ async def process_mass_extend_reason(
     )
 
 
-@router.callback_query(F.data == "confirm_mass_extend_apply")
+@router.callback_query(AdminStates.confirming_mass_extend, F.data == "confirm_mass_extend_apply")
 async def apply_mass_extend(
     callback: CallbackQuery,
     state: FSMContext,
@@ -402,28 +414,42 @@ async def apply_mass_extend(
         await callback.answer(texts.ADMIN_USERS_MASS_EXTEND_ALREADY_RUNNING, show_alert=True)
         return
 
-    _mass_extend_in_progress.add(admin_id)
-
     data = await state.get_data()
-    target_aud = data.get("target_aud", "active_all")
-    days = data.get("days", 1)
-    reason = data.get("reason", texts.ADMIN_USERS_MASS_EXTEND_DEFAULT_REASON)
-    days_text = format_subscription_days_text(days)
+    if not data or "target_aud" not in data or "days" not in data:
+        await callback.answer(texts.ERROR_OPERATION_CANCELLED, show_alert=True)
+        await state.clear()
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        return
 
-    await state.clear()
-    await callback.answer(texts.ADMIN_USERS_MASS_EXTEND_STARTED_ALERT, show_alert=True)
-
-    header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.ADMIN_USERS_MASS_BONUS_REZULTAT)
+    # Immediately remove inline keyboard to prevent duplicate clicks
     try:
-        await callback.message.edit_text(
-            texts.ADMIN_USERS_MASS_EXTEND_STARTED_TEXT.format(header=header, days_text=days_text),
-            parse_mode="HTML",
-        )
+        await callback.message.edit_reply_markup(reply_markup=None)
     except Exception:
         pass
 
-    batch_id = uuid.uuid4().hex[:16]
+    _mass_extend_in_progress.add(admin_id)
     try:
+        target_aud = data["target_aud"]
+        days = data["days"]
+        reason = data.get("reason", texts.ADMIN_USERS_MASS_EXTEND_DEFAULT_REASON)
+        days_text = format_subscription_days_text(days)
+
+        await state.clear()
+        await callback.answer(texts.ADMIN_USERS_MASS_EXTEND_STARTED_ALERT, show_alert=True)
+
+        header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.ADMIN_USERS_MASS_BONUS_REZULTAT)
+        try:
+            await callback.message.edit_text(
+                texts.ADMIN_USERS_MASS_EXTEND_STARTED_TEXT.format(header=header, days_text=days_text),
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+
+        batch_id = uuid.uuid4().hex[:16]
         _start_mass_extend_task(
             _run_mass_extend_background(
                 bot=callback.bot,
@@ -437,6 +463,24 @@ async def apply_mass_extend(
     except Exception:
         _mass_extend_in_progress.discard(admin_id)
         raise
+
+
+@router.callback_query(F.data == "confirm_mass_extend_apply")
+async def stale_confirm_mass_extend(
+    callback: CallbackQuery,
+    state: FSMContext,
+):
+    """Safely handles clicks on stale/expired confirmation buttons."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    await state.clear()
+    await callback.answer(texts.ERROR_OPERATION_CANCELLED, show_alert=True)
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
 
 
 async def _run_mass_extend_background(
@@ -460,9 +504,44 @@ async def _run_mass_extend_background(
         fail_count = 0
         blocked_count = 0
 
+        server = None
+        if target_aud.startswith("server_"):
+            try:
+                srv_id = int(target_aud.split("_")[1])
+            except (IndexError, ValueError):
+                srv_id = -1
+            async with session_scope() as session:
+                server = await session.get(Server, srv_id)
+
+            if not server:
+                logger.error("Server %s not found. Fail-closed: aborting mass extend.", target_aud)
+                try:
+                    header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.ADMIN_USERS_MASS_BONUS_ITOGI)
+                    builder = InlineKeyboardBuilder()
+                    builder.button(text=texts.ADMIN_USERS_MASS_EXTEND_BTN_NEW, callback_data="admin_mass_extend")
+                    builder.button(text=texts.ADMIN_USERS_MASS_BONUS_V_ADMIN_MENYU, callback_data="admin_menu")
+                    builder.adjust(1)
+
+                    await render_hub(
+                        bot,
+                        admin_id,
+                        texts.ADMIN_USERS_MASS_EXTEND_COMPLETED_TEXT.format(
+                            header=header,
+                            success_count=0,
+                            days_text=days_text,
+                            fail_count=0,
+                            blocked_count=0,
+                        ),
+                        reply_markup=builder.as_markup(),
+                        parse_mode="HTML",
+                    )
+                except Exception as e:
+                    logger.error("Failed to notify admin of missing server: %s", e)
+                return
+
         now = now_utc()
         base_cond = (User.is_deleted.is_(False)) & (User.is_banned.is_(False))
-        aud_cond = _build_mass_extend_audience_filter(target_aud, now)
+        aud_cond = _build_mass_extend_audience_filter(target_aud, now, server=server)
         stmt = (
             select(User.id, User.telegram_id)
             .where(base_cond, aud_cond)
@@ -470,19 +549,9 @@ async def _run_mass_extend_background(
             .order_by(User.id.asc())
         )
 
-        server_proto = None
         async with session_scope() as session:
             result = await session.execute(stmt)
             users = result.all()
-
-            if target_aud.startswith("server_"):
-                try:
-                    srv_id = int(target_aud.split("_")[1])
-                    srv = await session.get(Server, srv_id)
-                    if srv:
-                        server_proto = srv.protocol
-                except Exception as e:
-                    logger.warning("Could not determine server protocol for %s: %s", target_aud, e)
 
         if not users:
             try:
@@ -540,7 +609,7 @@ async def _run_mass_extend_background(
                                 if (
                                     sub
                                     and not getattr(sub, "is_trial", False)
-                                    and sub.status in [WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED]
+                                    and sub.status == WhiteInternetStatus.ACTIVE
                                     and sub.expires_at
                                     and sub.expires_at > current_now
                                 ):
@@ -564,7 +633,7 @@ async def _run_mass_extend_background(
                                 if (
                                     sub
                                     and not getattr(sub, "is_trial", False)
-                                    and sub.status in [WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED]
+                                    and sub.status == WhiteInternetStatus.ACTIVE
                                     and sub.expires_at
                                     and sub.expires_at > current_now
                                 ):
@@ -572,19 +641,21 @@ async def _run_mass_extend_background(
                                     if res_sub:
                                         extended = True
                             elif target_aud.startswith("server_"):
-                                if server_proto == XRAY_PROTOCOL:
+                                if not server:
+                                    continue
+                                if is_white_internet_origin_server(server):
                                     sub = await white_internet_repo.get_subscription_by_user_id(session, uid)
                                     if (
                                         sub
                                         and not getattr(sub, "is_trial", False)
-                                        and sub.status in [WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED]
+                                        and sub.status == WhiteInternetStatus.ACTIVE
                                         and sub.expires_at
                                         and sub.expires_at > current_now
                                     ):
                                         res_sub = await white_internet_repo.extend_subscription_atomic(session, sub.id, days)
                                         if res_sub:
                                             extended = True
-                                else:
+                                elif is_awg_capable_server(server) or is_vless_capable_server(server):
                                     if user.subscription_end and user.subscription_end > current_now:
                                         res = await SubscriptionService.extend_subscription(
                                             session,
@@ -595,6 +666,12 @@ async def _run_mass_extend_background(
                                         )
                                         if res:
                                             extended = True
+                                else:
+                                    logger.error(
+                                        "Server %s has unhandled capabilities. Fail-closed: skipped user %s.",
+                                        server.id,
+                                        uid,
+                                    )
 
                             if extended:
                                 success_count += 1
