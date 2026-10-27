@@ -97,6 +97,8 @@ BTN_MASSOVAYA_RASSYLKA = "📢 Массовая рассылка"
 
 BTN_MASS_BONUS = "🎁 Массовый бонус"
 
+BTN_MASS_EXTEND = "⏳ Массовое продление"
+
 BTN_MTPROTO_PROXY = "🚀 MTProto Proxy"
 
 BTN_MY_BALANCE = "🎁 Мой баланс"
