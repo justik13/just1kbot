@@ -22,6 +22,32 @@ class AWGPersistentTrafficTests(unittest.IsolatedAsyncioTestCase):
         mock_client.status = "active"
         return mock_client
 
+    def _make_mock_session(self, mock_rows):
+        mock_session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.all.return_value = mock_rows
+
+        user_rows = []
+        seen_uids = set()
+        for r in mock_rows:
+            uid = r[8] if len(r) > 8 else 42
+            tg_id = r[10] if len(r) > 10 else 123456789
+            if uid not in seen_uids:
+                seen_uids.add(uid)
+                user_rows.append((uid, tg_id, 0, 0))
+
+        mock_user_result = MagicMock()
+        mock_user_result.all.return_value = user_rows
+
+        def fake_execute(stmt, *args, **kwargs):
+            stmt_str = str(stmt).lower()
+            if "users.monthly_awg_bytes" in stmt_str or "users.monthly_vless_bytes" in stmt_str:
+                return mock_user_result
+            return mock_result
+
+        mock_session.execute.side_effect = fake_execute
+        return mock_session
+
     async def test_normal_incremental_traffic_accumulation(self):
         """When node counter increases normally, deltas are added to profile, user and server."""
         server_info = {"id": 1, "name": "NL-1"}
@@ -39,8 +65,6 @@ class AWGPersistentTrafficTests(unittest.IsolatedAsyncioTestCase):
         }
 
         # Mock database session
-        mock_session = AsyncMock()
-        mock_result = MagicMock()
         mock_row = (
             10,                 # p_id
             peer_id,            # peer_id
@@ -56,8 +80,7 @@ class AWGPersistentTrafficTests(unittest.IsolatedAsyncioTestCase):
             datetime(2028, 1, 1, tzinfo=timezone.utc),  # sub_end
             False,              # financial_hold
         )
-        mock_result.all.return_value = [mock_row]
-        mock_session.execute.return_value = mock_result
+        mock_session = self._make_mock_session([mock_row])
 
         mock_server = Server(
             id=1,
@@ -102,8 +125,6 @@ class AWGPersistentTrafficTests(unittest.IsolatedAsyncioTestCase):
             peer_id: self._make_mock_client_data(down_bytes=node_after_reboot, up_bytes=0)
         }
 
-        mock_session = AsyncMock()
-        mock_result = MagicMock()
         mock_row = (
             10,
             peer_id,
@@ -119,8 +140,7 @@ class AWGPersistentTrafficTests(unittest.IsolatedAsyncioTestCase):
             datetime(2028, 1, 1, tzinfo=timezone.utc),
             False,
         )
-        mock_result.all.return_value = [mock_row]
-        mock_session.execute.return_value = mock_result
+        mock_session = self._make_mock_session([mock_row])
 
         mock_server = Server(
             id=1,
@@ -153,14 +173,11 @@ class AWGPersistentTrafficTests(unittest.IsolatedAsyncioTestCase):
             peer_id: self._make_mock_client_data(down_bytes=2048, up_bytes=1024)
         }
 
-        mock_session = AsyncMock()
-        mock_result = MagicMock()
         mock_row = (
             10, peer_id, 0, 0, 0, 0, None, True, 42, False, 123456789,
             datetime(2028, 1, 1, tzinfo=timezone.utc), False,
         )
-        mock_result.all.return_value = [mock_row]
-        mock_session.execute.return_value = mock_result
+        mock_session = self._make_mock_session([mock_row])
 
         mock_server = Server(
             id=1,
@@ -274,8 +291,6 @@ class AWGPersistentTrafficTests(unittest.IsolatedAsyncioTestCase):
             peer_2: self._make_mock_client_data(down_bytes=220 * 1024 * 1024, up_bytes=0),
         }
 
-        mock_session = AsyncMock()
-        mock_result = MagicMock()
         row_1 = (
             101, peer_1, 100 * 1024 * 1024, 0, 100 * 1024 * 1024, 0, None, True, 42, False, 123456789,
             datetime(2028, 1, 1, tzinfo=timezone.utc), False,
@@ -284,8 +299,7 @@ class AWGPersistentTrafficTests(unittest.IsolatedAsyncioTestCase):
             102, peer_2, 200 * 1024 * 1024, 0, 200 * 1024 * 1024, 0, None, True, 42, False, 123456789,
             datetime(2028, 1, 1, tzinfo=timezone.utc), False,
         )
-        mock_result.all.return_value = [row_1, row_2]
-        mock_session.execute.return_value = mock_result
+        mock_session = self._make_mock_session([row_1, row_2])
 
         mock_server = Server(
             id=1,
