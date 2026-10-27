@@ -318,6 +318,35 @@ class TestCreditNotifyWorker(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(await worker._deliver_one(AsyncMock(), order.id))
         self.assertNotIn("late_notify_pending", order.metadata_)
 
+    async def test_preserves_debt_and_marks_blocked_on_forbidden(self):
+        from services.workers import credit_notifications as worker
+
+        order = _topup_order(
+            metadata_={
+                "late_notify_pending": True,
+                "late_notify_attempts": worker.MAX_NOTIFY_ATTEMPTS - 1,
+            }
+        )
+        user = _user()
+        session = self._session(order, user)
+        session.get = AsyncMock(side_effect=[order, user, order, user])
+        with (
+            patch.object(
+                worker, "session_scope", return_value=_scope_with(session)
+            ),
+            self._balance(worker),
+            patch.object(
+                worker, "_send_late_push", new=AsyncMock(return_value="forbidden")
+            ),
+        ):
+            self.assertFalse(await worker._deliver_one(AsyncMock(), order.id))
+        self.assertTrue(order.metadata_.get("late_notify_pending"))
+        self.assertEqual(
+            order.metadata_.get("late_notify_attempts"),
+            worker.MAX_NOTIFY_ATTEMPTS - 1,
+        )
+        self.assertTrue(user.is_bot_blocked)
+
     async def test_drops_debt_when_user_gone(self):
         from services.workers import credit_notifications as worker
 

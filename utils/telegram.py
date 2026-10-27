@@ -1020,6 +1020,7 @@ async def safe_send_message(
     parse_mode: str | None = "HTML",
     disable_web_page_preview: bool = True,
     message_effect_id: str | None = None,
+    raise_forbidden: bool = False,
 ) -> int | None:
     """Send a Telegram message with resilience and automatic plain-text fallback on parse errors.
 
@@ -1030,7 +1031,7 @@ async def safe_send_message(
       for HTML (parse_mode="HTML"), strips HTML formatting tags via strip_html_tags();
       for other modes, falls back to raw plain text; retries with parse_mode=None.
     - If message_effect_id is invalid, retries without effect.
-    - Catches TelegramForbiddenError (user blocked bot) and returns None gracefully.
+    - Catches TelegramForbiddenError (user blocked bot) and returns None gracefully (or raises if raise_forbidden=True).
     - Returns the message_id of the sent message (or last part if split), or None on terminal error.
     """
     link_preview_opts = LinkPreviewOptions(is_disabled=True) if disable_web_page_preview else None
@@ -1111,6 +1112,8 @@ async def safe_send_message(
                     raise
     except TelegramForbiddenError:
         logger.info("Cannot send message: bot was blocked by chat %s", chat_id)
+        if raise_forbidden:
+            raise
         return None
 
     return sent_id

@@ -99,6 +99,7 @@ class TestWhiteInternetNotifications(unittest.IsolatedAsyncioTestCase):
         sub = MagicMock(spec=WhiteInternetSubscription)
         sub.id = 10
         sub.user_id = 200
+        sub.is_trial = False
         sub.expires_at = now + timedelta(hours=1)
         sub.status = WhiteInternetStatus.ACTIVE
         sub.notified_3d = False
@@ -136,10 +137,10 @@ class TestWhiteInternetNotifications(unittest.IsolatedAsyncioTestCase):
             await _send_white_internet_notifications(bot, now)
 
         self.assertTrue(user.is_bot_blocked)
-        self.assertTrue(sub.notified_expired)
-        self.assertTrue(sub.notified_2h)
-        self.assertTrue(sub.notified_1d)
-        self.assertTrue(sub.notified_3d)
+        self.assertFalse(sub.notified_expired)
+        self.assertFalse(sub.notified_2h)
+        self.assertFalse(sub.notified_1d)
+        self.assertFalse(sub.notified_3d)
         mock_session_sub.flush.assert_awaited()
 
     async def test_already_expired_closes_earlier_flags_without_resending(self):

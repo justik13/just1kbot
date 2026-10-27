@@ -640,10 +640,6 @@ async def _send_white_internet_notifications(
                     await session.flush()
                 except TelegramForbiddenError:
                     user.is_bot_blocked = True
-                    sub.notified_expired = True
-                    sub.notified_2h = True
-                    sub.notified_1d = True
-                    sub.notified_3d = True
                     await session.flush()
                 except Exception as e:
                     logger.warning(
