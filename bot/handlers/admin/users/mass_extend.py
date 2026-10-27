@@ -238,6 +238,21 @@ async def process_mass_extend_days(
         await state.clear()
         return
 
+    if message.text and message.text.startswith("/"):
+        await state.clear()
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            texts.ERROR_OPERATION_CANCELLED,
+            get_back_button("admin_mass_extend"),
+            trigger_message_id=message.message_id,
+        )
+        return
+
     try:
         days = int(message.text.strip())
         if days < 1 or days > 365:
@@ -481,30 +496,33 @@ async def _run_mass_extend_background(
 
                             extended = False
                             if target_aud == "active_standard":
-                                await SubscriptionService.extend_subscription(
+                                res = await SubscriptionService.extend_subscription(
                                     session,
                                     tg_id,
                                     days,
                                     admin_id=admin_id,
                                     reason=reason,
                                 )
-                                extended = True
+                                if res:
+                                    extended = True
                             elif target_aud == "active_wi":
                                 sub = await white_internet_repo.get_subscription_by_user_id(session, uid)
                                 if sub and not getattr(sub, "is_trial", False) and sub.status != WhiteInternetStatus.DISABLED:
-                                    await white_internet_repo.extend_subscription_atomic(session, sub.id, days)
-                                    extended = True
+                                    res_sub = await white_internet_repo.extend_subscription_atomic(session, sub.id, days)
+                                    if res_sub:
+                                        extended = True
                             elif target_aud == "active_all":
                                 # Extend standard if active
                                 if user.subscription_end and user.subscription_end > now:
-                                    await SubscriptionService.extend_subscription(
+                                    res = await SubscriptionService.extend_subscription(
                                         session,
                                         tg_id,
                                         days,
                                         admin_id=admin_id,
                                         reason=reason,
                                     )
-                                    extended = True
+                                    if res:
+                                        extended = True
                                 # Extend White Internet if active
                                 sub = await white_internet_repo.get_subscription_by_user_id(session, uid)
                                 if (
@@ -514,33 +532,37 @@ async def _run_mass_extend_background(
                                     and sub.expires_at
                                     and sub.expires_at > now
                                 ):
-                                    await white_internet_repo.extend_subscription_atomic(session, sub.id, days)
-                                    extended = True
+                                    res_sub = await white_internet_repo.extend_subscription_atomic(session, sub.id, days)
+                                    if res_sub:
+                                        extended = True
                                 # Fallback if neither was active at cutoff but matched
                                 if not extended:
-                                    await SubscriptionService.extend_subscription(
+                                    res = await SubscriptionService.extend_subscription(
                                         session,
                                         tg_id,
                                         days,
                                         admin_id=admin_id,
                                         reason=reason,
                                     )
-                                    extended = True
+                                    if res:
+                                        extended = True
                             elif target_aud.startswith("server_"):
                                 if server_proto == XRAY_PROTOCOL:
                                     sub = await white_internet_repo.get_subscription_by_user_id(session, uid)
                                     if sub and not getattr(sub, "is_trial", False) and sub.status != WhiteInternetStatus.DISABLED:
-                                        await white_internet_repo.extend_subscription_atomic(session, sub.id, days)
-                                        extended = True
+                                        res_sub = await white_internet_repo.extend_subscription_atomic(session, sub.id, days)
+                                        if res_sub:
+                                            extended = True
                                 else:
-                                    await SubscriptionService.extend_subscription(
+                                    res = await SubscriptionService.extend_subscription(
                                         session,
                                         tg_id,
                                         days,
                                         admin_id=admin_id,
                                         reason=reason,
                                     )
-                                    extended = True
+                                    if res:
+                                        extended = True
 
                             if extended:
                                 success_count += 1
