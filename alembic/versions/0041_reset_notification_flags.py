@@ -1,6 +1,6 @@
 """Reset stale notification flags and unblock falsely flagged users.
 
-Revision ID: 0041_reset_stale_notification_flags
+Revision ID: 0041_reset_notification_flags
 Revises: 0040_vless_traffic_accounting
 Create Date: 2026-10-27 12:00:00.000000
 """
@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "0041_reset_stale_notification_flags"
+revision: str = "0041_reset_notification_flags"
 down_revision: str | None = "0040_vless_traffic_accounting"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
