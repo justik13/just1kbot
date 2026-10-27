@@ -262,8 +262,8 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         # WI total must render the 50 GB from total_wi_traffic_bytes
         self.assertIn("50", sent_text)
 
-    async def test_manage_device_view_sums_archived_traffic(self):
-        """render_device_screen includes archived traffic for this device slot."""
+    async def test_manage_device_view_shows_profile_traffic_isolated(self):
+        """render_device_screen displays live profile traffic without slot archived pollution."""
         from bot.handlers.connection.device_view_routes import render_device_screen
 
         mock_profile = VPNProfile(
@@ -303,9 +303,10 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertTrue(mock_hub.called)
             rendered_text = mock_hub.call_args[0][2]
-            # Total traffic displayed should be 5000 (archived) + 1500 (live) = 6500 B
-            # format_traffic(6500) produces "6.3 KiB"
-            self.assertIn("6.3 KiB", rendered_text)
+            # Profile traffic displayed must be strictly 1500 (live), not 6500 (with archived slot)
+            # format_traffic(1500) produces "1.5 KiB"
+            self.assertIn("1.5 KiB", rendered_text)
+            self.assertNotIn("6.3 KiB", rendered_text)
 
     def test_accumulate_host_traffic_cycle_logic(self):
         """Host monthly traffic accumulates deltas, detects reboots, and rolls over cycles."""

@@ -213,6 +213,7 @@ AMNEZIA_SCREEN_TEXT = """🛡 <b>Устройства Amnezia</b>
 Подключение и файлы конфигураций для приложений Amnezia.
 
 📱 <b>Устройства:</b> {active} из {limit} <i>(по ссылке: {vless_count} • Amnezia: {amnezia_count})</i>
+📊 <b>Трафик за месяц:</b> {monthly_traffic}
 {profiles_block}
 <i>Нажмите на устройство ниже для управления:</i>"""
 
@@ -221,6 +222,7 @@ AMNEZIA_SCREEN_EMPTY_TEXT = """🛡 <b>Устройства Amnezia</b>
 Подключение и файлы конфигураций для приложений Amnezia.
 
 📱 <b>Устройства:</b> {active} из {limit} <i>(по ссылке: {vless_count} • Amnezia: 0)</i>
+📊 <b>Трафик за месяц:</b> {monthly_traffic}
 
 <i>У вас пока нет добавленных устройств Amnezia.</i>{action_hint}"""
 

@@ -233,6 +233,11 @@ async def _build_amnezia_screen(
 
     builder = InlineKeyboardBuilder()
 
+    current_cycle = now_utc().strftime("%Y-%m")
+    user_cycle = getattr(user, "traffic_cycle", None)
+    monthly_bytes = getattr(user, "monthly_awg_bytes", 0) or 0 if user_cycle == current_cycle else 0
+    monthly_traffic_str = format_traffic(monthly_bytes)
+
     if not profiles:
         action_hint = (
             texts.AMNEZIA_SCREEN_HINT_ADD
@@ -243,6 +248,7 @@ async def _build_amnezia_screen(
             active=total_active_devices,
             limit=device_limit,
             vless_count=vless_hwid_count,
+            monthly_traffic=monthly_traffic_str,
             action_hint=action_hint,
         )
     else:
@@ -261,12 +267,7 @@ async def _build_amnezia_screen(
 
             location_label = f"{flag} {safe(server_name)}"
 
-            from utils.traffic_helpers import get_archived_traffic_for_device
-
-            archived_bytes = get_archived_traffic_for_device(
-                getattr(user, "archived_device_traffic", None), profile.device_name
-            )
-            dev_bytes = (getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0) + archived_bytes
+            dev_bytes = (getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0)
             traffic_str = format_traffic(dev_bytes)
             last_conn_str = format_datetime(profile.last_connected) if getattr(profile, "last_connected", None) else texts.CONNECTION_CONFIG_COMMON_NE_BYLO_AKTIVNOSTEY
 
@@ -293,6 +294,7 @@ async def _build_amnezia_screen(
             limit=device_limit,
             vless_count=vless_hwid_count,
             amnezia_count=quota_profiles_count,
+            monthly_traffic=monthly_traffic_str,
             profiles_block=profiles_block,
         )
 
