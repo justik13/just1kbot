@@ -314,6 +314,70 @@ ADMIN_USERS_MASS_BONUS_ZACHISLENO_CHEL_KAZHDOMU = """• Зачислено: <b>
 
 ADMIN_USERS_MASS_BONUS_ZAPUSTIT_GRANT = "🚀 Запустить начисление"
 
+ADMIN_USERS_MASS_EXTEND_TITLE = """⏳ <b>Массовое продление подписок</b>
+
+"""
+ADMIN_USERS_MASS_EXTEND_SELECT_AUDIENCE = "Выберите целевую группу пользователей для продления доступа:"
+ADMIN_USERS_MASS_EXTEND_HEADER_AUDIENCE = "Выбор аудитории"
+ADMIN_USERS_MASS_EXTEND_HEADER_DAYS = "Ввод срока"
+ADMIN_USERS_MASS_EXTEND_HEADER_REASON = "Ввод причины"
+ADMIN_USERS_MASS_EXTEND_HEADER_CONFIRM = "Подтверждение"
+ADMIN_USERS_MASS_EXTEND_HEADER_RESULT = "Результат"
+ADMIN_USERS_MASS_EXTEND_HEADER_SUMMARY = "Итоги"
+
+ADMIN_USERS_MASS_EXTEND_AUD_ACTIVE_STANDARD = "⚡ Стандартная (активные)"
+ADMIN_USERS_MASS_EXTEND_AUD_ACTIVE_WI = "🌐 Белый Интернет (активные)"
+ADMIN_USERS_MASS_EXTEND_AUD_ACTIVE_ALL = "🌟 Все активные (любой тип)"
+ADMIN_USERS_MASS_EXTEND_AUD_SERVER = "🖥 Пользователям сервера"
+ADMIN_USERS_MASS_EXTEND_SELECT_SERVER = "Выберите сервер, пользователям которого будут добавлены дни доступа:"
+ADMIN_USERS_MASS_EXTEND_SERVER_LABEL = "Пользователям сервера {flag} {name}"
+
+ADMIN_MASS_EXTEND_AUDIENCE_LABELS = {
+    "active_standard": "⚡ Стандартная подписка (активные)",
+    "active_wi": "🌐 Белый Интернет (активные)",
+    "active_all": "🌟 Все с активной подпиской",
+}
+
+ADMIN_USERS_MASS_EXTEND_ENTER_DAYS_PROMPT = """⏳ <b>Количество дней для продления:</b>
+
+Введите количество дней (целое число от 1 до 365, например <code>3</code>):"""
+ADMIN_USERS_MASS_EXTEND_INVALID_DAYS = "⚠️ Введите корректное количество дней от 1 до 365."
+
+ADMIN_USERS_MASS_EXTEND_ENTER_REASON_PROMPT = """📝 <b>Причина продления (+{days_text}):</b>
+
+Введите сообщение для пользователей и лога аудита (например: <i>Компенсация за сбой на серверах</i>):"""
+ADMIN_USERS_MASS_EXTEND_DEFAULT_REASON = "Компенсация за технические работы"
+
+ADMIN_USERS_MASS_EXTEND_CONFIRM_TITLE = """⚠️ <b>Подтверждение массового продления:</b>
+
+"""
+ADMIN_USERS_MASS_EXTEND_CONFIRM_AUDIENCE = "• Аудитория: <b>{aud_label}</b>\n"
+ADMIN_USERS_MASS_EXTEND_CONFIRM_RECIPIENTS = "• Получателей: <b>{user_count} чел.</b>\n"
+ADMIN_USERS_MASS_EXTEND_CONFIRM_DAYS = "• Продление каждому: <b>+{days_text}</b>\n"
+ADMIN_USERS_MASS_EXTEND_CONFIRM_REASON = "• Причина: <i>{safe_reason}</i>\n\n"
+ADMIN_USERS_MASS_EXTEND_CONFIRM_QUESTION = "Вы уверены, что хотите запустить продление?"
+ADMIN_USERS_MASS_EXTEND_BTN_START = "🚀 Запустить продление"
+
+ADMIN_USERS_MASS_EXTEND_ALREADY_RUNNING = "⚠️ Массовое продление уже выполняется!"
+ADMIN_USERS_MASS_EXTEND_STARTED_ALERT = "🚀 Массовое продление запущено в фоне!"
+ADMIN_USERS_MASS_EXTEND_STARTED_TEXT = """{header}
+
+⏳ <b>Массовое продление подписок (+{days_text}) запущено в фоновом режиме!</b>
+По завершении операции вам придёт отчёт со статистикой."""
+
+ADMIN_USERS_MASS_EXTEND_COMPLETED_TEXT = """{header}
+
+✅ <b>Массовое продление подписок завершено!</b>
+
+• Успешно продлено: <b>{success_count} чел.</b> (+{days_text} каждому)
+• Ошибок: <b>{fail_count}</b>
+• Заблокировали бота: <b>{blocked_count}</b>"""
+ADMIN_USERS_MASS_EXTEND_BTN_NEW = "⏳ Новое массовое продление"
+
+ADMIN_USER_SUB_EXTENDED_NOTIFICATION = """🎁 <b>Вам начислено +{days_text} доступа!</b>
+
+Причина: <i>{safe_reason}</i>"""
+
 ADMIN_USERS_MESSAGE_ENTER_TEXT_MESSAGE_KO = """Введите текст сообщения, которое бот доставит пользователю от имени администрации.
 
 """

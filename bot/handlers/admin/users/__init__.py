@@ -5,6 +5,7 @@ from .ban_routes import router as ban_router
 from .device_routes import router as device_router
 from .list_routes import router as list_router
 from .mass_bonus import router as mass_bonus_router
+from .mass_extend import router as mass_extend_router
 from .message_routes import router as message_router
 from .subscription_change_routes import router as subscription_change_router
 from .subscription_extend_routes import router as subscription_extend_router
@@ -25,6 +26,7 @@ router.include_router(ban_router)
 router.include_router(balance_router)
 router.include_router(message_router)
 router.include_router(mass_bonus_router)
+router.include_router(mass_extend_router)
 
 
 __all__ = [

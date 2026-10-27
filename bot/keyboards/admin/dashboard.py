@@ -66,6 +66,7 @@ def get_admin_cat_users_keyboard() -> InlineKeyboardMarkup:
     builder.button(text=texts.BTN_SPISOK_POLZOVATELEJ, callback_data="admin_users")
     builder.button(text=texts.BTN_MASSOVAYA_RASSYLKA, callback_data="admin_broadcast")
     builder.button(text=texts.BTN_MASS_BONUS, callback_data="admin_mass_bonus")
+    builder.button(text=texts.BTN_MASS_EXTEND, callback_data="admin_mass_extend")
     builder.button(text=texts.BTN_ADMIN_MENU, callback_data="admin_menu")
     builder.adjust(1)
     return builder.as_markup()
