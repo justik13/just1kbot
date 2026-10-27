@@ -302,8 +302,8 @@ class SafeSendMessageTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNone(res_false)
 
-    async def test_traffic_quota_alert_escapes_dangerous_server_name(self):
-        """_send_quota_alert escapes dangerous HTML characters in server_name."""
+    async def test_traffic_quota_alert_escapes_dangerous_cycle(self):
+        """_send_quota_alert escapes dangerous HTML characters in cycle."""
         fake_msg = MagicMock(spec=Message)
         fake_msg.message_id = 777
         self.mock_bot.send_message.return_value = fake_msg
@@ -315,18 +315,19 @@ class SafeSendMessageTests(unittest.IsolatedAsyncioTestCase):
             await _send_quota_alert(
                 self.mock_bot,
                 telegram_id=99999,
-                server_name="Node <DE-1> & 'Frankfurt' <b>test</b>",
-                total_bytes=1024**4,
-                profile_id=1,
+                cycle="<2026-10> & 'test' <b>cycle</b>",
+                total_bytes=1024**4 + 100,
+                awg_bytes=800 * 1024**3,
+                vless_bytes=300 * 1024**3,
             )
 
         self.mock_bot.send_message.assert_called_once()
         sent_text = self.mock_bot.send_message.call_args.kwargs["text"]
         # HTML special chars must be escaped with safe()
-        self.assertIn("&lt;DE-1&gt;", sent_text)
+        self.assertIn("&lt;2026-10&gt;", sent_text)
         self.assertIn("&amp;", sent_text)
-        self.assertIn("&lt;b&gt;test&lt;/b&gt;", sent_text)
-        self.assertNotIn("<DE-1>", sent_text)
+        self.assertIn("&lt;b&gt;cycle&lt;/b&gt;", sent_text)
+        self.assertNotIn("<2026-10>", sent_text)
 
     async def test_admin_server_name_length_limit(self):
         """Server add name longer than 50 chars is rejected."""

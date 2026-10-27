@@ -148,12 +148,7 @@ async def render_device_screen(
 
     country_display = f"{flag} {server_name}".strip() if flag else server_name
 
-    from utils.traffic_helpers import get_archived_traffic_for_device
-
-    archived_bytes = get_archived_traffic_for_device(
-        getattr(user, "archived_device_traffic", None), profile.device_name
-    )
-    dev_traffic = (getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0) + archived_bytes
+    dev_traffic = (getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0)
     header = texts.DEVICE_MANAGE_HEADER.format(
         device_name=safe(profile.device_name),
         country_display=safe(country_display),
@@ -563,13 +558,16 @@ async def render_vless_sub_screen(
 
     effective_limit = await SubscriptionService.get_effective_device_limit(session, user)
     total_active, _awg_active, vless_active = await VlessSubscriptionService.get_combined_quota(session, user)
-    dev_traffic = (getattr(sub, "traffic_down", 0) or 0) + (getattr(sub, "traffic_up", 0) or 0)
+
+    from utils.traffic_helpers import get_user_monthly_standard_traffic
+
+    monthly_bytes = get_user_monthly_standard_traffic(user)
 
     text = texts.VLESS_SUB_SCREEN_TEXT.format(
         sub_url=sub_url,
         active=total_active,
         limit=effective_limit,
-        traffic_total=format_traffic(dev_traffic),
+        monthly_traffic=format_traffic(monthly_bytes),
     )
 
     builder = InlineKeyboardBuilder()

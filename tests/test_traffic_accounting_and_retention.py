@@ -69,7 +69,17 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         )
         mock_result.all.return_value = [mock_row]
         mock_result.scalars.return_value.all.return_value = [101]
-        mock_session.execute.return_value = mock_result
+
+        mock_user_result = MagicMock()
+        mock_user_result.all.return_value = [(77, 12345, 60 * 1024 * 1024, 0)]
+
+        def fake_execute(stmt, *args, **kwargs):
+            stmt_str = str(stmt).lower()
+            if "users.monthly_awg_bytes" in stmt_str or "users.monthly_vless_bytes" in stmt_str:
+                return mock_user_result
+            return mock_result
+
+        mock_session.execute.side_effect = fake_execute
 
         mock_server = Server(
             id=1,
@@ -262,8 +272,8 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         # WI total must render the 50 GB from total_wi_traffic_bytes
         self.assertIn("50", sent_text)
 
-    async def test_manage_device_view_sums_archived_traffic(self):
-        """render_device_screen includes archived traffic for this device slot."""
+    async def test_manage_device_view_shows_profile_traffic_isolated(self):
+        """render_device_screen displays live profile traffic without slot archived pollution."""
         from bot.handlers.connection.device_view_routes import render_device_screen
 
         mock_profile = VPNProfile(
@@ -303,9 +313,10 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertTrue(mock_hub.called)
             rendered_text = mock_hub.call_args[0][2]
-            # Total traffic displayed should be 5000 (archived) + 1500 (live) = 6500 B
-            # format_traffic(6500) produces "6.3 KiB"
-            self.assertIn("6.3 KiB", rendered_text)
+            # Profile traffic displayed must be strictly 1500 (live), not 6500 (with archived slot)
+            # format_traffic(1500) produces "1.5 KiB"
+            self.assertIn("1.5 KiB", rendered_text)
+            self.assertNotIn("6.3 KiB", rendered_text)
 
     def test_accumulate_host_traffic_cycle_logic(self):
         """Host monthly traffic accumulates deltas, detects reboots, and rolls over cycles."""
@@ -1147,8 +1158,9 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertIn("<b>Трафик туннелей:</b> 20.0 GiB", card_text)
-        self.assertIn("• <b>AWG (за месяц):</b> 10.0 GiB", card_text)
-        self.assertIn("• <b>VLESS (за месяц):</b> 3.0 GiB", card_text)
+        self.assertIn("• <b>Стандартный доступ (за месяц):</b> 13.0 GiB", card_text)
+        self.assertIn("├ AWG: 10.0 GiB", card_text)
+        self.assertIn("└ VLESS: 3.0 GiB", card_text)
         self.assertIn("• <b>Белый Интернет (за месяц):</b> 2.0 GiB", card_text)
 
     def test_format_user_card_resets_monthly_traffic_on_cycle_rotation(self):
@@ -1177,8 +1189,9 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertIn("<b>Трафик туннелей:</b> 13.0 GiB", card_text)
-        self.assertIn("• <b>AWG (за месяц):</b> 0 B", card_text)
-        self.assertIn("• <b>VLESS (за месяц):</b> 0 B", card_text)
+        self.assertIn("• <b>Стандартный доступ (за месяц):</b> 0 B", card_text)
+        self.assertIn("├ AWG: 0 B", card_text)
+        self.assertIn("└ VLESS: 0 B", card_text)
         self.assertIn("• <b>Белый Интернет (за месяц):</b> 0 B", card_text)
 
     async def test_record_vless_traffic_atomic_multi_server_isolation(self):
@@ -1298,11 +1311,20 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sub.node_traffic_snapshots["1"]["epoch"], "new-epoch")
 
     async def test_render_vless_sub_screen_renders_traffic_total(self):
-        """render_vless_sub_screen formats and displays accumulated VLESS traffic."""
+        """render_vless_sub_screen formats and displays combined standard monthly traffic."""
         from bot.handlers.connection.device_view_routes import render_vless_sub_screen
         from database.models import User, VlessSubscription
 
-        user = User(id=1, telegram_id=987654321, device_limit=2, subscription_end=datetime.now(timezone.utc))
+        cur_cycle = datetime.now(timezone.utc).strftime("%Y-%m")
+        user = User(
+            id=1,
+            telegram_id=987654321,
+            device_limit=2,
+            subscription_end=datetime.now(timezone.utc),
+            traffic_cycle=cur_cycle,
+            monthly_awg_bytes=2 * 1024 * 1024 * 1024,
+            monthly_vless_bytes=4 * 1024 * 1024 * 1024,
+        )
         sub = VlessSubscription(
             id=10,
             user_id=1,
@@ -1324,7 +1346,7 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
             await render_vless_sub_screen(mock_bot, 987654321, user, mock_session)
             mock_render.assert_called_once()
             called_text = mock_render.call_args[0][2]
-            self.assertIn("📈 <b>Использовано трафика:</b> 6.0 GiB", called_text)
+            self.assertIn("📊 <b>Трафик за месяц:</b> 6.0 GiB", called_text)
             self.assertIn("📊 <b>Занято устройств:</b> 1 из 2", called_text)
 
     async def test_record_vless_traffic_atomic_uuid_mismatch_fencing(self):
@@ -1650,6 +1672,94 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(mock_session.execute.called)
         update_stmt = mock_session.execute.call_args[0][0]
         self.assertEqual(update_stmt.table.name, "users")
+
+    def test_combined_user_quota_alert_deduplication(self):
+        """_check_user_quota_alert triggers once per month only when combined AWG+VLESS exceeds 1 TiB."""
+        from services.workers.traffic import _check_user_quota_alert, _quota_alerted
+
+        _quota_alerted.clear()
+        mock_bot = MagicMock()
+
+        def _fake_start(coro):
+            coro.close()
+            return MagicMock()
+
+        with patch("services.workers.traffic._start_background_task", side_effect=_fake_start) as mock_start:
+            # 1. Total below 1 TiB (e.g. 500 GiB + 400 GiB = 900 GiB) -> No alert
+            _check_user_quota_alert(
+                bot=mock_bot,
+                user_id=42,
+                telegram_id=123456,
+                current_cycle="2026-10",
+                awg_bytes=500 * 1024**3,
+                vless_bytes=400 * 1024**3,
+            )
+            mock_start.assert_not_called()
+
+            # 2. Total exceeds 1 TiB (e.g. 700 GiB + 400 GiB = 1100 GiB) -> Alert triggered
+            _check_user_quota_alert(
+                bot=mock_bot,
+                user_id=42,
+                telegram_id=123456,
+                current_cycle="2026-10",
+                awg_bytes=700 * 1024**3,
+                vless_bytes=400 * 1024**3,
+            )
+            self.assertEqual(mock_start.call_count, 1)
+
+            # 3. Subsequent poll in same cycle with more traffic -> deduplicated, no new alert
+            _check_user_quota_alert(
+                bot=mock_bot,
+                user_id=42,
+                telegram_id=123456,
+                current_cycle="2026-10",
+                awg_bytes=750 * 1024**3,
+                vless_bytes=450 * 1024**3,
+            )
+            self.assertEqual(mock_start.call_count, 1)
+
+            # 4. Next cycle rollover ("2026-11") -> Alert can fire again if quota exceeded
+            _check_user_quota_alert(
+                bot=mock_bot,
+                user_id=42,
+                telegram_id=123456,
+                current_cycle="2026-11",
+                awg_bytes=800 * 1024**3,
+                vless_bytes=300 * 1024**3,
+            )
+            self.assertEqual(mock_start.call_count, 2)
+
+    def test_get_user_monthly_standard_traffic_ssot(self):
+        """get_user_monthly_standard_traffic correctly sums AWG+VLESS for active cycle and handles rotation/None."""
+        from utils.traffic_helpers import get_user_monthly_standard_traffic
+
+        # 1. Active cycle: sums AWG + VLESS
+        user_ok = User(
+            id=1,
+            traffic_cycle="2026-10",
+            monthly_awg_bytes=5 * 1024**3,
+            monthly_vless_bytes=3 * 1024**3,
+        )
+        self.assertEqual(get_user_monthly_standard_traffic(user_ok, "2026-10"), 8 * 1024**3)
+
+        # 2. Cycle mismatch: returns 0
+        user_old = User(
+            id=2,
+            traffic_cycle="2026-09",
+            monthly_awg_bytes=5 * 1024**3,
+            monthly_vless_bytes=3 * 1024**3,
+        )
+        self.assertEqual(get_user_monthly_standard_traffic(user_old, "2026-10"), 0)
+
+        # 3. None user or None fields: safely returns 0 or non-null sum
+        self.assertEqual(get_user_monthly_standard_traffic(None, "2026-10"), 0)
+        user_partial = User(
+            id=3,
+            traffic_cycle="2026-10",
+            monthly_awg_bytes=None,
+            monthly_vless_bytes=2 * 1024**3,
+        )
+        self.assertEqual(get_user_monthly_standard_traffic(user_partial, "2026-10"), 2 * 1024**3)
 
 
 if __name__ == "__main__":
