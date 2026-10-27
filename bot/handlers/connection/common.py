@@ -235,7 +235,9 @@ async def _build_amnezia_screen(
 
     current_cycle = now_utc().strftime("%Y-%m")
     user_cycle = getattr(user, "traffic_cycle", None)
-    monthly_bytes = getattr(user, "monthly_awg_bytes", 0) or 0 if user_cycle == current_cycle else 0
+    monthly_bytes = 0
+    if user_cycle == current_cycle:
+        monthly_bytes = (getattr(user, "monthly_awg_bytes", 0) or 0) + (getattr(user, "monthly_vless_bytes", 0) or 0)
     monthly_traffic_str = format_traffic(monthly_bytes)
 
     if not profiles:

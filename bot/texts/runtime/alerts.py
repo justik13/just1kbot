@@ -49,14 +49,15 @@ ALERT_TITLE_CRITICAL_STOP = "Критическая остановка фоно�
 
 ALERT_TITLE_WORKER_FAILED = "Фоновый воркер упал"
 
-ALERT_TRAFFIC_OVERUSAGE = """⚠️ <b>Fair Usage Policy: Превышение квоты трафика!</b>
+ALERT_TRAFFIC_OVERUSAGE = """⚠️ <b>Fair Usage Policy: Превышение 1 TiB за месяц!</b>
 ━━━━━━━━━━━━━━━━━━━━
 👤 <b>Пользователь:</b> <code>{telegram_id}</code>
-🖥 <b>Сервер:</b> {server_name}
-📊 <b>Трафик за сутки:</b> {tib:.2f} TiB
-🔑 <b>Профиль ID:</b> {profile_id}
+📅 <b>Период:</b> {cycle}
+📊 <b>Всего за месяц:</b> <b>{total_traffic}</b>
+   ├ <b>AmneziaWG:</b> {awg_traffic}
+   └ <b>VLESS:</b> {vless_traffic}
 ━━━━━━━━━━━━━━━━━━━━
-<i>Рекомендуется проверить активность пользователя.</i>"""
+<i>Доступ не заблокирован. Рекомендуется проверить активность пользователя.</i>"""
 
 ALERT_WORKER_CRASH = """🚨 <b>{title}</b>
 🧩 <b>Воркер:</b> <code>{worker}</code>

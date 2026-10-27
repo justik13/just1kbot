@@ -109,6 +109,7 @@ def format_user_card_text(
 
     total_traffic_str = format_traffic(awg_total + wi_total)
     total_traffic_str += texts.ADMIN_USER_TRAFFIC_MONTHLY_BREAKDOWN.format(
+        monthly_std=format_traffic(awg_m + vless_m),
         monthly_awg=format_traffic(awg_m),
         monthly_vless=format_traffic(vless_m),
         monthly_wi=format_traffic(wi_m),

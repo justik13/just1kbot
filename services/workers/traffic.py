@@ -30,7 +30,7 @@ TRAFFIC_QUOTA_BYTES = 1 * 1024 * 1024 * 1024 * 1024
 TRAFFIC_MAX_BACKOFF = 900
 WORKER_START_DELAY = 30.0
 
-_quota_alerted: TTLCache[int, bool] = TTLCache(maxsize=10000, ttl=86400)
+_quota_alerted: TTLCache[str, bool] = TTLCache(maxsize=10000, ttl=86400 * 35)
 _consecutive_crashes: int = 0
 _background_tasks: set[asyncio.Task] = set()
 
@@ -290,7 +290,7 @@ async def _process_server_traffic(
             is_active,
             user_id,
             is_banned,
-            tg_id,
+            _tg_id,
             sub_end,
             financial_hold,
         ) in rows:
@@ -383,22 +383,6 @@ async def _process_server_traffic(
                     user_traffic_deltas[user_id] = user_traffic_deltas.get(user_id, 0) + total_delta
                     server_delta += total_delta
 
-            total_traffic = (new_t_down or 0) + (new_t_up or 0)
-            if (
-                total_traffic > TRAFFIC_QUOTA_BYTES
-                and p_id not in _quota_alerted
-            ):
-                _quota_alerted[p_id] = True
-                _start_background_task(
-                    _send_quota_alert(
-                        bot,
-                        tg_id,
-                        server_info["name"],
-                        total_traffic,
-                        p_id,
-                    )
-                )
-
         # 1. Update User totals FIRST to respect canonical hierarchy: User -> Profile -> Server
         if user_traffic_deltas:
             current_cycle = current_time.strftime("%Y-%m")
@@ -432,6 +416,28 @@ async def _process_server_traffic(
                             ),
                         )
                     )
+
+            # Check combined standard subscription monthly quota alert (AWG + VLESS)
+            updated_users = (await session.execute(
+                select(User.id, User.telegram_id, User.monthly_awg_bytes, User.monthly_vless_bytes)
+                .where(User.id.in_(sorted_uids))
+            )).all()
+            for row in updated_users:
+                if len(row) == 4:
+                    uid_val, tg_id_val, m_awg, m_vless = row
+                else:
+                    uid_val = row[8] if len(row) > 8 else row[0]
+                    tg_id_val = row[10] if len(row) > 10 else 0
+                    m_awg = 0
+                    m_vless = 0
+                _check_user_quota_alert(
+                    bot=bot,
+                    user_id=uid_val,
+                    telegram_id=tg_id_val,
+                    current_cycle=current_cycle,
+                    awg_bytes=int(m_awg or 0),
+                    vless_bytes=int(m_vless or 0),
+                )
 
         # 2. Update VPNProfile SECOND with status guard (prevents resurrection of deleting/delete_failed profiles)
         if updates_data:
@@ -502,12 +508,38 @@ async def _process_server_traffic(
 
 
 
+def _check_user_quota_alert(
+    bot: Bot | None,
+    user_id: int,
+    telegram_id: int,
+    current_cycle: str,
+    awg_bytes: int,
+    vless_bytes: int,
+):
+    total_monthly = max(0, awg_bytes) + max(0, vless_bytes)
+    if total_monthly > TRAFFIC_QUOTA_BYTES:
+        cache_key = f"{user_id}:{current_cycle}"
+        if cache_key not in _quota_alerted:
+            _quota_alerted[cache_key] = True
+            _start_background_task(
+                _send_quota_alert(
+                    bot=bot,
+                    telegram_id=telegram_id,
+                    cycle=current_cycle,
+                    total_bytes=total_monthly,
+                    awg_bytes=awg_bytes,
+                    vless_bytes=vless_bytes,
+                )
+            )
+
+
 async def _send_quota_alert(
     bot: Bot | None,
     telegram_id: int,
-    server_name: str,
+    cycle: str,
     total_bytes: int,
-    profile_id: int,
+    awg_bytes: int,
+    vless_bytes: int,
 ):
     try:
         if not bot:
@@ -517,12 +549,14 @@ async def _send_quota_alert(
         if not admin_ids:
             return
 
-        tib = total_bytes / (1024**4)
+        from utils.formatters import format_traffic
+
         msg = ALERT_TRAFFIC_OVERUSAGE.format(
             telegram_id=telegram_id,
-            server_name=safe(server_name),
-            tib=tib,
-            profile_id=profile_id,
+            cycle=safe(cycle),
+            total_traffic=format_traffic(total_bytes),
+            awg_traffic=format_traffic(awg_bytes),
+            vless_traffic=format_traffic(vless_bytes),
         )
         reply_markup = get_traffic_alert_keyboard(telegram_id)
 
@@ -606,6 +640,7 @@ async def _vless_traffic_sync_once(bot: Bot | None = None):
             server_delta = 0
 
             # Process traffic deduction/accumulation per matching VlessSubscription
+            affected_user_ids: set[int] = set()
             if isinstance(users_stats, dict) and users_stats:
                 matching_uuids = [u for u in users_stats.keys() if isinstance(u, str) and u.strip()]
                 if matching_uuids:
@@ -639,6 +674,35 @@ async def _vless_traffic_sync_once(bot: Bot | None = None):
                             )
                             if delta_total > 0:
                                 server_delta += delta_total
+                                if _sub_uid:
+                                    affected_user_ids.add(_sub_uid)
+
+            if affected_user_ids:
+                current_cycle = current_time.strftime("%Y-%m")
+                async with session_scope() as session:
+                    user_rows = (
+                        await session.execute(
+                            select(User.id, User.telegram_id, User.monthly_awg_bytes, User.monthly_vless_bytes).where(
+                                User.id.in_(affected_user_ids)
+                            )
+                        )
+                    ).all()
+                    for row in user_rows:
+                        if len(row) == 4:
+                            uid_val, tg_id_val, m_awg, m_vless = row
+                        else:
+                            uid_val = row[0]
+                            tg_id_val = row[1] if len(row) > 1 else 0
+                            m_awg = 0
+                            m_vless = 0
+                        _check_user_quota_alert(
+                            bot=bot,
+                            user_id=uid_val,
+                            telegram_id=tg_id_val,
+                            current_cycle=current_cycle,
+                            awg_bytes=int(m_awg or 0),
+                            vless_bytes=int(m_vless or 0),
+                        )
 
             # In a separate transaction, update Server extra_data (isolated from User/Subscription locks)
             if server_delta > 0 or host_tx > 0 or host_rx > 0:

@@ -34,6 +34,7 @@ from database.repositories.profiles_repo import (
 from database.repositories.servers_repo import get_server_by_id
 from services.subscription import SubscriptionService
 from utils.callbacks import parse_callback_id
+from utils.datetime_helpers import now_utc
 from utils.formatters import format_datetime, format_traffic
 from utils.telegram import (
     _append_hub_document_unlocked,
@@ -558,13 +559,18 @@ async def render_vless_sub_screen(
 
     effective_limit = await SubscriptionService.get_effective_device_limit(session, user)
     total_active, _awg_active, vless_active = await VlessSubscriptionService.get_combined_quota(session, user)
-    dev_traffic = (getattr(sub, "traffic_down", 0) or 0) + (getattr(sub, "traffic_up", 0) or 0)
+
+    current_cycle = now_utc().strftime("%Y-%m")
+    user_cycle = getattr(user, "traffic_cycle", None)
+    monthly_bytes = 0
+    if user_cycle == current_cycle:
+        monthly_bytes = (getattr(user, "monthly_awg_bytes", 0) or 0) + (getattr(user, "monthly_vless_bytes", 0) or 0)
 
     text = texts.VLESS_SUB_SCREEN_TEXT.format(
         sub_url=sub_url,
         active=total_active,
         limit=effective_limit,
-        traffic_total=format_traffic(dev_traffic),
+        monthly_traffic=format_traffic(monthly_bytes),
     )
 
     builder = InlineKeyboardBuilder()
