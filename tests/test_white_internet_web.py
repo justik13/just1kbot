@@ -441,6 +441,9 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     self.assertIn("Routing", resp.headers)
                     self.assertTrue(resp.headers["Routing"].startswith("incy://routing/onadd/"))
                     self.assertEqual(resp.headers.get("routing-geo-update-interval"), "168")
+                    self.assertEqual(resp.headers.get("server-address-resolve-enable"), "1")
+                    self.assertEqual(resp.headers.get("server-address-resolve-dns-domain"), "https://cloudflare-dns.com/dns-query")
+                    self.assertEqual(resp.headers.get("server-address-resolve-dns-ip"), "1.1.1.1")
 
                     body_b64 = await resp.text()
                     decoded_lines = base64.b64decode(body_b64).decode("utf-8").splitlines()

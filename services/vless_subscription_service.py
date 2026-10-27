@@ -132,7 +132,7 @@ class VlessSubscriptionService:
         profile_name: str = "✦ Just1k",
         *,
         direct_ru: bool = True,
-        last_updated: str = "1761516000",
+        last_updated: str = "1761625000",
     ) -> str:
         """Construct incy://routing/onadd/<base64> deep link header for split tunneling."""
         return _generate_incy_routing_header(

@@ -682,6 +682,9 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                 "Sort-Order": "none",
                 "No-Limit-Enabled": "1",
                 "x-hwid-active": "true",
+                "server-address-resolve-enable": "1",
+                "server-address-resolve-dns-domain": "https://cloudflare-dns.com/dns-query",
+                "server-address-resolve-dns-ip": "1.1.1.1",
             }
         )
         routing_setting = await get_system_setting(session, "white_internet_routing_enabled", True)

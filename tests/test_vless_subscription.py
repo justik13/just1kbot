@@ -844,6 +844,9 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             self.assertIn("Routing", resp.headers)
             self.assertTrue(resp.headers["Routing"].startswith("incy://routing/onadd/"))
             self.assertEqual("168", resp.headers.get("routing-geo-update-interval"))
+            self.assertEqual("1", resp.headers.get("server-address-resolve-enable"))
+            self.assertEqual("https://cloudflare-dns.com/dns-query", resp.headers.get("server-address-resolve-dns-domain"))
+            self.assertEqual("1.1.1.1", resp.headers.get("server-address-resolve-dns-ip"))
             self.assertNotIn("Announce", resp.headers)
 
             # Profile-Title must be single-line strictly <= 25 characters

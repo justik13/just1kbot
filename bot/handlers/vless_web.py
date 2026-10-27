@@ -555,6 +555,9 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             "x-hwid-active": "true",
             "Hide-Url": "1",
             "No-Limit-Enabled": "1",
+            "server-address-resolve-enable": "1",
+            "server-address-resolve-dns-domain": "https://cloudflare-dns.com/dns-query",
+            "server-address-resolve-dns-ip": "1.1.1.1",
         }
         if routing_enabled:
             response_headers["Routing"] = VlessSubscriptionService.generate_incy_routing_header(
