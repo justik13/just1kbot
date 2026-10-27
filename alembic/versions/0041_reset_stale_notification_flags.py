@@ -126,6 +126,19 @@ def upgrade() -> None:
         """
     )
 
+    # 4. Normalize legacy device limits: any active Standard subscription must have at least
+    # 2 device slots according to the Base tier SSOT (config/tariffs.py).
+    op.execute(
+        """
+        UPDATE users
+        SET device_limit = 2
+        WHERE is_deleted = false
+          AND subscription_end IS NOT NULL
+          AND subscription_end > now()
+          AND device_limit < 2
+        """
+    )
+
 
 def downgrade() -> None:
     # Data migration: values were updated based on current timestamps; no rollback needed.
