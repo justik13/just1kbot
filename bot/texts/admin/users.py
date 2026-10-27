@@ -318,19 +318,13 @@ ADMIN_USERS_MASS_EXTEND_TITLE = """⏳ <b>Массовое продление п
 
 """
 ADMIN_USERS_MASS_EXTEND_SELECT_AUDIENCE = "Выберите целевую группу пользователей для продления доступа:"
-ADMIN_USERS_MASS_EXTEND_HEADER_AUDIENCE = "Выбор аудитории"
 ADMIN_USERS_MASS_EXTEND_HEADER_DAYS = "Ввод срока"
-ADMIN_USERS_MASS_EXTEND_HEADER_REASON = "Ввод причины"
-ADMIN_USERS_MASS_EXTEND_HEADER_CONFIRM = "Подтверждение"
-ADMIN_USERS_MASS_EXTEND_HEADER_RESULT = "Результат"
-ADMIN_USERS_MASS_EXTEND_HEADER_SUMMARY = "Итоги"
 
 ADMIN_USERS_MASS_EXTEND_AUD_ACTIVE_STANDARD = "⚡ Стандартная (активные)"
 ADMIN_USERS_MASS_EXTEND_AUD_ACTIVE_WI = "🌐 Белый Интернет (активные)"
 ADMIN_USERS_MASS_EXTEND_AUD_ACTIVE_ALL = "🌟 Все активные (любой тип)"
 ADMIN_USERS_MASS_EXTEND_AUD_SERVER = "🖥 Пользователям сервера"
 ADMIN_USERS_MASS_EXTEND_SELECT_SERVER = "Выберите сервер, пользователям которого будут добавлены дни доступа:"
-ADMIN_USERS_MASS_EXTEND_SERVER_LABEL = "Пользователям сервера {flag} {name}"
 
 ADMIN_MASS_EXTEND_AUDIENCE_LABELS = {
     "active_standard": "⚡ Стандартная подписка (активные)",
@@ -351,10 +345,7 @@ ADMIN_USERS_MASS_EXTEND_DEFAULT_REASON = "Компенсация за техни
 ADMIN_USERS_MASS_EXTEND_CONFIRM_TITLE = """⚠️ <b>Подтверждение массового продления:</b>
 
 """
-ADMIN_USERS_MASS_EXTEND_CONFIRM_AUDIENCE = "• Аудитория: <b>{aud_label}</b>\n"
-ADMIN_USERS_MASS_EXTEND_CONFIRM_RECIPIENTS = "• Получателей: <b>{user_count} чел.</b>\n"
 ADMIN_USERS_MASS_EXTEND_CONFIRM_DAYS = "• Продление каждому: <b>+{days_text}</b>\n"
-ADMIN_USERS_MASS_EXTEND_CONFIRM_REASON = "• Причина: <i>{safe_reason}</i>\n\n"
 ADMIN_USERS_MASS_EXTEND_CONFIRM_QUESTION = "Вы уверены, что хотите запустить продление?"
 ADMIN_USERS_MASS_EXTEND_BTN_START = "🚀 Запустить продление"
 

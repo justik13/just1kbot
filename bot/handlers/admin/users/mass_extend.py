@@ -123,7 +123,7 @@ async def start_mass_extend(
         return
 
     await state.clear()
-    header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.ADMIN_USERS_MASS_EXTEND_HEADER_AUDIENCE)
+    header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.ADMIN_USERS_MASS_BONUS_SELECT_AUDIENCE)
 
     text = (
         f"{header}\n\n"
@@ -256,7 +256,7 @@ async def process_mass_extend_days(
     await state.set_state(AdminStates.entering_mass_extend_reason)
 
     days_text = format_subscription_days_text(days)
-    header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.ADMIN_USERS_MASS_EXTEND_HEADER_REASON)
+    header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.ADMIN_USERS_MASS_BONUS_VVOD_PRICHINY)
     text = (
         f"{header}\n\n"
         f"{texts.ADMIN_USERS_MASS_EXTEND_ENTER_REASON_PROMPT.format(days_text=days_text)}"
@@ -324,7 +324,7 @@ async def process_mass_extend_reason(
         server = await get_server_by_id(session, server_id)
         server_name = server.name if server else f"ID {server_id}"
         server_flag = (server.country_flag or "🌐") if server else "🌐"
-        aud_label = texts.ADMIN_USERS_MASS_EXTEND_SERVER_LABEL.format(flag=server_flag, name=safe(server_name))
+        aud_label = texts.ADMIN_USERS_MASS_BONUS_SERVER_AUDIENCE_LABEL.format(flag=server_flag, name=safe(server_name))
     else:
         aud_label = texts.ADMIN_MASS_EXTEND_AUDIENCE_LABELS.get(target_aud, target_aud)
 
@@ -337,14 +337,14 @@ async def process_mass_extend_reason(
     await state.update_data(reason=reason, user_count=user_count)
     await state.set_state(AdminStates.confirming_mass_extend)
 
-    header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.ADMIN_USERS_MASS_EXTEND_HEADER_CONFIRM)
+    header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.ADMIN_USERS_MASS_BONUS_CONFIRM)
     text = (
         f"{header}\n\n"
         f"{texts.ADMIN_USERS_MASS_EXTEND_CONFIRM_TITLE}"
-        f"{texts.ADMIN_USERS_MASS_EXTEND_CONFIRM_AUDIENCE.format(aud_label=aud_label)}"
-        f"{texts.ADMIN_USERS_MASS_EXTEND_CONFIRM_RECIPIENTS.format(user_count=user_count)}"
+        f"{texts.ADMIN_USERS_MASS_BONUS_AUDIENCE.format(aud_label=aud_label)}"
+        f"{texts.ADMIN_USERS_MASS_BONUS_RECIPIENTS_CHEL.format(user_count=user_count)}"
         f"{texts.ADMIN_USERS_MASS_EXTEND_CONFIRM_DAYS.format(days_text=days_text)}"
-        f"{texts.ADMIN_USERS_MASS_EXTEND_CONFIRM_REASON.format(safe_reason=safe(reason))}"
+        f"{texts.ADMIN_USERS_MASS_BONUS_REASON.format(safe_reason=safe(reason))}"
         f"{texts.ADMIN_USERS_MASS_EXTEND_CONFIRM_QUESTION}"
     )
 
@@ -394,7 +394,7 @@ async def apply_mass_extend(
     await state.clear()
     await callback.answer(texts.ADMIN_USERS_MASS_EXTEND_STARTED_ALERT, show_alert=True)
 
-    header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.ADMIN_USERS_MASS_EXTEND_HEADER_RESULT)
+    header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.ADMIN_USERS_MASS_BONUS_REZULTAT)
     try:
         await callback.message.edit_text(
             texts.ADMIN_USERS_MASS_EXTEND_STARTED_TEXT.format(header=header, days_text=days_text),
@@ -599,7 +599,7 @@ async def _run_mass_extend_background(
             )
 
         try:
-            header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.ADMIN_USERS_MASS_EXTEND_HEADER_SUMMARY)
+            header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.ADMIN_USERS_MASS_BONUS_ITOGI)
             builder = InlineKeyboardBuilder()
             builder.button(text=texts.ADMIN_USERS_MASS_EXTEND_BTN_NEW, callback_data="admin_mass_extend")
             builder.button(text=texts.ADMIN_USERS_MASS_BONUS_V_ADMIN_MENYU, callback_data="admin_menu")
