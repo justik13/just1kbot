@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import time
+import uuid
 from datetime import timedelta
 from typing import Any
 
@@ -9,7 +10,7 @@ from aiogram.exceptions import TelegramForbiddenError
 from bot.keyboards.notifications import get_devices_deleted_keyboard
 from bot.texts.runtime.notifications import NOTIFY_DEVICES_DELETED
 from cachetools import TTLCache
-from sqlalchemy import and_, delete, or_, select, update
+from sqlalchemy import and_, delete, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from config.constants import (
     AMNEZIA_PROTOCOLS,
@@ -143,7 +144,13 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
                     select(VPNProfile.id).where(VPNProfile.user_id == User.id).exists(),
                     select(VlessSubscription.id).where(
                         VlessSubscription.user_id == User.id,
-                        VlessSubscription.is_active.is_(True),
+                        or_(
+                            VlessSubscription.is_active.is_(True),
+                            and_(
+                                VlessSubscription.active_hwids.is_not(None),
+                                VlessSubscription.active_hwids != text("'{}'::jsonb"),
+                            ),
+                        ),
                     ).exists(),
                 ),
             )
@@ -160,6 +167,7 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
     deleted_profiles_count = 0
 
     for user_id in user_ids:
+        notify_tg_id = None
         try:
             async with session_scope() as session:
                 user_stmt = select(User).where(User.id == user_id).with_for_update()
@@ -191,6 +199,12 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
                     )
                     continue
 
+                from database.repositories import vless_subscription_repo
+                from services.vless_subscription_service import VlessSubscriptionService
+
+                vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+                had_vless_devices = bool(vless_sub and (vless_sub.active_hwids or vless_sub.is_active))
+
                 await SubscriptionService.sync_access_state(session, user)
 
                 profiles_stmt = select(VPNProfile).where(
@@ -199,19 +213,45 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
                 profiles_result = await session.execute(profiles_stmt)
                 profiles = list(profiles_result.scalars().all())
 
-                if not profiles:
+                vless_deleted = False
+                if vless_sub and had_vless_devices:
+                    old_uuid, new_uuid = await vless_subscription_repo.reset_hwids(session, vless_sub.id)
+                    if not old_uuid:
+                        old_uuid = vless_sub.uuid
+                        new_uuid = str(uuid.uuid4())
+                        vless_sub.uuid = new_uuid
+                        vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1
+                        vless_sub.active_hwids = {}
+                        vless_sub.node_traffic_snapshots = {"_fresh": True}
+                        pending = list(getattr(vless_sub, "pending_revoked_uuids", None) or [])
+                        if old_uuid and old_uuid not in pending:
+                            pending.append(old_uuid)
+                        vless_sub.pending_revoked_uuids = pending
+                    vless_sub.is_active = False
+                    await session.flush()
+                    if old_uuid:
+                        VlessSubscriptionService.deprovision_background(
+                            old_uuid, version=vless_sub.version, sub_id=vless_sub.id, session=session
+                        )
+                    VlessSubscriptionService.ensure_synced_background(user.id, is_active=False, session=session)
+                    vless_deleted = True
+
+                if not profiles and not vless_deleted:
                     continue
 
-                deleted = await ProfileDeletionService.delete_profiles_list(
-                    session,
-                    profiles,
-                    reason="grace_delete",
-                    background=True,
-                )
+                deleted = 0
+                if profiles:
+                    deleted = await ProfileDeletionService.delete_profiles_list(
+                        session,
+                        profiles,
+                        reason="grace_delete",
+                        background=True,
+                    )
 
-                if deleted > 0:
+                if deleted > 0 or vless_deleted:
                     deleted_users_count += 1
                     deleted_profiles_count += deleted
+                    notify_tg_id = user.telegram_id
                     from services.audit_service import AuditService
 
                     await AuditService.log_action(
@@ -222,39 +262,43 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
                         target_id=user.id,
                         details={
                             "profiles_deleted": deleted,
+                            "vless_deleted": vless_deleted,
                             "reason": "grace_delete",
                         },
                     )
                     logger.info(
-                        "Grace cleanup: removed %s expired profiles "
+                        "Grace cleanup: removed %s expired profiles (vless=%s) "
                         "for user_id=%s (subscription_end=%s)",
                         deleted,
+                        vless_deleted,
                         user_id,
                         user.subscription_end,
                     )
 
-                    # Уведомить пользователя об удалении устройств
-                    if bot:
-                        try:
-                            await bot.send_message(
-                                user.telegram_id,
-                                NOTIFY_DEVICES_DELETED,
-                                reply_markup=get_devices_deleted_keyboard(),
-                                parse_mode="HTML",
-                            )
-                        except TelegramForbiddenError:
-                            user.is_bot_blocked = True
-                            logger.info(
-                                "User %s blocked the bot (grace cleanup notification)",
-                                user.telegram_id,
-                            )
-
-                        except Exception as e:
-                            logger.warning(
-                                "Failed to send grace cleanup notification to user %s: %s",
-                                user.telegram_id,
-                                e,
-                            )
+            # Отправка уведомления об удалении устройств ПОСЛЕ завершения транзакции
+            if notify_tg_id and bot:
+                try:
+                    await bot.send_message(
+                        notify_tg_id,
+                        NOTIFY_DEVICES_DELETED,
+                        reply_markup=get_devices_deleted_keyboard(),
+                        parse_mode="HTML",
+                    )
+                except TelegramForbiddenError:
+                    async with session_scope() as blocked_session:
+                        b_user = await blocked_session.get(User, user_id)
+                        if b_user:
+                            b_user.is_bot_blocked = True
+                    logger.info(
+                        "User %s blocked the bot (grace cleanup notification)",
+                        notify_tg_id,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Failed to send grace cleanup notification to user %s: %s",
+                        notify_tg_id,
+                        e,
+                    )
 
         except Exception as e:
             logger.error(

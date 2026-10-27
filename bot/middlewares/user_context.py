@@ -124,6 +124,13 @@ class UserContextMiddleware(BaseMiddleware):
             else:
                 set_cached_user_id(telegram_id, user.id)
 
+        if user is not None and user.is_bot_blocked:
+            user.is_bot_blocked = False
+            session.add(user)
+            await session.flush()
+            invalidate_user_cache(telegram_id)
+            logger.info("Unblocked user %s upon user interaction in UserContextMiddleware", telegram_id)
+
         data["db_user"] = user
         data["is_new_user"] = is_new_user
         return await handler(event, data)

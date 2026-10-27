@@ -182,3 +182,66 @@ class TestCleanupRetentionExtended(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(
             matches_webhook_retention("dead", recent_dt), "Recent dead webhook must NOT be deleted"
         )
+
+    async def test_cleanup_expired_profiles_grace_handles_vless_only_inactive_sub(self):
+        from services.workers.cleanup import _cleanup_expired_profiles_grace
+
+        user = MagicMock()
+        user.id = 123
+        user.telegram_id = 999999
+        user.is_deleted = False
+        user.subscription_end = datetime.now(timezone.utc) - timedelta(hours=30)
+        user.financial_hold = False
+
+        vless_sub = MagicMock()
+        vless_sub.id = 456
+        vless_sub.user_id = 123
+        vless_sub.is_active = False
+        vless_sub.uuid = "old-uuid-1234"
+        vless_sub.active_hwids = {"hwid-1": "some-info"}
+        vless_sub.pending_revoked_uuids = []
+        vless_sub.version = 1
+
+        mock_session_query = AsyncMock()
+        mock_session_query.execute.return_value = MagicMock(all=lambda: [(123,)])
+
+        mock_session_user = AsyncMock()
+        mock_session_user.execute.side_effect = [
+            MagicMock(scalar_one_or_none=lambda: user),
+            MagicMock(scalars=lambda: MagicMock(all=lambda: [])),
+        ]
+
+        sessions = [mock_session_query, mock_session_user]
+
+        def get_session():
+            ctx = AsyncMock()
+            ctx.__aenter__.return_value = sessions.pop(0)
+            return ctx
+
+        bot = AsyncMock()
+
+        with (
+            patch("services.workers.cleanup.session_scope", side_effect=get_session),
+            patch("services.subscription.SubscriptionService.sync_access_state", new_callable=AsyncMock) as mock_sync,
+            patch(
+                "database.repositories.vless_subscription_repo.get_subscription_by_user_id",
+                new_callable=AsyncMock,
+                return_value=vless_sub,
+            ),
+            patch(
+                "database.repositories.vless_subscription_repo.reset_hwids",
+                new_callable=AsyncMock,
+                return_value=("old-uuid-1234", "new-uuid-5678"),
+            ),
+            patch("services.vless_subscription_service.VlessSubscriptionService.deprovision_background") as mock_deprovision,
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background") as mock_ensure_synced,
+            patch("services.audit_service.AuditService.log_action", new_callable=AsyncMock),
+        ):
+            await _cleanup_expired_profiles_grace(bot)
+
+        mock_sync.assert_awaited_once()
+        mock_deprovision.assert_called_once_with(
+            "old-uuid-1234", version=vless_sub.version, sub_id=vless_sub.id, session=mock_session_user
+        )
+        mock_ensure_synced.assert_called_once_with(123, is_active=False, session=mock_session_user)
+        bot.send_message.assert_awaited_once()
