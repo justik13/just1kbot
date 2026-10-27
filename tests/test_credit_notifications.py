@@ -332,7 +332,7 @@ class TestCreditNotifyWorker(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(await worker._deliver_one(AsyncMock(), order.id))
         self.assertNotIn("late_notify_pending", order.metadata_)
 
-    async def test_drops_debt_when_user_blocked(self):
+    async def test_preserves_debt_when_user_blocked(self):
         from services.workers import credit_notifications as worker
 
         order = _topup_order(metadata_={"late_notify_pending": True})
@@ -352,7 +352,7 @@ class TestCreditNotifyWorker(unittest.IsolatedAsyncioTestCase):
         ):
             self.assertFalse(await worker._deliver_one(AsyncMock(), order.id))
             mock_send.assert_not_called()
-        self.assertNotIn("late_notify_pending", order.metadata_)
+        self.assertIn("late_notify_pending", order.metadata_)
 
     async def test_drops_debt_when_no_longer_paid(self):
         """A refund landed after settlement: never send a 'credited' push."""

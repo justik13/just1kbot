@@ -333,9 +333,10 @@ async def _snapshot(order_id) -> dict | None:
                     if (
                         user is None
                         or not user.telegram_id
-                        or user.is_bot_blocked
                     ):
                         owner = {"kind": "drop"}
+                    elif user.is_bot_blocked:
+                        owner = None
                     else:
                         balance = await get_account_balance(
                             session, user_id=user.id
@@ -374,10 +375,11 @@ async def _snapshot(order_id) -> dict | None:
                 order.status != "paid"
                 or ref_user is None
                 or not ref_user.telegram_id
-                or ref_user.is_bot_blocked
                 or bonus <= 0
             ):
                 referrer = {"kind": "drop"}
+            elif ref_user.is_bot_blocked:
+                referrer = None
             else:
                 ref_balance = await get_account_balance(session, user_id=ref_user.id)
                 referrer = {

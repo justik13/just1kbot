@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import time
+import uuid
 from datetime import timedelta
 from typing import Any
 
@@ -199,17 +200,45 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
                 profiles_result = await session.execute(profiles_stmt)
                 profiles = list(profiles_result.scalars().all())
 
-                if not profiles:
+                from database.repositories import vless_subscription_repo
+                from services.vless_subscription_service import VlessSubscriptionService
+
+                vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+                vless_deleted = False
+                if vless_sub and (vless_sub.active_hwids or vless_sub.is_active):
+                    old_uuid, new_uuid = await vless_subscription_repo.reset_hwids(session, vless_sub.id)
+                    if not old_uuid:
+                        old_uuid = vless_sub.uuid
+                        new_uuid = str(uuid.uuid4())
+                        vless_sub.uuid = new_uuid
+                        vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1
+                        vless_sub.active_hwids = {}
+                        pending = list(getattr(vless_sub, "pending_revoked_uuids", None) or [])
+                        if old_uuid and old_uuid not in pending:
+                            pending.append(old_uuid)
+                        vless_sub.pending_revoked_uuids = pending
+                    vless_sub.is_active = False
+                    await session.flush()
+                    if old_uuid:
+                        VlessSubscriptionService.deprovision_background(
+                            old_uuid, version=vless_sub.version, sub_id=vless_sub.id, session=session
+                        )
+                    VlessSubscriptionService.ensure_synced_background(user.id, is_active=False, session=session)
+                    vless_deleted = True
+
+                if not profiles and not vless_deleted:
                     continue
 
-                deleted = await ProfileDeletionService.delete_profiles_list(
-                    session,
-                    profiles,
-                    reason="grace_delete",
-                    background=True,
-                )
+                deleted = 0
+                if profiles:
+                    deleted = await ProfileDeletionService.delete_profiles_list(
+                        session,
+                        profiles,
+                        reason="grace_delete",
+                        background=True,
+                    )
 
-                if deleted > 0:
+                if deleted > 0 or vless_deleted:
                     deleted_users_count += 1
                     deleted_profiles_count += deleted
                     from services.audit_service import AuditService
@@ -222,13 +251,15 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
                         target_id=user.id,
                         details={
                             "profiles_deleted": deleted,
+                            "vless_deleted": vless_deleted,
                             "reason": "grace_delete",
                         },
                     )
                     logger.info(
-                        "Grace cleanup: removed %s expired profiles "
+                        "Grace cleanup: removed %s expired profiles (vless=%s) "
                         "for user_id=%s (subscription_end=%s)",
                         deleted,
+                        vless_deleted,
                         user_id,
                         user.subscription_end,
                     )
