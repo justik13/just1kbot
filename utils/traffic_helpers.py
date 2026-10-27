@@ -91,3 +91,20 @@ def record_device_traffic_archive(archived: dict, device_name: str | None, cur_b
     archived[slot_key] = int(archived.get(slot_key, 0)) + legacy_bytes + max(0, cur_bytes)
     return archived
 
+
+def get_user_monthly_standard_traffic(user: object | None, current_cycle: str | None = None) -> int:
+    """Returns combined standard subscription traffic (AWG + VLESS) for the active cycle."""
+    if not user:
+        return 0
+    if current_cycle is None:
+        from utils.datetime_helpers import now_utc
+
+        current_cycle = now_utc().strftime("%Y-%m")
+    user_cycle = getattr(user, "traffic_cycle", None)
+    if user_cycle != current_cycle:
+        return 0
+    awg = getattr(user, "monthly_awg_bytes", 0) or 0
+    vless = getattr(user, "monthly_vless_bytes", 0) or 0
+    return max(0, int(awg)) + max(0, int(vless))
+
+

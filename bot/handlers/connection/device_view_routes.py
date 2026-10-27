@@ -34,7 +34,6 @@ from database.repositories.profiles_repo import (
 from database.repositories.servers_repo import get_server_by_id
 from services.subscription import SubscriptionService
 from utils.callbacks import parse_callback_id
-from utils.datetime_helpers import now_utc
 from utils.formatters import format_datetime, format_traffic
 from utils.telegram import (
     _append_hub_document_unlocked,
@@ -560,11 +559,9 @@ async def render_vless_sub_screen(
     effective_limit = await SubscriptionService.get_effective_device_limit(session, user)
     total_active, _awg_active, vless_active = await VlessSubscriptionService.get_combined_quota(session, user)
 
-    current_cycle = now_utc().strftime("%Y-%m")
-    user_cycle = getattr(user, "traffic_cycle", None)
-    monthly_bytes = 0
-    if user_cycle == current_cycle:
-        monthly_bytes = (getattr(user, "monthly_awg_bytes", 0) or 0) + (getattr(user, "monthly_vless_bytes", 0) or 0)
+    from utils.traffic_helpers import get_user_monthly_standard_traffic
+
+    monthly_bytes = get_user_monthly_standard_traffic(user)
 
     text = texts.VLESS_SUB_SCREEN_TEXT.format(
         sub_url=sub_url,

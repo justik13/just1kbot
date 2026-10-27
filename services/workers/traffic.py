@@ -422,14 +422,7 @@ async def _process_server_traffic(
                 select(User.id, User.telegram_id, User.monthly_awg_bytes, User.monthly_vless_bytes)
                 .where(User.id.in_(sorted_uids))
             )).all()
-            for row in updated_users:
-                if len(row) == 4:
-                    uid_val, tg_id_val, m_awg, m_vless = row
-                else:
-                    uid_val = row[8] if len(row) > 8 else row[0]
-                    tg_id_val = row[10] if len(row) > 10 else 0
-                    m_awg = 0
-                    m_vless = 0
+            for uid_val, tg_id_val, m_awg, m_vless in updated_users:
                 _check_user_quota_alert(
                     bot=bot,
                     user_id=uid_val,
@@ -687,14 +680,7 @@ async def _vless_traffic_sync_once(bot: Bot | None = None):
                             )
                         )
                     ).all()
-                    for row in user_rows:
-                        if len(row) == 4:
-                            uid_val, tg_id_val, m_awg, m_vless = row
-                        else:
-                            uid_val = row[0]
-                            tg_id_val = row[1] if len(row) > 1 else 0
-                            m_awg = 0
-                            m_vless = 0
+                    for uid_val, tg_id_val, m_awg, m_vless in user_rows:
                         _check_user_quota_alert(
                             bot=bot,
                             user_id=uid_val,

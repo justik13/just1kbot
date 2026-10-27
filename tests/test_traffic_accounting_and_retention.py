@@ -69,7 +69,17 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         )
         mock_result.all.return_value = [mock_row]
         mock_result.scalars.return_value.all.return_value = [101]
-        mock_session.execute.return_value = mock_result
+
+        mock_user_result = MagicMock()
+        mock_user_result.all.return_value = [(77, 12345, 60 * 1024 * 1024, 0)]
+
+        def fake_execute(stmt, *args, **kwargs):
+            stmt_str = str(stmt).lower()
+            if "users.monthly_awg_bytes" in stmt_str or "users.monthly_vless_bytes" in stmt_str:
+                return mock_user_result
+            return mock_result
+
+        mock_session.execute.side_effect = fake_execute
 
         mock_server = Server(
             id=1,
@@ -1718,6 +1728,38 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
                 vless_bytes=300 * 1024**3,
             )
             self.assertEqual(mock_start.call_count, 2)
+
+    def test_get_user_monthly_standard_traffic_ssot(self):
+        """get_user_monthly_standard_traffic correctly sums AWG+VLESS for active cycle and handles rotation/None."""
+        from utils.traffic_helpers import get_user_monthly_standard_traffic
+
+        # 1. Active cycle: sums AWG + VLESS
+        user_ok = User(
+            id=1,
+            traffic_cycle="2026-10",
+            monthly_awg_bytes=5 * 1024**3,
+            monthly_vless_bytes=3 * 1024**3,
+        )
+        self.assertEqual(get_user_monthly_standard_traffic(user_ok, "2026-10"), 8 * 1024**3)
+
+        # 2. Cycle mismatch: returns 0
+        user_old = User(
+            id=2,
+            traffic_cycle="2026-09",
+            monthly_awg_bytes=5 * 1024**3,
+            monthly_vless_bytes=3 * 1024**3,
+        )
+        self.assertEqual(get_user_monthly_standard_traffic(user_old, "2026-10"), 0)
+
+        # 3. None user or None fields: safely returns 0 or non-null sum
+        self.assertEqual(get_user_monthly_standard_traffic(None, "2026-10"), 0)
+        user_partial = User(
+            id=3,
+            traffic_cycle="2026-10",
+            monthly_awg_bytes=None,
+            monthly_vless_bytes=2 * 1024**3,
+        )
+        self.assertEqual(get_user_monthly_standard_traffic(user_partial, "2026-10"), 2 * 1024**3)
 
 
 if __name__ == "__main__":
