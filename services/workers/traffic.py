@@ -419,18 +419,32 @@ async def _process_server_traffic(
 
             # Check combined standard subscription monthly quota alert (AWG + VLESS)
             updated_users = (await session.execute(
-                select(User.id, User.telegram_id, User.monthly_awg_bytes, User.monthly_vless_bytes)
+                select(
+                    User.id,
+                    User.telegram_id,
+                    User.monthly_awg_bytes,
+                    User.monthly_vless_bytes,
+                    User.traffic_cycle,
+                )
                 .where(User.id.in_(sorted_uids))
             )).all()
-            for uid_val, tg_id_val, m_awg, m_vless in updated_users:
-                _check_user_quota_alert(
-                    bot=bot,
-                    user_id=uid_val,
-                    telegram_id=tg_id_val,
-                    current_cycle=current_cycle,
-                    awg_bytes=int(m_awg or 0),
-                    vless_bytes=int(m_vless or 0),
-                )
+            if updated_users and bot:
+                from database.connection import queue_post_commit_task
+
+                async def _post_commit_alerts():
+                    for uid_val, tg_id_val, m_awg, m_vless, u_cycle in updated_users:
+                        if u_cycle != current_cycle:
+                            continue
+                        _check_user_quota_alert(
+                            bot=bot,
+                            user_id=uid_val,
+                            telegram_id=tg_id_val,
+                            current_cycle=current_cycle,
+                            awg_bytes=int(m_awg or 0),
+                            vless_bytes=int(m_vless or 0),
+                        )
+
+                queue_post_commit_task(session, _post_commit_alerts)
 
         # 2. Update VPNProfile SECOND with status guard (prevents resurrection of deleting/delete_failed profiles)
         if updates_data:
@@ -517,6 +531,7 @@ def _check_user_quota_alert(
             _start_background_task(
                 _send_quota_alert(
                     bot=bot,
+                    user_id=user_id,
                     telegram_id=telegram_id,
                     cycle=current_cycle,
                     total_bytes=total_monthly,
@@ -533,6 +548,7 @@ async def _send_quota_alert(
     total_bytes: int,
     awg_bytes: int,
     vless_bytes: int,
+    user_id: int = 0,
 ):
     try:
         if not bot:
@@ -553,21 +569,30 @@ async def _send_quota_alert(
         )
         reply_markup = get_traffic_alert_keyboard(telegram_id)
 
+        any_sent = False
         for admin_id in admin_ids:
             try:
-                await safe_send_message(
+                sent = await safe_send_message(
                     bot,
                     chat_id=admin_id,
                     text=msg,
                     reply_markup=reply_markup,
                     parse_mode="HTML",
                 )
+                if sent is not None:
+                    any_sent = True
             except Exception as e:
                 logger.error(
                     "Failed to send quota alert to %s: %s", admin_id, e
                 )
+        if not any_sent and user_id:
+            cache_key = f"{user_id}:{cycle}"
+            _quota_alerted.pop(cache_key, None)
     except Exception as e:
         logger.error("Failed to send quota alert: %s", e)
+        if user_id:
+            cache_key = f"{user_id}:{cycle}"
+            _quota_alerted.pop(cache_key, None)
 
 
 async def _vless_traffic_sync_once(bot: Bot | None = None):
@@ -670,27 +695,7 @@ async def _vless_traffic_sync_once(bot: Bot | None = None):
                                 if _sub_uid:
                                     affected_user_ids.add(_sub_uid)
 
-            if affected_user_ids:
-                current_cycle = current_time.strftime("%Y-%m")
-                async with session_scope() as session:
-                    user_rows = (
-                        await session.execute(
-                            select(User.id, User.telegram_id, User.monthly_awg_bytes, User.monthly_vless_bytes).where(
-                                User.id.in_(affected_user_ids)
-                            )
-                        )
-                    ).all()
-                    for uid_val, tg_id_val, m_awg, m_vless in user_rows:
-                        _check_user_quota_alert(
-                            bot=bot,
-                            user_id=uid_val,
-                            telegram_id=tg_id_val,
-                            current_cycle=current_cycle,
-                            awg_bytes=int(m_awg or 0),
-                            vless_bytes=int(m_vless or 0),
-                        )
-
-            # In a separate transaction, update Server extra_data (isolated from User/Subscription locks)
+            # 1. In a separate transaction, update Server extra_data immediately after subscription commit
             if server_delta > 0 or host_tx > 0 or host_rx > 0:
                 current_cycle = current_time.strftime("%Y-%m")
                 async with session_scope() as session:
@@ -712,6 +717,43 @@ async def _vless_traffic_sync_once(bot: Bot | None = None):
                                 changed = True
                         if changed:
                             server_obj.extra_data = extra
+
+            # 2. Check user quota alerts in an isolated try-block so notification errors never impact server stats
+            if affected_user_ids and bot:
+                try:
+                    current_cycle = current_time.strftime("%Y-%m")
+                    async with session_scope() as session:
+                        user_rows = (
+                            await session.execute(
+                                select(
+                                    User.id,
+                                    User.telegram_id,
+                                    User.monthly_awg_bytes,
+                                    User.monthly_vless_bytes,
+                                    User.traffic_cycle,
+                                ).where(User.id.in_(affected_user_ids))
+                            )
+                        ).all()
+                        for uid_val, tg_id_val, m_awg, m_vless, u_cycle in user_rows:
+                            if u_cycle != current_cycle:
+                                continue
+                            _check_user_quota_alert(
+                                bot=bot,
+                                user_id=uid_val,
+                                telegram_id=tg_id_val,
+                                current_cycle=current_cycle,
+                                awg_bytes=int(m_awg or 0),
+                                vless_bytes=int(m_vless or 0),
+                            )
+                except Exception as alert_err:
+                    logger.error(
+                        "Failed to check VLESS quota alerts for users %s on server %s (%d): %s",
+                        affected_user_ids,
+                        server_name,
+                        server_id,
+                        alert_err,
+                        exc_info=True,
+                    )
         except Exception as srv_err:
             logger.error(
                 "Failed to process VLESS traffic for server %s (%d): %s",
