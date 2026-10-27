@@ -90,7 +90,7 @@ def upgrade() -> None:
             notified_1d = false,
             notified_2h = false,
             notified_expired = false
-        WHERE status = 'ACTIVE'
+        WHERE status IN ('ACTIVE', 'EXHAUSTED')
           AND expires_at IS NOT NULL
           AND expires_at > now() + interval '3 days'
         """
@@ -104,7 +104,7 @@ def upgrade() -> None:
             notified_1d = false,
             notified_2h = false,
             notified_expired = false
-        WHERE status = 'ACTIVE'
+        WHERE status IN ('ACTIVE', 'EXHAUSTED')
           AND expires_at IS NOT NULL
           AND expires_at <= now() + interval '3 days'
           AND expires_at > now() + interval '1 day'
@@ -119,7 +119,7 @@ def upgrade() -> None:
             notified_1d = true,
             notified_2h = false,
             notified_expired = false
-        WHERE status = 'ACTIVE'
+        WHERE status IN ('ACTIVE', 'EXHAUSTED')
           AND expires_at IS NOT NULL
           AND expires_at <= now() + interval '1 day'
           AND expires_at > now()

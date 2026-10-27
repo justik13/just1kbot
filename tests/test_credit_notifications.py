@@ -214,6 +214,16 @@ def _empty_rows():
 
 
 class TestCreditNotifyWorker(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        super().setUp()
+        from services.workers import credit_notifications as worker
+        worker._blocked_orders_cache.clear()
+
+    def tearDown(self):
+        super().tearDown()
+        from services.workers import credit_notifications as worker
+        worker._blocked_orders_cache.clear()
+
     def _session(self, order, user, has_credit=1):
         session = AsyncMock(spec=AsyncSession)
         session.get = AsyncMock(side_effect=[order, user, order, order])
@@ -346,6 +356,7 @@ class TestCreditNotifyWorker(unittest.IsolatedAsyncioTestCase):
             worker.MAX_NOTIFY_ATTEMPTS - 1,
         )
         self.assertTrue(user.is_bot_blocked)
+        self.assertIn(order.id, worker._blocked_orders_cache)
 
     async def test_drops_debt_when_user_gone(self):
         from services.workers import credit_notifications as worker
@@ -382,6 +393,7 @@ class TestCreditNotifyWorker(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(await worker._deliver_one(AsyncMock(), order.id))
             mock_send.assert_not_called()
         self.assertIn("late_notify_pending", order.metadata_)
+        self.assertIn(order.id, worker._blocked_orders_cache)
 
     async def test_drops_debt_when_no_longer_paid(self):
         """A refund landed after settlement: never send a 'credited' push."""

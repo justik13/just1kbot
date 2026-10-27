@@ -24,7 +24,7 @@ from datetime import timedelta
 import logging
 import time
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Literal
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
@@ -53,12 +53,15 @@ from utils.telegram import EFFECT_CONFETTI, EFFECT_FIRE, safe_send_message
 
 logger = logging.getLogger(__name__)
 
+NotifyResult = bool | Literal["forbidden"]
+
 CREDIT_NOTIFY_INTERVAL = 300.0
 CREDIT_NOTIFY_START_DELAY = 60.0
 CREDIT_NOTIFY_BATCH_SIZE = 20
 MAX_NOTIFY_ATTEMPTS = 10
 CREDIT_NOTIFY_RETENTION_DAYS = 30
-_blocked_orders_cache: TTLCache[Any, float] = TTLCache(maxsize=2000, ttl=300.0)
+CREDIT_NOTIFY_CACHE_TTL = 900.0
+_blocked_orders_cache: TTLCache[Any, float] = TTLCache(maxsize=2000, ttl=CREDIT_NOTIFY_CACHE_TTL)
 
 
 async def credit_notifications_loop(
@@ -131,7 +134,6 @@ async def deliver_pending_credit_notifications(bot: Bot) -> int:
     for order_id in order_ids:
         try:
             if await _deliver_one(bot, order_id):
-                _blocked_orders_cache.pop(order_id, None)
                 delivered += 1
         except asyncio.CancelledError:
             raise
@@ -152,7 +154,7 @@ async def _send_late_push(
     telegram_id: int,
     real_available: int,
     bonus_available: int,
-) -> bool:
+) -> NotifyResult:
     """Compact proactive push for a credited order (no DB access).
 
     Uses only the worker-allowed presentation adapters (``bot.texts``,
@@ -207,7 +209,7 @@ async def _send_late_push(
         return False
 
 
-async def _send_referrer_push(bot: Bot, referrer: dict) -> bool:
+async def _send_referrer_push(bot: Bot, referrer: dict) -> NotifyResult:
     """Proactive push for a referral bonus (no DB access)."""
     try:
         bonus = int(referrer["bonus"])
@@ -275,6 +277,7 @@ async def _deliver_one(bot: Bot, order_id) -> bool:
     """
     snap = await _snapshot(order_id)
     if snap is None:
+        _blocked_orders_cache[order_id] = time.monotonic()
         return False
     owner, ref = snap["owner"], snap["referrer"]
     if owner is None and ref is None:
@@ -287,11 +290,13 @@ async def _deliver_one(bot: Bot, order_id) -> bool:
         await _drop_debts(order_id, owner=True, referrer=False)
         owner = None
         if ref is None:
+            _blocked_orders_cache[order_id] = time.monotonic()
             return False
     if ref is not None and ref["kind"] == "drop":
         await _drop_debts(order_id, owner=False, referrer=True)
         ref = None
         if owner is None:
+            _blocked_orders_cache[order_id] = time.monotonic()
             return False
 
     owner_ok = (
@@ -347,9 +352,10 @@ async def _snapshot(order_id) -> dict | None:
                     # Already synced as blocked by another path (broadcast,
                     # WI traffic, expiry notifications): do not burn attempts
                     # on a walled user.
+                    anchor_time = order.paid_at or order.created_at
                     expired_retention = bool(
-                        order.created_at
-                        and (now_utc() - order.created_at) > timedelta(days=CREDIT_NOTIFY_RETENTION_DAYS)
+                        anchor_time
+                        and (now_utc() - anchor_time) > timedelta(days=CREDIT_NOTIFY_RETENTION_DAYS)
                     )
                     if (
                         user is None
@@ -393,9 +399,10 @@ async def _snapshot(order_id) -> dict | None:
                 bonus = int(Decimal(str(debt.get("bonus", "0"))))
             except (InvalidOperation, TypeError, ValueError):
                 bonus = 0
+            anchor_time = order.paid_at or order.created_at
             expired_retention = bool(
-                order.created_at
-                and (now_utc() - order.created_at) > timedelta(days=CREDIT_NOTIFY_RETENTION_DAYS)
+                anchor_time
+                and (now_utc() - anchor_time) > timedelta(days=CREDIT_NOTIFY_RETENTION_DAYS)
             )
             if (
                 order.status != "paid"
@@ -426,7 +433,7 @@ async def _snapshot(order_id) -> dict | None:
 
 
 async def _finalize_delivery(
-    order_id, owner_ok: bool | str | None, ref_ok: bool | str | None
+    order_id, owner_ok: NotifyResult | None, ref_ok: NotifyResult | None
 ) -> bool:
     """Re-check each debt under a brief row lock, then clear or count."""
     delivered = False
@@ -438,6 +445,7 @@ async def _finalize_delivery(
         if order.status != "paid":
             mark_notified(order)
             mark_referrer_notified(order)
+            _blocked_orders_cache.pop(order_id, None)
             logger.info(
                 "Credit-notify drops debts for order %s: status is %s, not paid",
                 order.id,
@@ -493,6 +501,21 @@ async def _finalize_delivery(
                     "Credit-notify gives up on referrer push for order %s",
                     order.id,
                 )
+
+        meta = order.metadata_ or {}
+        has_remaining_debt = bool(
+            meta.get(LATE_NOTIFY_PENDING_KEY) or meta.get(REFERRER_PENDING_KEY)
+        )
+        if has_remaining_debt and (
+            owner_ok == "forbidden"
+            or ref_ok == "forbidden"
+            or (owner_ok is None and meta.get(LATE_NOTIFY_PENDING_KEY))
+            or (ref_ok is None and meta.get(REFERRER_PENDING_KEY))
+        ):
+            _blocked_orders_cache[order_id] = time.monotonic()
+        elif not has_remaining_debt:
+            _blocked_orders_cache.pop(order_id, None)
+
     return delivered
 
 
@@ -506,6 +529,12 @@ async def _drop_debts(order_id, *, owner: bool, referrer: bool) -> None:
             mark_notified(order)
         if referrer:
             mark_referrer_notified(order)
+        meta = order.metadata_ or {}
+        has_remaining_debt = bool(
+            meta.get(LATE_NOTIFY_PENDING_KEY) or meta.get(REFERRER_PENDING_KEY)
+        )
+        if not has_remaining_debt:
+            _blocked_orders_cache.pop(order_id, None)
         logger.info("Credit-notify drops dead debt for order %s", order.id)
 
 

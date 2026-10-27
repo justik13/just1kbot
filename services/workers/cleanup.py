@@ -222,6 +222,7 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
                         vless_sub.uuid = new_uuid
                         vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1
                         vless_sub.active_hwids = {}
+                        vless_sub.node_traffic_snapshots = {"_fresh": True}
                         pending = list(getattr(vless_sub, "pending_revoked_uuids", None) or [])
                         if old_uuid and old_uuid not in pending:
                             pending.append(old_uuid)
