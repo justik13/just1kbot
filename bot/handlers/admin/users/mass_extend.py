@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 
 from aiogram import F, Router
-from aiogram.exceptions import TelegramForbiddenError
+from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -66,6 +66,7 @@ def _build_mass_extend_audience_filter(target_aud: str, now: datetime):
                     WhiteInternetStatus.EXHAUSTED,
                 ]),
                 WhiteInternetSubscription.expires_at > now,
+                WhiteInternetSubscription.is_trial.is_(False),
                 WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
             )
         )
@@ -76,6 +77,7 @@ def _build_mass_extend_audience_filter(target_aud: str, now: datetime):
                 WhiteInternetStatus.EXHAUSTED,
             ]),
             WhiteInternetSubscription.expires_at > now,
+            WhiteInternetSubscription.is_trial.is_(False),
             WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
         )
         return or_(User.subscription_end > now, User.id.in_(wi_subq))
@@ -87,6 +89,7 @@ def _build_mass_extend_audience_filter(target_aud: str, now: datetime):
         server_proto_subq = select(Server.protocol).where(Server.id == server_id).scalar_subquery()
         awg_cond = (
             (server_proto_subq.in_(AMNEZIA_PROTOCOLS))
+            & (User.subscription_end > now)
             & User.profiles.any(
                 (VPNProfile.server_id == server_id)
                 & (VPNProfile.is_active.is_(True))
@@ -101,9 +104,10 @@ def _build_mass_extend_audience_filter(target_aud: str, now: datetime):
                     WhiteInternetSubscription.origin_node_id == server_id,
                     WhiteInternetSubscription.status.in_([
                         WhiteInternetStatus.ACTIVE,
-                        WhiteInternetStatus.PENDING,
                         WhiteInternetStatus.EXHAUSTED,
                     ]),
+                    WhiteInternetSubscription.expires_at > now,
+                    WhiteInternetSubscription.is_trial.is_(False),
                     WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
                 )
             )
@@ -394,7 +398,7 @@ async def apply_mass_extend(
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
 
-    if admin_id in _mass_extend_in_progress:
+    if _mass_extend_in_progress:
         await callback.answer(texts.ADMIN_USERS_MASS_EXTEND_ALREADY_RUNNING, show_alert=True)
         return
 
@@ -466,20 +470,44 @@ async def _run_mass_extend_background(
             .order_by(User.id.asc())
         )
 
+        server_proto = None
         async with session_scope() as session:
             result = await session.execute(stmt)
             users = result.all()
 
-        server_proto = None
-        if target_aud.startswith("server_"):
-            try:
-                srv_id = int(target_aud.split("_")[1])
-                async with session_scope() as session:
+            if target_aud.startswith("server_"):
+                try:
+                    srv_id = int(target_aud.split("_")[1])
                     srv = await session.get(Server, srv_id)
                     if srv:
                         server_proto = srv.protocol
+                except Exception as e:
+                    logger.warning("Could not determine server protocol for %s: %s", target_aud, e)
+
+        if not users:
+            try:
+                header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.ADMIN_USERS_MASS_BONUS_ITOGI)
+                builder = InlineKeyboardBuilder()
+                builder.button(text=texts.ADMIN_USERS_MASS_EXTEND_BTN_NEW, callback_data="admin_mass_extend")
+                builder.button(text=texts.ADMIN_USERS_MASS_BONUS_V_ADMIN_MENYU, callback_data="admin_menu")
+                builder.adjust(1)
+
+                await render_hub(
+                    bot,
+                    admin_id,
+                    texts.ADMIN_USERS_MASS_EXTEND_COMPLETED_TEXT.format(
+                        header=header,
+                        success_count=0,
+                        days_text=days_text,
+                        fail_count=0,
+                        blocked_count=0,
+                    ),
+                    reply_markup=builder.as_markup(),
+                    parse_mode="HTML",
+                )
             except Exception as e:
-                logger.warning("Could not determine server protocol for %s: %s", target_aud, e)
+                logger.error("Failed to notify admin of empty mass extension: %s", e)
+            return
 
         CHUNK_SIZE = 50
         for i in range(0, len(users), CHUNK_SIZE):
@@ -495,25 +523,33 @@ async def _run_mass_extend_background(
                                 continue
 
                             extended = False
+                            current_now = now_utc()
                             if target_aud == "active_standard":
-                                res = await SubscriptionService.extend_subscription(
-                                    session,
-                                    tg_id,
-                                    days,
-                                    admin_id=admin_id,
-                                    reason=reason,
-                                )
-                                if res:
-                                    extended = True
+                                if user.subscription_end and user.subscription_end > current_now:
+                                    res = await SubscriptionService.extend_subscription(
+                                        session,
+                                        tg_id,
+                                        days,
+                                        admin_id=admin_id,
+                                        reason=reason,
+                                    )
+                                    if res:
+                                        extended = True
                             elif target_aud == "active_wi":
                                 sub = await white_internet_repo.get_subscription_by_user_id(session, uid)
-                                if sub and not getattr(sub, "is_trial", False) and sub.status != WhiteInternetStatus.DISABLED:
+                                if (
+                                    sub
+                                    and not getattr(sub, "is_trial", False)
+                                    and sub.status in [WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED]
+                                    and sub.expires_at
+                                    and sub.expires_at > current_now
+                                ):
                                     res_sub = await white_internet_repo.extend_subscription_atomic(session, sub.id, days)
                                     if res_sub:
                                         extended = True
                             elif target_aud == "active_all":
                                 # Extend standard if active
-                                if user.subscription_end and user.subscription_end > now:
+                                if user.subscription_end and user.subscription_end > current_now:
                                     res = await SubscriptionService.extend_subscription(
                                         session,
                                         tg_id,
@@ -530,39 +566,35 @@ async def _run_mass_extend_background(
                                     and not getattr(sub, "is_trial", False)
                                     and sub.status in [WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED]
                                     and sub.expires_at
-                                    and sub.expires_at > now
+                                    and sub.expires_at > current_now
                                 ):
                                     res_sub = await white_internet_repo.extend_subscription_atomic(session, sub.id, days)
                                     if res_sub:
                                         extended = True
-                                # Fallback if neither was active at cutoff but matched
-                                if not extended:
-                                    res = await SubscriptionService.extend_subscription(
-                                        session,
-                                        tg_id,
-                                        days,
-                                        admin_id=admin_id,
-                                        reason=reason,
-                                    )
-                                    if res:
-                                        extended = True
                             elif target_aud.startswith("server_"):
                                 if server_proto == XRAY_PROTOCOL:
                                     sub = await white_internet_repo.get_subscription_by_user_id(session, uid)
-                                    if sub and not getattr(sub, "is_trial", False) and sub.status != WhiteInternetStatus.DISABLED:
+                                    if (
+                                        sub
+                                        and not getattr(sub, "is_trial", False)
+                                        and sub.status in [WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED]
+                                        and sub.expires_at
+                                        and sub.expires_at > current_now
+                                    ):
                                         res_sub = await white_internet_repo.extend_subscription_atomic(session, sub.id, days)
                                         if res_sub:
                                             extended = True
                                 else:
-                                    res = await SubscriptionService.extend_subscription(
-                                        session,
-                                        tg_id,
-                                        days,
-                                        admin_id=admin_id,
-                                        reason=reason,
-                                    )
-                                    if res:
-                                        extended = True
+                                    if user.subscription_end and user.subscription_end > current_now:
+                                        res = await SubscriptionService.extend_subscription(
+                                            session,
+                                            tg_id,
+                                            days,
+                                            admin_id=admin_id,
+                                            reason=reason,
+                                        )
+                                        if res:
+                                            extended = True
 
                             if extended:
                                 success_count += 1
@@ -589,6 +621,21 @@ async def _run_mass_extend_background(
                             reply_markup=dismiss_builder.as_markup(),
                             parse_mode="HTML",
                         )
+                    except TelegramRetryAfter as e:
+                        await asyncio.sleep(e.retry_after + 1)
+                        try:
+                            await global_send_limiter.acquire()
+                            await bot.send_message(
+                                tg_id,
+                                notification_text,
+                                reply_markup=dismiss_builder.as_markup(),
+                                parse_mode="HTML",
+                            )
+                        except TelegramForbiddenError:
+                            blocked_count += 1
+                            blocked_uids.append(uid)
+                        except Exception as retry_err:
+                            logger.warning("Failed retry notify for user %s: %s", uid, retry_err)
                     except TelegramForbiddenError:
                         blocked_count += 1
                         blocked_uids.append(uid)
@@ -602,23 +649,24 @@ async def _run_mass_extend_background(
                         if db_user:
                             db_user.is_bot_blocked = True
 
-        async with session_scope() as session:
-            audit_reason = f"[{target_aud}] {reason}" if target_aud else reason
-            await AuditService.log_action(
-                session,
-                admin_id,
-                AdminAuditAction.MASS_SUB_EXTEND,
-                "User",
-                0,
-                {
-                    "batch_id": batch_id,
-                    "target_aud": target_aud,
-                    "days": days,
-                    "success_count": success_count,
-                    "fail_count": fail_count,
-                    "reason": audit_reason,
-                },
-            )
+        if success_count > 0 or fail_count > 0:
+            async with session_scope() as session:
+                audit_reason = f"[{target_aud}] {reason}" if target_aud else reason
+                await AuditService.log_action(
+                    session,
+                    admin_id,
+                    AdminAuditAction.MASS_SUB_EXTEND,
+                    "User",
+                    0,
+                    {
+                        "batch_id": batch_id,
+                        "target_aud": target_aud,
+                        "days": days,
+                        "success_count": success_count,
+                        "fail_count": fail_count,
+                        "reason": audit_reason,
+                    },
+                )
 
         try:
             header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.ADMIN_USERS_MASS_BONUS_ITOGI)
