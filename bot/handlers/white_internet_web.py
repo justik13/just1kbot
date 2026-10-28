@@ -422,9 +422,10 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         notice_extra_headers: dict[str, str] = {}
         if is_happ:
             notice_extra_headers = {
-                "sub-expire": "1",
                 "sub-expire-button-link": f"https://t.me/{clean_bot}",
             }
+            if expire_ts > 0:
+                notice_extra_headers["sub-expire"] = "1"
 
         if sub.status == WhiteInternetStatus.DISABLED:
             if not raw_hwid and _is_browser_request(request):
@@ -599,6 +600,10 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                 "x-hwid-limit": "true",
                 "x-hwid-active": str(active_count),
             }
+            if is_happ:
+                if expire_ts > 0:
+                    extra_headers["sub-expire"] = "1"
+                extra_headers["sub-expire-button-link"] = f"https://t.me/{clean_bot}"
             return _build_service_notice_response(
                 title_text=texts.VLESS_FEED_DEVICE_LIMIT_TITLE,
                 notice_text=limit_msg,
@@ -714,9 +719,12 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             response_headers["routing-geo-update-interval"] = "168"
         else:
             response_headers["Routing"] = "off"
+            if is_happ:
+                response_headers["routing-enable"] = "0"
 
         if is_happ:
-            response_headers["sub-expire"] = "1"
+            if expire_ts > 0:
+                response_headers["sub-expire"] = "1"
             response_headers["sub-expire-button-link"] = f"https://t.me/{clean_bot}"
 
         sanitized_support = _sanitize_header_url(support_url)

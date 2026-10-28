@@ -363,7 +363,8 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             }
             if is_happ:
                 clean_bot = str(bot_username).strip().lstrip("@") or "just1k13bot"
-                response_headers["sub-expire"] = "1"
+                if expire_ts > 0:
+                    response_headers["sub-expire"] = "1"
                 response_headers["sub-expire-button-link"] = f"https://t.me/{clean_bot}"
             if sanitized_support:
                 response_headers["Support-Url"] = sanitized_support
@@ -467,6 +468,14 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                 "Hide-Url": "1",
                 "No-Limit-Enabled": "1",
             })
+            user_agent = request.headers.get("User-Agent", "")
+            client_name = parse_client_from_user_agent(user_agent)
+            is_happ = bool((client_name and "happ" in client_name.lower()) or ("happ" in user_agent.lower()))
+            if is_happ:
+                clean_bot = str(bot_username).strip().lstrip("@") or "just1k13bot"
+                if expire_ts > 0:
+                    headers["sub-expire"] = "1"
+                headers["sub-expire-button-link"] = f"https://t.me/{clean_bot}"
             sanitized_support = _sanitize_header_url(support_url)
             sanitized_channel = _sanitize_header_url(channel_url)
             if sanitized_support:
@@ -579,10 +588,13 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             response_headers["routing-geo-update-interval"] = "168"
         else:
             response_headers["Routing"] = "off"
+            if is_happ:
+                response_headers["routing-enable"] = "0"
 
         if is_happ:
             clean_bot = str(bot_username).strip().lstrip("@") or "just1k13bot"
-            response_headers["sub-expire"] = "1"
+            if expire_ts > 0:
+                response_headers["sub-expire"] = "1"
             response_headers["sub-expire-button-link"] = f"https://t.me/{clean_bot}"
 
         sanitized_support = _sanitize_header_url(support_url)

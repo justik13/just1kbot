@@ -5,12 +5,16 @@ from __future__ import annotations
 import base64
 import json
 
+# Fixed version timestamp used to detect routing profile changes in INCY/Happ clients.
+# Bump this timestamp when routing rules or DNS parameters change so clients pull updated rules.
+ROUTING_PROFILE_VERSION_TIMESTAMP = "1761516000"
+
 
 def generate_incy_routing_header(
     profile_name: str = "✦ Just1k",
     *,
     direct_ru: bool = True,
-    last_updated: str = "1761516000",
+    last_updated: str = ROUTING_PROFILE_VERSION_TIMESTAMP,
     scheme: str = "incy",
 ) -> str:
     """Construct incy:// or happ:// routing deep link header for split tunneling.
@@ -53,7 +57,7 @@ def generate_incy_routing_header(
         "Name": clean_name,
         "GlobalProxy": "true",
         "DomainStrategy": "IPIfNonMatch",
-        "LastUpdated": str(last_updated).strip() or "1761516000",
+        "LastUpdated": str(last_updated).strip() or ROUTING_PROFILE_VERSION_TIMESTAMP,
         "RemoteDNSType": "DoH",
         "RemoteDNSDomain": "https://cloudflare-dns.com/dns-query",
         "RemoteDNSIP": "1.1.1.1",

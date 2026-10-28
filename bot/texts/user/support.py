@@ -122,7 +122,8 @@ SUPPORT_INCY_INSTRUCTION_TEXT = """📱 <b>Инструкция по подкл�
 <b>2. Приложение Happ:</b>
 • 🍏 <a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215">Установить из App Store (iPhone / iPad)</a>
 • 🤖 <a href="https://play.google.com/store/apps/details?id=com.happproxy">Установить из Google Play (Android)</a>
-• 💻 <a href="https://github.com/Happ-proxy/happ-desktop/releases">Скачать для ПК / APK (GitHub)</a>
+• 📦 <a href="https://github.com/Happ-proxy/happ-android/releases">APK для Android (GitHub)</a>
+• 💻 <a href="https://github.com/Happ-proxy/happ-desktop/releases">Версия для ПК (GitHub)</a>
 
 <b>Как подключить:</b>
 1. В боте нажмите <b>«📋 Скопировать ссылку подписки»</b> или откройте веб-страницу подключения.
