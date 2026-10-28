@@ -861,6 +861,70 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             decoded_body = base64.b64decode(body).decode("utf-8")
             self.assertIn("vless://11111111-2222-3333-4444-555555555555@nl.example.com:443", decoded_body)
 
+    async def test_feed_happ_client_adaptive_routing_and_in_app_headers(self):
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=2),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 2)),
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
+        ):
+            headers = {
+                "X-Hwid": "test-client-hwid-happ-1",
+                "User-Agent": "Happ/4.6.1 (iPhone; iOS 17.4)",
+            }
+            resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
+            self.assertEqual(resp.status, 200)
+
+            # Adaptive routing header for Happ
+            self.assertIn("Routing", resp.headers)
+            self.assertTrue(resp.headers["Routing"].startswith("happ://routing/onadd/"))
+
+            # In-App expiration headers for Happ
+            self.assertEqual(resp.headers.get("sub-expire"), "1")
+            self.assertEqual(resp.headers.get("sub-expire-button-link"), "https://t.me/just1k13bot")
+
+    async def test_feed_incy_client_standard_routing_without_in_app_headers(self):
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=2),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 2)),
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
+        ):
+            headers = {
+                "X-Hwid": "test-client-hwid-incy-1",
+                "User-Agent": "INCY/3.9.0 (iPhone; iOS 17.4)",
+            }
+            resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
+            self.assertEqual(resp.status, 200)
+
+            # Routing header for INCY
+            self.assertIn("Routing", resp.headers)
+            self.assertTrue(resp.headers["Routing"].startswith("incy://routing/onadd/"))
+
+            # Happ-specific headers should not be present
+            self.assertNotIn("sub-expire", resp.headers)
+            self.assertNotIn("sub-expire-button-link", resp.headers)
+
     async def test_feed_includes_global_system_settings_in_headers(self):
         mock_session = AsyncMock()
         mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))

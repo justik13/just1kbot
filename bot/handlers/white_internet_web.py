@@ -32,7 +32,7 @@ from database.models import Server
 from database.repositories import users_repo, white_internet_repo
 from database.repositories.system_settings_repo import get_system_setting
 from services.white_internet_service import WhiteInternetService
-from utils.client_parser import extract_device_metadata
+from utils.client_parser import extract_device_metadata, parse_client_from_user_agent
 from utils.datetime_helpers import now_utc
 from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
 from utils.incy_routing import generate_incy_routing_header
@@ -415,6 +415,17 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             else 0
         )
 
+        user_agent = request.headers.get("User-Agent", "")
+        client_name = parse_client_from_user_agent(user_agent)
+        is_happ = bool((client_name and "happ" in client_name.lower()) or ("happ" in user_agent.lower()))
+        clean_bot = str(bot_user).strip().lstrip("@") or "just1k13bot"
+        notice_extra_headers: dict[str, str] = {}
+        if is_happ:
+            notice_extra_headers = {
+                "sub-expire": "1",
+                "sub-expire-button-link": f"https://t.me/{clean_bot}",
+            }
+
         if sub.status == WhiteInternetStatus.DISABLED:
             if not raw_hwid and _is_browser_request(request):
                 html_body = _render_white_internet_landing_html(
@@ -436,6 +447,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                 download_bytes=download_bytes,
                 total_quota=total_quota,
                 expire_ts=expire_ts,
+                extra_headers=notice_extra_headers,
             )
 
         if (
@@ -462,6 +474,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                 download_bytes=download_bytes,
                 total_quota=total_quota,
                 expire_ts=expire_ts,
+                extra_headers=notice_extra_headers,
             )
 
         if sub.status == WhiteInternetStatus.EXHAUSTED or available_bytes <= 0:
@@ -487,6 +500,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                 download_bytes=download_bytes,
                 total_quota=total_quota,
                 expire_ts=expire_ts,
+                extra_headers=notice_extra_headers,
             )
 
         # HWID (Device ID) enforcement: browser gets 1-click landing, app must provide HWID
@@ -690,14 +704,20 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         else:
             routing_enabled = bool(routing_setting)
 
+        routing_scheme = "happ" if is_happ else "incy"
         if routing_enabled:
             response_headers["Routing"] = generate_incy_routing_header(
                 profile_name="✦ Just1k WL",
                 direct_ru=False,
+                scheme=routing_scheme,
             )
             response_headers["routing-geo-update-interval"] = "168"
         else:
             response_headers["Routing"] = "off"
+
+        if is_happ:
+            response_headers["sub-expire"] = "1"
+            response_headers["sub-expire-button-link"] = f"https://t.me/{clean_bot}"
 
         sanitized_support = _sanitize_header_url(support_url)
         sanitized_channel = _sanitize_header_url(channel_url)
