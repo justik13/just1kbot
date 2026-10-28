@@ -220,6 +220,43 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
             self.fail("No outgoing Telegram request produced by admin flow — check bot send path and test mocks")
         self.assertIn("Hello from Admin!", send_req.text)
 
+    async def test_user_filter_counts_matches_individual_filtered_counts_in_db(self):
+        """DB integration test verifying get_user_filter_counts() equals get_filtered_users_count() for all filters."""
+        from datetime import datetime, timedelta, timezone
+        from database.models import User as DBUser
+        from database.repositories.users_repo import get_user_filter_counts, get_filtered_users_count
+        try:
+            from tests.db_utils import TRUNCATE_SQL
+        except ImportError:
+            from db_utils import TRUNCATE_SQL
+
+        now = datetime.now(timezone.utc)
+        async with self.sessions.begin() as session:
+            await session.execute(text(TRUNCATE_SQL))
+            # 1. Normal active user (new within 7 days, active sub for 30 days)
+            u1 = DBUser(telegram_id=1, username="u1", created_at=now - timedelta(days=2), subscription_end=now + timedelta(days=30))
+            # 2. Expiring user (active sub for 2 days)
+            u2 = DBUser(telegram_id=2, username="u2", created_at=now - timedelta(days=10), subscription_end=now + timedelta(days=2))
+            # 3. Expired user (subscription_end in the past)
+            u3 = DBUser(telegram_id=3, username="u3", created_at=now - timedelta(days=20), subscription_end=now - timedelta(days=5))
+            # 4. User without subscription (expired)
+            u4 = DBUser(telegram_id=4, username="u4", created_at=now - timedelta(days=3), subscription_end=None)
+            # 5. Banned user
+            u5 = DBUser(telegram_id=5, username="u5", created_at=now - timedelta(days=4), is_banned=True)
+            # 6. Bot blocked user
+            u6 = DBUser(telegram_id=6, username="u6", created_at=now - timedelta(days=5), is_bot_blocked=True)
+            # 7. Soft-deleted user (should be excluded from all filter counts)
+            u7 = DBUser(telegram_id=7, username="u7", created_at=now - timedelta(days=1), is_deleted=True)
+
+            session.add_all([u1, u2, u3, u4, u5, u6, u7])
+
+        async with self.sessions() as session:
+            aggregated = await get_user_filter_counts(session)
+
+            for f_type in ["all", "new_7d", "active", "expiring_3d", "expired", "banned"]:
+                individual = await get_filtered_users_count(session, filter_type=f_type)
+                self.assertEqual(aggregated[f_type], individual, f"Mismatch for filter {f_type}: {aggregated[f_type]} != {individual}")
+
 
 if __name__ == "__main__":
     unittest.main()

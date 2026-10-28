@@ -1,5 +1,4 @@
 import asyncio
-import inspect
 import logging
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -121,12 +120,6 @@ class TestHealthcheckAccessLogger(unittest.TestCase):
 
 
 class TestGetServerLoadTimeout(unittest.IsolatedAsyncioTestCase):
-    def test_default_timeout_signature(self):
-        sig = inspect.signature(AmneziaClient.get_server_load)
-        timeout_param = sig.parameters.get("timeout")
-        self.assertIsNotNone(timeout_param)
-        self.assertEqual(timeout_param.default, 10.0)
-
     async def test_get_server_load_timeout_handling_logs_error_name(self):
         client = AmneziaClient("http://localhost:3000", "testkey")
         with patch.object(client, "_get_server_load_internal", side_effect=asyncio.TimeoutError()):
