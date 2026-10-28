@@ -12,7 +12,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.formatters import format_admin_breadcrumbs
+from bot.formatters import format_admin_breadcrumbs, get_server_protocol_badge
 from bot.handlers.admin.users.common import format_subscription_days_text
 from bot.keyboards import get_back_button
 from bot.keyboards.admin.users import (
@@ -206,8 +206,9 @@ async def select_mass_extend_server(
     builder = InlineKeyboardBuilder()
     for s in servers:
         flag = s.country_flag or "🌐"
+        proto = get_server_protocol_badge(s)
         builder.button(
-            text=f"{flag} {s.name}",
+            text=f"{flag} {proto} {s.name}",
             callback_data=f"mass_ext_aud:server_{s.id}",
         )
     builder.button(text=texts.BTN_BACK, callback_data="admin_mass_extend")
@@ -238,8 +239,13 @@ async def _build_mass_extend_confirm_data(
         except (IndexError, ValueError):
             server_id = -1
         server = await get_server_by_id(session, server_id)
-        server_name = server.name if server else f"ID {server_id}"
-        server_flag = (server.country_flag or "🌐") if server else "🌐"
+        if server:
+            proto = get_server_protocol_badge(server)
+            server_name = f"{proto} {server.name}" if proto else server.name
+            server_flag = server.country_flag or "🌐"
+        else:
+            server_name = f"ID {server_id}"
+            server_flag = "🌐"
         aud_label = texts.ADMIN_USERS_MASS_BONUS_SERVER_AUDIENCE_LABEL.format(flag=server_flag, name=safe(server_name))
     else:
         aud_label = texts.ADMIN_MASS_EXTEND_AUDIENCE_LABELS.get(target_aud, target_aud)

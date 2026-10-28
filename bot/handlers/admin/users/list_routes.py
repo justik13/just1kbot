@@ -19,7 +19,7 @@ from database.repositories.users_repo import (
 )
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
-from bot.formatters import format_audit_details
+from bot.formatters import format_audit_details, get_server_protocol_badge
 from utils.telegram import render_hub, safe
 
 from .common import (
@@ -82,8 +82,12 @@ async def show_extended_filter_menu(
             return
         for server in rows:
             flag = server.country_flag or texts.ADMIN_FILTER_FLAG_FALLBACK
+            proto = get_server_protocol_badge(server)
             builder.button(
-                text=texts.ADMIN_USERS_FILTER_SERVER_BUTTON.format(flag=flag, server_name=server.name),
+                text=texts.ADMIN_USERS_FILTER_SERVER_BUTTON.format(
+                    flag=flag,
+                    server_name=f"{proto} {server.name}",
+                ),
                 callback_data=f"admin_users_filter:server:{server.id}:1",
             )
         title = texts.ADMIN_USERS_LIST_SELECT_SERVER

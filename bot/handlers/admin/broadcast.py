@@ -873,7 +873,9 @@ async def _start_broadcast_process(
                         server = await s_sess.get(Server, server_id)
                 if server:
                     flag = server.country_flag or "🌐"
-                    label = texts.BROADCAST_PROGRESS_SERVER_LABEL.format(flag=flag, name=safe(server.name))[:50]
+                    proto = get_server_protocol_badge(server)
+                    server_name = f"{proto} {safe(server.name)}" if proto else safe(server.name)
+                    label = texts.BROADCAST_PROGRESS_SERVER_LABEL.format(flag=flag, name=server_name)[:50]
                 else:
                     label = texts.BROADCAST_AUDIENCE_SERVER_ID_LABEL.format(server_id=server_id)[:50]
             except Exception:

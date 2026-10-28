@@ -291,6 +291,13 @@ async def _build_users_list_text_and_kb(
         elif str(filter_param).isdigit():
             from bot.formatters import get_tariff_group_name
             cur_filter_name = get_tariff_group_name(int(filter_param))
+    elif filter_type == "server" and filter_param != "none" and str(filter_param).isdigit() and session is not None:
+        srv = await session.get(Server, int(filter_param))
+        if srv:
+            from bot.formatters import get_server_protocol_badge
+            srv_flag = srv.country_flag or texts.ADMIN_FILTER_FLAG_FALLBACK
+            srv_proto = get_server_protocol_badge(srv)
+            cur_filter_name = f"{srv_flag} {srv_proto} {srv.name}"
     header = format_admin_breadcrumbs(texts.BTN_USERS, texts.COMMON_FILTR.format(f_name=cur_filter_name))
 
     rendered = (
@@ -488,7 +495,8 @@ async def _get_white_internet_card_info(
     if sub.origin_node_id:
         origin_server = await session.get(Server, sub.origin_node_id)
         if origin_server:
-            origin_name = safe(origin_server.name)
+            origin_flag = origin_server.country_flag or "🌐"
+            origin_name = f"{origin_flag} [Origin РФ] {safe(origin_server.name)}"
         else:
             origin_name = f"#{sub.origin_node_id}"
 

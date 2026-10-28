@@ -48,7 +48,7 @@ class TestAdminUsersImportsAndServerUsage(unittest.IsolatedAsyncioTestCase):
         reply_markup = call_args.kwargs["reply_markup"]
         buttons = [btn.text for row in reply_markup.inline_keyboard for btn in row]
 
-        self.assertIn("🖥 🇩🇪 DE-1", buttons)
+        self.assertIn("🖥 🇩🇪 [AWG] DE-1", buttons)
 
     async def test_users_keyboard_exposes_server_filter_but_not_country_filter(self):
         from bot.handlers.admin.users.common import _build_users_list_text_and_kb

@@ -226,7 +226,8 @@ async def _show_server_card(
     has_awg = is_awg_capable_server(server)
     is_origin = is_white_internet_origin_server(server)
     section_crumb = texts.BTN_WI_SERVERS if is_origin else texts.BTN_STD_SERVERS
-    header = format_admin_breadcrumbs(section_crumb, f"{flag} {server.name}")
+    proto_badge = get_server_protocol_badge(server)
+    header = format_admin_breadcrumbs(section_crumb, f"{flag} {proto_badge} {server.name}")
 
     is_pure_vless = is_pure_vless_server(server)
     if is_pure_vless:
@@ -263,7 +264,7 @@ async def _show_server_card(
     rendered = (
         f"{header}"
         + texts.COMMON_KARTOCHKA_VPN_SERVER_ID.format(
-            flag=flag, safe_server_name=safe(server.name), server_id=server.id
+            flag=flag, safe_server_name=f"{proto_badge} {safe(server.name)}", server_id=server.id
         )
         + texts.COMMON_STATUS_V_BOTE.format(status_line=status_line)
         + f"{extra_status_info}"

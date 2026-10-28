@@ -120,9 +120,13 @@ async def request_delete_server(
     await state.update_data(delete_server_id=server_id)
     await state.set_state(AdminStates.confirming_server_delete)
 
+    from bot.formatters import get_server_protocol_badge
+
+    proto = get_server_protocol_badge(server)
+    server_display_name = f"{proto} {safe(server.name)}" if proto else safe(server.name)
     confirm_msg = texts.ADMIN_SERVER_DELETE_CONFIRM.format(
         flag=flag,
-        name=safe(server.name),
+        name=server_display_name,
         profiles_count=profiles_count,
     )
     if wl_subs_count > 0:
@@ -407,7 +411,11 @@ async def request_purge_server(
     )) or 0
 
     from bot.keyboards.admin.users import get_admin_confirm_action_keyboard
-    text = texts.ADMIN_SERVER_FORCE_PURGE_CONFIRM.format(name=safe(server.name), count=wl_subs_count)
+    from bot.formatters import get_server_protocol_badge
+
+    proto = get_server_protocol_badge(server)
+    server_display_name = f"{proto} {safe(server.name)}" if proto else safe(server.name)
+    text = texts.ADMIN_SERVER_FORCE_PURGE_CONFIRM.format(name=server_display_name, count=wl_subs_count)
     await callback.message.edit_text(
         text,
         reply_markup=get_admin_confirm_action_keyboard(
