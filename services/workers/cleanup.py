@@ -429,8 +429,8 @@ async def _sweep_vless_pending_revocations() -> None:
                         if sub:
                             sub.updated_at = now_utc()
                             await session.flush()
-                except Exception:
-                    pass
+                except Exception as inner_exc:
+                    logger.debug("Failed to touch sub.updated_at for user_id=%s: %s", uid, inner_exc)
 
         # 3. Converge VLESS servers whose epoch drift occurred while monitor wasn't active
         async with session_scope() as session:

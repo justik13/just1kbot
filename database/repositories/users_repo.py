@@ -1,7 +1,7 @@
 from datetime import timedelta
 import inspect
 
-from sqlalchemy import and_, case, false, func, or_, select, text, update
+from sqlalchemy import and_, case, cast, false, func, or_, select, String, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
@@ -10,10 +10,12 @@ from config.constants import (
     PERMANENT_END_DATE,
     PERMANENT_SUBSCRIPTION_DAYS,
     REFERRAL_ACTIVE_MIN_TOPUP_RUB,
+    VLESS_PROTOCOL,
+    XRAY_ORIGIN_CAPABILITY,
     XRAY_PROTOCOL,
 )
 from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
-from database.models import Order, Payment, Server, Tariff, User, VPNProfile, WhiteInternetSubscription
+from database.models import Order, Payment, Server, Tariff, User, VPNProfile, VlessSubscription, WhiteInternetSubscription
 from database.repositories.profiles_repo import PROFILE_LIST_HIDDEN_STATUSES
 from utils.datetime_helpers import now_utc
 
@@ -674,13 +676,31 @@ def get_effective_expiring_3d_condition(now=None):
     )
 
 
+def get_effective_inactive_condition(now=None):
+    if now is None:
+        now = now_utc()
+    xray_active_subq = select(WhiteInternetSubscription.user_id).where(
+        WhiteInternetSubscription.status.in_([
+            WhiteInternetStatus.ACTIVE,
+            WhiteInternetStatus.PENDING,
+            WhiteInternetStatus.EXHAUSTED,
+        ]),
+        WhiteInternetSubscription.expires_at > now,
+        WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
+    )
+    return and_(
+        or_(User.subscription_end <= now, User.subscription_end.is_(None)),
+        ~User.id.in_(xray_active_subq),
+    )
+
+
 def get_effective_expired_condition(now=None):
     if now is None:
         now = now_utc()
-    active_cond = get_effective_active_condition(now)
+    inactive_cond = get_effective_inactive_condition(now)
     had_awg = User.subscription_end.is_not(None)
     had_xray = User.id.in_(select(WhiteInternetSubscription.user_id))
-    return and_(or_(had_awg, had_xray), ~active_cond)
+    return and_(or_(had_awg, had_xray), inactive_cond)
 
 
 def get_effective_never_condition():
@@ -703,7 +723,7 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
     elif filter_type == "expired":
         stmt = stmt.where(get_effective_expired_condition(now))
     elif filter_type == "no_sub":
-        stmt = stmt.where(~get_effective_active_condition(now))
+        stmt = stmt.where(get_effective_inactive_condition(now))
     elif filter_type == "never":
         stmt = stmt.where(get_effective_never_condition())
     elif filter_type in ("banned", "problem"):
@@ -717,34 +737,76 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
             return stmt.where(false())
         if not (1 <= target_server_id <= MAX_INT32):
             return stmt.where(false())
+
         server_proto_subq = select(Server.protocol).where(Server.id == target_server_id).scalar_subquery()
+        server_caps_subq = select(cast(Server.capabilities, String)).where(Server.id == target_server_id).scalar_subquery()
+
+        awg_cond = and_(
+            (
+                server_proto_subq.in_(AMNEZIA_PROTOCOLS)
+                | server_caps_subq.like('%"awg"%')
+                | server_caps_subq.like('%"amnezia"%')
+            ),
+            User.profiles.any(
+                (VPNProfile.server_id == target_server_id)
+                & (VPNProfile.provisioning_status.notin_(PROFILE_LIST_HIDDEN_STATUSES))
+            ),
+        )
+
+        is_vless_capable = (
+            (server_proto_subq == VLESS_PROTOCOL)
+            | server_caps_subq.like('%"vless"%')
+            | server_caps_subq.like('%"xray_vless"%')
+        )
+        is_pure_vless = (
+            is_vless_capable
+            & ~server_proto_subq.in_(AMNEZIA_PROTOCOLS)
+            & ~server_caps_subq.like('%"awg"%')
+            & ~server_caps_subq.like('%"amnezia"%')
+            & ~server_caps_subq.like(f'%"{XRAY_ORIGIN_CAPABILITY}"%')
+        )
+        vless_cond = and_(
+            is_vless_capable,
+            User.vless_subscription.has(
+                (VlessSubscription.is_active.is_(True))
+                & (
+                    is_pure_vless
+                    | VlessSubscription.node_traffic_snapshots.has_key(str(target_server_id))
+                )
+            ),
+        )
+
+        xray_cond = and_(
+            (
+                (server_proto_subq == XRAY_PROTOCOL)
+                | server_caps_subq.like('%"xray_origin"%')
+            ),
+            ~server_proto_subq.in_(AMNEZIA_PROTOCOLS),
+            User.id.in_(
+                select(WhiteInternetSubscription.user_id).where(
+                    WhiteInternetSubscription.origin_node_id == target_server_id,
+                    WhiteInternetSubscription.status.in_([
+                        WhiteInternetStatus.ACTIVE,
+                        WhiteInternetStatus.PENDING,
+                        WhiteInternetStatus.EXHAUSTED,
+                    ]),
+                    WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
+                )
+            ),
+        )
+        stmt = stmt.where(or_(awg_cond, vless_cond, xray_cond))
+    elif filter_type == "country" and filter_param:
+        country_str = str(filter_param)
+        xray_country_users_subq = select(WhiteInternetSubscription.user_id).where(
+            WhiteInternetSubscription.origin_node.has(Server.country_flag == country_str),
+            WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
+        )
         stmt = stmt.where(
             or_(
-                and_(
-                    server_proto_subq.in_(AMNEZIA_PROTOCOLS),
-                    User.profiles.any(
-                        (VPNProfile.server_id == target_server_id)
-                        & (VPNProfile.provisioning_status.notin_(PROFILE_LIST_HIDDEN_STATUSES))
-                    ),
-                ),
-                and_(
-                    server_proto_subq == XRAY_PROTOCOL,
-                    User.id.in_(
-                        select(WhiteInternetSubscription.user_id).where(
-                            WhiteInternetSubscription.origin_node_id == target_server_id,
-                            WhiteInternetSubscription.status.in_([
-                                WhiteInternetStatus.ACTIVE,
-                                WhiteInternetStatus.PENDING,
-                                WhiteInternetStatus.EXHAUSTED,
-                            ]),
-                            WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
-                        )
-                    ),
-                ),
+                User.profiles.any(VPNProfile.server.has(Server.country_flag == country_str)),
+                User.id.in_(xray_country_users_subq),
             )
         )
-    elif filter_type == "country" and filter_param:
-        stmt = stmt.where(User.profiles.any(VPNProfile.server.has(Server.country_flag == str(filter_param))))
     elif filter_type == "tariff" and filter_param is not None:
         if filter_param == "white_internet":
             stmt = stmt.where(

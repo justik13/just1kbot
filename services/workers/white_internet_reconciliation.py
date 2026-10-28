@@ -71,6 +71,8 @@ class WhiteInternetReconciliationWorker:
             from bot import texts
             kb = InlineKeyboardBuilder()
             kb.button(text=texts.BTN_WL_CONNECT_CLIENT, callback_data="white_internet")
+            kb.button(text=texts.BTN_DISMISS_NOTIFICATION, callback_data="dismiss_notification")
+            kb.adjust(1)
             await self.bot.send_message(
                 chat_id=user.telegram_id,
                 text=texts.WL_AUTO_PUSH_READY,

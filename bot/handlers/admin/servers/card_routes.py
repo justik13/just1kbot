@@ -36,6 +36,7 @@ from services.audit_service import AuditService
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
 from utils.telegram import safe
+from bot.formatters import get_server_protocol_badge
 
 from .common import _show_server_card
 
@@ -117,16 +118,18 @@ async def toggle_server_confirm(
     new_status = not server.is_active
 
     flag = server.country_flag or texts.EMOJI_GLOBE
+    proto = get_server_protocol_badge(server)
+    formatted_name = f"{proto} {safe(server.name)}" if proto else safe(server.name)
 
     if new_status:
         text = texts.ADMIN_SERVER_TOGGLE_ENABLE_CONFIRM.format(
             flag=flag,
-            name=safe(server.name),
+            name=formatted_name,
         )
     else:
         text = texts.ADMIN_SERVER_TOGGLE_DISABLE_CONFIRM.format(
             flag=flag,
-            name=safe(server.name),
+            name=formatted_name,
         )
 
     try:
@@ -360,7 +363,9 @@ async def show_server_relays(
     from services.xray_node_client import XrayNodeClient
 
     flag = server.country_flag or texts.EMOJI_GLOBE
-    header = format_admin_breadcrumbs(texts.BTN_SERVERS, f"{flag} {server.name}", "Relays")
+    proto = get_server_protocol_badge(server)
+    formatted_name = f"{proto} {server.name}" if proto else server.name
+    header = format_admin_breadcrumbs(texts.BTN_SERVERS, f"{flag} {formatted_name}", "Relays")
 
     origin_status_badge = texts.ADMIN_SERVER_RELAYS_STATUS_OFFLINE
     error_msg = None
@@ -399,7 +404,7 @@ async def show_server_relays(
     rendered = texts.ADMIN_SERVER_RELAYS_HEADER.format(
         header=header,
         flag=flag,
-        server_name=safe(server.name),
+        server_name=safe(formatted_name),
         origin_status_badge=origin_status_badge,
     )
 

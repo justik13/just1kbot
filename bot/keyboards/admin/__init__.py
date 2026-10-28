@@ -33,6 +33,9 @@ from .users import (
     get_admin_user_devices_keyboard,
     get_admin_wi_devices_keyboard,
     get_admin_wi_extend_days_keyboard,
+    get_admin_mass_extend_days_keyboard,
+    get_admin_mass_extend_confirm_keyboard,
+    get_admin_mass_extend_reason_keyboard,
 )
 
 __all__ = [
@@ -54,6 +57,9 @@ __all__ = [
     "get_admin_user_devices_keyboard",
     "get_admin_wi_devices_keyboard",
     "get_admin_wi_extend_days_keyboard",
+    "get_admin_mass_extend_days_keyboard",
+    "get_admin_mass_extend_confirm_keyboard",
+    "get_admin_mass_extend_reason_keyboard",
     # servers
     "get_admin_server_card_keyboard",
     "get_admin_server_incy_keyboard",

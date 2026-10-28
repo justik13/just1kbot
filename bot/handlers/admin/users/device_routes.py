@@ -88,8 +88,14 @@ async def admin_user_devices(
             # get_user_profiles() eagerly loads VPNProfile.server, so this does
             # not add a query per device and keeps the device list efficient.
             server = getattr(profile, "server", None)
-            server_name = safe(server.name) if server else texts.ADMIN_USERS_DEVICE_NEIZVESTNYY_SERVER
-            server_flag = safe(server.country_flag) if server and server.country_flag else "🌐"
+            if server:
+                from bot.formatters import get_server_protocol_badge
+                proto = get_server_protocol_badge(server)
+                server_name = f"{proto} {safe(server.name)}" if proto else safe(server.name)
+                server_flag = safe(server.country_flag) if server.country_flag else "🌐"
+            else:
+                server_name = texts.ADMIN_USERS_DEVICE_NEIZVESTNYY_SERVER
+                server_flag = "🌐"
 
             # VPNProfile does not have a last_handshake_at column. The traffic
             # worker persists the provider's lastHandshake/lastSeen/updatedAt
@@ -263,7 +269,12 @@ async def admin_delete_device_confirm(
 
     server = getattr(profile, "server", None)
     flag = server.country_flag if server else texts.EMOJI_GLOBE
-    server_name = server.name if server else texts.LABEL_UNKNOWN_CAP
+    if server:
+        from bot.formatters import get_server_protocol_badge
+        proto = get_server_protocol_badge(server)
+        server_name = f"{proto} {server.name}" if proto else server.name
+    else:
+        server_name = texts.LABEL_UNKNOWN_CAP
 
     text = texts.ADMIN_DELETE_DEVICE_CONFIRM.format(
         telegram_id=telegram_id,

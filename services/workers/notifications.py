@@ -464,6 +464,7 @@ async def _send_white_internet_notifications(
     from database.models import User, WhiteInternetSubscription
     from utils.formatters import format_tg_time
     from bot.texts.runtime.notifications import (
+        BTN_DISMISS_NOTIFICATION,
         BTN_EXTEND_WHITE_INTERNET,
         NOTIFY_WI_1D,
         NOTIFY_WI_2H,
@@ -614,6 +615,8 @@ async def _send_white_internet_notifications(
 
                 kb = InlineKeyboardBuilder()
                 kb.button(text=BTN_EXTEND_WHITE_INTERNET, callback_data="wl_renew_preview")
+                kb.button(text=BTN_DISMISS_NOTIFICATION, callback_data="dismiss_notification")
+                kb.adjust(1)
 
                 try:
                     await global_send_limiter.acquire()

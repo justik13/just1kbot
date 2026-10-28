@@ -117,3 +117,9 @@ ADMIN_PURCHASES_METHOD_SBP = "СБП"
 ADMIN_PURCHASES_METHOD_WALLET = "Внутренний баланс"
 ADMIN_PURCHASES_METHOD_ADMIN = "Выдача администратором"
 ADMIN_PURCHASES_METHOD_OTHER = "Другой способ"
+ADMIN_ALERT_ORDER_REQUIRES_MANUAL_REVIEW = (
+    "⚠️ <b>Внимание: требуется ручная проверка заказа</b>\n\n"
+    "Заказ: <code>{order_id}</code>\n"
+    "Сумма заказа: {amount_rub} ₽\n"
+    "Причина: частичный возврат или несовпадение суммы ({mismatch})"
+)
