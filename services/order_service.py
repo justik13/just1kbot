@@ -299,13 +299,12 @@ class OrderService:
         final_desc = description or texts.CHECKOUT_DESCRIPTION_DEFAULT
 
         # Lock user to serialize concurrent order creation (prevent double-clicks/races)
-        try:
+        bind = session.get_bind()
+        if bind and getattr(bind, "dialect", None) and bind.dialect.name == "postgresql":
             await session.execute(
                 text("SELECT pg_advisory_xact_lock(:key)"),
                 {"key": -user_id},
             )
-        except Exception:
-            pass
 
         # 1. Deduplication guard for pending external orders (prevent double-clicks)
         if payment_method != "wallet":
@@ -346,7 +345,10 @@ class OrderService:
             metadata_=order_meta,
         )
         session.add(order)
-        await session.flush()
+        # Commit pending order immediately to release the database transaction
+        # before making the external network HTTP call to the payment gateway.
+        # This prevents 10-second pool starvation when the gateway is under load.
+        await session.commit()
 
         if payment_method != "wallet":
             gateway = get_payment_gateway(payment_method)
@@ -360,19 +362,15 @@ class OrderService:
                 )
                 order.external_id = invoice.external_id
                 order.payment_url = invoice.payment_url
+                await session.commit()
             except PaymentCreationAmbiguousError:
                 # The provider may have created the payment (timeout, 5xx,
-                # unreadable response). Rolling back would destroy the
-                # order together with the only reference to it, and the
-                # incoming `payment.canceled` or `payment.succeeded` webhook
-                # would then find nothing and be retried by YooKassa for 24h.
-                # Keep the order so the webhook can still settle or cancel it.
+                # unreadable response). Keep the order so the incoming
+                # `payment.canceled` or `payment.succeeded` webhook can still
+                # settle or cancel it.
                 held_meta = dict(order.metadata_ or {})
                 held_meta["payment_creation_ambiguous"] = True
                 order.metadata_ = held_meta
-                await session.flush()
-                # Commit here, not at the end of the request: ensure durability
-                # before handler raises and safe alert is shown to user.
                 await session.commit()
                 raise
             except Exception as exc:
@@ -380,16 +378,18 @@ class OrderService:
                 logger.exception(
                     "Gateway failed to create payment for order %s: %s", order_id, exc
                 )
-                # NOTE: rollback() expires EVERY ORM object of this session
-                # (including the caller's User). Callers must capture
-                # user_id/telegram_id as plain ints BEFORE calling
-                # create_order() and never touch ORM attributes in except.
-                # Prod 2026-09-29: logger.exception(..., user.id) after this
-                # rollback raised MissingGreenlet and masked YooKassa TIMEOUT.
-                await session.rollback()
+                try:
+                    await session.delete(order)
+                    await session.commit()
+                except Exception as del_exc:
+                    logger.warning(
+                        "Failed to remove unpayable order %s after gateway error: %s",
+                        order_id,
+                        del_exc,
+                    )
+                    await session.rollback()
                 raise
 
-        await session.flush()
         return order
 
     @staticmethod

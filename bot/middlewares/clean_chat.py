@@ -130,14 +130,11 @@ class CleanChatMiddleware(BaseMiddleware):
                 )
             except asyncio.QueueFull:
                 logger.warning(
-                    f"CleanChat queue full, deleting message "
-                    f"{event.message_id} in {event.chat.id} without queue"
+                    "CleanChat queue full (5000 items); dropping deletion of "
+                    "message %s in %s to prevent Telegram flood ban",
+                    event.message_id,
+                    event.chat.id,
                 )
-                task = asyncio.create_task(
-                    _delete_message(event.bot, event.chat.id, event.message_id)
-                )
-                _direct_delete_tasks.add(task)
-                task.add_done_callback(_direct_delete_tasks.discard)
             except Exception as e:
                 logger.debug(f"Failed to enqueue message deletion: {e}")
 
