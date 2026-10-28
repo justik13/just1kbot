@@ -574,8 +574,6 @@ async def render_hub(
                 target_edit_id = trigger_message_id
             elif old_ids and old_ids[-1] != cached_effect_id:
                 target_edit_id = old_ids[-1]
-            elif trigger_message_id and trigger_message_id != cached_effect_id:
-                target_edit_id = trigger_message_id
 
         if trigger_message_id and trigger_message_id != target_edit_id and trigger_message_id not in old_ids:
             try:

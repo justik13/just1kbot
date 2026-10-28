@@ -592,3 +592,59 @@ def get_admin_user_devices_keyboard(
     builder.adjust(1)
 
     return builder.as_markup()
+
+
+def get_admin_mass_extend_days_keyboard() -> InlineKeyboardMarkup:
+    """Generate preset duration keyboard for mass extension wizard."""
+    builder = InlineKeyboardBuilder()
+
+    for days, label in texts.ADMIN_MASS_EXTEND_PRESET_DAYS_LABELS.items():
+        builder.button(
+            text=label,
+            callback_data=f"mass_ext_days:{days}",
+        )
+
+    builder.button(
+        text=texts.ADMIN_BTN_INPUT_MANUALLY,
+        callback_data="mass_ext_days:custom",
+    )
+    builder.button(
+        text=texts.BTN_BACK,
+        callback_data="mass_ext_back_to_aud",
+    )
+    builder.adjust(3, 3, 1, 1)
+    return builder.as_markup()
+
+
+def get_admin_mass_extend_confirm_keyboard() -> InlineKeyboardMarkup:
+    """Generate confirmation screen keyboard for mass extension."""
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=texts.ADMIN_USERS_MASS_EXTEND_BTN_START,
+        callback_data="confirm_mass_extend_apply",
+    )
+    builder.button(
+        text=texts.ADMIN_BTN_CHANGE_REASON,
+        callback_data="mass_ext_edit_reason",
+    )
+    builder.button(
+        text=texts.BTN_BACK,
+        callback_data="mass_ext_back_to_days",
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_admin_mass_extend_reason_keyboard() -> InlineKeyboardMarkup:
+    """Generate reason modification keyboard for mass extension."""
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=texts.ADMIN_BTN_USE_DEFAULT_REASON,
+        callback_data="mass_ext_skip_reason",
+    )
+    builder.button(
+        text=texts.BTN_BACK,
+        callback_data="mass_ext_back_to_confirm",
+    )
+    builder.adjust(1)
+    return builder.as_markup()

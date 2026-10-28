@@ -331,7 +331,16 @@ ADMIN_MASS_EXTEND_AUDIENCE_LABELS = {
     "active_wi": "🌐 Белый Интернет (активные)",
     "active_all": "🌟 Все с активной подпиской",
 }
+ADMIN_MASS_EXTEND_PRESET_DAYS_LABELS = {
+    1: "+1 день",
+    2: "+2 дня",
+    3: "+3 дня",
+    7: "+7 дней",
+    14: "+14 дней",
+    30: "+30 дней",
+}
 
+ADMIN_USERS_MASS_EXTEND_CHOOSE_DAYS = "⏳ <b>Выберите количество дней для продления или укажите вручную:</b>"
 ADMIN_USERS_MASS_EXTEND_ENTER_DAYS_PROMPT = """⏳ <b>Количество дней для продления:</b>
 
 Введите количество дней (целое число от 1 до 365, например <code>3</code>):"""
@@ -340,7 +349,12 @@ ADMIN_USERS_MASS_EXTEND_INVALID_DAYS = "⚠️ Введите корректно
 ADMIN_USERS_MASS_EXTEND_ENTER_REASON_PROMPT = """📝 <b>Причина продления (+{days_text}):</b>
 
 Введите сообщение для пользователей и лога аудита (например: <i>Компенсация за сбой на серверах</i>):"""
+ADMIN_USERS_MASS_EXTEND_EDIT_REASON_PROMPT = (
+    "📝 <b>Введите причину продления (+{days_text}):</b>\n\nВведите сообщение для пользователей или оставьте по умолчанию: "
+)
 ADMIN_USERS_MASS_EXTEND_DEFAULT_REASON = "Компенсация за технические работы"
+ADMIN_BTN_CHANGE_REASON = "✏️ Изменить причину"
+ADMIN_BTN_USE_DEFAULT_REASON = "📝 Оставить по умолчанию"
 
 ADMIN_USERS_MASS_EXTEND_CONFIRM_TITLE = """⚠️ <b>Подтверждение массового продления:</b>
 

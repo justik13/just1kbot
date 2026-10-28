@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 import logging
 
 from config.constants import AdminAuditAction
@@ -214,9 +215,9 @@ async def process_mass_bonus_amount(
 
 def _build_server_audience_condition(server_id: int):
     """Build unified SQL filter for users with active profiles or subscriptions on server_id."""
-    from config.constants import AMNEZIA_PROTOCOLS, XRAY_PROTOCOL
+    from config.constants import AMNEZIA_PROTOCOLS, VLESS_PROTOCOL, XRAY_PROTOCOL
     from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
-    from database.models import Server, VPNProfile, WhiteInternetSubscription
+    from database.models import Server, VPNProfile, VlessSubscription, WhiteInternetSubscription
 
     server_proto_subq = select(Server.protocol).where(Server.id == server_id).scalar_subquery()
     awg_cond = (
@@ -227,6 +228,10 @@ def _build_server_audience_condition(server_id: int):
             & (VPNProfile.desired_is_active.is_(True))
             & (VPNProfile.provisioning_status.notin_(("deleting", "create_failed", "create_cleanup_pending")))
         )
+    )
+    vless_cond = (
+        (server_proto_subq == VLESS_PROTOCOL)
+        & User.vless_subscription.has(VlessSubscription.is_active.is_(True))
     )
     xray_cond = (
         (server_proto_subq == XRAY_PROTOCOL)
@@ -242,7 +247,26 @@ def _build_server_audience_condition(server_id: int):
             )
         )
     )
-    return or_(awg_cond, xray_cond)
+    return or_(awg_cond, vless_cond, xray_cond)
+
+
+def _apply_mass_bonus_audience_filter(stmt, target_aud: str, now: datetime | None = None):
+    """Applies target audience filter for mass bonus preview and background execution."""
+    if now is None:
+        now = now_utc()
+    from database.repositories.users_repo import get_effective_active_condition
+
+    if target_aud.startswith("server_"):
+        try:
+            server_id = int(target_aud.split("_")[1])
+        except (IndexError, ValueError):
+            server_id = -1
+        return stmt.where(_build_server_audience_condition(server_id))
+    elif target_aud == "active":
+        return stmt.where(get_effective_active_condition(now))
+    elif target_aud == "expired":
+        return stmt.where(~get_effective_active_condition(now))
+    return stmt
 
 
 @router.message(AdminStates.entering_mass_bonus_reason)
@@ -300,23 +324,11 @@ async def process_mass_bonus_reason(
         server_name = server.name if server else f"ID {server_id}"
         server_flag = (server.country_flag or "🌐") if server else "🌐"
         aud_label = texts.ADMIN_USERS_MASS_BONUS_SERVER_AUDIENCE_LABEL.format(flag=server_flag, name=safe(server_name))
-
-        server_cond = _build_server_audience_condition(server_id)
-        stmt = (
-            select(func.count(User.id))
-            .where(
-                User.is_deleted.is_(False),
-                User.is_banned.is_(False),
-                server_cond,
-            )
-        )
     else:
         aud_label = texts.ADMIN_MASS_BONUS_AUDIENCE_LABELS.get(target_aud, target_aud)
-        stmt = select(func.count(User.id)).where(User.is_deleted.is_(False), User.is_banned.is_(False))
-        if target_aud == "active":
-            stmt = stmt.where(User.subscription_end > now)
-        elif target_aud == "expired":
-            stmt = stmt.where(or_(User.subscription_end <= now, User.subscription_end.is_(None)))
+
+    stmt = select(func.count(User.id)).where(User.is_deleted.is_(False), User.is_banned.is_(False))
+    stmt = _apply_mass_bonus_audience_filter(stmt, target_aud, now)
 
     user_count = int((await session.scalar(stmt)) or 0)
     total_budget = user_count * amount
@@ -447,27 +459,14 @@ async def _run_mass_bonus_background(
         blocked_count = 0
 
         now = now_utc()
-        if target_aud.startswith("server_"):
-            try:
-                server_id = int(target_aud.split("_")[1])
-            except (IndexError, ValueError):
-                server_id = -1
-            server_cond = _build_server_audience_condition(server_id)
-            stmt = (
-                select(User.id, User.telegram_id)
-                .where(
-                    User.is_deleted.is_(False),
-                    User.is_banned.is_(False),
-                    server_cond,
-                )
-                .distinct()
+        stmt = (
+            select(User.id, User.telegram_id)
+            .where(
+                User.is_deleted.is_(False),
+                User.is_banned.is_(False),
             )
-        else:
-            stmt = select(User.id, User.telegram_id).where(User.is_deleted.is_(False), User.is_banned.is_(False))
-            if target_aud == "active":
-                stmt = stmt.where(User.subscription_end > now)
-            elif target_aud == "expired":
-                stmt = stmt.where(or_(User.subscription_end <= now, User.subscription_end.is_(None)))
+        )
+        stmt = _apply_mass_bonus_audience_filter(stmt, target_aud, now).distinct()
 
         async with session_scope() as session:
             result = await session.execute(stmt)

@@ -6,7 +6,7 @@ from datetime import datetime
 from aiogram import F, Router
 from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +15,11 @@ from bot import texts
 from bot.formatters import format_admin_breadcrumbs
 from bot.handlers.admin.users.common import format_subscription_days_text
 from bot.keyboards import get_back_button
+from bot.keyboards.admin.users import (
+    get_admin_mass_extend_confirm_keyboard,
+    get_admin_mass_extend_days_keyboard,
+    get_admin_mass_extend_reason_keyboard,
+)
 from bot.states import AdminStates
 from config.constants import AdminAuditAction
 from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
@@ -31,6 +36,7 @@ from database.repositories.servers_repo import (
 )
 from services.audit_service import AuditService
 from services.subscription import SubscriptionService
+from services.user_cache import invalidate_user_cache
 from utils.admin import is_admin
 from utils.datetime_helpers import now_utc
 from utils.rate_limiter import global_send_limiter
@@ -138,6 +144,7 @@ async def start_mass_extend(
         return
 
     await state.clear()
+    await state.update_data(active_msg_id=callback.message.message_id)
     header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.ADMIN_USERS_MASS_BONUS_SELECT_AUDIENCE)
 
     text = (
@@ -191,6 +198,7 @@ async def select_mass_extend_server(
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
 
+    await state.update_data(active_msg_id=callback.message.message_id)
     servers = await get_all_servers(session)
     header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.BROADCAST_BREADCRUMB_SERVER_SELECTION)
     text = f"{header}\n\n{texts.ADMIN_USERS_MASS_EXTEND_SELECT_SERVER}"
@@ -216,6 +224,46 @@ async def select_mass_extend_server(
     await callback.answer(show_alert=False)
 
 
+async def _build_mass_extend_confirm_data(
+    session: AsyncSession,
+    target_aud: str,
+    days: int,
+    reason: str,
+) -> tuple[str, InlineKeyboardMarkup, int]:
+    now = now_utc()
+    server = None
+    if target_aud.startswith("server_"):
+        try:
+            server_id = int(target_aud.split("_")[1])
+        except (IndexError, ValueError):
+            server_id = -1
+        server = await get_server_by_id(session, server_id)
+        server_name = server.name if server else f"ID {server_id}"
+        server_flag = (server.country_flag or "🌐") if server else "🌐"
+        aud_label = texts.ADMIN_USERS_MASS_BONUS_SERVER_AUDIENCE_LABEL.format(flag=server_flag, name=safe(server_name))
+    else:
+        aud_label = texts.ADMIN_MASS_EXTEND_AUDIENCE_LABELS.get(target_aud, target_aud)
+
+    base_cond = (User.is_deleted.is_(False)) & (User.is_banned.is_(False))
+    aud_cond = _build_mass_extend_audience_filter(target_aud, now, server=server)
+    stmt = select(func.count(User.id)).where(base_cond, aud_cond)
+    user_count = int((await session.scalar(stmt)) or 0)
+
+    days_text = format_subscription_days_text(days)
+    header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.ADMIN_USERS_MASS_BONUS_CONFIRM)
+    text = (
+        f"{header}\n\n"
+        f"{texts.ADMIN_USERS_MASS_EXTEND_CONFIRM_TITLE}"
+        f"{texts.ADMIN_USERS_MASS_BONUS_AUDIENCE.format(aud_label=aud_label)}"
+        f"{texts.ADMIN_USERS_MASS_BONUS_RECIPIENTS_CHEL.format(user_count=user_count)}"
+        f"{texts.ADMIN_USERS_MASS_EXTEND_CONFIRM_DAYS.format(days_text=days_text)}"
+        f"{texts.ADMIN_USERS_MASS_BONUS_REASON.format(safe_reason=safe(reason))}"
+        f"{texts.ADMIN_USERS_MASS_EXTEND_CONFIRM_QUESTION}"
+    )
+    reply_markup = get_admin_mass_extend_confirm_keyboard()
+    return text, reply_markup, user_count
+
+
 @router.callback_query(F.data.startswith("mass_ext_aud:"))
 async def select_mass_extend_audience(
     callback: CallbackQuery,
@@ -226,16 +274,78 @@ async def select_mass_extend_audience(
         return
 
     target_aud = callback.data.split(":")[1]
-    await state.update_data(target_aud=target_aud)
-    await state.set_state(AdminStates.entering_mass_extend_days)
+    active_msg_id = callback.message.message_id
+    await state.update_data(target_aud=target_aud, active_msg_id=active_msg_id)
 
     header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.ADMIN_USERS_MASS_EXTEND_HEADER_DAYS)
-    text = f"{header}\n\n{texts.ADMIN_USERS_MASS_EXTEND_ENTER_DAYS_PROMPT}"
+    text = f"{header}\n\n{texts.ADMIN_USERS_MASS_EXTEND_CHOOSE_DAYS}"
 
     try:
         await callback.message.edit_text(
             text,
-            reply_markup=get_back_button("admin_mass_extend"),
+            reply_markup=get_admin_mass_extend_days_keyboard(),
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+
+    await callback.answer(show_alert=False)
+
+
+@router.callback_query(F.data.startswith("mass_ext_days:"))
+async def select_mass_extend_days(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    days_param = callback.data.split(":")[1]
+    await state.update_data(active_msg_id=callback.message.message_id)
+
+    if days_param == "custom":
+        await state.set_state(AdminStates.entering_mass_extend_days)
+        header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.ADMIN_USERS_MASS_EXTEND_HEADER_DAYS)
+        text = f"{header}\n\n{texts.ADMIN_USERS_MASS_EXTEND_ENTER_DAYS_PROMPT}"
+        try:
+            await callback.message.edit_text(
+                text,
+                reply_markup=get_back_button("mass_ext_back_to_days"),
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+        await callback.answer(show_alert=False)
+        return
+
+    try:
+        days = int(days_param)
+        if days < 1 or days > 365:
+            raise ValueError()
+    except ValueError:
+        await callback.answer(texts.ADMIN_USERS_MASS_EXTEND_INVALID_DAYS, show_alert=True)
+        return
+
+    data = await state.get_data()
+    target_aud = data.get("target_aud", "active_all")
+    reason = texts.ADMIN_USERS_MASS_EXTEND_DEFAULT_REASON
+
+    text, reply_markup, user_count = await _build_mass_extend_confirm_data(
+        session=session,
+        target_aud=target_aud,
+        days=days,
+        reason=reason,
+    )
+
+    await state.update_data(days=days, reason=reason, user_count=user_count)
+    await state.set_state(AdminStates.confirming_mass_extend)
+
+    try:
+        await callback.message.edit_text(
+            text,
+            reply_markup=reply_markup,
             parse_mode="HTML",
         )
     except Exception:
@@ -248,6 +358,7 @@ async def select_mass_extend_audience(
 async def process_mass_extend_days(
     message: Message,
     state: FSMContext,
+    session: AsyncSession,
 ):
     if not is_admin(message.from_user.id):
         await state.clear()
@@ -269,37 +380,258 @@ async def process_mass_extend_days(
         return
 
     try:
-        days = int(message.text.strip())
+        await message.delete()
+    except Exception:
+        pass
+
+    data = await state.get_data()
+    active_msg_id = data.get("active_msg_id")
+
+    try:
+        days = int(message.text.strip()) if message.text else 0
         if days < 1 or days > 365:
             raise ValueError()
     except (ValueError, AttributeError):
-        await render_hub(
-            message.bot,
-            message.chat.id,
-            texts.ADMIN_USERS_MASS_EXTEND_INVALID_DAYS,
-            get_back_button("admin_mass_extend"),
-            trigger_message_id=message.message_id,
-        )
+        header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.ADMIN_USERS_MASS_EXTEND_HEADER_DAYS)
+        err_text = f"{header}\n\n{texts.ADMIN_USERS_MASS_EXTEND_INVALID_DAYS}\n\n{texts.ADMIN_USERS_MASS_EXTEND_ENTER_DAYS_PROMPT}"
+        try:
+            if active_msg_id:
+                await message.bot.edit_message_text(
+                    chat_id=message.chat.id,
+                    message_id=active_msg_id,
+                    text=err_text,
+                    reply_markup=get_back_button("mass_ext_back_to_days"),
+                    parse_mode="HTML",
+                )
+            else:
+                raise RuntimeError("No active_msg_id")
+        except Exception:
+            new_id = await render_hub(
+                message.bot,
+                message.chat.id,
+                err_text,
+                reply_markup=get_back_button("mass_ext_back_to_days"),
+                parse_mode="HTML",
+            )
+            await state.update_data(active_msg_id=new_id)
         return
 
-    await state.update_data(days=days)
-    await state.set_state(AdminStates.entering_mass_extend_reason)
+    target_aud = data.get("target_aud", "active_all")
+    reason = texts.ADMIN_USERS_MASS_EXTEND_DEFAULT_REASON
 
-    days_text = format_subscription_days_text(days)
-    header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.ADMIN_USERS_MASS_BONUS_VVOD_PRICHINY)
+    text, reply_markup, user_count = await _build_mass_extend_confirm_data(
+        session=session,
+        target_aud=target_aud,
+        days=days,
+        reason=reason,
+    )
+
+    await state.update_data(days=days, reason=reason, user_count=user_count)
+    await state.set_state(AdminStates.confirming_mass_extend)
+
+    try:
+        if active_msg_id:
+            await message.bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=active_msg_id,
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode="HTML",
+            )
+        else:
+            raise RuntimeError("No active_msg_id")
+    except Exception:
+        new_id = await render_hub(
+            message.bot,
+            message.chat.id,
+            text,
+            reply_markup=reply_markup,
+            parse_mode="HTML",
+        )
+        await state.update_data(active_msg_id=new_id)
+
+
+@router.callback_query(F.data == "mass_ext_back_to_aud")
+async def mass_ext_back_to_aud(
+    callback: CallbackQuery,
+    state: FSMContext,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.ADMIN_USERS_MASS_BONUS_SELECT_AUDIENCE)
     text = (
         f"{header}\n\n"
-        f"{texts.ADMIN_USERS_MASS_EXTEND_ENTER_REASON_PROMPT.format(days_text=days_text)}"
+        f"{texts.ADMIN_USERS_MASS_EXTEND_TITLE}"
+        f"{texts.ADMIN_USERS_MASS_EXTEND_SELECT_AUDIENCE}"
     )
 
-    await render_hub(
-        message.bot,
-        message.chat.id,
-        text,
-        get_back_button("admin_mass_extend"),
-        parse_mode="HTML",
-        trigger_message_id=message.message_id,
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=texts.ADMIN_USERS_MASS_EXTEND_AUD_ACTIVE_STANDARD,
+        callback_data="mass_ext_aud:active_standard",
     )
+    builder.button(
+        text=texts.ADMIN_USERS_MASS_EXTEND_AUD_ACTIVE_WI,
+        callback_data="mass_ext_aud:active_wi",
+    )
+    builder.button(
+        text=texts.ADMIN_USERS_MASS_EXTEND_AUD_ACTIVE_ALL,
+        callback_data="mass_ext_aud:active_all",
+    )
+    builder.button(
+        text=texts.ADMIN_USERS_MASS_EXTEND_AUD_SERVER,
+        callback_data="mass_ext_servers",
+    )
+    builder.button(
+        text=texts.BTN_ADMIN_MENU,
+        callback_data="admin_menu",
+    )
+    builder.adjust(1)
+
+    await state.update_data(active_msg_id=callback.message.message_id)
+
+    try:
+        await callback.message.edit_text(
+            text,
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+
+    await callback.answer(show_alert=False)
+
+
+@router.callback_query(F.data == "mass_ext_back_to_days")
+async def mass_ext_back_to_days(
+    callback: CallbackQuery,
+    state: FSMContext,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    await state.update_data(active_msg_id=callback.message.message_id)
+    header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.ADMIN_USERS_MASS_EXTEND_HEADER_DAYS)
+    text = f"{header}\n\n{texts.ADMIN_USERS_MASS_EXTEND_CHOOSE_DAYS}"
+
+    try:
+        await callback.message.edit_text(
+            text,
+            reply_markup=get_admin_mass_extend_days_keyboard(),
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+
+    await callback.answer(show_alert=False)
+
+
+@router.callback_query(F.data == "mass_ext_edit_reason")
+async def mass_ext_edit_reason(
+    callback: CallbackQuery,
+    state: FSMContext,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    data = await state.get_data()
+    days = data.get("days", 1)
+    days_text = format_subscription_days_text(days)
+
+    await state.set_state(AdminStates.entering_mass_extend_reason)
+    await state.update_data(active_msg_id=callback.message.message_id)
+
+    header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.ADMIN_USERS_MASS_BONUS_VVOD_PRICHINY)
+    text = f"{header}\n\n{texts.ADMIN_USERS_MASS_EXTEND_EDIT_REASON_PROMPT.format(days_text=days_text)}"
+
+    try:
+        await callback.message.edit_text(
+            text,
+            reply_markup=get_admin_mass_extend_reason_keyboard(),
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+
+    await callback.answer(show_alert=False)
+
+
+@router.callback_query(F.data == "mass_ext_skip_reason")
+async def mass_ext_skip_reason(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    reason = texts.ADMIN_USERS_MASS_EXTEND_DEFAULT_REASON
+    data = await state.get_data()
+    target_aud = data.get("target_aud", "active_all")
+    days = data.get("days", 1)
+
+    text, reply_markup, user_count = await _build_mass_extend_confirm_data(
+        session=session,
+        target_aud=target_aud,
+        days=days,
+        reason=reason,
+    )
+
+    await state.update_data(reason=reason, user_count=user_count, active_msg_id=callback.message.message_id)
+    await state.set_state(AdminStates.confirming_mass_extend)
+
+    try:
+        await callback.message.edit_text(
+            text,
+            reply_markup=reply_markup,
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+
+    await callback.answer(show_alert=False)
+
+
+@router.callback_query(F.data == "mass_ext_back_to_confirm")
+async def mass_ext_back_to_confirm(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    data = await state.get_data()
+    target_aud = data.get("target_aud", "active_all")
+    days = data.get("days", 1)
+    reason = data.get("reason", texts.ADMIN_USERS_MASS_EXTEND_DEFAULT_REASON)
+
+    text, reply_markup, user_count = await _build_mass_extend_confirm_data(
+        session=session,
+        target_aud=target_aud,
+        days=days,
+        reason=reason,
+    )
+
+    await state.update_data(user_count=user_count, active_msg_id=callback.message.message_id)
+    await state.set_state(AdminStates.confirming_mass_extend)
+
+    try:
+        await callback.message.edit_text(
+            text,
+            reply_markup=reply_markup,
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+
+    await callback.answer(show_alert=False)
 
 
 @router.message(AdminStates.entering_mass_extend_reason)
@@ -327,77 +659,74 @@ async def process_mass_extend_reason(
         )
         return
 
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+    data = await state.get_data()
+    active_msg_id = data.get("active_msg_id")
+
     raw_reason = message.text.strip() if message.text else ""
     if len(raw_reason) > 100:
-        await render_hub(
-            message.bot,
-            message.chat.id,
-            texts.ERROR_REASON_TOO_LONG.format(max=100),
-            get_back_button("admin_mass_extend"),
-            parse_mode="HTML",
-            trigger_message_id=message.message_id,
-        )
+        header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.ADMIN_USERS_MASS_BONUS_VVOD_PRICHINY)
+        err_text = f"{header}\n\n{texts.ERROR_REASON_TOO_LONG.format(max=100)}"
+        try:
+            if active_msg_id:
+                await message.bot.edit_message_text(
+                    chat_id=message.chat.id,
+                    message_id=active_msg_id,
+                    text=err_text,
+                    reply_markup=get_admin_mass_extend_reason_keyboard(),
+                    parse_mode="HTML",
+                )
+            else:
+                raise RuntimeError("No active_msg_id")
+        except Exception:
+            new_id = await render_hub(
+                message.bot,
+                message.chat.id,
+                err_text,
+                reply_markup=get_admin_mass_extend_reason_keyboard(),
+                parse_mode="HTML",
+            )
+            await state.update_data(active_msg_id=new_id)
         return
 
     reason = raw_reason if raw_reason else texts.ADMIN_USERS_MASS_EXTEND_DEFAULT_REASON
-    data = await state.get_data()
     target_aud = data.get("target_aud", "active_all")
     days = data.get("days", 1)
-    days_text = format_subscription_days_text(days)
 
-    now = now_utc()
-    server = None
-    if target_aud.startswith("server_"):
-        try:
-            server_id = int(target_aud.split("_")[1])
-        except (IndexError, ValueError):
-            server_id = -1
-        server = await get_server_by_id(session, server_id)
-        server_name = server.name if server else f"ID {server_id}"
-        server_flag = (server.country_flag or "🌐") if server else "🌐"
-        aud_label = texts.ADMIN_USERS_MASS_BONUS_SERVER_AUDIENCE_LABEL.format(flag=server_flag, name=safe(server_name))
-    else:
-        aud_label = texts.ADMIN_MASS_EXTEND_AUDIENCE_LABELS.get(target_aud, target_aud)
-
-    base_cond = (User.is_deleted.is_(False)) & (User.is_banned.is_(False))
-    aud_cond = _build_mass_extend_audience_filter(target_aud, now, server=server)
-    stmt = select(func.count(User.id)).where(base_cond, aud_cond)
-
-    user_count = int((await session.scalar(stmt)) or 0)
+    text, reply_markup, user_count = await _build_mass_extend_confirm_data(
+        session=session,
+        target_aud=target_aud,
+        days=days,
+        reason=reason,
+    )
 
     await state.update_data(reason=reason, user_count=user_count)
     await state.set_state(AdminStates.confirming_mass_extend)
 
-    header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.ADMIN_USERS_MASS_BONUS_CONFIRM)
-    text = (
-        f"{header}\n\n"
-        f"{texts.ADMIN_USERS_MASS_EXTEND_CONFIRM_TITLE}"
-        f"{texts.ADMIN_USERS_MASS_BONUS_AUDIENCE.format(aud_label=aud_label)}"
-        f"{texts.ADMIN_USERS_MASS_BONUS_RECIPIENTS_CHEL.format(user_count=user_count)}"
-        f"{texts.ADMIN_USERS_MASS_EXTEND_CONFIRM_DAYS.format(days_text=days_text)}"
-        f"{texts.ADMIN_USERS_MASS_BONUS_REASON.format(safe_reason=safe(reason))}"
-        f"{texts.ADMIN_USERS_MASS_EXTEND_CONFIRM_QUESTION}"
-    )
-
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text=texts.ADMIN_USERS_MASS_EXTEND_BTN_START,
-        callback_data="confirm_mass_extend_apply",
-    )
-    builder.button(
-        text=texts.BTN_CANCEL,
-        callback_data="admin_mass_extend",
-    )
-    builder.adjust(1)
-
-    await render_hub(
-        message.bot,
-        message.chat.id,
-        text,
-        builder.as_markup(),
-        parse_mode="HTML",
-        trigger_message_id=message.message_id,
-    )
+    try:
+        if active_msg_id:
+            await message.bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=active_msg_id,
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode="HTML",
+            )
+        else:
+            raise RuntimeError("No active_msg_id")
+    except Exception:
+        new_id = await render_hub(
+            message.bot,
+            message.chat.id,
+            text,
+            reply_markup=reply_markup,
+            parse_mode="HTML",
+        )
+        await state.update_data(active_msg_id=new_id)
 
 
 @router.callback_query(AdminStates.confirming_mass_extend, F.data == "confirm_mass_extend_apply")
@@ -423,6 +752,8 @@ async def apply_mass_extend(
         except Exception:
             pass
         return
+
+    active_msg_id = data.get("active_msg_id") or callback.message.message_id
 
     # Immediately remove inline keyboard to prevent duplicate clicks
     try:
@@ -458,6 +789,7 @@ async def apply_mass_extend(
                 days=days,
                 reason=reason,
                 batch_id=batch_id,
+                active_msg_id=active_msg_id,
             )
         )
     except Exception:
@@ -490,6 +822,7 @@ async def _run_mass_extend_background(
     days: int,
     reason: str,
     batch_id: str | int,
+    active_msg_id: int | None = None,
 ):
     """Executes mass subscription extension across target audience in batches of 50.
 
@@ -534,6 +867,7 @@ async def _run_mass_extend_background(
                         ),
                         reply_markup=builder.as_markup(),
                         parse_mode="HTML",
+                        trigger_message_id=active_msg_id,
                     )
                 except Exception as e:
                     logger.error("Failed to notify admin of missing server: %s", e)
@@ -573,6 +907,7 @@ async def _run_mass_extend_background(
                     ),
                     reply_markup=builder.as_markup(),
                     parse_mode="HTML",
+                    trigger_message_id=active_msg_id,
                 )
             except Exception as e:
                 logger.error("Failed to notify admin of empty mass extension: %s", e)
@@ -616,6 +951,7 @@ async def _run_mass_extend_background(
                                     res_sub = await white_internet_repo.extend_subscription_atomic(session, sub.id, days)
                                     if res_sub:
                                         extended = True
+                                        invalidate_user_cache(tg_id)
                             elif target_aud == "active_all":
                                 # Extend standard if active
                                 if user.subscription_end and user.subscription_end > current_now:
@@ -640,6 +976,7 @@ async def _run_mass_extend_background(
                                     res_sub = await white_internet_repo.extend_subscription_atomic(session, sub.id, days)
                                     if res_sub:
                                         extended = True
+                                        invalidate_user_cache(tg_id)
                             elif target_aud.startswith("server_"):
                                 if not server:
                                     continue
@@ -655,6 +992,7 @@ async def _run_mass_extend_background(
                                         res_sub = await white_internet_repo.extend_subscription_atomic(session, sub.id, days)
                                         if res_sub:
                                             extended = True
+                                            invalidate_user_cache(tg_id)
                                 elif is_awg_capable_server(server) or is_vless_capable_server(server):
                                     if user.subscription_end and user.subscription_end > current_now:
                                         res = await SubscriptionService.extend_subscription(
@@ -764,6 +1102,7 @@ async def _run_mass_extend_background(
                 ),
                 reply_markup=builder.as_markup(),
                 parse_mode="HTML",
+                trigger_message_id=active_msg_id,
             )
         except Exception as e:
             logger.error("Failed to notify admin of mass extension completion: %s", e)
