@@ -178,13 +178,64 @@ class FulfillmentService:
             meta_op = meta.get("operation")
             target_sub_id = meta.get("subscription_id")
 
-            if meta_op in ("topup", "add_device_slot"):
-                logger.warning(
-                    "Revoke White Internet order %s for user %s: auxiliary operation %s, skipping subscription deactivation",
-                    order.id,
-                    user.id,
-                    meta_op,
+            if meta_op == "topup" or (
+                (order.traffic_bytes or 0) > 0 and (order.duration_days or 0) == 0
+            ):
+                from database.repositories.white_internet_repo import (
+                    get_subscription_by_user_id,
                 )
+
+                sub = await get_subscription_by_user_id(session, user.id)
+                if sub:
+                    sub.extra_traffic_bytes = max(
+                        0, (sub.extra_traffic_bytes or 0) - (order.traffic_bytes or 0)
+                    )
+                    sub.desired_version = (sub.desired_version or 0) + 1
+                    await session.flush()
+                    invalidate_user_cache(user.telegram_id)
+                    logger.info(
+                        "Revoked White Internet topup order %s for user %s (-%s bytes, extra_traffic_bytes=%s)",
+                        order.id,
+                        user.id,
+                        order.traffic_bytes,
+                        sub.extra_traffic_bytes,
+                    )
+                return
+
+            if meta_op == "add_device_slot" or (
+                order.device_limit
+                and not (order.traffic_bytes or 0)
+                and (order.duration_days or 0) == 0
+            ):
+                from config.constants import (
+                    WHITE_INTERNET_DEFAULT_DEVICE_LIMIT,
+                    WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES,
+                )
+                from database.repositories.white_internet_repo import (
+                    get_subscription_by_user_id,
+                )
+
+                sub = await get_subscription_by_user_id(session, user.id)
+                if sub:
+                    sub.device_limit = max(
+                        WHITE_INTERNET_DEFAULT_DEVICE_LIMIT,
+                        (sub.device_limit or 1) - 1,
+                    )
+                    sub.extra_traffic_bytes = max(
+                        0,
+                        (sub.extra_traffic_bytes or 0)
+                        - WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES,
+                    )
+                    sub.desired_version = (sub.desired_version or 0) + 1
+                    await session.flush()
+                    invalidate_user_cache(user.telegram_id)
+                    logger.info(
+                        "Revoked White Internet device slot order %s for user %s (device_limit=%s, extra_traffic_bytes=%s)",
+                        order.id,
+                        user.id,
+                        sub.device_limit,
+                        sub.extra_traffic_bytes,
+                    )
                 return
 
             await WhiteInternetService.deactivate_user_subscriptions(
