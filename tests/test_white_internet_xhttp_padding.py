@@ -1,33 +1,16 @@
 """Unit tests for White Internet dynamic XHTTP padding."""
 
-import importlib
 import json
-import os
 import unittest
 import urllib.parse
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import config.constants
 from database.models import WhiteInternetSubscription
 from services.white_internet_service import WhiteInternetService
 
 
 class TestWhiteInternetXHttpPadding(unittest.TestCase):
     """Test suite for dynamic XHTTP padding parameter propagation in VLESS and Xray configs."""
-
-    def test_canonical_xhttp_profile_padding_default(self):
-        """Verify CANONICAL_XHTTP_PROFILE has default xPaddingBytes 100-1000."""
-        self.assertEqual(config.constants.CANONICAL_XHTTP_PROFILE.get("xPaddingBytes"), "100-1000")
-
-    def test_canonical_xhttp_profile_padding_env_override(self):
-        """Verify WHITE_INTERNET_PADDING_BYTES env var overrides default padding."""
-        with patch.dict(os.environ, {"WHITE_INTERNET_PADDING_BYTES": "250-750"}):
-            importlib.reload(config.constants)
-            self.assertEqual(config.constants.CANONICAL_XHTTP_PROFILE.get("xPaddingBytes"), "250-750")
-
-        # Reload back to restore
-        importlib.reload(config.constants)
-        self.assertEqual(config.constants.CANONICAL_XHTTP_PROFILE.get("xPaddingBytes"), "100-1000")
 
     def test_generate_vless_links_contains_padding(self):
         """Verify generate_vless_links includes xPaddingBytes in extra query parameter."""

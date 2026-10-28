@@ -617,6 +617,20 @@ class NoDirectSettingsSecretLoggingTests(unittest.TestCase):
                         )
         self.assertEqual([], violations, "Direct secret logging:\n" + "\n".join(violations))
 
+    def test_peer_id_preserved_when_it_matches_fernet_length(self):
+        peer_pubkey = "xX12345678901234567890123456789012345678901="
+        raw_log = f"Configuring interface peer_id={peer_pubkey} on server_id=1"
+        sanitized = sanitize_text(raw_log)
+        self.assertIn(f"peer_id={peer_pubkey}", sanitized)
+        self.assertNotIn("[FERNET_KEY_REDACTED]", sanitized)
+
+    def test_actual_fernet_key_still_redacted(self):
+        fernet_key = "AAA-_AABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhs="
+        raw_log = f"settings.FIELD_ENCRYPTION_KEY={fernet_key} loaded"
+        sanitized = sanitize_text(raw_log)
+        self.assertNotIn(fernet_key, sanitized)
+        self.assertIn("[FERNET_KEY_REDACTED]", sanitized)
+
 
 if __name__ == "__main__":
     unittest.main()

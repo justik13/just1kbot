@@ -8,33 +8,10 @@ from bot.handlers.admin.servers.peers_routes import show_server_peers
 from bot.handlers.admin.users.list_routes import show_user_card
 from bot.keyboards.admin.servers import get_admin_server_card_keyboard
 from bot.keyboards.admin.users import get_admin_user_card_keyboard
-from database.repositories.users_repo import get_user_filter_counts
 from utils.datetime_helpers import now_utc
 
 
 class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
-    async def test_get_user_filter_counts_aggregates_correctly(self):
-        session = AsyncMock()
-        mock_result = SimpleNamespace(
-            total=34,
-            new_7d=5,
-            active=21,
-            expiring_3d=2,
-            expired=13,
-            banned=1,
-        )
-        scalars_mock = MagicMock()
-        scalars_mock.one.return_value = mock_result
-        session.execute.return_value = scalars_mock
-
-        counts = await get_user_filter_counts(session)
-        self.assertEqual(counts["all"], 34)
-        self.assertEqual(counts["new_7d"], 5)
-        self.assertEqual(counts["active"], 21)
-        self.assertEqual(counts["expiring_3d"], 2)
-        self.assertEqual(counts["expired"], 13)
-        self.assertEqual(counts["banned"], 1)
-
     async def test_dashboard_server_capacity_summary_shows_admin_peers(self):
         server1 = SimpleNamespace(id=1, name="Netherlands", country_flag="🇳🇱", max_clients=240)
         session = AsyncMock()

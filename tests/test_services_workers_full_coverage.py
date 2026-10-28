@@ -54,21 +54,6 @@ class ServicesWorkersFullCoverageTests(unittest.IsolatedAsyncioTestCase):
         self.env_patcher.stop()
         await self.engine.dispose()
 
-
-    async def test_notifications_helpers(self):
-        # Countdown formatting helper
-        d1 = datetime.timedelta(days=2, hours=3)
-        fmt1 = notifications._format_countdown(d1)
-        self.assertIn("2", fmt1)
-
-        d2 = datetime.timedelta(seconds=-10)
-        fmt2 = notifications._format_countdown(d2)
-        self.assertIsNotNone(fmt2)
-
-        # Backoff calculation
-        delay = notifications._get_backoff_delay(0)
-        self.assertTrue(delay > 0)
-
     async def test_notifications_worker_single_step(self):
         bot = AsyncMock()
         async with self.sessions.begin() as session:

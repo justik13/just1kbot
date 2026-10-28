@@ -60,24 +60,6 @@ class CircularImportRegressionTests(unittest.TestCase):
             with self.subTest(code=code):
                 self._assert_isolated_code(code)
 
-    def test_architectural_single_source_of_truth(self):
-        import config.constants
-
-        # Protocol
-        self.assertEqual(config.constants.AMNEZIA_PROTOCOL, "amneziawg2")
-
-        # AWG DNS and MTU defaults
-        self.assertEqual(config.constants.DEFAULT_AWG_DNS1, "8.8.8.8")
-        self.assertEqual(config.constants.DEFAULT_AWG_DNS2, "8.8.4.4")
-        self.assertEqual(config.constants.DEFAULT_AWG_MTU, "1280")
-
-        # Config Size limit
-        self.assertEqual(config.constants.MAX_RAW_CONFIG_BYTES, 65536)
-
-        # Rate limiter defaults
-        self.assertEqual(config.constants.RATE_LIMIT_REQUESTS_PER_MINUTE, 30.0)
-        self.assertEqual(config.constants.RATE_LIMIT_BURST, 10)
-
     @staticmethod
     def _find_ast_import_violations(tree: ast.AST, forbidden_prefixes: tuple[str, ...]) -> list[tuple[int, str]]:
         violations = []

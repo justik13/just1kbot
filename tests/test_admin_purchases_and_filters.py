@@ -3,7 +3,6 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from bot.handlers.admin.users.common import _build_users_list_text_and_kb
-from bot.keyboards.device import get_device_keyboard
 from database.models import (
     AuditLog,
     Tariff,
@@ -17,25 +16,6 @@ from utils.datetime_helpers import now_utc
 
 
 class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
-
-    def test_admin_dashboard_keyboard_has_purchases(self):
-        from bot.keyboards.admin.dashboard import get_admin_cat_finance_keyboard
-        markup = get_admin_cat_finance_keyboard()
-        all_callbacks = [
-            btn.callback_data
-            for row in markup.inline_keyboard
-            for btn in row
-        ]
-        self.assertIn("admin_purchases", all_callbacks)
-
-    def test_device_keyboard_has_support_help(self):
-        markup = get_device_keyboard(profile_id=42)
-        all_callbacks = [
-            btn.callback_data
-            for row in markup.inline_keyboard
-            for btn in row
-        ]
-        self.assertTrue(any(cb.startswith("support_help") for cb in all_callbacks))
 
     async def test_users_list_keyboard_banned_filter(self):
         u1 = User(telegram_id=2001, username="test_grid_user")

@@ -739,6 +739,31 @@ class TestWhiteInternetTrialProtectionAndReset(unittest.IsolatedAsyncioTestCase)
             self.session.flush.assert_awaited_once()
             mock_dispatch.assert_called_once()
 
+    async def test_reset_user_trial_leaves_paid_subscription_untouched(self):
+        """reset_user_trial must never deprovision or alter a paid subscription."""
+        user = User(id=101, telegram_id=11223344, last_trial_reset_at=None)
+        paid_sub = WhiteInternetSubscription(
+            id=50,
+            user_id=user.id,
+            is_trial=False,
+            status=WhiteInternetStatus.ACTIVE,
+            provisioning_status=WhiteInternetProvisioningStatus.ACTIVE,
+            base_traffic_bytes=50 * 1024**3,
+        )
+
+        mock_exec = MagicMock()
+        mock_exec.scalars.return_value.all.return_value = [paid_sub]
+        self.session.execute = AsyncMock(return_value=mock_exec)
+
+        with patch("services.white_internet_service.lock_checkout_user", new=AsyncMock(return_value=user)):
+            success, msg = await WhiteInternetService.reset_user_trial(self.session, user.id)
+
+            self.assertTrue(success)
+            self.assertEqual(msg, texts.ADMIN_WL_RESET_SUCCESS)
+            self.assertIsNotNone(user.last_trial_reset_at)
+            self.assertEqual(paid_sub.status, WhiteInternetStatus.ACTIVE)
+            self.assertFalse(paid_sub.is_trial)
+
     async def test_finalize_hard_delete_only_after_node_confirmed_disable(self):
         """finalize_hard_delete_subscription deletes only confirmed-disabled rows, keeps pending ones."""
         confirmed = WhiteInternetSubscription(

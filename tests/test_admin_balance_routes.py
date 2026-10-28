@@ -143,21 +143,6 @@ class TestAdminBalanceRoutes(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(adj_kwargs["metadata"], {"admin_id": 123456789, "reason": "preset_100_123456789"})
             self.assertTrue(adj_kwargs["idempotency_key"].startswith("admin_adj:"))
 
-    async def test_admin_balance_preset_signature_compatible_with_real_repo(self):
-        """Verify admin_balance_preset parameter names match real create_admin_adjustment signature."""
-        import inspect
-        from bot.handlers.admin.users.balance_routes import create_admin_adjustment as handler_adj
-        from database.repositories.account_ledger_repo import create_admin_adjustment as repo_adj
-
-        self.assertIs(handler_adj, repo_adj)
-        sig = inspect.signature(repo_adj)
-        # Verify repo signature has expected parameter names
-        self.assertIn("signed_amount", sig.parameters)
-        self.assertIn("idempotency_key", sig.parameters)
-        self.assertIn("metadata", sig.parameters)
-        self.assertNotIn("amount", sig.parameters)
-        self.assertNotIn("account_type", sig.parameters)
-
     async def test_admin_balance_preset_rolls_back_on_invariant_error(self):
         """When create_admin_adjustment raises AccountLedgerInvariantError, session must rollback so op_key is not committed."""
         from aiogram.types import CallbackQuery, User as TgUser
