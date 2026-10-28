@@ -4,6 +4,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot import texts
 from config.enums import ServerLifecycleStatus
 from bot.formatters import get_server_protocol_badge
+from utils.text_limits import truncate_button_text
 
 
 def get_broadcast_audience_keyboard() -> InlineKeyboardMarkup:
@@ -59,7 +60,7 @@ def get_broadcast_server_selection_keyboard(servers) -> InlineKeyboardMarkup:
         proto = get_server_protocol_badge(s)
         status = "" if is_server_active else texts.BROADCAST_SERVER_STATUS_DISABLED
         builder.button(
-            text=f"{flag} {proto} {s.name}{status}",
+            text=truncate_button_text(f"{flag} {proto} {s.name}{status}"),
             callback_data=f"broadcast_aud:server_{s.id}",
         )
 

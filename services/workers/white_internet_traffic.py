@@ -391,6 +391,8 @@ class WhiteInternetTrafficWorker:
                         kb.button(text=texts.BTN_BUY_ACCESS, callback_data="white_internet")
                     else:
                         kb.button(text=texts.BTN_WL_TOPUP, callback_data="wl_topup_menu")
+                    kb.button(text=texts.BTN_DISMISS_NOTIFICATION, callback_data="dismiss_notification")
+                    kb.adjust(1)
 
                     for attempt in range(3):
                         try:
@@ -442,6 +444,8 @@ class WhiteInternetTrafficWorker:
                             kb.button(text=texts.BTN_BUY_ACCESS, callback_data="white_internet")
                         else:
                             kb.button(text=texts.BTN_WL_TOPUP, callback_data="wl_topup_menu")
+                        kb.button(text=texts.BTN_DISMISS_NOTIFICATION, callback_data="dismiss_notification")
+                        kb.adjust(1)
 
                         await self.bot.send_message(
                             chat_id=telegram_id,

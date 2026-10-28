@@ -187,6 +187,26 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                         mark_notify_pending(order)
                     await session.flush()
 
+            if order and (order.metadata_ or {}).get("requires_manual_review"):
+                bot = request.app.get("bot")
+                if bot:
+                    from config.settings import get_settings
+                    from utils.telegram import safe_send_message
+                    admin_ids = get_settings().ADMIN_IDS
+                    for aid in admin_ids:
+                        try:
+                            await safe_send_message(
+                                bot,
+                                aid,
+                                f"⚠️ <b>Внимание: требуется ручная проверка заказа</b>\n\n"
+                                f"Заказ: <code>{order.id}</code>\n"
+                                f"Сумма заказа: {order.amount_rub} ₽\n"
+                                f"Причина: частичный возврат или несовпадение суммы ({order.metadata_.get('refund_amount_mismatch')})",
+                                parse_mode="HTML",
+                            )
+                        except Exception as exc:
+                            logger.warning("Failed to send manual review alert to admin %s: %s", aid, exc)
+
             if existing_event:
                 existing_event.status = inbox_status
                 if public_order_id:

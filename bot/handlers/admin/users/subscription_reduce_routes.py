@@ -117,6 +117,13 @@ async def admin_sub_reduce_process(
 
     if not telegram_id:
         await state.clear()
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            texts.ERROR_INVALID_REQUEST,
+            get_back_button("admin_users"),
+            trigger_message_id=trigger_msg_id,
+        )
         return
 
     days = _validate_positive_int(message.text)
@@ -244,8 +251,10 @@ async def admin_sub_apply_reduce(
         new_end = user.subscription_end - timedelta(days=days)
         if new_end <= now:
             user.subscription_end = cutoff
+            effective_end = cutoff
         else:
             user.subscription_end = new_end
+            effective_end = new_end
 
         user.notified_3d = False
         user.notified_1d = False
@@ -269,13 +278,13 @@ async def admin_sub_apply_reduce(
             target_id=user.id,
             details={
                 "days": days,
-                "new_end": format_datetime(new_end),
+                "new_end": format_datetime(effective_end),
             },
         )
 
         text = texts.ADMIN_SUB_REDUCED.format(
             telegram_id=telegram_id,
-            new_end=format_datetime(new_end),
+            new_end=format_datetime(effective_end),
         )
 
         try:
