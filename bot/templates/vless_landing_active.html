@@ -337,22 +337,12 @@
             margin-bottom: 16px;
             color: var(--text-sub);
         }
-        .actions-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            margin-bottom: 10px;
-        }
-        .actions-grid .btn {
-            margin-bottom: 0;
-            padding: 12px 10px;
-            font-size: 14px;
-        }
         .btn-happ {
             background-color: var(--surface-elevated);
             color: var(--text-main);
             border: 1px solid var(--border-subtle);
             box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+            margin-bottom: 10px;
         }
         .app-tabs {
             display: flex;
@@ -379,11 +369,6 @@
             background-color: var(--surface-hover);
             color: var(--text-main);
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
-        }
-        @media (max-width: 360px) {
-            .actions-grid {
-                grid-template-columns: 1fr;
-            }
         }
         @media (hover: hover) and (pointer: fine) {
             .btn-primary:hover {
@@ -499,24 +484,22 @@
         </div>
 
         <div class="stagger-2">
-            <div class="actions-grid">
-                <a id="deepLinkIncy" href="#" class="btn btn-primary">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <path d="M15 3h6v6"/>
-                        <path d="M10 14L21 3"/>
-                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-                    </svg>
-                    <span>Открыть в INCY</span>
-                </a>
-                <a id="deepLinkHapp" href="#" class="btn btn-happ">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <path d="M15 3h6v6"/>
-                        <path d="M10 14L21 3"/>
-                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-                    </svg>
-                    <span>Открыть в Happ</span>
-                </a>
-            </div>
+            <a id="deepLinkIncy" href="#" class="btn btn-primary">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M15 3h6v6"/>
+                    <path d="M10 14L21 3"/>
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                </svg>
+                <span>Открыть в приложении INCY</span>
+            </a>
+            <a id="deepLinkHapp" href="#" class="btn btn-happ">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M15 3h6v6"/>
+                    <path d="M10 14L21 3"/>
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                </svg>
+                <span>Открыть в приложении Happ</span>
+            </a>
 
             <button id="copyBtn" type="button" class="btn btn-secondary" onclick="copyLink()">
                 <span id="copyBtnContent">
@@ -598,7 +581,7 @@
                 </li>
                 <li>
                     <span class="step-num">2</span>
-                    <span>Нажмите кнопку <strong>«Открыть в INCY»</strong> или <strong>«Открыть в Happ»</strong> (либо скопируйте ссылку и добавьте её в приложении).</span>
+                    <span>Нажмите кнопку <strong>«Открыть в приложении INCY»</strong> или <strong>«Открыть в приложении Happ»</strong> (либо скопируйте ссылку и добавьте её в приложении).</span>
                 </li>
             </ol>
         </div>
