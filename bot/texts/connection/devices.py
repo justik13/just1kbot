@@ -201,9 +201,9 @@ CONNECTION_HUB_EXPIRED_TEXT = """🌐 <b>Подключение</b>
 {grace_notice}
 <i>Для возобновления доступа продлите подписку.</i>"""
 
-BTN_SUB_CONNECT_INCY = "🚀 Подключить в INCY"
+BTN_SUB_CONNECT_INCY = "🚀 Подключить в приложении"
 BTN_SUB_COPY_LINK = "📋 Скопировать ссылку"
-BTN_INCY_INSTRUCTIONS = "📱 Инструкция для INCY"
+BTN_INCY_INSTRUCTIONS = "📱 Инструкция (INCY / Happ)"
 VLESS_WEB_TOO_MANY_REQUESTS = "Слишком много запросов к подписке. Попробуйте позже."
 AMNEZIA_SCREEN_HINT_ADD = "\n\n<i>Нажмите кнопку ниже, чтобы создать первое устройство.</i>"
 AMNEZIA_SCREEN_HINT_LIMIT = "\n\n⚠️ <i>Общий лимит устройств исчерпан. Для добавления перейдите на тариф с большим количеством устройств или отключите неиспользуемые.</i>"

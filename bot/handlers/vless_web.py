@@ -19,7 +19,7 @@ from database.repositories import tariffs_repo, users_repo, vless_subscription_r
 from database.repositories.system_settings_repo import get_system_setting
 from services.subscription import SubscriptionService
 from services.vless_subscription_service import VlessSubscriptionService
-from utils.client_parser import extract_device_metadata
+from utils.client_parser import extract_device_metadata, parse_client_from_user_agent
 from utils.datetime_helpers import now_utc
 from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
 
@@ -85,7 +85,7 @@ def _is_browser_request(request: web.Request) -> bool:
         or request.headers.get("X-Device-Hwid")
         or request.headers.get("X-Device-Id")
         or ""
-    ).strip()
+    ).strip().strip("{}")
     if raw_hwid:
         return False
 
@@ -271,7 +271,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         or request.headers.get("X-Device-Hwid")
         or request.headers.get("X-Device-Id")
         or ""
-    ).strip()
+    ).strip().strip("{}")
     if raw_hwid and not HWID_PATTERN.match(raw_hwid):
         headers = dict(common_headers)
         headers["x-hwid-required"] = "true"
@@ -347,6 +347,11 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             sub_down = max(0, int(getattr(sub, "traffic_down", 0) or 0))
             sanitized_support = _sanitize_header_url(support_url)
             sanitized_channel = _sanitize_header_url(channel_url)
+
+            user_agent = request.headers.get("User-Agent", "")
+            client_name = parse_client_from_user_agent(user_agent)
+            is_happ = bool((client_name and "happ" in client_name.lower()) or ("happ" in user_agent.lower()))
+
             response_headers = {
                 **common_headers,
                 "Content-Type": "text/plain; charset=utf-8",
@@ -356,6 +361,11 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                 "Hide-Url": "1",
                 "No-Limit-Enabled": "1",
             }
+            if is_happ:
+                clean_bot = str(bot_username).strip().lstrip("@") or "just1k13bot"
+                if expire_ts > 0:
+                    response_headers["sub-expire"] = "1"
+                response_headers["sub-expire-button-link"] = f"https://t.me/{clean_bot}"
             if sanitized_support:
                 response_headers["Support-Url"] = sanitized_support
             if sanitized_channel:
@@ -458,6 +468,14 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                 "Hide-Url": "1",
                 "No-Limit-Enabled": "1",
             })
+            user_agent = request.headers.get("User-Agent", "")
+            client_name = parse_client_from_user_agent(user_agent)
+            is_happ = bool((client_name and "happ" in client_name.lower()) or ("happ" in user_agent.lower()))
+            if is_happ:
+                clean_bot = str(bot_username).strip().lstrip("@") or "just1k13bot"
+                if expire_ts > 0:
+                    headers["sub-expire"] = "1"
+                headers["sub-expire-button-link"] = f"https://t.me/{clean_bot}"
             sanitized_support = _sanitize_header_url(support_url)
             sanitized_channel = _sanitize_header_url(channel_url)
             if sanitized_support:
@@ -556,14 +574,28 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             "Hide-Url": "1",
             "No-Limit-Enabled": "1",
         }
+        user_agent = request.headers.get("User-Agent", "")
+        client_name = parse_client_from_user_agent(user_agent)
+        is_happ = bool((client_name and "happ" in client_name.lower()) or ("happ" in user_agent.lower()))
+        routing_scheme = "happ" if is_happ else "incy"
+
         if routing_enabled:
             response_headers["Routing"] = VlessSubscriptionService.generate_incy_routing_header(
                 profile_name="✦ Just1k",
                 direct_ru=True,
+                scheme=routing_scheme,
             )
             response_headers["routing-geo-update-interval"] = "168"
         else:
             response_headers["Routing"] = "off"
+            if is_happ:
+                response_headers["routing-enable"] = "0"
+
+        if is_happ:
+            clean_bot = str(bot_username).strip().lstrip("@") or "just1k13bot"
+            if expire_ts > 0:
+                response_headers["sub-expire"] = "1"
+            response_headers["sub-expire-button-link"] = f"https://t.me/{clean_bot}"
 
         sanitized_support = _sanitize_header_url(support_url)
         sanitized_channel = _sanitize_header_url(channel_url)

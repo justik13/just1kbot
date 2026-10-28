@@ -331,7 +331,9 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     self.assertIn("text/html", resp.headers.get("Content-Type", ""))
                     html_text = await resp.text()
                     self.assertIn("incy://add/", html_text)
+                    self.assertIn("happ://add/", html_text)
                     self.assertIn("Открыть в приложении INCY", html_text)
+                    self.assertIn("Открыть в приложении Happ", html_text)
 
     async def test_epoch_mismatch_returns_503(self):
         now = datetime.now(timezone.utc)
@@ -452,6 +454,67 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     decoded_url = unquote(wl_url)
                     self.assertIn('"uplinkHTTPMethod":"GET"', decoded_url)
                     self.assertIn('"uplinkDataPlacement":"header"', decoded_url)
+
+    async def test_feed_happ_client_adaptive_routing_and_in_app_headers(self):
+        now = datetime.now(timezone.utc)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            origin_node_id=1,
+            token="valid-token-happ-1234567890abcdef",
+            uuid="a2b9d4e1-73c5-4812-b964-f3e7b85a1902",
+            status=WhiteInternetStatus.ACTIVE,
+            started_at=now,
+            expires_at=now + timedelta(days=30),
+            traffic_limit_bytes=53687091200,
+            traffic_used_bytes=1000,
+            traffic_uplink_bytes=500,
+            traffic_downlink_bytes=500,
+            last_uplink_snapshot=500,
+            last_downlink_snapshot=500,
+            desired_version=1,
+            actual_version=1,
+            last_reconciled_node_epoch="epoch-xyz",
+            device_limit=1,
+            active_hwids={},
+        )
+
+        server = Server(
+            id=1,
+            name="Origin-Node",
+            protocol=XRAY_PROTOCOL,
+            api_url="https://cdn.example.com:8444",
+            xray_instance_epoch="epoch-xyz",
+            capabilities=["xray_origin"],
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+        )
+
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = server
+        mock_session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
+        mock_session.get.return_value = sub
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.example.com"}):
+            with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+                with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                    resp = await self.client.get(
+                        "/sub/wl/valid-token-happ-1234567890abcdef",
+                        headers={
+                            "X-Hwid": "test-device-hwid-happ",
+                            "User-Agent": "Happ/4.6.1 (Android; Pixel 8)",
+                        },
+                    )
+
+                    self.assertEqual(resp.status, 200)
+                    self.assertIn("Routing", resp.headers)
+                    self.assertTrue(resp.headers["Routing"].startswith("happ://routing/onadd/"))
+                    self.assertEqual(resp.headers.get("sub-expire"), "1")
+                    self.assertEqual(resp.headers.get("sub-expire-button-link"), "https://t.me/just1k13bot")
 
     async def test_feed_without_hwid_returns_403_hwid_required(self):
         now = datetime.now(timezone.utc)
