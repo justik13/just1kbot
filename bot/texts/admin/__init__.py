@@ -154,6 +154,7 @@ from bot.texts.admin.dashboard import (
 )
 
 from bot.texts.admin.finances import (
+    ADMIN_ALERT_ORDER_REQUIRES_MANUAL_REVIEW,
     ADMIN_BTN_BACK_TO_PAYMENTS,
     ADMIN_BTN_BACK_TO_USER_PAYMENTS,
     ADMIN_BTN_PAGINATION_NEXT,
@@ -747,6 +748,7 @@ from bot.texts.admin.users import (
 )
 
 __all__ = [
+    "ADMIN_ALERT_ORDER_REQUIRES_MANUAL_REVIEW",
     "ADMIN_AUDIT_LOG_DETAILS_BROADCAST",
     "ADMIN_AUDIT_LOG_DETAILS_DELETE_SERVER",
     "ADMIN_AUDIT_LOG_DETAILS_EDIT_SERVER",

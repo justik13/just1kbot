@@ -1,6 +1,8 @@
 """Domain texts for runtime/notifications.py."""
 from __future__ import annotations
 
+from bot.texts.common.buttons import BTN_DISMISS_NOTIFICATION as BTN_DISMISS_NOTIFICATION
+
 BALANCE_TOPUP_CREDITED = """✅ <b>Баланс пополнен на +{amount} ₽!</b>
 
 💰 Баланс: <b>{real_balance} ₽</b>

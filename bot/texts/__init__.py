@@ -34,6 +34,7 @@ from bot.texts.admin.dashboard import (
     DASHBOARD_INACTIVE_SERVER_ROW_VLESS as DASHBOARD_INACTIVE_SERVER_ROW_VLESS,
 )
 from bot.texts.admin.finances import (
+    ADMIN_ALERT_ORDER_REQUIRES_MANUAL_REVIEW as ADMIN_ALERT_ORDER_REQUIRES_MANUAL_REVIEW,
     ADMIN_PURCHASES_ROW_FORMAT as ADMIN_PURCHASES_ROW_FORMAT,
 )
 from bot.texts.admin.servers import (

@@ -190,18 +190,21 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
             if order and (order.metadata_ or {}).get("requires_manual_review"):
                 bot = request.app.get("bot")
                 if bot:
+                    from bot import texts
                     from config.settings import get_settings
                     from utils.telegram import safe_send_message
                     admin_ids = get_settings().ADMIN_IDS
+                    alert_text = texts.ADMIN_ALERT_ORDER_REQUIRES_MANUAL_REVIEW.format(
+                        order_id=order.id,
+                        amount_rub=order.amount_rub,
+                        mismatch=(order.metadata_ or {}).get("refund_amount_mismatch", "—"),
+                    )
                     for aid in admin_ids:
                         try:
                             await safe_send_message(
                                 bot,
                                 aid,
-                                f"⚠️ <b>Внимание: требуется ручная проверка заказа</b>\n\n"
-                                f"Заказ: <code>{order.id}</code>\n"
-                                f"Сумма заказа: {order.amount_rub} ₽\n"
-                                f"Причина: частичный возврат или несовпадение суммы ({order.metadata_.get('refund_amount_mismatch')})",
+                                alert_text,
                                 parse_mode="HTML",
                             )
                         except Exception as exc:
