@@ -65,7 +65,7 @@ class CommandSurfaceTests(unittest.TestCase):
     def test_all_admin_package_routers_are_descendants_of_admin_root(self):
         """Every Router instance defined in bot.handlers.admin must be inside admin_router."""
         from aiogram import Router
-        from bot.handlers.admin import router as admin_router
+        from bot.handlers.admin import admin_router
 
         admin_tree = self._collect_descendant_routers(admin_router)
         admin_package_dir = ROOT / "bot" / "handlers" / "admin"
