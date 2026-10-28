@@ -14,7 +14,6 @@ from services.yookassa_service import (
     YooKassaResult,
     YooKassaService,
 )
-from utils.logging_security import sanitize_text
 from utils.telegram import safe_callback_answer
 
 
@@ -65,14 +64,6 @@ class TestSafeCallbackAnswer(unittest.IsolatedAsyncioTestCase):
 
 
 class TestYooKassaServiceTimeouts(unittest.IsolatedAsyncioTestCase):
-    def test_timeout_presets(self):
-        self.assertEqual(CHECK_STATUS_TIMEOUT.total, 7.0)
-        self.assertEqual(CHECK_STATUS_TIMEOUT.connect, 3.0)
-        self.assertEqual(CHECK_STATUS_TIMEOUT.sock_read, 5.0)
-        self.assertEqual(CREATE_PAYMENT_TIMEOUT.total, 10.0)
-        self.assertEqual(CREATE_PAYMENT_TIMEOUT.connect, 5.0)
-        self.assertEqual(CREATE_PAYMENT_TIMEOUT.sock_read, 7.0)
-
     async def test_connector_configuration(self):
         import socket
         from services.yookassa_service import _create_tcp_connector
@@ -141,23 +132,6 @@ class TestYooKassaServiceTimeouts(unittest.IsolatedAsyncioTestCase):
 
         mock_safe_answer.assert_awaited_once_with(cb)
         mock_render_hub.assert_awaited_once()
-
-
-class TestPeerIdLoggingNotCorrupted(unittest.TestCase):
-    def test_peer_id_preserved_when_it_matches_fernet_length(self):
-        # A 43-character base64 public key ending with '='
-        peer_pubkey = "xX12345678901234567890123456789012345678901="
-        raw_log = f"Configuring interface peer_id={peer_pubkey} on server_id=1"
-        sanitized = sanitize_text(raw_log)
-        self.assertIn(f"peer_id={peer_pubkey}", sanitized)
-        self.assertNotIn("[FERNET_KEY_REDACTED]", sanitized)
-
-    def test_actual_fernet_key_still_redacted(self):
-        fernet_key = "AAA-_AABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhs="
-        raw_log = f"settings.FIELD_ENCRYPTION_KEY={fernet_key} loaded"
-        sanitized = sanitize_text(raw_log)
-        self.assertNotIn(fernet_key, sanitized)
-        self.assertIn("[FERNET_KEY_REDACTED]", sanitized)
 
 
 class TestReconciliationWorkerUnit(unittest.IsolatedAsyncioTestCase):

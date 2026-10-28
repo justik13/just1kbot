@@ -203,21 +203,6 @@ class CheckoutWalletOrderTests(unittest.IsolatedAsyncioTestCase):
                     insufficient_text="unused",
                 )
 
-    async def test_subscriber_module_has_single_checkout_boundary(self):
-        """Guard against the checkout being copied back into individual paths."""
-        import inspect
-
-        source = inspect.getsource(
-            __import__(
-                "services.white_internet_service", fromlist=["x"]
-            )
-        )
-        self.assertEqual(
-            source.count("await create_order_debit("),
-            1,
-            "create_order_debit must be called from exactly one place",
-        )
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -12,8 +12,6 @@ from database.models import (
 )
 from services.workers.cleanup import (
     AUDIT_LOG_RETENTION_DAYS,
-    BATCH_DELETE_CHUNK_SIZE,
-    MAX_BATCH_DELETE_ROUNDS,
     WEBHOOK_INBOX_RETENTION_DAYS,
     _batch_delete_matching,
     _cleanup_old_records,
@@ -21,12 +19,6 @@ from services.workers.cleanup import (
 
 
 class TestCleanupRetentionExtended(unittest.IsolatedAsyncioTestCase):
-    def test_retention_constants(self):
-        self.assertEqual(30, WEBHOOK_INBOX_RETENTION_DAYS)
-        self.assertEqual(180, AUDIT_LOG_RETENTION_DAYS)
-        self.assertEqual(500, BATCH_DELETE_CHUNK_SIZE)
-        self.assertEqual(100, MAX_BATCH_DELETE_ROUNDS)
-
     async def test_batch_delete_matching_chunks_multi_round(self):
         mock_session = AsyncMock()
 

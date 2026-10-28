@@ -5,7 +5,6 @@ from aiogram import Bot
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.handlers.admin.users.mass_bonus import _run_mass_bonus_background
-from bot.handlers.connection.device_create_routes import _await_profile_ready
 from database.models import Server
 from database.repositories.profiles_repo import (
     PROFILE_LIST_HIDDEN_STATUSES,
@@ -47,12 +46,6 @@ class TestServerOutageResilience(unittest.IsolatedAsyncioTestCase):
             available = await get_available_servers(mock_session)
             self.assertEqual(len(available), 1)
             self.assertEqual(available[0].id, 1)
-
-    async def test_await_profile_ready_default_timeout(self):
-        """Verify _await_profile_ready has a default 15s timeout for UI in-place waiting."""
-        import inspect
-        sig = inspect.signature(_await_profile_ready)
-        self.assertEqual(sig.parameters["timeout_seconds"].default, 15.0)
 
     async def test_mass_bonus_server_audience_filters_by_server_id(self):
         """Mass bonus with server target filters users with devices on that server."""

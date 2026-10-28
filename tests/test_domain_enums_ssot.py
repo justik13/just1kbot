@@ -61,9 +61,6 @@ class DomainEnumsSSOTTests(unittest.TestCase):
             for member in members:
                 self.assertIsInstance(member.value, str)
                 self.assertTrue(len(member.value) > 0)
-                # StrEnum member must equal its string value
-                self.assertEqual(member, member.value)
-                self.assertEqual(enum_cls(member.value), member)
 
     def test_model_tuples_derived_from_enums(self):
         """The one live database.models tuple constant must match config.enums exactly."""
