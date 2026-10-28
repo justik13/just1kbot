@@ -215,20 +215,94 @@ async def process_mass_bonus_amount(
     )
 
 
-def _build_server_audience_condition(server, now: datetime):
+def _build_server_audience_condition(server_or_id, now: datetime):
     """Build unified SQL filter for users with active profiles or subscriptions on server."""
-    if not server:
+    if server_or_id is None:
         return User.id == -1
 
-    from database.models import VPNProfile, VlessSubscription, WhiteInternetSubscription
+    from config.constants import AMNEZIA_PROTOCOLS, VLESS_PROTOCOL, XRAY_ORIGIN_CAPABILITY, XRAY_PROTOCOL
+    from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
+    from database.models import Server, VPNProfile, VlessSubscription, WhiteInternetSubscription
     from database.repositories.servers_repo import (
         is_awg_capable_server,
         is_pure_vless_server,
         is_vless_capable_server,
         is_white_internet_origin_server,
     )
-    from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
 
+    if isinstance(server_or_id, int):
+        server_id = server_or_id
+        if server_id <= 0:
+            return User.id == -1
+
+        from sqlalchemy import cast, String
+
+        server_proto_subq = select(Server.protocol).where(Server.id == server_id).scalar_subquery()
+        server_caps_subq = select(cast(Server.capabilities, String)).where(Server.id == server_id).scalar_subquery()
+
+        awg_cond = (
+            (
+                server_proto_subq.in_(AMNEZIA_PROTOCOLS)
+                | server_caps_subq.like('%"awg"%')
+                | server_caps_subq.like('%"amnezia"%')
+            )
+            & (User.subscription_end > now)
+            & User.profiles.any(
+                (VPNProfile.server_id == server_id)
+                & (VPNProfile.is_active.is_(True))
+                & (VPNProfile.desired_is_active.is_(True))
+                & (VPNProfile.provisioning_status.notin_(("deleting", "create_failed", "create_cleanup_pending")))
+            )
+        )
+
+        is_vless_capable = (
+            (server_proto_subq == VLESS_PROTOCOL)
+            | server_caps_subq.like('%"vless"%')
+            | server_caps_subq.like('%"xray_vless"%')
+        )
+        is_pure_vless = (
+            is_vless_capable
+            & ~server_proto_subq.in_(AMNEZIA_PROTOCOLS)
+            & ~server_caps_subq.like('%"awg"%')
+            & ~server_caps_subq.like('%"amnezia"%')
+            & ~server_caps_subq.like(f'%"{XRAY_ORIGIN_CAPABILITY}"%')
+        )
+
+        vless_cond = (
+            is_vless_capable
+            & (User.subscription_end > now)
+            & User.vless_subscription.has(
+                (VlessSubscription.is_active.is_(True))
+                & (
+                    is_pure_vless
+                    | VlessSubscription.node_traffic_snapshots.has_key(str(server_id))
+                )
+            )
+        )
+
+        xray_cond = (
+            (
+                (server_proto_subq == XRAY_PROTOCOL)
+                | server_caps_subq.like('%"xray_origin"%')
+            )
+            & ~server_proto_subq.in_(AMNEZIA_PROTOCOLS)
+            & User.id.in_(
+                select(WhiteInternetSubscription.user_id).where(
+                    WhiteInternetSubscription.origin_node_id == server_id,
+                    WhiteInternetSubscription.status.in_([
+                        WhiteInternetStatus.ACTIVE,
+                        WhiteInternetStatus.PENDING,
+                        WhiteInternetStatus.EXHAUSTED,
+                    ]),
+                    WhiteInternetSubscription.expires_at > now,
+                    WhiteInternetSubscription.is_trial.is_(False),
+                    WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
+                )
+            )
+        )
+        return or_(awg_cond, vless_cond, xray_cond)
+
+    server = server_or_id
     conds = []
     if is_awg_capable_server(server):
         conds.append(
@@ -285,7 +359,12 @@ def _apply_mass_bonus_audience_filter(
     from database.repositories.users_repo import get_effective_active_condition
 
     if target_aud.startswith("server_"):
-        return stmt.where(_build_server_audience_condition(server, now))
+        try:
+            server_id = int(target_aud.split("_")[1])
+        except (IndexError, ValueError):
+            server_id = -1
+        target = server if server is not None else server_id
+        return stmt.where(_build_server_audience_condition(target, now))
     elif target_aud == "active":
         return stmt.where(get_effective_active_condition(now))
     elif target_aud == "expired":
@@ -504,17 +583,6 @@ async def _run_mass_bonus_background(
         blocked_count = 0
 
         now = now_utc()
-        server = None
-        if target_aud.startswith("server_"):
-            try:
-                server_id = int(target_aud.split("_")[1])
-            except (IndexError, ValueError):
-                server_id = -1
-            from database.repositories.servers_repo import get_server_by_id
-
-            async with session_scope() as session:
-                server = await get_server_by_id(session, server_id)
-
         stmt = (
             select(User.id, User.telegram_id)
             .where(
@@ -522,7 +590,7 @@ async def _run_mass_bonus_background(
                 User.is_banned.is_(False),
             )
         )
-        stmt = _apply_mass_bonus_audience_filter(stmt, target_aud, now, server=server).distinct()
+        stmt = _apply_mass_bonus_audience_filter(stmt, target_aud, now).distinct()
 
         async with session_scope() as session:
             result = await session.execute(stmt)
