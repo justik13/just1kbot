@@ -495,8 +495,10 @@ async def _get_white_internet_card_info(
     if sub.origin_node_id:
         origin_server = await session.get(Server, sub.origin_node_id)
         if origin_server:
+            from bot.formatters import get_server_protocol_badge
             origin_flag = origin_server.country_flag or "🌐"
-            origin_name = f"{origin_flag} [Origin РФ] {safe(origin_server.name)}"
+            origin_proto = get_server_protocol_badge(origin_server)
+            origin_name = f"{origin_flag} {origin_proto} {safe(origin_server.name)}"
         else:
             origin_name = f"#{sub.origin_node_id}"
 

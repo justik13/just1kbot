@@ -37,7 +37,7 @@ class TestAdminDeviceContext(unittest.IsolatedAsyncioTestCase):
 
         rendered = callback.message.edit_text.await_args.args[0]
         self.assertIn("🆔 ID устройства: <code>36</code>", rendered)
-        self.assertIn("🖥 Сервер: 🇩🇪 <b>Germany 01</b>", rendered)
+        self.assertIn("🖥 Сервер: 🇩🇪 <b>[AWG] Germany 01</b>", rendered)
         self.assertNotIn("ID устройства: 36)", rendered)
 
     async def test_device_list_has_safe_fallback_when_server_relationship_is_missing(self):
