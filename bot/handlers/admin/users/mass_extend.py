@@ -41,6 +41,7 @@ from utils.admin import is_admin
 from utils.datetime_helpers import now_utc
 from utils.rate_limiter import global_send_limiter
 from utils.telegram import render_hub, safe
+from utils.text_limits import truncate_button_text
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -183,7 +184,15 @@ async def start_mass_extend(
             parse_mode="HTML",
         )
     except Exception:
-        pass
+        new_id = await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            text,
+            builder.as_markup(),
+            parse_mode="HTML",
+        )
+        if new_id:
+            await state.update_data(active_msg_id=new_id)
 
     await callback.answer(show_alert=False)
 
@@ -208,7 +217,7 @@ async def select_mass_extend_server(
         flag = s.country_flag or "🌐"
         proto = get_server_protocol_badge(s)
         builder.button(
-            text=f"{flag} {proto} {s.name}",
+            text=truncate_button_text(f"{flag} {proto} {s.name}"),
             callback_data=f"mass_ext_aud:server_{s.id}",
         )
     builder.button(text=texts.BTN_BACK, callback_data="admin_mass_extend")
@@ -221,7 +230,15 @@ async def select_mass_extend_server(
             parse_mode="HTML",
         )
     except Exception:
-        pass
+        new_id = await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            text,
+            builder.as_markup(),
+            parse_mode="HTML",
+        )
+        if new_id:
+            await state.update_data(active_msg_id=new_id)
     await callback.answer(show_alert=False)
 
 
@@ -286,14 +303,23 @@ async def select_mass_extend_audience(
     header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.ADMIN_USERS_MASS_EXTEND_HEADER_DAYS)
     text = f"{header}\n\n{texts.ADMIN_USERS_MASS_EXTEND_CHOOSE_DAYS}"
 
+    markup = get_admin_mass_extend_days_keyboard()
     try:
         await callback.message.edit_text(
             text,
-            reply_markup=get_admin_mass_extend_days_keyboard(),
+            reply_markup=markup,
             parse_mode="HTML",
         )
     except Exception:
-        pass
+        new_id = await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            text,
+            markup,
+            parse_mode="HTML",
+        )
+        if new_id:
+            await state.update_data(active_msg_id=new_id)
 
     await callback.answer(show_alert=False)
 
@@ -315,14 +341,23 @@ async def select_mass_extend_days(
         await state.set_state(AdminStates.entering_mass_extend_days)
         header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.ADMIN_USERS_MASS_EXTEND_HEADER_DAYS)
         text = f"{header}\n\n{texts.ADMIN_USERS_MASS_EXTEND_ENTER_DAYS_PROMPT}"
+        markup = get_back_button("mass_ext_back_to_days")
         try:
             await callback.message.edit_text(
                 text,
-                reply_markup=get_back_button("mass_ext_back_to_days"),
+                reply_markup=markup,
                 parse_mode="HTML",
             )
         except Exception:
-            pass
+            new_id = await render_hub(
+                callback.bot,
+                callback.message.chat.id,
+                text,
+                markup,
+                parse_mode="HTML",
+            )
+            if new_id:
+                await state.update_data(active_msg_id=new_id)
         await callback.answer(show_alert=False)
         return
 
@@ -336,7 +371,7 @@ async def select_mass_extend_days(
 
     data = await state.get_data()
     target_aud = data.get("target_aud", "active_all")
-    reason = texts.ADMIN_USERS_MASS_EXTEND_DEFAULT_REASON
+    reason = data.get("reason") or texts.ADMIN_USERS_MASS_EXTEND_DEFAULT_REASON
 
     text, reply_markup, user_count = await _build_mass_extend_confirm_data(
         session=session,
@@ -355,7 +390,15 @@ async def select_mass_extend_days(
             parse_mode="HTML",
         )
     except Exception:
-        pass
+        new_id = await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            text,
+            reply_markup,
+            parse_mode="HTML",
+        )
+        if new_id:
+            await state.update_data(active_msg_id=new_id)
 
     await callback.answer(show_alert=False)
 
@@ -423,7 +466,7 @@ async def process_mass_extend_days(
         return
 
     target_aud = data.get("target_aud", "active_all")
-    reason = texts.ADMIN_USERS_MASS_EXTEND_DEFAULT_REASON
+    reason = data.get("reason") or texts.ADMIN_USERS_MASS_EXTEND_DEFAULT_REASON
 
     text, reply_markup, user_count = await _build_mass_extend_confirm_data(
         session=session,
@@ -505,7 +548,15 @@ async def mass_ext_back_to_aud(
             parse_mode="HTML",
         )
     except Exception:
-        pass
+        new_id = await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            text,
+            builder.as_markup(),
+            parse_mode="HTML",
+        )
+        if new_id:
+            await state.update_data(active_msg_id=new_id)
 
     await callback.answer(show_alert=False)
 
@@ -522,15 +573,24 @@ async def mass_ext_back_to_days(
     await state.update_data(active_msg_id=callback.message.message_id)
     header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.ADMIN_USERS_MASS_EXTEND_HEADER_DAYS)
     text = f"{header}\n\n{texts.ADMIN_USERS_MASS_EXTEND_CHOOSE_DAYS}"
+    markup = get_admin_mass_extend_days_keyboard()
 
     try:
         await callback.message.edit_text(
             text,
-            reply_markup=get_admin_mass_extend_days_keyboard(),
+            reply_markup=markup,
             parse_mode="HTML",
         )
     except Exception:
-        pass
+        new_id = await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            text,
+            markup,
+            parse_mode="HTML",
+        )
+        if new_id:
+            await state.update_data(active_msg_id=new_id)
 
     await callback.answer(show_alert=False)
 
@@ -553,15 +613,24 @@ async def mass_ext_edit_reason(
 
     header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.ADMIN_USERS_MASS_BONUS_VVOD_PRICHINY)
     text = f"{header}\n\n{texts.ADMIN_USERS_MASS_EXTEND_EDIT_REASON_PROMPT.format(days_text=days_text)}"
+    markup = get_admin_mass_extend_reason_keyboard()
 
     try:
         await callback.message.edit_text(
             text,
-            reply_markup=get_admin_mass_extend_reason_keyboard(),
+            reply_markup=markup,
             parse_mode="HTML",
         )
     except Exception:
-        pass
+        new_id = await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            text,
+            markup,
+            parse_mode="HTML",
+        )
+        if new_id:
+            await state.update_data(active_msg_id=new_id)
 
     await callback.answer(show_alert=False)
 
@@ -598,7 +667,15 @@ async def mass_ext_skip_reason(
             parse_mode="HTML",
         )
     except Exception:
-        pass
+        new_id = await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            text,
+            reply_markup,
+            parse_mode="HTML",
+        )
+        if new_id:
+            await state.update_data(active_msg_id=new_id)
 
     await callback.answer(show_alert=False)
 
@@ -635,7 +712,15 @@ async def mass_ext_back_to_confirm(
             parse_mode="HTML",
         )
     except Exception:
-        pass
+        new_id = await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            text,
+            reply_markup,
+            parse_mode="HTML",
+        )
+        if new_id:
+            await state.update_data(active_msg_id=new_id)
 
     await callback.answer(show_alert=False)
 
@@ -778,13 +863,21 @@ async def apply_mass_extend(
         await callback.answer(texts.ADMIN_USERS_MASS_EXTEND_STARTED_ALERT, show_alert=True)
 
         header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.ADMIN_USERS_MASS_BONUS_REZULTAT)
+        started_text = texts.ADMIN_USERS_MASS_EXTEND_STARTED_TEXT.format(header=header, days_text=days_text)
         try:
             await callback.message.edit_text(
-                texts.ADMIN_USERS_MASS_EXTEND_STARTED_TEXT.format(header=header, days_text=days_text),
+                started_text,
                 parse_mode="HTML",
             )
         except Exception:
-            pass
+            new_id = await render_hub(
+                callback.bot,
+                callback.message.chat.id,
+                started_text,
+                parse_mode="HTML",
+            )
+            if new_id:
+                active_msg_id = new_id
 
         batch_id = uuid.uuid4().hex[:16]
         _start_mass_extend_task(

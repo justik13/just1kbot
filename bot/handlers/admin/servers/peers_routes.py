@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only, selectinload
 
 from bot import texts
-from bot.formatters import format_admin_breadcrumbs
+from bot.formatters import format_admin_breadcrumbs, get_server_protocol_badge
 from bot.keyboards.admin.servers import get_admin_server_peers_keyboard
 from config.constants import AMNEZIA_PROTOCOL, AMNEZIA_PROTOCOLS
 from database.models import Server, User, VPNProfile
@@ -257,14 +257,16 @@ async def show_server_peers(
     page_items = all_items[start_idx : start_idx + PEERS_PER_PAGE]
 
     flag = server.country_flag or texts.EMOJI_GLOBE
-    header = format_admin_breadcrumbs(texts.BTN_SERVERS, f"{flag} {server.name}", texts.ADMIN_SERVER_PEERS_BREADCRUMB)
+    proto = get_server_protocol_badge(server)
+    formatted_name = f"{proto} {server.name}" if proto else server.name
+    header = format_admin_breadcrumbs(texts.BTN_SERVERS, f"{flag} {formatted_name}", texts.ADMIN_SERVER_PEERS_BREADCRUMB)
 
     if not api_available:
         status_banner = texts.ADMIN_SERVER_PEERS_API_ERROR_BANNER
         rendered = texts.ADMIN_SERVER_PEERS_HEADER_DEGRADED.format(
             header=header,
             flag=flag,
-            server_name=safe(server.name),
+            server_name=safe(formatted_name),
             status_banner=status_banner,
             db_profiles_count=len(profiles),
             page=page,
@@ -293,7 +295,7 @@ async def show_server_peers(
         rendered = texts.ADMIN_SERVER_PEERS_HEADER.format(
             header=header,
             flag=flag,
-            server_name=safe(server.name),
+            server_name=safe(formatted_name),
             status_banner=status_banner,
             live_peers=live_peers,
             bot_peers=len(bot_items_on_node),

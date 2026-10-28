@@ -395,6 +395,77 @@ class AdminMassBonusTests(unittest.IsolatedAsyncioTestCase):
             # Confirm lock was cleaned up
             self.assertNotIn(admin_id, _mass_bonus_in_progress)
 
+    def test_apply_mass_bonus_audience_filter_expired_includes_null_and_excludes_wi(self):
+        """Verify that expired audience filter is null-safe (includes users with subscription_end IS NULL)
+        and explicitly excludes users with active White Internet subscriptions."""
+        from datetime import datetime, timezone
+        from sqlalchemy import select
+        from bot.handlers.admin.users.mass_bonus import _apply_mass_bonus_audience_filter
+
+        now = datetime(2026, 10, 28, 12, 0, tzinfo=timezone.utc)
+        stmt = select(User.id)
+        filtered_stmt = _apply_mass_bonus_audience_filter(stmt, target_aud="expired", now=now)
+        compiled = str(filtered_stmt.compile(compile_kwargs={"literal_binds": False}))
+
+        self.assertIn("users.subscription_end <=", compiled)
+        self.assertIn("users.subscription_end IS NULL", compiled)
+        self.assertIn("white_internet_subscriptions.user_id", compiled)
+
+    def test_build_server_audience_condition_pure_vless_requires_unexpired_sub(self):
+        """Verify that pure VLESS server audience requires User.subscription_end > now,
+        excluding expired users who are still within the 4-hour cleanup grace window."""
+        from datetime import datetime, timezone
+        from sqlalchemy import select
+        from database.models import Server
+        from bot.handlers.admin.users.mass_bonus import _build_server_audience_condition
+
+        now = datetime(2026, 10, 28, 12, 0, tzinfo=timezone.utc)
+        server = Server(id=42, protocol="vless", name="Pure VLESS Node")
+
+        cond = _build_server_audience_condition(server, now)
+        stmt = select(User.id).where(cond)
+        compiled = str(stmt.compile(compile_kwargs={"literal_binds": False}))
+
+        self.assertIn("users.subscription_end >", compiled)
+        self.assertIn("vless_subscriptions.is_active", compiled)
+
+    def test_build_server_audience_condition_hybrid_server(self):
+        """Verify that hybrid AWG+VLESS server checks both AWG profiles and VLESS node traffic snapshot,
+        both requiring unexpired subscription_end."""
+        from datetime import datetime, timezone
+        from sqlalchemy import select
+        from database.models import Server
+        from bot.handlers.admin.users.mass_bonus import _build_server_audience_condition
+
+        now = datetime(2026, 10, 28, 12, 0, tzinfo=timezone.utc)
+        server = Server(
+            id=77,
+            protocol="amneziawg2",
+            name="Hybrid Node",
+            capabilities=["awg", "vless"],
+        )
+
+        cond = _build_server_audience_condition(server, now)
+        stmt = select(User.id).where(cond)
+        compiled = str(stmt.compile(compile_kwargs={"literal_binds": False}))
+
+        self.assertIn("vpn_profiles.server_id =", compiled)
+        self.assertIn("vless_subscriptions.node_traffic_snapshots", compiled)
+        self.assertIn("users.subscription_end >", compiled)
+
+    def test_build_server_audience_condition_none_server_fails_closed(self):
+        """Verify that missing/None server fails closed with id = -1."""
+        from datetime import datetime, timezone
+        from sqlalchemy import select
+        from bot.handlers.admin.users.mass_bonus import _build_server_audience_condition
+
+        now = datetime(2026, 10, 28, 12, 0, tzinfo=timezone.utc)
+        cond = _build_server_audience_condition(None, now)
+        stmt = select(User.id).where(cond)
+        compiled = str(stmt.compile(compile_kwargs={"literal_binds": False}))
+
+        self.assertIn("users.id = :id_1", compiled)
+
 
 if __name__ == "__main__":
     unittest.main()
