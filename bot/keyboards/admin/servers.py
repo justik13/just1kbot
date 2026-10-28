@@ -2,6 +2,7 @@ from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot import texts
+from utils.text_limits import truncate_button_text
 
 
 def get_admin_server_card_keyboard(
@@ -45,7 +46,7 @@ def get_admin_server_card_keyboard(
             text=texts.ADMIN_SERVER_BTN_MIGRATE,
             callback_data=f"admin_server_migrate:{server_id}",
         )
-    if has_awg:
+    if has_awg or has_vless or is_xray:
         builder.button(
             text=texts.ADMIN_SERVER_BTN_SERVER_USERS,
             callback_data=f"admin_users_filter:server:{server_id}:1",
@@ -186,7 +187,7 @@ def get_server_migration_targets_keyboard(
     builder = InlineKeyboardBuilder()
     for t_id, name, flag, active, max_c in targets:
         builder.button(
-            text=f"{flag} {name} ({active}/{max_c})",
+            text=truncate_button_text(f"{flag} {name} ({active}/{max_c})"),
             callback_data=f"admin_server_migrate_to:{source_id}:{t_id}",
         )
     builder.button(

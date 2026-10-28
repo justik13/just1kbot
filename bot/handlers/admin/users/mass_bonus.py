@@ -88,6 +88,8 @@ async def start_mass_bonus(
     )
     builder.adjust(1)
 
+    await state.update_data(active_msg_id=callback.message.message_id)
+
     try:
         await callback.message.edit_text(
             text,
@@ -95,7 +97,15 @@ async def start_mass_bonus(
             parse_mode="HTML",
         )
     except Exception:
-        pass
+        new_id = await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            text,
+            builder.as_markup(),
+            parse_mode="HTML",
+        )
+        if new_id:
+            await state.update_data(active_msg_id=new_id)
 
     await callback.answer(show_alert=False)
 
@@ -109,6 +119,8 @@ async def select_mass_bonus_server(
     if not is_admin(callback.from_user.id):
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
+
+    await state.update_data(active_msg_id=callback.message.message_id)
 
     from database.repositories.servers_repo import get_all_servers
 
@@ -134,7 +146,15 @@ async def select_mass_bonus_server(
             parse_mode="HTML",
         )
     except Exception:
-        pass
+        new_id = await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            text,
+            builder.as_markup(),
+            parse_mode="HTML",
+        )
+        if new_id:
+            await state.update_data(active_msg_id=new_id)
     await callback.answer(show_alert=False)
 
 
@@ -149,7 +169,7 @@ async def select_mass_bonus_audience(
         return
 
     target_aud = callback.data.split(":")[1]
-    await state.update_data(target_aud=target_aud)
+    await state.update_data(target_aud=target_aud, active_msg_id=callback.message.message_id)
     await state.set_state(AdminStates.entering_mass_bonus_amount)
 
     header = format_admin_breadcrumbs(texts.BTN_MASS_BONUS, texts.ADMIN_USERS_MASS_BONUS_VVOD_SUMMY)
@@ -166,7 +186,15 @@ async def select_mass_bonus_audience(
             parse_mode="HTML",
         )
     except Exception:
-        pass
+        new_id = await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            text,
+            get_back_button("admin_mass_bonus"),
+            parse_mode="HTML",
+        )
+        if new_id:
+            await state.update_data(active_msg_id=new_id)
 
     await callback.answer(show_alert=False)
 
@@ -205,7 +233,7 @@ async def process_mass_bonus_amount(
         texts.ADMIN_USERS_MASS_BONUS_NAPRIMER_KOMPENSATSIYA_ZA_SBOY.format()
     )
 
-    await render_hub(
+    new_id = await render_hub(
         message.bot,
         message.chat.id,
         text,
@@ -213,6 +241,8 @@ async def process_mass_bonus_amount(
         parse_mode="HTML",
         trigger_message_id=message.message_id,
     )
+    if new_id:
+        await state.update_data(active_msg_id=new_id)
 
 
 def _build_server_audience_condition(server_or_id, now: datetime):
@@ -484,7 +514,7 @@ async def process_mass_bonus_reason(
     )
     builder.adjust(1)
 
-    await render_hub(
+    new_id = await render_hub(
         message.bot,
         message.chat.id,
         text,
@@ -492,6 +522,8 @@ async def process_mass_bonus_reason(
         parse_mode="HTML",
         trigger_message_id=message.message_id,
     )
+    if new_id:
+        await state.update_data(active_msg_id=new_id)
 
 
 
@@ -515,19 +547,30 @@ async def apply_mass_bonus(
     target_aud = data.get("target_aud", "all")
     amount = data.get("amount", 0)
     reason = data.get("reason", texts.ADMIN_MASS_BONUS_DEFAULT_REASON)
+    active_msg_id = data.get("active_msg_id") or callback.message.message_id
 
     await state.clear()
     await callback.answer(texts.ADMIN_USERS_MASS_BONUS_MASSOVOE_GRANT_ZAPUSHCHE, show_alert=True)
 
     header = format_admin_breadcrumbs(texts.BTN_MASS_BONUS, texts.ADMIN_USERS_MASS_BONUS_REZULTAT)
+    status_text = (
+        texts.ADMIN_USERS_MASS_BONUS_MASSOVOE_GRANT_BONUSOV_P.format(header=header, amount=amount)+
+        texts.ADMIN_USERS_MASS_BONUS_PO_ZAVERSHENII_OPERATIONS_VAM_P.format()
+    )
     try:
         await callback.message.edit_text(
-            texts.ADMIN_USERS_MASS_BONUS_MASSOVOE_GRANT_BONUSOV_P.format(header=header, amount=amount)+
-            texts.ADMIN_USERS_MASS_BONUS_PO_ZAVERSHENII_OPERATIONS_VAM_P.format(),
+            status_text,
             parse_mode="HTML",
         )
     except Exception:
-        pass
+        new_id = await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            status_text,
+            parse_mode="HTML",
+        )
+        if new_id:
+            active_msg_id = new_id
 
     import uuid
 
@@ -547,6 +590,7 @@ async def apply_mass_bonus(
                 amount=amount,
                 reason=reason,
                 batch_id=batch_id,
+                active_msg_id=active_msg_id,
             )
         )
     except Exception:
@@ -561,6 +605,7 @@ async def _run_mass_bonus_background(
     amount: int,
     reason: str,
     batch_id: str | int,
+    active_msg_id: int | None = None,
 ):
     """Executes mass bonus adjustment across target audience in batches of 50.
 
@@ -572,7 +617,7 @@ async def _run_mass_bonus_background(
     - Best-Effort Post-Commit Telegram Notification: Notifications are dispatched post-commit strictly to
       newly credited users (`created=True`) in each chunk.
     """
-    from aiogram.exceptions import TelegramForbiddenError
+    from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 
     from database.connection import session_scope
     from utils.rate_limiter import global_send_limiter
@@ -625,16 +670,38 @@ async def _run_mass_bonus_background(
                         logger.error("Failed mass bonus credit for user %s: %s", uid, exc)
 
             blocked_uids = []
+            dismiss_builder = InlineKeyboardBuilder()
+            dismiss_builder.button(text=texts.BTN_DISMISS, callback_data="dismiss_notification")
+            notification_text = (
+                texts.ADMIN_USER_BONUS_ACCREDITED_NOTIFICATION.format(amount=amount)+
+                texts.ADMIN_BONUS_REASON_LINE_FORMAT.format(safe_reason=safe(reason))
+            )
+
             for uid, tg_id in credited_in_batch:
                 if tg_id and tg_id != admin_id:
                     try:
                         await global_send_limiter.acquire()
                         await bot.send_message(
                             tg_id,
-                            texts.ADMIN_USER_BONUS_ACCREDITED_NOTIFICATION.format(amount=amount)+
-                            texts.ADMIN_BONUS_REASON_LINE_FORMAT.format(safe_reason=safe(reason)),
+                            notification_text,
+                            reply_markup=dismiss_builder.as_markup(),
                             parse_mode="HTML",
                         )
+                    except TelegramRetryAfter as e:
+                        await asyncio.sleep(e.retry_after + 1)
+                        try:
+                            await global_send_limiter.acquire()
+                            await bot.send_message(
+                                tg_id,
+                                notification_text,
+                                reply_markup=dismiss_builder.as_markup(),
+                                parse_mode="HTML",
+                            )
+                        except TelegramForbiddenError:
+                            blocked_count += 1
+                            blocked_uids.append(uid)
+                        except Exception as e_retry:
+                            logger.warning("Failed retry to notify user %s for mass bonus: %s", uid, e_retry)
                     except TelegramForbiddenError:
                         blocked_count += 1
                         blocked_uids.append(uid)
@@ -668,13 +735,30 @@ async def _run_mass_bonus_background(
             builder.button(text=texts.ADMIN_USERS_MASS_BONUS_V_ADMIN_MENYU, callback_data="admin_menu")
             builder.adjust(1)
 
-            await render_hub(
-                bot,
-                admin_id,
+            report_text = (
                 texts.ADMIN_USERS_MASS_BONUS_MASSOVOE_GRANT_BONUSOV_Z.format(header=header)+
                 texts.ADMIN_USERS_MASS_BONUS_ZACHISLENO_CHEL_KAZHDOMU.format(success_count=success_count, amount=amount)+
                 texts.ADMIN_USERS_MASS_BONUS_OSHIBOK.format(fail_count=fail_count)+
-                texts.ADMIN_USERS_MASS_BONUS_ZABLOKIROVALI_BOTA.format(blocked_count=blocked_count),
+                texts.ADMIN_USERS_MASS_BONUS_ZABLOKIROVALI_BOTA.format(blocked_count=blocked_count)
+            )
+
+            if active_msg_id:
+                try:
+                    await bot.edit_message_text(
+                        chat_id=admin_id,
+                        message_id=active_msg_id,
+                        text=report_text,
+                        reply_markup=builder.as_markup(),
+                        parse_mode="HTML",
+                    )
+                    return
+                except Exception as edit_err:
+                    logger.debug("Failed in-place edit for mass bonus completion, falling back to render_hub: %s", edit_err)
+
+            await render_hub(
+                bot,
+                admin_id,
+                report_text,
                 reply_markup=builder.as_markup(),
                 parse_mode="HTML",
             )
