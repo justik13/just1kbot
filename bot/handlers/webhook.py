@@ -157,58 +157,20 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
             else:
                 inbox_status = WebhookInboxStatus.SUCCEEDED.value
 
+            notify_order_info = None
             if order and order.status == "paid" and getattr(order, "_newly_paid", False):
-                bot = request.app.get("bot")
-                if bot:
-                    from database.models import User
-                    from bot.handlers.payment.credit_notify import (
-                        notify_order_credited,
-                    )
-                    from services.order_notifications import (
-                        mark_notified,
-                        mark_notify_pending,
-                    )
+                from services.order_notifications import mark_notify_pending
+                mark_notify_pending(order)
+                notify_order_info = (order.id, order.user_id)
+                await session.flush()
 
-                    user = await session.get(User, order.user_id)
-                    try:
-                        delivered = await notify_order_credited(
-                            bot, session, order, user
-                        )
-                    except Exception as exc:
-                        logger.warning(
-                            "Could not notify user of order fulfillment: %s", exc
-                        )
-                        delivered = False
-                    if delivered:
-                        mark_notified(order)
-                    else:
-                        # Keep the debt: the credit-notify worker retries
-                        # the push for users who already left the screen.
-                        mark_notify_pending(order)
-                    await session.flush()
-
+            admin_alert_info = None
             if order and (order.metadata_ or {}).get("requires_manual_review"):
-                bot = request.app.get("bot")
-                if bot:
-                    from bot import texts
-                    from config.settings import get_settings
-                    from utils.telegram import safe_send_message
-                    admin_ids = get_settings().ADMIN_IDS
-                    alert_text = texts.ADMIN_ALERT_ORDER_REQUIRES_MANUAL_REVIEW.format(
-                        order_id=order.id,
-                        amount_rub=order.amount_rub,
-                        mismatch=(order.metadata_ or {}).get("refund_amount_mismatch", "—"),
-                    )
-                    for aid in admin_ids:
-                        try:
-                            await safe_send_message(
-                                bot,
-                                aid,
-                                alert_text,
-                                parse_mode="HTML",
-                            )
-                        except Exception as exc:
-                            logger.warning("Failed to send manual review alert to admin %s: %s", aid, exc)
+                admin_alert_info = {
+                    "order_id": order.id,
+                    "amount_rub": order.amount_rub,
+                    "mismatch": (order.metadata_ or {}).get("refund_amount_mismatch", "—"),
+                }
 
             if existing_event:
                 existing_event.status = inbox_status
@@ -234,6 +196,61 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
     except Exception:
         logger.exception("[%s] webhook inbox commit failed", request_id)
         return web.Response(status=500, text="Database unavailable")
+
+    bot = request.app.get("bot")
+    if bot:
+        if notify_order_info:
+            n_order_id, n_user_id = notify_order_info
+            try:
+                from database.models import Order, User
+                from bot.handlers.payment.credit_notify import notify_order_credited
+                from services.order_notifications import mark_notified
+
+                async with session_scope() as notify_session:
+                    loaded_order = await notify_session.get(Order, n_order_id)
+                    db_order = loaded_order if isinstance(loaded_order, Order) else order
+                    loaded_user = await notify_session.get(User, n_user_id)
+                    db_user = loaded_user if isinstance(loaded_user, User) else None
+                    if db_order and db_user:
+                        delivered = await notify_order_credited(
+                            bot, notify_session, db_order, db_user
+                        )
+                        if delivered:
+                            mark_notified(db_order)
+                            if order is not None:
+                                mark_notified(order)
+                            await notify_session.flush()
+            except Exception as exc:
+                logger.warning(
+                    "[%s] Could not deliver immediate credit notification for order %s: %s",
+                    request_id,
+                    n_order_id,
+                    exc,
+                )
+
+        if admin_alert_info:
+            try:
+                from bot import texts
+                from config.settings import get_settings
+                from utils.telegram import safe_send_message
+                admin_ids = get_settings().ADMIN_IDS
+                alert_text = texts.ADMIN_ALERT_ORDER_REQUIRES_MANUAL_REVIEW.format(
+                    order_id=admin_alert_info["order_id"],
+                    amount_rub=admin_alert_info["amount_rub"],
+                    mismatch=admin_alert_info["mismatch"],
+                )
+                for aid in admin_ids:
+                    try:
+                        await safe_send_message(
+                            bot,
+                            aid,
+                            alert_text,
+                            parse_mode="HTML",
+                        )
+                    except Exception as exc:
+                        logger.warning("Failed to send manual review alert to admin %s: %s", aid, exc)
+            except Exception as exc:
+                logger.warning("[%s] Failed to send admin alerts: %s", request_id, exc)
     if inbox_status == WebhookInboxStatus.PENDING.value:
         return web.Response(status=503, text="order_pending_retry")
     return web.Response(status=200, text="OK")

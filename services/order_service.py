@@ -299,13 +299,12 @@ class OrderService:
         final_desc = description or texts.CHECKOUT_DESCRIPTION_DEFAULT
 
         # Lock user to serialize concurrent order creation (prevent double-clicks/races)
-        try:
+        bind = session.get_bind()
+        if bind and getattr(bind, "dialect", None) and bind.dialect.name == "postgresql":
             await session.execute(
                 text("SELECT pg_advisory_xact_lock(:key)"),
                 {"key": -user_id},
             )
-        except Exception:
-            pass
 
         # 1. Deduplication guard for pending external orders (prevent double-clicks)
         if payment_method != "wallet":
@@ -409,13 +408,12 @@ class OrderService:
         if service_type == "awg":
             service_type = "standard"
         # Acquire advisory lock then row lock to avoid lock inversion deadlock
-        try:
+        bind = session.get_bind()
+        if bind and getattr(bind, "dialect", None) and bind.dialect.name == "postgresql":
             await session.execute(
                 text("SELECT pg_advisory_xact_lock(:key)"),
                 {"key": -user_id},
             )
-        except Exception:
-            pass
         user = await OrderService._load_settlement_user(session, user_id)
         if user and getattr(user, "financial_hold", False):
             raise FinancialHoldBlockedError("Financial hold active on user")
@@ -577,11 +575,16 @@ class OrderService:
             order_meta["underpaid"] = True
             order_meta["underpaid_expected"] = str(order.amount_rub)
             order_meta["underpaid_received"] = str(paid_amount_rub)
+            order_meta["requires_manual_review"] = True
             order_meta["manual_review"] = True
             order_meta["manual_review_reason"] = "underpayment"
+            order_meta["refund_amount_mismatch"] = (
+                f"Underpaid: expected {order.amount_rub} RUB, received {paid_amount_rub} RUB"
+            )
             order.metadata_ = order_meta
+            order._newly_paid = False
             await session.flush()
-            return None
+            return order
 
         order.status = "paid"
         order.paid_at = now_utc()
@@ -794,6 +797,16 @@ class OrderService:
                         order_id=order.id,
                         refund_id=refund_ref,
                     )
+                    balance_after = await get_account_balance(session, order.user_id)
+                    if balance_after < 0:
+                        order_meta = dict(order.metadata_ or {})
+                        order_meta["requires_manual_review"] = True
+                        order_meta["negative_balance_rub"] = str(balance_after)
+                        order_meta["refund_amount_mismatch"] = (
+                            f"Negative balance detected: {balance_after} RUB"
+                        )
+                        order.metadata_ = order_meta
+                        await session.flush()
                 else:
                     logger.info(
                         "Order %s topup has no payment_credit in ledger; skipping refund debit",

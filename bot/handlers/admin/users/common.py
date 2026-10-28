@@ -12,7 +12,7 @@ from bot import texts
 from bot.keyboards.admin.users import get_admin_user_card_keyboard
 from config.constants import PERMANENT_END_DATE, PERMANENT_SUBSCRIPTION_DAYS
 from config.enums import WhiteInternetProvisioningStatus
-from database.models import Server, Tariff, User, WhiteInternetSubscription
+from database.models import Server, Tariff, User, VlessSubscription, WhiteInternetSubscription
 from database.repositories import white_internet_repo
 from database.repositories.white_internet_repo import count_active_hwids
 from database.repositories.profiles_repo import (
@@ -353,9 +353,10 @@ async def _build_users_list_text_and_kb(
     else:
         current_time = now_utc()
 
-        # Batch fetch White Internet subscriptions for users on the current page
+        # Batch fetch White Internet and VLESS subscriptions for users on the current page
         user_ids = [getattr(u, "id", None) for u in users if getattr(u, "id", None) is not None]
         wi_subs_map: dict[int, WhiteInternetSubscription] = {}
+        vless_subs_map: dict[int, VlessSubscription] = {}
         if user_ids and session is not None:
             try:
                 from config.enums import WhiteInternetStatus
@@ -375,9 +376,23 @@ async def _build_users_list_text_and_kb(
             except Exception as exc:
                 logger.warning("Failed to batch fetch White Internet subscriptions: %s", exc, exc_info=True)
 
+            try:
+                vless_stmt = select(VlessSubscription).where(
+                    VlessSubscription.user_id.in_(user_ids),
+                    VlessSubscription.is_active.is_(True),
+                )
+                vless_result = await session.execute(vless_stmt)
+                for v in vless_result.scalars().all():
+                    uid = getattr(v, "user_id", None)
+                    if uid is not None:
+                        vless_subs_map[uid] = v
+            except Exception as exc:
+                logger.warning("Failed to batch fetch VLESS subscriptions: %s", exc, exc_info=True)
+
         for user in users:
             uid = getattr(user, "id", None)
             wi_sub = wi_subs_map.get(uid) if uid is not None else None
+            vless_sub = vless_subs_map.get(uid) if uid is not None else None
             has_awg = bool(user.subscription_end and user.subscription_end > current_time)
             has_wi = bool(
                 wi_sub
@@ -392,23 +407,26 @@ async def _build_users_list_text_and_kb(
                 f"@{user.username}" if user.username else texts.ADMIN_USER_ID_FORMAT.format(telegram_id=user.telegram_id)
             )
 
+            awg_profiles_count = (
+                len([p for p in user.profiles if getattr(p, "provisioning_status", None) not in PROFILE_QUOTA_EXCLUDED_STATUSES])
+                if user.profiles
+                else 0
+            )
+            vless_hwid_count = (
+                count_active_hwids(getattr(vless_sub, "active_hwids", None), now=current_time)
+                if vless_sub
+                else 0
+            )
+
             if has_awg:
                 days = format_days_left(user.subscription_end)
-                profiles_count = (
-                    len([p for p in user.profiles if getattr(p, "provisioning_status", None) not in PROFILE_QUOTA_EXCLUDED_STATUSES])
-                    if user.profiles
-                    else 0
-                )
+                profiles_count = awg_profiles_count + vless_hwid_count
             elif has_wi and wi_sub and wi_sub.expires_at:
                 days = format_days_left(wi_sub.expires_at)
                 profiles_count = count_active_hwids(wi_sub.active_hwids, now=current_time)
             else:
                 days = format_days_left(user.subscription_end)
-                profiles_count = (
-                    len([p for p in user.profiles if getattr(p, "provisioning_status", None) not in PROFILE_QUOTA_EXCLUDED_STATUSES])
-                    if user.profiles
-                    else 0
-                )
+                profiles_count = awg_profiles_count + vless_hwid_count
 
             button_text = truncate_button_text(
                 texts.COMMON_USTR.format(status=status, ban=ban, username=username, days=days, profiles_count=profiles_count)

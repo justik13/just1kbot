@@ -8,7 +8,7 @@ from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from sqlalchemy import func, or_, select
+from sqlalchemy import cast, func, or_, select, String
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
@@ -30,7 +30,6 @@ from database.repositories.servers_repo import (
     get_all_servers,
     get_server_by_id,
     is_awg_capable_server,
-    is_pure_vless_server,
     is_vless_capable_server,
     is_white_internet_origin_server,
 )
@@ -105,19 +104,14 @@ def _build_mass_extend_audience_filter(target_aud: str, now: datetime, server: S
                 )
             )
         if is_vless_capable_server(server):
-            if is_pure_vless_server(server):
-                conds.append(
-                    (User.subscription_end > now)
-                    & User.vless_subscription.has(VlessSubscription.is_active.is_(True))
+            conds.append(
+                (User.subscription_end > now)
+                & User.vless_subscription.has(
+                    (VlessSubscription.is_active.is_(True))
+                    & (VlessSubscription.active_hwids.is_not(None))
+                    & (cast(VlessSubscription.active_hwids, String) != "{}")
                 )
-            else:
-                conds.append(
-                    (User.subscription_end > now)
-                    & User.vless_subscription.has(
-                        (VlessSubscription.is_active.is_(True))
-                        & VlessSubscription.node_traffic_snapshots.has_key(str(server.id))
-                    )
-                )
+            )
         if is_white_internet_origin_server(server):
             conds.append(
                 User.id.in_(

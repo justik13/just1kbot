@@ -845,7 +845,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                         cur_synced = (dict(updated_srv.extra_data or {})).get("vless_synced_epoch")
                         if prev_epoch != updated_srv.xray_instance_epoch or cur_synced != updated_srv.xray_instance_epoch:
                             from services.vless_subscription_service import VlessSubscriptionService
-                            asyncio.create_task(VlessSubscriptionService.sync_all_active_to_server(updated_srv.id))
+                            VlessSubscriptionService.sync_all_active_to_server_background(updated_srv.id)
 
             db_server, applied = await update_server_health_snapshot(
                 session,

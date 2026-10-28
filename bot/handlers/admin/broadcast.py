@@ -5,7 +5,6 @@ import logging
 from config.constants import (
     AMNEZIA_PROTOCOLS,
     VLESS_PROTOCOL,
-    XRAY_ORIGIN_CAPABILITY,
     XRAY_PROTOCOL,
     AdminAuditAction,
     TELEGRAM_MESSAGE_LIMIT,
@@ -409,22 +408,13 @@ def _apply_audience_filters(stmt, audience: str, *, admin_tg_id: int | None = No
             | server_caps_subq.like('%"vless"%')
             | server_caps_subq.like('%"xray_vless"%')
         )
-        is_pure_vless = (
-            is_vless_capable
-            & ~server_proto_subq.in_(AMNEZIA_PROTOCOLS)
-            & ~server_caps_subq.like('%"awg"%')
-            & ~server_caps_subq.like('%"amnezia"%')
-            & ~server_caps_subq.like(f'%"{XRAY_ORIGIN_CAPABILITY}"%')
-        )
         vless_user_condition = and_(
             is_vless_capable,
             User.subscription_end > current_time,
             User.vless_subscription.has(
                 (VlessSubscription.is_active.is_(True))
-                & (
-                    is_pure_vless
-                    | VlessSubscription.node_traffic_snapshots.has_key(str(target_server_id))
-                )
+                & (VlessSubscription.active_hwids.is_not(None))
+                & (cast(VlessSubscription.active_hwids, String) != "{}")
             ),
         )
 

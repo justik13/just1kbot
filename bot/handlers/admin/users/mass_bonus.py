@@ -250,12 +250,11 @@ def _build_server_audience_condition(server_or_id, now: datetime):
     if server_or_id is None:
         return User.id == -1
 
-    from config.constants import AMNEZIA_PROTOCOLS, VLESS_PROTOCOL, XRAY_ORIGIN_CAPABILITY, XRAY_PROTOCOL
+    from config.constants import AMNEZIA_PROTOCOLS, VLESS_PROTOCOL, XRAY_PROTOCOL
     from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
     from database.models import Server, VPNProfile, VlessSubscription, WhiteInternetSubscription
     from database.repositories.servers_repo import (
         is_awg_capable_server,
-        is_pure_vless_server,
         is_vless_capable_server,
         is_white_internet_origin_server,
     )
@@ -290,23 +289,13 @@ def _build_server_audience_condition(server_or_id, now: datetime):
             | server_caps_subq.like('%"vless"%')
             | server_caps_subq.like('%"xray_vless"%')
         )
-        is_pure_vless = (
-            is_vless_capable
-            & ~server_proto_subq.in_(AMNEZIA_PROTOCOLS)
-            & ~server_caps_subq.like('%"awg"%')
-            & ~server_caps_subq.like('%"amnezia"%')
-            & ~server_caps_subq.like(f'%"{XRAY_ORIGIN_CAPABILITY}"%')
-        )
-
         vless_cond = (
             is_vless_capable
             & (User.subscription_end > now)
             & User.vless_subscription.has(
                 (VlessSubscription.is_active.is_(True))
-                & (
-                    is_pure_vless
-                    | VlessSubscription.node_traffic_snapshots.has_key(str(server_id))
-                )
+                & (VlessSubscription.active_hwids.is_not(None))
+                & (cast(VlessSubscription.active_hwids, String) != "{}")
             )
         )
 
@@ -345,19 +334,14 @@ def _build_server_audience_condition(server_or_id, now: datetime):
             )
         )
     if is_vless_capable_server(server):
-        if is_pure_vless_server(server):
-            conds.append(
-                (User.subscription_end > now)
-                & User.vless_subscription.has(VlessSubscription.is_active.is_(True))
+        conds.append(
+            (User.subscription_end > now)
+            & User.vless_subscription.has(
+                (VlessSubscription.is_active.is_(True))
+                & (VlessSubscription.active_hwids.is_not(None))
+                & (cast(VlessSubscription.active_hwids, String) != "{}")
             )
-        else:
-            conds.append(
-                (User.subscription_end > now)
-                & User.vless_subscription.has(
-                    (VlessSubscription.is_active.is_(True))
-                    & VlessSubscription.node_traffic_snapshots.has_key(str(server.id))
-                )
-            )
+        )
     if is_white_internet_origin_server(server):
         conds.append(
             User.id.in_(

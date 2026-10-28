@@ -650,3 +650,11 @@ class VlessSubscriptionService:
 
         logger.info("Provisioned %d active VLESS subscriptions on new server %s", synced_count, srv_id)
         return synced_count
+
+    @classmethod
+    def sync_all_active_to_server_background(cls, server_id: int) -> asyncio.Task:
+        """Spawn background server provisioning with GC task protection."""
+        task = asyncio.create_task(cls.sync_all_active_to_server(server_id))
+        _BACKGROUND_TASKS.add(task)
+        task.add_done_callback(_BACKGROUND_TASKS.discard)
+        return task

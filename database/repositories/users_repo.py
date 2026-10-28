@@ -11,7 +11,6 @@ from config.constants import (
     PERMANENT_SUBSCRIPTION_DAYS,
     REFERRAL_ACTIVE_MIN_TOPUP_RUB,
     VLESS_PROTOCOL,
-    XRAY_ORIGIN_CAPABILITY,
     XRAY_PROTOCOL,
 )
 from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
@@ -758,21 +757,12 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
             | server_caps_subq.like('%"vless"%')
             | server_caps_subq.like('%"xray_vless"%')
         )
-        is_pure_vless = (
-            is_vless_capable
-            & ~server_proto_subq.in_(AMNEZIA_PROTOCOLS)
-            & ~server_caps_subq.like('%"awg"%')
-            & ~server_caps_subq.like('%"amnezia"%')
-            & ~server_caps_subq.like(f'%"{XRAY_ORIGIN_CAPABILITY}"%')
-        )
         vless_cond = and_(
             is_vless_capable,
             User.vless_subscription.has(
                 (VlessSubscription.is_active.is_(True))
-                & (
-                    is_pure_vless
-                    | VlessSubscription.node_traffic_snapshots.has_key(str(target_server_id))
-                )
+                & (VlessSubscription.active_hwids.is_not(None))
+                & (cast(VlessSubscription.active_hwids, String) != "{}")
             ),
         )
 
@@ -797,6 +787,22 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
         stmt = stmt.where(or_(awg_cond, vless_cond, xray_cond))
     elif filter_type == "country" and filter_param:
         country_str = str(filter_param)
+        vless_country_exists = select(Server.id).where(
+            Server.country_flag == country_str,
+            (
+                (Server.protocol == VLESS_PROTOCOL)
+                | cast(Server.capabilities, String).like('%"vless"%')
+                | cast(Server.capabilities, String).like('%"xray_vless"%')
+            ),
+        ).exists()
+        vless_country_cond = and_(
+            vless_country_exists,
+            User.vless_subscription.has(
+                (VlessSubscription.is_active.is_(True))
+                & (VlessSubscription.active_hwids.is_not(None))
+                & (cast(VlessSubscription.active_hwids, String) != "{}")
+            ),
+        )
         xray_country_users_subq = select(WhiteInternetSubscription.user_id).where(
             WhiteInternetSubscription.origin_node.has(Server.country_flag == country_str),
             WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
@@ -804,6 +810,7 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
         stmt = stmt.where(
             or_(
                 User.profiles.any(VPNProfile.server.has(Server.country_flag == country_str)),
+                vless_country_cond,
                 User.id.in_(xray_country_users_subq),
             )
         )
