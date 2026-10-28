@@ -1,4 +1,3 @@
-import asyncio
 import logging
 
 from config.constants import (
@@ -430,7 +429,7 @@ async def process_add_server(
             from database.repositories.servers_repo import is_vless_capable_server
             if is_vless_capable_server(server):
                 from services.vless_subscription_service import VlessSubscriptionService
-                asyncio.create_task(VlessSubscriptionService.sync_all_active_to_server(server.id))
+                VlessSubscriptionService.sync_all_active_to_server_background(server.id)
 
             await state.clear()
             return
@@ -571,6 +570,6 @@ async def process_add_server(
         from database.repositories.servers_repo import is_vless_capable_server
         if is_vless_capable_server(server):
             from services.vless_subscription_service import VlessSubscriptionService
-            asyncio.create_task(VlessSubscriptionService.sync_all_active_to_server(server.id))
+            VlessSubscriptionService.sync_all_active_to_server_background(server.id)
 
         await state.clear()

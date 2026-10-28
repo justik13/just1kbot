@@ -666,6 +666,7 @@ async def _vless_traffic_sync_once(bot: Bot | None = None):
                         subs_stmt = (
                             select(VlessSubscription.id, VlessSubscription.uuid, VlessSubscription.user_id)
                             .where(VlessSubscription.uuid.in_(matching_uuids))
+                            .order_by(VlessSubscription.user_id, VlessSubscription.id)
                         )
                         candidate_subs = (await session.execute(subs_stmt)).all()
                         for sub_id, sub_uuid, _sub_uid in candidate_subs:

@@ -299,13 +299,12 @@ class OrderService:
         final_desc = description or texts.CHECKOUT_DESCRIPTION_DEFAULT
 
         # Lock user to serialize concurrent order creation (prevent double-clicks/races)
-        try:
+        bind = session.get_bind()
+        if bind and getattr(bind, "dialect", None) and bind.dialect.name == "postgresql":
             await session.execute(
                 text("SELECT pg_advisory_xact_lock(:key)"),
                 {"key": -user_id},
             )
-        except Exception:
-            pass
 
         # 1. Deduplication guard for pending external orders (prevent double-clicks)
         if payment_method != "wallet":
@@ -409,13 +408,12 @@ class OrderService:
         if service_type == "awg":
             service_type = "standard"
         # Acquire advisory lock then row lock to avoid lock inversion deadlock
-        try:
+        bind = session.get_bind()
+        if bind and getattr(bind, "dialect", None) and bind.dialect.name == "postgresql":
             await session.execute(
                 text("SELECT pg_advisory_xact_lock(:key)"),
                 {"key": -user_id},
             )
-        except Exception:
-            pass
         user = await OrderService._load_settlement_user(session, user_id)
         if user and getattr(user, "financial_hold", False):
             raise FinancialHoldBlockedError("Financial hold active on user")
