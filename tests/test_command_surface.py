@@ -1,6 +1,8 @@
 import ast
-import unittest
+import importlib
 from pathlib import Path
+import sys
+import unittest
 
 ROOT = Path(__file__).parents[1]
 
@@ -52,6 +54,48 @@ class CommandSurfaceTests(unittest.TestCase):
             source = path.read_text(encoding="utf-8")
             self.assertNotIn("Command(", source, path.relative_to(ROOT).as_posix())
             self.assertNotIn("CommandStart(", source, path.relative_to(ROOT).as_posix())
+
+    @staticmethod
+    def _collect_descendant_routers(root) -> set:
+        collected = {root}
+        for sub in getattr(root, "sub_routers", []):
+            collected |= CommandSurfaceTests._collect_descendant_routers(sub)
+        return collected
+
+    def test_all_admin_package_routers_are_descendants_of_admin_root(self):
+        """Every Router instance defined in bot.handlers.admin must be inside admin_router."""
+        from aiogram import Router
+        from bot.handlers.admin import router as admin_router
+
+        admin_tree = self._collect_descendant_routers(admin_router)
+        admin_package_dir = ROOT / "bot" / "handlers" / "admin"
+
+        found_routers: list[tuple[str, str, Router]] = []
+        for file_path in admin_package_dir.rglob("*.py"):
+            rel = file_path.relative_to(ROOT)
+            module_name = str(rel.with_suffix("")).replace("/", ".").replace("\\", ".")
+            module_name = module_name.removesuffix(".__init__")
+            mod = sys.modules.get(module_name)
+            if mod is None:
+                try:
+                    mod = importlib.import_module(module_name)
+                except Exception as e:
+                    self.fail(f"Failed to import admin module {module_name}: {e}")
+
+            for attr_name in dir(mod):
+                attr = getattr(mod, attr_name)
+                if isinstance(attr, Router) and attr is not admin_router:
+                    found_routers.append((module_name, attr_name, attr))
+
+        self.assertGreater(len(found_routers), 0, "No admin routers discovered")
+        for mod_name, attr_name, router_obj in found_routers:
+            with self.subTest(module=mod_name, attribute=attr_name):
+                self.assertIn(
+                    router_obj,
+                    admin_tree,
+                    f"Router '{attr_name}' in '{mod_name}' is NOT attached to admin_router! "
+                    f"It would bypass the centralized AdminFilter.",
+                )
 
 
 class TestSetupBotCommands(unittest.IsolatedAsyncioTestCase):

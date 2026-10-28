@@ -1,11 +1,13 @@
 import os
 import unittest
+from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from database.models import Order
 from database.repositories import audit_repo, users_repo
 from services import (
     audit_service,
@@ -13,6 +15,8 @@ from services import (
     referral_bonus,
     yookassa_service,
 )
+from services.fulfillment_service import FulfillmentService
+from utils.datetime_helpers import now_utc
 
 DB = os.getenv("TEST_DATABASE_URL")
 
@@ -116,6 +120,49 @@ class ServicesCoreFullCoverageTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertTrue(res.ok)
             self.assertEqual(res.value["id"], "22d38f5d-000f-5000-9000-100000000000")
+
+    async def test_fulfillment_service_order_lifecycle(self):
+        async with self.sessions.begin() as session:
+            user = await users_repo.create_user(session, telegram_id=5001, username="fulfil_test")
+            base_now = now_utc()
+            initial_end = base_now + timedelta(days=10)
+            user.subscription_end = initial_end
+            user.notified_3d = True
+            user.notified_1d = True
+            user.notification_retry_count = 3
+            await session.flush()
+
+            order = Order(
+                user_id=user.id,
+                service_type="standard",
+                amount_rub=Decimal("100.00"),
+                duration_days=30,
+                device_limit=2,
+                payment_method="yookassa",
+                status="paid",
+            )
+            session.add(order)
+            await session.flush()
+
+            # 1. Fulfill order: linear extension of subscription and flag resets
+            await FulfillmentService.fulfill_order(session, order)
+
+            expected_end = initial_end + timedelta(days=30)
+            self.assertEqual(user.subscription_end, expected_end)
+            self.assertEqual(user.device_limit, 2)
+            self.assertFalse(user.notified_3d)
+            self.assertFalse(user.notified_1d)
+            self.assertEqual(user.notification_retry_count, 0)
+            self.assertIn("previous_subscription_end", order.metadata_ or {})
+
+            # 2. Revoke order: rollback subscription duration
+            await FulfillmentService.revoke_order(session, order)
+            self.assertEqual(user.subscription_end, initial_end)
+
+            # 3. Revoke beyond current date drops to cutoff
+            user.subscription_end = now_utc() + timedelta(days=5)
+            await FulfillmentService.revoke_order(session, order)
+            self.assertLess(user.subscription_end, now_utc())
 
 
 if __name__ == "__main__":

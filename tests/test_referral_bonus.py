@@ -87,5 +87,106 @@ class TestMaskTelegramId(unittest.TestCase):
         assert mask_telegram_id(1) == "***"
 
 
+class TestTariffChangeMath(unittest.TestCase):
+    """Pure mathematical validation for OrderService.calculate_tariff_change."""
+
+    def test_calculate_tariff_change_math(self):
+        from datetime import datetime, timedelta, timezone
+        from database.models import Tariff
+        from services.order_service import OrderService
+
+        now = datetime.now(timezone.utc)
+        current_tariff = Tariff(
+            id=1,
+            name="100 RUB / 10 days",
+            price_rub=Decimal("100.00"),
+            duration_days=10,
+        )
+        target_tariff = Tariff(
+            id=2,
+            name="300 RUB / 30 days",
+            price_rub=Decimal("300.00"),
+            duration_days=30,
+        )
+        # 5 days remaining on current tariff -> 50 RUB remaining value
+        subscription_end = now + timedelta(days=5)
+
+        due_rub, resulting_days = OrderService.calculate_tariff_change(
+            current_tariff, target_tariff, subscription_end, now=now
+        )
+        # 300 - 50 = 250 RUB
+        self.assertEqual(due_rub, Decimal("250.00"))
+        self.assertEqual(resulting_days, 30)
+
+    def test_calculate_tariff_change_multi_month_proportional(self):
+        from datetime import datetime, timedelta, timezone
+        from database.models import Tariff
+        from services.order_service import OrderService
+
+        now = datetime.now(timezone.utc)
+        base_tariff = Tariff(
+            id=1,
+            name="100 RUB / 30 days",
+            price_rub=Decimal("100.00"),
+            duration_days=30,
+        )
+        pro_tariff = Tariff(
+            id=2,
+            name="200 RUB / 30 days",
+            price_rub=Decimal("200.00"),
+            duration_days=30,
+        )
+
+        # Case 1: 200 days of Base -> switch to Pro
+        # Value = 200 * (100 / 30) = 667 RUB >= target cost (200 RUB)
+        # due_rub = 0, resulting_days = round(667 / (200 / 30)) = 100 days
+        sub_end_200 = now + timedelta(days=200)
+        due_rub, resulting_days = OrderService.calculate_tariff_change(
+            base_tariff, pro_tariff, sub_end_200, now=now
+        )
+        self.assertEqual(due_rub, Decimal("0.00"))
+        self.assertEqual(resulting_days, 100)
+
+        # Case 2: 200 days of Base -> switch to another Base variant with identical daily rate
+        same_rate_tariff = Tariff(
+            id=3,
+            name="100 RUB / 30 days variant",
+            price_rub=Decimal("100.00"),
+            duration_days=30,
+        )
+        due_rub_same, resulting_days_same = OrderService.calculate_tariff_change(
+            base_tariff, same_rate_tariff, sub_end_200, now=now
+        )
+        self.assertEqual(due_rub_same, Decimal("0.00"))
+        self.assertEqual(resulting_days_same, 200)
+
+        # Case 3: Expired subscription (0 days left) -> full price, standard duration
+        sub_end_expired = now - timedelta(days=1)
+        due_expired, days_expired = OrderService.calculate_tariff_change(
+            base_tariff, pro_tariff, sub_end_expired, now=now
+        )
+        self.assertEqual(due_expired, Decimal("200.00"))
+        self.assertEqual(days_expired, 30)
+
+    def test_calculate_tariff_change_preserves_partial_days_with_ceil(self):
+        from datetime import datetime, timedelta, timezone
+        from database.models import Tariff
+        from services.order_service import OrderService
+
+        now = datetime(2026, 9, 26, 12, 0, 0, tzinfo=timezone.utc)
+        sub_end = now + timedelta(hours=36)  # 1.5 days left
+        current_tariff = Tariff(id=1, name="Basic", price_rub=Decimal("300.00"), duration_days=30)
+        target_tariff = Tariff(id=2, name="Pro", price_rub=Decimal("600.00"), duration_days=30)
+
+        cost, days = OrderService.calculate_tariff_change(
+            current_tariff=current_tariff,
+            target_tariff=target_tariff,
+            subscription_end=sub_end,
+            now=now,
+        )
+        self.assertEqual(cost, Decimal("580.00"))
+        self.assertEqual(days, 30)
+
+
 if __name__ == "__main__":
     unittest.main()
