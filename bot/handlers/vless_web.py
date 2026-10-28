@@ -85,7 +85,7 @@ def _is_browser_request(request: web.Request) -> bool:
         or request.headers.get("X-Device-Hwid")
         or request.headers.get("X-Device-Id")
         or ""
-    ).strip()
+    ).strip().strip("{}")
     if raw_hwid:
         return False
 
@@ -271,7 +271,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         or request.headers.get("X-Device-Hwid")
         or request.headers.get("X-Device-Id")
         or ""
-    ).strip()
+    ).strip().strip("{}")
     if raw_hwid and not HWID_PATTERN.match(raw_hwid):
         headers = dict(common_headers)
         headers["x-hwid-required"] = "true"
