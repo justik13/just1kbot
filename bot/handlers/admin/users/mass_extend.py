@@ -832,6 +832,29 @@ async def _run_mass_extend_background(
     - Clean chat compliance: user notifications include dismiss_notification button.
     """
     days_text = format_subscription_days_text(days)
+
+    async def _notify_admin_report(report_text: str, reply_markup: InlineKeyboardMarkup) -> None:
+        if active_msg_id:
+            try:
+                await bot.edit_message_text(
+                    chat_id=admin_id,
+                    message_id=active_msg_id,
+                    text=report_text,
+                    reply_markup=reply_markup,
+                    parse_mode="HTML",
+                )
+                return
+            except Exception:
+                pass
+        await render_hub(
+            bot,
+            admin_id,
+            report_text,
+            reply_markup=reply_markup,
+            parse_mode="HTML",
+            trigger_message_id=active_msg_id,
+        )
+
     try:
         success_count = 0
         fail_count = 0
@@ -855,9 +878,7 @@ async def _run_mass_extend_background(
                     builder.button(text=texts.ADMIN_USERS_MASS_BONUS_V_ADMIN_MENYU, callback_data="admin_menu")
                     builder.adjust(1)
 
-                    await render_hub(
-                        bot,
-                        admin_id,
+                    await _notify_admin_report(
                         texts.ADMIN_USERS_MASS_EXTEND_COMPLETED_TEXT.format(
                             header=header,
                             success_count=0,
@@ -865,9 +886,7 @@ async def _run_mass_extend_background(
                             fail_count=0,
                             blocked_count=0,
                         ),
-                        reply_markup=builder.as_markup(),
-                        parse_mode="HTML",
-                        trigger_message_id=active_msg_id,
+                        builder.as_markup(),
                     )
                 except Exception as e:
                     logger.error("Failed to notify admin of missing server: %s", e)
@@ -895,9 +914,7 @@ async def _run_mass_extend_background(
                 builder.button(text=texts.ADMIN_USERS_MASS_BONUS_V_ADMIN_MENYU, callback_data="admin_menu")
                 builder.adjust(1)
 
-                await render_hub(
-                    bot,
-                    admin_id,
+                await _notify_admin_report(
                     texts.ADMIN_USERS_MASS_EXTEND_COMPLETED_TEXT.format(
                         header=header,
                         success_count=0,
@@ -905,9 +922,7 @@ async def _run_mass_extend_background(
                         fail_count=0,
                         blocked_count=0,
                     ),
-                    reply_markup=builder.as_markup(),
-                    parse_mode="HTML",
-                    trigger_message_id=active_msg_id,
+                    builder.as_markup(),
                 )
             except Exception as e:
                 logger.error("Failed to notify admin of empty mass extension: %s", e)
@@ -1090,9 +1105,7 @@ async def _run_mass_extend_background(
             builder.button(text=texts.ADMIN_USERS_MASS_BONUS_V_ADMIN_MENYU, callback_data="admin_menu")
             builder.adjust(1)
 
-            await render_hub(
-                bot,
-                admin_id,
+            await _notify_admin_report(
                 texts.ADMIN_USERS_MASS_EXTEND_COMPLETED_TEXT.format(
                     header=header,
                     success_count=success_count,
@@ -1100,9 +1113,7 @@ async def _run_mass_extend_background(
                     fail_count=fail_count,
                     blocked_count=blocked_count,
                 ),
-                reply_markup=builder.as_markup(),
-                parse_mode="HTML",
-                trigger_message_id=active_msg_id,
+                builder.as_markup(),
             )
         except Exception as e:
             logger.error("Failed to notify admin of mass extension completion: %s", e)
