@@ -87,6 +87,23 @@ async def get_user_payments(
     return combined
 
 
+async def get_user_payments_count(
+    session: AsyncSession,
+    user_id: int,
+) -> int:
+    """Return total count of top-up orders and payments for user."""
+    from database.models import Order
+
+    order_stmt = select(func.count(Order.id)).where(
+        Order.user_id == user_id,
+        Order.service_type == "topup",
+    )
+    payment_stmt = select(func.count(Payment.id)).where(Payment.user_id == user_id)
+    order_count = (await session.scalar(order_stmt)) or 0
+    payment_count = (await session.scalar(payment_stmt)) or 0
+    return int(order_count + payment_count)
+
+
 async def get_payment_by_id(
     session: AsyncSession, payment_id: int
 ) -> Payment | None:

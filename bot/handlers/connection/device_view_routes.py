@@ -55,9 +55,6 @@ from utils.vpn_parser import (
 
 from .common import _render_connections
 
-# Kept in sync with bot/handlers/support.py::AMNEZIA_DOCS
-_AMNEZIA_DOCS = "https://storage.googleapis.com/amnezia/docs?m-path=/"
-
 router = Router()
 logger = logging.getLogger(__name__)
 
@@ -313,7 +310,7 @@ async def device_help(
     builder.button(text=texts.BTN_INSTRUCTION_IOS, callback_data=f"help_ios{suffix}")
     builder.button(text=texts.BTN_INSTRUCTION_WINDOWS, callback_data=f"help_windows{suffix}")
     builder.button(text=texts.BTN_SPLIT_TUNNELING, callback_data=f"help_split{suffix}")
-    builder.button(text=texts.BTN_AMNEZIA_DOCS, url=_AMNEZIA_DOCS)
+    builder.button(text=texts.BTN_AMNEZIA_DOCS, url=texts.AMNEZIA_DOCS)
     builder.button(text=texts.CONNECTION_DEVICES_DEVICE_BACK_TO_DEVICE, callback_data=f"manage_device:{profile_id}")
     builder.adjust(1)
 
@@ -631,6 +628,68 @@ async def vless_sub_feed_info(
 
 @router.callback_query(F.data == "vless_sub_reset")
 async def vless_sub_reset(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User | None = None,
+):
+    await state.clear()
+
+    from services.maintenance_service import MaintenanceService
+    if not await MaintenanceService.can_user_perform_action(session, callback.from_user.id):
+        try:
+            await callback.answer(texts.MAINTENANCE_DEFAULT_MESSAGE, show_alert=True)
+        except Exception:
+            pass
+        return
+
+    if not db_user:
+        try:
+            await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        except Exception:
+            pass
+        return
+
+    if not SubscriptionService.check_vpn_access(db_user):
+        try:
+            await callback.answer(texts.ERROR_NO_SUBSCRIPTION, show_alert=True)
+        except Exception:
+            pass
+        return
+
+    from database.repositories import vless_subscription_repo
+
+    sub = await vless_subscription_repo.get_subscription_by_user_id(session, db_user.id)
+    if not sub or not sub.active_hwids:
+        try:
+            await callback.answer(texts.VLESS_RESET_EMPTY, show_alert=True)
+        except Exception:
+            pass
+        return
+
+    await callback.answer()
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=texts.BTN_VLESS_RESET_CONFIRM,
+        callback_data="vless_sub_reset_confirm",
+        style="danger",
+    )
+    builder.button(
+        text=texts.BTN_CANCEL_ACTION,
+        callback_data="back_to_connections",
+    )
+    builder.adjust(1)
+
+    await render_hub(
+        callback.bot,
+        callback.message.chat.id,
+        texts.VLESS_RESET_CONFIRM_TEXT,
+        builder.as_markup(),
+    )
+
+
+@router.callback_query(F.data == "vless_sub_reset_confirm")
+async def vless_sub_reset_confirm(
     callback: CallbackQuery,
     state: FSMContext,
     session: AsyncSession,
