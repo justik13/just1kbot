@@ -104,6 +104,9 @@ async def rename_device_process(
         data = await state.get_data()
         profile_id = data.get("profile_id")
         await state.clear()
+        if not db_user:
+            from database.repositories.users_repo import get_user_by_telegram_id
+            db_user = await get_user_by_telegram_id(session, message.from_user.id)
         if profile_id and db_user:
             profile = await get_profile_by_id(session, profile_id)
             if profile and profile.user_id == db_user.id:

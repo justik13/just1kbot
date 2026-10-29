@@ -13,9 +13,11 @@ from bot.keyboards import (
     get_referral_leaderboard_keyboard,
     get_referrals_list_keyboard,
 )
-from config.settings import get_settings
 from database.models import User
-from database.repositories.payments_repo import get_user_payments
+from database.repositories.payments_repo import (
+    get_user_payments,
+    get_user_payments_count,
+)
 from database.repositories.users_repo import (
     get_referral_leaderboard,
     get_user_active_referrals_count,
@@ -27,7 +29,7 @@ from database.repositories.users_repo import (
 )
 from services.referral_bonus import get_referral_bonus_balance, get_referral_tier
 from utils.formatters import format_datetime
-from utils.telegram import render_hub, safe
+from utils.telegram import render_hub, resolve_bot_username, safe
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -87,13 +89,14 @@ async def show_history(
             pass
         return
 
-    payments = await get_user_payments(session, db_user.id)
+    total_count = await get_user_payments_count(session, db_user.id)
 
-    if not payments:
+    if total_count == 0:
         rendered = texts.HISTORY_HEADER + texts.HISTORY_EMPTY
     else:
+        payments = await get_user_payments(session, db_user.id, limit=10)
         rendered = texts.HISTORY_HEADER
-        for payment in payments[:10]:
+        for payment in payments:
             display_status = payment_display_status(payment)
             status_icon = texts.PAYMENT_STATUS_ICONS.get(
                 display_status,
@@ -111,8 +114,8 @@ async def show_history(
                 f"{amount} {currency}\n"
             )
 
-        if len(payments) > 10:
-            rendered += texts.HISTORY_LIMIT_NOTE.format(count=len(payments))
+        if total_count > len(payments):
+            rendered += texts.HISTORY_LIMIT_NOTE.format(count=total_count)
 
     await render_hub(
         callback.bot,
@@ -167,16 +170,7 @@ async def show_referral(
     else:
         rank_line = texts.REFERRAL_MAIN_RANK_NOT_RANKED
 
-    try:
-        bot_username = (get_settings().BOT_USERNAME or "").lstrip("@")
-    except Exception:
-        bot_username = None
-    if not bot_username:
-        try:
-            bot_username = callback.bot.me.username
-        except Exception:
-            bot_info = await callback.bot.get_me()
-            bot_username = bot_info.username
+    bot_username = (await resolve_bot_username(callback.bot)) or "bot"
     referral_link = f"https://t.me/{bot_username}?start=ref_{db_user.telegram_id}"
 
     inviter_line = await _get_inviter_line(session, db_user)

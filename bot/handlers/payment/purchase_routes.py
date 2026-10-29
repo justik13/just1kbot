@@ -15,7 +15,6 @@ from bot.keyboards import (
     get_order_invoice_keyboard,
     get_payment_success_keyboard,
 )
-from config.settings import get_settings
 from utils.support import get_support_url
 from database.models import Order, User
 from database.repositories.account_ledger_repo import get_account_balance
@@ -32,7 +31,12 @@ from services.order_service import (
     OrderService,
 )
 from utils.datetime_helpers import now_utc
-from utils.telegram import EFFECT_CONFETTI, render_hub, safe_callback_answer
+from utils.telegram import (
+    EFFECT_CONFETTI,
+    render_hub,
+    resolve_bot_username,
+    safe_callback_answer,
+)
 
 from .common import _render_maintenance
 
@@ -228,15 +232,7 @@ async def handle_order_pay_card(
             return
 
     try:
-        try:
-            bot_username = (get_settings().BOT_USERNAME or "").lstrip("@")
-        except Exception:
-            bot_username = None
-        if not bot_username:
-            try:
-                bot_username = callback.bot.me.username
-            except Exception:
-                bot_username = getattr(getattr(callback.bot, "_me", None), "username", None)
+        bot_username = await resolve_bot_username(callback.bot)
         order = await OrderService.create_order(
             session,
             user_id=db_user_id,

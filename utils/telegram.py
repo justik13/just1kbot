@@ -1157,3 +1157,52 @@ async def safe_callback_answer(
         return False
 
 
+async def resolve_bot_username(bot: Any = None) -> str | None:
+    """Resolve the Telegram bot username without unnecessary network calls.
+
+    Precedence:
+    1. settings.BOT_USERNAME (configured in .env / settings)
+    2. Cached bot._me.username (if bot instance already cached get_me)
+    3. bot.me() (aiogram cached coroutine method) or bot.me.username (if mock/object)
+    4. bot.get_me() (fallback network call if needed)
+    """
+    try:
+        from config.settings import get_settings
+        username = (get_settings().BOT_USERNAME or "").lstrip("@")
+        if username:
+            return username
+    except Exception:
+        pass
+
+    if bot is None:
+        return None
+
+    me = getattr(bot, "_me", None)
+    if me and getattr(me, "username", None):
+        return me.username
+
+    bot_me = getattr(bot, "me", None)
+    if bot_me is not None:
+        try:
+            if callable(bot_me):
+                res = await bot_me()
+                if res and getattr(res, "username", None):
+                    return res.username
+            elif getattr(bot_me, "username", None):
+                return bot_me.username
+        except Exception:
+            pass
+
+    get_me = getattr(bot, "get_me", None)
+    if callable(get_me):
+        try:
+            res = await get_me()
+            if res and getattr(res, "username", None):
+                return res.username
+        except Exception:
+            pass
+
+    return None
+
+
+
