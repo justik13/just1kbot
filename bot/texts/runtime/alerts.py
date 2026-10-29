@@ -96,6 +96,23 @@ ALERT_CDN_INGRESS_RESTORED = """✅ <b>Доставка подписок чер�
 🌐 CDN Домен: <code>{domain}</code>
 Эндпоинт <code>{endpoint}</code> через CDN снова отвечает 200 OK."""
 
+ALERT_RELAY_TSPU_PROBLEM = """🚨 <b>Сбой доступности узла из РФ (ТСПУ)</b>
+
+🌍 Сервер: <b>{relay_name}</b> (<code>{relay_ip}:{relay_port}</code>)
+📡 Контрольный узел: <b>{origin_name}</b> (Москва, ID: {origin_id})
+⚠️ Ошибка проверки: <code>{status_or_err}</code>
+
+Сетевой узел не отвечает на TCP-подключение со стороны Origin в Москве.
+Возможна трансграничная фильтрация или блокировка IP на оборудовании ТСПУ."""
+
+ALERT_RELAY_TSPU_RESTORED = """✅ <b>Доступность узла из РФ восстановлена</b>
+
+🌍 Сервер: <b>{relay_name}</b> (<code>{relay_ip}:{relay_port}</code>)
+📡 Контрольный узел: <b>{origin_name}</b> (Москва, ID: {origin_id})
+⏱ RTT соединения: <b>{rtt_ms} мс</b>
+
+TCP-соединение из Москвы снова успешно устанавливается."""
+
 
 
 

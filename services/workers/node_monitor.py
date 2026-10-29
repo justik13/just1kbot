@@ -9,6 +9,8 @@ import os
 import socket
 import time
 from datetime import datetime, timezone
+from typing import Any
+from urllib.parse import urlsplit
 
 import aiohttp
 from aiogram import Bot
@@ -21,6 +23,8 @@ from bot.texts.runtime.alerts import (
     ALERT_INGRESS_RESTORED,
     ALERT_CDN_INGRESS_PROBLEM,
     ALERT_CDN_INGRESS_RESTORED,
+    ALERT_RELAY_TSPU_PROBLEM,
+    ALERT_RELAY_TSPU_RESTORED,
     ALERT_SERVER_AUTO_DISABLED,
     ALERT_SERVER_AUTO_DISABLED_RECOVERED,
     ALERT_SERVER_DISK_CRITICAL,
@@ -65,6 +69,8 @@ DISK_ALERT_COOLDOWN_SECONDS = 3600.0  # 1 час между повторными
 REQUIRED_INGRESS_FAILS = 3  # Требуется 3 цикла сбоя подряд (>= 45-60с) перед отправкой алерта
 REQUIRED_CDN_FAILS = 5  # Требуется 5 циклов сбоя подряд (~100-120с) для фильтрации трансграничного шума
 REQUIRED_INGRESS_SUCCESSES = 2  # Требуется 2 цикла успеха подряд для подтверждения восстановления
+REQUIRED_RELAY_FAILS = 3  # Требуется 3 цикла сбоя подряд (~45с) перед отправкой алерта о ТСПУ
+REQUIRED_RELAY_SUCCESSES = 2  # Требуется 2 цикла успеха подряд для подтверждения восстановления
 INGRESS_RETRY_DELAY = 1.5  # Базовая задержка перед повторным запросом зонда при ошибке/таймауте
 INGRESS_PROBE_TOTAL_TIMEOUT = 30.0  # Максимальное время синтетического ingress-зонда
 INGRESS_PROBE_CONNECT_TIMEOUT = 25.0  # Запас на трансграничный TLS handshake при пиках нагрузки
@@ -92,6 +98,7 @@ class ServerMonitorState:
         self.cdn_problem: bool = False
         self.consecutive_cdn_fails: int = 0
         self.consecutive_cdn_successes: int = 0
+        self.relays_probe_state: dict[str, dict[str, Any]] = {}
 
     def sync_from_db_server(self, db_server: Server):
         if db_server:
@@ -114,6 +121,10 @@ class ServerMonitorState:
                 self.cdn_problem = bool(db_server.extra_data.get("cdn_problem", False))
                 self.consecutive_cdn_fails = int(db_server.extra_data.get("consecutive_cdn_fails", 0) or 0)
                 self.consecutive_cdn_successes = int(db_server.extra_data.get("consecutive_cdn_successes", 0) or 0)
+                if isinstance(db_server.extra_data.get("relays_probe_state"), dict):
+                    self.relays_probe_state = dict(db_server.extra_data["relays_probe_state"])
+                else:
+                    self.relays_probe_state = {}
             else:
                 self.ingress_problem = False
                 self.consecutive_ingress_fails = 0
@@ -121,6 +132,7 @@ class ServerMonitorState:
                 self.cdn_problem = False
                 self.consecutive_cdn_fails = 0
                 self.consecutive_cdn_successes = 0
+                self.relays_probe_state = {}
 
             if db_server.problem_started_at:
                 now_m = time.monotonic()
@@ -170,6 +182,7 @@ def reset_server_monitor_state(server_id: int, new_state: str = ServerHealthStat
     st.cdn_problem = False
     st.consecutive_cdn_fails = 0
     st.consecutive_cdn_successes = 0
+    st.relays_probe_state = {}
 
 
 def clear_monitor_states():
@@ -302,6 +315,7 @@ async def check_node_resources_and_alerts(bot: Bot):
         is_healthy = False
         xray_epoch = None
         xray_data = None
+        relays_probe_result: list[dict] | None = None
         client = None
 
         awg_ok = True
@@ -335,6 +349,24 @@ async def check_node_resources_and_alerts(bot: Bot):
                         xray_ok, xray_epoch, xray_data = await xray_client.check_health(
                             xray_url, server.api_key
                         )
+                        if (
+                            xray_ok
+                            and ("xray_origin" in caps or bool((getattr(server, "extra_data", None) or {}).get("relays")))
+                            and hasattr(xray_client, "get_relays_health")
+                        ):
+                            try:
+                                r_ok, r_data, _r_err = await xray_client.get_relays_health(
+                                    xray_url, server.api_key
+                                )
+                                if r_ok and isinstance(r_data, dict):
+                                    relays_probe_result = r_data.get("relays")
+                            except Exception as r_exc:
+                                logger.warning(
+                                    "Relays health probe exception for Origin %s (%s): %s",
+                                    server.id,
+                                    server.name,
+                                    r_exc,
+                                )
             except Exception as exc:
                 logger.warning(
                     "Xray healthcheck exception for server %s (%s): %s",
@@ -384,7 +416,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                         origin_domain = server.extra_data.get("domain")
                         cdn_domain = server.extra_data.get("cdn_domain")
                     if not origin_domain and server.api_url:
-                        from urllib.parse import urlsplit
                         parsed = urlsplit(server.api_url)
                         if parsed.hostname and not parsed.hostname.replace(".", "").isdigit() and parsed.hostname != "localhost":
                             origin_domain = parsed.hostname
@@ -423,9 +454,10 @@ async def check_node_resources_and_alerts(bot: Bot):
 
         alerts_to_send: list[dict] = []
         ingress_alerts_to_send: list[tuple[str, str, object, bool]] = []
+        relay_alerts_to_send: list[tuple[str, str, object, bool]] = []
 
-        # Decoupled ingress alert evaluation and delivery (independent of core server CAS / health state)
-        if origin_probe_result is not None:
+        # Decoupled ingress and relays alert evaluation and delivery (independent of core server CAS / health state)
+        if origin_probe_result is not None or relays_probe_result is not None:
             lock_key = 8_000_000_000 + int(server.id)
 
             async with session_scope() as session:
@@ -435,7 +467,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                 if bind and getattr(bind, "dialect", None) and getattr(bind.dialect, "name", None) == "postgresql":
                     got_lock = bool(await session.scalar(select(func.pg_try_advisory_xact_lock(lock_key))))
                     if not got_lock:
-                        logger.debug("Ingress alert evaluation for server %d locked by peer worker. Skipping alert dispatch.", server.id)
+                        logger.debug("Ingress/relay alert evaluation for server %d locked by peer worker. Skipping alert dispatch.", server.id)
                 else:
                     got_lock = True
 
@@ -464,119 +496,194 @@ async def check_node_resources_and_alerts(bot: Bot):
                     has_cdn_problem = db_cdn_problem or st.cdn_problem
                     extra_changed = False
 
-                    origin_ok, origin_detail = origin_probe_result
-                    active_origin_domain = origin_domain or cdn_domain or server.name
+                    if origin_probe_result is not None:
+                        origin_ok, origin_detail = origin_probe_result
+                        active_origin_domain = origin_domain or cdn_domain or server.name
 
-                    # 1. Evaluate Origin Ingress
-                    if not origin_ok:
-                        st.consecutive_ingress_fails += 1
-                        st.consecutive_ingress_successes = 0
-                        if (
-                            db_extra.get("consecutive_ingress_fails") != st.consecutive_ingress_fails
-                            or db_extra.get("consecutive_ingress_successes") != 0
-                        ):
-                            db_extra["consecutive_ingress_fails"] = st.consecutive_ingress_fails
-                            db_extra["consecutive_ingress_successes"] = 0
-                            extra_changed = True
+                        # 1. Evaluate Origin Ingress
+                        if not origin_ok:
+                            st.consecutive_ingress_fails += 1
+                            st.consecutive_ingress_successes = 0
+                            if (
+                                db_extra.get("consecutive_ingress_fails") != st.consecutive_ingress_fails
+                                or db_extra.get("consecutive_ingress_successes") != 0
+                            ):
+                                db_extra["consecutive_ingress_fails"] = st.consecutive_ingress_fails
+                                db_extra["consecutive_ingress_successes"] = 0
+                                extra_changed = True
 
-                        if not has_ingress_problem and st.consecutive_ingress_fails >= REQUIRED_INGRESS_FAILS:
-                            ingress_alerts_to_send.append((
-                                "ingress",
-                                ALERT_INGRESS_PROBLEM.format(
-                                    server_name=safe(server.name),
-                                    server_id=server.id,
-                                    domain=safe(active_origin_domain),
-                                    status_or_err=safe(origin_detail),
-                                    endpoint=safe(f"{sub_prefix}/ping"),
-                                ),
-                                get_node_monitor_alert_keyboard(server.id).as_markup(),
-                                True,
-                            ))
-                    else:
-                        st.consecutive_ingress_successes += 1
-                        st.consecutive_ingress_fails = 0
-                        if (
-                            db_extra.get("consecutive_ingress_successes") != st.consecutive_ingress_successes
-                            or db_extra.get("consecutive_ingress_fails") != 0
-                        ):
-                            db_extra["consecutive_ingress_successes"] = st.consecutive_ingress_successes
-                            db_extra["consecutive_ingress_fails"] = 0
-                            extra_changed = True
+                            if not has_ingress_problem and st.consecutive_ingress_fails >= REQUIRED_INGRESS_FAILS:
+                                ingress_alerts_to_send.append((
+                                    "ingress",
+                                    ALERT_INGRESS_PROBLEM.format(
+                                        server_name=safe(server.name),
+                                        server_id=server.id,
+                                        domain=safe(active_origin_domain),
+                                        status_or_err=safe(origin_detail),
+                                        endpoint=safe(f"{sub_prefix}/ping"),
+                                    ),
+                                    get_node_monitor_alert_keyboard(server.id).as_markup(),
+                                    True,
+                                ))
+                        else:
+                            st.consecutive_ingress_successes += 1
+                            st.consecutive_ingress_fails = 0
+                            if (
+                                db_extra.get("consecutive_ingress_successes") != st.consecutive_ingress_successes
+                                or db_extra.get("consecutive_ingress_fails") != 0
+                            ):
+                                db_extra["consecutive_ingress_successes"] = st.consecutive_ingress_successes
+                                db_extra["consecutive_ingress_fails"] = 0
+                                extra_changed = True
 
-                        if has_ingress_problem and st.consecutive_ingress_successes >= REQUIRED_INGRESS_SUCCESSES:
-                            ingress_alerts_to_send.append((
-                                "ingress",
-                                ALERT_INGRESS_RESTORED.format(
-                                    server_name=safe(server.name),
-                                    server_id=server.id,
-                                    domain=safe(active_origin_domain),
-                                    endpoint=safe(f"{sub_prefix}/ping"),
-                                ),
-                                get_node_monitor_alert_keyboard(server.id).as_markup(),
-                                False,
-                            ))
+                            if has_ingress_problem and st.consecutive_ingress_successes >= REQUIRED_INGRESS_SUCCESSES:
+                                ingress_alerts_to_send.append((
+                                    "ingress",
+                                    ALERT_INGRESS_RESTORED.format(
+                                        server_name=safe(server.name),
+                                        server_id=server.id,
+                                        domain=safe(active_origin_domain),
+                                        endpoint=safe(f"{sub_prefix}/ping"),
+                                    ),
+                                    get_node_monitor_alert_keyboard(server.id).as_markup(),
+                                    False,
+                                ))
 
-                    # 2. Evaluate CDN Delivery (only in dual probe mode when origin is healthy)
-                    if cdn_probe_result is not None and cdn_domain:
-                        cdn_ok, cdn_detail = cdn_probe_result
-                        if origin_ok:
-                            if cdn_ok:
-                                st.consecutive_cdn_successes += 1
-                                st.consecutive_cdn_fails = 0
-                                if (
-                                    db_extra.get("consecutive_cdn_successes") != st.consecutive_cdn_successes
-                                    or db_extra.get("consecutive_cdn_fails") != 0
-                                ):
-                                    db_extra["consecutive_cdn_successes"] = st.consecutive_cdn_successes
-                                    db_extra["consecutive_cdn_fails"] = 0
-                                    extra_changed = True
+                        # 2. Evaluate CDN Delivery (only in dual probe mode when origin is healthy)
+                        if cdn_probe_result is not None and cdn_domain:
+                            cdn_ok, cdn_detail = cdn_probe_result
+                            if origin_ok:
+                                if cdn_ok:
+                                    st.consecutive_cdn_successes += 1
+                                    st.consecutive_cdn_fails = 0
+                                    if (
+                                        db_extra.get("consecutive_cdn_successes") != st.consecutive_cdn_successes
+                                        or db_extra.get("consecutive_cdn_fails") != 0
+                                    ):
+                                        db_extra["consecutive_cdn_successes"] = st.consecutive_cdn_successes
+                                        db_extra["consecutive_cdn_fails"] = 0
+                                        extra_changed = True
 
-                                if has_cdn_problem and st.consecutive_cdn_successes >= REQUIRED_INGRESS_SUCCESSES:
-                                    ingress_alerts_to_send.append((
-                                        "cdn",
-                                        ALERT_CDN_INGRESS_RESTORED.format(
-                                            server_name=safe(server.name),
-                                            server_id=server.id,
-                                            domain=safe(cdn_domain),
-                                            endpoint=safe(f"{sub_prefix}/ping"),
-                                        ),
-                                        get_node_monitor_alert_keyboard(server.id).as_markup(),
-                                        False,
-                                    ))
+                                    if has_cdn_problem and st.consecutive_cdn_successes >= REQUIRED_INGRESS_SUCCESSES:
+                                        ingress_alerts_to_send.append((
+                                            "cdn",
+                                            ALERT_CDN_INGRESS_RESTORED.format(
+                                                server_name=safe(server.name),
+                                                server_id=server.id,
+                                                domain=safe(cdn_domain),
+                                                endpoint=safe(f"{sub_prefix}/ping"),
+                                            ),
+                                            get_node_monitor_alert_keyboard(server.id).as_markup(),
+                                            False,
+                                        ))
+                                else:
+                                    st.consecutive_cdn_fails += 1
+                                    st.consecutive_cdn_successes = 0
+                                    if (
+                                        db_extra.get("consecutive_cdn_fails") != st.consecutive_cdn_fails
+                                        or db_extra.get("consecutive_cdn_successes") != 0
+                                    ):
+                                        db_extra["consecutive_cdn_fails"] = st.consecutive_cdn_fails
+                                        db_extra["consecutive_cdn_successes"] = 0
+                                        extra_changed = True
+
+                                    if st.consecutive_cdn_fails < REQUIRED_CDN_FAILS:
+                                        logger.info(
+                                            "Xray origin node %s Origin (%s) is healthy (200), but CDN (%s) returned %s (%d/%d fails). Suppressing transient alert.",
+                                            server.id, active_origin_domain, cdn_domain, cdn_detail, st.consecutive_cdn_fails, REQUIRED_CDN_FAILS,
+                                        )
+                                    elif not has_cdn_problem:
+                                        logger.warning(
+                                            "Xray origin node %s CDN (%s) persistent failure (%d fails): %s (Origin %s is 200 OK). Sending CDN alert.",
+                                            server.id, cdn_domain, st.consecutive_cdn_fails, cdn_detail, active_origin_domain,
+                                        )
+                                        ingress_alerts_to_send.append((
+                                            "cdn",
+                                            ALERT_CDN_INGRESS_PROBLEM.format(
+                                                server_name=safe(server.name),
+                                                server_id=server.id,
+                                                domain=safe(cdn_domain),
+                                                origin_domain=safe(active_origin_domain),
+                                                status_or_err=safe(cdn_detail),
+                                                endpoint=safe(f"{sub_prefix}/ping"),
+                                            ),
+                                            get_node_monitor_alert_keyboard(server.id).as_markup(),
+                                            True,
+                                        ))
+
+                    # 3. Evaluate Origin Relays Health (TSPU check from inside Russia)
+                    if relays_probe_result is not None and isinstance(relays_probe_result, list):
+                        db_relays_state = dict(db_extra.get("relays_probe_state") or {})
+                        # Map IP to server ID from current servers batch for direct button links
+                        ip_to_srv_id = {}
+                        for srv in servers:
+                            if getattr(srv, "api_url", None):
+                                try:
+                                    parsed_host = urlsplit(srv.api_url).hostname
+                                    if parsed_host:
+                                        ip_to_srv_id[parsed_host] = srv.id
+                                except Exception:
+                                    pass
+
+                        for r in relays_probe_result:
+                            relay_ip = str(r.get("ip") or "").strip()
+                            relay_port = r.get("port") or 10443
+                            relay_name = str(r.get("name") or r.get("code") or relay_ip).strip()
+                            is_relay_ok = bool(r.get("healthy"))
+                            relay_err = str(r.get("error") or "Timeout / Unreachable").strip()
+                            rtt_ms = r.get("rtt_ms") or 0.0
+                            relay_key = f"{relay_ip}:{relay_port}" if relay_ip else relay_name
+
+                            r_state = st.relays_probe_state.setdefault(relay_key, {
+                                "consecutive_fails": 0,
+                                "consecutive_successes": 0,
+                                "is_problem": False,
+                            })
+                            if relay_key in db_relays_state:
+                                r_state["is_problem"] = bool(db_relays_state[relay_key].get("is_problem", False))
+
+                            has_relay_problem = bool(r_state.get("is_problem", False))
+                            target_srv_id = ip_to_srv_id.get(relay_ip, server.id)
+
+                            if not is_relay_ok:
+                                r_state["consecutive_fails"] = int(r_state.get("consecutive_fails", 0)) + 1
+                                r_state["consecutive_successes"] = 0
+                                if r_state["consecutive_fails"] >= REQUIRED_RELAY_FAILS:
+                                    if not has_relay_problem:
+                                        relay_alerts_to_send.append((
+                                            relay_key,
+                                            ALERT_RELAY_TSPU_PROBLEM.format(
+                                                relay_name=safe(relay_name),
+                                                relay_ip=safe(relay_ip),
+                                                relay_port=relay_port,
+                                                origin_name=safe(server.name),
+                                                origin_id=server.id,
+                                                status_or_err=safe(relay_err),
+                                            ),
+                                            get_node_monitor_alert_keyboard(target_srv_id).as_markup(),
+                                            True,
+                                        ))
                             else:
-                                st.consecutive_cdn_fails += 1
-                                st.consecutive_cdn_successes = 0
-                                if (
-                                    db_extra.get("consecutive_cdn_fails") != st.consecutive_cdn_fails
-                                    or db_extra.get("consecutive_cdn_successes") != 0
-                                ):
-                                    db_extra["consecutive_cdn_fails"] = st.consecutive_cdn_fails
-                                    db_extra["consecutive_cdn_successes"] = 0
-                                    extra_changed = True
+                                r_state["consecutive_successes"] = int(r_state.get("consecutive_successes", 0)) + 1
+                                r_state["consecutive_fails"] = 0
+                                if r_state["consecutive_successes"] >= REQUIRED_RELAY_SUCCESSES:
+                                    if has_relay_problem:
+                                        relay_alerts_to_send.append((
+                                            relay_key,
+                                            ALERT_RELAY_TSPU_RESTORED.format(
+                                                relay_name=safe(relay_name),
+                                                relay_ip=safe(relay_ip),
+                                                relay_port=relay_port,
+                                                origin_name=safe(server.name),
+                                                origin_id=server.id,
+                                                rtt_ms=round(rtt_ms, 1),
+                                            ),
+                                            get_node_monitor_alert_keyboard(target_srv_id).as_markup(),
+                                            False,
+                                        ))
 
-                                if st.consecutive_cdn_fails < REQUIRED_CDN_FAILS:
-                                    logger.info(
-                                        "Xray origin node %s Origin (%s) is healthy (200), but CDN (%s) returned %s (%d/%d fails). Suppressing transient alert.",
-                                        server.id, active_origin_domain, cdn_domain, cdn_detail, st.consecutive_cdn_fails, REQUIRED_CDN_FAILS,
-                                    )
-                                elif not has_cdn_problem:
-                                    logger.warning(
-                                        "Xray origin node %s CDN (%s) persistent failure (%d fails): %s (Origin %s is 200 OK). Sending CDN alert.",
-                                        server.id, cdn_domain, st.consecutive_cdn_fails, cdn_detail, active_origin_domain,
-                                    )
-                                    ingress_alerts_to_send.append((
-                                        "cdn",
-                                        ALERT_CDN_INGRESS_PROBLEM.format(
-                                            server_name=safe(server.name),
-                                            server_id=server.id,
-                                            domain=safe(cdn_domain),
-                                            origin_domain=safe(active_origin_domain),
-                                            status_or_err=safe(cdn_detail),
-                                            endpoint=safe(f"{sub_prefix}/ping"),
-                                        ),
-                                        get_node_monitor_alert_keyboard(server.id).as_markup(),
-                                        True,
-                                    ))
+                        db_extra["relays_probe_state"] = dict(st.relays_probe_state)
+                        extra_changed = True
 
                     if extra_changed and fresh_server:
                         merged_extra = dict(fresh_server.extra_data or {})
@@ -605,6 +712,32 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 cur_extra[state_prop] = True
                             else:
                                 cur_extra.pop(state_prop, None)
+                            await update_server(session, fresh, extra_data=cur_extra)
+
+            # Decoupled relay alert dispatch outside DB transaction and advisory lock
+            for relay_key, alert_text, alert_kb, is_problem in relay_alerts_to_send:
+                sent_ok = False
+                try:
+                    sent_ok = await _send_admin_alert_msg(
+                        bot,
+                        alert_text,
+                        reply_markup=alert_kb,
+                    )
+                except Exception as e:
+                    logger.error("Failed to deliver relay alert for %s on Origin %d: %s", relay_key, server.id, e)
+                if sent_ok:
+                    if relay_key in st.relays_probe_state:
+                        st.relays_probe_state[relay_key]["is_problem"] = is_problem
+                    async with session_scope() as session:
+                        fresh = await get_server_by_id(session, server.id, for_update=True)
+                        if fresh:
+                            cur_extra = dict(fresh.extra_data or {})
+                            cur_relays_state = dict(cur_extra.get("relays_probe_state") or {})
+                            if relay_key in cur_relays_state:
+                                cur_relays_state[relay_key]["is_problem"] = is_problem
+                            else:
+                                cur_relays_state[relay_key] = {"is_problem": is_problem}
+                            cur_extra["relays_probe_state"] = cur_relays_state
                             await update_server(session, fresh, extra_data=cur_extra)
 
         if is_healthy:
