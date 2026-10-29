@@ -670,7 +670,10 @@ async def check_node_resources_and_alerts(bot: Bot):
                             )
 
                             if not is_relay_ok:
-                                r_state["consecutive_fails"] = int(r_state.get("consecutive_fails", 0)) + 1
+                                r_state["consecutive_fails"] = min(
+                                    int(r_state.get("consecutive_fails", 0)) + 1,
+                                    REQUIRED_RELAY_FAILS + 1,
+                                )
                                 r_state["consecutive_successes"] = 0
                                 if r_state["consecutive_fails"] >= REQUIRED_RELAY_FAILS:
                                     if not has_relay_problem:
@@ -688,7 +691,10 @@ async def check_node_resources_and_alerts(bot: Bot):
                                             True,
                                         ))
                             else:
-                                r_state["consecutive_successes"] = int(r_state.get("consecutive_successes", 0)) + 1
+                                r_state["consecutive_successes"] = min(
+                                    int(r_state.get("consecutive_successes", 0)) + 1,
+                                    REQUIRED_RELAY_SUCCESSES + 1,
+                                )
                                 r_state["consecutive_fails"] = 0
                                 if r_state["consecutive_successes"] >= REQUIRED_RELAY_SUCCESSES:
                                     if has_relay_problem:
@@ -706,8 +712,19 @@ async def check_node_resources_and_alerts(bot: Bot):
                                             False,
                                         ))
 
-                        db_extra["relays_probe_state"] = dict(st.relays_probe_state)
-                        extra_changed = True
+                        # Prune dead relay entries that are no longer configured on Origin
+                        current_keys = {
+                            f"{str(r.get('ip') or '').strip()}:{r.get('port') or 10443}" if str(r.get("ip") or "").strip()
+                            else str(r.get("name") or r.get("code") or "").strip()
+                            for r in relays_probe_result
+                        }
+                        for stale_key in list(st.relays_probe_state.keys()):
+                            if stale_key not in current_keys:
+                                st.relays_probe_state.pop(stale_key, None)
+
+                        if db_relays_state != st.relays_probe_state:
+                            db_extra["relays_probe_state"] = dict(st.relays_probe_state)
+                            extra_changed = True
 
                     if extra_changed and fresh_server:
                         merged_extra = dict(fresh_server.extra_data or {})
