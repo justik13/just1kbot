@@ -11,10 +11,10 @@ ROUTING_PROFILE_VERSION_TIMESTAMP = "1793318400"
 
 
 def generate_incy_routing_header(
-    profile_name: str = "✦ Just1k",
+    profile_name: str | None = None,
     *,
     direct_ru: bool = True,
-    last_updated: str = ROUTING_PROFILE_VERSION_TIMESTAMP,
+    last_updated: str | int | None = None,
     scheme: str = "incy",
 ) -> str:
     """Construct incy:// or happ:// routing deep link header for split tunneling.
@@ -28,7 +28,23 @@ def generate_incy_routing_header(
     - Enforces secure DoH resolution (Cloudflare/Google DoH) to prevent TSPU DNS hijacking.
     - Includes LastUpdated Unix timestamp for reliable profile versioning and updates.
     """
-    clean_name = str(profile_name).strip()[:25] or "✦ Just1k"
+    default_name = "✦ Just1k" if direct_ru else "✦ Just1k WL"
+    if profile_name is None:
+        clean_name = default_name
+    else:
+        raw_name = str(profile_name).strip()
+        clean_name = raw_name[:25] if (raw_name and raw_name.lower() != "none") else default_name
+
+    if last_updated is None:
+        clean_last_updated = ROUTING_PROFILE_VERSION_TIMESTAMP
+    else:
+        raw_updated = str(last_updated).strip()
+        clean_last_updated = (
+            raw_updated
+            if (raw_updated and raw_updated.lower() != "none")
+            else ROUTING_PROFILE_VERSION_TIMESTAMP
+        )
+
     lan_direct_ips = [
         "10.0.0.0/8",
         "100.64.0.0/10",
@@ -59,7 +75,7 @@ def generate_incy_routing_header(
         "Name": clean_name,
         "GlobalProxy": "true",
         "DomainStrategy": "IPIfNonMatch",
-        "LastUpdated": str(last_updated).strip() or ROUTING_PROFILE_VERSION_TIMESTAMP,
+        "LastUpdated": clean_last_updated,
         "useChunkFiles": "true",
         "RemoteDNSType": "DoH",
         "RemoteDNSDomain": "https://cloudflare-dns.com/dns-query",
@@ -83,5 +99,5 @@ def generate_incy_routing_header(
     }
     json_bytes = json.dumps(profile, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     b64_profile = base64.b64encode(json_bytes).decode("ascii")
-    clean_scheme = "happ" if str(scheme).strip().lower() == "happ" else "incy"
+    clean_scheme = "happ" if (scheme and str(scheme).strip().lower() == "happ") else "incy"
     return f"{clean_scheme}://routing/onadd/{b64_profile}"

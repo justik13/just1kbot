@@ -521,6 +521,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     routing_uri = resp.headers["Routing"]
                     b64_routing = routing_uri.removeprefix("happ://routing/onadd/")
                     routing_json = json.loads(base64.b64decode(b64_routing).decode("utf-8"))
+                    self.assertEqual(routing_json.get("Name"), "✦ Just1k WL")
                     self.assertEqual(routing_json.get("useChunkFiles"), "true")
                     self.assertEqual(routing_json.get("LastUpdated"), "1793318400")
                     self.assertEqual(routing_json.get("DirectSites"), [])

@@ -18,10 +18,7 @@ from database.repositories import vless_subscription_repo
 from services.device_service import RESERVING_STATUSES
 from services.xray_node_client import XrayNodeClient
 from utils.datetime_helpers import now_utc
-from utils.incy_routing import (
-    ROUTING_PROFILE_VERSION_TIMESTAMP,
-    generate_incy_routing_header as _generate_incy_routing_header,
-)
+from utils.incy_routing import generate_incy_routing_header as _generate_incy_routing_header
 
 logger = logging.getLogger(__name__)
 
@@ -132,10 +129,10 @@ class VlessSubscriptionService:
 
     @staticmethod
     def generate_incy_routing_header(
-        profile_name: str = "✦ Just1k",
+        profile_name: str | None = None,
         *,
         direct_ru: bool = True,
-        last_updated: str = ROUTING_PROFILE_VERSION_TIMESTAMP,
+        last_updated: str | int | None = None,
         scheme: str = "incy",
     ) -> str:
         """Construct incy:// or happ:// routing deep link header for split tunneling."""
