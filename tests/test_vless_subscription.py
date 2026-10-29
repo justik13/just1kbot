@@ -896,7 +896,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             b64_routing = routing_uri.removeprefix("happ://routing/onadd/")
             routing_json = json.loads(base64.b64decode(b64_routing).decode("utf-8"))
             self.assertEqual(routing_json.get("Name"), "✦ Just1k")
-            self.assertEqual(routing_json.get("useChunkFiles"), "true")
+            self.assertIs(routing_json.get("useChunkFiles"), True)
             self.assertEqual(routing_json.get("LastUpdated"), "1793318400")
             self.assertIn("geosite:category-ru", routing_json.get("DirectSites", []))
             self.assertIn("geosite:tld-ru", routing_json.get("DirectSites", []))
@@ -904,6 +904,38 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             # In-App expiration headers for Happ
             self.assertEqual(resp.headers.get("sub-expire"), "1")
             self.assertEqual(resp.headers.get("sub-expire-button-link"), "https://t.me/just1k13bot")
+
+    async def test_feed_happ_client_disabled_routing_headers(self):
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        async def fake_get_setting(session, key, default=None):
+            if key == "vless_routing_enabled":
+                return False
+            return default
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=2),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 2)),
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
+            patch("bot.handlers.vless_web.get_system_setting", side_effect=fake_get_setting),
+        ):
+            headers = {
+                "X-Hwid": "test-client-hwid-happ-disabled",
+                "User-Agent": "Happ/4.6.1 (iPhone; iOS 17.4)",
+            }
+            resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
+            self.assertEqual(resp.status, 200)
+            self.assertEqual(resp.headers.get("Routing"), "off")
+            self.assertEqual(resp.headers.get("Routing-Enable"), "0")
 
     async def test_feed_incy_client_standard_routing_without_in_app_headers(self):
         mock_session = AsyncMock()
@@ -1874,7 +1906,7 @@ class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(std_header.startswith("incy://routing/onadd/"))
         std_json = json.loads(base64.b64decode(std_header.removeprefix("incy://routing/onadd/")).decode("utf-8"))
         self.assertEqual(std_json.get("Name"), "✦ Just1k")
-        self.assertEqual(std_json.get("useChunkFiles"), "true")
+        self.assertIs(std_json.get("useChunkFiles"), True)
         self.assertEqual(std_json.get("LastUpdated"), "1793318400")
         self.assertIn("geosite:category-ru", std_json.get("DirectSites", []))
         self.assertIn("geosite:tld-ru", std_json.get("DirectSites", []))
@@ -1884,7 +1916,7 @@ class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(wl_header.startswith("happ://routing/onadd/"))
         wl_json = json.loads(base64.b64decode(wl_header.removeprefix("happ://routing/onadd/")).decode("utf-8"))
         self.assertEqual(wl_json.get("Name"), "✦ Just1k WL")
-        self.assertEqual(wl_json.get("useChunkFiles"), "true")
+        self.assertIs(wl_json.get("useChunkFiles"), True)
         self.assertEqual(wl_json.get("LastUpdated"), "1793318400")
         self.assertEqual(wl_json.get("DirectSites"), [])
 

@@ -76,7 +76,7 @@ def generate_incy_routing_header(
         "GlobalProxy": "true",
         "DomainStrategy": "IPIfNonMatch",
         "LastUpdated": clean_last_updated,
-        "useChunkFiles": "true",
+        "useChunkFiles": True,
         "RemoteDNSType": "DoH",
         "RemoteDNSDomain": "https://cloudflare-dns.com/dns-query",
         "RemoteDNSIP": "1.1.1.1",

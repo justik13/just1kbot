@@ -522,12 +522,72 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     b64_routing = routing_uri.removeprefix("happ://routing/onadd/")
                     routing_json = json.loads(base64.b64decode(b64_routing).decode("utf-8"))
                     self.assertEqual(routing_json.get("Name"), "✦ Just1k WL")
-                    self.assertEqual(routing_json.get("useChunkFiles"), "true")
+                    self.assertIs(routing_json.get("useChunkFiles"), True)
                     self.assertEqual(routing_json.get("LastUpdated"), "1793318400")
                     self.assertEqual(routing_json.get("DirectSites"), [])
 
                     self.assertEqual(resp.headers.get("sub-expire"), "1")
                     self.assertEqual(resp.headers.get("sub-expire-button-link"), "https://t.me/just1k13bot")
+
+    async def test_feed_happ_client_disabled_routing_headers(self):
+        now = datetime.now(timezone.utc)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            origin_node_id=1,
+            token="valid-token-happ-disabled-1234567890",
+            uuid="a2b9d4e1-73c5-4812-b964-f3e7b85a1901",
+            status=WhiteInternetStatus.ACTIVE,
+            started_at=now,
+            expires_at=now + timedelta(days=30),
+            traffic_limit_bytes=53687091200,
+            traffic_used_bytes=1000,
+            desired_version=1,
+            applied_version=1,
+            device_limit=1,
+            active_hwids={},
+        )
+
+        server = Server(
+            id=1,
+            name="Origin-Node",
+            protocol=XRAY_PROTOCOL,
+            api_url="https://cdn.example.com:8444",
+            xray_instance_epoch="epoch-xyz",
+            capabilities=["xray_origin"],
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+        )
+
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = server
+        mock_session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
+        mock_session.get.return_value = sub
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        async def fake_get_setting(session, key, default=None):
+            if key == "white_internet_routing_enabled":
+                return False
+            return default
+
+        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.example.com"}):
+            with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+                with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                    with patch("bot.handlers.white_internet_web.get_system_setting", side_effect=fake_get_setting):
+                        resp = await self.client.get(
+                            "/sub/wl/valid-token-happ-disabled-1234567890",
+                            headers={
+                                "X-Hwid": "test-device-hwid-happ-disabled",
+                                "User-Agent": "Happ/4.6.1 (Android; Pixel 8)",
+                            },
+                        )
+
+                        self.assertEqual(resp.status, 200)
+                        self.assertEqual(resp.headers.get("Routing"), "off")
+                        self.assertEqual(resp.headers.get("Routing-Enable"), "0")
 
     async def test_feed_without_hwid_returns_403_hwid_required(self):
         now = datetime.now(timezone.utc)
