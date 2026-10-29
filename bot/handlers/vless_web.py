@@ -548,6 +548,12 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         else:
             routing_enabled = bool(routing_setting)
 
+        fragmentation_setting = await get_system_setting(session, "vless_fragmentation_enabled", True)
+        if isinstance(fragmentation_setting, str):
+            fragmentation_enabled = fragmentation_setting.lower() in ("1", "true", "yes", "on")
+        else:
+            fragmentation_enabled = bool(fragmentation_setting)
+
         profile_title_base = str(profile_title).strip().replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
         if show_devices:
             suffix = f" [{total_active_devices}/{total_device_limit}]"
@@ -578,6 +584,12 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         client_name = parse_client_from_user_agent(user_agent)
         is_happ = bool((client_name and "happ" in client_name.lower()) or ("happ" in user_agent.lower()))
         routing_scheme = "happ" if is_happ else "incy"
+
+        if fragmentation_enabled:
+            response_headers["fragmentation-enable"] = "1"
+            response_headers["fragmentation-packets"] = "tlshello"
+            response_headers["fragmentation-length"] = "10-30"
+            response_headers["fragmentation-interval"] = "10-30"
 
         if routing_enabled:
             response_headers["Routing"] = VlessSubscriptionService.generate_incy_routing_header(
