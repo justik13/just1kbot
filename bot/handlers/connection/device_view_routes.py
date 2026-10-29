@@ -554,27 +554,22 @@ async def render_vless_sub_screen(
     from services.vless_subscription_service import VlessSubscriptionService
 
     sub = await vless_subscription_repo.get_or_create_subscription(session, user.id)
-    sub_url = VlessSubscriptionService.build_subscription_url(sub.token)
-
-    effective_limit = await SubscriptionService.get_effective_device_limit(session, user)
-    total_active, _awg_active, vless_active = await VlessSubscriptionService.get_combined_quota(session, user)
-
-    from utils.traffic_helpers import get_user_monthly_standard_traffic
-
-    monthly_bytes = get_user_monthly_standard_traffic(user)
+    try:
+        sub_url = VlessSubscriptionService.build_subscription_url(sub.token)
+    except Exception as exc:
+        logger.warning("Failed to resolve VLESS subscription url for user %s: %s", user.id, exc)
+        sub_url = ""
 
     text = texts.VLESS_SUB_SCREEN_TEXT.format(
         sub_url=sub_url,
-        active=total_active,
-        limit=effective_limit,
-        monthly_traffic=format_traffic(monthly_bytes),
     )
 
     builder = InlineKeyboardBuilder()
-    if vless_active > 0:
+    if sub_url and 1 <= len(sub_url) <= 256:
         builder.button(
-            text=texts.BTN_VLESS_RESET_HWID,
-            callback_data="vless_sub_reset",
+            text=texts.BTN_SUB_CONNECT_INCY,
+            url=sub_url,
+            style="success",
         )
     builder.button(
         text=texts.BTN_BACK_TO_CONNECTION,

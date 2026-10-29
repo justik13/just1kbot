@@ -1311,7 +1311,8 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sub.node_traffic_snapshots["1"]["epoch"], "new-epoch")
 
     async def test_render_vless_sub_screen_renders_traffic_total(self):
-        """render_vless_sub_screen formats and displays combined standard monthly traffic."""
+        """render_vless_sub_screen formats instructions with client links and connect button without duplicate reset or quotas."""
+        from bot import texts
         from bot.handlers.connection.device_view_routes import render_vless_sub_screen
         from database.models import User, VlessSubscription
 
@@ -1336,18 +1337,45 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
 
         mock_bot = AsyncMock()
         mock_session = AsyncMock()
+        expected_sub_url = "https://test.domain/sub/vless-token-xyz"
 
         with patch("database.repositories.vless_subscription_repo.get_or_create_subscription", AsyncMock(return_value=sub)), \
-             patch("services.vless_subscription_service.VlessSubscriptionService.build_subscription_url", return_value="https://test.domain/sub/vless-token-xyz"), \
-             patch("services.subscription.SubscriptionService.get_effective_device_limit", AsyncMock(return_value=2)), \
-             patch("services.vless_subscription_service.VlessSubscriptionService.get_combined_quota", AsyncMock(return_value=(1, 0, 1))), \
+             patch("services.vless_subscription_service.VlessSubscriptionService.build_subscription_url", return_value=expected_sub_url), \
              patch("bot.handlers.connection.device_view_routes.render_hub", AsyncMock()) as mock_render:
 
             await render_vless_sub_screen(mock_bot, 987654321, user, mock_session)
             mock_render.assert_called_once()
             called_text = mock_render.call_args[0][2]
-            self.assertIn("📊 <b>Трафик за месяц:</b> 6.0 GiB", called_text)
-            self.assertIn("📊 <b>Занято устройств:</b> 1 из 2", called_text)
+            called_kb = mock_render.call_args[0][3]
+
+            # Instruction text checks
+            self.assertIn(expected_sub_url, called_text)
+            self.assertIn("INCY", called_text)
+            self.assertIn("Happ", called_text)
+            self.assertIn("App Store", called_text)
+            self.assertIn("Google Play", called_text)
+            self.assertIn("GitHub", called_text)
+
+            # Quota and traffic lines must not be in instruction text
+            self.assertNotIn("📊 <b>Трафик за месяц:</b>", called_text)
+            self.assertNotIn("📊 <b>Занято устройств:</b>", called_text)
+
+            # Buttons checks
+            buttons = [btn for row in called_kb.inline_keyboard for btn in row]
+            self.assertEqual(len(buttons), 3)
+
+            connect_btn = buttons[0]
+            self.assertEqual(connect_btn.text, texts.BTN_SUB_CONNECT_INCY)
+            self.assertEqual(connect_btn.url, expected_sub_url)
+            self.assertEqual(connect_btn.style, "success")
+
+            back_conn_btn = buttons[1]
+            self.assertEqual(back_conn_btn.callback_data, "back_to_connections")
+
+            back_menu_btn = buttons[2]
+            self.assertEqual(back_menu_btn.callback_data, "back_to_main_menu")
+
+            self.assertFalse(any(b.callback_data == "vless_sub_reset" for b in buttons))
 
     async def test_record_vless_traffic_atomic_uuid_mismatch_fencing(self):
         """When subscription UUID rotated concurrently, atomic recording aborts without mutating state."""
