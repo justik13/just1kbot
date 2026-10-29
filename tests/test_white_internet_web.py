@@ -543,7 +543,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             traffic_limit_bytes=53687091200,
             traffic_used_bytes=1000,
             desired_version=1,
-            applied_version=1,
+            actual_version=1,
             device_limit=1,
             active_hwids={},
         )
