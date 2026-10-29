@@ -550,18 +550,20 @@ async def render_vless_sub_screen(
     user: User,
     session: AsyncSession,
 ) -> None:
+    import html
     from database.repositories import vless_subscription_repo
     from services.vless_subscription_service import VlessSubscriptionService
 
     sub = await vless_subscription_repo.get_or_create_subscription(session, user.id)
+    token = getattr(sub, "token", None) if sub else None
     try:
-        sub_url = VlessSubscriptionService.build_subscription_url(sub.token)
+        sub_url = VlessSubscriptionService.build_subscription_url(str(token)) if token else ""
     except Exception as exc:
         logger.warning("Failed to resolve VLESS subscription url for user %s: %s", user.id, exc)
         sub_url = ""
 
     text = texts.VLESS_SUB_SCREEN_TEXT.format(
-        sub_url=sub_url,
+        sub_url=html.escape(sub_url) if sub_url else "",
     )
 
     builder = InlineKeyboardBuilder()
@@ -596,7 +598,6 @@ async def vless_sub_feed_info(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    await callback.answer(show_alert=False)
     await state.clear()
 
     if not db_user:
@@ -613,6 +614,8 @@ async def vless_sub_feed_info(
         except Exception:
             pass
         return
+
+    await callback.answer()
 
     from services.vless_subscription_service import VlessSubscriptionService
 
