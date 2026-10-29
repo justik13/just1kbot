@@ -355,11 +355,18 @@ async def check_node_resources_and_alerts(bot: Bot):
                             and hasattr(xray_client, "get_relays_health")
                         ):
                             try:
-                                r_ok, r_data, _r_err = await xray_client.get_relays_health(
+                                r_ok, r_data, r_err = await xray_client.get_relays_health(
                                     xray_url, server.api_key
                                 )
                                 if r_ok and isinstance(r_data, dict):
                                     relays_probe_result = r_data.get("relays")
+                                else:
+                                    logger.warning(
+                                        "Relays health check failed for Origin %s (%s): %s",
+                                        server.id,
+                                        server.name,
+                                        r_err or "Unknown error",
+                                    )
                             except Exception as r_exc:
                                 logger.warning(
                                     "Relays health probe exception for Origin %s (%s): %s",
@@ -614,16 +621,24 @@ async def check_node_resources_and_alerts(bot: Bot):
                     # 3. Evaluate Origin Relays Health (TSPU check from inside Russia)
                     if relays_probe_result is not None and isinstance(relays_probe_result, list):
                         db_relays_state = dict(db_extra.get("relays_probe_state") or {})
-                        # Map IP to server ID from current servers batch for direct button links
+                        # Map IP/domain/name to server ID from current servers batch for direct button links
                         ip_to_srv_id = {}
                         for srv in servers:
+                            srv_extra = getattr(srv, "extra_data", None) or {}
+                            if isinstance(srv_extra, dict):
+                                if srv_extra.get("ip"):
+                                    ip_to_srv_id[str(srv_extra["ip"]).strip().lower()] = srv.id
+                                if srv_extra.get("domain"):
+                                    ip_to_srv_id[str(srv_extra["domain"]).strip().lower()] = srv.id
                             if getattr(srv, "api_url", None):
                                 try:
                                     parsed_host = urlsplit(srv.api_url).hostname
                                     if parsed_host:
-                                        ip_to_srv_id[parsed_host] = srv.id
+                                        ip_to_srv_id[parsed_host.strip().lower()] = srv.id
                                 except Exception:
                                     pass
+                            if getattr(srv, "name", None):
+                                ip_to_srv_id[srv.name.strip().lower()] = srv.id
 
                         for r in relays_probe_result:
                             relay_ip = str(r.get("ip") or "").strip()
@@ -639,11 +654,20 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 "consecutive_successes": 0,
                                 "is_problem": False,
                             })
-                            if relay_key in db_relays_state:
-                                r_state["is_problem"] = bool(db_relays_state[relay_key].get("is_problem", False))
+                            if relay_key in db_relays_state and isinstance(db_relays_state[relay_key], dict):
+                                db_r = db_relays_state[relay_key]
+                                r_state["is_problem"] = bool(db_r.get("is_problem", False))
+                                if "consecutive_fails" in db_r:
+                                    r_state["consecutive_fails"] = int(db_r.get("consecutive_fails") or 0)
+                                if "consecutive_successes" in db_r:
+                                    r_state["consecutive_successes"] = int(db_r.get("consecutive_successes") or 0)
 
                             has_relay_problem = bool(r_state.get("is_problem", False))
-                            target_srv_id = ip_to_srv_id.get(relay_ip, server.id)
+                            target_srv_id = (
+                                ip_to_srv_id.get(relay_ip.lower())
+                                or ip_to_srv_id.get(relay_name.lower())
+                                or server.id
+                            )
 
                             if not is_relay_ok:
                                 r_state["consecutive_fails"] = int(r_state.get("consecutive_fails", 0)) + 1
