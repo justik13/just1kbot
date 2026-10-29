@@ -37,7 +37,7 @@ from services.maintenance_service import MaintenanceService
 from services.order_service import OrderService
 from utils.callbacks import parse_callback_id
 from utils.formatters import format_datetime
-from utils.telegram import render_hub, safe_callback_answer
+from utils.telegram import render_hub, resolve_bot_username, safe_callback_answer
 
 from .common import _render_maintenance
 
@@ -268,7 +268,7 @@ async def _create_and_render_topup(
             return
 
         try:
-            bot_username = getattr(getattr(bot, "_me", None), "username", None)
+            bot_username = await resolve_bot_username(bot)
             order_meta = {"context": context} if context else None
             order = await OrderService.create_order(
                 session,
@@ -605,6 +605,17 @@ async def accept_custom_amount(
     raw = (message.text or "").strip()
     if not raw or raw.startswith("/"):
         await state.clear()
+        if not db_user:
+            from database.repositories.users_repo import get_user_by_telegram_id
+            db_user = await get_user_by_telegram_id(session, message.from_user.id)
+        if db_user:
+            await _render_balance(
+                message.bot,
+                message.chat.id,
+                session,
+                db_user,
+                notice=texts.ERROR_OPERATION_CANCELLED,
+            )
         return
 
     if not raw.isascii() or not raw.isdigit():

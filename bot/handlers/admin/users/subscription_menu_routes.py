@@ -156,12 +156,6 @@ async def admin_subscription_menu(
         logger.debug(f"admin_subscription_menu edit_text failed: {e}")
 
 
-def _safe_update_callback_data(callback: CallbackQuery, new_data: str) -> CallbackQuery:
-    """Safely update callback data on frozen Pydantic models or mocks."""
-    object.__setattr__(callback, "data", new_data)
-    return callback
-
-
 # ---------------------------------------------------------------------------
 # White Internet Submenu
 # ---------------------------------------------------------------------------
@@ -362,7 +356,6 @@ async def admin_wi_traffic_add(
     )
 
     await callback.answer(texts.ADMIN_WI_TRAFFIC_ADDED_SUCCESS.format(gb=gb), show_alert=True)
-    callback = _safe_update_callback_data(callback, f"admin_sub_wi_menu:{telegram_id}")
     await admin_wi_subscription_menu(callback, session, target_telegram_id=telegram_id)
 
 
@@ -460,7 +453,6 @@ async def admin_wi_traffic_reset_apply(
     )
 
     await callback.answer(texts.ADMIN_WI_TRAFFIC_RESET_SUCCESS, show_alert=True)
-    callback = _safe_update_callback_data(callback, f"admin_sub_wi_menu:{telegram_id}")
     await admin_wi_subscription_menu(callback, session, target_telegram_id=telegram_id)
 
 
@@ -560,7 +552,6 @@ async def admin_wi_quota_set(
     )
 
     await callback.answer(texts.ADMIN_WI_QUOTA_SET_SUCCESS.format(gb=gb), show_alert=True)
-    callback = _safe_update_callback_data(callback, f"admin_sub_wi_menu:{telegram_id}")
     await admin_wi_subscription_menu(callback, session, target_telegram_id=telegram_id)
 
 
@@ -659,7 +650,6 @@ async def admin_wi_devlimit_set(
     )
 
     await callback.answer(texts.ADMIN_WI_DEVLIMIT_SET_SUCCESS.format(limit=limit), show_alert=True)
-    callback = _safe_update_callback_data(callback, f"admin_sub_wi_menu:{telegram_id}")
     await admin_wi_subscription_menu(callback, session, target_telegram_id=telegram_id)
 
 
@@ -741,7 +731,6 @@ async def admin_wi_hwid_reset_apply(
     )
 
     await callback.answer(texts.ADMIN_WI_HWID_RESET_SUCCESS, show_alert=True)
-    callback = _safe_update_callback_data(callback, f"admin_sub_wi_menu:{telegram_id}")
     await admin_wi_subscription_menu(callback, session, target_telegram_id=telegram_id)
 
 
@@ -866,7 +855,6 @@ async def admin_wi_token_reset_apply(
     )
 
     await callback.answer(texts.ADMIN_WI_TOKEN_RESET_SUCCESS, show_alert=True)
-    callback = _safe_update_callback_data(callback, f"admin_sub_wi_menu:{telegram_id}")
     await admin_wi_subscription_menu(callback, session, target_telegram_id=telegram_id)
 
 
@@ -945,7 +933,6 @@ async def admin_wl_reset_apply(
         await callback.answer(texts.ADMIN_WL_RESET_SUCCESS, show_alert=True)
     except Exception:
         pass
-    callback = _safe_update_callback_data(callback, f"admin_sub_wi_menu:{telegram_id}")
     await admin_wi_subscription_menu(callback, session, target_telegram_id=telegram_id)
 
 
@@ -986,7 +973,6 @@ async def admin_wl_grant_trial(
         await callback.answer(texts.ADMIN_WL_GRANT_SUCCESS, show_alert=True)
     except Exception:
         pass
-    callback = _safe_update_callback_data(callback, f"admin_sub_wi_menu:{telegram_id}")
     await admin_wi_subscription_menu(callback, session, target_telegram_id=telegram_id)
 
 
@@ -1220,7 +1206,6 @@ async def admin_wi_apply_extend(
     except Exception:
         pass
 
-    callback = _safe_update_callback_data(callback, f"admin_sub_wi_menu:{telegram_id}")
     await admin_wi_subscription_menu(callback, session, target_telegram_id=telegram_id)
 
 

@@ -31,7 +31,12 @@ from services.order_service import (
     OrderService,
 )
 from utils.datetime_helpers import now_utc
-from utils.telegram import EFFECT_CONFETTI, render_hub, safe_callback_answer
+from utils.telegram import (
+    EFFECT_CONFETTI,
+    render_hub,
+    resolve_bot_username,
+    safe_callback_answer,
+)
 
 from .common import _render_maintenance
 
@@ -223,10 +228,11 @@ async def handle_order_pay_card(
                 message_effect_id=EFFECT_CONFETTI,
                 force_new=True,
             )
+            await callback.answer()
             return
 
     try:
-        bot_username = getattr(getattr(callback.bot, "_me", None), "username", None)
+        bot_username = await resolve_bot_username(callback.bot)
         order = await OrderService.create_order(
             session,
             user_id=db_user_id,
