@@ -7,7 +7,7 @@ import json
 
 # Fixed version timestamp used to detect routing profile changes in INCY/Happ clients.
 # Bump this timestamp when routing rules or DNS parameters change so clients pull updated rules.
-ROUTING_PROFILE_VERSION_TIMESTAMP = "1761516000"
+ROUTING_PROFILE_VERSION_TIMESTAMP = "1793318400"
 
 
 def generate_incy_routing_header(
@@ -20,7 +20,7 @@ def generate_incy_routing_header(
     """Construct incy:// or happ:// routing deep link header for split tunneling.
 
     - Supports both "incy" (INCY app) and "happ" (Happ app) schemes.
-    - If direct_ru=True (Standard VLESS): routes domain:ru, domain:su, domain:xn--p1ai, geoip:ru directly
+    - If direct_ru=True (Standard VLESS): routes geosite:category-ru, geosite:tld-ru, domain:ru, domain:su, domain:xn--p1ai, geoip:ru directly
       via user's home ISP, sending foreign destinations through the VLESS tunnel.
     - If direct_ru=False (White Internet / CDN relay): sends all domain traffic through
       the Yandex CDN tunnel to the Moscow Origin server (where Origin routes RU directly
@@ -44,6 +44,8 @@ def generate_incy_routing_header(
     ]
     direct_sites = (
         [
+            "geosite:category-ru",
+            "geosite:tld-ru",
             "domain:ru",
             "domain:su",
             "domain:xn--p1ai",
@@ -58,6 +60,7 @@ def generate_incy_routing_header(
         "GlobalProxy": "true",
         "DomainStrategy": "IPIfNonMatch",
         "LastUpdated": str(last_updated).strip() or ROUTING_PROFILE_VERSION_TIMESTAMP,
+        "useChunkFiles": "true",
         "RemoteDNSType": "DoH",
         "RemoteDNSDomain": "https://cloudflare-dns.com/dns-query",
         "RemoteDNSIP": "1.1.1.1",

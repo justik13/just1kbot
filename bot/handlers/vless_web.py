@@ -598,6 +598,8 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                 scheme=routing_scheme,
             )
             response_headers["routing-geo-update-interval"] = "168"
+            if is_happ:
+                response_headers["Routing-Enable"] = "true"
         else:
             response_headers["Routing"] = "off"
             if is_happ:

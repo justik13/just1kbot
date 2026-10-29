@@ -263,7 +263,7 @@ WL_COUNTRY_KEYWORD_FLAGS: dict[str, str] = {
     "швейцария": "🇨🇭",
 }
 WL_DEFAULT_TARIFF_NAME = "Белый Интернет 50 ГБ"
-WL_PROFILE_NAME = "✦ Just1k"
+WL_PROFILE_NAME = "✦ Just1k WL"
 WL_DOMAIN_UNCONFIGURED = "Ошибка: домен бота не настроен в конфигурации."
 WL_DOMAIN_UNCONFIGURED_BANNER = "\n\n⚠️ Ошибка: домен бота не настроен в конфигурации."
 WL_USERINFO_HEADER_TEMPLATE = "upload={upload}; download={download}; total={total}; expire={expire}"

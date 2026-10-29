@@ -1,6 +1,7 @@
 """Unit tests for White Internet HTTP subscription feed endpoint (/sub/wl/{token})."""
 
 import base64
+import json
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -443,6 +444,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     self.assertIn("Routing", resp.headers)
                     self.assertTrue(resp.headers["Routing"].startswith("incy://routing/onadd/"))
                     self.assertEqual(resp.headers.get("routing-geo-update-interval"), "168")
+                    self.assertNotIn("Routing-Enable", resp.headers)
 
                     body_b64 = await resp.text()
                     decoded_lines = base64.b64decode(body_b64).decode("utf-8").splitlines()
@@ -513,6 +515,16 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     self.assertEqual(resp.status, 200)
                     self.assertIn("Routing", resp.headers)
                     self.assertTrue(resp.headers["Routing"].startswith("happ://routing/onadd/"))
+                    self.assertEqual(resp.headers.get("Routing-Enable"), "true")
+
+                    # Decode routing deep link and verify White Internet rules
+                    routing_uri = resp.headers["Routing"]
+                    b64_routing = routing_uri.removeprefix("happ://routing/onadd/")
+                    routing_json = json.loads(base64.b64decode(b64_routing).decode("utf-8"))
+                    self.assertEqual(routing_json.get("useChunkFiles"), "true")
+                    self.assertEqual(routing_json.get("LastUpdated"), "1793318400")
+                    self.assertEqual(routing_json.get("DirectSites"), [])
+
                     self.assertEqual(resp.headers.get("sub-expire"), "1")
                     self.assertEqual(resp.headers.get("sub-expire-button-link"), "https://t.me/just1k13bot")
 

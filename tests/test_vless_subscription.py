@@ -3,6 +3,7 @@
 import base64
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+import json
 import os
 import unittest
 import urllib.parse
@@ -888,6 +889,16 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             # Adaptive routing header for Happ
             self.assertIn("Routing", resp.headers)
             self.assertTrue(resp.headers["Routing"].startswith("happ://routing/onadd/"))
+            self.assertEqual(resp.headers.get("Routing-Enable"), "true")
+
+            # Decode routing deep link and verify rules
+            routing_uri = resp.headers["Routing"]
+            b64_routing = routing_uri.removeprefix("happ://routing/onadd/")
+            routing_json = json.loads(base64.b64decode(b64_routing).decode("utf-8"))
+            self.assertEqual(routing_json.get("useChunkFiles"), "true")
+            self.assertEqual(routing_json.get("LastUpdated"), "1793318400")
+            self.assertIn("geosite:category-ru", routing_json.get("DirectSites", []))
+            self.assertIn("geosite:tld-ru", routing_json.get("DirectSites", []))
 
             # In-App expiration headers for Happ
             self.assertEqual(resp.headers.get("sub-expire"), "1")
@@ -924,6 +935,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             # Happ-specific headers should not be present
             self.assertNotIn("sub-expire", resp.headers)
             self.assertNotIn("sub-expire-button-link", resp.headers)
+            self.assertNotIn("Routing-Enable", resp.headers)
 
     async def test_feed_includes_global_system_settings_in_headers(self):
         mock_session = AsyncMock()
