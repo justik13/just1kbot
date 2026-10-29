@@ -637,6 +637,104 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             mock_client_cls.return_value.healthcheck.assert_called_once()
             self.assertEqual(st.health_state, ServerHealthState.ONLINE)
 
+    async def test_origin_relays_tspu_alert_and_recovery(self):
+        origin_server = MagicMock(spec=Server)
+        origin_server.id = 10
+        origin_server.name = "Origin-RU"
+        origin_server.protocol = "vless"
+        origin_server.capabilities = ["xray_origin"]
+        origin_server.extra_data = {
+            "domain": "origin.test.pro",
+            "relays": [{"ip": "191.44.113.0", "port": 10443, "name": "Poland-1"}],
+        }
+        origin_server.api_url = "https://origin.test.pro:8444"
+        origin_server.api_key = "secret_origin"
+        origin_server.is_active = True
+        origin_server.disabled_reason = None
+        origin_server.health_state = "ONLINE"
+        origin_server.consecutive_fails = 0
+        origin_server.consecutive_successes = 0
+        origin_server.problem_started_at = None
+        origin_server.next_check_at = None
+        origin_server.recovery_notice_sent = False
+        origin_server.last_alert_sent_state = None
+
+        relay_server = MagicMock(spec=Server)
+        relay_server.id = 20
+        relay_server.name = "Poland-1"
+        relay_server.protocol = "vless"
+        relay_server.capabilities = ["xray"]
+        relay_server.extra_data = {"ip": "191.44.113.0"}
+        relay_server.api_url = "https://pl-node.test.pro:8443"
+        relay_server.api_key = "secret_relay"
+        relay_server.is_active = True
+        relay_server.disabled_reason = None
+        relay_server.health_state = "ONLINE"
+        relay_server.consecutive_fails = 0
+        relay_server.consecutive_successes = 0
+        relay_server.problem_started_at = None
+        relay_server.next_check_at = None
+        relay_server.recovery_notice_sent = False
+        relay_server.last_alert_sent_state = None
+
+        all_servers = [origin_server, relay_server]
+
+        with patch("services.workers.node_monitor.get_all_servers", return_value=all_servers), \
+             patch("services.workers.node_monitor.get_server_by_id", side_effect=lambda session, s_id, **kw: next((s for s in all_servers if s.id == s_id), None)), \
+             patch("services.workers.node_monitor.update_server", new_callable=AsyncMock), \
+             patch("services.workers.node_monitor._probe_single_ingress_endpoint", new_callable=AsyncMock, return_value=(True, "OK")), \
+             patch("services.xray_node_client.XrayNodeClient") as mock_xray_cls, \
+             patch("services.workers.node_monitor.update_server_xray_epoch_cas", new_callable=AsyncMock) as mock_cas:
+
+            mock_cas.return_value = (True, origin_server)
+            mock_xray_client = AsyncMock()
+            mock_xray_client.check_health = AsyncMock(return_value=(True, "epoch-1", {}))
+            mock_xray_cls.return_value.__aenter__.return_value = mock_xray_client
+            mock_xray_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            # 1. 1st fail
+            mock_xray_client.get_relays_health = AsyncMock(return_value=(
+                True,
+                {"relays": [{"name": "Poland-1", "code": "pl", "ip": "191.44.113.0", "port": 10443, "healthy": False, "error": "Timeout (5.0s)", "rtt_ms": None}]},
+                None,
+            ))
+            await check_node_resources_and_alerts(self.mock_bot)
+            self.mock_bot.send_message.assert_not_called()
+
+            # 2. 2nd fail
+            await check_node_resources_and_alerts(self.mock_bot)
+            self.mock_bot.send_message.assert_not_called()
+
+            # 3. 3rd fail -> triggers alert
+            await check_node_resources_and_alerts(self.mock_bot)
+            self.assertEqual(self.mock_bot.send_message.call_count, 1)
+            call_args = self.mock_bot.send_message.call_args
+            sent_text = call_args[0][1] if len(call_args[0]) > 1 else call_args[1].get("text")
+            self.assertIn("191.44.113.0", sent_text)
+            self.assertIn("Poland-1", sent_text)
+
+            # Verify button links to relay_server.id (20) via extra_data["ip"] mapping
+            kb = call_args[1].get("reply_markup")
+            self.assertIsNotNone(kb)
+            button_callback = kb.inline_keyboard[0][0].callback_data
+            self.assertEqual(button_callback, "admin_server_card:20")
+
+            # 4. Recovery cycle 1 (success 1) -> no recovery notice yet
+            mock_xray_client.get_relays_health = AsyncMock(return_value=(
+                True,
+                {"relays": [{"name": "Poland-1", "code": "pl", "ip": "191.44.113.0", "port": 10443, "healthy": True, "error": None, "rtt_ms": 42.5}]},
+                None,
+            ))
+            await check_node_resources_and_alerts(self.mock_bot)
+            self.assertEqual(self.mock_bot.send_message.call_count, 1)
+
+            # 5. Recovery cycle 2 (success 2) -> recovery notice sent
+            await check_node_resources_and_alerts(self.mock_bot)
+            self.assertEqual(self.mock_bot.send_message.call_count, 2)
+            rec_args = self.mock_bot.send_message.call_args
+            rec_text = rec_args[0][1] if len(rec_args[0]) > 1 else rec_args[1].get("text")
+            self.assertIn("42.5", rec_text)
+
 
 if __name__ == "__main__":
     unittest.main()
