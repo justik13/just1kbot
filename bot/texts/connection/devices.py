@@ -150,20 +150,31 @@ DEVICE_MIGRATE_PENDING_NOTICE = """⏳ <b>Настройка нового сер
 
 BTN_VLESS_SUB_INFO = "⚡️ Подключение по ссылке (все серверы)"
 
-VLESS_SUB_SCREEN_TEXT = """⚡️ <b>Основное подключение по ссылке (INCY)</b>
+VLESS_SUB_SCREEN_TEXT = """⚡️ <b>Основное подключение по ссылке (INCY / Happ)</b>
 
-С помощью единой ссылки вы получаете доступ сразу ко всем доступным серверам с автообновлением без ручной настройки отдельных ключей.
+Единая ссылка дает доступ сразу ко всем серверам с автообновлением без ручной настройки отдельных ключей.
 
-📋 <b>Ваша ссылка на подписку:</b>
+1️⃣ <b>Установите приложение:</b>
+   <b>INCY:</b>
+   🍏 <a href="https://apps.apple.com/app/incy/id6756943388">App Store (iPhone / iPad)</a>
+   🤖 <a href="https://play.google.com/store/apps/details?id=llc.itdev.incy">Google Play (Android)</a>
+   💻 / 📦 <a href="https://github.com/INCY-DEV/incy-platforms/releases">Для ПК / APK (GitHub)</a>
+
+   <b>Happ:</b>
+   🍏 <a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215">App Store (iPhone / iPad)</a>
+   🤖 <a href="https://play.google.com/store/apps/details?id=com.happproxy">Google Play (Android)</a>
+   📦 <a href="https://github.com/Happ-proxy/happ-android/releases">APK для Android (GitHub)</a>
+   💻 <a href="https://github.com/Happ-proxy/happ-desktop/releases">Для ПК (GitHub)</a>
+
+2️⃣ <b>Скопируйте вашу ссылку на подписку:</b>
 <code>{sub_url}</code>
+<i>(нажмите на ссылку выше для копирования)</i>
 
-📱 <b>Как подключить:</b>
-1. Установите приложение <b>INCY</b> на телефон или планшет.
-2. Скопируйте ссылку выше и добавьте ее в приложении (кнопка <b>+</b> ➔ <b>Добавить подписку</b>).
-3. Приложение автоматически загрузит список серверов и будет обновлять их.
+3️⃣ <b>Добавьте подписку:</b>
+   • Откройте приложение (<b>INCY</b> или <b>Happ</b>)
+   • Вставьте скопированную ссылку подписки и сохраните
+   • Нажмите кнопку подключения!
 
-📊 <b>Занято устройств:</b> {active} из {limit}
-📊 <b>Трафик за месяц:</b> {monthly_traffic}
 <i>Каждое подключенное устройство учитывается в общем лимите устройств.</i>"""
 
 BTN_VLESS_RESET_HWID = "🔄 Сбросить привязку устройств"
@@ -185,7 +196,7 @@ CONNECTION_HUB_ACTIVE_TEXT = """🌐 <b>Подключение</b>
 📱 <b>Устройства:</b> {active} из {limit}
 <i>(по ссылке: {vless_count} • Amnezia: {amnezia_count})</i>
 
-⚡️ <b>Основное подключение по ссылке (INCY):</b>
+⚡️ <b>Основное подключение по ссылке (INCY / Happ):</b>
 Единая ссылка дает доступ сразу ко всем серверам с автообновлением без ручной настройки отдельных ключей. Рекомендуется для всех основных устройств.
 
 📋 <b>Ваша ссылка на подписку:</b>
