@@ -544,6 +544,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             traffic_used_bytes=1000,
             desired_version=1,
             actual_version=1,
+            last_reconciled_node_epoch="epoch-xyz",
             device_limit=1,
             active_hwids={},
         )
