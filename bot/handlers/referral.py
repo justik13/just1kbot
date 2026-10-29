@@ -170,7 +170,7 @@ async def show_referral(
     else:
         rank_line = texts.REFERRAL_MAIN_RANK_NOT_RANKED
 
-    bot_username = (await resolve_bot_username(callback.bot)) or "bot"
+    bot_username = (await resolve_bot_username(callback.bot)) or "just1k13bot"
     referral_link = f"https://t.me/{bot_username}?start=ref_{db_user.telegram_id}"
 
     inviter_line = await _get_inviter_line(session, db_user)

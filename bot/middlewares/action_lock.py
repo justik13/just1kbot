@@ -119,6 +119,7 @@ STALE_ACTION_PREFIXES = (
     "admin_wl_grant_trial:",
     "admin_wi_confirm_extend:",
     "admin_wi_apply_extend:",
+    "vless_sub_reset_confirm",
 )
 
 STALE_MAX_AGE_SECONDS = 600
