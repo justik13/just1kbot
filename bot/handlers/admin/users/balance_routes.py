@@ -34,12 +34,6 @@ logger = logging.getLogger(__name__)
 MAX_BALANCE_ADJUSTMENT = 1_000_000
 
 
-def _safe_update_callback_data(callback: CallbackQuery, new_data: str) -> CallbackQuery:
-    """Safely update callback data on frozen Pydantic models or mocks."""
-    object.__setattr__(callback, "data", new_data)
-    return callback
-
-
 @router.callback_query(F.data.startswith("admin_bal_preset:"))
 async def admin_balance_preset(
     callback: CallbackQuery,
@@ -124,7 +118,6 @@ async def admin_balance_preset(
         texts.ADMIN_BALANCE_ADJUSTED_SUCCESS.format(amount=f"{amount:+d}"),
         show_alert=True,
     )
-    callback = _safe_update_callback_data(callback, f"admin_user_balance:{telegram_id}")
     await show_user_balance_menu(callback, None, session, target_telegram_id=telegram_id)
 
 

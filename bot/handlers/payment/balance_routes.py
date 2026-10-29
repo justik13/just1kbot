@@ -268,7 +268,15 @@ async def _create_and_render_topup(
             return
 
         try:
-            bot_username = getattr(getattr(bot, "_me", None), "username", None)
+            try:
+                bot_username = (get_settings().BOT_USERNAME or "").lstrip("@")
+            except Exception:
+                bot_username = None
+            if not bot_username:
+                try:
+                    bot_username = bot.me.username
+                except Exception:
+                    bot_username = getattr(getattr(bot, "_me", None), "username", None)
             order_meta = {"context": context} if context else None
             order = await OrderService.create_order(
                 session,
@@ -605,6 +613,14 @@ async def accept_custom_amount(
     raw = (message.text or "").strip()
     if not raw or raw.startswith("/"):
         await state.clear()
+        if db_user:
+            await _render_balance(
+                message.bot,
+                message.chat.id,
+                session,
+                db_user,
+                notice=texts.ERROR_OPERATION_CANCELLED,
+            )
         return
 
     if not raw.isascii() or not raw.isdigit():

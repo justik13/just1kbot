@@ -3,7 +3,6 @@ from aiogram.fsm.state import State, StatesGroup
 
 class DeviceCreationStates(StatesGroup):
     choose_server = State()
-    enter_device_name = State()
 
 
 class DeviceManagementStates(StatesGroup):

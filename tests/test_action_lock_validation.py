@@ -21,6 +21,7 @@ class CallbackValidationTests(unittest.TestCase):
         from bot.middlewares.action_lock import _is_locked_action
         self.assertTrue(_is_locked_action("add_device"))
         self.assertTrue(_is_locked_action("vless_sub_reset"))
+        self.assertTrue(_is_locked_action("vless_sub_reset_confirm"))
         self.assertTrue(_is_locked_action("admin_vless_hwid_reset:123"))
         self.assertTrue(_is_locked_action("admin_vless_token_rotate:123"))
 

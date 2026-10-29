@@ -20,7 +20,7 @@ from services.subscription import SubscriptionService
 from utils.callbacks import parse_callback_id
 from utils.telegram import EFFECT_LIKE, render_hub, safe
 
-from .common import DEVICE_NAME_REGEX
+from .common import DEVICE_NAME_REGEX, _render_connections
 from .device_view_routes import render_device_screen
 
 router = Router()
@@ -101,7 +101,23 @@ async def rename_device_process(
         pass
 
     if not message.text or message.text.startswith("/"):
+        data = await state.get_data()
+        profile_id = data.get("profile_id")
         await state.clear()
+        if profile_id and db_user:
+            profile = await get_profile_by_id(session, profile_id)
+            if profile and profile.user_id == db_user.id:
+                await render_device_screen(
+                    message.bot,
+                    message.chat.id,
+                    profile,
+                    db_user,
+                    session,
+                    notice=texts.ERROR_OPERATION_CANCELLED,
+                )
+                return
+        if db_user:
+            await _render_connections(message, db_user, session)
         return
 
     data = await state.get_data()

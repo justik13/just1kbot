@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from bot.keyboards import get_back_button
+from config.settings import get_settings
 from database.models import User
 from database.repositories.profiles_repo import (
     PROFILE_QUOTA_EXCLUDED_STATUSES,
@@ -197,9 +198,14 @@ async def _build_connections_screen(
             style="success",
         )
 
+    try:
+        status_url = get_settings().STATUS_PAGE_URL
+    except Exception:
+        status_url = "https://status.just1k.pro/status/just1kbot"
+
     builder.button(
         text=texts.CONNECTION_CONFIG_COMMON_STATUS_SERVEROV,
-        url="https://status.just1k.pro/status/just1kbot",
+        url=status_url,
     )
     builder.button(
         text=texts.BTN_MAIN_MENU_NAV,
@@ -306,11 +312,12 @@ async def _build_amnezia_screen(
         )
         action_buttons_count += 1
 
-    builder.button(
-        text=texts.BTN_BACK_TO_CONNECTION,
-        callback_data="back_to_connections",
-    )
-    action_buttons_count += 1
+    if not read_only:
+        builder.button(
+            text=texts.BTN_BACK_TO_CONNECTION,
+            callback_data="back_to_connections",
+        )
+        action_buttons_count += 1
 
     builder.button(
         text=texts.BTN_MAIN_MENU_NAV,

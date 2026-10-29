@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     BOT_TOKEN: str = Field(repr=False)
     ADMIN_IDS: list[int]
     SUPPORT_USERNAME: str
+    BOT_USERNAME: str = ""
+    STATUS_PAGE_URL: str = "https://status.just1k.pro/status/just1kbot"
 
     # ── Database ──
     DATABASE_URL: str = Field(repr=False)

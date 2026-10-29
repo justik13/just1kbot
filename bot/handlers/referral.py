@@ -13,6 +13,7 @@ from bot.keyboards import (
     get_referral_leaderboard_keyboard,
     get_referrals_list_keyboard,
 )
+from config.settings import get_settings
 from database.models import User
 from database.repositories.payments_repo import get_user_payments
 from database.repositories.users_repo import (
@@ -86,7 +87,7 @@ async def show_history(
             pass
         return
 
-    payments = await get_user_payments(session, db_user.id, limit=10)
+    payments = await get_user_payments(session, db_user.id)
 
     if not payments:
         rendered = texts.HISTORY_HEADER + texts.HISTORY_EMPTY
@@ -166,8 +167,17 @@ async def show_referral(
     else:
         rank_line = texts.REFERRAL_MAIN_RANK_NOT_RANKED
 
-    bot_info = await callback.bot.get_me()
-    referral_link = f"https://t.me/{bot_info.username}?start=ref_{db_user.telegram_id}"
+    try:
+        bot_username = (get_settings().BOT_USERNAME or "").lstrip("@")
+    except Exception:
+        bot_username = None
+    if not bot_username:
+        try:
+            bot_username = callback.bot.me.username
+        except Exception:
+            bot_info = await callback.bot.get_me()
+            bot_username = bot_info.username
+    referral_link = f"https://t.me/{bot_username}?start=ref_{db_user.telegram_id}"
 
     inviter_line = await _get_inviter_line(session, db_user)
     if inviter_line:

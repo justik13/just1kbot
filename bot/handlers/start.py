@@ -8,7 +8,6 @@ from aiogram.types import (
     CallbackQuery,
     InlineKeyboardMarkup,
     Message,
-    ReplyKeyboardRemove,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -278,13 +277,6 @@ async def cmd_start(
     except Exception:
         pass
 
-    # Clear legacy ReplyKeyboard if present from previous bot versions
-    try:
-        tmp_msg = await message.answer("🧹", reply_markup=ReplyKeyboardRemove())
-        await message.bot.delete_message(message.chat.id, tmp_msg.message_id)
-    except Exception:
-        pass
-
     telegram_id = message.from_user.id
     ref_id = parse_referral_id(command.args) if command.args else None
 
@@ -375,9 +367,7 @@ async def handle_legacy_reply_keyboard(
 ):
     await state.clear()
     try:
-        tmp_msg = await message.answer("🧹", reply_markup=ReplyKeyboardRemove())
-        await message.bot.delete_message(message.chat.id, tmp_msg.message_id)
-        await message.bot.delete_message(message.chat.id, message.message_id)
+        await message.delete()
     except Exception:
         pass
 

@@ -16,7 +16,6 @@ from bot.states import DeviceCreationStates
 from config.constants import AMNEZIA_PROTOCOL
 from database.connection import get_session
 from database.models import User, VPNProfile
-from database.repositories.profiles_repo import get_user_profiles
 from database.repositories.servers_repo import (
     get_available_servers,
     get_server_by_id,
@@ -45,7 +44,6 @@ from .common import (
     _render_maintenance,
 )
 
-_ = get_user_profiles
 router = Router()
 logger = logging.getLogger(__name__)
 
