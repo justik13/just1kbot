@@ -523,7 +523,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     routing_json = json.loads(base64.b64decode(b64_routing).decode("utf-8"))
                     self.assertEqual(routing_json.get("Name"), "✦ Just1k WL")
                     self.assertIs(routing_json.get("useChunkFiles"), True)
-                    self.assertEqual(routing_json.get("LastUpdated"), "1793318400")
+                    self.assertEqual(routing_json.get("LastUpdated"), "1793404800")
                     self.assertEqual(routing_json.get("DirectSites"), [])
 
                     self.assertEqual(resp.headers.get("sub-expire"), "1")
