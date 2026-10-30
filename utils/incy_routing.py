@@ -12,7 +12,7 @@ from config.constants import (
 
 # Fixed version timestamp used to detect routing profile changes in INCY/Happ clients.
 # Bump this timestamp when routing rules or DNS parameters change so clients pull updated rules.
-ROUTING_PROFILE_VERSION_TIMESTAMP = "1793408400"
+ROUTING_PROFILE_VERSION_TIMESTAMP = "1793412000"
 
 
 def generate_incy_routing_header(
@@ -25,8 +25,8 @@ def generate_incy_routing_header(
     """Construct incy:// or happ:// routing deep link header for split tunneling.
 
     - Supports both "incy" (INCY app) and "happ" (Happ app) schemes.
-    - If direct_ru=True (Standard VLESS): routes geosite:category-ru, geosite:tld-ru, domain:ru, domain:su, domain:xn--p1ai directly
-      via user's home ISP, while sending foreign destinations and raw UDP/voice/gaming traffic through the VLESS tunnel to avoid Windows Xray Direct UDP drops.
+    - If direct_ru=True (Standard VLESS): routes geosite:category-ru, geosite:tld-ru, domain:ru, domain:su, domain:xn--p1ai, geoip:ru directly
+      via user's home ISP, while routing domain:just1k.pro (TeamSpeak/services) and foreign destinations through the VLESS tunnel.
     - If direct_ru=False (White Internet / CDN relay): sends all domain traffic through
       the Yandex CDN tunnel to the Moscow Origin server (where Origin routes RU directly
       from datacenter fiber and forwards foreign traffic to Exit), preserving LAN bypass.
@@ -74,10 +74,12 @@ def generate_incy_routing_header(
         if direct_ru
         else []
     )
-    # Exclude geoip:ru from DirectIp to bypass Windows Xray Direct UDP binding bug (XTLS/Xray-core #5845).
-    # All Russian web services match direct_sites and route direct; raw IP traffic (TeamSpeak, games)
-    # flows through high-speed VLESS XUDP tunnel with Full-Cone NAT and zero packet loss.
-    direct_ips = lan_direct_ips
+    # Retain geoip:ru in DirectIp for standard VLESS to guarantee all Russian banks,
+    # payment gateways (SBP, Mir), Ozon, WB, and domestic APIs stay 100% Direct via user's home ISP.
+    # To bypass Windows Wintun direct UDP drops (XTLS/Xray-core #5845) for TeamSpeak/services,
+    # we explicitly route domain:just1k.pro via ProxySites at the domain matching stage.
+    direct_ips = (["geoip:ru"] + lan_direct_ips) if direct_ru else lan_direct_ips
+    proxy_sites = ["domain:just1k.pro"]
 
     profile = {
         "Name": clean_name,
@@ -99,7 +101,7 @@ def generate_incy_routing_header(
         },
         "DirectSites": direct_sites,
         "DirectIp": direct_ips,
-        "ProxySites": [],
+        "ProxySites": proxy_sites,
         "ProxyIp": [],
         "BlockSites": [],
         "BlockIp": [],

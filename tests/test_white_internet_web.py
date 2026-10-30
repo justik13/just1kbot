@@ -523,7 +523,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     routing_json = json.loads(base64.b64decode(b64_routing).decode("utf-8"))
                     self.assertEqual(routing_json.get("Name"), "✦ Just1k WL")
                     self.assertIs(routing_json.get("useChunkFiles"), True)
-                    self.assertEqual(routing_json.get("LastUpdated"), "1793408400")
+                    self.assertEqual(routing_json.get("LastUpdated"), "1793412000")
                     self.assertEqual(routing_json.get("DomesticDNSType"), "DoH")
                     self.assertEqual(routing_json.get("DomesticDNSDomain"), "https://common.dot.dns.yandex.net/dns-query")
                     self.assertEqual(routing_json.get("DomesticDNSIP"), "77.88.8.8")
@@ -531,6 +531,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     self.assertEqual(routing_json.get("RemoteDNSDomain"), "https://cloudflare-dns.com/dns-query")
                     self.assertEqual(routing_json.get("RemoteDNSIP"), "1.1.1.1")
                     self.assertEqual(routing_json.get("DirectSites"), [])
+                    self.assertEqual(routing_json.get("ProxySites"), ["domain:just1k.pro"])
 
                     self.assertEqual(resp.headers.get("sub-expire"), "1")
                     self.assertEqual(resp.headers.get("sub-expire-button-link"), "https://t.me/just1k13bot")
