@@ -5,6 +5,11 @@ from __future__ import annotations
 import base64
 import json
 
+from config.constants import (
+    DEFAULT_VLESS_PROFILE_TITLE,
+    DEFAULT_WHITE_INTERNET_PROFILE_TITLE,
+)
+
 # Fixed version timestamp used to detect routing profile changes in INCY/Happ clients.
 # Bump this timestamp when routing rules or DNS parameters change so clients pull updated rules.
 ROUTING_PROFILE_VERSION_TIMESTAMP = "1793318400"
@@ -28,7 +33,7 @@ def generate_incy_routing_header(
     - Enforces secure DoH resolution (Cloudflare/Google DoH) to prevent TSPU DNS hijacking.
     - Includes LastUpdated Unix timestamp for reliable profile versioning and updates.
     """
-    default_name = "✦ Just1k" if direct_ru else "✦ Just1k WL"
+    default_name = DEFAULT_VLESS_PROFILE_TITLE if direct_ru else DEFAULT_WHITE_INTERNET_PROFILE_TITLE
     if profile_name is None:
         clean_name = default_name
     else:

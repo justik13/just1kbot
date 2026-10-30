@@ -510,9 +510,17 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         bot_username = await _resolve_bot_username(request)
         default_bot_url = f"https://t.me/{bot_username}"
 
-        profile_title = await get_system_setting(session, "vless_profile_title", os.getenv("VLESS_PROFILE_TITLE", "✦ Just1k"))
+        profile_title = await get_system_setting(
+            session,
+            "vless_profile_title",
+            os.getenv("VLESS_PROFILE_TITLE", constants.DEFAULT_VLESS_PROFILE_TITLE)
+            or constants.DEFAULT_VLESS_PROFILE_TITLE,
+        )
         if not isinstance(profile_title, str) or not profile_title.strip():
-            profile_title = os.getenv("VLESS_PROFILE_TITLE", "✦ Just1k") or "✦ Just1k"
+            profile_title = (
+                os.getenv("VLESS_PROFILE_TITLE", constants.DEFAULT_VLESS_PROFILE_TITLE)
+                or constants.DEFAULT_VLESS_PROFILE_TITLE
+            )
 
         total_device_limit = await SubscriptionService.get_effective_device_limit(session, user)
         total_active_devices, _awg_active, _vless_active = (
@@ -594,7 +602,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
 
         if routing_enabled:
             response_headers["Routing"] = VlessSubscriptionService.generate_incy_routing_header(
-                profile_name=profile_title,
+                profile_name=constants.DEFAULT_VLESS_PROFILE_TITLE,
                 direct_ru=True,
                 scheme=routing_scheme,
             )

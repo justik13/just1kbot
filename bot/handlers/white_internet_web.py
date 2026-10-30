@@ -721,7 +721,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         routing_scheme = "happ" if is_happ else "incy"
         if routing_enabled:
             response_headers["Routing"] = generate_incy_routing_header(
-                profile_name=profile_title,
+                profile_name=constants.DEFAULT_WHITE_INTERNET_PROFILE_TITLE,
                 direct_ru=False,
                 scheme=routing_scheme,
             )
