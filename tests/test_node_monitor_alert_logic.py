@@ -713,6 +713,10 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("191.44.113.0", sent_text)
             self.assertIn("Poland-1", sent_text)
 
+            # 3b. 4th fail -> should NOT send duplicate alert
+            await check_node_resources_and_alerts(self.mock_bot)
+            self.assertEqual(self.mock_bot.send_message.call_count, 1)
+
             # Verify button links to relay_server.id (20) via extra_data["ip"] mapping
             kb = call_args[1].get("reply_markup")
             self.assertIsNotNone(kb)

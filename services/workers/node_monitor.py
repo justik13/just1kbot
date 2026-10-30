@@ -122,7 +122,10 @@ class ServerMonitorState:
                 self.consecutive_cdn_fails = int(db_server.extra_data.get("consecutive_cdn_fails", 0) or 0)
                 self.consecutive_cdn_successes = int(db_server.extra_data.get("consecutive_cdn_successes", 0) or 0)
                 if isinstance(db_server.extra_data.get("relays_probe_state"), dict):
-                    self.relays_probe_state = dict(db_server.extra_data["relays_probe_state"])
+                    self.relays_probe_state = {
+                        k: dict(v) if isinstance(v, dict) else v
+                        for k, v in db_server.extra_data["relays_probe_state"].items()
+                    }
                 else:
                     self.relays_probe_state = {}
             else:
@@ -656,10 +659,10 @@ async def check_node_resources_and_alerts(bot: Bot):
                             })
                             if relay_key in db_relays_state and isinstance(db_relays_state[relay_key], dict):
                                 db_r = db_relays_state[relay_key]
-                                r_state["is_problem"] = bool(db_r.get("is_problem", False))
-                                if "consecutive_fails" in db_r:
+                                r_state["is_problem"] = bool(r_state.get("is_problem", False)) or bool(db_r.get("is_problem", False))
+                                if "consecutive_fails" in db_r and not r_state.get("consecutive_fails"):
                                     r_state["consecutive_fails"] = int(db_r.get("consecutive_fails") or 0)
-                                if "consecutive_successes" in db_r:
+                                if "consecutive_successes" in db_r and not r_state.get("consecutive_successes"):
                                     r_state["consecutive_successes"] = int(db_r.get("consecutive_successes") or 0)
 
                             has_relay_problem = bool(r_state.get("is_problem", False))
@@ -677,6 +680,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 r_state["consecutive_successes"] = 0
                                 if r_state["consecutive_fails"] >= REQUIRED_RELAY_FAILS:
                                     if not has_relay_problem:
+                                        r_state["is_problem"] = True
                                         relay_alerts_to_send.append((
                                             relay_key,
                                             ALERT_RELAY_TSPU_PROBLEM.format(
@@ -698,6 +702,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 r_state["consecutive_fails"] = 0
                                 if r_state["consecutive_successes"] >= REQUIRED_RELAY_SUCCESSES:
                                     if has_relay_problem:
+                                        r_state["is_problem"] = False
                                         relay_alerts_to_send.append((
                                             relay_key,
                                             ALERT_RELAY_TSPU_RESTORED.format(
@@ -723,7 +728,10 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 st.relays_probe_state.pop(stale_key, None)
 
                         if db_relays_state != st.relays_probe_state:
-                            db_extra["relays_probe_state"] = dict(st.relays_probe_state)
+                            db_extra["relays_probe_state"] = {
+                                k: dict(v) if isinstance(v, dict) else v
+                                for k, v in st.relays_probe_state.items()
+                            }
                             extra_changed = True
 
                     if extra_changed and fresh_server:
@@ -780,6 +788,9 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 cur_relays_state[relay_key] = {"is_problem": is_problem}
                             cur_extra["relays_probe_state"] = cur_relays_state
                             await update_server(session, fresh, extra_data=cur_extra)
+                else:
+                    if relay_key in st.relays_probe_state:
+                        st.relays_probe_state[relay_key]["is_problem"] = not is_problem
 
         if is_healthy:
             if st.health_state == ServerHealthState.WAITING_CONFIRMATION:

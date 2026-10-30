@@ -3,6 +3,7 @@ from typing import TypedDict
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from config.constants import (
     AMNEZIA_PROTOCOL,
@@ -396,6 +397,8 @@ async def update_server(
             continue
         if hasattr(server, key):
             setattr(server, key, value)
+            if key in ("extra_data", "capabilities"):
+                flag_modified(server, key)
 
     if "lifecycle_status" in kwargs:
         server.is_active = (str(server.lifecycle_status) == ServerLifecycleStatus.ACTIVE)
@@ -462,8 +465,11 @@ async def update_server_health_snapshot(
             existing_extra = dict(current.extra_data or {})
             existing_extra.update(value)
             setattr(current, key, existing_extra)
+            flag_modified(current, "extra_data")
         elif hasattr(current, key):
             setattr(current, key, value)
+            if key == "capabilities":
+                flag_modified(current, "capabilities")
 
     await session.flush()
     await session.refresh(current)
