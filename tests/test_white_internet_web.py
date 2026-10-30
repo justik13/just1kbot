@@ -523,7 +523,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     routing_json = json.loads(base64.b64decode(b64_routing).decode("utf-8"))
                     self.assertEqual(routing_json.get("Name"), "✦ Just1k WL")
                     self.assertIs(routing_json.get("useChunkFiles"), True)
-                    self.assertEqual(routing_json.get("LastUpdated"), "1793415600")
+                    self.assertEqual(routing_json.get("LastUpdated"), "1793420000")
                     self.assertEqual(routing_json.get("DomesticDNSType"), "DoH")
                     self.assertEqual(routing_json.get("DomesticDNSDomain"), "https://common.dot.dns.yandex.net/dns-query")
                     self.assertEqual(routing_json.get("DomesticDNSIP"), "77.88.8.8")

@@ -12,7 +12,7 @@ from config.constants import (
 
 # Fixed version timestamp used to detect routing profile changes in INCY/Happ clients.
 # Bump this timestamp when routing rules or DNS parameters change so clients pull updated rules.
-ROUTING_PROFILE_VERSION_TIMESTAMP = "1793415600"
+ROUTING_PROFILE_VERSION_TIMESTAMP = "1793420000"
 
 
 def generate_incy_routing_header(
@@ -26,7 +26,7 @@ def generate_incy_routing_header(
 
     - Supports both "incy" (INCY app) and "happ" (Happ app) schemes.
     - If direct_ru=True (Standard VLESS): routes geosite:category-ru, geosite:tld-ru, domain:ru, domain:su, domain:xn--p1ai, geoip:ru directly
-      via user's home ISP, while routing domain:ts.just1k.pro (TeamSpeak) and foreign destinations through the VLESS tunnel.
+      via user's home ISP, while sending foreign destinations through the VLESS tunnel.
     - If direct_ru=False (White Internet / CDN relay): sends all domain traffic through
       the Yandex CDN tunnel to the Moscow Origin server (where Origin routes RU directly
       from datacenter fiber and forwards foreign traffic to Exit), preserving LAN bypass.
@@ -75,14 +75,8 @@ def generate_incy_routing_header(
         else []
     )
     # Retain geoip:ru in DirectIp for standard VLESS to guarantee all Russian banks,
-    # payment gateways (SBP, Mir), Ozon, WB, and domestic APIs stay 100% Direct via user's home ISP.
-    # To bypass Windows Wintun direct UDP drops (XTLS/Xray-core #5845) for TeamSpeak,
-    # we explicitly route domain:ts.just1k.pro via ProxySites at the domain matching stage.
-    # Scope is intentionally narrow: ProxySites domains resolve via RemoteDNS (through the tunnel),
-    # so proxy endpoints (ee/ger/nl/pl/cdn.just1k.pro) must never match this rule.
-    # White Internet already tunnels everything, so no ProxySites are needed there.
+    # payment gateways (SBP, Mir), Ozon, WB, and domestic APIs stay Direct via user's home ISP.
     direct_ips = (["geoip:ru"] + lan_direct_ips) if direct_ru else lan_direct_ips
-    proxy_sites = ["domain:ts.just1k.pro"] if direct_ru else []
 
     profile = {
         "Name": clean_name,
@@ -104,7 +98,7 @@ def generate_incy_routing_header(
         },
         "DirectSites": direct_sites,
         "DirectIp": direct_ips,
-        "ProxySites": proxy_sites,
+        "ProxySites": [],
         "ProxyIp": [],
         "BlockSites": [],
         "BlockIp": [],
