@@ -34,6 +34,9 @@ from bot.texts.runtime.alerts import (
     ALERT_SERVER_OUTAGE_REMINDER,
     ALERT_SERVER_PROBLEM,
     ALERT_SERVER_RESTORED,
+    ALERT_TIME_HOURS,
+    ALERT_TIME_HOURS_MINUTES,
+    ALERT_TIME_MINUTES,
 )
 from config.constants import (
     AMNEZIA_PROTOCOLS,
@@ -90,10 +93,10 @@ def _format_outage_duration(seconds: float) -> str:
     hours = total_mins // 60
     minutes = total_mins % 60
     if hours > 0 and minutes > 0:
-        return f"{hours} ч. {minutes} мин."
+        return ALERT_TIME_HOURS_MINUTES.format(hours=hours, minutes=minutes)
     if hours > 0:
-        return f"{hours} ч."
-    return f"{minutes} мин."
+        return ALERT_TIME_HOURS.format(hours=hours)
+    return ALERT_TIME_MINUTES.format(minutes=minutes)
 
 
 class ServerMonitorState:

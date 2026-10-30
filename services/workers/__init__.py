@@ -152,7 +152,11 @@ def heartbeat_allowed(*, now: float | None = None) -> bool:
 
 async def _send_alert(bot: Bot, title: str, worker: str,
                       failure_count: int, error_type: str) -> None:
-    template = ALERT_WORKER_COOLDOWN if "cooldown" in title.lower() or "ожидания" in title.lower() else ALERT_WORKER_CRASH
+    template = (
+        ALERT_WORKER_COOLDOWN
+        if ("cooldown" in title.lower() or title == ALERT_TITLE_WORKER_COOLDOWN)
+        else ALERT_WORKER_CRASH
+    )
     message = template.format(
         title=title,
         worker=worker,

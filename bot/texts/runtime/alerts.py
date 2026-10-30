@@ -166,6 +166,10 @@ ALERT_WHITE_INTERNET_ORIGIN_RESTORED = """✅ <b>Origin-сервер снова 
 
 Выделение узлов для новых подписок возобновлено в штатном режиме."""
 
+ALERT_TIME_HOURS_MINUTES = "{hours} ч. {minutes} мин."
+ALERT_TIME_HOURS = "{hours} ч."
+ALERT_TIME_MINUTES = "{minutes} мин."
+
 ALERT_TITLE_WORKER_COOLDOWN = "Воркер превысил лимит ошибок и перешёл в режим ожидания (15 мин)"
 
 ALERT_WORKER_COOLDOWN = """🚨 <b>{title}</b>
