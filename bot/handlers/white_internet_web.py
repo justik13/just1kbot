@@ -16,6 +16,7 @@ from aiohttp import web
 from sqlalchemy import select
 
 from bot import texts
+from config import constants
 from config.constants import (
     DEFAULT_WHITE_INTERNET_PATH,
     DEFAULT_WHITE_INTERNET_SUB_PATH_PREFIX,
@@ -139,7 +140,11 @@ def _render_white_internet_landing_html(
     tariff_badge: str | None = None,
 ) -> str:
     """Render universal landing page for INCY 1-click import."""
-    clean_bot = html.escape(bot_username.strip().lstrip("@")) if bot_username else "just1k13bot"
+    clean_bot = (
+        html.escape(bot_username.strip().lstrip("@"))
+        if bot_username
+        else constants.DEFAULT_FALLBACK_BOT_USERNAME
+    )
     bot_link = f"https://t.me/{clean_bot}"
 
     if not is_active:
@@ -165,7 +170,11 @@ def _render_white_internet_landing_html(
 
 def _render_white_internet_pending_landing_html(bot_username: str = "") -> str:
     """Render landing page for PENDING state with auto-refresh."""
-    clean_bot = html.escape(bot_username.strip().lstrip("@")) if bot_username else "just1k13bot"
+    clean_bot = (
+        html.escape(bot_username.strip().lstrip("@"))
+        if bot_username
+        else constants.DEFAULT_FALLBACK_BOT_USERNAME
+    )
     bot_link = f"https://t.me/{clean_bot}"
     return _LANDING_PENDING_HTML.replace("{clean_bot}", clean_bot).replace("{bot_link}", bot_link)
 
@@ -195,7 +204,7 @@ async def _resolve_bot_username(request: web.Request) -> str:
         except Exception:
             pass
 
-    return os.getenv("BOT_USERNAME", "").lstrip("@") or "just1k13bot"
+    return os.getenv("BOT_USERNAME", "").lstrip("@") or constants.DEFAULT_FALLBACK_BOT_USERNAME
 
 
 async def _resolve_urls_and_bot(request: web.Request, extra: dict | None) -> tuple[str, str, str, str]:
@@ -418,7 +427,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         user_agent = request.headers.get("User-Agent", "")
         client_name = parse_client_from_user_agent(user_agent)
         is_happ = bool((client_name and "happ" in client_name.lower()) or ("happ" in user_agent.lower()))
-        clean_bot = str(bot_user).strip().lstrip("@") or "just1k13bot"
+        clean_bot = str(bot_user).strip().lstrip("@") or constants.DEFAULT_FALLBACK_BOT_USERNAME
         notice_extra_headers: dict[str, str] = {}
         if is_happ:
             notice_extra_headers = {
@@ -712,15 +721,17 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         routing_scheme = "happ" if is_happ else "incy"
         if routing_enabled:
             response_headers["Routing"] = generate_incy_routing_header(
-                profile_name="✦ Just1k WL",
+                profile_name=constants.DEFAULT_WHITE_INTERNET_PROFILE_TITLE,
                 direct_ru=False,
                 scheme=routing_scheme,
             )
             response_headers["routing-geo-update-interval"] = "168"
+            if is_happ:
+                response_headers["Routing-Enable"] = "true"
         else:
             response_headers["Routing"] = "off"
             if is_happ:
-                response_headers["routing-enable"] = "0"
+                response_headers["Routing-Enable"] = "0"
 
         if is_happ:
             if expire_ts > 0:

@@ -22,6 +22,7 @@ from bot.keyboards.admin.servers import (
     get_admin_std_sub_incy_keyboard,
 )
 from bot.states import AdminStates
+from config import constants
 from config.constants import (
     WHITE_INTERNET_CHANNEL_URL,
     WHITE_INTERNET_PROFILE_TITLE,
@@ -47,14 +48,17 @@ logger = logging.getLogger(__name__)
 def _get_server_incy_details(server: Any) -> dict[str, Any]:
     """Extract and format current INCY subscription settings for a server."""
     extra = server.extra_data if isinstance(getattr(server, "extra_data", None), dict) else {}
-    bot_user = os.getenv("BOT_USERNAME", "just1kbot").lstrip("@")
+    bot_user = (os.getenv("BOT_USERNAME") or constants.DEFAULT_FALLBACK_BOT_USERNAME).lstrip("@")
     default_bot_url = f"https://t.me/{bot_user}"
 
     is_origin = is_white_internet_origin_server(server)
     default_title = (
         WHITE_INTERNET_PROFILE_TITLE or texts.WL_PROFILE_NAME
         if is_origin
-        else os.getenv("VLESS_PROFILE_TITLE", "✦ Just1k")
+        else (
+            os.getenv("VLESS_PROFILE_TITLE", constants.DEFAULT_VLESS_PROFILE_TITLE)
+            or constants.DEFAULT_VLESS_PROFILE_TITLE
+        )
     )
     title = extra.get("profile_title") or default_title
     announce = extra.get("announce")
@@ -94,7 +98,12 @@ def _get_server_incy_details(server: Any) -> dict[str, Any]:
 
 
 async def _build_std_sub_incy_card(session: AsyncSession) -> tuple[str, Any]:
-    title = await get_system_setting(session, "vless_profile_title", os.getenv("VLESS_PROFILE_TITLE", "✦ Just1k"))
+    title = await get_system_setting(
+        session,
+        "vless_profile_title",
+        os.getenv("VLESS_PROFILE_TITLE", constants.DEFAULT_VLESS_PROFILE_TITLE)
+        or constants.DEFAULT_VLESS_PROFILE_TITLE,
+    )
     announce = await get_system_setting(session, "vless_announce", None)
     announce_url = await get_system_setting(session, "vless_announce_url", None)
 
@@ -106,7 +115,7 @@ async def _build_std_sub_incy_card(session: AsyncSession) -> tuple[str, Any]:
 
     show_devs_status = texts.ADMIN_STD_SUB_INCY_STATUS_ON if show_devices else texts.ADMIN_STD_SUB_INCY_STATUS_OFF
     card_text = texts.ADMIN_STD_SUB_INCY_CONFIG_CARD.format(
-        title=safe(title or "✦ Just1k"),
+        title=safe(title or constants.DEFAULT_VLESS_PROFILE_TITLE),
         show_devices_status=show_devs_status,
         announce=safe(announce or texts.ADMIN_SERVER_INCY_VALUE_NONE),
         announce_url=safe(announce_url or texts.ADMIN_SERVER_INCY_VALUE_NONE),
@@ -181,12 +190,17 @@ async def start_edit_std_incy_param(
         return
 
     field = callback.data.split(":")[1]
-    title = await get_system_setting(session, "vless_profile_title", os.getenv("VLESS_PROFILE_TITLE", "✦ Just1k"))
+    title = await get_system_setting(
+        session,
+        "vless_profile_title",
+        os.getenv("VLESS_PROFILE_TITLE", constants.DEFAULT_VLESS_PROFILE_TITLE)
+        or constants.DEFAULT_VLESS_PROFILE_TITLE,
+    )
     announce = await get_system_setting(session, "vless_announce", None)
     announce_url = await get_system_setting(session, "vless_announce_url", None)
 
     prompt_map = {
-        "title": (texts.ADMIN_SERVER_INCY_PROMPT_TITLE, title or "✦ Just1k"),
+        "title": (texts.ADMIN_SERVER_INCY_PROMPT_TITLE, title or constants.DEFAULT_VLESS_PROFILE_TITLE),
         "announce": (texts.ADMIN_SERVER_INCY_PROMPT_ANNOUNCE, announce or texts.ADMIN_SERVER_INCY_VALUE_NONE),
         "announce_url": (texts.ADMIN_SERVER_INCY_PROMPT_ANNOUNCE_URL, announce_url or texts.ADMIN_SERVER_INCY_VALUE_NONE),
     }
@@ -261,7 +275,7 @@ async def process_std_incy_param_input(
 
     if field == "title":
         if is_clear or is_none or not text:
-            new_val = os.getenv("VLESS_PROFILE_TITLE", "✦ Just1k") or "✦ Just1k"
+            new_val = os.getenv("VLESS_PROFILE_TITLE", constants.DEFAULT_VLESS_PROFILE_TITLE) or constants.DEFAULT_VLESS_PROFILE_TITLE
         else:
             new_val = text[:25]
         await set_system_setting(session, "vless_profile_title", new_val, updated_by=message.from_user.id)
@@ -346,7 +360,10 @@ async def reset_std_sub_incy_to_defaults(
         return
 
     await state.clear()
-    default_title = os.getenv("VLESS_PROFILE_TITLE", "✦ Just1k") or "✦ Just1k"
+    default_title = (
+        os.getenv("VLESS_PROFILE_TITLE", constants.DEFAULT_VLESS_PROFILE_TITLE)
+        or constants.DEFAULT_VLESS_PROFILE_TITLE
+    )
     await set_system_setting(session, "vless_profile_title", default_title, updated_by=callback.from_user.id)
     await set_system_setting(session, "vless_profile_description", None, updated_by=callback.from_user.id)
     await set_system_setting(session, "vless_profile_desc", None, updated_by=callback.from_user.id)

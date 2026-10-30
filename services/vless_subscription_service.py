@@ -129,10 +129,10 @@ class VlessSubscriptionService:
 
     @staticmethod
     def generate_incy_routing_header(
-        profile_name: str = "✦ Just1k",
+        profile_name: str | None = None,
         *,
         direct_ru: bool = True,
-        last_updated: str = "1761516000",
+        last_updated: str | int | None = None,
         scheme: str = "incy",
     ) -> str:
         """Construct incy:// or happ:// routing deep link header for split tunneling."""

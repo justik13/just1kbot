@@ -3,6 +3,7 @@
 import base64
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+import json
 import os
 import unittest
 import urllib.parse
@@ -888,10 +889,53 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             # Adaptive routing header for Happ
             self.assertIn("Routing", resp.headers)
             self.assertTrue(resp.headers["Routing"].startswith("happ://routing/onadd/"))
+            self.assertEqual(resp.headers.get("Routing-Enable"), "true")
+
+            # Decode routing deep link and verify rules
+            routing_uri = resp.headers["Routing"]
+            b64_routing = routing_uri.removeprefix("happ://routing/onadd/")
+            routing_json = json.loads(base64.b64decode(b64_routing).decode("utf-8"))
+            self.assertEqual(routing_json.get("Name"), "✦ Just1k")
+            self.assertIs(routing_json.get("useChunkFiles"), True)
+            self.assertEqual(routing_json.get("LastUpdated"), "1793318400")
+            self.assertIn("geosite:category-ru", routing_json.get("DirectSites", []))
+            self.assertIn("geosite:tld-ru", routing_json.get("DirectSites", []))
 
             # In-App expiration headers for Happ
             self.assertEqual(resp.headers.get("sub-expire"), "1")
             self.assertEqual(resp.headers.get("sub-expire-button-link"), "https://t.me/just1k13bot")
+
+    async def test_feed_happ_client_disabled_routing_headers(self):
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        async def fake_get_setting(session, key, default=None):
+            if key == "vless_routing_enabled":
+                return False
+            return default
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=2),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 2)),
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
+            patch("bot.handlers.vless_web.get_system_setting", side_effect=fake_get_setting),
+        ):
+            headers = {
+                "X-Hwid": "test-client-hwid-happ-disabled",
+                "User-Agent": "Happ/4.6.1 (iPhone; iOS 17.4)",
+            }
+            resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
+            self.assertEqual(resp.status, 200)
+            self.assertEqual(resp.headers.get("Routing"), "off")
+            self.assertEqual(resp.headers.get("Routing-Enable"), "0")
 
     async def test_feed_incy_client_standard_routing_without_in_app_headers(self):
         mock_session = AsyncMock()
@@ -924,6 +968,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             # Happ-specific headers should not be present
             self.assertNotIn("sub-expire", resp.headers)
             self.assertNotIn("sub-expire-button-link", resp.headers)
+            self.assertNotIn("Routing-Enable", resp.headers)
 
     async def test_feed_includes_global_system_settings_in_headers(self):
         mock_session = AsyncMock()
@@ -1084,6 +1129,13 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             ann_b64 = raw_ann.removeprefix("base64:")
             ann = base64.b64decode(ann_b64).decode("utf-8")
             self.assertEqual(ann, "📢 Супер-Тариф | 2/5")
+
+            # Verify Routing profile name is stable and does NOT clone with device count
+            routing_uri = resp.headers.get("Routing", "")
+            self.assertTrue(routing_uri.startswith("incy://routing/onadd/"))
+            b64_routing = routing_uri.removeprefix("incy://routing/onadd/")
+            routing_json = json.loads(base64.b64decode(b64_routing).decode("utf-8"))
+            self.assertEqual(routing_json.get("Name"), "✦ Just1k")
 
     async def test_feed_default_description_when_not_set_in_db(self):
         mock_session = AsyncMock()
@@ -1854,6 +1906,38 @@ class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
         expected_tag = urllib.parse.quote("🇩🇪 DE Server")
         self.assertIn(f"#{expected_tag}", links[0])
         self.assertNotIn("?serverDescription=", links[0])
+
+    def test_generate_incy_routing_header_invariants_and_fallbacks(self):
+        # 1. Standard defaults
+        std_header = VlessSubscriptionService.generate_incy_routing_header()
+        self.assertTrue(std_header.startswith("incy://routing/onadd/"))
+        std_json = json.loads(base64.b64decode(std_header.removeprefix("incy://routing/onadd/")).decode("utf-8"))
+        self.assertEqual(std_json.get("Name"), "✦ Just1k")
+        self.assertIs(std_json.get("useChunkFiles"), True)
+        self.assertEqual(std_json.get("LastUpdated"), "1793318400")
+        self.assertIn("geosite:category-ru", std_json.get("DirectSites", []))
+        self.assertIn("geosite:tld-ru", std_json.get("DirectSites", []))
+
+        # 2. White Internet defaults (direct_ru=False)
+        wl_header = VlessSubscriptionService.generate_incy_routing_header(direct_ru=False, scheme="happ")
+        self.assertTrue(wl_header.startswith("happ://routing/onadd/"))
+        wl_json = json.loads(base64.b64decode(wl_header.removeprefix("happ://routing/onadd/")).decode("utf-8"))
+        self.assertEqual(wl_json.get("Name"), "✦ Just1k WL")
+        self.assertIs(wl_json.get("useChunkFiles"), True)
+        self.assertEqual(wl_json.get("LastUpdated"), "1793318400")
+        self.assertEqual(wl_json.get("DirectSites"), [])
+
+        # 3. None and edge-case fallbacks
+        edge_header = VlessSubscriptionService.generate_incy_routing_header(
+            profile_name=None,
+            direct_ru=False,
+            last_updated=None,
+            scheme=None,
+        )
+        self.assertTrue(edge_header.startswith("incy://routing/onadd/"))
+        edge_json = json.loads(base64.b64decode(edge_header.removeprefix("incy://routing/onadd/")).decode("utf-8"))
+        self.assertEqual(edge_json.get("Name"), "✦ Just1k WL")
+        self.assertEqual(edge_json.get("LastUpdated"), "1793318400")
 
     def test_generate_vless_links_forces_client_port_443_when_relay_port_configured(self):
         sub = VlessSubscription(

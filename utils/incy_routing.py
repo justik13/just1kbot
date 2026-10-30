@@ -5,22 +5,27 @@ from __future__ import annotations
 import base64
 import json
 
+from config.constants import (
+    DEFAULT_VLESS_PROFILE_TITLE,
+    DEFAULT_WHITE_INTERNET_PROFILE_TITLE,
+)
+
 # Fixed version timestamp used to detect routing profile changes in INCY/Happ clients.
 # Bump this timestamp when routing rules or DNS parameters change so clients pull updated rules.
-ROUTING_PROFILE_VERSION_TIMESTAMP = "1761516000"
+ROUTING_PROFILE_VERSION_TIMESTAMP = "1793318400"
 
 
 def generate_incy_routing_header(
-    profile_name: str = "✦ Just1k",
+    profile_name: str | None = None,
     *,
     direct_ru: bool = True,
-    last_updated: str = ROUTING_PROFILE_VERSION_TIMESTAMP,
+    last_updated: str | int | None = None,
     scheme: str = "incy",
 ) -> str:
     """Construct incy:// or happ:// routing deep link header for split tunneling.
 
     - Supports both "incy" (INCY app) and "happ" (Happ app) schemes.
-    - If direct_ru=True (Standard VLESS): routes domain:ru, domain:su, domain:xn--p1ai, geoip:ru directly
+    - If direct_ru=True (Standard VLESS): routes geosite:category-ru, geosite:tld-ru, domain:ru, domain:su, domain:xn--p1ai, geoip:ru directly
       via user's home ISP, sending foreign destinations through the VLESS tunnel.
     - If direct_ru=False (White Internet / CDN relay): sends all domain traffic through
       the Yandex CDN tunnel to the Moscow Origin server (where Origin routes RU directly
@@ -28,7 +33,23 @@ def generate_incy_routing_header(
     - Enforces secure DoH resolution (Cloudflare/Google DoH) to prevent TSPU DNS hijacking.
     - Includes LastUpdated Unix timestamp for reliable profile versioning and updates.
     """
-    clean_name = str(profile_name).strip()[:25] or "✦ Just1k"
+    default_name = DEFAULT_VLESS_PROFILE_TITLE if direct_ru else DEFAULT_WHITE_INTERNET_PROFILE_TITLE
+    if profile_name is None:
+        clean_name = default_name
+    else:
+        raw_name = str(profile_name).strip()
+        clean_name = raw_name[:25] if (raw_name and raw_name.lower() != "none") else default_name
+
+    if last_updated is None:
+        clean_last_updated = ROUTING_PROFILE_VERSION_TIMESTAMP
+    else:
+        raw_updated = str(last_updated).strip()
+        clean_last_updated = (
+            raw_updated
+            if (raw_updated and raw_updated.lower() != "none")
+            else ROUTING_PROFILE_VERSION_TIMESTAMP
+        )
+
     lan_direct_ips = [
         "10.0.0.0/8",
         "100.64.0.0/10",
@@ -44,6 +65,8 @@ def generate_incy_routing_header(
     ]
     direct_sites = (
         [
+            "geosite:category-ru",
+            "geosite:tld-ru",
             "domain:ru",
             "domain:su",
             "domain:xn--p1ai",
@@ -57,7 +80,8 @@ def generate_incy_routing_header(
         "Name": clean_name,
         "GlobalProxy": "true",
         "DomainStrategy": "IPIfNonMatch",
-        "LastUpdated": str(last_updated).strip() or ROUTING_PROFILE_VERSION_TIMESTAMP,
+        "LastUpdated": clean_last_updated,
+        "useChunkFiles": True,
         "RemoteDNSType": "DoH",
         "RemoteDNSDomain": "https://cloudflare-dns.com/dns-query",
         "RemoteDNSIP": "1.1.1.1",
@@ -80,5 +104,5 @@ def generate_incy_routing_header(
     }
     json_bytes = json.dumps(profile, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     b64_profile = base64.b64encode(json_bytes).decode("ascii")
-    clean_scheme = "happ" if str(scheme).strip().lower() == "happ" else "incy"
+    clean_scheme = "happ" if (scheme and str(scheme).strip().lower() == "happ") else "incy"
     return f"{clean_scheme}://routing/onadd/{b64_profile}"

@@ -14,6 +14,7 @@ from aiohttp import web
 
 from bot import texts
 from bot.formatters import format_plural, get_tariff_display_name
+from config import constants
 from database.connection import session_scope
 from database.repositories import tariffs_repo, users_repo, vless_subscription_repo
 from database.repositories.system_settings_repo import get_system_setting
@@ -139,7 +140,7 @@ async def _resolve_bot_username(request: web.Request) -> str:
         except Exception:
             pass
 
-    return os.getenv("BOT_USERNAME", "").lstrip("@") or "just1k13bot"
+    return os.getenv("BOT_USERNAME", "").lstrip("@") or constants.DEFAULT_FALLBACK_BOT_USERNAME
 
 
 def _resolve_support_url(first_extra: dict | None, default_bot_url: str) -> str:
@@ -202,7 +203,7 @@ def _render_vless_landing_html(
     tariff_badge: str | None = None,
 ) -> str:
     """Render universal landing page for INCY 1-click import and installation guidance."""
-    clean_bot = html.escape(bot_username.strip().lstrip("@")) if bot_username else "just1k13bot"
+    clean_bot = html.escape(bot_username.strip().lstrip("@")) if bot_username else constants.DEFAULT_FALLBACK_BOT_USERNAME
     bot_link = f"https://t.me/{clean_bot}"
 
     if not is_active:
@@ -362,7 +363,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                 "No-Limit-Enabled": "1",
             }
             if is_happ:
-                clean_bot = str(bot_username).strip().lstrip("@") or "just1k13bot"
+                clean_bot = str(bot_username).strip().lstrip("@") or constants.DEFAULT_FALLBACK_BOT_USERNAME
                 if expire_ts > 0:
                     response_headers["sub-expire"] = "1"
                 response_headers["sub-expire-button-link"] = f"https://t.me/{clean_bot}"
@@ -472,7 +473,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             client_name = parse_client_from_user_agent(user_agent)
             is_happ = bool((client_name and "happ" in client_name.lower()) or ("happ" in user_agent.lower()))
             if is_happ:
-                clean_bot = str(bot_username).strip().lstrip("@") or "just1k13bot"
+                clean_bot = str(bot_username).strip().lstrip("@") or constants.DEFAULT_FALLBACK_BOT_USERNAME
                 if expire_ts > 0:
                     headers["sub-expire"] = "1"
                 headers["sub-expire-button-link"] = f"https://t.me/{clean_bot}"
@@ -509,9 +510,17 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         bot_username = await _resolve_bot_username(request)
         default_bot_url = f"https://t.me/{bot_username}"
 
-        profile_title = await get_system_setting(session, "vless_profile_title", os.getenv("VLESS_PROFILE_TITLE", "✦ Just1k"))
+        profile_title = await get_system_setting(
+            session,
+            "vless_profile_title",
+            os.getenv("VLESS_PROFILE_TITLE", constants.DEFAULT_VLESS_PROFILE_TITLE)
+            or constants.DEFAULT_VLESS_PROFILE_TITLE,
+        )
         if not isinstance(profile_title, str) or not profile_title.strip():
-            profile_title = os.getenv("VLESS_PROFILE_TITLE", "✦ Just1k") or "✦ Just1k"
+            profile_title = (
+                os.getenv("VLESS_PROFILE_TITLE", constants.DEFAULT_VLESS_PROFILE_TITLE)
+                or constants.DEFAULT_VLESS_PROFILE_TITLE
+            )
 
         total_device_limit = await SubscriptionService.get_effective_device_limit(session, user)
         total_active_devices, _awg_active, _vless_active = (
@@ -593,18 +602,20 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
 
         if routing_enabled:
             response_headers["Routing"] = VlessSubscriptionService.generate_incy_routing_header(
-                profile_name="✦ Just1k",
+                profile_name=constants.DEFAULT_VLESS_PROFILE_TITLE,
                 direct_ru=True,
                 scheme=routing_scheme,
             )
             response_headers["routing-geo-update-interval"] = "168"
+            if is_happ:
+                response_headers["Routing-Enable"] = "true"
         else:
             response_headers["Routing"] = "off"
             if is_happ:
-                response_headers["routing-enable"] = "0"
+                response_headers["Routing-Enable"] = "0"
 
         if is_happ:
-            clean_bot = str(bot_username).strip().lstrip("@") or "just1k13bot"
+            clean_bot = str(bot_username).strip().lstrip("@") or constants.DEFAULT_FALLBACK_BOT_USERNAME
             if expire_ts > 0:
                 response_headers["sub-expire"] = "1"
             response_headers["sub-expire-button-link"] = f"https://t.me/{clean_bot}"
