@@ -274,6 +274,7 @@ LANDING_REPORT_CONTACT_LENGTH_ERROR = "Укажите контакт для св
 LANDING_REPORT_MESSAGE_LENGTH_ERROR = "Опишите проблему подробнее (от 5 до 1000 символов)."
 LANDING_REPORT_STATUS_NOT_FOUND = "Не найдена"
 LANDING_REPORT_USER_UNKNOWN = "Не определен"
+LANDING_REPORT_DELIVERY_FAILED = "Не удалось доставить сообщение. Попробуйте позже."
 
 ADMIN_ALERT_EMERGENCY_SUPPORT = (
     "🆘 <b>Экстренное обращение с веб-страницы</b>\n\n"

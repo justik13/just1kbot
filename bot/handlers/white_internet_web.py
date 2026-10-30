@@ -827,8 +827,17 @@ async def white_internet_report_handler(request: web.Request) -> web.Response:
             headers={"Cache-Control": "no-store"},
         )
 
-    contact = str(data.get("contact", "")).strip()
-    message = str(data.get("message", "")).strip()
+    contact_raw = data.get("contact")
+    message_raw = data.get("message")
+    if not isinstance(contact_raw, str) or not isinstance(message_raw, str):
+        return web.json_response(
+            {"ok": False, "error": texts.LANDING_REPORT_INVALID_FORMAT},
+            status=400,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    contact = contact_raw.strip()
+    message = message_raw.strip()
 
     if len(contact) < 3 or len(contact) > 120:
         return web.json_response(
@@ -847,27 +856,38 @@ async def white_internet_report_handler(request: web.Request) -> web.Response:
     contact_escaped = html.escape(contact)
     message_escaped = html.escape(message)
 
-    user_info = None
-    sub_status = texts.LANDING_REPORT_STATUS_NOT_FOUND
-    devices_info = "—"
-
     try:
         async with session_scope() as session:
-            sub = await white_internet_repo.get_by_token(session, token)
-            if sub:
-                user = await users_repo.get_user(session, sub.user_id)
-                sub_status = sub.status.value if hasattr(sub.status, "value") else str(sub.status)
-                active_count = await white_internet_repo.count_active_devices(session, sub.id)
-                max_devs = await white_internet_repo.get_effective_device_limit(session, sub)
-                devices_info = f"{active_count} / {max_devs}"
-                if user:
-                    user_tag = f"@{html.escape(user.username)}" if user.username else "—"
-                    user_info = f"ID: <code>{user.telegram_id}</code> ({user_tag})"
+            sub = await white_internet_repo.get_subscription_by_token(session, token)
+            if not sub:
+                return web.json_response(
+                    {"ok": False, "error": texts.LANDING_REPORT_INVALID_LINK},
+                    status=404,
+                    headers={"Cache-Control": "no-store"},
+                )
+            user = await users_repo.get_user_by_id(session, sub.user_id)
+            if not user or getattr(user, "is_deleted", False):
+                return web.json_response(
+                    {"ok": False, "error": texts.LANDING_REPORT_INVALID_LINK},
+                    status=404,
+                    headers={"Cache-Control": "no-store"},
+                )
+            sub_status = sub.status.value if hasattr(sub.status, "value") else str(sub.status)
+            active_count = white_internet_repo.count_active_hwids(sub.active_hwids)
+            max_devs = white_internet_repo._effective_device_limit(sub)
+            devices_info = f"{active_count} / {max_devs}"
+            user_tag = f"@{html.escape(user.username)}" if user.username else "—"
+            user_info = f"ID: <code>{user.telegram_id}</code> ({user_tag})"
     except Exception as exc:
         logger.error("Failed to query subscription info for emergency report: %s", exc)
+        return web.json_response(
+            {"ok": False, "error": texts.LANDING_REPORT_DELIVERY_FAILED},
+            status=500,
+            headers={"Cache-Control": "no-store"},
+        )
 
     admin_text = texts.ADMIN_ALERT_EMERGENCY_SUPPORT.format(
-        user_info=user_info or texts.LANDING_REPORT_USER_UNKNOWN,
+        user_info=user_info,
         category=texts.LANDING_WHITE_INTERNET_PAGE_TITLE,
         sub_status=html.escape(sub_status),
         devices_info=devices_info,
@@ -877,6 +897,7 @@ async def white_internet_report_handler(request: web.Request) -> web.Response:
     )
 
     bot = request.app.get("bot")
+    delivered = False
     if bot:
         from config.settings import get_settings
         from utils.telegram import safe_send_message
@@ -884,11 +905,20 @@ async def white_internet_report_handler(request: web.Request) -> web.Response:
         admin_ids = get_settings().ADMIN_IDS
         for aid in admin_ids:
             try:
-                await safe_send_message(bot, aid, admin_text, parse_mode="HTML")
+                msg_id = await safe_send_message(bot, aid, admin_text, parse_mode="HTML")
+                if msg_id is not None:
+                    delivered = True
             except Exception as exc:
                 logger.error("Failed to send emergency support alert to admin %s: %s", aid, exc)
     else:
         logger.warning("Emergency support report received, but bot instance not set on app")
+
+    if not delivered:
+        return web.json_response(
+            {"ok": False, "error": texts.LANDING_REPORT_DELIVERY_FAILED},
+            status=502,
+            headers={"Cache-Control": "no-store"},
+        )
 
     return web.json_response({"ok": True}, headers={"Cache-Control": "no-store"})
 

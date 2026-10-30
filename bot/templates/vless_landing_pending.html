@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta http-equiv="refresh" content="5">
+    <noscript><meta http-equiv="refresh" content="5"></noscript>
     <meta name="theme-color" content="#050505">
     <meta name="color-scheme" content="dark">
     <title>Настройка подключения</title>
@@ -236,12 +236,14 @@
         .support-form-container {
             display: grid;
             grid-template-rows: 0fr;
-            transition: grid-template-rows 260ms cubic-bezier(0.16, 1, 0.3, 1);
+            transition: grid-template-rows 260ms cubic-bezier(0.16, 1, 0.3, 1), visibility 260ms;
             overflow: hidden;
+            visibility: hidden;
         }
 
         .support-accordion.open .support-form-container {
             grid-template-rows: 1fr;
+            visibility: visible;
         }
 
         .support-form-inner {
@@ -450,7 +452,7 @@
                     <polyline points="6 9 12 15 18 9"/>
                 </svg>
             </button>
-            <div id="supportFormContainer" class="support-form-container" role="region" aria-label="Форма связи с поддержкой">
+            <div id="supportFormContainer" class="support-form-container" role="region" aria-label="Форма связи с поддержкой" aria-hidden="true">
                 <div class="support-form-inner">
                     <p class="support-intro">Оставьте контакты для связи — мы напишем вам в удобное приложение и поможем с настройкой.</p>
                     <form id="emergencySupportForm" onsubmit="submitSupportReport(event)">
@@ -473,22 +475,35 @@
     </div>
 
     <script>
+        let refreshTimer = setTimeout(function() {
+            location.reload();
+        }, 5000);
+
         function toggleSupportForm() {
             const accordion = document.getElementById("supportAccordion");
             const btn = document.getElementById("supportToggleBtn");
+            const container = document.getElementById("supportFormContainer");
             if (!accordion || !btn) return;
             const isOpen = accordion.classList.contains("open");
             if (isOpen) {
                 accordion.classList.remove("open");
                 btn.setAttribute("aria-expanded", "false");
+                if (container) container.setAttribute("aria-hidden", "true");
+                if (!refreshTimer) {
+                    refreshTimer = setTimeout(function() {
+                        location.reload();
+                    }, 5000);
+                }
             } else {
-                // Pause/remove meta refresh so user's typing isn't interrupted
-                const metaRefresh = document.querySelector('meta[http-equiv="refresh"]');
-                if (metaRefresh) metaRefresh.remove();
-                try { window.stop(); } catch(e) {}
+                // Pause refresh timer so user's typing isn't interrupted
+                if (refreshTimer) {
+                    clearTimeout(refreshTimer);
+                    refreshTimer = null;
+                }
 
                 accordion.classList.add("open");
                 btn.setAttribute("aria-expanded", "true");
+                if (container) container.setAttribute("aria-hidden", "false");
                 setTimeout(function() {
                     const input = document.getElementById("supportContact");
                     if (input) input.focus();
