@@ -1130,6 +1130,13 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             ann = base64.b64decode(ann_b64).decode("utf-8")
             self.assertEqual(ann, "📢 Супер-Тариф | 2/5")
 
+            # Verify Routing profile name is stable and does NOT clone with device count
+            routing_uri = resp.headers.get("Routing", "")
+            self.assertTrue(routing_uri.startswith("incy://routing/onadd/"))
+            b64_routing = routing_uri.removeprefix("incy://routing/onadd/")
+            routing_json = json.loads(base64.b64decode(b64_routing).decode("utf-8"))
+            self.assertEqual(routing_json.get("Name"), "✦ Just1k")
+
     async def test_feed_default_description_when_not_set_in_db(self):
         mock_session = AsyncMock()
         mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))

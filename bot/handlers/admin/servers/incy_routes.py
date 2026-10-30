@@ -55,7 +55,10 @@ def _get_server_incy_details(server: Any) -> dict[str, Any]:
     default_title = (
         WHITE_INTERNET_PROFILE_TITLE or texts.WL_PROFILE_NAME
         if is_origin
-        else os.getenv("VLESS_PROFILE_TITLE", constants.DEFAULT_VLESS_PROFILE_TITLE)
+        else (
+            os.getenv("VLESS_PROFILE_TITLE", constants.DEFAULT_VLESS_PROFILE_TITLE)
+            or constants.DEFAULT_VLESS_PROFILE_TITLE
+        )
     )
     title = extra.get("profile_title") or default_title
     announce = extra.get("announce")
@@ -95,7 +98,12 @@ def _get_server_incy_details(server: Any) -> dict[str, Any]:
 
 
 async def _build_std_sub_incy_card(session: AsyncSession) -> tuple[str, Any]:
-    title = await get_system_setting(session, "vless_profile_title", os.getenv("VLESS_PROFILE_TITLE", constants.DEFAULT_VLESS_PROFILE_TITLE))
+    title = await get_system_setting(
+        session,
+        "vless_profile_title",
+        os.getenv("VLESS_PROFILE_TITLE", constants.DEFAULT_VLESS_PROFILE_TITLE)
+        or constants.DEFAULT_VLESS_PROFILE_TITLE,
+    )
     announce = await get_system_setting(session, "vless_announce", None)
     announce_url = await get_system_setting(session, "vless_announce_url", None)
 
@@ -182,7 +190,12 @@ async def start_edit_std_incy_param(
         return
 
     field = callback.data.split(":")[1]
-    title = await get_system_setting(session, "vless_profile_title", os.getenv("VLESS_PROFILE_TITLE", constants.DEFAULT_VLESS_PROFILE_TITLE))
+    title = await get_system_setting(
+        session,
+        "vless_profile_title",
+        os.getenv("VLESS_PROFILE_TITLE", constants.DEFAULT_VLESS_PROFILE_TITLE)
+        or constants.DEFAULT_VLESS_PROFILE_TITLE,
+    )
     announce = await get_system_setting(session, "vless_announce", None)
     announce_url = await get_system_setting(session, "vless_announce_url", None)
 
