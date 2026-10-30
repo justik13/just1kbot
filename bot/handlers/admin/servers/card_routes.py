@@ -388,10 +388,36 @@ async def show_server_relays(
                             locked_server = await get_server_by_id(session, server_id, for_update=True)
                             if locked_server:
                                 extra = dict(locked_server.extra_data or {})
-                                if extra.get("relays") != relays_list:
-                                    extra["relays"] = relays_list
-                                    locked_server.extra_data = extra
-                                    await session.flush()
+                                existing_relays = extra.get("relays", [])
+                                if isinstance(existing_relays, list) and existing_relays:
+                                    health_by_code = {
+                                        str(r.get("code", "")).strip().lower(): r
+                                        for r in relays_list
+                                        if isinstance(r, dict) and r.get("code")
+                                    }
+                                    updated_relays = []
+                                    has_changes = False
+                                    for ex in existing_relays:
+                                        if not isinstance(ex, dict):
+                                            continue
+                                        c = str(ex.get("code", "")).strip().lower()
+                                        merged = dict(ex)
+                                        if c in health_by_code:
+                                            h = health_by_code[c]
+                                            for k in ("healthy", "rtt_ms", "error", "reachable", "status"):
+                                                if k in h and merged.get(k) != h[k]:
+                                                    merged[k] = h[k]
+                                                    has_changes = True
+                                        updated_relays.append(merged)
+                                    if has_changes:
+                                        extra["relays"] = updated_relays
+                                        locked_server.extra_data = extra
+                                        await session.flush()
+                                else:
+                                    if extra.get("relays") != relays_list:
+                                        extra["relays"] = relays_list
+                                        locked_server.extra_data = extra
+                                        await session.flush()
                 else:
                     error_msg = err or texts.ADMIN_SERVER_RELAYS_ERR_FETCH
             else:
