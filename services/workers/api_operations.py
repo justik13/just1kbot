@@ -4,6 +4,7 @@ import uuid
 from datetime import timedelta
 
 from aiogram import Bot
+from sqlalchemy import select
 
 from bot.texts.runtime.alerts import ALERT_API_OPERATION_DEAD
 from config.settings import get_settings
@@ -22,7 +23,7 @@ PROCESS_ID = uuid.uuid4()
 MAX_CONCURRENCY = 5
 
 _wake_event: asyncio.Event | None = None
-_dead_alerts_sent: set[int] = set()
+_dead_alerts_sent: set[tuple[int, int]] = set()
 
 
 def get_wake_event() -> asyncio.Event:
@@ -38,11 +39,11 @@ def notify_api_operation_enqueued() -> None:
 
 
 async def _send_dead_operation_alert(bot: Bot | None, operation: APIOperation) -> None:
-    if not bot or operation.id in _dead_alerts_sent:
+    if not bot:
         return
-    _dead_alerts_sent.add(operation.id)
-    if len(_dead_alerts_sent) > 5000:
-        _dead_alerts_sent.clear()
+    alert_key = (operation.id, operation.attempts)
+    if alert_key in _dead_alerts_sent:
+        return
 
     settings = get_settings()
     admin_ids = settings.ADMIN_IDS
@@ -59,15 +60,23 @@ async def _send_dead_operation_alert(bot: Bot | None, operation: APIOperation) -
         error_message=safe((operation.last_error or "")[:300]),
         attempts=operation.attempts,
     )
+    delivered = False
     for aid in admin_ids:
         try:
-            await safe_send_message(bot, chat_id=aid, text=text, parse_mode="HTML")
+            sent = await safe_send_message(bot, chat_id=aid, text=text, parse_mode="HTML")
+            if sent:
+                delivered = True
         except Exception as e:
             logger.warning("Failed to send dead operation alert to admin %s: %s", aid, e)
 
+    if delivered:
+        _dead_alerts_sent.add(alert_key)
+        if len(_dead_alerts_sent) > 5000:
+            _dead_alerts_sent.clear()
+
 
 async def _check_and_alert_if_dead(bot: Bot | None, operation_id: int) -> None:
-    if not bot or operation_id in _dead_alerts_sent:
+    if not bot:
         return
     try:
         async with session_scope() as session:
@@ -122,6 +131,19 @@ async def api_operations_loop(
                 _, dead_recovered = recovered
                 if dead_recovered > 0:
                     logger.warning("Recovered %d dead stale operations", dead_recovered)
+                    if bot:
+                        try:
+                            async with session_scope() as session:
+                                recent_dead = (await session.execute(
+                                    select(APIOperation).where(
+                                        APIOperation.status == "dead",
+                                        APIOperation.last_error_code == "stale_lease_max_attempts",
+                                    ).order_by(APIOperation.id.desc()).limit(dead_recovered)
+                                )).scalars().all()
+                                for op in recent_dead:
+                                    await _send_dead_operation_alert(bot, op)
+                        except Exception as e:
+                            logger.warning("Failed to alert on recovered dead operations: %s", e)
 
             available = MAX_CONCURRENCY - len(in_flight)
             if available == 0:

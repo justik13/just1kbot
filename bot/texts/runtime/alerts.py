@@ -160,7 +160,7 @@ ALERT_WHITE_INTERNET_ORIGIN_EXHAUSTED = """🚨 <b>Внимание: Нет до
 Не удалось выделить Origin-узел для подписки ID: <code>{sub_id}</code>.
 Все Origin-серверы либо недоступны (OFFLINE/AUTO_DISABLED), либо исчерпали лимит емкости.
 
-🔍 <i>Проверьте доступность Origin-серверов в админке или увеличьте лимит емкости (max_capacity).</i>"""
+🔍 <i>Проверьте доступность Origin-серверов в админке или увеличьте лимит емкости (max_clients).</i>"""
 
 ALERT_WHITE_INTERNET_ORIGIN_RESTORED = """✅ <b>Origin-сервер снова доступен для распределения</b>
 

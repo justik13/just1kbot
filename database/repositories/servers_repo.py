@@ -468,8 +468,6 @@ async def update_server_health_snapshot(
             flag_modified(current, "extra_data")
         elif hasattr(current, key):
             setattr(current, key, value)
-            if key == "capabilities":
-                flag_modified(current, "capabilities")
 
     await session.flush()
     await session.refresh(current)
