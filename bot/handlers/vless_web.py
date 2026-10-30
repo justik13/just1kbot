@@ -367,6 +367,8 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                 if expire_ts > 0:
                     response_headers["sub-expire"] = "1"
                 response_headers["sub-expire-button-link"] = f"https://t.me/{clean_bot}"
+                response_headers["tun-type"] = "singbox"
+                response_headers["tun-mode"] = "mixed"
             if sanitized_support:
                 response_headers["Support-Url"] = sanitized_support
             if sanitized_channel:
@@ -477,6 +479,8 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                 if expire_ts > 0:
                     headers["sub-expire"] = "1"
                 headers["sub-expire-button-link"] = f"https://t.me/{clean_bot}"
+                headers["tun-type"] = "singbox"
+                headers["tun-mode"] = "mixed"
             sanitized_support = _sanitize_header_url(support_url)
             sanitized_channel = _sanitize_header_url(channel_url)
             if sanitized_support:
@@ -619,6 +623,8 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             if expire_ts > 0:
                 response_headers["sub-expire"] = "1"
             response_headers["sub-expire-button-link"] = f"https://t.me/{clean_bot}"
+            response_headers["tun-type"] = "singbox"
+            response_headers["tun-mode"] = "mixed"
 
         sanitized_support = _sanitize_header_url(support_url)
         sanitized_channel = _sanitize_header_url(channel_url)

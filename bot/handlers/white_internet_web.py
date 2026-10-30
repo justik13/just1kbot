@@ -432,6 +432,8 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         if is_happ:
             notice_extra_headers = {
                 "sub-expire-button-link": f"https://t.me/{clean_bot}",
+                "tun-type": "singbox",
+                "tun-mode": "mixed",
             }
             if expire_ts > 0:
                 notice_extra_headers["sub-expire"] = "1"
@@ -613,6 +615,8 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                 if expire_ts > 0:
                     extra_headers["sub-expire"] = "1"
                 extra_headers["sub-expire-button-link"] = f"https://t.me/{clean_bot}"
+                extra_headers["tun-type"] = "singbox"
+                extra_headers["tun-mode"] = "mixed"
             return _build_service_notice_response(
                 title_text=texts.VLESS_FEED_DEVICE_LIMIT_TITLE,
                 notice_text=limit_msg,
@@ -737,6 +741,8 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             if expire_ts > 0:
                 response_headers["sub-expire"] = "1"
             response_headers["sub-expire-button-link"] = f"https://t.me/{clean_bot}"
+            response_headers["tun-type"] = "singbox"
+            response_headers["tun-mode"] = "mixed"
 
         sanitized_support = _sanitize_header_url(support_url)
         sanitized_channel = _sanitize_header_url(channel_url)

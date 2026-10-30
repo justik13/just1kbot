@@ -445,6 +445,8 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     self.assertTrue(resp.headers["Routing"].startswith("incy://routing/onadd/"))
                     self.assertEqual(resp.headers.get("routing-geo-update-interval"), "168")
                     self.assertNotIn("Routing-Enable", resp.headers)
+                    self.assertNotIn("tun-type", resp.headers)
+                    self.assertNotIn("tun-mode", resp.headers)
 
                     body_b64 = await resp.text()
                     decoded_lines = base64.b64decode(body_b64).decode("utf-8").splitlines()
@@ -528,6 +530,8 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
 
                     self.assertEqual(resp.headers.get("sub-expire"), "1")
                     self.assertEqual(resp.headers.get("sub-expire-button-link"), "https://t.me/just1k13bot")
+                    self.assertEqual(resp.headers.get("tun-type"), "singbox")
+                    self.assertEqual(resp.headers.get("tun-mode"), "mixed")
 
     async def test_feed_happ_client_disabled_routing_headers(self):
         now = datetime.now(timezone.utc)
@@ -589,6 +593,8 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                         self.assertEqual(resp.status, 200)
                         self.assertEqual(resp.headers.get("Routing"), "off")
                         self.assertEqual(resp.headers.get("Routing-Enable"), "0")
+                        self.assertEqual(resp.headers.get("tun-type"), "singbox")
+                        self.assertEqual(resp.headers.get("tun-mode"), "mixed")
 
     async def test_feed_without_hwid_returns_403_hwid_required(self):
         now = datetime.now(timezone.utc)

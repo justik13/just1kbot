@@ -901,9 +901,11 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             self.assertIn("geosite:category-ru", routing_json.get("DirectSites", []))
             self.assertIn("geosite:tld-ru", routing_json.get("DirectSites", []))
 
-            # In-App expiration headers for Happ
+            # In-App expiration and TUN autoconfiguration headers for Happ
             self.assertEqual(resp.headers.get("sub-expire"), "1")
             self.assertEqual(resp.headers.get("sub-expire-button-link"), "https://t.me/just1k13bot")
+            self.assertEqual(resp.headers.get("tun-type"), "singbox")
+            self.assertEqual(resp.headers.get("tun-mode"), "mixed")
 
     async def test_feed_happ_client_disabled_routing_headers(self):
         mock_session = AsyncMock()
@@ -936,6 +938,8 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             self.assertEqual(resp.status, 200)
             self.assertEqual(resp.headers.get("Routing"), "off")
             self.assertEqual(resp.headers.get("Routing-Enable"), "0")
+            self.assertEqual(resp.headers.get("tun-type"), "singbox")
+            self.assertEqual(resp.headers.get("tun-mode"), "mixed")
 
     async def test_feed_incy_client_standard_routing_without_in_app_headers(self):
         mock_session = AsyncMock()
@@ -969,6 +973,8 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             self.assertNotIn("sub-expire", resp.headers)
             self.assertNotIn("sub-expire-button-link", resp.headers)
             self.assertNotIn("Routing-Enable", resp.headers)
+            self.assertNotIn("tun-type", resp.headers)
+            self.assertNotIn("tun-mode", resp.headers)
 
     async def test_feed_includes_global_system_settings_in_headers(self):
         mock_session = AsyncMock()
