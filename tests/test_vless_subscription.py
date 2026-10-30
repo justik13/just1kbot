@@ -907,6 +907,33 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             self.assertEqual(resp.headers.get("tun-type"), "singbox")
             self.assertEqual(resp.headers.get("tun-mode"), "mixed")
 
+    async def test_feed_happ_windows_desktop_tun_autoconfig_headers(self):
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=2),
+            patch("database.repositories.vless_subscription_repo.register_hwid_atomic", return_value=(True, 1, 2)),
+            patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background"),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_eligible_vless_servers", return_value=[self.default_server]),
+        ):
+            headers = {
+                "X-Hwid": "test-client-hwid-happ-windows",
+                "User-Agent": "Happ/4.6.1 (Windows NT 10.0; Win64; x64)",
+            }
+            resp = await self.client.get("/sub/access/test-token-valid-length-12345678", headers=headers)
+            self.assertEqual(resp.status, 200)
+            self.assertEqual(resp.headers.get("tun-type"), "singbox")
+            self.assertEqual(resp.headers.get("tun-mode"), "mixed")
+            self.assertEqual(resp.headers.get("Routing-Enable"), "true")
+
     async def test_feed_happ_client_disabled_routing_headers(self):
         mock_session = AsyncMock()
         mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one=MagicMock(return_value=0)))

@@ -533,6 +533,62 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     self.assertEqual(resp.headers.get("tun-type"), "singbox")
                     self.assertEqual(resp.headers.get("tun-mode"), "mixed")
 
+    async def test_feed_happ_windows_desktop_routing_and_tun_headers(self):
+        now = datetime.now(timezone.utc)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            origin_node_id=1,
+            token="valid-token-happ-win-1234567890abcdef",
+            uuid="a2b9d4e1-73c5-4812-b964-f3e7b85a1909",
+            status=WhiteInternetStatus.ACTIVE,
+            started_at=now,
+            expires_at=now + timedelta(days=30),
+            traffic_limit_bytes=53687091200,
+            traffic_used_bytes=1000,
+            desired_version=1,
+            actual_version=1,
+            last_reconciled_node_epoch="epoch-xyz",
+            device_limit=1,
+            active_hwids={},
+        )
+
+        server = Server(
+            id=1,
+            name="Origin-Node",
+            protocol=XRAY_PROTOCOL,
+            api_url="https://cdn.example.com:8444",
+            xray_instance_epoch="epoch-xyz",
+            capabilities=["xray_origin"],
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+        )
+
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = server
+        mock_session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
+        mock_session.get.return_value = sub
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.example.com"}):
+            with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+                with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                    resp = await self.client.get(
+                        "/sub/wl/valid-token-happ-win-1234567890abcdef",
+                        headers={
+                            "X-Hwid": "test-device-hwid-happ-win",
+                            "User-Agent": "Happ/4.6.1 (Windows NT 10.0; Win64; x64)",
+                        },
+                    )
+
+                    self.assertEqual(resp.status, 200)
+                    self.assertEqual(resp.headers.get("tun-type"), "singbox")
+                    self.assertEqual(resp.headers.get("tun-mode"), "mixed")
+                    self.assertEqual(resp.headers.get("Routing-Enable"), "true")
+
     async def test_feed_happ_client_disabled_routing_headers(self):
         now = datetime.now(timezone.utc)
         sub = WhiteInternetSubscription(
