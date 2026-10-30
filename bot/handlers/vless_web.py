@@ -32,6 +32,8 @@ _LANDING_INACTIVE_HTML = (_TEMPLATES_DIR / "vless_landing_inactive.html").read_t
 
 _ip_rate_limiter = HttpRateLimiter(rate_per_minute=60.0, burst=15)
 _token_rate_limiter = HttpRateLimiter(rate_per_minute=30.0, burst=10)
+_report_ip_limiter = HttpRateLimiter(rate_per_minute=5.0, burst=3)
+_report_token_limiter = HttpRateLimiter(rate_per_minute=3.0, burst=2)
 
 HWID_PATTERN = re.compile(r"^[a-zA-Z0-9_\-:]{3,128}$")
 
@@ -645,7 +647,122 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         return web.Response(status=200, text=b64_payload, headers=response_headers)
 
 
+async def vless_report_handler(request: web.Request) -> web.Response:
+    """Handle emergency contact reports from standard VLESS landing pages."""
+    client_ip = get_trusted_client_ip(request)
+    allowed_ip, retry_after_ip = _report_ip_limiter.check(client_ip)
+    if not allowed_ip:
+        return web.json_response(
+            {"ok": False, "error": "Слишком много запросов. Пожалуйста, подождите."},
+            status=429,
+            headers={"Retry-After": str(retry_after_ip), "Cache-Control": "no-store"},
+        )
+
+    token = request.match_info.get("token", "").strip()
+    if not token or len(token) < 16:
+        return web.json_response(
+            {"ok": False, "error": "Неверная ссылка."},
+            status=400,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    allowed_tok, retry_after_tok = _report_token_limiter.check(token)
+    if not allowed_tok:
+        return web.json_response(
+            {"ok": False, "error": "Слишком много запросов. Пожалуйста, подождите."},
+            status=429,
+            headers={"Retry-After": str(retry_after_tok), "Cache-Control": "no-store"},
+        )
+
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response(
+            {"ok": False, "error": "Некорректный запрос."},
+            status=400,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    if not isinstance(data, dict):
+        return web.json_response(
+            {"ok": False, "error": "Некорректный формат."},
+            status=400,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    contact = str(data.get("contact", "")).strip()
+    message = str(data.get("message", "")).strip()
+
+    if len(contact) < 3 or len(contact) > 120:
+        return web.json_response(
+            {"ok": False, "error": "Укажите контакт для связи (от 3 до 120 символов)."},
+            status=400,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    if len(message) < 5 or len(message) > 1000:
+        return web.json_response(
+            {"ok": False, "error": "Опишите проблему подробнее (от 5 до 1000 символов)."},
+            status=400,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    contact_escaped = html.escape(contact)
+    message_escaped = html.escape(message)
+
+    user_info = None
+    sub_status = "Не найдена"
+    devices_info = "—"
+    tariff_name = "—"
+
+    try:
+        async with session_scope() as session:
+            vless_sub = await vless_subscription_repo.get_by_token(session, token)
+            if vless_sub:
+                user = await users_repo.get_user(session, vless_sub.user_id)
+                dev_limit = 0
+                if user:
+                    user_tag = f"@{html.escape(user.username)}" if user.username else "—"
+                    user_info = f"ID: <code>{user.telegram_id}</code> ({user_tag})"
+                    dev_limit = await SubscriptionService.get_effective_device_limit(session, user)
+                    tariff_name = get_tariff_display_name(dev_limit)
+                active_count = await vless_subscription_repo.count_active_devices(session, vless_sub.id)
+                devices_info = f"{active_count} / {dev_limit if dev_limit > 0 else '—'}"
+                sub_status = vless_sub.status.value if hasattr(vless_sub.status, "value") else str(vless_sub.status)
+    except Exception as exc:
+        logger.error("Failed to query subscription info for emergency report: %s", exc)
+
+    admin_text = (
+        "🆘 <b>Экстренное обращение с веб-страницы</b>\n\n"
+        f"👤 <b>Пользователь:</b> {user_info or 'Не определен'}\n"
+        f"📋 <b>Тариф:</b> {html.escape(tariff_name)}\n"
+        f"📊 <b>Статус доступа:</b> <code>{html.escape(sub_status)}</code>\n"
+        f"📱 <b>Устройства:</b> {devices_info}\n"
+        f"🌐 <b>IP:</b> <code>{html.escape(client_ip)}</code>\n\n"
+        f"📞 <b>Контакт для связи:</b>\n<code>{contact_escaped}</code>\n\n"
+        f"💬 <b>Сообщение:</b>\n{message_escaped}"
+    )
+
+    bot = request.app.get("bot")
+    if bot:
+        from config.settings import get_settings
+        from utils.telegram import safe_send_message
+
+        admin_ids = get_settings().ADMIN_IDS
+        for aid in admin_ids:
+            try:
+                await safe_send_message(bot, aid, admin_text, parse_mode="HTML")
+            except Exception as exc:
+                logger.error("Failed to send emergency support alert to admin %s: %s", aid, exc)
+    else:
+        logger.warning("Emergency support report received, but bot instance not set on app")
+
+    return web.json_response({"ok": True}, headers={"Cache-Control": "no-store"})
+
+
 def setup_vless_web_routes(app: web.Application) -> None:
     """Register HTTP subscription feed route for VLESS access."""
     app.router.add_get("/sub/access/{token}", vless_subscription_feed_handler)
     app.router.add_get("/sub/vless/{token}", vless_subscription_feed_handler)
+    app.router.add_post("/sub/access/{token}/report", vless_report_handler)
+    app.router.add_post("/sub/vless/{token}/report", vless_report_handler)
