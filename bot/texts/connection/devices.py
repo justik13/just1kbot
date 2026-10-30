@@ -266,6 +266,26 @@ LANDING_WHITE_INTERNET_PAGE_TITLE = "Белый Интернет"
 LANDING_SPECIAL_ACCESS_BADGE = "СПЕЦИАЛЬНЫЙ ДОСТУП"
 LANDING_DEVICE_FORMS_LABELS = ("УСТРОЙСТВО", "УСТРОЙСТВА", "УСТРОЙСТВ")
 
+LANDING_REPORT_TOO_MANY_REQUESTS = "Слишком много запросов. Пожалуйста, подождите."
+LANDING_REPORT_INVALID_LINK = "Неверная ссылка."
+LANDING_REPORT_INVALID_REQUEST = "Некорректный запрос."
+LANDING_REPORT_INVALID_FORMAT = "Некорректный формат."
+LANDING_REPORT_CONTACT_LENGTH_ERROR = "Укажите контакт для связи (от 3 до 120 символов)."
+LANDING_REPORT_MESSAGE_LENGTH_ERROR = "Опишите проблему подробнее (от 5 до 1000 символов)."
+LANDING_REPORT_STATUS_NOT_FOUND = "Не найдена"
+LANDING_REPORT_USER_UNKNOWN = "Не определен"
+
+ADMIN_ALERT_EMERGENCY_SUPPORT = (
+    "🆘 <b>Экстренное обращение с веб-страницы</b>\n\n"
+    "👤 <b>Пользователь:</b> {user_info}\n"
+    "📋 <b>Категория:</b> {category}\n"
+    "📊 <b>Статус доступа:</b> <code>{sub_status}</code>\n"
+    "📱 <b>Устройства:</b> {devices_info}\n"
+    "🌐 <b>IP:</b> <code>{client_ip}</code>\n\n"
+    "📞 <b>Контакт для связи:</b>\n<code>{contact}</code>\n\n"
+    "💬 <b>Сообщение:</b>\n{message}"
+)
+
 
 
 

@@ -790,7 +790,7 @@ async def white_internet_report_handler(request: web.Request) -> web.Response:
     allowed_ip, retry_after_ip = _report_ip_limiter.check(client_ip)
     if not allowed_ip:
         return web.json_response(
-            {"ok": False, "error": "Слишком много запросов. Пожалуйста, подождите."},
+            {"ok": False, "error": texts.LANDING_REPORT_TOO_MANY_REQUESTS},
             status=429,
             headers={"Retry-After": str(retry_after_ip), "Cache-Control": "no-store"},
         )
@@ -798,7 +798,7 @@ async def white_internet_report_handler(request: web.Request) -> web.Response:
     token = request.match_info.get("token", "").strip()
     if not token or len(token) < 16:
         return web.json_response(
-            {"ok": False, "error": "Неверная ссылка."},
+            {"ok": False, "error": texts.LANDING_REPORT_INVALID_LINK},
             status=400,
             headers={"Cache-Control": "no-store"},
         )
@@ -806,7 +806,7 @@ async def white_internet_report_handler(request: web.Request) -> web.Response:
     allowed_tok, retry_after_tok = _report_token_limiter.check(token)
     if not allowed_tok:
         return web.json_response(
-            {"ok": False, "error": "Слишком много запросов. Пожалуйста, подождите."},
+            {"ok": False, "error": texts.LANDING_REPORT_TOO_MANY_REQUESTS},
             status=429,
             headers={"Retry-After": str(retry_after_tok), "Cache-Control": "no-store"},
         )
@@ -815,14 +815,14 @@ async def white_internet_report_handler(request: web.Request) -> web.Response:
         data = await request.json()
     except Exception:
         return web.json_response(
-            {"ok": False, "error": "Некорректный запрос."},
+            {"ok": False, "error": texts.LANDING_REPORT_INVALID_REQUEST},
             status=400,
             headers={"Cache-Control": "no-store"},
         )
 
     if not isinstance(data, dict):
         return web.json_response(
-            {"ok": False, "error": "Некорректный формат."},
+            {"ok": False, "error": texts.LANDING_REPORT_INVALID_FORMAT},
             status=400,
             headers={"Cache-Control": "no-store"},
         )
@@ -832,14 +832,14 @@ async def white_internet_report_handler(request: web.Request) -> web.Response:
 
     if len(contact) < 3 or len(contact) > 120:
         return web.json_response(
-            {"ok": False, "error": "Укажите контакт для связи (от 3 до 120 символов)."},
+            {"ok": False, "error": texts.LANDING_REPORT_CONTACT_LENGTH_ERROR},
             status=400,
             headers={"Cache-Control": "no-store"},
         )
 
     if len(message) < 5 or len(message) > 1000:
         return web.json_response(
-            {"ok": False, "error": "Опишите проблему подробнее (от 5 до 1000 символов)."},
+            {"ok": False, "error": texts.LANDING_REPORT_MESSAGE_LENGTH_ERROR},
             status=400,
             headers={"Cache-Control": "no-store"},
         )
@@ -848,7 +848,7 @@ async def white_internet_report_handler(request: web.Request) -> web.Response:
     message_escaped = html.escape(message)
 
     user_info = None
-    sub_status = "Не найдена"
+    sub_status = texts.LANDING_REPORT_STATUS_NOT_FOUND
     devices_info = "—"
 
     try:
@@ -866,15 +866,14 @@ async def white_internet_report_handler(request: web.Request) -> web.Response:
     except Exception as exc:
         logger.error("Failed to query subscription info for emergency report: %s", exc)
 
-    admin_text = (
-        "🆘 <b>Экстренное обращение с веб-страницы</b>\n\n"
-        f"👤 <b>Пользователь:</b> {user_info or 'Не определен'}\n"
-        f"📋 <b>Категория:</b> Белый Интернет\n"
-        f"📊 <b>Статус доступа:</b> <code>{html.escape(sub_status)}</code>\n"
-        f"📱 <b>Устройства:</b> {devices_info}\n"
-        f"🌐 <b>IP:</b> <code>{html.escape(client_ip)}</code>\n\n"
-        f"📞 <b>Контакт для связи:</b>\n<code>{contact_escaped}</code>\n\n"
-        f"💬 <b>Сообщение:</b>\n{message_escaped}"
+    admin_text = texts.ADMIN_ALERT_EMERGENCY_SUPPORT.format(
+        user_info=user_info or texts.LANDING_REPORT_USER_UNKNOWN,
+        category=texts.LANDING_WHITE_INTERNET_PAGE_TITLE,
+        sub_status=html.escape(sub_status),
+        devices_info=devices_info,
+        client_ip=html.escape(client_ip),
+        contact=contact_escaped,
+        message=message_escaped,
     )
 
     bot = request.app.get("bot")
