@@ -397,10 +397,13 @@ async def show_server_relays(
                                     }
                                     updated_relays = []
                                     has_changes = False
+                                    existing_codes = set()
                                     for ex in existing_relays:
                                         if not isinstance(ex, dict):
                                             continue
                                         c = str(ex.get("code", "")).strip().lower()
+                                        if c:
+                                            existing_codes.add(c)
                                         merged = dict(ex)
                                         if c in health_by_code:
                                             h = health_by_code[c]
@@ -409,15 +412,57 @@ async def show_server_relays(
                                                     merged[k] = h[k]
                                                     has_changes = True
                                         updated_relays.append(merged)
+
+                                    node_relays = (detail or {}).get("relays") if isinstance(detail, dict) else []
+                                    if isinstance(node_relays, list):
+                                        for nr in node_relays:
+                                            if not isinstance(nr, dict):
+                                                continue
+                                            nc = str(nr.get("code", "")).strip().lower()
+                                            if nc and nc not in existing_codes:
+                                                new_entry = dict(nr)
+                                                if nc in health_by_code:
+                                                    h = health_by_code[nc]
+                                                    for k in ("healthy", "rtt_ms", "error", "reachable", "status"):
+                                                        if k in h:
+                                                            new_entry[k] = h[k]
+                                                updated_relays.append(new_entry)
+                                                existing_codes.add(nc)
+                                                has_changes = True
+
                                     if has_changes:
                                         extra["relays"] = updated_relays
                                         locked_server.extra_data = extra
                                         await session.flush()
                                 else:
-                                    if extra.get("relays") != relays_list:
-                                        extra["relays"] = relays_list
-                                        locked_server.extra_data = extra
-                                        await session.flush()
+                                    node_relays = (detail or {}).get("relays") if isinstance(detail, dict) else []
+                                    if isinstance(node_relays, list) and node_relays:
+                                        health_by_code = {
+                                            str(r.get("code", "")).strip().lower(): r
+                                            for r in relays_list
+                                            if isinstance(r, dict) and r.get("code")
+                                        }
+                                        merged_relays = []
+                                        for nr in node_relays:
+                                            if not isinstance(nr, dict):
+                                                continue
+                                            nc = str(nr.get("code", "")).strip().lower()
+                                            entry = dict(nr)
+                                            if nc in health_by_code:
+                                                h = health_by_code[nc]
+                                                for k in ("healthy", "rtt_ms", "error", "reachable", "status"):
+                                                    if k in h:
+                                                        entry[k] = h[k]
+                                            merged_relays.append(entry)
+                                        if extra.get("relays") != merged_relays:
+                                            extra["relays"] = merged_relays
+                                            locked_server.extra_data = extra
+                                            await session.flush()
+                                    else:
+                                        if extra.get("relays") != relays_list:
+                                            extra["relays"] = relays_list
+                                            locked_server.extra_data = extra
+                                            await session.flush()
                 else:
                     error_msg = err or texts.ADMIN_SERVER_RELAYS_ERR_FETCH
             else:
