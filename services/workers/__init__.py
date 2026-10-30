@@ -11,7 +11,9 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.texts.common.buttons import BTN_DISMISS_ALERT
 from bot.texts.runtime.alerts import (
     ALERT_TITLE_CRITICAL_STOP,
+    ALERT_TITLE_WORKER_COOLDOWN,
     ALERT_TITLE_WORKER_FAILED,
+    ALERT_WORKER_COOLDOWN,
     ALERT_WORKER_CRASH,
 )
 from config.settings import get_settings
@@ -100,7 +102,7 @@ def _cleanup(bot): return cleanup_dangling_peers_loop(bot, shutdown_event)
 def _notifications(bot): return subscription_notifications_loop(bot, shutdown_event)
 def _credit_notifications(bot): return credit_notifications_loop(bot, shutdown_event)
 def _heartbeat(bot): return heartbeat_loop(shutdown_event, heartbeat_allowed)
-def _api_operations(bot): return api_operations_loop(shutdown_event)
+def _api_operations(bot): return api_operations_loop(bot, shutdown_event)
 def _node_monitor(bot): return node_monitor_loop(bot, shutdown_event)
 def _white_internet_reconciliation(bot): return white_internet_reconciliation_loop(bot, shutdown_event)
 def _white_internet_traffic(bot): return white_internet_traffic_loop(bot, shutdown_event)
@@ -150,7 +152,12 @@ def heartbeat_allowed(*, now: float | None = None) -> bool:
 
 async def _send_alert(bot: Bot, title: str, worker: str,
                       failure_count: int, error_type: str) -> None:
-    message = ALERT_WORKER_CRASH.format(
+    template = (
+        ALERT_WORKER_COOLDOWN
+        if ("cooldown" in title.lower() or title == ALERT_TITLE_WORKER_COOLDOWN)
+        else ALERT_WORKER_CRASH
+    )
+    message = template.format(
         title=title,
         worker=worker,
         failure_count=failure_count,
@@ -244,6 +251,7 @@ async def _supervise_workers(bot: Bot, *, check_interval: float | None = None,
                 if health.cooldown_until is not None and now < health.cooldown_until:
                     continue
                 # Cooldown expired -> attempt restart
+                _alert_keys.discard(f"cooldown:{name}")
                 health.state = "backoff"
                 _spawn(definition, bot, clock())
                 continue
@@ -294,6 +302,7 @@ async def _supervise_workers(bot: Bot, *, check_interval: float | None = None,
                 logger.critical("Non-critical worker %s exhausted restart budget, entering cooldown", name)
                 health.state = "cooldown"
                 health.cooldown_until = now + 900.0
+                _schedule_alert(bot, f"cooldown:{name}", ALERT_TITLE_WORKER_COOLDOWN, name, count, error_type)
                 continue
 
             backoff = (backoff_delay(count) if backoff_delay is not None else min(30.0, 2.0 ** count))

@@ -6,11 +6,16 @@ import asyncio
 from contextlib import asynccontextmanager
 import hashlib
 import logging
+import time
 
 from aiogram import Bot
 from sqlalchemy import and_, func, nulls_first, or_, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from bot.texts.runtime.alerts import (
+    ALERT_WHITE_INTERNET_ORIGIN_EXHAUSTED,
+    ALERT_WHITE_INTERNET_ORIGIN_RESTORED,
+)
 from config.constants import XRAY_PROTOCOL
 from config.enums import (
     ServerHealthState,
@@ -18,11 +23,13 @@ from config.enums import (
     WhiteInternetProvisioningStatus,
     WhiteInternetStatus,
 )
+from config.settings import get_settings
 from database.connection import session_scope
 from database.models import Server, WhiteInternetSubscription
 from database.repositories import servers_repo, white_internet_repo
 from services.xray_node_client import SyncResult, XrayNodeClient
 from utils.datetime_helpers import now_utc
+from utils.telegram import safe_send_message
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +56,28 @@ class WhiteInternetReconciliationWorker:
         self.max_concurrency = max_concurrency
         self._semaphore = asyncio.Semaphore(self.max_concurrency)
         self._sub_locks: dict[int, asyncio.Lock] = {}
+        self._origin_exhausted_alerted: bool = False
+        self._origin_exhausted_last_sent: float | None = None
+
+    async def _send_origin_exhausted_alert(self, sub_id: int) -> None:
+        if not self.bot:
+            return
+        text = ALERT_WHITE_INTERNET_ORIGIN_EXHAUSTED.format(sub_id=sub_id)
+        for aid in get_settings().ADMIN_IDS:
+            try:
+                await safe_send_message(self.bot, chat_id=aid, text=text, parse_mode="HTML")
+            except Exception as e:
+                logger.warning("Failed to send origin exhausted alert to admin %s: %s", aid, e)
+
+    async def _send_origin_restored_alert(self) -> None:
+        if not self.bot:
+            return
+        text = ALERT_WHITE_INTERNET_ORIGIN_RESTORED
+        for aid in get_settings().ADMIN_IDS:
+            try:
+                await safe_send_message(self.bot, chat_id=aid, text=text, parse_mode="HTML")
+            except Exception as e:
+                logger.warning("Failed to send origin restored alert to admin %s: %s", aid, e)
 
     def _get_sub_lock(self, sub_id: int) -> asyncio.Lock:
         lock = self._sub_locks.get(sub_id)
@@ -716,6 +745,15 @@ class WhiteInternetReconciliationWorker:
                             origin = await servers_repo.allocate_origin_server_atomic(sess)
                             if origin is None:
                                 logger.warning("No healthy origin server available for unallocated sub_id=%d", sub_id)
+                                if self.bot:
+                                    now_m = time.monotonic()
+                                    if not self._origin_exhausted_alerted or (
+                                        self._origin_exhausted_last_sent
+                                        and (now_m - self._origin_exhausted_last_sent) >= 3600.0
+                                    ):
+                                        self._origin_exhausted_alerted = True
+                                        self._origin_exhausted_last_sent = now_m
+                                        asyncio.create_task(self._send_origin_exhausted_alert(sub_id))
                                 break
 
                             sub.origin_node_id = origin.id
@@ -724,6 +762,10 @@ class WhiteInternetReconciliationWorker:
                             sub.last_reconciled_node_epoch = None
                             await sess.commit()
                             allocated += 1
+                            if self._origin_exhausted_alerted and self.bot:
+                                self._origin_exhausted_alerted = False
+                                self._origin_exhausted_last_sent = None
+                                asyncio.create_task(self._send_origin_restored_alert())
                         except Exception as exc:
                             logger.error("Failed to allocate origin node for sub_id=%d: %s", sub_id, exc)
                             await sess.rollback()

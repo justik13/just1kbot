@@ -17,19 +17,28 @@ from aiogram import Bot
 from sqlalchemy import func, select
 
 from bot.keyboards.notifications import get_node_monitor_alert_keyboard
+from bot.texts.common.status import TIME_HOURS_LEFT
 from bot.texts.runtime.alerts import (
+    ALERT_CDN_INGRESS_PROBLEM,
+    ALERT_CDN_INGRESS_PROBLEM_REMINDER,
+    ALERT_CDN_INGRESS_RESTORED,
     ALERT_INGRESS_ERR_TIMEOUT,
     ALERT_INGRESS_PROBLEM,
+    ALERT_INGRESS_PROBLEM_REMINDER,
     ALERT_INGRESS_RESTORED,
-    ALERT_CDN_INGRESS_PROBLEM,
-    ALERT_CDN_INGRESS_RESTORED,
     ALERT_RELAY_TSPU_PROBLEM,
+    ALERT_RELAY_TSPU_PROBLEM_REMINDER,
     ALERT_RELAY_TSPU_RESTORED,
     ALERT_SERVER_AUTO_DISABLED,
     ALERT_SERVER_AUTO_DISABLED_RECOVERED,
     ALERT_SERVER_DISK_CRITICAL,
+    ALERT_SERVER_OUTAGE_REMINDER,
     ALERT_SERVER_PROBLEM,
     ALERT_SERVER_RESTORED,
+)
+from bot.texts.runtime.notifications import (
+    TIME_HOURS_MINUTES_FORMAT,
+    TIME_MINUTES_FORMAT,
 )
 from config.constants import (
     AMNEZIA_PROTOCOLS,
@@ -74,10 +83,22 @@ REQUIRED_RELAY_SUCCESSES = 2  # Требуется 2 цикла успеха п�
 INGRESS_RETRY_DELAY = 1.5  # Базовая задержка перед повторным запросом зонда при ошибке/таймауте
 INGRESS_PROBE_TOTAL_TIMEOUT = 30.0  # Максимальное время синтетического ingress-зонда
 INGRESS_PROBE_CONNECT_TIMEOUT = 25.0  # Запас на трансграничный TLS handshake при пиках нагрузки
+OUTAGE_REMINDER_INTERVAL_SECONDS = 3600.0  # 1 час между повторными напоминаниями о продолжающейся аварии
 # A hung node can hold a healthcheck for tens of seconds; checking servers in
 # bounded parallel batches keeps one degraded node from freezing alerts for
 # every other node in the cycle.
 CHECK_PARALLELISM = 6
+
+
+def _format_outage_duration(seconds: float) -> str:
+    total_mins = max(1, int(seconds // 60))
+    hours = total_mins // 60
+    minutes = total_mins % 60
+    if hours > 0 and minutes > 0:
+        return TIME_HOURS_MINUTES_FORMAT.format(hours=hours, minutes=minutes)
+    if hours > 0:
+        return TIME_HOURS_LEFT.format(hours=hours)
+    return TIME_MINUTES_FORMAT.format(minutes=minutes)
 
 
 class ServerMonitorState:
@@ -92,12 +113,17 @@ class ServerMonitorState:
         self.last_alert_sent_state: str | None = None
         self.disk_alert_last_sent: float | None = None
         self.recovery_notice_sent: bool = False
+        self.last_core_reminder_at: float | None = None
         self.ingress_problem: bool = False
         self.consecutive_ingress_fails: int = 0
         self.consecutive_ingress_successes: int = 0
+        self.ingress_problem_started_at: float | None = None
+        self.last_ingress_reminder_at: float | None = None
         self.cdn_problem: bool = False
         self.consecutive_cdn_fails: int = 0
         self.consecutive_cdn_successes: int = 0
+        self.cdn_problem_started_at: float | None = None
+        self.last_cdn_reminder_at: float | None = None
         self.relays_probe_state: dict[str, dict[str, Any]] = {}
 
     def sync_from_db_server(self, db_server: Server):
@@ -122,7 +148,10 @@ class ServerMonitorState:
                 self.consecutive_cdn_fails = int(db_server.extra_data.get("consecutive_cdn_fails", 0) or 0)
                 self.consecutive_cdn_successes = int(db_server.extra_data.get("consecutive_cdn_successes", 0) or 0)
                 if isinstance(db_server.extra_data.get("relays_probe_state"), dict):
-                    self.relays_probe_state = dict(db_server.extra_data["relays_probe_state"])
+                    self.relays_probe_state = {
+                        k: dict(v) if isinstance(v, dict) else v
+                        for k, v in db_server.extra_data["relays_probe_state"].items()
+                    }
                 else:
                     self.relays_probe_state = {}
             else:
@@ -176,12 +205,17 @@ def reset_server_monitor_state(server_id: int, new_state: str = ServerHealthStat
     st.recovery_notice_sent = False
     st.last_alert_sent_state = None
     st.disk_alert_last_sent = None
+    st.last_core_reminder_at = None
     st.ingress_problem = False
     st.consecutive_ingress_fails = 0
     st.consecutive_ingress_successes = 0
+    st.ingress_problem_started_at = None
+    st.last_ingress_reminder_at = None
     st.cdn_problem = False
     st.consecutive_cdn_fails = 0
     st.consecutive_cdn_successes = 0
+    st.cdn_problem_started_at = None
+    st.last_cdn_reminder_at = None
     st.relays_probe_state = {}
 
 
@@ -520,6 +554,8 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 extra_changed = True
 
                             if not has_ingress_problem and st.consecutive_ingress_fails >= REQUIRED_INGRESS_FAILS:
+                                st.ingress_problem_started_at = now_m
+                                st.last_ingress_reminder_at = now_m
                                 ingress_alerts_to_send.append((
                                     "ingress",
                                     ALERT_INGRESS_PROBLEM.format(
@@ -532,6 +568,24 @@ async def check_node_resources_and_alerts(bot: Bot):
                                     get_node_monitor_alert_keyboard(server.id).as_markup(),
                                     True,
                                 ))
+                            elif has_ingress_problem:
+                                if st.last_ingress_reminder_at is None:
+                                    st.last_ingress_reminder_at = now_m
+                                elif (now_m - st.last_ingress_reminder_at) >= OUTAGE_REMINDER_INTERVAL_SECONDS:
+                                    outage_dur = (now_m - st.ingress_problem_started_at) if st.ingress_problem_started_at else OUTAGE_REMINDER_INTERVAL_SECONDS
+                                    ingress_alerts_to_send.append((
+                                        "ingress",
+                                        ALERT_INGRESS_PROBLEM_REMINDER.format(
+                                            server_name=safe(server.name),
+                                            server_id=server.id,
+                                            domain=safe(active_origin_domain),
+                                            endpoint=safe(f"{sub_prefix}/ping"),
+                                            hours_text=_format_outage_duration(outage_dur),
+                                        ),
+                                        get_node_monitor_alert_keyboard(server.id).as_markup(),
+                                        True,
+                                    ))
+                                    st.last_ingress_reminder_at = now_m
                         else:
                             st.consecutive_ingress_successes += 1
                             st.consecutive_ingress_fails = 0
@@ -544,6 +598,8 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 extra_changed = True
 
                             if has_ingress_problem and st.consecutive_ingress_successes >= REQUIRED_INGRESS_SUCCESSES:
+                                st.ingress_problem_started_at = None
+                                st.last_ingress_reminder_at = None
                                 ingress_alerts_to_send.append((
                                     "ingress",
                                     ALERT_INGRESS_RESTORED.format(
@@ -572,6 +628,8 @@ async def check_node_resources_and_alerts(bot: Bot):
                                         extra_changed = True
 
                                     if has_cdn_problem and st.consecutive_cdn_successes >= REQUIRED_INGRESS_SUCCESSES:
+                                        st.cdn_problem_started_at = None
+                                        st.last_cdn_reminder_at = None
                                         ingress_alerts_to_send.append((
                                             "cdn",
                                             ALERT_CDN_INGRESS_RESTORED.format(
@@ -600,6 +658,8 @@ async def check_node_resources_and_alerts(bot: Bot):
                                             server.id, active_origin_domain, cdn_domain, cdn_detail, st.consecutive_cdn_fails, REQUIRED_CDN_FAILS,
                                         )
                                     elif not has_cdn_problem:
+                                        st.cdn_problem_started_at = now_m
+                                        st.last_cdn_reminder_at = now_m
                                         logger.warning(
                                             "Xray origin node %s CDN (%s) persistent failure (%d fails): %s (Origin %s is 200 OK). Sending CDN alert.",
                                             server.id, cdn_domain, st.consecutive_cdn_fails, cdn_detail, active_origin_domain,
@@ -617,6 +677,24 @@ async def check_node_resources_and_alerts(bot: Bot):
                                             get_node_monitor_alert_keyboard(server.id).as_markup(),
                                             True,
                                         ))
+                                    elif has_cdn_problem:
+                                        if st.last_cdn_reminder_at is None:
+                                            st.last_cdn_reminder_at = now_m
+                                        elif (now_m - st.last_cdn_reminder_at) >= OUTAGE_REMINDER_INTERVAL_SECONDS:
+                                            outage_dur = (now_m - st.cdn_problem_started_at) if st.cdn_problem_started_at else OUTAGE_REMINDER_INTERVAL_SECONDS
+                                            ingress_alerts_to_send.append((
+                                                "cdn",
+                                                ALERT_CDN_INGRESS_PROBLEM_REMINDER.format(
+                                                    server_name=safe(server.name),
+                                                    server_id=server.id,
+                                                    domain=safe(cdn_domain),
+                                                    endpoint=safe(f"{sub_prefix}/ping"),
+                                                    hours_text=_format_outage_duration(outage_dur),
+                                                ),
+                                                get_node_monitor_alert_keyboard(server.id).as_markup(),
+                                                True,
+                                            ))
+                                            st.last_cdn_reminder_at = now_m
 
                     # 3. Evaluate Origin Relays Health (TSPU check from inside Russia)
                     if relays_probe_result is not None and isinstance(relays_probe_result, list):
@@ -656,11 +734,15 @@ async def check_node_resources_and_alerts(bot: Bot):
                             })
                             if relay_key in db_relays_state and isinstance(db_relays_state[relay_key], dict):
                                 db_r = db_relays_state[relay_key]
-                                r_state["is_problem"] = bool(db_r.get("is_problem", False))
-                                if "consecutive_fails" in db_r:
+                                r_state["is_problem"] = bool(r_state.get("is_problem", False)) or bool(db_r.get("is_problem", False))
+                                if "consecutive_fails" in db_r and not r_state.get("consecutive_fails"):
                                     r_state["consecutive_fails"] = int(db_r.get("consecutive_fails") or 0)
-                                if "consecutive_successes" in db_r:
+                                if "consecutive_successes" in db_r and not r_state.get("consecutive_successes"):
                                     r_state["consecutive_successes"] = int(db_r.get("consecutive_successes") or 0)
+                                if "problem_started_at" in db_r and "problem_started_at" not in r_state:
+                                    r_state["problem_started_at"] = db_r.get("problem_started_at")
+                                if "last_reminder_at" in db_r and "last_reminder_at" not in r_state:
+                                    r_state["last_reminder_at"] = db_r.get("last_reminder_at")
 
                             has_relay_problem = bool(r_state.get("is_problem", False))
                             target_srv_id = (
@@ -676,7 +758,11 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 )
                                 r_state["consecutive_successes"] = 0
                                 if r_state["consecutive_fails"] >= REQUIRED_RELAY_FAILS:
+                                    now_ts = time.time()
                                     if not has_relay_problem:
+                                        r_state["is_problem"] = True
+                                        r_state["problem_started_at"] = now_ts
+                                        r_state["last_reminder_at"] = now_ts
                                         relay_alerts_to_send.append((
                                             relay_key,
                                             ALERT_RELAY_TSPU_PROBLEM.format(
@@ -690,6 +776,27 @@ async def check_node_resources_and_alerts(bot: Bot):
                                             get_node_monitor_alert_keyboard(target_srv_id).as_markup(),
                                             True,
                                         ))
+                                    elif has_relay_problem:
+                                        last_rem = r_state.get("last_reminder_at")
+                                        if last_rem is None:
+                                            r_state["last_reminder_at"] = now_ts
+                                        elif (now_ts - float(last_rem)) >= OUTAGE_REMINDER_INTERVAL_SECONDS:
+                                            started_at = float(r_state.get("problem_started_at") or (now_ts - OUTAGE_REMINDER_INTERVAL_SECONDS))
+                                            outage_dur = max(0.0, now_ts - started_at)
+                                            relay_alerts_to_send.append((
+                                                relay_key,
+                                                ALERT_RELAY_TSPU_PROBLEM_REMINDER.format(
+                                                    relay_name=safe(relay_name),
+                                                    relay_ip=safe(relay_ip),
+                                                    relay_port=relay_port,
+                                                    origin_name=safe(server.name),
+                                                    origin_id=server.id,
+                                                    hours_text=_format_outage_duration(outage_dur),
+                                                ),
+                                                get_node_monitor_alert_keyboard(target_srv_id).as_markup(),
+                                                True,
+                                            ))
+                                            r_state["last_reminder_at"] = now_ts
                             else:
                                 r_state["consecutive_successes"] = min(
                                     int(r_state.get("consecutive_successes", 0)) + 1,
@@ -698,6 +805,9 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 r_state["consecutive_fails"] = 0
                                 if r_state["consecutive_successes"] >= REQUIRED_RELAY_SUCCESSES:
                                     if has_relay_problem:
+                                        r_state["is_problem"] = False
+                                        r_state.pop("problem_started_at", None)
+                                        r_state.pop("last_reminder_at", None)
                                         relay_alerts_to_send.append((
                                             relay_key,
                                             ALERT_RELAY_TSPU_RESTORED.format(
@@ -723,7 +833,10 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 st.relays_probe_state.pop(stale_key, None)
 
                         if db_relays_state != st.relays_probe_state:
-                            db_extra["relays_probe_state"] = dict(st.relays_probe_state)
+                            db_extra["relays_probe_state"] = {
+                                k: dict(v) if isinstance(v, dict) else v
+                                for k, v in st.relays_probe_state.items()
+                            }
                             extra_changed = True
 
                     if extra_changed and fresh_server:
@@ -780,6 +893,19 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 cur_relays_state[relay_key] = {"is_problem": is_problem}
                             cur_extra["relays_probe_state"] = cur_relays_state
                             await update_server(session, fresh, extra_data=cur_extra)
+                else:
+                    rollback_val = not is_problem
+                    if relay_key in st.relays_probe_state:
+                        st.relays_probe_state[relay_key]["is_problem"] = rollback_val
+                    async with session_scope() as session:
+                        fresh = await get_server_by_id(session, server.id, for_update=True)
+                        if fresh:
+                            cur_extra = dict(fresh.extra_data or {})
+                            cur_relays_state = dict(cur_extra.get("relays_probe_state") or {})
+                            if relay_key in cur_relays_state:
+                                cur_relays_state[relay_key]["is_problem"] = rollback_val
+                                cur_extra["relays_probe_state"] = cur_relays_state
+                                await update_server(session, fresh, extra_data=cur_extra)
 
         if is_healthy:
             if st.health_state == ServerHealthState.WAITING_CONFIRMATION:
@@ -845,6 +971,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                     st.health_state = ServerHealthState.ONLINE
                     st.problem_started_at = None
                     st.next_check_at = None
+                    st.last_core_reminder_at = None
 
                     alerts_to_send.append({
                         "text": ALERT_SERVER_RESTORED.format(
@@ -861,6 +988,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                 st.next_check_at = now_m + AUTO_DISABLED_CHECK_INTERVAL
 
                 if st.consecutive_successes >= REQUIRED_STABLE_SUCCESSES and not st.recovery_notice_sent:
+                    st.last_core_reminder_at = None
                     alerts_to_send.append({
                         "text": ALERT_SERVER_AUTO_DISABLED_RECOVERED.format(
                             server_name=safe(server.name),
@@ -906,6 +1034,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                 if elapsed_problem_sec >= PROBLEM_OBSERVATION_TIMEOUT:
                     st.health_state = ServerHealthState.AUTO_DISABLED
                     st.next_check_at = now_m + AUTO_DISABLED_CHECK_INTERVAL
+                    st.last_core_reminder_at = now_m
                     alerts_to_send.append({
                         "text": ALERT_SERVER_AUTO_DISABLED.format(
                             server_name=safe(server.name),
@@ -930,6 +1059,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                     "target_alert_state": ServerHealthState.PROBLEM,
                 })
             elif st.health_state == ServerHealthState.AUTO_DISABLED and st.last_alert_sent_state != ServerHealthState.AUTO_DISABLED:
+                st.last_core_reminder_at = now_m
                 alerts_to_send.append({
                     "text": ALERT_SERVER_AUTO_DISABLED.format(
                         server_name=safe(server.name),
@@ -938,6 +1068,25 @@ async def check_node_resources_and_alerts(bot: Bot):
                     "reply_markup": get_node_monitor_alert_keyboard(server.id, include_enable_button=True).as_markup(),
                     "target_alert_state": ServerHealthState.AUTO_DISABLED,
                 })
+            elif (
+                st.health_state == ServerHealthState.AUTO_DISABLED
+                and st.last_alert_sent_state == ServerHealthState.AUTO_DISABLED
+            ):
+                last_rem = st.last_core_reminder_at
+                if last_rem is None:
+                    st.last_core_reminder_at = now_m
+                elif (now_m - last_rem) >= OUTAGE_REMINDER_INTERVAL_SECONDS:
+                    outage_dur = (now_m - st.problem_started_at) if st.problem_started_at else (now_m - last_rem)
+                    alerts_to_send.append({
+                        "text": ALERT_SERVER_OUTAGE_REMINDER.format(
+                            server_name=safe(server.name),
+                            server_id=server.id,
+                            hours_text=_format_outage_duration(outage_dur),
+                        ),
+                        "reply_markup": get_node_monitor_alert_keyboard(server.id, include_enable_button=True).as_markup(),
+                        "is_reminder": True,
+                    })
+                    st.last_core_reminder_at = now_m
 
         # 5. ЕДИНСТВЕННОЕ АТОМАРНОЕ ОБНОВЛЕНИЕ БД НА КАЖДУЮ ПРОВЕРКУ (СНАЧАЛА CAS UPDATE)
         update_kwargs = {

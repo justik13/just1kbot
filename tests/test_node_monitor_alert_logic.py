@@ -713,6 +713,10 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("191.44.113.0", sent_text)
             self.assertIn("Poland-1", sent_text)
 
+            # 3b. 4th fail -> should NOT send duplicate alert
+            await check_node_resources_and_alerts(self.mock_bot)
+            self.assertEqual(self.mock_bot.send_message.call_count, 1)
+
             # Verify button links to relay_server.id (20) via extra_data["ip"] mapping
             kb = call_args[1].get("reply_markup")
             self.assertIsNotNone(kb)
@@ -734,6 +738,60 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             rec_args = self.mock_bot.send_message.call_args
             rec_text = rec_args[0][1] if len(rec_args[0]) > 1 else rec_args[1].get("text")
             self.assertIn("42.5", rec_text)
+
+    async def test_auto_disabled_server_hourly_outage_reminder(self):
+        """AUTO_DISABLED server triggers periodic reminder alert every 1 hour (3600s)."""
+        server = MagicMock(spec=Server)
+        server.id = 201
+        server.name = "Disabled-Remind-Node"
+        server.api_url = "https://vpn201.example.com"
+        server.api_key = "secret"
+        server.is_active = False
+        server.disabled_reason = "AUTO_UNAVAILABLE"
+        server.health_state = "AUTO_DISABLED"
+        server.consecutive_fails = 5
+        server.consecutive_successes = 0
+        server.problem_started_at = None
+        server.next_check_at = None
+        server.recovery_notice_sent = False
+        server.last_alert_sent_state = ServerHealthState.AUTO_DISABLED
+
+        async def fake_update_server(session, db_srv, **kwargs):
+            for k, v in kwargs.items():
+                setattr(db_srv, k, v)
+            return db_srv
+
+        with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
+             patch("services.workers.node_monitor.AmneziaClient") as mock_client_cls, \
+             patch("services.workers.node_monitor.get_server_by_id", return_value=server), \
+             patch("services.workers.node_monitor.update_server", side_effect=fake_update_server):
+
+            client_instance = mock_client_cls.return_value
+            client_instance.healthcheck = AsyncMock(return_value=False)
+
+            st = get_server_monitor_state(201, server)
+            st.health_state = ServerHealthState.AUTO_DISABLED
+            st.last_alert_sent_state = ServerHealthState.AUTO_DISABLED
+
+            # 1. First tick in AUTO_DISABLED -> establishes last_core_reminder_at, no duplicate alert
+            await check_node_resources_and_alerts(self.mock_bot)
+            self.mock_bot.send_message.assert_not_called()
+            self.assertIsNotNone(st.last_core_reminder_at)
+
+            # 2. Advance clock by 3500s (< 1 hour) -> no reminder yet
+            st.next_check_at = None
+            with patch("time.monotonic", return_value=st.last_core_reminder_at + 3500.0):
+                await check_node_resources_and_alerts(self.mock_bot)
+                self.mock_bot.send_message.assert_not_called()
+
+            # 3. Advance clock by 3605s (>= 1 hour) -> reminder alert sent
+            st.next_check_at = None
+            with patch("time.monotonic", return_value=st.last_core_reminder_at + 3605.0):
+                await check_node_resources_and_alerts(self.mock_bot)
+                self.assertEqual(self.mock_bot.send_message.call_count, 1)
+                sent_text = self.mock_bot.send_message.call_args[1]["text"]
+                self.assertIn("Напоминание: Сервер отключён", sent_text)
+                self.assertIn("Disabled-Remind-Node", sent_text)
 
 
 if __name__ == "__main__":
