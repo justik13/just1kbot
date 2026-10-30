@@ -405,7 +405,9 @@ class WhiteInternetReconciliationWorker:
                             fresh_server = await sess.scalar(select(Server).where(Server.id == server_id))
                             target_node_epoch = fresh_server.xray_instance_epoch if fresh_server else None
 
-                active_server_targets.append((server_id, api_url, api_key, target_node_epoch or node_epoch, relays, origin_hidden))
+                node_relays = health_data.get("relays")
+                target_relays = node_relays if isinstance(node_relays, list) and not health_data.get("relays_error") else relays
+                active_server_targets.append((server_id, api_url, api_key, target_node_epoch or node_epoch, target_relays, origin_hidden))
 
         synced_count = 0
         for server_id, api_url, api_key, target_epoch, relays, origin_hidden in active_server_targets:
