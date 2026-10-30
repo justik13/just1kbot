@@ -12,7 +12,7 @@ from config.constants import (
 
 # Fixed version timestamp used to detect routing profile changes in INCY/Happ clients.
 # Bump this timestamp when routing rules or DNS parameters change so clients pull updated rules.
-ROUTING_PROFILE_VERSION_TIMESTAMP = "1793318400"
+ROUTING_PROFILE_VERSION_TIMESTAMP = "1793325600"
 
 
 def generate_incy_routing_header(
@@ -30,7 +30,7 @@ def generate_incy_routing_header(
     - If direct_ru=False (White Internet / CDN relay): sends all domain traffic through
       the Yandex CDN tunnel to the Moscow Origin server (where Origin routes RU directly
       from datacenter fiber and forwards foreign traffic to Exit), preserving LAN bypass.
-    - Enforces secure DoH resolution (Cloudflare/Google DoH) to prevent TSPU DNS hijacking.
+    - Enforces secure DoH resolution (Cloudflare DoH) to prevent TSPU DNS hijacking.
     - Includes LastUpdated Unix timestamp for reliable profile versioning and updates.
     """
     default_name = DEFAULT_VLESS_PROFILE_TITLE if direct_ru else DEFAULT_WHITE_INTERNET_PROFILE_TITLE
@@ -86,13 +86,12 @@ def generate_incy_routing_header(
         "RemoteDNSDomain": "https://cloudflare-dns.com/dns-query",
         "RemoteDNSIP": "1.1.1.1",
         "DomesticDNSType": "DoH",
-        "DomesticDNSDomain": "https://dns.google/dns-query",
-        "DomesticDNSIP": "8.8.8.8",
+        "DomesticDNSDomain": "https://cloudflare-dns.com/dns-query",
+        "DomesticDNSIP": "1.1.1.1",
         "Geoipurl": "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat",
         "Geositeurl": "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat",
         "DnsHosts": {
             "cloudflare-dns.com": "1.1.1.1",
-            "dns.google": "8.8.8.8",
         },
         "DirectSites": direct_sites,
         "DirectIp": direct_ips,

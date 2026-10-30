@@ -1914,7 +1914,9 @@ class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
         std_json = json.loads(base64.b64decode(std_header.removeprefix("incy://routing/onadd/")).decode("utf-8"))
         self.assertEqual(std_json.get("Name"), "✦ Just1k")
         self.assertIs(std_json.get("useChunkFiles"), True)
-        self.assertEqual(std_json.get("LastUpdated"), "1793318400")
+        self.assertEqual(std_json.get("LastUpdated"), "1793325600")
+        self.assertEqual(std_json.get("DomesticDNSIP"), "1.1.1.1")
+        self.assertEqual(std_json.get("DomesticDNSDomain"), "https://cloudflare-dns.com/dns-query")
         self.assertIn("geosite:category-ru", std_json.get("DirectSites", []))
         self.assertIn("geosite:tld-ru", std_json.get("DirectSites", []))
 
@@ -1924,7 +1926,8 @@ class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
         wl_json = json.loads(base64.b64decode(wl_header.removeprefix("happ://routing/onadd/")).decode("utf-8"))
         self.assertEqual(wl_json.get("Name"), "✦ Just1k WL")
         self.assertIs(wl_json.get("useChunkFiles"), True)
-        self.assertEqual(wl_json.get("LastUpdated"), "1793318400")
+        self.assertEqual(wl_json.get("LastUpdated"), "1793325600")
+        self.assertEqual(wl_json.get("DomesticDNSIP"), "1.1.1.1")
         self.assertEqual(wl_json.get("DirectSites"), [])
 
         # 3. None and edge-case fallbacks
@@ -1937,7 +1940,7 @@ class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(edge_header.startswith("incy://routing/onadd/"))
         edge_json = json.loads(base64.b64decode(edge_header.removeprefix("incy://routing/onadd/")).decode("utf-8"))
         self.assertEqual(edge_json.get("Name"), "✦ Just1k WL")
-        self.assertEqual(edge_json.get("LastUpdated"), "1793318400")
+        self.assertEqual(edge_json.get("LastUpdated"), "1793325600")
 
     def test_generate_vless_links_forces_client_port_443_when_relay_port_configured(self):
         sub = VlessSubscription(
