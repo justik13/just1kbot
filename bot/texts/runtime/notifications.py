@@ -83,6 +83,8 @@ TIME_DAYS_HOURS_FORMAT = "{days} дн. {hours} ч."
 
 TIME_HOURS_MINUTES_FORMAT = "{hours} ч. {minutes} мин."
 
+TIME_MINUTES_FORMAT = "{minutes} мин."
+
 TIME_SOON_LABEL = "в ближайшее время"
 
 NOTIFY_WI_3D = "⏳ <b>Белый Интернет: осталось 3 дня</b>\n\nПодписка действует до {date}. Вы можете продлить её в любой момент."

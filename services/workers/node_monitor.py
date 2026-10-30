@@ -17,6 +17,7 @@ from aiogram import Bot
 from sqlalchemy import func, select
 
 from bot.keyboards.notifications import get_node_monitor_alert_keyboard
+from bot.texts.common.status import TIME_HOURS_LEFT
 from bot.texts.runtime.alerts import (
     ALERT_CDN_INGRESS_PROBLEM,
     ALERT_CDN_INGRESS_PROBLEM_REMINDER,
@@ -34,9 +35,10 @@ from bot.texts.runtime.alerts import (
     ALERT_SERVER_OUTAGE_REMINDER,
     ALERT_SERVER_PROBLEM,
     ALERT_SERVER_RESTORED,
-    ALERT_TIME_HOURS,
-    ALERT_TIME_HOURS_MINUTES,
-    ALERT_TIME_MINUTES,
+)
+from bot.texts.runtime.notifications import (
+    TIME_HOURS_MINUTES_FORMAT,
+    TIME_MINUTES_FORMAT,
 )
 from config.constants import (
     AMNEZIA_PROTOCOLS,
@@ -93,10 +95,10 @@ def _format_outage_duration(seconds: float) -> str:
     hours = total_mins // 60
     minutes = total_mins % 60
     if hours > 0 and minutes > 0:
-        return ALERT_TIME_HOURS_MINUTES.format(hours=hours, minutes=minutes)
+        return TIME_HOURS_MINUTES_FORMAT.format(hours=hours, minutes=minutes)
     if hours > 0:
-        return ALERT_TIME_HOURS.format(hours=hours)
-    return ALERT_TIME_MINUTES.format(minutes=minutes)
+        return TIME_HOURS_LEFT.format(hours=hours)
+    return TIME_MINUTES_FORMAT.format(minutes=minutes)
 
 
 class ServerMonitorState:
