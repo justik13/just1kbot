@@ -12,7 +12,7 @@ from config.constants import (
 
 # Fixed version timestamp used to detect routing profile changes in INCY/Happ clients.
 # Bump this timestamp when routing rules or DNS parameters change so clients pull updated rules.
-ROUTING_PROFILE_VERSION_TIMESTAMP = "1793318400"
+ROUTING_PROFILE_VERSION_TIMESTAMP = "1793420000"
 
 
 def generate_incy_routing_header(
@@ -26,11 +26,11 @@ def generate_incy_routing_header(
 
     - Supports both "incy" (INCY app) and "happ" (Happ app) schemes.
     - If direct_ru=True (Standard VLESS): routes geosite:category-ru, geosite:tld-ru, domain:ru, domain:su, domain:xn--p1ai, geoip:ru directly
-      via user's home ISP, sending foreign destinations through the VLESS tunnel.
+      via user's home ISP, while sending foreign destinations through the VLESS tunnel.
     - If direct_ru=False (White Internet / CDN relay): sends all domain traffic through
       the Yandex CDN tunnel to the Moscow Origin server (where Origin routes RU directly
       from datacenter fiber and forwards foreign traffic to Exit), preserving LAN bypass.
-    - Enforces secure DoH resolution (Cloudflare/Google DoH) to prevent TSPU DNS hijacking.
+    - Enforces secure DoH resolution (Cloudflare DoH for remote proxy traffic, Yandex DoH for domestic RU/bootstrap) to prevent TSPU DNS hijacking and cellular UDP drops.
     - Includes LastUpdated Unix timestamp for reliable profile versioning and updates.
     """
     default_name = DEFAULT_VLESS_PROFILE_TITLE if direct_ru else DEFAULT_WHITE_INTERNET_PROFILE_TITLE
@@ -74,6 +74,8 @@ def generate_incy_routing_header(
         if direct_ru
         else []
     )
+    # Retain geoip:ru in DirectIp for standard VLESS to guarantee all Russian banks,
+    # payment gateways (SBP, Mir), Ozon, WB, and domestic APIs stay Direct via user's home ISP.
     direct_ips = (["geoip:ru"] + lan_direct_ips) if direct_ru else lan_direct_ips
 
     profile = {
@@ -86,13 +88,13 @@ def generate_incy_routing_header(
         "RemoteDNSDomain": "https://cloudflare-dns.com/dns-query",
         "RemoteDNSIP": "1.1.1.1",
         "DomesticDNSType": "DoH",
-        "DomesticDNSDomain": "https://dns.google/dns-query",
-        "DomesticDNSIP": "8.8.8.8",
+        "DomesticDNSDomain": "https://common.dot.dns.yandex.net/dns-query",
+        "DomesticDNSIP": "77.88.8.8",
         "Geoipurl": "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat",
         "Geositeurl": "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat",
         "DnsHosts": {
             "cloudflare-dns.com": "1.1.1.1",
-            "dns.google": "8.8.8.8",
+            "common.dot.dns.yandex.net": "77.88.8.8",
         },
         "DirectSites": direct_sites,
         "DirectIp": direct_ips,
