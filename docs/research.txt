@@ -12,8 +12,28 @@
   https://arxiv.org/abs/2305.08189
 - Habr #1075272: Практический анализ инспекции и перехвата DNS ТСПУ, сокетный флаг IP_RECVERR, утилита dpi-ch:
   https://habr.com/ru/articles/1075272/
-- Habr #1044396: Инцидент постквантовых рукопожатий Reality (X25519MLKEM768 / Kyber):
+- Habr #1044396: Реверс-инжиниринг схемы ограничений ТСПУ (hyperion_cs, июнь 2026) — фильтрация сессий по uTLS-отпечаткам Chrome/Safari, пропуск Firefox и штрафные заморозки:
   https://habr.com/ru/articles/1044396/
+- Habr #997088: Блокировка l4-25 (tcp 16-20) и белые списки для зарубежных AS (0ka, февраль 2026):
+  https://habr.com/ru/articles/997088/
+- Habr #1003852: Динамические 10-минутные блокировки 47 зарубежных AS по IP-триггеру (0ka, февраль 2026):
+  https://habr.com/ru/articles/1003852/
+- Habr #1010336: Первое исследование «сибирской блокировки» параллельных TLS-сессий со SNI (0ka, март 2026):
+  https://habr.com/ru/articles/1010336/
+- Habr #1021908: Детектирование TUN-интерфейсов и сетевая телеметрия в Android-приложениях (RKS Global / denis-19, апрель 2026):
+  https://habr.com/ru/news/1021908/
+- Habr #1092760: Аппаратный лимит ТСПУ на 13 одновременных TCP-сессий к одному адресу (Kraionix, октябрь 2026):
+  https://habr.com/ru/articles/1092760/
+- net4people/bbs Issue #490: Блокировка TCP/UDP сессий после ~16-20 KB (l4-25 / 25 пакетов) на зарубежных автономных системах:
+  https://github.com/net4people/bbs/issues/490
+- net4people/bbs Issue #671: Массовые блокировки IP-адресов популярных зарубежных VPS-провайдеров в РФ (its0ka, сентябрь-октябрь 2026):
+  https://github.com/net4people/bbs/issues/671
+- net4people/bbs Issue #663: Анализ деградации мобильных сетей при активации TUN и сниффинге Telegram (gohoski, its0ka, сентябрь 2026):
+  https://github.com/net4people/bbs/issues/663
+- bol-van/zapret: Архитектурный анализ фрагментации ClientHello при постквантовом TLS-Kyber/MLKEM768 и алгоритмы десинхронизации (tlsrec, fake, multisplit):
+  https://github.com/bol-van/zapret/blob/master/docs/readme.md
+- hyperion-cs/dpi-checkers (dpi-ch v0.13.0): TUI/CLI комплекс для анализа ТСПУ с субчекерами Siberian, l4-25, DNS-спуфинга НСДИ:
+  https://github.com/hyperion-cs/dpi-checkers
 - Habr #1040846 & 4PDA #1094247: Предотвращение блокировок Datacenter IP и Cloudflare Captcha через Cloudflare WARP на Exit:
   https://habr.com/ru/articles/1040846/
   https://4pda.to/forum/index.php?showtopic=1094247

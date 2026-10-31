@@ -2785,7 +2785,7 @@ curl -fsSL https://cheburcheck.ru/install-probe.sh | sudo sh
    - [frkn-dev/fcore: Ядро и оркестратор протоколов Xray-core, WireGuard, AmneziaWG, Hysteria2](https://github.com/frkn-dev/fcore)
    - [frkn-dev/selfhosted: Архитектура развертывания self-hosted прокси-серверов](https://github.com/frkn-dev/selfhosted)
    - [Хабр #1075272: Исследование перехвата DNS-запросов ТСПУ в НСДИ и детектирование через IP_RECVERR](https://habr.com/ru/articles/1075272/)
-   - [Хабр #1044396: Исследование сбоев Reality из-за Post-Quantum TLS X25519MLKEM768](https://habr.com/ru/articles/1044396/)
+   - [Хабр #1044396: Реверс-инжиниринг схемы ограничений ТСПУ (hyperion_cs): фильтрация параллельных TLS-сессий по uTLS-отпечаткам Chrome/Safari и обоснование перехода на Firefox](https://habr.com/ru/articles/1044396/)
 4. **Официальная документация и регламенты провайдеров:**
    - [Yandex Cloud CDN: Правила тарификации и спецификации](https://yandex.cloud/ru/docs/cdn/pricing)
    - [Yandex Cloud Support: Официальное предписание от 29.09.2026 по ошибке 413 и блокировке тел запросов в CDN](https://yandex.cloud/ru/docs/cdn/)
