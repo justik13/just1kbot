@@ -761,9 +761,10 @@ async def vless_report_handler(request: web.Request) -> web.Response:
             headers={"Cache-Control": "no-store"},
         )
 
+    category_name = f"{texts.LANDING_VLESS_PAGE_TITLE} ({tariff_name})" if tariff_name != "—" else texts.LANDING_VLESS_PAGE_TITLE
     admin_text = texts.ADMIN_ALERT_EMERGENCY_SUPPORT.format(
         user_info=user_info,
-        category=tariff_name,
+        category=category_name,
         sub_status=html.escape(sub_status),
         devices_info=devices_info,
         client_ip=html.escape(client_ip),

@@ -308,6 +308,31 @@
             box-shadow: 0 0 0 1px var(--border-strong);
         }
 
+        .support-input:disabled, .support-textarea:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+            background-color: rgba(255, 255, 255, 0.03);
+            border-color: var(--border-subtle);
+        }
+
+        .support-reset-btn {
+            background: none;
+            border: none;
+            color: var(--text-sub);
+            font-size: 12px;
+            cursor: pointer;
+            text-decoration: underline;
+            margin-top: 8px;
+            display: inline-block;
+            padding: 0;
+            font-family: inherit;
+            transition: color 150ms ease;
+        }
+
+        .support-reset-btn:hover {
+            color: var(--text-main);
+        }
+
         .support-textarea {
             resize: vertical;
             min-height: 74px;
@@ -551,11 +576,11 @@
                 const data = await response.json().catch(() => ({}));
                 if (response.ok && data.ok) {
                     const checkIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;display:inline-block;vertical-align:-2px;margin-right:6px;"><polyline points="20 6 9 17 4 12"/></svg>';
-                    statusMsg.innerHTML = checkIcon + "Контакты отправлены. Мы скоро свяжемся с вами!";
+                    statusMsg.innerHTML = checkIcon + '<span>Контакты отправлены. Мы скоро свяжемся с вами!</span><br><button type="button" class="support-reset-btn" onclick="resetSupportForm()">Отправить ещё сообщение</button>';
                     statusMsg.className = "support-status-msg success";
                     statusMsg.style.display = "block";
-                    contactInput.value = "";
-                    messageInput.value = "";
+                    contactInput.disabled = true;
+                    messageInput.disabled = true;
                     submitBtn.style.display = "none";
                 } else {
                     const errText = data.error || "Не удалось отправить. Попробуйте позже.";
@@ -574,6 +599,31 @@
                 submitBtn.disabled = false;
                 submitBtn.innerHTML = '<span>Отправить контакты</span>';
             }
+        }
+
+        function resetSupportForm() {
+            const contactInput = document.getElementById("supportContact");
+            const messageInput = document.getElementById("supportMessage");
+            const submitBtn = document.getElementById("supportSubmitBtn");
+            const statusMsg = document.getElementById("supportStatusMsg");
+            if (contactInput) {
+                contactInput.disabled = false;
+                contactInput.value = "";
+            }
+            if (messageInput) {
+                messageInput.disabled = false;
+                messageInput.value = "";
+            }
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.style.display = "";
+                submitBtn.innerHTML = '<span>Отправить контакты</span>';
+            }
+            if (statusMsg) {
+                statusMsg.style.display = "none";
+                statusMsg.innerHTML = "";
+            }
+            if (contactInput) contactInput.focus();
         }
     </script>
 </body>
