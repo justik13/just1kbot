@@ -12,7 +12,7 @@ import urllib.parse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.constants import VLESS_TLS_FINGERPRINT
+from config.constants import VALID_VLESS_TLS_FINGERPRINTS, VLESS_TLS_FINGERPRINT
 from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.models import Server, User, VlessSubscription, VPNProfile
 from database.repositories import vless_subscription_repo
@@ -104,7 +104,8 @@ class VlessSubscriptionService:
             else:
                 fragment = quoted_label
 
-            fp = str(extra.get("fp") or extra.get("fingerprint") or VLESS_TLS_FINGERPRINT or "firefox").strip()
+            raw_fp = str(extra.get("fp") or extra.get("fingerprint") or "").strip().lower()
+            fp = raw_fp if raw_fp in VALID_VLESS_TLS_FINGERPRINTS else VLESS_TLS_FINGERPRINT
             link = (
                 f"vless://{subscription.uuid}@{domain}:{port}"
                 f"?encryption=none&security=tls&sni={domain}&alpn=http/1.1&fp={fp}"
