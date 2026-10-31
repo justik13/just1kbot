@@ -138,6 +138,23 @@ DEFAULT_XRAY_ORIGIN_MAX_CLIENTS = 1000
 DEFAULT_WHITE_INTERNET_PATH = os.getenv("WHITE_INTERNET_XHTTP_PATH", "/assets/v1")
 DEFAULT_WHITE_INTERNET_PADDING_KEY = os.getenv("WHITE_INTERNET_PADDING_KEY", "dc")
 WHITE_INTERNET_TLS_FINGERPRINT = os.getenv("WHITE_INTERNET_TLS_FINGERPRINT", "firefox")
+DEFAULT_VLESS_TLS_FINGERPRINT = "firefox"
+VALID_VLESS_TLS_FINGERPRINTS = frozenset({
+    "chrome",
+    "firefox",
+    "safari",
+    "ios",
+    "android",
+    "edge",
+    "360",
+    "qq",
+    "random",
+    "randomized",
+})
+_vless_fp_env = os.getenv("VLESS_TLS_FINGERPRINT", DEFAULT_VLESS_TLS_FINGERPRINT).strip().lower()
+VLESS_TLS_FINGERPRINT = (
+    _vless_fp_env if _vless_fp_env in VALID_VLESS_TLS_FINGERPRINTS else DEFAULT_VLESS_TLS_FINGERPRINT
+)
 DEFAULT_WHITE_INTERNET_SUB_PATH_PREFIX = "/sub/wl"
 WHITE_INTERNET_SUB_PATH_PREFIX = (
     os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX", DEFAULT_WHITE_INTERNET_SUB_PATH_PREFIX)
@@ -331,7 +348,10 @@ __all__ = [
     "WHITE_INTERNET_TOPUP_PACKS",
     "WHITE_INTERNET_TRIAL_DURATION_DAYS",
     "WHITE_INTERNET_TRIAL_TRAFFIC_BYTES",
+    "DEFAULT_VLESS_TLS_FINGERPRINT",
+    "VALID_VLESS_TLS_FINGERPRINTS",
     "VLESS_PROTOCOL",
+    "VLESS_TLS_FINGERPRINT",
     "WebhookInboxStatus",
     "WhiteInternetGrantType",
     "WhiteInternetProvisioningStatus",
