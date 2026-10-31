@@ -78,8 +78,10 @@ DISK_ALERT_COOLDOWN_SECONDS = 3600.0  # 1 час между повторными
 REQUIRED_INGRESS_FAILS = 3  # Требуется 3 цикла сбоя подряд (>= 45-60с) перед отправкой алерта
 REQUIRED_CDN_FAILS = 5  # Требуется 5 циклов сбоя подряд (~100-120с) для фильтрации трансграничного шума
 REQUIRED_INGRESS_SUCCESSES = 2  # Требуется 2 цикла успеха подряд для подтверждения восстановления
-REQUIRED_RELAY_FAILS = 3  # Требуется 3 цикла сбоя подряд (~45с) перед отправкой алерта о ТСПУ
-REQUIRED_RELAY_SUCCESSES = 2  # Требуется 2 цикла успеха подряд для подтверждения восстановления
+REQUIRED_RELAY_FAILS = 5  # Требуется 5 циклов сбоя подряд (~75-100с) для фильтрации трансграничного шума
+REQUIRED_RELAY_SUCCESSES = 3  # Требуется 3 цикла успеха подряд (~45с) для подтверждения восстановления
+RELAY_PROBE_TIMEOUT = 5.0  # Таймаут TCP-подключения к релею на одну попытку
+RELAY_PROBE_RETRIES = 2  # Количество повторных попыток на Origin перед фиксацией сбоя
 INGRESS_RETRY_DELAY = 1.5  # Базовая задержка перед повторным запросом зонда при ошибке/таймауте
 INGRESS_PROBE_TOTAL_TIMEOUT = 30.0  # Максимальное время синтетического ingress-зонда
 INGRESS_PROBE_CONNECT_TIMEOUT = 25.0  # Запас на трансграничный TLS handshake при пиках нагрузки
@@ -390,7 +392,10 @@ async def check_node_resources_and_alerts(bot: Bot):
                         ):
                             try:
                                 r_ok, r_data, r_err = await xray_client.get_relays_health(
-                                    xray_url, server.api_key
+                                    xray_url,
+                                    server.api_key,
+                                    timeout=RELAY_PROBE_TIMEOUT,
+                                    retries=RELAY_PROBE_RETRIES,
                                 )
                                 if r_ok and isinstance(r_data, dict):
                                     relays_probe_result = r_data.get("relays")
@@ -716,7 +721,11 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 except Exception:
                                     pass
                             if getattr(srv, "name", None):
-                                ip_to_srv_id[srv.name.strip().lower()] = srv.id
+                                clean_srv_name = srv.name.strip().lower()
+                                ip_to_srv_id[clean_srv_name] = srv.id
+                                srv_words = clean_srv_name.split()
+                                if len(srv_words) > 1:
+                                    ip_to_srv_id[" ".join(srv_words[1:])] = srv.id
 
                         for r in relays_probe_result:
                             relay_ip = str(r.get("ip") or "").strip()
@@ -745,9 +754,12 @@ async def check_node_resources_and_alerts(bot: Bot):
                                     r_state["last_reminder_at"] = db_r.get("last_reminder_at")
 
                             has_relay_problem = bool(r_state.get("is_problem", False))
+                            clean_relay_name = relay_name.strip().lower()
+                            relay_words = clean_relay_name.split()
                             target_srv_id = (
                                 ip_to_srv_id.get(relay_ip.lower())
-                                or ip_to_srv_id.get(relay_name.lower())
+                                or ip_to_srv_id.get(clean_relay_name)
+                                or (ip_to_srv_id.get(" ".join(relay_words[1:])) if len(relay_words) > 1 else None)
                                 or server.id
                             )
 

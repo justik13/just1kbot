@@ -137,14 +137,18 @@ class XrayNodeClient:
         url: str,
         headers: dict[str, str],
         json_data: dict[str, Any] | None = None,
+        request_timeout: float | None = None,
+        max_retries: int | None = None,
     ) -> tuple[int, Any, str | None]:
         safe_url = _sanitize_url(url)
         session = await self._get_session()
+        retries_limit = self.max_retries if max_retries is None else max_retries
+        client_timeout = aiohttp.ClientTimeout(total=request_timeout) if request_timeout is not None else None
 
-        for attempt in range(self.max_retries + 1):
+        for attempt in range(retries_limit + 1):
             try:
                 async with session.request(
-                    method, url, headers=headers, json=json_data
+                    method, url, headers=headers, json=json_data, timeout=client_timeout
                 ) as resp:
                     status_code = resp.status
                     if status_code in (200, 201):
@@ -158,19 +162,19 @@ class XrayNodeClient:
                         return status_code, None, None
 
                     text = await resp.text()
-                    if status_code in (502, 503, 504) and attempt < self.max_retries:
+                    if status_code in (502, 503, 504) and attempt < retries_limit:
                         logger.warning(
                             "%s %s failed with status %d (attempt %d/%d), retrying...",
-                            method, safe_url, status_code, attempt + 1, self.max_retries + 1
+                            method, safe_url, status_code, attempt + 1, retries_limit + 1
                         )
                         await asyncio.sleep(1.5 * (2**attempt))
                         continue
                     return status_code, None, f"HTTP {status_code}: {sanitize_short(text, limit=200)}"
             except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
-                if attempt < self.max_retries:
+                if attempt < retries_limit:
                     logger.warning(
                         "%s %s failed with %s (attempt %d/%d), retrying...",
-                        method, safe_url, exc, attempt + 1, self.max_retries + 1
+                        method, safe_url, exc, attempt + 1, retries_limit + 1
                     )
                     await asyncio.sleep(1.5 * (2**attempt))
                     continue
@@ -328,12 +332,21 @@ class XrayNodeClient:
         return TrafficSnapshot(None, None, None, None, 0, 0)
 
     async def get_relays_health(
-        self, api_url: str, api_key: str
+        self,
+        api_url: str,
+        api_key: str,
+        timeout: float = 5.0,
+        retries: int = 2,
     ) -> tuple[bool, dict[str, Any] | None, str | None]:
         """Fetch real-time health status of all relay nodes connected through Origin."""
-        url = f"{api_url.rstrip('/')}/v1/relays/health"
+        url = f"{api_url.rstrip('/')}/v1/relays/health?timeout={timeout}&retries={retries}"
         headers = self._get_headers(api_key)
-        status_code, data, err = await self._make_request("GET", url, headers)
+        # Node probe takes up to: (retries + 1) * timeout + retries * 0.5s.
+        # Add a 4.0s network/TLS handshake buffer and run with max_retries=0 (node already retried internally).
+        needed_timeout = max(10.0, (retries + 1) * timeout + retries * 0.5 + 4.0)
+        status_code, data, err = await self._make_request(
+            "GET", url, headers, request_timeout=needed_timeout, max_retries=0
+        )
         if status_code == 200 and isinstance(data, dict):
             return True, data, None
         return False, None, err or f"Relays health check failed with HTTP {status_code}"

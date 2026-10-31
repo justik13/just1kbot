@@ -372,13 +372,15 @@ async def show_server_relays(
     relays_list: list[dict] = []
 
     try:
-        async with XrayNodeClient(timeout=3.5, max_retries=0) as xclient:
+        async with XrayNodeClient(timeout=8.0, max_retries=0) as xclient:
             t0 = time.monotonic()
             is_ok, _epoch, detail = await xclient.check_health(server.api_url, server.api_key)
             origin_rtt = int((time.monotonic() - t0) * 1000)
             if is_ok:
                 origin_status_badge = texts.ADMIN_SERVER_RELAYS_STATUS_ONLINE_RTT.format(rtt_ms=origin_rtt)
-                success, data, err = await xclient.get_relays_health(server.api_url, server.api_key)
+                success, data, err = await xclient.get_relays_health(
+                    server.api_url, server.api_key, timeout=5.0, retries=0
+                )
                 if success and isinstance(data, dict):
                     if data.get("status") == "error":
                         error_msg = data.get("error") or texts.ADMIN_SERVER_RELAYS_ERR_FETCH
