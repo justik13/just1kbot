@@ -35,7 +35,7 @@ class TestRelaysHealthAndNodeLimits(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(err)
             self.assertEqual(data["status"], "ok")
             self.assertEqual(len(data["relays"]), 2)
-            mock_req.assert_called_once_with("GET", "https://origin.node:8444/v1/relays/health", {
+            mock_req.assert_called_once_with("GET", "https://origin.node:8444/v1/relays/health?timeout=5.0&retries=2", {
                 "X-API-Key": "test-key",
                 "Accept": "application/json",
                 "Content-Type": "application/json",
