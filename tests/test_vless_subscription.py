@@ -897,9 +897,20 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             routing_json = json.loads(base64.b64decode(b64_routing).decode("utf-8"))
             self.assertEqual(routing_json.get("Name"), "✦ Just1k")
             self.assertIs(routing_json.get("useChunkFiles"), True)
-            self.assertEqual(routing_json.get("LastUpdated"), "1793318400")
+            self.assertEqual(routing_json.get("LastUpdated"), "1793420000")
+            self.assertEqual(routing_json.get("DomesticDNSType"), "DoH")
+            self.assertEqual(routing_json.get("DomesticDNSDomain"), "https://common.dot.dns.yandex.net/dns-query")
+            self.assertEqual(routing_json.get("DomesticDNSIP"), "77.88.8.8")
+            self.assertEqual(routing_json.get("RemoteDNSType"), "DoH")
+            self.assertEqual(routing_json.get("RemoteDNSDomain"), "https://cloudflare-dns.com/dns-query")
+            self.assertEqual(routing_json.get("RemoteDNSIP"), "1.1.1.1")
+            self.assertEqual(routing_json.get("DnsHosts", {}).get("common.dot.dns.yandex.net"), "77.88.8.8")
+            self.assertEqual(routing_json.get("DnsHosts", {}).get("cloudflare-dns.com"), "1.1.1.1")
             self.assertIn("geosite:category-ru", routing_json.get("DirectSites", []))
             self.assertIn("geosite:tld-ru", routing_json.get("DirectSites", []))
+            self.assertIn("geoip:ru", routing_json.get("DirectIp", []))
+            self.assertIn("192.168.0.0/16", routing_json.get("DirectIp", []))
+            self.assertEqual(routing_json.get("ProxySites"), [])
 
             # In-App expiration headers for Happ
             self.assertEqual(resp.headers.get("sub-expire"), "1")
@@ -1914,9 +1925,20 @@ class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
         std_json = json.loads(base64.b64decode(std_header.removeprefix("incy://routing/onadd/")).decode("utf-8"))
         self.assertEqual(std_json.get("Name"), "✦ Just1k")
         self.assertIs(std_json.get("useChunkFiles"), True)
-        self.assertEqual(std_json.get("LastUpdated"), "1793318400")
+        self.assertEqual(std_json.get("LastUpdated"), "1793420000")
+        self.assertEqual(std_json.get("DomesticDNSType"), "DoH")
+        self.assertEqual(std_json.get("DomesticDNSDomain"), "https://common.dot.dns.yandex.net/dns-query")
+        self.assertEqual(std_json.get("DomesticDNSIP"), "77.88.8.8")
+        self.assertEqual(std_json.get("RemoteDNSType"), "DoH")
+        self.assertEqual(std_json.get("RemoteDNSDomain"), "https://cloudflare-dns.com/dns-query")
+        self.assertEqual(std_json.get("RemoteDNSIP"), "1.1.1.1")
+        self.assertEqual(std_json.get("DnsHosts", {}).get("common.dot.dns.yandex.net"), "77.88.8.8")
+        self.assertEqual(std_json.get("DnsHosts", {}).get("cloudflare-dns.com"), "1.1.1.1")
         self.assertIn("geosite:category-ru", std_json.get("DirectSites", []))
         self.assertIn("geosite:tld-ru", std_json.get("DirectSites", []))
+        self.assertIn("geoip:ru", std_json.get("DirectIp", []))
+        self.assertIn("192.168.0.0/16", std_json.get("DirectIp", []))
+        self.assertEqual(std_json.get("ProxySites"), [])
 
         # 2. White Internet defaults (direct_ru=False)
         wl_header = VlessSubscriptionService.generate_incy_routing_header(direct_ru=False, scheme="happ")
@@ -1924,8 +1946,14 @@ class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
         wl_json = json.loads(base64.b64decode(wl_header.removeprefix("happ://routing/onadd/")).decode("utf-8"))
         self.assertEqual(wl_json.get("Name"), "✦ Just1k WL")
         self.assertIs(wl_json.get("useChunkFiles"), True)
-        self.assertEqual(wl_json.get("LastUpdated"), "1793318400")
+        self.assertEqual(wl_json.get("LastUpdated"), "1793420000")
+        self.assertEqual(wl_json.get("DomesticDNSType"), "DoH")
+        self.assertEqual(wl_json.get("DomesticDNSDomain"), "https://common.dot.dns.yandex.net/dns-query")
+        self.assertEqual(wl_json.get("DomesticDNSIP"), "77.88.8.8")
         self.assertEqual(wl_json.get("DirectSites"), [])
+        self.assertNotIn("geoip:ru", wl_json.get("DirectIp", []))
+        self.assertIn("192.168.0.0/16", wl_json.get("DirectIp", []))
+        self.assertEqual(wl_json.get("ProxySites"), [])
 
         # 3. None and edge-case fallbacks
         edge_header = VlessSubscriptionService.generate_incy_routing_header(
@@ -1937,7 +1965,7 @@ class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(edge_header.startswith("incy://routing/onadd/"))
         edge_json = json.loads(base64.b64decode(edge_header.removeprefix("incy://routing/onadd/")).decode("utf-8"))
         self.assertEqual(edge_json.get("Name"), "✦ Just1k WL")
-        self.assertEqual(edge_json.get("LastUpdated"), "1793318400")
+        self.assertEqual(edge_json.get("LastUpdated"), "1793420000")
 
     def test_generate_vless_links_forces_client_port_443_when_relay_port_configured(self):
         sub = VlessSubscription(
