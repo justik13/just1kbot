@@ -1913,10 +1913,70 @@ class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
         self.assertIn("flow=xtls-rprx-vision", links[0])
         self.assertIn("security=tls", links[0])
         self.assertIn("alpn=http/1.1", links[0])
-        self.assertIn("fp=chrome", links[0])
+        self.assertIn("fp=firefox", links[0])
         expected_tag = urllib.parse.quote("🇩🇪 DE Server")
         self.assertIn(f"#{expected_tag}", links[0])
         self.assertNotIn("?serverDescription=", links[0])
+
+        # Test per-server fp override via extra_data
+        srv_custom_fp = Server(
+            id=2,
+            name="NL Server",
+            country_flag="🇳🇱",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            protocol="vless",
+            capabilities=["vless"],
+            api_url="https://nl.example.com:8443",
+            extra_data={"domain": "nl.example.com", "vless_port": 443, "fp": "chrome"},
+        )
+        custom_links = VlessSubscriptionService.generate_vless_links(sub, [srv_custom_fp])
+        self.assertEqual(len(custom_links), 1)
+        self.assertIn("fp=chrome", custom_links[0])
+
+        # Test fingerprint fallback on whitespace or invalid profile
+        srv_whitespace_fp = Server(
+            id=3,
+            name="PL Server",
+            country_flag="🇵🇱",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            protocol="vless",
+            capabilities=["vless"],
+            api_url="https://pl.example.com:8443",
+            extra_data={"domain": "pl.example.com", "vless_port": 443, "fp": "   "},
+        )
+        ws_links = VlessSubscriptionService.generate_vless_links(sub, [srv_whitespace_fp])
+        self.assertIn("fp=firefox", ws_links[0])
+
+        srv_invalid_fp = Server(
+            id=4,
+            name="FR Server",
+            country_flag="🇫🇷",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            protocol="vless",
+            capabilities=["vless"],
+            api_url="https://fr.example.com:8443",
+            extra_data={"domain": "fr.example.com", "vless_port": 443, "fp": "firefx_typo"},
+        )
+        invalid_links = VlessSubscriptionService.generate_vless_links(sub, [srv_invalid_fp])
+        self.assertIn("fp=firefox", invalid_links[0])
+
+        # Test extra_data.fingerprint alias
+        srv_alias_fp = Server(
+            id=5,
+            name="SE Server",
+            country_flag="🇸🇪",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            protocol="vless",
+            capabilities=["vless"],
+            api_url="https://se.example.com:8443",
+            extra_data={"domain": "se.example.com", "vless_port": 443, "fingerprint": "safari"},
+        )
+        alias_links = VlessSubscriptionService.generate_vless_links(sub, [srv_alias_fp])
+        self.assertIn("fp=safari", alias_links[0])
 
     def test_generate_incy_routing_header_invariants_and_fallbacks(self):
         # 1. Standard defaults
