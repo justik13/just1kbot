@@ -701,11 +701,15 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             await check_node_resources_and_alerts(self.mock_bot)
             self.mock_bot.send_message.assert_not_called()
 
-            # 2. 2nd fail
+            # 2. 2nd-4th fails (still no alert until 5 consecutive fails)
+            await check_node_resources_and_alerts(self.mock_bot)
+            self.mock_bot.send_message.assert_not_called()
+            await check_node_resources_and_alerts(self.mock_bot)
+            self.mock_bot.send_message.assert_not_called()
             await check_node_resources_and_alerts(self.mock_bot)
             self.mock_bot.send_message.assert_not_called()
 
-            # 3. 3rd fail -> triggers alert
+            # 3. 5th fail -> triggers alert
             await check_node_resources_and_alerts(self.mock_bot)
             self.assertEqual(self.mock_bot.send_message.call_count, 1)
             call_args = self.mock_bot.send_message.call_args
@@ -713,7 +717,7 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("191.44.113.0", sent_text)
             self.assertIn("Poland-1", sent_text)
 
-            # 3b. 4th fail -> should NOT send duplicate alert
+            # 3b. 6th fail -> should NOT send duplicate alert
             await check_node_resources_and_alerts(self.mock_bot)
             self.assertEqual(self.mock_bot.send_message.call_count, 1)
 
@@ -723,7 +727,7 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             button_callback = kb.inline_keyboard[0][0].callback_data
             self.assertEqual(button_callback, "admin_server_card:20")
 
-            # 4. Recovery cycle 1 (success 1) -> no recovery notice yet
+            # 4. Recovery cycle 1 & 2 -> no recovery notice yet (requires 3 consecutive successes)
             mock_xray_client.get_relays_health = AsyncMock(return_value=(
                 True,
                 {"relays": [{"name": "Poland-1", "code": "pl", "ip": "191.44.113.0", "port": 10443, "healthy": True, "error": None, "rtt_ms": 42.5}]},
@@ -731,8 +735,10 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             ))
             await check_node_resources_and_alerts(self.mock_bot)
             self.assertEqual(self.mock_bot.send_message.call_count, 1)
+            await check_node_resources_and_alerts(self.mock_bot)
+            self.assertEqual(self.mock_bot.send_message.call_count, 1)
 
-            # 5. Recovery cycle 2 (success 2) -> recovery notice sent
+            # 5. Recovery cycle 3 (success 3) -> recovery notice sent
             await check_node_resources_and_alerts(self.mock_bot)
             self.assertEqual(self.mock_bot.send_message.call_count, 2)
             rec_args = self.mock_bot.send_message.call_args

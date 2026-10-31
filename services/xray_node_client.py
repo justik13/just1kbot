@@ -328,10 +328,14 @@ class XrayNodeClient:
         return TrafficSnapshot(None, None, None, None, 0, 0)
 
     async def get_relays_health(
-        self, api_url: str, api_key: str
+        self,
+        api_url: str,
+        api_key: str,
+        timeout: float = 5.0,
+        retries: int = 2,
     ) -> tuple[bool, dict[str, Any] | None, str | None]:
         """Fetch real-time health status of all relay nodes connected through Origin."""
-        url = f"{api_url.rstrip('/')}/v1/relays/health"
+        url = f"{api_url.rstrip('/')}/v1/relays/health?timeout={timeout}&retries={retries}"
         headers = self._get_headers(api_key)
         status_code, data, err = await self._make_request("GET", url, headers)
         if status_code == 200 and isinstance(data, dict):

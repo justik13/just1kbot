@@ -96,14 +96,14 @@ ALERT_CDN_INGRESS_RESTORED = """✅ <b>Доставка подписок чер�
 🌐 CDN Домен: <code>{domain}</code>
 Эндпоинт <code>{endpoint}</code> через CDN снова отвечает 200 OK."""
 
-ALERT_RELAY_TSPU_PROBLEM = """🚨 <b>Сбой доступности узла из РФ (ТСПУ)</b>
+ALERT_RELAY_TSPU_PROBLEM = """⚠️ <b>Сбой доступности узла из РФ (возможно ТСПУ)</b>
 
 🌍 Сервер: <b>{relay_name}</b> (<code>{relay_ip}:{relay_port}</code>)
 📡 Контрольный узел: <b>{origin_name}</b> (Москва, ID: {origin_id})
 ⚠️ Ошибка проверки: <code>{status_or_err}</code>
 
-Сетевой узел не отвечает на TCP-подключение со стороны Origin в Москве.
-Возможна трансграничная фильтрация или блокировка IP на оборудовании ТСПУ."""
+Сетевой узел стабильно не отвечает на TCP-подключение со стороны Origin в Москве.
+Возможна трансграничная фильтрация, сбой магистрального провайдера или блокировка IP на оборудовании ТСПУ."""
 
 ALERT_RELAY_TSPU_RESTORED = """✅ <b>Доступность узла из РФ восстановлена</b>
 
@@ -137,7 +137,7 @@ ALERT_CDN_INGRESS_PROBLEM_REMINDER = """⚠️ <b>Напоминание: Сбо
 
 🔍 <i>Проверьте Яндекс Облако (баланс, сертификат и статус CDN).</i>"""
 
-ALERT_RELAY_TSPU_PROBLEM_REMINDER = """🚨 <b>Напоминание: Сбой доступности узла из РФ (ТСПУ) продолжается ({hours_text})</b>
+ALERT_RELAY_TSPU_PROBLEM_REMINDER = """⚠️ <b>Напоминание: Сбой доступности узла из РФ продолжается ({hours_text})</b>
 
 🌍 Сервер: <b>{relay_name}</b> (<code>{relay_ip}:{relay_port}</code>)
 📡 Контрольный узел: <b>{origin_name}</b> (Москва, ID: {origin_id})
