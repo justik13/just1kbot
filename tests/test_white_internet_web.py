@@ -27,6 +27,9 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
         from bot.handlers import white_internet_web
         white_internet_web._ip_rate_limiter.buckets.clear()
         white_internet_web._token_rate_limiter.buckets.clear()
+        white_internet_web._report_ip_limiter.buckets.clear()
+        white_internet_web._report_token_limiter.buckets.clear()
+        white_internet_web._report_token_limiter.buckets.clear()
         self.default_user = User(id=10, telegram_id=777, is_banned=False, is_deleted=False)
         self.user_patcher = patch(
             "database.repositories.users_repo.get_user_by_id",
@@ -39,6 +42,9 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
         from bot.handlers import white_internet_web
         white_internet_web._ip_rate_limiter.buckets.clear()
         white_internet_web._token_rate_limiter.buckets.clear()
+        white_internet_web._report_ip_limiter.buckets.clear()
+        white_internet_web._report_token_limiter.buckets.clear()
+        white_internet_web._report_token_limiter.buckets.clear()
         super().tearDown()
 
     async def get_application(self):
@@ -1679,4 +1685,73 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                 self.assertEqual(mock_request.app.get("bot_username"), "real_bot")
         finally:
             wi_web._cached_bot_username = orig_cached
+
+    async def test_white_internet_report_success(self):
+        mock_session = AsyncMock()
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        mock_bot = AsyncMock()
+
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            token="wi-valid-report-token-12345678",
+            status=WhiteInternetStatus.ACTIVE,
+            active_hwids={},
+            device_limit=2,
+        )
+
+        with (
+            patch.dict(self.app, {"bot": mock_bot}),
+            patch("bot.handlers.white_internet_web.session_scope", fake_session_scope),
+            patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
+            patch("config.settings.get_settings") as mock_settings,
+            patch("utils.telegram.safe_send_message", new_callable=AsyncMock) as mock_send,
+        ):
+            mock_s = MagicMock()
+            mock_s.ADMIN_IDS = [123456]
+            mock_settings.return_value = mock_s
+            mock_send.return_value = 1001
+
+            payload = {"contact": "@wi_user", "message": "Проблема с Белым Интернетом"}
+            resp = await self.client.post("/sub/wl/wi-valid-report-token-12345678/report", json=payload)
+            self.assertEqual(resp.status, 200)
+            data = await resp.json()
+            self.assertTrue(data.get("ok"))
+
+            mock_send.assert_called_once()
+            admin_msg = mock_send.call_args[0][2]
+            self.assertIn("@wi_user", admin_msg)
+            self.assertIn("ACTIVE", admin_msg)
+            self.assertIn("Белый Интернет", admin_msg)
+
+    async def test_white_internet_report_validation_errors(self):
+        from bot.handlers import white_internet_web
+
+        # 1. Invalid token (< 16)
+        resp = await self.client.post("/sub/wl/short/report", json={"contact": "12345", "message": "12345"})
+        self.assertEqual(resp.status, 400)
+        white_internet_web._report_ip_limiter.buckets.clear()
+        white_internet_web._report_token_limiter.buckets.clear()
+
+        # 2. Contact too short (< 3)
+        resp = await self.client.post("/sub/wl/wi-valid-report-token-12345678/report", json={"contact": "12", "message": "12345"})
+        self.assertEqual(resp.status, 400)
+        white_internet_web._report_ip_limiter.buckets.clear()
+        white_internet_web._report_token_limiter.buckets.clear()
+
+        # 3. Contact too long (> 120)
+        resp = await self.client.post("/sub/wl/wi-valid-report-token-12345678/report", json={"contact": "b" * 121, "message": "12345"})
+        self.assertEqual(resp.status, 400)
+        white_internet_web._report_ip_limiter.buckets.clear()
+        white_internet_web._report_token_limiter.buckets.clear()
+
+        # 4. Message too short (< 5)
+        resp = await self.client.post("/sub/wl/wi-valid-report-token-12345678/report", json={"contact": "12345", "message": "1234"})
+        self.assertEqual(resp.status, 400)
+
 

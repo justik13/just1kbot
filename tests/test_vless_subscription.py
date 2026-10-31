@@ -29,6 +29,9 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
         from bot.handlers import vless_web
         vless_web._ip_rate_limiter.buckets.clear()
         vless_web._token_rate_limiter.buckets.clear()
+        vless_web._report_ip_limiter.buckets.clear()
+        vless_web._report_token_limiter.buckets.clear()
+        vless_web._report_token_limiter.buckets.clear()
         from database.repositories import system_settings_repo
         system_settings_repo._SETTINGS_CACHE.clear()
 
@@ -65,6 +68,9 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
         from bot.handlers import vless_web
         vless_web._ip_rate_limiter.buckets.clear()
         vless_web._token_rate_limiter.buckets.clear()
+        vless_web._report_ip_limiter.buckets.clear()
+        vless_web._report_token_limiter.buckets.clear()
+        vless_web._report_token_limiter.buckets.clear()
         from database.repositories import system_settings_repo
         system_settings_repo._SETTINGS_CACHE.clear()
         super().tearDown()
@@ -2455,6 +2461,9 @@ class TestVlessFeedDynamicBotUrls(AioHTTPTestCase):
         from bot.handlers import vless_web
         vless_web._ip_rate_limiter.buckets.clear()
         vless_web._token_rate_limiter.buckets.clear()
+        vless_web._report_ip_limiter.buckets.clear()
+        vless_web._report_token_limiter.buckets.clear()
+        vless_web._report_token_limiter.buckets.clear()
         from database.repositories import system_settings_repo
         system_settings_repo._SETTINGS_CACHE.clear()
 
@@ -2490,6 +2499,9 @@ class TestVlessFeedDynamicBotUrls(AioHTTPTestCase):
         from bot.handlers import vless_web
         vless_web._ip_rate_limiter.buckets.clear()
         vless_web._token_rate_limiter.buckets.clear()
+        vless_web._report_ip_limiter.buckets.clear()
+        vless_web._report_token_limiter.buckets.clear()
+        vless_web._report_token_limiter.buckets.clear()
         super().tearDown()
 
     async def get_application(self):
@@ -2535,6 +2547,114 @@ class TestVlessFeedDynamicBotUrls(AioHTTPTestCase):
             self.assertEqual(resp.headers.get("Profile-Web-Page-Url"), "https://t.me/just1k13bot")
             self.assertNotIn("just1kbot", resp.headers.get("Support-Url", ""))
             self.assertNotIn("just1kbot", resp.headers.get("Profile-Web-Page-Url", ""))
+
+    async def test_vless_report_success(self):
+        mock_session = AsyncMock()
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=self.default_user),
+            patch("services.subscription.SubscriptionService.check_vpn_access", return_value=True),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=2),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_combined_quota", return_value=(1, 0, 1)),
+            patch("config.settings.get_settings") as mock_settings,
+            patch("utils.telegram.safe_send_message", new_callable=AsyncMock) as mock_send,
+        ):
+            mock_s = MagicMock()
+            mock_s.ADMIN_IDS = [123456]
+            mock_settings.return_value = mock_s
+            mock_send.return_value = 9999
+
+            payload = {"contact": "@my_contact", "message": "Проблема с подключением к узлу"}
+            resp = await self.client.post("/sub/access/test-token-valid-length-12345678/report", json=payload)
+            self.assertEqual(resp.status, 200)
+            data = await resp.json()
+            self.assertTrue(data.get("ok"))
+
+            # Delivery confirmation
+            mock_send.assert_called_once()
+            call_args = mock_send.call_args
+            admin_msg = call_args[0][2]
+            self.assertIn("@my_contact", admin_msg)
+            self.assertIn("ACTIVE", admin_msg)
+            self.assertIn("1 / 2", admin_msg)
+
+    async def test_vless_report_hold_status(self):
+        mock_session = AsyncMock()
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        hold_user = User(
+            id=42,
+            telegram_id=999,
+            username="hold_user",
+            is_banned=False,
+            is_deleted=False,
+            financial_hold=True,
+            device_limit=2,
+            current_tariff_id=1,
+            subscription_end=datetime.now(timezone.utc) + timedelta(days=5),
+        )
+
+        with (
+            patch("bot.handlers.vless_web.session_scope", fake_session_scope),
+            patch("database.repositories.vless_subscription_repo.get_subscription_by_token", return_value=self.default_sub),
+            patch("database.repositories.users_repo.get_user_by_id", return_value=hold_user),
+            patch("services.subscription.SubscriptionService.check_vpn_access", return_value=False),
+            patch("services.subscription.SubscriptionService.get_effective_device_limit", return_value=2),
+            patch("services.vless_subscription_service.VlessSubscriptionService.get_combined_quota", return_value=(0, 0, 0)),
+            patch("config.settings.get_settings") as mock_settings,
+            patch("utils.telegram.safe_send_message", new_callable=AsyncMock) as mock_send,
+        ):
+            mock_s = MagicMock()
+            mock_s.ADMIN_IDS = [123456]
+            mock_settings.return_value = mock_s
+            mock_send.return_value = 9999
+
+            payload = {"contact": "+79991234567", "message": "Финансовая блокировка, доступ ограничен"}
+            resp = await self.client.post("/sub/vless/test-token-valid-length-12345678/report", json=payload)
+            self.assertEqual(resp.status, 200)
+            admin_msg = mock_send.call_args[0][2]
+            self.assertIn("HOLD", admin_msg)
+
+    async def test_vless_report_validation_errors(self):
+        from bot.handlers import vless_web
+
+        # 1. Invalid token length (< 16)
+        resp = await self.client.post("/sub/access/short/report", json={"contact": "12345", "message": "12345"})
+        self.assertEqual(resp.status, 400)
+        vless_web._report_ip_limiter.buckets.clear()
+        vless_web._report_token_limiter.buckets.clear()
+
+        # 2. Contact too short (< 3)
+        resp = await self.client.post("/sub/access/test-token-valid-length-12345678/report", json={"contact": "12", "message": "12345"})
+        self.assertEqual(resp.status, 400)
+        vless_web._report_ip_limiter.buckets.clear()
+        vless_web._report_token_limiter.buckets.clear()
+
+        # 3. Contact too long (> 120)
+        resp = await self.client.post("/sub/access/test-token-valid-length-12345678/report", json={"contact": "a" * 121, "message": "12345"})
+        self.assertEqual(resp.status, 400)
+        vless_web._report_ip_limiter.buckets.clear()
+        vless_web._report_token_limiter.buckets.clear()
+
+        # 4. Message too short (< 5)
+        resp = await self.client.post("/sub/access/test-token-valid-length-12345678/report", json={"contact": "12345", "message": "1234"})
+        self.assertEqual(resp.status, 400)
+        vless_web._report_ip_limiter.buckets.clear()
+        vless_web._report_token_limiter.buckets.clear()
+
+        # 5. Invalid body format
+        resp = await self.client.post("/sub/access/test-token-valid-length-12345678/report", data="not json", headers={"Content-Type": "application/json"})
+        self.assertEqual(resp.status, 400)
+
 
 
 

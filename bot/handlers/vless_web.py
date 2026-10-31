@@ -32,6 +32,8 @@ _LANDING_INACTIVE_HTML = (_TEMPLATES_DIR / "vless_landing_inactive.html").read_t
 
 _ip_rate_limiter = HttpRateLimiter(rate_per_minute=60.0, burst=15)
 _token_rate_limiter = HttpRateLimiter(rate_per_minute=30.0, burst=10)
+_report_ip_limiter = HttpRateLimiter(rate_per_minute=5.0, burst=3)
+_report_token_limiter = HttpRateLimiter(rate_per_minute=3.0, burst=2)
 
 HWID_PATTERN = re.compile(r"^[a-zA-Z0-9_\-:]{3,128}$")
 
@@ -645,7 +647,159 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         return web.Response(status=200, text=b64_payload, headers=response_headers)
 
 
+async def vless_report_handler(request: web.Request) -> web.Response:
+    """Handle emergency contact reports from standard VLESS landing pages."""
+    client_ip = get_trusted_client_ip(request)
+    allowed_ip, retry_after_ip = _report_ip_limiter.check(client_ip)
+    if not allowed_ip:
+        return web.json_response(
+            {"ok": False, "error": texts.LANDING_REPORT_TOO_MANY_REQUESTS},
+            status=429,
+            headers={"Retry-After": str(retry_after_ip), "Cache-Control": "no-store"},
+        )
+
+    token = request.match_info.get("token", "").strip()
+    if not token or len(token) < 16:
+        return web.json_response(
+            {"ok": False, "error": texts.LANDING_REPORT_INVALID_LINK},
+            status=400,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    allowed_tok, retry_after_tok = _report_token_limiter.check(token)
+    if not allowed_tok:
+        return web.json_response(
+            {"ok": False, "error": texts.LANDING_REPORT_TOO_MANY_REQUESTS},
+            status=429,
+            headers={"Retry-After": str(retry_after_tok), "Cache-Control": "no-store"},
+        )
+
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response(
+            {"ok": False, "error": texts.LANDING_REPORT_INVALID_REQUEST},
+            status=400,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    if not isinstance(data, dict):
+        return web.json_response(
+            {"ok": False, "error": texts.LANDING_REPORT_INVALID_FORMAT},
+            status=400,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    contact_raw = data.get("contact")
+    message_raw = data.get("message")
+    if not isinstance(contact_raw, str) or not isinstance(message_raw, str):
+        return web.json_response(
+            {"ok": False, "error": texts.LANDING_REPORT_INVALID_FORMAT},
+            status=400,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    contact = contact_raw.strip()
+    message = message_raw.strip()
+
+    if len(contact) < 3 or len(contact) > 120:
+        return web.json_response(
+            {"ok": False, "error": texts.LANDING_REPORT_CONTACT_LENGTH_ERROR},
+            status=400,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    if len(message) < 5 or len(message) > 1000:
+        return web.json_response(
+            {"ok": False, "error": texts.LANDING_REPORT_MESSAGE_LENGTH_ERROR},
+            status=400,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    contact_escaped = html.escape(contact)
+    message_escaped = html.escape(message)
+
+    try:
+        async with session_scope() as session:
+            vless_sub = await vless_subscription_repo.get_subscription_by_token(session, token)
+            if not vless_sub:
+                return web.json_response(
+                    {"ok": False, "error": texts.LANDING_REPORT_INVALID_LINK},
+                    status=404,
+                    headers={"Cache-Control": "no-store"},
+                )
+            user = await users_repo.get_user_by_id(session, vless_sub.user_id)
+            if not user or getattr(user, "is_deleted", False):
+                return web.json_response(
+                    {"ok": False, "error": texts.LANDING_REPORT_INVALID_LINK},
+                    status=404,
+                    headers={"Cache-Control": "no-store"},
+                )
+
+            user_tag = f"@{html.escape(user.username)}" if user.username else "—"
+            user_info = f"ID: <code>{user.telegram_id}</code> ({user_tag})"
+            dev_limit = await SubscriptionService.get_effective_device_limit(session, user)
+            tariff_name = get_tariff_display_name(dev_limit)
+            total_active, _awg_active, _vless_active = await VlessSubscriptionService.get_combined_quota(session, user)
+            devices_info = f"{total_active} / {dev_limit if dev_limit > 0 else '—'}"
+            is_access_active = SubscriptionService.check_vpn_access(user)
+            if getattr(user, "is_banned", False):
+                sub_status = "BANNED"
+            elif getattr(user, "financial_hold", False):
+                sub_status = "HOLD"
+            elif not getattr(vless_sub, "is_active", True) or not is_access_active:
+                sub_status = "EXPIRED"
+            else:
+                sub_status = "ACTIVE"
+    except Exception as exc:
+        logger.error("Failed to query subscription info for emergency report: %s", exc)
+        return web.json_response(
+            {"ok": False, "error": texts.LANDING_REPORT_DELIVERY_FAILED},
+            status=500,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    category_name = f"{texts.LANDING_VLESS_PAGE_TITLE} ({tariff_name})" if tariff_name != "—" else texts.LANDING_VLESS_PAGE_TITLE
+    admin_text = texts.ADMIN_ALERT_EMERGENCY_SUPPORT.format(
+        user_info=user_info,
+        category=category_name,
+        sub_status=html.escape(sub_status),
+        devices_info=devices_info,
+        client_ip=html.escape(client_ip),
+        contact=contact_escaped,
+        message=message_escaped,
+    )
+
+    bot = request.app.get("bot")
+    delivered = False
+    if bot:
+        from config.settings import get_settings
+        from utils.telegram import safe_send_message
+
+        admin_ids = get_settings().ADMIN_IDS
+        for aid in admin_ids:
+            try:
+                msg_id = await safe_send_message(bot, aid, admin_text, parse_mode="HTML")
+                if msg_id is not None:
+                    delivered = True
+            except Exception as exc:
+                logger.error("Failed to send emergency support alert to admin %s: %s", aid, exc)
+    else:
+        logger.warning("Emergency support report received, but bot instance not set on app")
+
+    if not delivered:
+        return web.json_response(
+            {"ok": False, "error": texts.LANDING_REPORT_DELIVERY_FAILED},
+            status=502,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    return web.json_response({"ok": True}, headers={"Cache-Control": "no-store"})
+
+
 def setup_vless_web_routes(app: web.Application) -> None:
     """Register HTTP subscription feed route for VLESS access."""
     app.router.add_get("/sub/access/{token}", vless_subscription_feed_handler)
     app.router.add_get("/sub/vless/{token}", vless_subscription_feed_handler)
+    app.router.add_post("/sub/access/{token}/report", vless_report_handler)
+    app.router.add_post("/sub/vless/{token}/report", vless_report_handler)
