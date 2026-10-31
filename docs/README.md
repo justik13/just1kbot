@@ -7,8 +7,8 @@
 
 ## 📑 Каталог документов
 
-### 1. [AmneziaWG 2.0 Technical Reference](amnezia_docs.md)
-* **Назначение:** Спецификация используемого протокола AmneziaWG 2.0 (`amneziawg2`), форматы файлов `.conf` и `.vpn`, схема URI `vpn://...`, обфускационные параметры (`Jc`, `Jmin`, `Jmax`, `S1-S4`, `H1-H4`, `I1-I5`), особенности интеграции с нативным микросервисом `amnezia-api` и чеклист валидации.
+### 1. [AmneziaWG 2.0 Technical Reference [DEPRECATED / ARCHIVED]](amnezia_docs.md)
+* **Назначение:** Историческая спецификация протокола AmneziaWG 2.0 (`amneziawg2`), форматы файлов `.conf` и `.vpn`, схема URI `vpn://...`, обфускационные параметры (`Jc`, `Jmin`, `Jmax`, `S1-S4`, `H1-H4`, `I1-I5`). **Статус: ВЫВЕДЕН ИЗ ЭКСПЛУАТАЦИИ (OUT OF PRODUCTION)** в связи с ковровыми блокировками IP ТСПУ в РФ с конца октября 2026 года. Стандартная подписка переведена на VLESS TLS (`sub`-ссылка).
 
 ### 2. [Белые списки в РФ (Whitelist) Master Guide](WL/WHITELIST_MASTER_GUIDE.md)
 * **Назначение:** Полный независимый исследовательский справочник и база знаний по цензурной инфраструктуре ТСПУ/РКН и методам работы в условиях жестких белых списков (Default-Drop). Архитектура VLESS XHTTP over Yandex Cloud CDN, Bodiless GET Uplink (защита от 413 ошибок на CDN), Nginx Zero Buffering, VLESS-Vision туннелирование Origin ➔ Exit, а также детальный технический аудит и анализ применимости транспорта XDRIVE (`network: "xdrive"` из Xray-core v26.10.x).

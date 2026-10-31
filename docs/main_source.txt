@@ -16,6 +16,7 @@ https://docs.incy.cc/
 https://docs.incy.cc/llms.txt
 https://docs.incy.cc/ai-mcp/
 https://feedback.incy.cc/
+https://github.com/Happ-proxy/happ-desktop
 https://github.com/frkn-dev/fcore
 https://github.com/frkn-dev/selfhosted
 
@@ -28,6 +29,7 @@ https://yandex.cloud/ru/docs/security/ip-list
 ## Платежная система (ЮKassa)
 https://yookassa.ru/developers
 https://yookassa.ru/docs
+https://github.com/grandvan709/yookassa-to-mynalog
 
 ## Telegram API и Bot API
 https://telegram.org/
@@ -50,6 +52,7 @@ https://www.reddit.com/r/AmneziaVPN/
 ## Сетевая безопасность, ТСПУ и Xray-core
 https://ntc.party/
 https://github.com/net4people/bbs
+https://github.com/DanielLavrushin/tspu-docs
 https://github.com/XTLS/Xray-core
 https://github.com/XTLS/REALITY
 https://github.com/bol-van/zapret2

@@ -30,6 +30,25 @@
   https://github.com/net4people/bbs/issues/671
 - net4people/bbs Issue #663: Анализ деградации мобильных сетей при активации TUN и сниффинге Telegram (gohoski, its0ka, сентябрь 2026):
   https://github.com/net4people/bbs/issues/663
+- net4people/bbs Issue #657: Анализ DNS Hijacking на UDP:53 в РФ — перехват запросов 8.8.8.8, подмена на IP MSK-IX и поддельный NXDOMAIN (its0ka, сентябрь 2026):
+  https://github.com/net4people/bbs/issues/657
+- net4people/bbs Issue #662: Префиксная блокировка адресных диапазонов Cloudflare в РФ (TrickyBird, август-сентябрь 2026):
+  https://github.com/net4people/bbs/issues/662
+- DanielLavrushin/tspu-docs (Раздел 22): Аппаратная архитектура комплексов ТСПУ (РДП.РУ EcoFilter), двухстадийный цикл блокировки серверов за 5–15 минут, Fast Path (TCAM) и Slow Path (DPI):
+  https://github.com/DanielLavrushin/tspu-docs/blob/main/docs/protocol-blocking.md
+- bol-van/zapret2 (коммиты 27.10.2026): Реализация модуля `udp2icmp` — инкапсуляция UDP-потоков в ICMP Echo для обхода тяжелых очередей DPI ТСПУ:
+  https://github.com/bol-van/zapret2/commit/336338d1c79e61ef76fe1954388e6a2b85fa1e38
+- telemt/telemt Issue #617 & Mekotofeuka/MTPROTO_FIX_By_MEKO: Исследование проблемы «Telegram handshake timeout» на сетях РФ, лимиты TCP SYN и правила nftables/iptables с REJECT вместо DROP:
+  https://github.com/telemt/telemt/issues/617
+  https://github.com/Mekotofeuka/MTPROTO_FIX_By_MEKO
+- AlexeyLCP/lucx-ui (октябрь 2026): Реализация альтернативных транспортов — RakNet Minecraft обфускация (коммит lucx.319), OpenFlux v0.13.0 с мимикрией под Яндекс.Телемост (lucx.326) и MasterDNSVPN (lucx.327):
+  https://github.com/AlexeyLCP/lucx-ui
+- frkn-dev/fcore (31.10.2026): Архитектура динамических портов `node_ports` и сбора клиентских отчетов о блокировках `/v1/report/block`:
+  https://github.com/frkn-dev/fcore/commit/53066df75f7823521d0bb9988350eb81ecda39d5
+- LowderPlay/cheburcheck: Архитектура распределенного зондирования блокировок в РФ (измерение TTL-дистанции до ТСПУ через dpi_hop и проверка подмены DNS):
+  https://github.com/LowderPlay/cheburcheck
+- grandvan709/yookassa-to-mynalog: Архитектура фискализации платежей для самозанятых (НПД) в РФ после остановки встроенного сервиса ЮKassa, автоматическое аннулирование чеков при refund.succeeded:
+  https://github.com/grandvan709/yookassa-to-mynalog
 - bol-van/zapret: Архитектурный анализ фрагментации ClientHello при постквантовом TLS-Kyber/MLKEM768 и алгоритмы десинхронизации (tlsrec, fake, multisplit):
   https://github.com/bol-van/zapret/blob/master/docs/readme.md
 - hyperion-cs/dpi-checkers (dpi-ch v0.13.0): TUI/CLI комплекс для анализа ТСПУ с субчекерами Siberian, l4-25, DNS-спуфинга НСДИ:
@@ -41,6 +60,9 @@
   https://telegra.ph/Perehod-na-SelfSteal-SNI-prostaya-i-gramotnaya-nastrojka-dlya-vashego-VPN-09-29
 
 ## Ядро Xray-core: релизы, спецификации и Pull Requests
+- Xray-core v26.10.29 и PR #5067 (VLESS Native Encryption ML-KEM-768 — постквантовое 0-RTT шифрование полезной нагрузки для предотвращения детекции и оверхеда двойного TLS поверх CDN):
+  https://github.com/XTLS/Xray-core/releases/tag/v26.10.29
+  https://github.com/XTLS/Xray-core/pull/5067
 - Xray-core v26.9.30 (Тег prerelease: true, транспорт XDRIVE, PR #5645, PR #6748, PR #6754):
   https://github.com/XTLS/Xray-core/releases/tag/v26.9.30
   https://github.com/XTLS/Xray-core/pull/5645
