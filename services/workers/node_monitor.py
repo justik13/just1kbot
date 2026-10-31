@@ -381,7 +381,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                     )
                     xray_ok = False
                 else:
-                    async with XrayNodeClient(timeout=15.0) as xray_client:
+                    async with XrayNodeClient(timeout=25.0) as xray_client:
                         xray_ok, xray_epoch, xray_data = await xray_client.check_health(
                             xray_url, server.api_key
                         )
