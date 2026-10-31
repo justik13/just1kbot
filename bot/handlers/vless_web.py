@@ -745,11 +745,9 @@ async def vless_report_handler(request: web.Request) -> web.Response:
             is_access_active = SubscriptionService.check_vpn_access(user)
             if getattr(user, "is_banned", False):
                 sub_status = "BANNED"
-            elif getattr(user, "on_hold", False):
+            elif getattr(user, "financial_hold", False):
                 sub_status = "HOLD"
-            elif getattr(user, "vpn_disabled", False):
-                sub_status = "DISABLED"
-            elif user.tariff_id is None or not is_access_active:
+            elif not getattr(vless_sub, "is_active", True) or not is_access_active:
                 sub_status = "EXPIRED"
             else:
                 sub_status = "ACTIVE"
