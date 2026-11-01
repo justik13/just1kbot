@@ -72,13 +72,7 @@ async def admin_user_devices(
     )
     now = now_utc()
 
-    if not profiles:
-        text = (
-            f"{header}"+
-            texts.ADMIN_USERS_DEVICE_DEVICES_POLZOVATELYA_ID.format(telegram_id=telegram_id)+
-            texts.ADMIN_USERS_DEVICE_U_POLZOVATELYA_POKA_NET_SOZDAN.format()
-        )
-    else:
+    if profiles:
         lines = [texts.ADMIN_USER_DEVICES_HEADER.format(header=header, telegram_id=telegram_id)]
         for profile in profiles:
             name = (
@@ -125,6 +119,8 @@ async def admin_user_devices(
                 texts.ADMIN_USERS_DEVICE_AKTIVNOST.format(last_conn=last_conn)
             )
         text = "\n".join(lines)
+    else:
+        text = header
 
     # VLESS subscription & active HWIDs
     from database.repositories import vless_subscription_repo

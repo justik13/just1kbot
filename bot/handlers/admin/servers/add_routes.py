@@ -53,20 +53,18 @@ async def start_add_server(
 
     builder = InlineKeyboardBuilder()
     if filter_type == "std":
-        builder.button(text=texts.ADMIN_SERVER_BTN_PROTO_AWG, callback_data="admin_server_add_proto:amneziawg2:std")
         builder.button(text=texts.ADMIN_SERVER_BTN_PROTO_VLESS, callback_data="admin_server_add_proto:vless:std")
         builder.button(text=texts.ADMIN_BTN_BACK_TO_SERVERS, callback_data=back_target)
-        builder.adjust(1, 1, 1)
+        builder.adjust(1, 1)
     elif filter_type == "wi":
         builder.button(text=texts.ADMIN_SERVER_BTN_PROTO_XRAY, callback_data="admin_server_add_proto:xray:wi")
         builder.button(text=texts.ADMIN_BTN_BACK_TO_SERVERS, callback_data=back_target)
         builder.adjust(1, 1)
     else:
-        builder.button(text=texts.ADMIN_SERVER_BTN_PROTO_AWG, callback_data="admin_server_add_proto:amneziawg2")
         builder.button(text=texts.ADMIN_SERVER_BTN_PROTO_VLESS, callback_data="admin_server_add_proto:vless")
         builder.button(text=texts.ADMIN_SERVER_BTN_PROTO_XRAY, callback_data="admin_server_add_proto:xray")
         builder.button(text=texts.ADMIN_BTN_BACK_TO_SERVERS, callback_data=back_target)
-        builder.adjust(1, 1, 1, 1)
+        builder.adjust(1, 1, 1)
 
     await callback.message.edit_text(
         texts.ADMIN_SERVER_SELECT_PROTO_PROMPT,
@@ -87,6 +85,10 @@ async def select_add_server_protocol(
     parts = callback.data.split(":")
     protocol = parts[1]
     filter_type = parts[2] if len(parts) > 2 else None
+
+    if protocol in AMNEZIA_PROTOCOLS:
+        await callback.answer(texts.ALERT_AMNEZIA_DECOMMISSIONED, show_alert=True)
+        return
 
     await callback.answer(show_alert=False)
     await state.set_state(AdminStates.adding_server)

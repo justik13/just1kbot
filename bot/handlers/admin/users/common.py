@@ -84,7 +84,10 @@ def format_user_card_text(
         valid_until_str = format_datetime(user.subscription_end)
         days_left_str = format_days_left(user.subscription_end)
         total_dev = amnezia_count + vless_hwid_count
-        devices_count = f"{total_dev} (VLESS: {vless_hwid_count}, Amnezia: {amnezia_count})"
+        if amnezia_count > 0:
+            devices_count = f"{total_dev} (VLESS: {vless_hwid_count}, Amnezia: {amnezia_count})"
+        else:
+            devices_count = f"{vless_hwid_count}"
         device_limit = resolved_limit
     elif has_wi and wi_sub:
         valid_until_str = format_datetime(wi_sub.expires_at) if wi_sub.expires_at else "—"
@@ -95,7 +98,10 @@ def format_user_card_text(
         valid_until_str = format_datetime(user.subscription_end)
         days_left_str = format_days_left(user.subscription_end)
         total_dev = amnezia_count + vless_hwid_count
-        devices_count = f"{total_dev} (VLESS: {vless_hwid_count}, Amnezia: {amnezia_count})"
+        if amnezia_count > 0:
+            devices_count = f"{total_dev} (VLESS: {vless_hwid_count}, Amnezia: {amnezia_count})"
+        else:
+            devices_count = f"{vless_hwid_count}"
         device_limit = resolved_limit
 
     awg_total = getattr(user, "total_traffic_bytes", 0) or 0
@@ -108,12 +114,18 @@ def format_user_card_text(
         awg_m, vless_m, wi_m = 0, 0, 0
 
     total_traffic_str = format_traffic(awg_total + wi_total)
-    total_traffic_str += texts.ADMIN_USER_TRAFFIC_MONTHLY_BREAKDOWN.format(
-        monthly_std=format_traffic(awg_m + vless_m),
-        monthly_awg=format_traffic(awg_m),
-        monthly_vless=format_traffic(vless_m),
-        monthly_wi=format_traffic(wi_m),
-    )
+    if awg_m > 0:
+        total_traffic_str += texts.ADMIN_USER_TRAFFIC_MONTHLY_BREAKDOWN.format(
+            monthly_std=format_traffic(awg_m + vless_m),
+            monthly_awg=format_traffic(awg_m),
+            monthly_vless=format_traffic(vless_m),
+            monthly_wi=format_traffic(wi_m),
+        )
+    else:
+        total_traffic_str += texts.ADMIN_USER_TRAFFIC_MONTHLY_BREAKDOWN_VLESS.format(
+            monthly_std=format_traffic(vless_m),
+            monthly_wi=format_traffic(wi_m),
+        )
 
     card_text = texts.ADMIN_USER_CARD.format(
         telegram_id=user.telegram_id,

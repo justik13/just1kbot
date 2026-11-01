@@ -237,6 +237,8 @@ DASHBOARD_USERS_I_SUBSCRIPTION = """📊 <b>Пользователи и Подп
 
 DASHBOARD_VPN_SERVERS_I_POOL_IP = """🖥 <b>Серверы и Пул IP:</b>
 """
+ADMIN_DASHBOARD_SERVERS_SECTION = """🖥 <b>Серверы:</b>
+"""
 
 DASHBOARD_VVOD_SSYLKI_MTPROTO_PROXY = """🚀 <b>Ввод ссылки MTProto Proxy:</b>
 
