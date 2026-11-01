@@ -68,6 +68,28 @@ def resolve_relay_db_health(
         if k in health_dict:
             ui_entry[k] = health_dict[k]
 
+    if is_healthy:
+        ui_entry["healthy"] = True
+        ui_entry["error"] = None
+        if "reachable" in health_dict:
+            ui_entry["reachable"] = health_dict["reachable"]
+        elif "reachable" in ui_entry:
+            ui_entry["reachable"] = True
+        if "status" in health_dict:
+            ui_entry["status"] = health_dict["status"]
+        elif "status" in ui_entry:
+            ui_entry["status"] = "online"
+    else:
+        ui_entry["healthy"] = False
+        if "reachable" in health_dict:
+            ui_entry["reachable"] = health_dict["reachable"]
+        elif "reachable" in ui_entry:
+            ui_entry["reachable"] = False
+        if "status" in health_dict:
+            ui_entry["status"] = health_dict["status"]
+        elif "status" in ui_entry:
+            ui_entry["status"] = "offline"
+
     db_entry = dict(base_dict)
     if is_healthy:
         for k in ("healthy", "rtt_ms", "error", "reachable", "status"):
@@ -75,6 +97,14 @@ def resolve_relay_db_health(
                 db_entry[k] = health_dict[k]
         db_entry["healthy"] = True
         db_entry["error"] = None
+        if "reachable" in health_dict:
+            db_entry["reachable"] = health_dict["reachable"]
+        elif "reachable" in db_entry:
+            db_entry["reachable"] = True
+        if "status" in health_dict:
+            db_entry["status"] = health_dict["status"]
+        elif "status" in db_entry:
+            db_entry["status"] = "online"
     else:
         r_ip = str(base_dict.get("ip") or "").strip()
         r_port = base_dict.get("port") or 10443
@@ -82,7 +112,9 @@ def resolve_relay_db_health(
         r_key = f"{r_ip}:{r_port}" if r_ip else r_name
         probe_st = (
             relays_state.get(r_key)
+            or (relays_state.get(r_ip) if r_ip else None)
             or relays_state.get(r_name)
+            or relays_state.get(r_name.lower())
             or relays_state.get(code_str)
             or relays_state.get(code_str.lower())
             or relays_state.get(code_str.upper())
@@ -109,6 +141,14 @@ def resolve_relay_db_health(
                 if k in health_dict:
                     db_entry[k] = health_dict[k]
             db_entry["healthy"] = False
+            if "reachable" in health_dict:
+                db_entry["reachable"] = health_dict["reachable"]
+            elif "reachable" in db_entry:
+                db_entry["reachable"] = False
+            if "status" in health_dict:
+                db_entry["status"] = health_dict["status"]
+            elif "status" in db_entry:
+                db_entry["status"] = "offline"
         elif prev_healthy is True:
             # Protect PostgreSQL database state from poisoning on transient UI lag:
             # preserve previous healthy state, RTT, and error
@@ -128,6 +168,14 @@ def resolve_relay_db_health(
                 if k in health_dict:
                     db_entry[k] = health_dict[k]
             db_entry["healthy"] = False
+            if "reachable" in health_dict:
+                db_entry["reachable"] = health_dict["reachable"]
+            elif "reachable" in db_entry:
+                db_entry["reachable"] = False
+            if "status" in health_dict:
+                db_entry["status"] = health_dict["status"]
+            elif "status" in db_entry:
+                db_entry["status"] = "offline"
 
     return db_entry, ui_entry
 

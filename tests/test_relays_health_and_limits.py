@@ -617,20 +617,21 @@ class TestRelaysHealthAndNodeLimits(unittest.IsolatedAsyncioTestCase):
 
     def test_resolve_relay_db_health_monitor_confirmed_problem_sets_db_unhealthy(self):
         """Scenario 2: Monitor confirmed problem (is_problem=True) sets DB healthy=False."""
-        base_dict = {"name": "DE", "code": "de", "ip": "1.2.3.4", "port": 10443}
+        base_dict = {"name": "DE", "code": "de", "ip": "1.2.3.4", "port": 10443, "status": "online", "reachable": True}
         prev_dict = {
             "name": "DE",
             "code": "de",
             "healthy": True,
             "rtt_ms": 42.0,
             "error": None,
+            "status": "online",
+            "reachable": True,
         }
+        # Real node API /v1/relays/health response: only healthy, rtt_ms, error (no status/reachable)
         health_dict = {
             "healthy": False,
             "rtt_ms": None,
             "error": "Connection refused",
-            "reachable": False,
-            "status": "offline",
         }
         db_relays_state = {"de": {"is_problem": True, "fail_count": 3}}
 
@@ -643,6 +644,8 @@ class TestRelaysHealthAndNodeLimits(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(db_entry["reachable"])
         self.assertEqual(db_entry["status"], "offline")
         self.assertFalse(ui_entry["healthy"])
+        self.assertFalse(ui_entry["reachable"])
+        self.assertEqual(ui_entry["status"], "offline")
 
     def test_resolve_relay_db_health_previously_offline_sets_db_unhealthy(self):
         """Scenario 3: Previously offline (prev_healthy=False) sets DB healthy=False."""
@@ -675,7 +678,14 @@ class TestRelaysHealthAndNodeLimits(unittest.IsolatedAsyncioTestCase):
 
     def test_resolve_relay_db_health_recovery_sets_db_healthy(self):
         """Scenario 4: Relay recovery (is_healthy=True) sets DB healthy=True."""
-        base_dict = {"name": "DE", "code": "de", "ip": "1.2.3.4", "port": 10443}
+        base_dict = {
+            "name": "DE",
+            "code": "de",
+            "ip": "1.2.3.4",
+            "port": 10443,
+            "status": "offline",
+            "reachable": False,
+        }
         prev_dict = {
             "name": "DE",
             "code": "de",
@@ -685,12 +695,11 @@ class TestRelaysHealthAndNodeLimits(unittest.IsolatedAsyncioTestCase):
             "status": "offline",
             "reachable": False,
         }
+        # Real node API /v1/relays/health recovery: no explicit status/reachable keys
         health_dict = {
             "healthy": True,
             "rtt_ms": 35.0,
             "error": None,
-            "reachable": True,
-            "status": "online",
         }
         db_relays_state = {"de": {"is_problem": True}}
 
@@ -704,6 +713,8 @@ class TestRelaysHealthAndNodeLimits(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(db_entry["reachable"])
         self.assertEqual(db_entry["status"], "online")
         self.assertTrue(ui_entry["healthy"])
+        self.assertTrue(ui_entry["reachable"])
+        self.assertEqual(ui_entry["status"], "online")
 
     def test_resolve_relay_db_health_unseen_relay_failure_sets_db_unhealthy(self):
         """Scenario 5: Unseen relay (prev_healthy=None, monitor not problem) sets DB healthy=False."""
