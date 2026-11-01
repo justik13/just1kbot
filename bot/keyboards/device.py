@@ -36,8 +36,8 @@ def get_device_keyboard(
         adjustments.append(1)
 
     builder.button(
-        text=texts.BTN_BACK_TO_DEVICES,
-        callback_data="back_to_amnezia_devices",
+        text=texts.BTN_BACK_TO_CONNECTION,
+        callback_data="back_to_connections",
     )
     builder.button(
         text=texts.BTN_MAIN_MENU_NAV,

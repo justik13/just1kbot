@@ -15,10 +15,7 @@ from config.enums import WhiteInternetProvisioningStatus
 from database.models import Server, Tariff, User, VlessSubscription, WhiteInternetSubscription
 from database.repositories import white_internet_repo
 from database.repositories.white_internet_repo import count_active_hwids
-from database.repositories.profiles_repo import (
-    PROFILE_QUOTA_EXCLUDED_STATUSES,
-    get_user_profiles,
-)
+from database.repositories.profiles_repo import get_user_profiles
 from database.repositories.tariffs_repo import get_tariff_by_id
 from database.repositories.users_repo import (
     get_user_by_telegram_id,
@@ -72,22 +69,12 @@ def format_user_card_text(
     else:
         ban_str = texts.STATUS_NOT_BANNED_BADGE
 
-    from database.repositories.profiles_repo import PROFILE_QUOTA_EXCLUDED_STATUSES
-    amnezia_count = len([
-        p for p in profiles
-        if getattr(p, "provisioning_status", "") not in PROFILE_QUOTA_EXCLUDED_STATUSES
-    ])
-
     resolved_limit = effective_device_limit if effective_device_limit is not None else (user.device_limit or 0)
 
     if has_awg:
         valid_until_str = format_datetime(user.subscription_end)
         days_left_str = format_days_left(user.subscription_end)
-        total_dev = amnezia_count + vless_hwid_count
-        if amnezia_count > 0:
-            devices_count = f"{total_dev} (VLESS: {vless_hwid_count}, Amnezia: {amnezia_count})"
-        else:
-            devices_count = f"{vless_hwid_count}"
+        devices_count = f"{vless_hwid_count}"
         device_limit = resolved_limit
     elif has_wi and wi_sub:
         valid_until_str = format_datetime(wi_sub.expires_at) if wi_sub.expires_at else "—"
@@ -97,11 +84,7 @@ def format_user_card_text(
     else:
         valid_until_str = format_datetime(user.subscription_end)
         days_left_str = format_days_left(user.subscription_end)
-        total_dev = amnezia_count + vless_hwid_count
-        if amnezia_count > 0:
-            devices_count = f"{total_dev} (VLESS: {vless_hwid_count}, Amnezia: {amnezia_count})"
-        else:
-            devices_count = f"{vless_hwid_count}"
+        devices_count = f"{vless_hwid_count}"
         device_limit = resolved_limit
 
     awg_total = getattr(user, "total_traffic_bytes", 0) or 0
@@ -116,8 +99,6 @@ def format_user_card_text(
     total_traffic_str = format_traffic(awg_total + wi_total)
     total_traffic_str += texts.ADMIN_USER_TRAFFIC_MONTHLY_BREAKDOWN.format(
         monthly_std=format_traffic(awg_m + vless_m),
-        monthly_awg=format_traffic(awg_m),
-        monthly_vless=format_traffic(vless_m),
         monthly_wi=format_traffic(wi_m),
     )
 
@@ -413,11 +394,6 @@ async def _build_users_list_text_and_kb(
                 f"@{user.username}" if user.username else texts.ADMIN_USER_ID_FORMAT.format(telegram_id=user.telegram_id)
             )
 
-            awg_profiles_count = (
-                len([p for p in user.profiles if getattr(p, "provisioning_status", None) not in PROFILE_QUOTA_EXCLUDED_STATUSES])
-                if user.profiles
-                else 0
-            )
             vless_hwid_count = (
                 count_active_hwids(getattr(vless_sub, "active_hwids", None), now=current_time)
                 if vless_sub
@@ -426,13 +402,13 @@ async def _build_users_list_text_and_kb(
 
             if has_awg:
                 days = format_days_left(user.subscription_end)
-                profiles_count = awg_profiles_count + vless_hwid_count
+                profiles_count = vless_hwid_count
             elif has_wi and wi_sub and wi_sub.expires_at:
                 days = format_days_left(wi_sub.expires_at)
                 profiles_count = count_active_hwids(wi_sub.active_hwids, now=current_time)
             else:
                 days = format_days_left(user.subscription_end)
-                profiles_count = awg_profiles_count + vless_hwid_count
+                profiles_count = vless_hwid_count
 
             button_text = truncate_button_text(
                 texts.COMMON_USTR.format(status=status, ban=ban, username=username, days=days, profiles_count=profiles_count)

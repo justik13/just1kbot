@@ -115,10 +115,6 @@ async def _ensure_bot_unblocked(
 
 
 async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[str, InlineKeyboardMarkup]:
-    from database.repositories.profiles_repo import (
-        PROFILE_QUOTA_EXCLUDED_STATUSES,
-        get_user_profiles,
-    )
     from database.repositories import vless_subscription_repo
     from bot.formatters import format_days_left, format_subscription_date
 
@@ -126,7 +122,6 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
     is_admin = db_user.telegram_id in get_settings().ADMIN_IDS
     name = safe(db_user.first_name or texts.USER_HUB_START)
     balance = await get_account_balance(session, user_id=db_user.id)
-    profiles = await get_user_profiles(session, db_user.id)
 
     from database.repositories.white_internet_repo import count_active_hwids, get_subscription_by_user_id
     from config.enums import WhiteInternetStatus
@@ -154,10 +149,6 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
     valid_until_str = format_subscription_date(db_user.subscription_end) if db_user.subscription_end else texts.PLACEHOLDER_DASH
     days_left_str = format_days_left(db_user.subscription_end) if db_user.subscription_end else texts.ZERO_DAYS_LABEL
 
-    quota_profiles_count = len([
-        p for p in profiles
-        if getattr(p, "provisioning_status", "") not in PROFILE_QUOTA_EXCLUDED_STATUSES
-    ])
     vless_hwid_count = 0
     try:
         async with session.begin_nested():
@@ -172,7 +163,7 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
         )
         vless_hwid_count = 0
 
-    devices_count = quota_profiles_count + vless_hwid_count
+    devices_count = vless_hwid_count
     device_limit = await SubscriptionService.get_effective_device_limit(session, db_user)
 
     white_internet_line = ""

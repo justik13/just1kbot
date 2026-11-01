@@ -30,7 +30,6 @@ from database.repositories.idempotency_repo import (
     check_and_record_admin_op,
     make_admin_op_key,
 )
-from database.repositories.profiles_repo import get_user_profiles_count
 from database.repositories.tariffs_repo import get_tariff_by_id
 from database.repositories.users_repo import get_user_by_telegram_id
 from services.audit_service import AuditService
@@ -88,10 +87,9 @@ async def admin_subscription_menu(
         return
 
     has_active = _is_subscription_active(user)
-    profiles_count = await get_user_profiles_count(session, user.id)
     from database.repositories import vless_subscription_repo
     vless_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
-    total_devices = profiles_count + vless_count
+    total_devices = vless_count
 
     tariff_name = texts.PLACEHOLDER_DASH
     device_limit = user.device_limit or 0

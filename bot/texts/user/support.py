@@ -1,15 +1,6 @@
 """Domain texts for user/support.py."""
 from __future__ import annotations
 
-AMNEZIA_DOCS = "https://storage.googleapis.com/amnezia/docs?m-path=/"
-AMNEZIA_DOWNLOAD_MIRROR = "https://storage.googleapis.com/amnezia/amnezia.org?m-path=/downloads"
-AMNEZIA_GITHUB_LATEST = "https://github.com/amnezia-vpn/amnezia-client/releases/latest"
-AMNEZIA_IOS_RU = "https://storage.googleapis.com/amnezia/docs?m-path=/documentation/instructions/installing-amneziavpn-on-ios/"
-AMNEZIA_OFFICIAL_SITE = "https://storage.googleapis.com/amnezia/amnezia.org"
-AMNEZIA_SPLIT_TUNNELING = "https://storage.googleapis.com/amnezia/docs?m-path=/documentation/instructions/vpn-split-tunneling/"
-AMNEZIA_WIN_INSTALL = "https://storage.googleapis.com/amnezia/docs?m-path=/documentation/instructions/installing-app-on-windows/"
-AMNEZIA_WIN_UPDATE = "https://storage.googleapis.com/amnezia/docs?m-path=/documentation/instructions/application-update-on-windows/"
-
 BTN_PRIVACY_POLICY = "🔒 Политика"
 
 BTN_TOS = "📄 Условия сервиса"
@@ -72,14 +63,6 @@ PRIVACY_POLICY_URL = "https://telegra.ph/Politika-konfidencialnosti-07-23-84"
 
 SUPPORT = "❓ Частые вопросы"
 
-SUPPORT_DOWNLOAD_CLIENT_TEXT = """📥 <b>Скачать клиент Amnezia для подключения</b>
-
-Официальные ссылки для загрузки приложения AmneziaVPN для Windows, Android, iOS, macOS и Linux:
-
-• <b>Прямая ссылка (Зеркало)</b> — загрузка последней сборки клиента
-• <b>GitHub Releases</b> — релизы и бинарные файлы всех версий
-• <b>Официальный сайт Amnezia</b> — подробная информация"""
-
 SUPPORT_GREETING_TEMPLATE = "Здравствуйте! Мой ID: {telegram_id}"
 SUPPORT_TOPUP_GREETING_TEMPLATE = (
     "Здравствуйте! Мой ID: {telegram_id}. Вопрос по пополнению баланса на {price} ₽ (заказ #{order_ref})."
@@ -126,10 +109,6 @@ SUPPORT_INCY_INSTRUCTION_TEXT = """📱 <b>Инструкция по подкл�
 • <b>Одна ссылка на все устройства:</b> используйте одну и ту же ссылку на телефоне, планшете и компьютере в рамках лимита вашего тарифа.
 • <b>Банки и Госуслуги:</b> работают напрямую на полной скорости вашего интернета, отключать приложение не нужно."""
 
-SUPPORT_IOS_INSTRUCTION_TEXT = """🍏 <b>Установка AmneziaVPN на iOS для жителей России</b>
-
-Подробное пошаговое руководство по скачиванию и первичной настройке приложения AmneziaVPN на iPhone и iPad в условиях региональных ограничений App Store."""
-
 SUPPORT_SPLIT_TUNNELING_TEXT = """🔀 <b>Раздельное подключение (Исключения)</b>
 
 Раздельное подключение позволяет направлять через защищённый канал только нужные ресурсы, сохраняя обычную связь для остальных сервисов.
@@ -159,9 +138,5 @@ SUPPORT_TEXT = """💬 <b>Поддержка</b>
 👤 {support_username}
 
 Мы постараемся помочь как можно скорее."""
-
-SUPPORT_WINDOWS_INSTRUCTION_TEXT = """💻 <b>Инструкции для Windows</b>
-
-Руководства по установке и обновлению приложения AmneziaVPN на ПК под управлением Windows:"""
 
 TOS_AGREEMENT_URL = "https://telegra.ph/Polzovatelskoe-soglashenie-07-23-48"

@@ -1159,8 +1159,6 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("<b>Трафик туннелей:</b> 20.0 GiB", card_text)
         self.assertIn("• <b>Стандартный доступ (за месяц):</b> 13.0 GiB", card_text)
-        self.assertIn("├ AWG: 10.0 GiB", card_text)
-        self.assertIn("└ VLESS: 3.0 GiB", card_text)
         self.assertIn("• <b>Белый Интернет (за месяц):</b> 2.0 GiB", card_text)
 
     def test_format_user_card_resets_monthly_traffic_on_cycle_rotation(self):

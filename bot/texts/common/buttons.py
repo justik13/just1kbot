@@ -13,8 +13,6 @@ BTN_ADMIN_USER_LOGS = "📜 История действий (Логи)"
 
 BTN_ADMIN_USER_MESSAGE = "✉️ Написать пользователю"
 
-BTN_AMNEZIA_DOCS = "📚 Документация Amnezia"
-
 BTN_BACK = "← Назад"
 
 BTN_BACK_TO_DEVICE = "← Назад в устройство"
@@ -53,8 +51,6 @@ BTN_DISMISS_ALERT = "🗑 Прочитано"
 
 BTN_DISMISS_NOTIFICATION = "✅ Прочитано (убрать)"
 
-BTN_DOWNLOAD_AMNEZIA = "📥 Скачать клиент Amnezia"
-
 BTN_DOWNLOAD_MIRROR = "🌐 Скачать клиент (Зеркало)"
 
 BTN_ENABLE_SERVER = "🔘 Включить сервер"
@@ -68,8 +64,6 @@ BTN_FILTER_BY_TARIFF = "💎 По тарифам"
 BTN_FILTER_BY_TARIFF_ACTIVE = "• 💎 По тарифам •"
 
 BTN_HELP_INSTRUCTIONS = "ℹ️ Помощь и Инструкции"
-
-BTN_INSTALL_WINDOWS = "📥 Установка AmneziaVPN на Windows"
 
 BTN_INSTRUCTION_INCY = "📱 Инструкция (INCY / Happ)"
 
@@ -106,8 +100,6 @@ BTN_MY_BALANCE = "🎁 Мой баланс"
 BTN_MY_SUBSCRIPTION = "⏳ Моя подписка"
 
 BTN_NASTROJKI_MTPROTO_PROXY = "🚀 Настройки MTProto Proxy"
-
-BTN_OFFICIAL_SITE_AMNEZIA = "🏠 Официальный сайт Amnezia"
 
 BTN_OPEN_IOS_INSTRUCTION = "📖 Открыть инструкцию iOS"
 
@@ -146,8 +138,6 @@ BTN_SUPPORT = "💬 Поддержка"
 BTN_TARIFY_PODPISOK = "💎 Тарифы подписок"
 
 BTN_TO_SERVER = "⚙️ К серверу"
-
-BTN_UPDATE_WINDOWS = "🔄 Обновление AmneziaVPN на Windows"
 
 BTN_USERS_AND_BROADCAST = "👥 Пользователи и Рассылки"
 

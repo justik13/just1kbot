@@ -13,20 +13,15 @@ from bot import texts
 from bot.keyboards import get_back_button
 from config.settings import get_settings
 from database.models import User
-from database.repositories.profiles_repo import (
-    PROFILE_QUOTA_EXCLUDED_STATUSES,
-    get_user_profiles,
-)
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc
-from utils.formatters import format_datetime, format_traffic
-from utils.telegram import render_hub, safe
+from utils.telegram import render_hub
 
 logger = logging.getLogger(__name__)
 
 DEVICE_NAME_REGEX = re.compile(r"^[a-zA-Z\u0400-\u04FF0-9\s_#-]+$")
 
-_PROTOCOL_DISPLAY = {p: "AmneziaWG" for p in AMNEZIA_PROTOCOLS}
+_PROTOCOL_DISPLAY = {p: "Архивное подключение" for p in AMNEZIA_PROTOCOLS}
 
 
 def _format_protocol(raw_protocol: str | None) -> str:
@@ -89,15 +84,10 @@ async def _render_maintenance(
 async def _build_connections_screen(
     user: User,
     session: AsyncSession,
-    profiles: list,
+    profiles: list | None = None,
     *,
     read_only: bool = False,
 ) -> tuple[str, InlineKeyboardBuilder]:
-    quota_profiles_count = len([
-        p for p in profiles
-        if getattr(p, "provisioning_status", "") not in PROFILE_QUOTA_EXCLUDED_STATUSES
-    ])
-
     from database.repositories import vless_subscription_repo
     from services.vless_subscription_service import VlessSubscriptionService
 
@@ -118,7 +108,7 @@ async def _build_connections_screen(
     except Exception:
         vless_hwid_count = 0
 
-    total_active_devices = quota_profiles_count + vless_hwid_count
+    total_active_devices = vless_hwid_count
 
     device_limit = await _get_effective_device_limit(
         session,
@@ -185,11 +175,6 @@ async def _build_connections_screen(
                 callback_data="vless_sub_reset",
                 style="danger",
             )
-        if profiles:
-            builder.button(
-                text=texts.BTN_AMNEZIA_DEVICES_COUNT.format(count=len(profiles)),
-                callback_data="amnezia_devices",
-            )
 
     try:
         status_url = get_settings().STATUS_PAGE_URL
@@ -206,113 +191,6 @@ async def _build_connections_screen(
     )
 
     builder.adjust(1)
-    return rendered, builder
-
-
-async def _build_amnezia_screen(
-    user: User,
-    session: AsyncSession,
-    profiles: list,
-    *,
-    read_only: bool = False,
-) -> tuple[str, InlineKeyboardBuilder]:
-    quota_profiles_count = len([
-        p for p in profiles
-        if getattr(p, "provisioning_status", "") not in PROFILE_QUOTA_EXCLUDED_STATUSES
-    ])
-
-    from database.repositories import vless_subscription_repo
-    vless_hwid_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
-    total_active_devices = quota_profiles_count + vless_hwid_count
-
-    device_limit = await _get_effective_device_limit(
-        session,
-        user,
-    )
-
-    builder = InlineKeyboardBuilder()
-
-    from utils.traffic_helpers import get_user_monthly_standard_traffic
-
-    monthly_bytes = get_user_monthly_standard_traffic(user)
-    monthly_traffic_str = format_traffic(monthly_bytes)
-
-    if not profiles:
-        rendered = texts.AMNEZIA_SCREEN_EMPTY_TEXT.format(
-            active=total_active_devices,
-            limit=device_limit,
-            vless_count=vless_hwid_count,
-            monthly_traffic=monthly_traffic_str,
-        )
-    else:
-        profiles_block = "\n"
-        for profile in profiles:
-            server = profile.server
-
-            flag = server.country_flag if server else texts.EMOJI_GLOBE
-            server_name = server.name if server else texts.LABEL_UNKNOWN_CAP
-            raw_device_name = profile.device_name or texts.DEVICE_DEFAULT_NAME_TEMPLATE.format(slot=1)
-            btn_text = f"{flag} {raw_device_name}"
-            builder.button(
-                text=btn_text,
-                callback_data=f"manage_device:{profile.id}",
-            )
-
-            location_label = f"{flag} {safe(server_name)}"
-
-            dev_bytes = (getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0)
-            traffic_str = format_traffic(dev_bytes)
-            last_conn_str = format_datetime(profile.last_connected) if getattr(profile, "last_connected", None) else texts.CONNECTION_CONFIG_COMMON_NE_BYLO_AKTIVNOSTEY
-
-            profiles_block += texts.CONNECTION_DEVICE_ROW_FORMAT.format(
-                device_name=safe(profile.device_name),
-                location=location_label,
-                traffic=traffic_str,
-                last_conn=last_conn_str,
-            )
-            labels = {
-                "pending_create": texts.DEVICE_STATUS_CREATING,
-                "pending_update": texts.PROVISIONING_UPDATING,
-                "deleting": texts.DEVICE_STATUS_DELETING,
-                "create_failed": texts.PROVISIONING_CREATE_FAILED,
-                "create_cleanup_pending": texts.DEVICE_STATUS_CLEANUP,
-                "update_failed": texts.DEVICE_STATUS_UPDATE_ERROR,
-                "delete_failed": texts.PROVISIONING_DELETE_FAILED,
-            }
-            if profile.provisioning_status in labels:
-                profiles_block += texts.DEVICE_STATUS_LINE_FORMAT.format(v0=labels[profile.provisioning_status])
-
-        rendered = texts.AMNEZIA_SCREEN_TEXT.format(
-            active=total_active_devices,
-            limit=device_limit,
-            vless_count=vless_hwid_count,
-            amnezia_count=quota_profiles_count,
-            monthly_traffic=monthly_traffic_str,
-            profiles_block=profiles_block,
-        )
-
-    action_buttons_count = 0
-    if not read_only:
-        builder.button(
-            text=texts.BTN_BACK_TO_CONNECTION,
-            callback_data="back_to_connections",
-        )
-        action_buttons_count += 1
-
-    builder.button(
-        text=texts.BTN_MAIN_MENU_NAV,
-        callback_data="back_to_main_menu",
-    )
-    action_buttons_count += 1
-
-    # 2 columns for device buttons as requested by user
-    device_count = len(profiles)
-    sizes = [2] * (device_count // 2)
-    if device_count % 2 == 1:
-        sizes.append(1)
-    sizes.extend([1] * action_buttons_count)
-
-    builder.adjust(*sizes)
     return rendered, builder
 
 
@@ -335,24 +213,20 @@ async def _render_connections(
         user.telegram_id,
     )
 
-    visible_profiles = await get_user_profiles(
-        session,
-        user.id,
-    )
-    visible_profiles_count = len(visible_profiles)
-
     if not has_access:
-        if visible_profiles_count > 0:
-            rendered, builder = await _build_amnezia_screen(
+        if user.subscription_end:
+            rendered, builder = await _build_connections_screen(
                 user,
                 session,
-                visible_profiles,
                 read_only=True,
             )
-
             builder.button(
                 text=texts.BTN_BUY_ACCESS,
                 callback_data="menu_buy",
+            )
+            builder.button(
+                text=texts.BTN_MAIN_MENU_NAV,
+                callback_data="back_to_main_menu",
             )
             builder.adjust(1)
 
@@ -386,7 +260,6 @@ async def _render_connections(
     rendered, builder = await _build_connections_screen(
         user,
         session,
-        visible_profiles,
         read_only=False,
     )
 
@@ -404,36 +277,5 @@ async def _render_amnezia_devices(
     user: User,
     session: AsyncSession,
 ):
-    if not user:
-        await render_hub(
-            target.bot,
-            target.chat.id,
-            texts.ERROR_USER_NOT_FOUND,
-            get_back_button("back_to_main_menu"),
-        )
-        return
-
-    has_access = await SubscriptionService.check_access(
-        session,
-        user.telegram_id,
-    )
-    visible_profiles = await get_user_profiles(
-        session,
-        user.id,
-    )
-
-    rendered, builder = await _build_amnezia_screen(
-        user,
-        session,
-        visible_profiles,
-        read_only=not has_access,
-    )
-
-    await render_hub(
-        target.bot,
-        target.chat.id,
-        rendered,
-        builder.as_markup(),
-        trigger_message_id=getattr(target, "message_id", None),
-    )
+    await _render_connections(target, user, session)
 

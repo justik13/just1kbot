@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import re
 
@@ -8,65 +7,34 @@ from config.constants import (
     DEFAULT_AWG_MTU,
 )
 from aiogram import F, Router
-from aiogram.exceptions import (
-    TelegramBadRequest,
-    TelegramForbiddenError,
-    TelegramNetworkError,
-    TelegramRetryAfter,
-    TelegramServerError,
-)
 from aiogram.fsm.context import FSMContext
-from aiogram.types import BufferedInputFile, CallbackQuery
+from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from bot.keyboards import (
-    get_alt_connection_keyboard,
-    get_back_button,
     get_device_keyboard,
 )
 from database.models import User
 from database.repositories.profiles_repo import (
     ALLOWED_DELETE_STATES,
-    get_profile_by_id,
 )
 from database.repositories.servers_repo import get_server_by_id
 from services.subscription import SubscriptionService
-from utils.callbacks import parse_callback_id
 from utils.formatters import format_datetime, format_traffic
 from utils.telegram import (
-    _append_hub_document_unlocked,
-    _append_hub_message_unlocked,
-    _delete_hub_messages,
-    _get_hub_render_lock,
-    _hub_cache,
-    get_hub_ids,
     render_hub,
     safe,
 )
 from utils.vpn_parser import (
-    build_conf_file_from_dict,
-    build_vpn_file_from_dict,
-    customize_vpn_config_dict,
     customize_vpn_uri,
-    decode_vpn_uri_to_json,
 )
 
 from .common import _render_connections
 
 router = Router()
 logger = logging.getLogger(__name__)
-
-
-async def _get_safe_device_name(session: AsyncSession, profile) -> str:
-    server = await get_server_by_id(session, profile.server_id)
-    server_name = server.name if server else "server"
-    m = re.search(r'#(\d+)$', profile.device_name)
-    slot_suffix = f"_{m.group(1)}" if m else ""
-    return "".join(
-        c for c in f"{server_name}{slot_suffix}" if c.isalnum() or c in (" ", "_", "-")
-    ).strip().replace(" ", "_") or "client"
 
 
 def has_usable_vpn_uri(profile) -> bool:
@@ -248,28 +216,9 @@ async def manage_device(
     db_user: User | None = None,
 ):
     await state.clear()
-
-    profile_id = parse_callback_id(callback.data, 1)
-    if profile_id is None:
-        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
-        return
-
-    profile = await get_profile_by_id(session, profile_id)
-    if not profile or not db_user or profile.user_id != db_user.id:
-        await callback.answer(texts.CONNECTION_CONFIG_DEVICE_VIEW_DEVICE_NE_NAYDENO_ILI_BYLO, show_alert=True)
-        if db_user:
-            await _render_connections(callback.message, db_user, session)
-        return
-
-    await render_device_screen(
-        callback.bot,
-        callback.message.chat.id,
-        profile,
-        db_user,
-        session,
-    )
-    await callback.answer(show_alert=False)
-
+    await callback.answer(texts.ALERT_AMNEZIA_DECOMMISSIONED, show_alert=True)
+    if db_user:
+        await _render_connections(callback.message, db_user, session)
 
 
 @router.callback_query(F.data.startswith("device_help:"))
@@ -279,50 +228,10 @@ async def device_help(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    """Contextual help screen shown after 'Скачать файлом' / 'Показать ключ'.
-
-    Intentionally uses manage_device:{profile_id} as the back button so the
-    user returns to their device card, not to the generic support menu.
-    DO NOT replace the back button with menu_support — that breaks the device flow.
-    """
-    profile_id = parse_callback_id(callback.data, 1)
-    if profile_id is None:
-        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
-        return
-    profile = await get_profile_by_id(session, profile_id)
-    if not profile or not db_user or profile.user_id != db_user.id:
-        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
-        return
-
-    text = (
-        texts.CONNECTION_CONFIG_DEVICE_VIEW_INSTRUKTSII_I_SPRAVKA_AMNEZIAV+
-        texts.CONNECTION_CONFIG_DEVICE_VIEW_V_ETOM_RAZDELE_VY_NAYDETE_RUKO+
-        texts.CONNECTION_CONFIG_DEVICE_VIEW_SKACHIVANIYU_KLIENTA_I_NASTROY+
-        texts.CONNECTION_CONFIG_DEVICE_VIEW_PRAVILA_I_OSOBENNOSTI_RABOTY+
-        texts.CONNECTION_CONFIG_DEVICE_VIEW_NE_REKOMENDUETSYA_ISPOLZOVAT_T+
-        texts.CONNECTION_THIRD_PARTY_SERVICE_NOTICE+
-        texts.CONNECTION_CONFIG_DEVICE_VIEW_SELECT_NUZHNUYU_TEMU_BELOW
-    )
-
-    builder = InlineKeyboardBuilder()
-    suffix = f":device_{profile_id}"
-    builder.button(text=texts.BTN_DOWNLOAD_AMNEZIA, callback_data=f"help_download{suffix}")
-    builder.button(text=texts.BTN_INSTRUCTION_IOS, callback_data=f"help_ios{suffix}")
-    builder.button(text=texts.BTN_INSTRUCTION_WINDOWS, callback_data=f"help_windows{suffix}")
-    builder.button(text=texts.BTN_SPLIT_TUNNELING, callback_data=f"help_split{suffix}")
-    builder.button(text=texts.BTN_AMNEZIA_DOCS, url=texts.AMNEZIA_DOCS)
-    builder.button(text=texts.CONNECTION_DEVICES_DEVICE_BACK_TO_DEVICE, callback_data=f"manage_device:{profile_id}")
-    builder.adjust(1)
-
-    await render_hub(
-        callback.bot,
-        callback.message.chat.id,
-        text,
-        builder.as_markup(),
-        trigger_message_id=callback.message.message_id,
-    )
-    await callback.answer(show_alert=False)
-
+    await state.clear()
+    await callback.answer(texts.ALERT_AMNEZIA_DECOMMISSIONED, show_alert=True)
+    if db_user:
+        await _render_connections(callback.message, db_user, session)
 
 
 @router.callback_query(F.data.startswith("alt_connection:") | F.data.startswith("download_conf:"))
@@ -333,212 +242,9 @@ async def alt_connection(
     db_user: User | None = None,
 ):
     await state.clear()
-
-    profile_id = parse_callback_id(callback.data, 1)
-    if profile_id is None:
-        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
-        return
-
-    profile = await get_profile_by_id(session, profile_id)
-    if not profile or not db_user or profile.user_id != db_user.id:
-        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
-        return
-
-    has_access = await SubscriptionService.check_access(session, db_user.telegram_id)
-    if not has_access:
-        await callback.answer(texts.DEVICE_ACCESS_INACTIVE, show_alert=True)
-        return
-
-    await callback.answer(texts.DEVICE_CONFIG_GENERATING, show_alert=False)
-    try:
-        await callback.bot.send_chat_action(chat_id=callback.message.chat.id, action="upload_document")
-    except Exception:
-        pass
-
-    safe_device_name = await _get_safe_device_name(session, profile)
-
-    raw_config = profile.raw_config or ""
-    if not can_show_config_actions(profile) or not raw_config:
-        await render_hub(
-            callback.bot, callback.message.chat.id,
-            texts.DOWNLOAD_CONF_FALLBACK.format(device_name=safe(profile.device_name)),
-            get_back_button(f"manage_device:{profile.id}"),
-            trigger_message_id=callback.message.message_id,
-        )
-        return
-
-    try:
-        decoded = decode_vpn_uri_to_json(raw_config)
-        if decoded is None:
-            raise ValueError("Failed to decode raw_config to JSON")
-
-        server = await get_server_by_id(session, profile.server_id)
-        client_description = _client_description(profile, server)
-
-        customized_data = customize_vpn_config_dict(
-            decoded,
-            description=client_description,
-            dns1=DEFAULT_AWG_DNS1,
-            dns2=DEFAULT_AWG_DNS2,
-            mtu=DEFAULT_AWG_MTU,
-        )
-
-        vpn_content = build_vpn_file_from_dict(customized_data)
-        conf_content = build_conf_file_from_dict(customized_data)
-
-        if not vpn_content or not conf_content:
-            raise ValueError("Empty vpn or conf file content")
-    except Exception as exc:
-        logger.warning("Failed to prepare alt connection files for profile %s: %s", profile.id, exc)
-        await render_hub(
-            callback.bot, callback.message.chat.id,
-            texts.DOWNLOAD_CONF_FALLBACK.format(device_name=safe(profile.device_name)),
-            get_back_button(f"manage_device:{profile.id}"),
-            trigger_message_id=callback.message.message_id,
-        )
-        return
-
-    vpn_file = BufferedInputFile(vpn_content.encode("utf-8"), filename=f"{safe_device_name}.vpn")
-    conf_file = BufferedInputFile(conf_content.encode("utf-8"), filename=f"{safe_device_name}.conf")
-
-    chat_lock = _get_hub_render_lock(callback.message.chat.id)
-
-    async with chat_lock:
-        old_hub_ids = await get_hub_ids(callback.message.chat.id, session=session)
-
-        sent_doc_ids = []
-        vpn_sent = False
-        conf_sent = False
-        guide_sent = False
-
-        try:
-            try:
-                doc_msg_1 = await _append_hub_document_unlocked(
-                    callback.bot, callback.message.chat.id,
-                    document=vpn_file,
-                    caption=texts.DEVICE_CONFIG_VPN_CAPTION.format(device_name=safe(profile.device_name)),
-                    parse_mode="HTML",
-                )
-                sent_doc_ids.append(doc_msg_1)
-                vpn_sent = True
-            except (
-                TelegramNetworkError,
-                TelegramServerError,
-                TelegramRetryAfter,
-                TelegramForbiddenError,
-                asyncio.TimeoutError,
-            ) as e:
-                # Ambiguous delivery or transient server/network/flood failure:
-                # fail-closed to abort operation and preserve old hub.
-                logger.warning(
-                    "hub_orphan_suspected profile=%s context=alt_vpn: %s", profile.id, e,
-                )
-                raise
-            except TelegramBadRequest as e:
-                # Deterministic format/rejection error from Telegram:
-                # graceful degradation to text/key instructions.
-                logger.warning("Telegram rejected .vpn file for profile %s: %s", profile.id, e)
-                # Continue without setting vpn_sent = True
-
-            try:
-                doc_msg_2 = await _append_hub_document_unlocked(
-                    callback.bot, callback.message.chat.id,
-                    document=conf_file,
-                    caption=texts.DEVICE_CONFIG_CONF_CAPTION.format(device_name=safe(profile.device_name)),
-                    parse_mode="HTML",
-                )
-                sent_doc_ids.append(doc_msg_2)
-                conf_sent = True
-            except (
-                TelegramNetworkError,
-                TelegramServerError,
-                TelegramRetryAfter,
-                TelegramForbiddenError,
-                asyncio.TimeoutError,
-            ) as e:
-                logger.warning(
-                    "hub_orphan_suspected profile=%s context=alt_conf: %s", profile.id, e,
-                )
-                raise
-            except TelegramBadRequest as e:
-                logger.warning("Telegram rejected .conf file for profile %s: %s", profile.id, e)
-                # Continue without setting conf_sent = True
-
-            if vpn_sent and conf_sent:
-                files_info = (
-                    texts.CONNECTION_CONFIG_DEVICE_VIEW_1_SOKHRANITE_ODIN_IZ_PRIKREPLE+
-                    texts.CONNECTION_CONFIG_DEVICE_VIEW_VPN_FOR_PRILOZHENIYA_AMNEZIAV+
-                    texts.CONNECTION_CONFIG_DEVICE_VIEW_CONF_FOR_AMNEZIAWG_DEFAULTVPN
-                )
-            elif vpn_sent:
-                files_info = (
-                    texts.CONNECTION_CONFIG_DEVICE_VIEW_1_SOKHRANITE_PRIKREPLENNYY_FAY
-                )
-            elif conf_sent:
-                files_info = (
-                    texts.CONNECTION_GUIDE_SAVE_CONF_FILE
-                )
-            else:
-                escaped_key = safe(profile.raw_config or "")
-                key_block = (
-                    texts.CONNECTION_KEY_BLOCK_FORMAT.format(escaped_key=escaped_key)
-                    if len(escaped_key) <= 3500
-                    else texts.CONNECTION_CONFIG_DEVICE_VIEW_KEY_PODKLYUCHENIYA_DOSTUPEN
-                )
-                files_info = (
-                    texts.CONNECTION_CONFIG_DEVICE_VIEW_NE_UDALOS_PRIKREPIT_FAYLY_KONF+
-                    f"{key_block}"
-                )
-
-            alt_guide_text = (
-                texts.CONNECTION_CONFIG_DEVICE_VIEW_DRUGOY_SPOSOB_PODKLYUCHENIYA.format(safe_profile_device_name=safe(profile.device_name))+
-                texts.CONNECTION_CONFIG_DEVICE_VIEW_ESLI_PRYAMAYA_VSTAVKA_KEY+
-                f"{files_info}"+
-                texts.CONNECTION_CONFIG_DEVICE_VIEW_2_OTKROYTE_PRILOZHENIE_I_VYBER
-            )
-
-            try:
-                await _append_hub_message_unlocked(
-                    callback.bot, callback.message.chat.id,
-                    text=alt_guide_text,
-                    reply_markup=get_alt_connection_keyboard(profile.id),
-                    parse_mode="HTML",
-                )
-                guide_sent = True
-            except Exception as e:
-                logger.error("Failed to send instruction message for profile %s: %s", profile.id, e)
-
-            if guide_sent:
-                if old_hub_ids:
-                    try:
-                        failed_old = await asyncio.shield(_delete_hub_messages(callback.bot, callback.message.chat.id, old_hub_ids))
-                    except Exception as e:
-                        # Durable cleanup uncertain: invalidate cache so the next
-                        # render re-reads DB truth instead of hiding stale rows.
-                        _hub_cache.pop(callback.message.chat.id, None)
-                        failed_old = list(old_hub_ids)
-                        logger.error("Failed to delete old hub messages for profile %s: %s", profile.id, e)
-                    if failed_old:
-                        # Keep undeletable ids visible to the next render (cache mirrors DB truth).
-                        entry = _hub_cache.setdefault(
-                            callback.message.chat.id, {"ids": [], "effect_msg_id": None}
-                        )
-                        for fid in failed_old:
-                            if fid not in entry["ids"]:
-                                entry["ids"].append(fid)
-            else:
-                if sent_doc_ids:
-                    try:
-                        await asyncio.shield(_delete_hub_messages(callback.bot, callback.message.chat.id, sent_doc_ids))
-                    except Exception as clean_exc:
-                        logger.error("Failed to cleanup partial documents for profile %s: %s", profile.id, clean_exc)
-        except BaseException as root_exc:
-            if sent_doc_ids and not guide_sent:
-                try:
-                    await asyncio.shield(_delete_hub_messages(callback.bot, callback.message.chat.id, sent_doc_ids))
-                except Exception:
-                    pass
-            raise root_exc
+    await callback.answer(texts.ALERT_AMNEZIA_DECOMMISSIONED, show_alert=True)
+    if db_user:
+        await _render_connections(callback.message, db_user, session)
 
 
 async def render_vless_sub_screen(
