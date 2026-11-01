@@ -431,10 +431,25 @@ async def show_server_relays(
                                             db_relays_state.get(r_key)
                                             or db_relays_state.get(r_name)
                                             or db_relays_state.get(code_str)
+                                            or db_relays_state.get(code_str.lower())
+                                            or db_relays_state.get(code_str.upper())
                                             or {}
                                         )
                                         monitor_confirmed_offline = bool(probe_st.get("is_problem"))
-                                        prev_healthy = prev_dict.get("healthy")
+                                        if (
+                                            prev_dict.get("healthy") is True
+                                            or prev_dict.get("status") == "online"
+                                            or prev_dict.get("reachable") is True
+                                        ):
+                                            prev_healthy = True
+                                        elif (
+                                            prev_dict.get("healthy") is False
+                                            or prev_dict.get("status") == "offline"
+                                            or prev_dict.get("reachable") is False
+                                        ):
+                                            prev_healthy = False
+                                        else:
+                                            prev_healthy = None
 
                                         if monitor_confirmed_offline or prev_healthy is False:
                                             for k in ("healthy", "rtt_ms", "error", "reachable", "status"):
@@ -447,6 +462,14 @@ async def show_server_relays(
                                             db_entry["healthy"] = True
                                             db_entry["rtt_ms"] = prev_dict.get("rtt_ms")
                                             db_entry["error"] = prev_dict.get("error")
+                                            if "reachable" in prev_dict:
+                                                db_entry["reachable"] = prev_dict.get("reachable")
+                                            elif "reachable" in db_entry:
+                                                db_entry["reachable"] = True
+                                            if "status" in prev_dict:
+                                                db_entry["status"] = prev_dict.get("status")
+                                            elif "status" in db_entry:
+                                                db_entry["status"] = "online"
                                         else:
                                             for k in ("healthy", "rtt_ms", "error", "reachable", "status"):
                                                 if k in health_dict:
