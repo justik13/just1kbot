@@ -539,8 +539,9 @@ async def check_node_resources_and_alerts(bot: Bot):
                         st.consecutive_ingress_successes = int(db_extra.get("consecutive_ingress_successes") or 0)
                     saved_ing_start = db_extra.get("ingress_problem_started_at")
                     if saved_ing_start is not None and isinstance(saved_ing_start, (int, float)):
-                        diff = max(0.0, time.time() - float(saved_ing_start))
-                        st.ingress_problem_started_at = now_m - diff
+                        if st.ingress_problem_started_at is None:
+                            diff = max(0.0, time.time() - float(saved_ing_start))
+                            st.ingress_problem_started_at = now_m - diff
                     elif not db_ingress_problem and not st.ingress_problem:
                         st.ingress_problem_started_at = None
 
