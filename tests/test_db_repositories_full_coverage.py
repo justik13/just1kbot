@@ -5,6 +5,7 @@ from unittest.mock import patch
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from config.constants import AMNEZIA_PROTOCOL
 from database.models import (
     Tariff,
 )
@@ -99,6 +100,7 @@ class DBRepositoriesFullCoverageTests(unittest.IsolatedAsyncioTestCase):
                 country_flag="🇩🇪",
                 api_url="https://server1.example.test:8080",
                 api_key="secret_key_123",
+                protocol=AMNEZIA_PROTOCOL,
                 max_clients=10,
             )
             self.assertIsNotNone(s.id)
