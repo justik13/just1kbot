@@ -174,9 +174,13 @@ class ServerMonitorState:
                 self.ingress_problem = False
                 self.consecutive_ingress_fails = 0
                 self.consecutive_ingress_successes = 0
+                self.ingress_problem_started_at = None
+                self.last_ingress_reminder_at = None
                 self.cdn_problem = False
                 self.consecutive_cdn_fails = 0
                 self.consecutive_cdn_successes = 0
+                self.cdn_problem_started_at = None
+                self.last_cdn_reminder_at = None
                 self.relays_probe_state = {}
 
             if db_server.problem_started_at:
