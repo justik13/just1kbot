@@ -17,7 +17,6 @@ from config.constants import AMNEZIA_PROTOCOL
 from database.connection import get_session
 from database.models import User, VPNProfile
 from database.repositories.servers_repo import (
-    get_available_servers,
     get_server_by_id,
     is_server_allocatable,
 )
@@ -145,28 +144,6 @@ async def start_add_device(
         show_alert=True,
     )
     return
-
-    builder = InlineKeyboardBuilder()
-
-    for server in servers:
-        flag = server.country_flag or texts.EMOJI_GLOBE
-        builder.button(
-            text=texts.DEVICE_CREATING_SPINNER_NOTICE.format(v0=flag, value_1=server.name),
-            callback_data=f"select_server:{server.id}",
-        )
-
-    builder.button(text=texts.BTN_BACK, callback_data="back_to_connections")
-    builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
-    builder.adjust(*([1] * len(servers)), 2)
-
-    await render_hub(
-        callback.bot,
-        callback.message.chat.id,
-        texts.CONNECTION_SELECT_SERVER,
-        builder.as_markup(),
-    )
-
-    await state.set_state(DeviceCreationStates.choose_server)
 
 
 @router.callback_query(
