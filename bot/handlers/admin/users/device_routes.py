@@ -396,7 +396,41 @@ async def admin_delete_device_apply(
         )
 
 
-@router.callback_query(F.data.startswith("admin_vless_hwid_reset:"))
+@router.callback_query(F.data.startswith("admin_vless_hwid_reset_confirm:"))
+async def admin_vless_hwid_reset_confirm(
+    callback: CallbackQuery,
+    session: AsyncSession,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    telegram_id = parse_callback_id(callback.data, 1)
+    if telegram_id is None:
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        return
+
+    await callback.answer(show_alert=False)
+
+    from bot.keyboards.admin.users import get_admin_confirm_action_keyboard
+
+    text = texts.ADMIN_VLESS_HWID_RESET_CONFIRM_TITLE.format(telegram_id=telegram_id)
+    try:
+        await callback.message.edit_text(
+            text,
+            reply_markup=get_admin_confirm_action_keyboard(
+                confirm_callback=f"admin_vless_hwid_reset_apply:{telegram_id}",
+                cancel_callback=f"admin_user_devices:{telegram_id}",
+            ),
+            parse_mode="HTML",
+        )
+    except TelegramBadRequest as e:
+        logger.debug(f"admin_vless_hwid_reset_confirm edit_text failed: {e}")
+
+
+@router.callback_query(
+    F.data.startswith("admin_vless_hwid_reset_apply:") | F.data.startswith("admin_vless_hwid_reset:")
+)
 async def admin_vless_hwid_reset(
     callback: CallbackQuery,
     session: AsyncSession,
@@ -465,7 +499,41 @@ async def admin_vless_hwid_reset(
         await admin_user_devices(updated_cb, session)
 
 
-@router.callback_query(F.data.startswith("admin_vless_token_rotate:"))
+@router.callback_query(F.data.startswith("admin_vless_token_rotate_confirm:"))
+async def admin_vless_token_rotate_confirm(
+    callback: CallbackQuery,
+    session: AsyncSession,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    telegram_id = parse_callback_id(callback.data, 1)
+    if telegram_id is None:
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        return
+
+    await callback.answer(show_alert=False)
+
+    from bot.keyboards.admin.users import get_admin_confirm_action_keyboard
+
+    text = texts.ADMIN_VLESS_TOKEN_ROTATE_CONFIRM_TITLE.format(telegram_id=telegram_id)
+    try:
+        await callback.message.edit_text(
+            text,
+            reply_markup=get_admin_confirm_action_keyboard(
+                confirm_callback=f"admin_vless_token_rotate_apply:{telegram_id}",
+                cancel_callback=f"admin_user_devices:{telegram_id}",
+            ),
+            parse_mode="HTML",
+        )
+    except TelegramBadRequest as e:
+        logger.debug(f"admin_vless_token_rotate_confirm edit_text failed: {e}")
+
+
+@router.callback_query(
+    F.data.startswith("admin_vless_token_rotate_apply:") | F.data.startswith("admin_vless_token_rotate:")
+)
 async def admin_vless_token_rotate(
     callback: CallbackQuery,
     session: AsyncSession,
