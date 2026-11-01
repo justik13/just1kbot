@@ -150,30 +150,31 @@ DEVICE_MIGRATE_PENDING_NOTICE = """⏳ <b>Настройка нового сер
 
 BTN_VLESS_SUB_INFO = "⚡️ Подключение по ссылке (все серверы)"
 
-VLESS_SUB_SCREEN_TEXT = """⚡️ <b>Основное подключение по ссылке (INCY / Happ)</b>
+VLESS_SUB_SCREEN_TEXT = """⚡️ <b>Основное подключение по ссылке (Happ / INCY)</b>
 
 Единая ссылка дает доступ сразу ко всем серверам с автообновлением без ручной настройки отдельных ключей.
 
 1️⃣ <b>Установите приложение:</b>
+   <b>Happ (Рекомендуется для ПК):</b>
+   💻 <a href="https://github.com/Happ-proxy/happ-desktop/releases">Для ПК / Windows (GitHub)</a> — <i>рекомендуется для компьютеров</i>
+   🍏 <a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215">App Store (iPhone / iPad)</a>
+   🤖 <a href="https://play.google.com/store/apps/details?id=com.happproxy">Google Play (Android)</a>
+   📦 <a href="https://github.com/Happ-proxy/happ-android/releases">APK для Android (GitHub)</a>
+
    <b>INCY:</b>
    🍏 <a href="https://apps.apple.com/app/incy/id6756943388">App Store (iPhone / iPad)</a>
    🤖 <a href="https://play.google.com/store/apps/details?id=llc.itdev.incy">Google Play (Android)</a>
    💻 / 📦 <a href="https://github.com/INCY-DEV/incy-platforms/releases">Для ПК / APK (GitHub)</a>
-
-   <b>Happ:</b>
-   🍏 <a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215">App Store (iPhone / iPad)</a>
-   🤖 <a href="https://play.google.com/store/apps/details?id=com.happproxy">Google Play (Android)</a>
-   📦 <a href="https://github.com/Happ-proxy/happ-android/releases">APK для Android (GitHub)</a>
-   💻 <a href="https://github.com/Happ-proxy/happ-desktop/releases">Для ПК (GitHub)</a>
 
 2️⃣ <b>Скопируйте вашу ссылку на подписку:</b>
 <code>{sub_url}</code>
 <i>(нажмите на ссылку выше для копирования)</i>
 
 3️⃣ <b>Добавьте подписку:</b>
-   • Откройте приложение (<b>INCY</b> или <b>Happ</b>)
+   • Откройте приложение (<b>Happ</b> или <b>INCY</b>)
    • Вставьте скопированную ссылку подписки и сохраните
    • Нажмите кнопку подключения!
+   <i>(при первом запуске подтвердите системный запрос системы на подключение)</i>
 
 <i>Каждое подключенное устройство учитывается в общем лимите устройств.</i>"""
 
