@@ -156,6 +156,13 @@ class ServerMonitorState:
                     self.ingress_problem_started_at = now_m - diff
                 else:
                     self.ingress_problem_started_at = None
+                saved_cdn_start = db_server.extra_data.get("cdn_problem_started_at")
+                if saved_cdn_start is not None and isinstance(saved_cdn_start, (int, float)):
+                    now_m = time.monotonic()
+                    diff = max(0.0, time.time() - float(saved_cdn_start))
+                    self.cdn_problem_started_at = now_m - diff
+                else:
+                    self.cdn_problem_started_at = None
                 if isinstance(db_server.extra_data.get("relays_probe_state"), dict):
                     self.relays_probe_state = {
                         k: dict(v) if isinstance(v, dict) else v
@@ -551,6 +558,13 @@ async def check_node_resources_and_alerts(bot: Bot):
                         st.consecutive_cdn_fails = int(db_extra.get("consecutive_cdn_fails") or 0)
                     if "consecutive_cdn_successes" in db_extra:
                         st.consecutive_cdn_successes = int(db_extra.get("consecutive_cdn_successes") or 0)
+                    saved_cdn_start = db_extra.get("cdn_problem_started_at")
+                    if saved_cdn_start is not None and isinstance(saved_cdn_start, (int, float)):
+                        if st.cdn_problem_started_at is None:
+                            diff = max(0.0, time.time() - float(saved_cdn_start))
+                            st.cdn_problem_started_at = now_m - diff
+                    elif not db_cdn_problem and not st.cdn_problem:
+                        st.cdn_problem_started_at = None
 
                     has_ingress_problem = db_ingress_problem or st.ingress_problem
                     has_cdn_problem = db_cdn_problem or st.cdn_problem
@@ -654,6 +668,9 @@ async def check_node_resources_and_alerts(bot: Bot):
                                     if has_cdn_problem and st.consecutive_cdn_successes >= REQUIRED_INGRESS_SUCCESSES:
                                         st.cdn_problem_started_at = None
                                         st.last_cdn_reminder_at = None
+                                        if "cdn_problem_started_at" in db_extra:
+                                            db_extra.pop("cdn_problem_started_at", None)
+                                            extra_changed = True
                                         ingress_alerts_to_send.append((
                                             "cdn",
                                             ALERT_CDN_INGRESS_RESTORED.format(
@@ -684,6 +701,8 @@ async def check_node_resources_and_alerts(bot: Bot):
                                     elif not has_cdn_problem:
                                         st.cdn_problem_started_at = now_m
                                         st.last_cdn_reminder_at = now_m
+                                        db_extra["cdn_problem_started_at"] = time.time()
+                                        extra_changed = True
                                         logger.warning(
                                             "Xray origin node %s CDN (%s) persistent failure (%d fails): %s (Origin %s is 200 OK). Sending CDN alert.",
                                             server.id, cdn_domain, st.consecutive_cdn_fails, cdn_detail, active_origin_domain,
@@ -897,10 +916,14 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 cur_extra[state_prop] = True
                                 if alert_kind == "ingress" and "ingress_problem_started_at" not in cur_extra:
                                     cur_extra["ingress_problem_started_at"] = time.time()
+                                elif alert_kind == "cdn" and "cdn_problem_started_at" not in cur_extra:
+                                    cur_extra["cdn_problem_started_at"] = time.time()
                             else:
                                 cur_extra.pop(state_prop, None)
                                 if alert_kind == "ingress":
                                     cur_extra.pop("ingress_problem_started_at", None)
+                                elif alert_kind == "cdn":
+                                    cur_extra.pop("cdn_problem_started_at", None)
                             await update_server(session, fresh, extra_data=cur_extra)
 
             # Decoupled relay alert dispatch outside DB transaction and advisory lock

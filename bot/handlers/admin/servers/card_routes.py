@@ -509,8 +509,7 @@ async def show_server_relays(
                                     relays_list = ui_relays
                                     if extra.get("relays") != synced_relays:
                                         extra["relays"] = synced_relays
-                                        locked_server.extra_data = extra
-                                        await session.flush()
+                                        await update_server(session, locked_server, extra_data=extra)
                                 elif isinstance(existing_relays, list) and existing_relays:
                                     updated_relays = []
                                     ui_relays = []
@@ -531,13 +530,11 @@ async def show_server_relays(
                                     relays_list = ui_relays
                                     if extra.get("relays") != updated_relays:
                                         extra["relays"] = updated_relays
-                                        locked_server.extra_data = extra
-                                        await session.flush()
+                                        await update_server(session, locked_server, extra_data=extra)
                                 else:
                                     if extra.get("relays") != relays_list:
                                         extra["relays"] = relays_list
-                                        locked_server.extra_data = extra
-                                        await session.flush()
+                                        await update_server(session, locked_server, extra_data=extra)
                 else:
                     error_msg = err or texts.ADMIN_SERVER_RELAYS_ERR_FETCH
             else:

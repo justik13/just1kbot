@@ -525,8 +525,13 @@ async def process_edit_server_url(
     elif server.protocol in (XRAY_PROTOCOL, VLESS_PROTOCOL):
         from services.xray_node_client import XrayNodeClient
 
-        async with XrayNodeClient(timeout=5.0, max_retries=0) as xclient:
-            is_healthy, _node_epoch, _ = await xclient.check_health(new_url, server.api_key)
+        is_healthy = False
+        try:
+            async with XrayNodeClient(timeout=5.0, max_retries=0) as xclient:
+                is_healthy, _node_epoch, _ = await xclient.check_health(new_url, server.api_key)
+        except Exception as e:
+            logger.warning("Xray health check failed for %s: %s", new_url, e)
+            is_healthy = False
         if not is_healthy:
             await render_hub(
                 message.bot,
@@ -863,8 +868,13 @@ async def process_edit_server_key(
     elif server.protocol in (XRAY_PROTOCOL, VLESS_PROTOCOL):
         from services.xray_node_client import XrayNodeClient
 
-        async with XrayNodeClient(timeout=5.0, max_retries=0) as xclient:
-            is_healthy, _node_epoch, _ = await xclient.check_health(server.api_url, new_key)
+        is_healthy = False
+        try:
+            async with XrayNodeClient(timeout=5.0, max_retries=0) as xclient:
+                is_healthy, _node_epoch, _ = await xclient.check_health(server.api_url, new_key)
+        except Exception as e:
+            logger.warning("Xray health check failed for %s: %s", server.api_url, e)
+            is_healthy = False
         if not is_healthy:
             await render_hub(
                 message.bot,
