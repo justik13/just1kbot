@@ -279,6 +279,14 @@ async def _show_admin_dashboard(
     else:
         awg_avg_str = f"{format_traffic(0)}{texts.DASHBOARD_PER_MONTH_SUFFIX}"
 
+    if free_ips > 0:
+        servers_header_text = (
+            texts.DASHBOARD_VPN_SERVERS_I_POOL_IP.format()
+            + texts.DASHBOARD_FREE_IP_V_POOL.format(free_ips=free_ips)
+        )
+    else:
+        servers_header_text = texts.ADMIN_DASHBOARD_SERVERS_SECTION
+
     header = format_admin_breadcrumbs(texts.DASHBOARD_MAIN_DASHBOARD)
     text = (
         f"{header}"+
@@ -293,8 +301,7 @@ async def _show_admin_dashboard(
         texts.DASHBOARD_REVENUE_ZA_7D_REV_7D.format(fin_stats__rev_7d=fin_stats['rev_7d'])+
         texts.DASHBOARD_REVENUE_ZA_30D_REV_30D.format(fin_stats__rev_30d=fin_stats['rev_30d'])+
         texts.DASHBOARD_AVG_CHECK_30D_AVG_CHECK.format(fin_stats__avg_check=fin_stats['avg_check'])+
-        texts.DASHBOARD_VPN_SERVERS_I_POOL_IP.format()+
-        texts.DASHBOARD_FREE_IP_V_POOL.format(free_ips=free_ips)+
+        servers_header_text+
         f"{servers_summary}\n\n"
     )
 

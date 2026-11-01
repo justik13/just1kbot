@@ -576,12 +576,12 @@ def get_admin_user_devices_keyboard(
     if has_vless_hwids:
         builder.button(
             text=texts.ADMIN_BTN_VLESS_HWID_RESET,
-            callback_data=f"admin_vless_hwid_reset:{telegram_id}",
+            callback_data=f"admin_vless_hwid_reset_confirm:{telegram_id}",
         )
 
     builder.button(
         text=texts.ADMIN_BTN_VLESS_TOKEN_ROTATE,
-        callback_data=f"admin_vless_token_rotate:{telegram_id}",
+        callback_data=f"admin_vless_token_rotate_confirm:{telegram_id}",
     )
 
     builder.button(

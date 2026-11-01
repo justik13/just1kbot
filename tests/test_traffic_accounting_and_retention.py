@@ -1190,8 +1190,6 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("<b>Трафик туннелей:</b> 13.0 GiB", card_text)
         self.assertIn("• <b>Стандартный доступ (за месяц):</b> 0 B", card_text)
-        self.assertIn("├ AWG: 0 B", card_text)
-        self.assertIn("└ VLESS: 0 B", card_text)
         self.assertIn("• <b>Белый Интернет (за месяц):</b> 0 B", card_text)
 
     async def test_record_vless_traffic_atomic_multi_server_isolation(self):

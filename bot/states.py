@@ -1,10 +1,6 @@
 from aiogram.fsm.state import State, StatesGroup
 
 
-class DeviceCreationStates(StatesGroup):
-    choose_server = State()
-
-
 class DeviceManagementStates(StatesGroup):
     rename_device = State()
 
