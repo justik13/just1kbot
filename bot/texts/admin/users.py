@@ -20,10 +20,6 @@ ADMIN_USER_TRAFFIC_MONTHLY_BREAKDOWN = (
     "\n   └ VLESS: {monthly_vless}"
     "\n• <b>Белый Интернет (за месяц):</b> {monthly_wi}"
 )
-ADMIN_USER_TRAFFIC_MONTHLY_BREAKDOWN_VLESS = (
-    "\n• <b>Стандартный доступ (за месяц):</b> {monthly_std}"
-    "\n• <b>Белый Интернет (за месяц):</b> {monthly_wi}"
-)
 
 ADMIN_BTN_INPUT_MANUALLY = "⌨️ Ввести вручную"
 

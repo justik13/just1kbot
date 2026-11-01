@@ -114,18 +114,12 @@ def format_user_card_text(
         awg_m, vless_m, wi_m = 0, 0, 0
 
     total_traffic_str = format_traffic(awg_total + wi_total)
-    if awg_m > 0:
-        total_traffic_str += texts.ADMIN_USER_TRAFFIC_MONTHLY_BREAKDOWN.format(
-            monthly_std=format_traffic(awg_m + vless_m),
-            monthly_awg=format_traffic(awg_m),
-            monthly_vless=format_traffic(vless_m),
-            monthly_wi=format_traffic(wi_m),
-        )
-    else:
-        total_traffic_str += texts.ADMIN_USER_TRAFFIC_MONTHLY_BREAKDOWN_VLESS.format(
-            monthly_std=format_traffic(vless_m),
-            monthly_wi=format_traffic(wi_m),
-        )
+    total_traffic_str += texts.ADMIN_USER_TRAFFIC_MONTHLY_BREAKDOWN.format(
+        monthly_std=format_traffic(awg_m + vless_m),
+        monthly_awg=format_traffic(awg_m),
+        monthly_vless=format_traffic(vless_m),
+        monthly_wi=format_traffic(wi_m),
+    )
 
     card_text = texts.ADMIN_USER_CARD.format(
         telegram_id=user.telegram_id,
