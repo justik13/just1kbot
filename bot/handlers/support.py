@@ -99,6 +99,10 @@ async def show_support_help(callback: CallbackQuery):
         callback_data=f"help_incy{suffix}",
     )
     builder.button(
+        text=texts.BTN_SPLIT_TUNNELING,
+        callback_data=f"help_split{suffix}",
+    )
+    builder.button(
         text=texts.BTN_BACK,
         callback_data=f"manage_device:{device_id}" if device_id else "menu_support",
     )
@@ -106,7 +110,7 @@ async def show_support_help(callback: CallbackQuery):
         text=texts.BTN_MAIN_MENU_NAV,
         callback_data="back_to_main_menu",
     )
-    builder.adjust(1, 2)
+    builder.adjust(1, 1, 2)
 
     await render_hub(
         callback.bot,
@@ -126,6 +130,10 @@ async def show_help_incy(callback: CallbackQuery):
 
     builder = InlineKeyboardBuilder()
     builder.button(
+        text=texts.BTN_CONNECTIONS,
+        callback_data="menu_connections",
+    )
+    builder.button(
         text=texts.BTN_WHITE_INTERNET,
         callback_data="white_internet",
     )
@@ -137,7 +145,42 @@ async def show_help_incy(callback: CallbackQuery):
         text=texts.BTN_MAIN_MENU_NAV,
         callback_data="back_to_main_menu",
     )
-    builder.adjust(1, 2)
+    builder.adjust(2, 2)
+
+    await render_hub(
+        callback.bot,
+        callback.message.chat.id,
+        text,
+        builder.as_markup(),
+    )
+
+
+@router.callback_query(F.data.startswith("help_split"))
+async def show_help_split(callback: CallbackQuery):
+    await callback.answer(show_alert=False)
+    device_id = _extract_device_id(callback.data)
+    back_cb = f"support_help:device_{device_id}" if device_id else "support_help"
+
+    text = texts.SUPPORT_SPLIT_TUNNELING_TEXT
+
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=texts.BTN_CONNECTIONS,
+        callback_data="menu_connections",
+    )
+    builder.button(
+        text=texts.BTN_WHITE_INTERNET,
+        callback_data="white_internet",
+    )
+    builder.button(
+        text=texts.BTN_BACK,
+        callback_data=back_cb,
+    )
+    builder.button(
+        text=texts.BTN_MAIN_MENU_NAV,
+        callback_data="back_to_main_menu",
+    )
+    builder.adjust(2, 2)
 
     await render_hub(
         callback.bot,
@@ -151,7 +194,6 @@ async def show_help_incy(callback: CallbackQuery):
     F.data.startswith("help_download")
     | F.data.startswith("help_ios")
     | F.data.startswith("help_windows")
-    | F.data.startswith("help_split")
 )
 async def decommissioned_amnezia_help(callback: CallbackQuery):
     await callback.answer(

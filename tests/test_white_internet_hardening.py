@@ -126,7 +126,9 @@ class TestGroupCAlembicMigration0017(unittest.TestCase):
     def test_alembic_heads_and_chain(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
         heads = scripts.get_heads()
-        self.assertEqual(heads, ["0041_reset_notification_flags"])
+        self.assertEqual(heads, ["0042_servers_proto_vless"])
+        rev = scripts.get_revision("0042_servers_proto_vless")
+        self.assertEqual(rev.down_revision, "0041_reset_notification_flags")
         rev = scripts.get_revision("0041_reset_notification_flags")
         self.assertEqual(rev.down_revision, "0040_vless_traffic_accounting")
         rev = scripts.get_revision("0040_vless_traffic_accounting")

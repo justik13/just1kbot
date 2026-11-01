@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from database.models import User
 
-from .common import _render_amnezia_devices, _render_connections
+from .common import _render_connections
 
 router = Router()
 
@@ -42,38 +42,9 @@ async def hub_menu_connections(
 async def hub_amnezia_devices(
     callback: CallbackQuery,
     state: FSMContext,
-    session: AsyncSession,
-    db_user: User | None = None,
 ):
     await state.clear()
-
-    if not db_user:
-        try:
-            await callback.answer(
-                texts.ERROR_USER_NOT_FOUND,
-                show_alert=True,
-            )
-        except Exception:
-            pass
-        return
-
-    from database.repositories.profiles_repo import PROFILE_QUOTA_EXCLUDED_STATUSES, get_user_profiles
-    profiles = await get_user_profiles(session, db_user.id)
-    quota_profiles = [
-        p for p in profiles
-        if getattr(p, "provisioning_status", "") not in PROFILE_QUOTA_EXCLUDED_STATUSES
-    ]
-
-    if not quota_profiles:
-        await callback.answer(
-            texts.ALERT_AMNEZIA_DECOMMISSIONED,
-            show_alert=True,
-        )
-        return
-
-    await callback.answer(show_alert=False)
-    await _render_amnezia_devices(
-        callback.message,
-        db_user,
-        session,
+    await callback.answer(
+        texts.ALERT_AMNEZIA_DECOMMISSIONED,
+        show_alert=True,
     )

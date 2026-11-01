@@ -32,7 +32,7 @@ DEVICE_ACCESS_INACTIVE_NOTICE = """
 DEVICE_ACTION_UNAVAILABLE_STATE = "⚠️ Это действие сейчас недоступно для текущего состояния устройства."
 
 
-DEVICE_CONFIG_CONF_CAPTION = """📁 <b>Файл для AmneziaWG</b>
+DEVICE_CONFIG_CONF_CAPTION = """📁 <b>Файл конфигурации (.conf)</b>
 
 📱 Устройство: <b>{device_name}</b>
 
@@ -40,11 +40,11 @@ DEVICE_CONFIG_CONF_CAPTION = """📁 <b>Файл для AmneziaWG</b>
 
 DEVICE_CONFIG_GENERATING = "⏳ Генерирую файлы..."
 
-DEVICE_CONFIG_VPN_CAPTION = """📁 <b>Файл для AmneziaVPN</b>
+DEVICE_CONFIG_VPN_CAPTION = """📁 <b>Файл конфигурации</b>
 
 📱 Устройство: <b>{device_name}</b>
 
-<i>Файл конфигурации (.vpn) — дополнительный способ подключения, если ключ не подходит.</i>"""
+<i>Файл конфигурации — дополнительный способ подключения, если ключ не подходит.</i>"""
 
 DEVICE_CREATE_IN_PROGRESS = "⏳ Уже обрабатываем запрос..."
 
@@ -89,7 +89,7 @@ DEVICE_STATUS_CREATING_LABEL = BTN_CONFIRM_DELETE
 
 DOWNLOAD_CONF_FALLBACK = """⚠️ <b>Не удалось сформировать файл</b> для устройства <b>{device_name}</b>.
 
-Скопируйте ключ подключения на карточке устройства для импорта в приложение <b>AmneziaVPN</b> или обратитесь в <b>💬 Поддержку</b>."""
+Скопируйте ключ подключения на карточке устройства для импорта в приложение или обратитесь в <b>💬 Поддержку</b>."""
 
 
 DEVICE_DEFAULT_NAME_TEMPLATE = 'Устройство #{slot}'
@@ -115,7 +115,7 @@ DEVICE_MIGRATE_CONFIRM = """🔄 <b>Подтверждение смены сер
 ⚠️ <b>Как это работает:</b>
 • <b>Старое подключение отключится через 15 минут.</b>
 • Ваша связь с интернетом и Telegram <b>не прервётся</b> — старый сервер продолжает работать, пока вы настраиваете новый.
-• У вас будет 15 минут, чтобы добавить новый ключ в приложение Amnezia и переключиться.
+• У вас будет 15 минут, чтобы добавить новый ключ в приложение и переключиться.
 
 Подтверждаете перенос?"""
 
@@ -125,10 +125,10 @@ DEVICE_MIGRATE_SUCCESS_NOTICE = """🎉 <b>Сервер успешно изме�
 
 📋 <b>Инструкция — как переключиться прямо сейчас:</b>
 <b>1.</b> Нажмите на ключ ниже, чтобы скопировать его в буфер.
-<b>2.</b> Откройте приложение <b>Amnezia</b>.
+<b>2.</b> Откройте приложение для подключения.
 <b>3.</b> Нажмите кнопку <b>«+»</b> (или «Добавить») → выберите «Вставить из буфера».
 <b>4.</b> Подключитесь к новому серверу.
-<b>5.</b> Старое подключение в приложении Amnezia можно смело удалить."""
+<b>5.</b> Старое подключение в приложении можно смело удалить."""
 
 DEVICE_MIGRATE_FAILED_NOTICE = """⚠️ <b>Не удалось настроить новый сервер</b>
 
@@ -150,30 +150,30 @@ DEVICE_MIGRATE_PENDING_NOTICE = """⏳ <b>Настройка нового сер
 
 BTN_VLESS_SUB_INFO = "⚡️ Подключение по ссылке (все серверы)"
 
-VLESS_SUB_SCREEN_TEXT = """⚡️ <b>Основное подключение по ссылке (INCY / Happ)</b>
+VLESS_SUB_SCREEN_TEXT = """⚡️ <b>Подключение по ссылке (Happ / INCY)</b>
 
-Единая ссылка дает доступ сразу ко всем серверам с автообновлением без ручной настройки отдельных ключей.
+Одна ссылка дает доступ сразу ко всем серверам на всех ваших устройствах (смартфон, планшет, ПК) в рамках тарифа.
 
 1️⃣ <b>Установите приложение:</b>
+   <b>Happ (Рекомендуется для ПК):</b>
+   💻 <a href="https://github.com/Happ-proxy/happ-desktop/releases">Для ПК / Windows (GitHub)</a> — <i>рекомендуется для компьютеров</i>
+   🍏 <a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215">App Store (iPhone / iPad)</a>
+   🤖 <a href="https://play.google.com/store/apps/details?id=com.happproxy">Google Play (Android)</a>
+   📦 <a href="https://github.com/Happ-proxy/happ-android/releases">APK для Android (GitHub)</a>
+
    <b>INCY:</b>
    🍏 <a href="https://apps.apple.com/app/incy/id6756943388">App Store (iPhone / iPad)</a>
    🤖 <a href="https://play.google.com/store/apps/details?id=llc.itdev.incy">Google Play (Android)</a>
    💻 / 📦 <a href="https://github.com/INCY-DEV/incy-platforms/releases">Для ПК / APK (GitHub)</a>
 
-   <b>Happ:</b>
-   🍏 <a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215">App Store (iPhone / iPad)</a>
-   🤖 <a href="https://play.google.com/store/apps/details?id=com.happproxy">Google Play (Android)</a>
-   📦 <a href="https://github.com/Happ-proxy/happ-android/releases">APK для Android (GitHub)</a>
-   💻 <a href="https://github.com/Happ-proxy/happ-desktop/releases">Для ПК (GitHub)</a>
-
 2️⃣ <b>Скопируйте вашу ссылку на подписку:</b>
 <code>{sub_url}</code>
-<i>(нажмите на ссылку выше для копирования)</i>
+<i>(нажмите на ссылку для копирования)</i>
 
 3️⃣ <b>Добавьте подписку:</b>
-   • Откройте приложение (<b>INCY</b> или <b>Happ</b>)
-   • Вставьте скопированную ссылку подписки и сохраните
-   • Нажмите кнопку подключения!
+   • Откройте приложение (<b>Happ</b> или <b>INCY</b>)
+   • Вставьте скопированную ссылку подписки через «+» и включите связь
+   <i>(при первом запуске подтвердите системный запрос на подключение)</i>
 
 <i>Каждое подключенное устройство учитывается в общем лимите устройств.</i>"""
 
@@ -188,13 +188,14 @@ VLESS_RESET_SUCCESS = "✅ Привязка устройств по ссылке
 VLESS_RESET_EMPTY = "ℹ️ У вас нет привязанных устройств по ссылке."
 VLESS_DEFAULT_SERVER_DESCRIPTION = "Прямой доступ"
 
-BTN_AMNEZIA_DEVICES = "🛡 Устройства Amnezia"
-BTN_AMNEZIA_DEVICES_COUNT = "🛡 Устройства Amnezia ({count})"
+BTN_AMNEZIA_DEVICES = "🛡 Архивные устройства"
+BTN_AMNEZIA_DEVICES_COUNT = "🛡 Архивные устройства ({count})"
+LABEL_ARCHIVED_CONNECTION = "Архивное подключение"
 BTN_BACK_TO_CONNECTION = "◀️ Назад к подключению"
 BTN_ADD_DEVICE = "➕ Добавить устройство"
 
 ALERT_AMNEZIA_DECOMMISSIONED = (
-    "ℹ️ Индивидуальные конфигурации Amnezia отключены.\n\n"
+    "ℹ️ Индивидуальные конфигурации отключены.\n\n"
     "Всё подключение работает через единую ссылку в приложении INCY / Happ."
 )
 
@@ -206,8 +207,8 @@ CONNECTION_HUB_ACTIVE_TEXT = """🌐 <b>Подключение</b>
 
 📱 <b>Устройства:</b> {active} из {limit}
 
-⚡️ <b>Основное подключение по ссылке (INCY / Happ):</b>
-Единая ссылка дает доступ сразу ко всем серверам с автообновлением без ручной настройки отдельных ключей. Рекомендуется для всех основных устройств.
+⚡️ <b>Подключение по ссылке (Happ / INCY):</b>
+Одна ссылка дает доступ сразу ко всем серверам на всех ваших устройствах (смартфон, планшет, ПК) в рамках тарифа.
 
 📋 <b>Ваша ссылка на подписку:</b>
 <code>{sub_url}</code>
@@ -223,26 +224,23 @@ BTN_SUB_CONNECT_INCY = "🚀 Подключить в приложении"
 BTN_SUB_COPY_LINK = "📋 Скопировать ссылку"
 BTN_INCY_INSTRUCTIONS = "📱 Инструкция (INCY / Happ)"
 VLESS_WEB_TOO_MANY_REQUESTS = "Слишком много запросов к подписке. Попробуйте позже."
-AMNEZIA_SCREEN_HINT_ADD = "\n\n<i>Нажмите кнопку ниже, чтобы создать первое устройство.</i>"
-AMNEZIA_SCREEN_HINT_LIMIT = "\n\n⚠️ <i>Общий лимит устройств исчерпан. Для добавления перейдите на тариф с большим количеством устройств или отключите неиспользуемые.</i>"
+AMNEZIA_SCREEN_TEXT = """🛡 <b>Архивные устройства</b>
 
-AMNEZIA_SCREEN_TEXT = """🛡 <b>Устройства Amnezia</b>
+Управление ранее созданными устройствами.
 
-Подключение и файлы конфигураций для приложений Amnezia.
-
-📱 <b>Устройства:</b> {active} из {limit} <i>(по ссылке: {vless_count} • Amnezia: {amnezia_count})</i>
+📱 <b>Устройства:</b> {active} из {limit} <i>(по ссылке: {vless_count} • архивные: {legacy_count})</i>
 📊 <b>Трафик за месяц:</b> {monthly_traffic}
 {profiles_block}
 <i>Нажмите на устройство ниже для управления:</i>"""
 
-AMNEZIA_SCREEN_EMPTY_TEXT = """🛡 <b>Устройства Amnezia</b>
+AMNEZIA_SCREEN_EMPTY_TEXT = """🛡 <b>Архивные устройства</b>
 
-Подключение и файлы конфигураций для приложений Amnezia.
+Управление ранее созданными устройствами.
 
-📱 <b>Устройства:</b> {active} из {limit} <i>(по ссылке: {vless_count} • Amnezia: 0)</i>
+📱 <b>Устройства:</b> {active} из {limit} <i>(по ссылке: {vless_count} • архивные: 0)</i>
 📊 <b>Трафик за месяц:</b> {monthly_traffic}
 
-<i>У вас пока нет добавленных устройств Amnezia.</i>{action_hint}"""
+<i>У вас нет архивных устройств.</i>"""
 
 VLESS_FEED_EXPIRED_TITLE = "⚠️ Подписка закончилась"
 VLESS_FEED_EXPIRED_NOTICE = "⚠️ Подписка закончилась. Продлите доступ: @{bot_username}"

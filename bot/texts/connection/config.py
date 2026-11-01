@@ -12,21 +12,20 @@ CONNECTION_CONFIG_COMMON_STATUS_SERVEROV = "🌐 Статус серверов"
 CONNECTION_CONFIG_DEVICE_VIEW_1_SOKHRANITE_ODIN_IZ_PRIKREPLE = """1. Сохраните один из прикреплённых файлов конфигурации:
 """
 
-CONNECTION_CONFIG_DEVICE_VIEW_1_SOKHRANITE_PRIKREPLENNYY_FAY = """1. Сохраните прикреплённый файл <code>.vpn</code> (для приложения <b>AmneziaVPN</b>).
+CONNECTION_CONFIG_DEVICE_VIEW_1_SOKHRANITE_PRIKREPLENNYY_FAY = """1. Сохраните прикреплённый файл конфигурации.
 """
 
 CONNECTION_CONFIG_DEVICE_VIEW_2_OTKROYTE_PRILOZHENIE_I_VYBER = "2. Откройте приложение и выберите <b>«Импорт файла / Добавить туннель»</b>."
 
-CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_NAZHMITE = "📁 <i>Нужен файл конфигурации (.vpn / .conf)? Нажмите кнопку ниже:</i>"
+CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_NAZHMITE = "📁 <i>Нужен файл конфигурации (.conf)? Нажмите кнопку ниже:</i>"
 
 CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_SKOPIRUY = """<b>1. Скопируйте ключ</b> — нажмите на блок с ключом выше.
 <b>2. Откройте приложение:</b>
-   • <b>AmneziaVPN</b> (iOS / Android / Win / Mac) → «+» (или «У меня есть данные») → «Вставить ключ».
-   • <b>DefaultVPN</b> (iOS) → «+» → «Import from Clipboard».
+   • Добавьте подключение через «+» (или «Импорт») → «Вставить ключ».
 <b>3. Нажмите «Подключиться».</b>
 
 ✅ <b>Как понять, что всё работает:</b>
-• В приложении статус сменится на <b>«Подключено»</b> (значок соединения или 🔑 вверху);
+• В приложении статус сменится на <b>«Подключено»</b>;
 • На сайте <b>2ip.io</b> страна сменится на локацию сервера."""
 
 CONNECTION_CONFIG_DEVICE_VIEW_CONFIG_DEVICES_OBNO = """
@@ -35,7 +34,7 @@ CONNECTION_CONFIG_DEVICE_VIEW_CONFIG_DEVICES_OBNO = """
 
 CONNECTION_CONFIG_DEVICE_VIEW_CONFIG_DOSTUPNA_CHEREZ = "<i>Конфигурация доступна через кнопку «🔄 Другой способ подключения» ниже.</i>"
 
-CONNECTION_CONFIG_DEVICE_VIEW_CONF_FOR_AMNEZIAWG_DEFAULTVPN = """   • <code>.conf</code> — для <b>AmneziaWG</b>, <b>DefaultVPN</b> или роутеров с поддержкой AmneziaWG (Keenetic AWG)
+CONNECTION_CONFIG_DEVICE_VIEW_CONF_FOR_AMNEZIAWG_DEFAULTVPN = """   • <code>.conf</code> — для роутеров и совместимых приложений
 """
 
 CONNECTION_CONFIG_DEVICE_VIEW_DEVICE_NE_NAYDENO_ILI_BYLO = "Устройство не найдено или было удалено"
@@ -60,7 +59,7 @@ CONNECTION_CONFIG_DEVICE_VIEW_IDET_AVTOMATICHESKOE_VOSSTANOV = """
 
 ⚠️ <b>Идёт автоматическое восстановление после сбоя...</b>"""
 
-CONNECTION_CONFIG_DEVICE_VIEW_INSTRUKTSII_I_SPRAVKA_AMNEZIAV = """📖 <b>Инструкции и справка AmneziaVPN</b>
+CONNECTION_CONFIG_DEVICE_VIEW_INSTRUKTSII_I_SPRAVKA_AMNEZIAV = """📖 <b>Инструкции и справка по подключению</b>
 
 """
 
@@ -104,7 +103,7 @@ CONNECTION_CONFIG_DEVICE_VIEW_SKACHIVANIYU_KLIENTA_I_NASTROY = """скачива
 
 """
 
-CONNECTION_CONFIG_DEVICE_VIEW_VPN_FOR_PRILOZHENIYA_AMNEZIAV = """   • <code>.vpn</code> — для приложения <b>AmneziaVPN</b>
+CONNECTION_CONFIG_DEVICE_VIEW_VPN_FOR_PRILOZHENIYA_AMNEZIAV = """   • Файл конфигурации для совместимых приложений
 """
 
 CONNECTION_CONFIG_DEVICE_VIEW_V_ETOM_RAZDELE_VY_NAYDETE_RUKO = "В этом разделе вы найдёте руководства по подключению, "
@@ -139,7 +138,7 @@ CONNECTION_EXPIRED_READ_ONLY = """
 Продлите доступ, чтобы восстановить их.
 """
 
-CONNECTION_GUIDE_SAVE_CONF_FILE = """1. Сохраните прикреплённый файл <code>.conf</code> (для <b>AmneziaWG</b>, <b>DefaultVPN</b> или роутеров с поддержкой AmneziaWG — Keenetic AWG).
+CONNECTION_GUIDE_SAVE_CONF_FILE = """1. Сохраните прикреплённый файл <code>.conf</code> (для роутеров и совместимых приложений).
 """
 
 CONNECTION_KEY_BLOCK_FORMAT = """🔑 <b>Ключ подключения:</b>

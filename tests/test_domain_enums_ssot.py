@@ -171,19 +171,6 @@ class DomainEnumsSSOTTests(unittest.TestCase):
         )
         self.assertEqual(tariff.duration_days, 30)
 
-    def test_support_urls_in_texts_ssot(self):
-        """Amnezia support URLs are correctly exposed via bot.texts."""
-        from bot import texts
-
-        self.assertTrue(texts.AMNEZIA_DOWNLOAD_MIRROR.startswith("https://"))
-        self.assertTrue(texts.AMNEZIA_GITHUB_LATEST.startswith("https://"))
-        self.assertTrue(texts.AMNEZIA_OFFICIAL_SITE.startswith("https://"))
-        self.assertTrue(texts.AMNEZIA_DOCS.startswith("https://"))
-        self.assertTrue(texts.AMNEZIA_SPLIT_TUNNELING.startswith("https://"))
-        self.assertTrue(texts.AMNEZIA_IOS_RU.startswith("https://"))
-        self.assertTrue(texts.AMNEZIA_WIN_INSTALL.startswith("https://"))
-        self.assertTrue(texts.AMNEZIA_WIN_UPDATE.startswith("https://"))
-
     def test_sql_enum_in_identifier_validation(self):
         """sql_enum_in rejects non-identifier column names."""
         from database.models import sql_enum_in

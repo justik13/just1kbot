@@ -1,7 +1,6 @@
 import logging
 
 from config.constants import (
-    AMNEZIA_PROTOCOL,
     AMNEZIA_PROTOCOLS,
     AdminAuditAction,
 )
@@ -17,7 +16,6 @@ from database.repositories.servers_repo import (
     create_server,
     get_server_by_api_url,
 )
-from services.amnezia_client import AmneziaClient
 from services.audit_service import AuditService
 from utils.admin import is_admin
 from utils.security import is_safe_url
@@ -29,8 +27,6 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 router = Router()
 logger = logging.getLogger(__name__)
-
-SAFE_DEFAULT_MAX_PEERS = 200
 
 
 @router.callback_query(F.data.in_(["admin_server_add", "admin_server_add:std", "admin_server_add:wi"]))
@@ -280,7 +276,7 @@ async def process_add_server(
             trigger_message_id=trigger_msg_id,
         )
 
-        protocol = all_data.get("protocol", AMNEZIA_PROTOCOL)
+        protocol = all_data.get("protocol")
 
         if protocol in ("xray", "vless"):
             from services.xray_node_client import XrayNodeClient
@@ -436,142 +432,13 @@ async def process_add_server(
             await state.clear()
             return
 
-        client = AmneziaClient(
-            all_data["api_url"],
-            api_key,
-        )
-
-        if not await client.healthcheck():
-            await render_hub(
-                message.bot,
-                message.chat.id,
-                texts.ERROR_SERVER_UNREACHABLE,
-                get_back_button(back_servers),
-                parse_mode="HTML",
-            )
-
-            await state.clear()
-
-            return
-
-        server_info = await client.get_server_info()
-
-        if not server_info:
-            await render_hub(
-                message.bot,
-                message.chat.id,
-                texts.ERROR_SERVER_API_INFO_FAILED,
-                get_back_button(back_servers),
-                parse_mode="HTML",
-            )
-
-            await state.clear()
-
-            return
-
-        protocols = server_info.protocols
-
-        if not any(p in AMNEZIA_PROTOCOLS for p in protocols):
-            await render_hub(
-                message.bot,
-                message.chat.id,
-                texts.ERROR_PROTOCOL_NOT_SUPPORTED.format(
-                    protocols=safe(
-                        ", ".join(protocols) if protocols else texts.LABEL_UNKNOWN_LOWER
-                    ),
-                ),
-                get_back_button(back_servers),
-                parse_mode="HTML",
-            )
-
-            await state.clear()
-
-            return
-
-        api_max_peers = server_info.get_effective_max_peers()
-
-        if not (server_info.maxPeers or server_info.serverMaxPeers):
-            logger.warning(
-                "Amnezia API did not return max peers for %s. "
-                "Using safe default %s instead of %s.",
-                all_data["api_url"],
-                SAFE_DEFAULT_MAX_PEERS,
-                server_info.SERVER_MAX_PEERS,
-            )
-
-            api_max_peers = SAFE_DEFAULT_MAX_PEERS
-
-        api_server_name = (all_data.get("name") or server_info.name or "AmneziaWG")[:50]
-
-        existing = await get_server_by_api_url(
-            session,
-            all_data["api_url"],
-        )
-
-        if existing:
-            await render_hub(
-                message.bot,
-                message.chat.id,
-                texts.ERROR_SERVER_DUPLICATE_URL.format(
-                    api_url=safe(all_data["api_url"]),
-                ),
-                get_back_button(back_servers),
-                parse_mode="HTML",
-            )
-
-            await state.clear()
-
-            return
-
-        server_protocol = server_info.get_protocol()
-
-        capabilities = ["awg"]
-
-        create_kwargs = {
-            "name": api_server_name,
-            "country_flag": all_data["country_flag"],
-            "api_url": all_data["api_url"],
-            "api_key": api_key,
-            "protocol": server_protocol,
-            "max_clients": api_max_peers,
-            "capabilities": capabilities,
-        }
-
-        server = await create_server(
-            session,
-            **create_kwargs,
-        )
-
-        await AuditService.log_action(
-            session,
-            message.from_user.id,
-            AdminAuditAction.ADD_SERVER,
-            "Server",
-            server.id,
-            api_server_name,
-        )
-
+        # Любой другой протокол (в т.ч. AWG из старого сохранённого FSM) не поддерживается.
+        await state.clear()
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.ADMIN_SERVER_ADDED.format(
-                flag=all_data["country_flag"],
-                name=safe(api_server_name),
-                protocol=server_protocol,
-                max_clients=api_max_peers,
-                api_url=safe(all_data["api_url"]),
-            ),
+            texts.ALERT_AMNEZIA_DECOMMISSIONED,
             get_back_button(back_servers),
             parse_mode="HTML",
         )
-
-        logger.info(
-            f"Admin {message.from_user.id} added server: {server.id}"
-        )
-
-        from database.repositories.servers_repo import is_vless_capable_server
-        if is_vless_capable_server(server):
-            from services.vless_subscription_service import VlessSubscriptionService
-            VlessSubscriptionService.sync_all_active_to_server_background(server.id)
-
-        await state.clear()
+        return

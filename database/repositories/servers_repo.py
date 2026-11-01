@@ -364,7 +364,7 @@ async def create_server(
     api_url: str,
     api_key: str,
     country_flag: str = None,
-    protocol: str = AMNEZIA_PROTOCOL,
+    protocol: str = VLESS_PROTOCOL,
     max_clients: int = 50,
     capabilities: list[str] | None = None,
     lifecycle_status: str | ServerLifecycleStatus = ServerLifecycleStatus.ACTIVE,
