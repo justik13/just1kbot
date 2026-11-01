@@ -287,7 +287,7 @@ async def process_add_server(
             xray_epoch = None
             xray_data = None
             try:
-                async with XrayNodeClient(timeout=10.0) as xray_client:
+                async with XrayNodeClient(timeout=5.0, max_retries=0) as xray_client:
                     xray_ok, xray_epoch, xray_data = await xray_client.check_health(
                         all_data["api_url"], api_key
                     )

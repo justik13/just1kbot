@@ -149,6 +149,20 @@ class ServerMonitorState:
                 self.cdn_problem = bool(db_server.extra_data.get("cdn_problem", False))
                 self.consecutive_cdn_fails = int(db_server.extra_data.get("consecutive_cdn_fails", 0) or 0)
                 self.consecutive_cdn_successes = int(db_server.extra_data.get("consecutive_cdn_successes", 0) or 0)
+                saved_ing_start = db_server.extra_data.get("ingress_problem_started_at")
+                if saved_ing_start is not None and isinstance(saved_ing_start, (int, float)):
+                    now_m = time.monotonic()
+                    diff = max(0.0, time.time() - float(saved_ing_start))
+                    self.ingress_problem_started_at = now_m - diff
+                else:
+                    self.ingress_problem_started_at = None
+                saved_cdn_start = db_server.extra_data.get("cdn_problem_started_at")
+                if saved_cdn_start is not None and isinstance(saved_cdn_start, (int, float)):
+                    now_m = time.monotonic()
+                    diff = max(0.0, time.time() - float(saved_cdn_start))
+                    self.cdn_problem_started_at = now_m - diff
+                else:
+                    self.cdn_problem_started_at = None
                 if isinstance(db_server.extra_data.get("relays_probe_state"), dict):
                     self.relays_probe_state = {
                         k: dict(v) if isinstance(v, dict) else v
@@ -160,9 +174,13 @@ class ServerMonitorState:
                 self.ingress_problem = False
                 self.consecutive_ingress_fails = 0
                 self.consecutive_ingress_successes = 0
+                self.ingress_problem_started_at = None
+                self.last_ingress_reminder_at = None
                 self.cdn_problem = False
                 self.consecutive_cdn_fails = 0
                 self.consecutive_cdn_successes = 0
+                self.cdn_problem_started_at = None
+                self.last_cdn_reminder_at = None
                 self.relays_probe_state = {}
 
             if db_server.problem_started_at:
@@ -530,6 +548,13 @@ async def check_node_resources_and_alerts(bot: Bot):
                         st.consecutive_ingress_fails = int(db_extra.get("consecutive_ingress_fails") or 0)
                     if "consecutive_ingress_successes" in db_extra:
                         st.consecutive_ingress_successes = int(db_extra.get("consecutive_ingress_successes") or 0)
+                    saved_ing_start = db_extra.get("ingress_problem_started_at")
+                    if saved_ing_start is not None and isinstance(saved_ing_start, (int, float)):
+                        if st.ingress_problem_started_at is None:
+                            diff = max(0.0, time.time() - float(saved_ing_start))
+                            st.ingress_problem_started_at = now_m - diff
+                    elif not db_ingress_problem and not st.ingress_problem:
+                        st.ingress_problem_started_at = None
 
                     if db_cdn_problem:
                         st.cdn_problem = True
@@ -537,6 +562,13 @@ async def check_node_resources_and_alerts(bot: Bot):
                         st.consecutive_cdn_fails = int(db_extra.get("consecutive_cdn_fails") or 0)
                     if "consecutive_cdn_successes" in db_extra:
                         st.consecutive_cdn_successes = int(db_extra.get("consecutive_cdn_successes") or 0)
+                    saved_cdn_start = db_extra.get("cdn_problem_started_at")
+                    if saved_cdn_start is not None and isinstance(saved_cdn_start, (int, float)):
+                        if st.cdn_problem_started_at is None:
+                            diff = max(0.0, time.time() - float(saved_cdn_start))
+                            st.cdn_problem_started_at = now_m - diff
+                    elif not db_cdn_problem and not st.cdn_problem:
+                        st.cdn_problem_started_at = None
 
                     has_ingress_problem = db_ingress_problem or st.ingress_problem
                     has_cdn_problem = db_cdn_problem or st.cdn_problem
@@ -561,6 +593,8 @@ async def check_node_resources_and_alerts(bot: Bot):
                             if not has_ingress_problem and st.consecutive_ingress_fails >= REQUIRED_INGRESS_FAILS:
                                 st.ingress_problem_started_at = now_m
                                 st.last_ingress_reminder_at = now_m
+                                db_extra["ingress_problem_started_at"] = time.time()
+                                extra_changed = True
                                 ingress_alerts_to_send.append((
                                     "ingress",
                                     ALERT_INGRESS_PROBLEM.format(
@@ -605,6 +639,9 @@ async def check_node_resources_and_alerts(bot: Bot):
                             if has_ingress_problem and st.consecutive_ingress_successes >= REQUIRED_INGRESS_SUCCESSES:
                                 st.ingress_problem_started_at = None
                                 st.last_ingress_reminder_at = None
+                                if "ingress_problem_started_at" in db_extra:
+                                    db_extra.pop("ingress_problem_started_at", None)
+                                    extra_changed = True
                                 ingress_alerts_to_send.append((
                                     "ingress",
                                     ALERT_INGRESS_RESTORED.format(
@@ -635,6 +672,9 @@ async def check_node_resources_and_alerts(bot: Bot):
                                     if has_cdn_problem and st.consecutive_cdn_successes >= REQUIRED_INGRESS_SUCCESSES:
                                         st.cdn_problem_started_at = None
                                         st.last_cdn_reminder_at = None
+                                        if "cdn_problem_started_at" in db_extra:
+                                            db_extra.pop("cdn_problem_started_at", None)
+                                            extra_changed = True
                                         ingress_alerts_to_send.append((
                                             "cdn",
                                             ALERT_CDN_INGRESS_RESTORED.format(
@@ -665,6 +705,8 @@ async def check_node_resources_and_alerts(bot: Bot):
                                     elif not has_cdn_problem:
                                         st.cdn_problem_started_at = now_m
                                         st.last_cdn_reminder_at = now_m
+                                        db_extra["cdn_problem_started_at"] = time.time()
+                                        extra_changed = True
                                         logger.warning(
                                             "Xray origin node %s CDN (%s) persistent failure (%d fails): %s (Origin %s is 200 OK). Sending CDN alert.",
                                             server.id, cdn_domain, st.consecutive_cdn_fails, cdn_detail, active_origin_domain,
@@ -876,8 +918,16 @@ async def check_node_resources_and_alerts(bot: Bot):
                             cur_extra = dict(fresh.extra_data or {})
                             if is_problem:
                                 cur_extra[state_prop] = True
+                                if alert_kind == "ingress" and "ingress_problem_started_at" not in cur_extra:
+                                    cur_extra["ingress_problem_started_at"] = time.time()
+                                elif alert_kind == "cdn" and "cdn_problem_started_at" not in cur_extra:
+                                    cur_extra["cdn_problem_started_at"] = time.time()
                             else:
                                 cur_extra.pop(state_prop, None)
+                                if alert_kind == "ingress":
+                                    cur_extra.pop("ingress_problem_started_at", None)
+                                elif alert_kind == "cdn":
+                                    cur_extra.pop("cdn_problem_started_at", None)
                             await update_server(session, fresh, extra_data=cur_extra)
 
             # Decoupled relay alert dispatch outside DB transaction and advisory lock
@@ -944,36 +994,49 @@ async def check_node_resources_and_alerts(bot: Bot):
                         "target_alert_state": ServerHealthState.ONLINE,
                     })
 
-                # Проверка диска (с 1-часовым кулдауном) для Amnezia узлов
+                # Проверка диска (с 1-часовым кулдауном) для Amnezia и Xray узлов
+                disk_percent = None
                 if is_amnezia_node and client is not None:
                     try:
                         load_info = await client.get_server_load()
                         if load_info and isinstance(load_info, dict):
-                            disk_percent = (
+                            raw_dp = (
                                 load_info.get("disk_percent")
                                 or load_info.get("disk_used_percent")
                                 or load_info.get("disk")
                             )
-                            if disk_percent is not None and isinstance(disk_percent, (int, float)):
-                                if disk_percent > 85.0:
-                                    should_alert = False
-                                    if st.disk_alert_last_sent is None or (now_m - st.disk_alert_last_sent) >= DISK_ALERT_COOLDOWN_SECONDS:
-                                        should_alert = True
-
-                                    if should_alert:
-                                        alerts_to_send.append({
-                                            "text": ALERT_SERVER_DISK_CRITICAL.format(
-                                                server_name=safe(server.name),
-                                                server_id=server.id,
-                                                disk_percent=disk_percent,
-                                            ),
-                                            "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
-                                        })
-                                        st.disk_alert_last_sent = now_m
-                                elif disk_percent <= 80.0:
-                                    st.disk_alert_last_sent = None
+                            if raw_dp is not None and isinstance(raw_dp, (int, float)):
+                                disk_percent = float(raw_dp)
                     except Exception as exc:
                         logger.warning("Error reading server load for server %s: %s", server.id, exc)
+                elif is_xray_node and xray_data and isinstance(xray_data, dict):
+                    try:
+                        disk_usage = xray_data.get("disk_usage", {})
+                        if isinstance(disk_usage, dict):
+                            raw_dp = disk_usage.get("used_percent")
+                            if raw_dp is not None and isinstance(raw_dp, (int, float)):
+                                disk_percent = float(raw_dp)
+                    except Exception as exc:
+                        logger.warning("Error reading disk usage for Xray server %s: %s", server.id, exc)
+
+                if disk_percent is not None:
+                    if disk_percent > 85.0:
+                        should_alert = False
+                        if st.disk_alert_last_sent is None or (now_m - st.disk_alert_last_sent) >= DISK_ALERT_COOLDOWN_SECONDS:
+                            should_alert = True
+
+                        if should_alert:
+                            alerts_to_send.append({
+                                "text": ALERT_SERVER_DISK_CRITICAL.format(
+                                    server_name=safe(server.name),
+                                    server_id=server.id,
+                                    disk_percent=disk_percent,
+                                ),
+                                "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
+                            })
+                            st.disk_alert_last_sent = now_m
+                    elif disk_percent <= 80.0:
+                        st.disk_alert_last_sent = None
 
             elif st.health_state == ServerHealthState.PROBLEM:
                 st.consecutive_fails = 0
