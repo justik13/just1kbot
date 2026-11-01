@@ -799,6 +799,124 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("Напоминание: Сервер отключён", sent_text)
                 self.assertIn("Disabled-Remind-Node", sent_text)
 
+    async def test_xray_disk_usage_alert_and_cooldown(self):
+        """Xray node with disk usage > 85% triggers ALERT_SERVER_DISK_CRITICAL and respects 1h cooldown."""
+        server = MagicMock(spec=Server)
+        server.id = 301
+        server.name = "Xray-Disk-Node"
+        server.protocol = "vless"
+        server.api_url = "https://xray301.example.com"
+        server.api_key = "secret_xray_key"
+        server.is_active = True
+        server.disabled_reason = None
+        server.health_state = "ONLINE"
+        server.consecutive_fails = 0
+        server.consecutive_successes = 10
+        server.problem_started_at = None
+        server.next_check_at = None
+        server.recovery_notice_sent = False
+        server.last_alert_sent_state = ServerHealthState.ONLINE
+        server.extra_data = {}
+
+        with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
+             patch("services.workers.node_monitor.get_server_by_id", return_value=server), \
+             patch("services.workers.node_monitor.update_server", new_callable=AsyncMock), \
+             patch("services.workers.node_monitor._probe_single_ingress_endpoint", new_callable=AsyncMock, return_value=(True, "OK")), \
+             patch("services.xray_node_client.XrayNodeClient") as mock_xray_cls, \
+             patch("services.workers.node_monitor.update_server_xray_epoch_cas", new_callable=AsyncMock) as mock_cas:
+
+            mock_cas.return_value = (True, server)
+            mock_xray_client = AsyncMock()
+            mock_xray_client.check_health = AsyncMock(return_value=(
+                True,
+                "epoch-disk",
+                {
+                    "disk_usage": {
+                        "total_bytes": 100000,
+                        "used_bytes": 89400,
+                        "free_bytes": 10600,
+                        "used_percent": 89.4,
+                    }
+                },
+            ))
+            mock_xray_cls.return_value.__aenter__.return_value = mock_xray_client
+            mock_xray_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            st = get_server_monitor_state(301, server)
+            st.health_state = ServerHealthState.ONLINE
+
+            # 1. First tick -> triggers critical disk alert
+            await check_node_resources_and_alerts(self.mock_bot)
+            self.assertEqual(self.mock_bot.send_message.call_count, 1)
+            sent_text = self.mock_bot.send_message.call_args[1]["text"]
+            self.assertIn("89.4%", sent_text)
+            self.assertIn("Xray-Disk-Node", sent_text)
+            self.assertIsNotNone(st.disk_alert_last_sent)
+
+            # 2. Second tick within cooldown -> no new alert
+            await check_node_resources_and_alerts(self.mock_bot)
+            self.assertEqual(self.mock_bot.send_message.call_count, 1)
+
+            # 3. Advance clock past 1 hour -> triggers alert again
+            with patch("time.monotonic", return_value=st.disk_alert_last_sent + 3650.0):
+                await check_node_resources_and_alerts(self.mock_bot)
+                self.assertEqual(self.mock_bot.send_message.call_count, 2)
+
+    async def test_ingress_problem_started_at_persistence_across_restart(self):
+        """Verify ingress_problem_started_at is persisted to extra_data and restored correctly across monitor resets."""
+        server = MagicMock(spec=Server)
+        server.id = 401
+        server.name = "Origin-Persistence-Node"
+        server.protocol = "vless"
+        server.api_url = "https://origin401.example.com"
+        server.api_key = "secret"
+        server.is_active = True
+        server.disabled_reason = None
+        server.health_state = "ONLINE"
+        server.consecutive_fails = 0
+        server.consecutive_successes = 10
+        server.problem_started_at = None
+        server.next_check_at = None
+        server.recovery_notice_sent = False
+        server.last_alert_sent_state = ServerHealthState.ONLINE
+        server.capabilities = ["xray_origin"]
+        server.extra_data = {"domain": "origin401.example.com"}
+
+        async def fake_update_server(session, db_srv, **kwargs):
+            if "extra_data" in kwargs:
+                db_srv.extra_data = dict(kwargs["extra_data"])
+            return db_srv
+
+        with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
+             patch("services.workers.node_monitor.get_server_by_id", return_value=server), \
+             patch("services.workers.node_monitor.update_server", side_effect=fake_update_server), \
+             patch("services.workers.node_monitor._probe_single_ingress_endpoint", new_callable=AsyncMock, return_value=(False, "502 Bad Gateway")), \
+             patch("services.xray_node_client.XrayNodeClient") as mock_xray_cls, \
+             patch("services.workers.node_monitor.update_server_xray_epoch_cas", new_callable=AsyncMock) as mock_cas:
+
+            mock_cas.return_value = (True, server)
+            mock_xray_client = AsyncMock()
+            mock_xray_client.check_health = AsyncMock(return_value=(True, "epoch-1", {}))
+            mock_xray_cls.return_value.__aenter__.return_value = mock_xray_client
+            mock_xray_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            # Trigger 5 consecutive ingress fails to start ingress problem
+            for _ in range(5):
+                await check_node_resources_and_alerts(self.mock_bot)
+
+            # Confirm ingress_problem_started_at was persisted in extra_data
+            self.assertIn("ingress_problem_started_at", server.extra_data)
+            saved_started_ts = server.extra_data["ingress_problem_started_at"]
+            self.assertIsInstance(saved_started_ts, float)
+
+            # Simulate bot restart (clear monitor states and re-sync from server with extra_data)
+            _server_states.clear()
+            # Fast forward wall-clock by 3600 seconds (1 hour of outage)
+            with patch("time.time", return_value=saved_started_ts + 3600.0):
+                st_restored = get_server_monitor_state(401, server)
+                outage_dur = time.monotonic() - st_restored.ingress_problem_started_at
+                self.assertAlmostEqual(outage_dur, 3600.0, delta=5.0)
+
 
 if __name__ == "__main__":
     unittest.main()

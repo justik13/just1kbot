@@ -525,7 +525,7 @@ async def process_edit_server_url(
     elif server.protocol in (XRAY_PROTOCOL, VLESS_PROTOCOL):
         from services.xray_node_client import XrayNodeClient
 
-        async with XrayNodeClient(timeout=10.0) as xclient:
+        async with XrayNodeClient(timeout=5.0, max_retries=0) as xclient:
             is_healthy, _node_epoch, _ = await xclient.check_health(new_url, server.api_key)
         if not is_healthy:
             await render_hub(
@@ -863,7 +863,7 @@ async def process_edit_server_key(
     elif server.protocol in (XRAY_PROTOCOL, VLESS_PROTOCOL):
         from services.xray_node_client import XrayNodeClient
 
-        async with XrayNodeClient(timeout=10.0) as xclient:
+        async with XrayNodeClient(timeout=5.0, max_retries=0) as xclient:
             is_healthy, _node_epoch, _ = await xclient.check_health(server.api_url, new_key)
         if not is_healthy:
             await render_hub(
