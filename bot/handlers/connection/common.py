@@ -185,9 +185,9 @@ async def _build_connections_screen(
                 callback_data="vless_sub_reset",
                 style="danger",
             )
-        if quota_profiles_count > 0:
+        if profiles:
             builder.button(
-                text=texts.BTN_AMNEZIA_DEVICES_COUNT.format(count=quota_profiles_count),
+                text=texts.BTN_AMNEZIA_DEVICES_COUNT.format(count=len(profiles)),
                 callback_data="amnezia_devices",
             )
 
@@ -238,17 +238,11 @@ async def _build_amnezia_screen(
     monthly_traffic_str = format_traffic(monthly_bytes)
 
     if not profiles:
-        action_hint = (
-            texts.AMNEZIA_SCREEN_HINT_ADD
-            if (not read_only and total_active_devices < device_limit)
-            else (texts.AMNEZIA_SCREEN_HINT_LIMIT if not read_only else "")
-        )
         rendered = texts.AMNEZIA_SCREEN_EMPTY_TEXT.format(
             active=total_active_devices,
             limit=device_limit,
             vless_count=vless_hwid_count,
             monthly_traffic=monthly_traffic_str,
-            action_hint=action_hint,
         )
     else:
         profiles_block = "\n"

@@ -223,9 +223,6 @@ BTN_SUB_CONNECT_INCY = "🚀 Подключить в приложении"
 BTN_SUB_COPY_LINK = "📋 Скопировать ссылку"
 BTN_INCY_INSTRUCTIONS = "📱 Инструкция (INCY / Happ)"
 VLESS_WEB_TOO_MANY_REQUESTS = "Слишком много запросов к подписке. Попробуйте позже."
-AMNEZIA_SCREEN_HINT_ADD = "\n\n<i>Нажмите кнопку ниже, чтобы создать первое устройство.</i>"
-AMNEZIA_SCREEN_HINT_LIMIT = "\n\n⚠️ <i>Общий лимит устройств исчерпан. Для добавления перейдите на тариф с большим количеством устройств или отключите неиспользуемые.</i>"
-
 AMNEZIA_SCREEN_TEXT = """🛡 <b>Устройства Amnezia</b>
 
 Подключение и файлы конфигураций для приложений Amnezia.
@@ -242,7 +239,7 @@ AMNEZIA_SCREEN_EMPTY_TEXT = """🛡 <b>Устройства Amnezia</b>
 📱 <b>Устройства:</b> {active} из {limit} <i>(по ссылке: {vless_count} • Amnezia: 0)</i>
 📊 <b>Трафик за месяц:</b> {monthly_traffic}
 
-<i>У вас пока нет добавленных устройств Amnezia.</i>{action_hint}"""
+<i>У вас пока нет добавленных устройств Amnezia.</i>"""
 
 VLESS_FEED_EXPIRED_TITLE = "⚠️ Подписка закончилась"
 VLESS_FEED_EXPIRED_NOTICE = "⚠️ Подписка закончилась. Продлите доступ: @{bot_username}"

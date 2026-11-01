@@ -57,14 +57,10 @@ async def hub_amnezia_devices(
             pass
         return
 
-    from database.repositories.profiles_repo import PROFILE_QUOTA_EXCLUDED_STATUSES, get_user_profiles
+    from database.repositories.profiles_repo import get_user_profiles
     profiles = await get_user_profiles(session, db_user.id)
-    quota_profiles = [
-        p for p in profiles
-        if getattr(p, "provisioning_status", "") not in PROFILE_QUOTA_EXCLUDED_STATUSES
-    ]
 
-    if not quota_profiles:
+    if not profiles:
         await callback.answer(
             texts.ALERT_AMNEZIA_DECOMMISSIONED,
             show_alert=True,

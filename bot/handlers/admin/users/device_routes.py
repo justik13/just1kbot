@@ -428,9 +428,23 @@ async def admin_vless_hwid_reset_confirm(
         logger.debug(f"admin_vless_hwid_reset_confirm edit_text failed: {e}")
 
 
-@router.callback_query(
-    F.data.startswith("admin_vless_hwid_reset_apply:") | F.data.startswith("admin_vless_hwid_reset:")
-)
+@router.callback_query(F.data.startswith("admin_vless_hwid_reset:"))
+async def admin_vless_hwid_reset_legacy(
+    callback: CallbackQuery,
+    session: AsyncSession,
+):
+    """Старые сообщения: прямой сброс запрещён, ведём на экран подтверждения."""
+    telegram_id = parse_callback_id(callback.data, 1)
+    if telegram_id is None:
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        return
+    redirected = callback.model_copy(
+        update={"data": f"admin_vless_hwid_reset_confirm:{telegram_id}"}
+    )
+    await admin_vless_hwid_reset_confirm(redirected, session)
+
+
+@router.callback_query(F.data.startswith("admin_vless_hwid_reset_apply:"))
 async def admin_vless_hwid_reset(
     callback: CallbackQuery,
     session: AsyncSession,
@@ -531,9 +545,23 @@ async def admin_vless_token_rotate_confirm(
         logger.debug(f"admin_vless_token_rotate_confirm edit_text failed: {e}")
 
 
-@router.callback_query(
-    F.data.startswith("admin_vless_token_rotate_apply:") | F.data.startswith("admin_vless_token_rotate:")
-)
+@router.callback_query(F.data.startswith("admin_vless_token_rotate:"))
+async def admin_vless_token_rotate_legacy(
+    callback: CallbackQuery,
+    session: AsyncSession,
+):
+    """Старые сообщения: прямой перевыпуск запрещён, ведём на экран подтверждения."""
+    telegram_id = parse_callback_id(callback.data, 1)
+    if telegram_id is None:
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
+        return
+    redirected = callback.model_copy(
+        update={"data": f"admin_vless_token_rotate_confirm:{telegram_id}"}
+    )
+    await admin_vless_token_rotate_confirm(redirected, session)
+
+
+@router.callback_query(F.data.startswith("admin_vless_token_rotate_apply:"))
 async def admin_vless_token_rotate(
     callback: CallbackQuery,
     session: AsyncSession,

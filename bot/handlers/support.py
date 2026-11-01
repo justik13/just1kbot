@@ -126,6 +126,10 @@ async def show_help_incy(callback: CallbackQuery):
 
     builder = InlineKeyboardBuilder()
     builder.button(
+        text=texts.BTN_CONNECTIONS,
+        callback_data="menu_connections",
+    )
+    builder.button(
         text=texts.BTN_WHITE_INTERNET,
         callback_data="white_internet",
     )
@@ -137,7 +141,7 @@ async def show_help_incy(callback: CallbackQuery):
         text=texts.BTN_MAIN_MENU_NAV,
         callback_data="back_to_main_menu",
     )
-    builder.adjust(1, 2)
+    builder.adjust(2, 2)
 
     await render_hub(
         callback.bot,
