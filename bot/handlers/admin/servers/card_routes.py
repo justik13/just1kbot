@@ -44,6 +44,97 @@ router = Router()
 logger = logging.getLogger(__name__)
 
 
+def resolve_relay_db_health(
+    code_str: str,
+    base_dict: dict,
+    prev_dict: dict,
+    health_dict: dict,
+    db_relays_state: dict | None = None,
+) -> tuple[dict, dict]:
+    """Resolve relay health for database persistence vs UI display.
+
+    Returns:
+        (db_entry, ui_entry): A tuple where ui_entry reflects real-time probe results,
+        and db_entry protects database state from transient network fluctuations.
+    """
+    relays_state = db_relays_state or {}
+    is_healthy = bool(
+        health_dict.get("healthy")
+        or health_dict.get("status") == "online"
+        or health_dict.get("reachable") is True
+    )
+    ui_entry = dict(base_dict)
+    for k in ("healthy", "rtt_ms", "error", "reachable", "status"):
+        if k in health_dict:
+            ui_entry[k] = health_dict[k]
+
+    db_entry = dict(base_dict)
+    if is_healthy:
+        for k in ("healthy", "rtt_ms", "error", "reachable", "status"):
+            if k in health_dict:
+                db_entry[k] = health_dict[k]
+        db_entry["healthy"] = True
+        db_entry["error"] = None
+    else:
+        r_ip = str(base_dict.get("ip") or "").strip()
+        r_port = base_dict.get("port") or 10443
+        r_name = str(base_dict.get("name") or code_str).strip()
+        r_key = f"{r_ip}:{r_port}" if r_ip else r_name
+        probe_st = (
+            relays_state.get(r_key)
+            or relays_state.get(r_name)
+            or relays_state.get(code_str)
+            or relays_state.get(code_str.lower())
+            or relays_state.get(code_str.upper())
+            or {}
+        )
+        monitor_confirmed_offline = bool(probe_st.get("is_problem"))
+        if (
+            prev_dict.get("healthy") is True
+            or prev_dict.get("status") == "online"
+            or prev_dict.get("reachable") is True
+        ):
+            prev_healthy = True
+        elif (
+            prev_dict.get("healthy") is False
+            or prev_dict.get("status") == "offline"
+            or prev_dict.get("reachable") is False
+        ):
+            prev_healthy = False
+        else:
+            prev_healthy = None
+
+        if monitor_confirmed_offline or prev_healthy is False:
+            for k in ("healthy", "rtt_ms", "error", "reachable", "status"):
+                if k in health_dict:
+                    db_entry[k] = health_dict[k]
+            db_entry["healthy"] = False
+        elif prev_healthy is True:
+            # Protect PostgreSQL database state from poisoning on transient UI lag:
+            # preserve previous healthy state, RTT, and error
+            db_entry["healthy"] = True
+            db_entry["rtt_ms"] = prev_dict.get("rtt_ms")
+            db_entry["error"] = prev_dict.get("error")
+            if "reachable" in prev_dict:
+                db_entry["reachable"] = prev_dict.get("reachable")
+            elif "reachable" in db_entry:
+                db_entry["reachable"] = True
+            if "status" in prev_dict:
+                db_entry["status"] = prev_dict.get("status")
+            elif "status" in db_entry:
+                db_entry["status"] = "online"
+        else:
+            for k in ("healthy", "rtt_ms", "error", "reachable", "status"):
+                if k in health_dict:
+                    db_entry[k] = health_dict[k]
+            db_entry["healthy"] = False
+
+    return db_entry, ui_entry
+
+
+_resolve_relay_db_health = resolve_relay_db_health
+
+
 @router.callback_query(F.data.startswith("admin_server_card:"))
 async def show_server_card(
     callback: CallbackQuery,
@@ -399,85 +490,6 @@ async def show_server_relays(
                                 }
                                 db_relays_state = dict(extra.get("relays_probe_state") or {})
 
-                                def _resolve_relay_db_health(
-                                    code_str: str,
-                                    base_dict: dict,
-                                    prev_dict: dict,
-                                    health_dict: dict,
-                                ) -> tuple[dict, dict]:
-                                    is_healthy = bool(
-                                        health_dict.get("healthy")
-                                        or health_dict.get("status") == "online"
-                                        or health_dict.get("reachable") is True
-                                    )
-                                    ui_entry = dict(base_dict)
-                                    for k in ("healthy", "rtt_ms", "error", "reachable", "status"):
-                                        if k in health_dict:
-                                            ui_entry[k] = health_dict[k]
-
-                                    db_entry = dict(base_dict)
-                                    if is_healthy:
-                                        for k in ("healthy", "rtt_ms", "error", "reachable", "status"):
-                                            if k in health_dict:
-                                                db_entry[k] = health_dict[k]
-                                        db_entry["healthy"] = True
-                                        db_entry["error"] = None
-                                    else:
-                                        r_ip = str(base_dict.get("ip") or "").strip()
-                                        r_port = base_dict.get("port") or 10443
-                                        r_name = str(base_dict.get("name") or code_str).strip()
-                                        r_key = f"{r_ip}:{r_port}" if r_ip else r_name
-                                        probe_st = (
-                                            db_relays_state.get(r_key)
-                                            or db_relays_state.get(r_name)
-                                            or db_relays_state.get(code_str)
-                                            or db_relays_state.get(code_str.lower())
-                                            or db_relays_state.get(code_str.upper())
-                                            or {}
-                                        )
-                                        monitor_confirmed_offline = bool(probe_st.get("is_problem"))
-                                        if (
-                                            prev_dict.get("healthy") is True
-                                            or prev_dict.get("status") == "online"
-                                            or prev_dict.get("reachable") is True
-                                        ):
-                                            prev_healthy = True
-                                        elif (
-                                            prev_dict.get("healthy") is False
-                                            or prev_dict.get("status") == "offline"
-                                            or prev_dict.get("reachable") is False
-                                        ):
-                                            prev_healthy = False
-                                        else:
-                                            prev_healthy = None
-
-                                        if monitor_confirmed_offline or prev_healthy is False:
-                                            for k in ("healthy", "rtt_ms", "error", "reachable", "status"):
-                                                if k in health_dict:
-                                                    db_entry[k] = health_dict[k]
-                                            db_entry["healthy"] = False
-                                        elif prev_healthy is True:
-                                            # Protect PostgreSQL database state from poisoning on transient UI lag:
-                                            # preserve previous healthy state, RTT, and error
-                                            db_entry["healthy"] = True
-                                            db_entry["rtt_ms"] = prev_dict.get("rtt_ms")
-                                            db_entry["error"] = prev_dict.get("error")
-                                            if "reachable" in prev_dict:
-                                                db_entry["reachable"] = prev_dict.get("reachable")
-                                            elif "reachable" in db_entry:
-                                                db_entry["reachable"] = True
-                                            if "status" in prev_dict:
-                                                db_entry["status"] = prev_dict.get("status")
-                                            elif "status" in db_entry:
-                                                db_entry["status"] = "online"
-                                        else:
-                                            for k in ("healthy", "rtt_ms", "error", "reachable", "status"):
-                                                if k in health_dict:
-                                                    db_entry[k] = health_dict[k]
-                                            db_entry["healthy"] = False
-
-                                    return db_entry, ui_entry
-
                                 node_relays = (detail or {}).get("relays") if isinstance(detail, dict) else None
                                 if isinstance(node_relays, list):
                                     synced_relays = []
@@ -497,8 +509,8 @@ async def show_server_relays(
                                         merged = dict(prev_entry)
                                         merged.update(nr)
                                         if nc in health_by_code:
-                                            db_e, ui_e = _resolve_relay_db_health(
-                                                nc, merged, prev_entry, health_by_code[nc]
+                                            db_e, ui_e = resolve_relay_db_health(
+                                                nc, merged, prev_entry, health_by_code[nc], db_relays_state
                                             )
                                             synced_relays.append(db_e)
                                             ui_relays.append(ui_e)
@@ -519,8 +531,8 @@ async def show_server_relays(
                                         c = str(ex.get("code", "")).strip().lower()
                                         merged = dict(ex)
                                         if c in health_by_code:
-                                            db_e, ui_e = _resolve_relay_db_health(
-                                                c, merged, ex, health_by_code[c]
+                                            db_e, ui_e = resolve_relay_db_health(
+                                                c, merged, ex, health_by_code[c], db_relays_state
                                             )
                                             updated_relays.append(db_e)
                                             ui_relays.append(ui_e)
