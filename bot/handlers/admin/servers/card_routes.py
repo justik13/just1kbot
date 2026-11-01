@@ -379,7 +379,7 @@ async def show_server_relays(
             if is_ok:
                 origin_status_badge = texts.ADMIN_SERVER_RELAYS_STATUS_ONLINE_RTT.format(rtt_ms=origin_rtt)
                 success, data, err = await xclient.get_relays_health(
-                    server.api_url, server.api_key, timeout=5.0, retries=0
+                    server.api_url, server.api_key, timeout=5.0, retries=2
                 )
                 if success and isinstance(data, dict):
                     if data.get("status") == "error":
@@ -397,10 +397,68 @@ async def show_server_relays(
                                     for r in relays_list
                                     if isinstance(r, dict) and r.get("code")
                                 }
+                                db_relays_state = dict(extra.get("relays_probe_state") or {})
+
+                                def _resolve_relay_db_health(
+                                    code_str: str,
+                                    base_dict: dict,
+                                    prev_dict: dict,
+                                    health_dict: dict,
+                                ) -> tuple[dict, dict]:
+                                    is_healthy = bool(
+                                        health_dict.get("healthy")
+                                        or health_dict.get("status") == "online"
+                                        or health_dict.get("reachable") is True
+                                    )
+                                    ui_entry = dict(base_dict)
+                                    for k in ("healthy", "rtt_ms", "error", "reachable", "status"):
+                                        if k in health_dict:
+                                            ui_entry[k] = health_dict[k]
+
+                                    db_entry = dict(base_dict)
+                                    if is_healthy:
+                                        for k in ("healthy", "rtt_ms", "error", "reachable", "status"):
+                                            if k in health_dict:
+                                                db_entry[k] = health_dict[k]
+                                        db_entry["healthy"] = True
+                                        db_entry["error"] = None
+                                    else:
+                                        r_ip = str(base_dict.get("ip") or "").strip()
+                                        r_port = base_dict.get("port") or 10443
+                                        r_name = str(base_dict.get("name") or code_str).strip()
+                                        r_key = f"{r_ip}:{r_port}" if r_ip else r_name
+                                        probe_st = (
+                                            db_relays_state.get(r_key)
+                                            or db_relays_state.get(r_name)
+                                            or db_relays_state.get(code_str)
+                                            or {}
+                                        )
+                                        monitor_confirmed_offline = bool(probe_st.get("is_problem"))
+                                        prev_healthy = prev_dict.get("healthy")
+
+                                        if monitor_confirmed_offline or prev_healthy is False:
+                                            for k in ("healthy", "rtt_ms", "error", "reachable", "status"):
+                                                if k in health_dict:
+                                                    db_entry[k] = health_dict[k]
+                                            db_entry["healthy"] = False
+                                        elif prev_healthy is True:
+                                            # Protect PostgreSQL database state from poisoning on transient UI lag:
+                                            # preserve previous healthy state, RTT, and error
+                                            db_entry["healthy"] = True
+                                            db_entry["rtt_ms"] = prev_dict.get("rtt_ms")
+                                            db_entry["error"] = prev_dict.get("error")
+                                        else:
+                                            for k in ("healthy", "rtt_ms", "error", "reachable", "status"):
+                                                if k in health_dict:
+                                                    db_entry[k] = health_dict[k]
+                                            db_entry["healthy"] = False
+
+                                    return db_entry, ui_entry
 
                                 node_relays = (detail or {}).get("relays") if isinstance(detail, dict) else None
                                 if isinstance(node_relays, list):
                                     synced_relays = []
+                                    ui_relays = []
                                     existing_by_code = {
                                         str(ex.get("code", "")).strip().lower(): dict(ex)
                                         for ex in (existing_relays if isinstance(existing_relays, list) else [])
@@ -412,34 +470,42 @@ async def show_server_relays(
                                         nc = str(nr.get("code", "")).strip().lower()
                                         if not nc:
                                             continue
-                                        merged = dict(existing_by_code.get(nc, {}))
+                                        prev_entry = existing_by_code.get(nc, {})
+                                        merged = dict(prev_entry)
                                         merged.update(nr)
                                         if nc in health_by_code:
-                                            h = health_by_code[nc]
-                                            for k in ("healthy", "rtt_ms", "error", "reachable", "status"):
-                                                if k in h:
-                                                    merged[k] = h[k]
-                                        synced_relays.append(merged)
+                                            db_e, ui_e = _resolve_relay_db_health(
+                                                nc, merged, prev_entry, health_by_code[nc]
+                                            )
+                                            synced_relays.append(db_e)
+                                            ui_relays.append(ui_e)
+                                        else:
+                                            synced_relays.append(merged)
+                                            ui_relays.append(merged)
 
-                                    relays_list = synced_relays
+                                    relays_list = ui_relays
                                     if extra.get("relays") != synced_relays:
                                         extra["relays"] = synced_relays
                                         locked_server.extra_data = extra
                                         await session.flush()
                                 elif isinstance(existing_relays, list) and existing_relays:
                                     updated_relays = []
+                                    ui_relays = []
                                     for ex in existing_relays:
                                         if not isinstance(ex, dict):
                                             continue
                                         c = str(ex.get("code", "")).strip().lower()
                                         merged = dict(ex)
                                         if c in health_by_code:
-                                            h = health_by_code[c]
-                                            for k in ("healthy", "rtt_ms", "error", "reachable", "status"):
-                                                if k in h:
-                                                    merged[k] = h[k]
-                                        updated_relays.append(merged)
-                                    relays_list = updated_relays
+                                            db_e, ui_e = _resolve_relay_db_health(
+                                                c, merged, ex, health_by_code[c]
+                                            )
+                                            updated_relays.append(db_e)
+                                            ui_relays.append(ui_e)
+                                        else:
+                                            updated_relays.append(merged)
+                                            ui_relays.append(merged)
+                                    relays_list = ui_relays
                                     if extra.get("relays") != updated_relays:
                                         extra["relays"] = updated_relays
                                         locked_server.extra_data = extra
