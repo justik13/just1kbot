@@ -190,6 +190,7 @@ VLESS_DEFAULT_SERVER_DESCRIPTION = "Прямой доступ"
 
 BTN_AMNEZIA_DEVICES = "🛡 Архивные устройства"
 BTN_AMNEZIA_DEVICES_COUNT = "🛡 Архивные устройства ({count})"
+LABEL_ARCHIVED_CONNECTION = "Архивное подключение"
 BTN_BACK_TO_CONNECTION = "◀️ Назад к подключению"
 BTN_ADD_DEVICE = "➕ Добавить устройство"
 

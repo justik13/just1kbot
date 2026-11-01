@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 DEVICE_NAME_REGEX = re.compile(r"^[a-zA-Z\u0400-\u04FF0-9\s_#-]+$")
 
-_PROTOCOL_DISPLAY = {p: "Архивное подключение" for p in AMNEZIA_PROTOCOLS}
+_PROTOCOL_DISPLAY = {p: texts.LABEL_ARCHIVED_CONNECTION for p in AMNEZIA_PROTOCOLS}
 
 
 def _format_protocol(raw_protocol: str | None) -> str:
