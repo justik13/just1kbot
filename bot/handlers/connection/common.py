@@ -162,8 +162,6 @@ async def _build_connections_screen(
             tariff=tariff_name,
             active=total_active_devices,
             limit=device_limit,
-            vless_count=vless_hwid_count,
-            amnezia_count=quota_profiles_count,
             sub_url=sub_url,
         )
 
@@ -187,16 +185,11 @@ async def _build_connections_screen(
                 callback_data="vless_sub_reset",
                 style="danger",
             )
-        amnezia_btn_text = (
-            texts.BTN_AMNEZIA_DEVICES_COUNT.format(count=quota_profiles_count)
-            if quota_profiles_count > 0
-            else texts.BTN_AMNEZIA_DEVICES
-        )
-        builder.button(
-            text=amnezia_btn_text,
-            callback_data="amnezia_devices",
-            style="success",
-        )
+        if quota_profiles_count > 0:
+            builder.button(
+                text=texts.BTN_AMNEZIA_DEVICES_COUNT.format(count=quota_profiles_count),
+                callback_data="amnezia_devices",
+            )
 
     try:
         status_url = get_settings().STATUS_PAGE_URL
@@ -305,13 +298,6 @@ async def _build_amnezia_screen(
         )
 
     action_buttons_count = 0
-    if not read_only and total_active_devices < device_limit:
-        builder.button(
-            text=texts.BTN_ADD_DEVICE,
-            callback_data="add_device",
-        )
-        action_buttons_count += 1
-
     if not read_only:
         builder.button(
             text=texts.BTN_BACK_TO_CONNECTION,

@@ -139,65 +139,12 @@ async def start_add_device(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    user_id = callback.from_user.id
-
-    if not await MaintenanceService.can_user_perform_action(session, user_id):
-        await callback.answer(show_alert=False)
-        await _render_maintenance(
-            callback.message, session, back_to="back_to_connections"
-        )
-        return
-
-    if user_id in _creating_devices:
-        await callback.answer(texts.DEVICE_CREATE_IN_PROGRESS, show_alert=True)
-        return
-
-    user = db_user or await get_user_by_telegram_id(session, user_id)
-
-    if not user or not await SubscriptionService.check_access(
-        session, user.telegram_id
-    ):
-        await render_hub(
-            callback.bot,
-            callback.message.chat.id,
-            texts.ERROR_NO_SUBSCRIPTION,
-            _get_no_subscription_keyboard(),
-        )
-        await callback.answer(show_alert=False)
-        return
-
-    await callback.answer(show_alert=False)
     await state.clear()
-
-    from database.repositories.profiles_repo import PROFILE_QUOTA_EXCLUDED_STATUSES, get_user_profiles
-    from database.repositories import vless_subscription_repo
-
-    profiles = await get_user_profiles(session, user.id)
-    awg_count = len([p for p in profiles if getattr(p, "provisioning_status", "") not in PROFILE_QUOTA_EXCLUDED_STATUSES])
-    vless_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
-    device_limit = await _get_effective_device_limit(session, user)
-    if (awg_count + vless_count) >= device_limit:
-        from database.repositories.tariffs_repo import get_active_tariffs
-        active_tariffs = await get_active_tariffs(session, service_type="standard")
-        can_upgrade = any(getattr(t, "device_limit", 1) > device_limit for t in active_tariffs)
-        await render_hub(
-            callback.bot,
-            callback.message.chat.id,
-            texts.ERROR_DEVICE_LIMIT_UPGRADE.format(limit=device_limit),
-            _get_device_limit_keyboard(can_upgrade=can_upgrade),
-        )
-        return
-
-    servers = await get_available_servers(session)
-
-    if not servers:
-        await render_hub(
-            callback.bot,
-            callback.message.chat.id,
-            texts.ERROR_NO_FREE_SLOTS,
-            get_back_button("back_to_connections"),
-        )
-        return
+    await callback.answer(
+        texts.ALERT_AMNEZIA_DECOMMISSIONED,
+        show_alert=True,
+    )
+    return
 
     builder = InlineKeyboardBuilder()
 

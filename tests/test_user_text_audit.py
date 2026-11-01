@@ -61,13 +61,8 @@ class TestUserTextAudit(unittest.TestCase):
 
     def test_technical_connection_identifiers_are_preserved(self):
         faq = texts.FAQ_TEXT
-        assert "AmneziaVPN" in faq
-        assert "AmneziaWG" in faq
-        assert "DefaultVPN" in faq
         assert "INCY" in faq
-        assert "vpn://" in faq
-        assert ".vpn" in faq
-        assert ".conf" in faq
+        assert "Happ" in faq
 
     def test_referral_texts_do_not_keep_removed_profile_screens(self):
         assert "PROFILE_TEXT_ACTIVE_REFERRAL_BALANCE" not in dir(REFERRAL_TEXTS)
