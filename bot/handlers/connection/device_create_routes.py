@@ -138,6 +138,15 @@ async def start_add_device(
     session: AsyncSession,
     db_user: User | None = None,
 ):
+    user_id = callback.from_user.id
+
+    if not await MaintenanceService.can_user_perform_action(session, user_id):
+        await callback.answer(show_alert=False)
+        await _render_maintenance(
+            callback.message, session, back_to="back_to_connections"
+        )
+        return
+
     await state.clear()
     await callback.answer(
         texts.ALERT_AMNEZIA_DECOMMISSIONED,
