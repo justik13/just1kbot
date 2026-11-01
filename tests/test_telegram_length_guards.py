@@ -118,6 +118,41 @@ class TestTelegramLengthGuards(unittest.IsolatedAsyncioTestCase):
             callback.answer.assert_called_once_with(texts.ALERT_AMNEZIA_DECOMMISSIONED, show_alert=True)
             mock_render.assert_called_once()
 
+    async def test_render_connections_financial_hold_shows_dispute_notice(self):
+        from bot.handlers.connection.common import _render_connections
+        from bot import texts
+
+        target = MagicMock()
+        target.bot = MagicMock()
+        target.chat.id = 12345
+        session = AsyncMock()
+        user = SimpleNamespace(id=10, telegram_id=12345, financial_hold=True, subscription_end=None)
+
+        with patch("services.subscription.SubscriptionService.check_access", new=AsyncMock(return_value=False)), \
+             patch("bot.handlers.connection.common.render_hub", new=AsyncMock()) as mock_render_hub:
+            await _render_connections(target, user, session)
+            mock_render_hub.assert_called_once()
+            args = mock_render_hub.call_args[0]
+            self.assertEqual(args[2], texts.PAYMENT_DISPUTE_BLOCKED_NOTICE)
+
+    async def test_render_connections_expired_shows_read_only(self):
+        from bot.handlers.connection.common import _render_connections
+        from datetime import datetime, timezone, timedelta
+
+        target = MagicMock()
+        target.bot = MagicMock()
+        target.chat.id = 12345
+        session = AsyncMock()
+        expired_date = datetime.now(timezone.utc) - timedelta(days=1)
+        user = SimpleNamespace(id=10, telegram_id=12345, financial_hold=False, subscription_end=expired_date)
+
+        with patch("services.subscription.SubscriptionService.check_access", new=AsyncMock(return_value=False)), \
+             patch("bot.handlers.connection.common._build_connections_screen", new=AsyncMock(return_value=("EXPIRED_TEXT", MagicMock()))) as mock_build, \
+             patch("bot.handlers.connection.common.render_hub", new=AsyncMock()) as mock_render_hub:
+            await _render_connections(target, user, session)
+            mock_build.assert_called_once_with(user, session, read_only=True)
+            mock_render_hub.assert_called_once()
+
 
 class TestTelegramBotApi103KeyboardAudit(unittest.IsolatedAsyncioTestCase):
     """Universal audit of all keyboards and buttons across bot against Telegram Bot API 10.3 constraints."""

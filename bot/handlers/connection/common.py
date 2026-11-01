@@ -10,11 +10,12 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.keyboards import get_back_button
+from bot.keyboards import get_back_button, get_dispute_blocked_keyboard
 from config.settings import get_settings
 from database.models import User
 from services.subscription import SubscriptionService
-from utils.datetime_helpers import now_utc
+from utils.datetime_helpers import is_expired, now_utc
+from utils.support import get_support_url
 from utils.telegram import render_hub
 
 logger = logging.getLogger(__name__)
@@ -214,7 +215,21 @@ async def _render_connections(
     )
 
     if not has_access:
-        if user.subscription_end:
+        if getattr(user, "financial_hold", False):
+            support_url = get_support_url(
+                texts.SUPPORT_DISPUTE_GREETING_TEMPLATE.format(
+                    telegram_id=getattr(user, "telegram_id", None) or target.chat.id
+                )
+            )
+            await render_hub(
+                target.bot,
+                target.chat.id,
+                texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
+                get_dispute_blocked_keyboard("back_to_main_menu", support_url=support_url),
+            )
+            return
+
+        if user.subscription_end and is_expired(user.subscription_end):
             rendered, builder = await _build_connections_screen(
                 user,
                 session,
