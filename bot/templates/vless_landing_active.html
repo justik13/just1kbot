@@ -33,10 +33,10 @@
         }
 
         body[data-tier="pro"] {
-            --tier-glow-color: rgba(99, 102, 241, 0.08);
-            --tier-highlight-line: rgba(129, 140, 248, 0.30);
-            --tier-badge-glow: rgba(99, 102, 241, 0.16);
-            --tier-accent: #818cf8;
+            --tier-glow-color: rgba(56, 189, 248, 0.08);
+            --tier-highlight-line: rgba(56, 189, 248, 0.32);
+            --tier-badge-glow: rgba(56, 189, 248, 0.14);
+            --tier-accent: #38bdf8;
         }
 
         body[data-tier="family"] {
@@ -517,21 +517,25 @@
         }
 
         .support-reset-btn {
-            background: none;
-            border: none;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
             color: var(--text-sub);
             font-size: 12px;
             cursor: pointer;
-            text-decoration: underline;
-            margin-top: 8px;
-            display: inline-block;
-            padding: 0;
+            margin-top: 10px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 36px;
+            padding: 6px 14px;
             font-family: inherit;
-            transition: color 150ms ease;
+            transition: color 150ms ease, background-color 150ms ease;
         }
 
         .support-reset-btn:hover {
             color: var(--text-main);
+            background-color: rgba(255, 255, 255, 0.09);
         }
 
         .support-textarea {
@@ -615,12 +619,11 @@
         }
 
         .section-title {
-            font-size: 11px;
+            font-size: 13px;
             font-weight: 600;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            margin-bottom: 6px;
+            color: var(--text-sub);
+            letter-spacing: -0.01em;
+            margin-bottom: 8px;
         }
 
         .section-hint {
@@ -652,10 +655,10 @@
             align-items: center;
             justify-content: center;
             gap: 6px;
-            min-height: 40px;
-            padding: 9px 12px;
-            border-radius: 8px;
-            font-size: 13px;
+            min-height: 44px;
+            padding: 10px 14px;
+            border-radius: 9px;
+            font-size: 13.5px;
             font-weight: 600;
             color: var(--text-sub);
             background: transparent;
@@ -895,26 +898,21 @@
         </div>
 
         <div class="stagger-2">
-            <a id="deepLinkIncy" href="#" class="btn btn-primary">
+            <a id="deepLinkHapp" href="#" class="btn btn-primary">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <path d="M15 3h6v6"/>
                     <path d="M10 14L21 3"/>
                     <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
                 </svg>
-                <span>Открыть в приложении INCY</span>
+                <span>Подключить в Happ</span>
             </a>
-            <a id="deepLinkHapp" href="#" class="btn btn-happ">
-                <span class="btn-inner-stack">
-                    <span class="btn-main-row">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                            <path d="M15 3h6v6"/>
-                            <path d="M10 14L21 3"/>
-                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-                        </svg>
-                        <span class="btn-title">Открыть в приложении Happ</span>
-                    </span>
-                    <span class="btn-subtitle">Рекомендуется для Windows</span>
-                </span>
+            <a id="deepLinkIncy" href="#" class="btn btn-secondary">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M15 3h6v6"/>
+                    <path d="M10 14L21 3"/>
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                </svg>
+                <span>Подключить в INCY</span>
             </a>
 
             <button id="copyBtn" type="button" class="btn btn-secondary" onclick="copyLink()">
@@ -967,60 +965,24 @@
         <div class="stagger-3">
             <div class="section-title">Приложения для подключения</div>
             <div class="app-tabs">
-                <button type="button" class="app-tab active" onclick="switchAppTab('incy')">INCY</button>
-                <button type="button" class="app-tab" onclick="switchAppTab('happ')">Happ</button>
-            </div>
-
-            <!-- INCY Downloads: Unified 2x2 Grid with clear client context -->
-            <div id="tab-incy" class="tab-pane">
-                <div class="store-buttons">
-                    <a href="https://apps.apple.com/app/incy/id6756943388" target="_blank" rel="noopener" class="store-btn">
-                        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                            <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.33c.64-.78 1.08-1.86.96-2.94-.93.04-2.06.62-2.72 1.4-.58.68-1.1 1.79-.96 2.84 1.04.08 2.08-.52 2.72-1.3"/>
-                        </svg>
-                        <span>App Store (INCY)</span>
-                    </a>
-                    <a href="https://play.google.com/store/apps/details?id=llc.itdev.incy" target="_blank" rel="noopener" class="store-btn">
-                        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                            <path d="M3.61 1.814L13.793 12 3.61 22.186a1.05 1.05 0 0 1-.61-.959V2.773c0-.419.246-.785.61-.959zm10.89 10.893l2.302 2.302-10.937 6.333 8.635-8.635zm3.199-3.198l2.807 1.626a1 1 0 0 1 0 1.73l-2.808 1.626L15.206 12l2.493-2.491zM5.864 2.658L16.8 8.99l-2.302 2.302-8.634-8.634z"/>
-                        </svg>
-                        <span>Google Play (INCY)</span>
-                    </a>
-                </div>
-                <div class="store-buttons">
-                    <a href="https://github.com/INCY-DEV/incy-platforms/releases" target="_blank" rel="noopener" class="store-btn">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                            <polyline points="7 10 12 15 17 10"/>
-                            <line x1="12" y1="15" x2="12" y2="3"/>
-                        </svg>
-                        <span>INCY APK</span>
-                    </a>
-                    <a href="https://github.com/INCY-DEV/incy-platforms/releases" target="_blank" rel="noopener" class="store-btn">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
-                            <line x1="8" y1="21" x2="16" y2="21"/>
-                            <line x1="12" y1="17" x2="12" y2="21"/>
-                        </svg>
-                        <span>INCY для Windows</span>
-                    </a>
-                </div>
+                <button type="button" class="app-tab active" onclick="switchAppTab('happ')">Happ (Основное)</button>
+                <button type="button" class="app-tab" onclick="switchAppTab('incy')">INCY</button>
             </div>
 
             <!-- Happ Downloads: Unified 2x2 Grid with clear client context -->
-            <div id="tab-happ" class="tab-pane" style="display: none;">
+            <div id="tab-happ" class="tab-pane">
                 <div class="store-buttons">
                     <a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215" target="_blank" rel="noopener" class="store-btn">
                         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                             <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.33c.64-.78 1.08-1.86.96-2.94-.93.04-2.06.62-2.72 1.4-.58.68-1.1 1.79-.96 2.84 1.04.08 2.08-.52 2.72-1.3"/>
                         </svg>
-                        <span>App Store (Happ)</span>
+                        <span>App Store</span>
                     </a>
                     <a href="https://play.google.com/store/apps/details?id=com.happproxy" target="_blank" rel="noopener" class="store-btn">
                         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                             <path d="M3.61 1.814L13.793 12 3.61 22.186a1.05 1.05 0 0 1-.61-.959V2.773c0-.419.246-.785.61-.959zm10.89 10.893l2.302 2.302-10.937 6.333 8.635-8.635zm3.199-3.198l2.807 1.626a1 1 0 0 1 0 1.73l-2.808 1.626L15.206 12l2.493-2.491zM5.864 2.658L16.8 8.99l-2.302 2.302-8.634-8.634z"/>
                         </svg>
-                        <span>Google Play (Happ)</span>
+                        <span>Google Play</span>
                     </a>
                 </div>
                 <div class="store-buttons">
@@ -1030,7 +992,7 @@
                             <polyline points="7 10 12 15 17 10"/>
                             <line x1="12" y1="15" x2="12" y2="3"/>
                         </svg>
-                        <span>Happ APK</span>
+                        <span>Android APK</span>
                     </a>
                     <a href="https://github.com/Happ-proxy/happ-desktop/releases" target="_blank" rel="noopener" class="store-btn">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1038,7 +1000,43 @@
                             <line x1="8" y1="21" x2="16" y2="21"/>
                             <line x1="12" y1="17" x2="12" y2="21"/>
                         </svg>
-                        <span>Happ для Windows</span>
+                        <span>Windows</span>
+                    </a>
+                </div>
+            </div>
+
+            <!-- INCY Downloads: Unified 2x2 Grid with TestFlight for iOS -->
+            <div id="tab-incy" class="tab-pane" style="display: none;">
+                <div class="store-buttons">
+                    <a href="https://testflight.apple.com/join/dFw66h3a" target="_blank" rel="noopener" class="store-btn">
+                        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                            <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.33c.64-.78 1.08-1.86.96-2.94-.93.04-2.06.62-2.72 1.4-.58.68-1.1 1.79-.96 2.84 1.04.08 2.08-.52 2.72-1.3"/>
+                        </svg>
+                        <span>TestFlight (iOS)</span>
+                    </a>
+                    <a href="https://play.google.com/store/apps/details?id=llc.itdev.incy" target="_blank" rel="noopener" class="store-btn">
+                        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                            <path d="M3.61 1.814L13.793 12 3.61 22.186a1.05 1.05 0 0 1-.61-.959V2.773c0-.419.246-.785.61-.959zm10.89 10.893l2.302 2.302-10.937 6.333 8.635-8.635zm3.199-3.198l2.807 1.626a1 1 0 0 1 0 1.73l-2.808 1.626L15.206 12l2.493-2.491zM5.864 2.658L16.8 8.99l-2.302 2.302-8.634-8.634z"/>
+                        </svg>
+                        <span>Google Play</span>
+                    </a>
+                </div>
+                <div class="store-buttons">
+                    <a href="https://github.com/INCY-DEV/incy-platforms/releases" target="_blank" rel="noopener" class="store-btn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="7 10 12 15 17 10"/>
+                            <line x1="12" y1="15" x2="12" y2="3"/>
+                        </svg>
+                        <span>Android APK</span>
+                    </a>
+                    <a href="https://github.com/INCY-DEV/incy-platforms/releases" target="_blank" rel="noopener" class="store-btn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                            <line x1="8" y1="21" x2="16" y2="21"/>
+                            <line x1="12" y1="17" x2="12" y2="21"/>
+                        </svg>
+                        <span>Windows</span>
                     </a>
                 </div>
             </div>
@@ -1049,11 +1047,11 @@
             <ol>
                 <li>
                     <span class="step-num">1</span>
-                    <span>Установите приложение <strong>Happ</strong> или <strong>INCY</strong> (для Windows рекомендуется <strong>Happ</strong>).</span>
+                    <span>Установите приложение <strong>Happ</strong> или <strong>INCY</strong> (для iPhone доступно в TestFlight).</span>
                 </li>
                 <li>
                     <span class="step-num">2</span>
-                    <span>Нажмите кнопку <strong>«Открыть в приложении...»</strong> выше либо скопируйте ссылку и добавьте её в приложении.</span>
+                    <span>Нажмите кнопку <strong>«Подключить в Happ»</strong> (или INCY) выше либо скопируйте ссылку и вставьте её в приложении.</span>
                 </li>
                 <li>
                     <span class="step-num">3</span>
@@ -1082,23 +1080,23 @@
             const tabIncy = document.getElementById("tab-incy");
             const tabHapp = document.getElementById("tab-happ");
             const tabs = document.querySelectorAll(".app-tab");
-            if (app === "incy") {
-                if (tabHapp) tabHapp.style.display = "none";
-                if (tabIncy) {
-                    tabIncy.style.display = "block";
-                    tabIncy.style.animation = "none";
-                    void tabIncy.offsetWidth;
-                    tabIncy.style.animation = "tabFadeIn 180ms cubic-bezier(0.16, 1, 0.3, 1) both";
-                }
-                if (tabs[0]) tabs[0].classList.add("active");
-                if (tabs[1]) tabs[1].classList.remove("active");
-            } else {
+            if (app === "happ") {
                 if (tabIncy) tabIncy.style.display = "none";
                 if (tabHapp) {
                     tabHapp.style.display = "block";
                     tabHapp.style.animation = "none";
                     void tabHapp.offsetWidth;
                     tabHapp.style.animation = "tabFadeIn 180ms cubic-bezier(0.16, 1, 0.3, 1) both";
+                }
+                if (tabs[0]) tabs[0].classList.add("active");
+                if (tabs[1]) tabs[1].classList.remove("active");
+            } else {
+                if (tabHapp) tabHapp.style.display = "none";
+                if (tabIncy) {
+                    tabIncy.style.display = "block";
+                    tabIncy.style.animation = "none";
+                    void tabIncy.offsetWidth;
+                    tabIncy.style.animation = "tabFadeIn 180ms cubic-bezier(0.16, 1, 0.3, 1) both";
                 }
                 if (tabs[0]) tabs[0].classList.remove("active");
                 if (tabs[1]) tabs[1].classList.add("active");

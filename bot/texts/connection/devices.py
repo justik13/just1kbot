@@ -189,7 +189,7 @@ VLESS_RESET_EMPTY = "ℹ️ У вас нет привязанных устрой
 VLESS_DEFAULT_SERVER_DESCRIPTION = "Прямой доступ"
 
 LABEL_ARCHIVED_CONNECTION = "Архивное подключение"
-BTN_BACK_TO_CONNECTION = "◀️ Назад к подключению"
+BTN_BACK_TO_CONNECTION = "← К подключению"
 BTN_ADD_DEVICE = "➕ Добавить устройство"
 
 ALERT_AMNEZIA_DECOMMISSIONED = (
