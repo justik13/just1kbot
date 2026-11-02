@@ -69,18 +69,18 @@ _build_alert_keyboard = get_node_monitor_alert_keyboard
 
 logger = logging.getLogger(__name__)
 
-CHECK_INTERVAL_SECONDS = 15.0  # Частота тиков фонового воркера
-CONFIRMATION_DELAY_SECONDS = 30.0  # Пауза между FAIL #1 и FAIL #2 (неблокирующая)
+CHECK_INTERVAL_SECONDS = 60.0  # Частота тиков фонового воркера (1 минута)
+CONFIRMATION_DELAY_SECONDS = 60.0  # Пауза между FAIL #1 и FAIL #2 (неблокирующая)
 PROBLEM_OBSERVATION_TIMEOUT = 15 * 60.0  # 15 минут наблюдения за сервером в статусе PROBLEM
 AUTO_DISABLED_CHECK_INTERVAL = 900.0  # 15 минут между тихими проверками в режиме AUTO_DISABLED
 REQUIRED_STABLE_SUCCESSES = 3  # 3 успешных ответа подряд для подтверждения восстановления
 DISK_ALERT_COOLDOWN_SECONDS = 3600.0  # 1 час между повторными уведомлениями о диске
-REQUIRED_INGRESS_FAILS = 3  # Требуется 3 цикла сбоя подряд (>= 45-60с) перед отправкой алерта
-REQUIRED_CDN_FAILS = 5  # Требуется 5 циклов сбоя подряд (~100-120с) для фильтрации трансграничного шума
+REQUIRED_INGRESS_FAILS = 3  # Требуется 3 цикла сбоя подряд (>= 3 мин) перед отправкой алерта
+REQUIRED_CDN_FAILS = 5  # Требуется 5 циклов сбоя подряд (~5 мин) для фильтрации трансграничного шума
 REQUIRED_INGRESS_SUCCESSES = 2  # Требуется 2 цикла успеха подряд для подтверждения восстановления
-REQUIRED_RELAY_FAILS = 5  # Требуется 5 циклов сбоя подряд (~75-100с) для фильтрации трансграничного шума
-REQUIRED_RELAY_SUCCESSES = 3  # Требуется 3 цикла успеха подряд (~45с) для подтверждения восстановления
-RELAY_PROBE_TIMEOUT = 5.0  # Таймаут TCP-подключения к релею на одну попытку
+REQUIRED_RELAY_FAILS = 15  # Требуется 15 циклов сбоя подряд (15 минут) для подтверждения аварии
+REQUIRED_RELAY_SUCCESSES = 3  # Требуется 3 цикла успеха подряд (3 минуты) для подтверждения восстановления
+RELAY_PROBE_TIMEOUT = 8.0  # Таймаут TCP-подключения к релею на одну попытку (запас на ретрансмиссию)
 RELAY_PROBE_RETRIES = 2  # Количество повторных попыток на Origin перед фиксацией сбоя
 INGRESS_RETRY_DELAY = 1.5  # Базовая задержка перед повторным запросом зонда при ошибке/таймауте
 INGRESS_PROBE_TOTAL_TIMEOUT = 30.0  # Максимальное время синтетического ingress-зонда
