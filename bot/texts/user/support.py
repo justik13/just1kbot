@@ -91,7 +91,6 @@ SUPPORT_INCY_INSTRUCTION_TEXT = """📱 <b>Инструкция по подкл�
 <b>1. Приложение Happ (Рекомендуется для ПК):</b>
 • 💻 <a href="https://github.com/Happ-proxy/happ-desktop/releases">Скачать для Windows / ПК (GitHub)</a> — <i>рекомендуется для компьютеров</i>
 • 🍏 <a href="https://testflight.apple.com/join/XMls6Ckd">TestFlight (iOS РФ)</a> | <a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215">App Store</a>
-• 🤖 <a href="https://play.google.com/store/apps/details?id=com.happproxy">Установить из Google Play (Android)</a>
 • 📦 <a href="https://github.com/Happ-proxy/happ-android/releases">APK для Android (GitHub)</a>
 
 <b>2. Приложение INCY:</b>

@@ -854,18 +854,26 @@
         #mainView, #guidesView {
             transition: opacity 180ms cubic-bezier(0.16, 1, 0.3, 1), transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
         }
+        #guidesView {
+            text-align: left;
+        }
+        .guide-section {
+            text-align: left;
+        }
         .view-hidden {
             display: none !important;
         }
 
         /* Micro-interactions & Tactile Tap */
-        button:active, .sub-pill:active, .guide-nav-btn:active, .mini-copy-btn:active, .guides-trigger-card:active {
+        button:active, .sub-pill:active, .guide-nav-btn:active, .mini-copy-btn:active, .guides-trigger-card:active, .guide-method-btn:active, .guide-store-card:active {
             transform: scale(0.98);
         }
         @media (prefers-reduced-motion: reduce) {
-            #mainView, #guidesView, .guide-faq-a, .guide-faq-chevron, button, .sub-pill {
-                transition: none !important;
-                animation: none !important;
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+                scroll-behavior: auto !important;
             }
         }
 
@@ -873,31 +881,20 @@
         .guides-trigger-card {
             display: flex;
             align-items: center;
-            justify-content: space-between;
-            gap: 10px;
+            gap: 12px;
             margin-top: 14px;
             padding: 12px 14px;
             background: linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.02) 100%);
             border: 1px solid var(--border-subtle);
             border-radius: 14px;
+            cursor: pointer;
             transition: all 150ms ease;
+            text-align: left;
         }
         .guides-trigger-card:hover {
             background: rgba(255, 255, 255, 0.07);
             border-color: var(--border-strong);
             transform: translateY(-1px);
-        }
-        .guides-trigger-clickable {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            flex: 1;
-            min-width: 0;
-            cursor: pointer;
-            background: none;
-            border: none;
-            padding: 0;
-            text-align: left;
         }
         .guides-trigger-icon {
             width: 36px;
@@ -941,30 +938,6 @@
             width: 16px;
             height: 16px;
         }
-        .guides-trigger-popout {
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            padding: 7px 10px;
-            background: rgba(255, 255, 255, 0.06);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 8px;
-            color: var(--text-sub);
-            font-size: 11px;
-            font-weight: 500;
-            cursor: pointer;
-            flex-shrink: 0;
-            transition: all 150ms ease;
-        }
-        .guides-trigger-popout:hover {
-            background: rgba(255, 255, 255, 0.14);
-            color: var(--text-main);
-            border-color: var(--border-strong);
-        }
-        .guides-trigger-popout svg {
-            width: 13px;
-            height: 13px;
-        }
 
         /* Guides Screen Header */
         .guides-sticky-bar {
@@ -983,9 +956,10 @@
             background: rgba(255, 255, 255, 0.05);
             border: 1px solid var(--border-subtle);
             border-radius: 10px;
-            padding: 7px 12px;
+            padding: 8px 14px;
+            min-height: 38px;
             color: var(--text-main);
-            font-size: 12px;
+            font-size: 12.5px;
             font-weight: 600;
             cursor: pointer;
             transition: all 120ms ease;
@@ -998,42 +972,14 @@
             width: 14px;
             height: 14px;
         }
-        .sticky-right-actions {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .guides-external-btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            padding: 6px 10px;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 8px;
-            color: var(--text-sub);
-            font-size: 11px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 120ms ease;
-        }
-        .guides-external-btn:hover {
-            background: rgba(255, 255, 255, 0.12);
-            color: var(--text-main);
-            border-color: var(--border-strong);
-        }
-        .guides-external-btn svg {
-            width: 13px;
-            height: 13px;
-        }
         .guides-badge-tag {
-            font-size: 11px;
+            font-size: 11.5px;
             font-weight: 600;
             color: var(--tier-accent);
             background: var(--tier-badge-glow);
             border: 1px solid var(--tier-highlight-line);
-            padding: 3px 8px;
-            border-radius: 6px;
+            padding: 4px 9px;
+            border-radius: 7px;
         }
         .guides-header-title {
             text-align: left;
@@ -1067,14 +1013,18 @@
         .guide-nav-btn {
             background: transparent;
             border: none;
-            border-radius: 8px;
-            padding: 8px 4px;
-            font-size: 12px;
+            border-radius: 9px;
+            padding: 10px 6px;
+            min-height: 38px;
+            font-size: 12.5px;
             font-weight: 500;
             color: var(--text-sub);
             cursor: pointer;
             transition: all 120ms ease;
             text-align: center;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
         .guide-nav-btn.active {
             background: rgba(255, 255, 255, 0.1);
@@ -1098,8 +1048,9 @@
         .guide-method-btn {
             background: rgba(255, 255, 255, 0.03);
             border: 1px solid var(--border-subtle);
-            border-radius: 11px;
-            padding: 8px 5px;
+            border-radius: 12px;
+            padding: 8px 6px;
+            min-height: 58px;
             text-align: center;
             cursor: pointer;
             transition: all 120ms cubic-bezier(0.16, 1, 0.3, 1);
@@ -1107,7 +1058,7 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            gap: 2px;
+            gap: 3px;
         }
         .guide-method-btn:hover {
             background: rgba(255, 255, 255, 0.06);
@@ -1119,25 +1070,36 @@
             box-shadow: 0 0 10px var(--tier-accent-glow);
         }
         .guide-method-badge {
-            font-size: 9px;
+            font-size: 10.5px;
             font-weight: 700;
             text-transform: uppercase;
-            letter-spacing: 0.4px;
+            letter-spacing: 0.5px;
             color: var(--text-muted);
+            line-height: 1;
         }
         .guide-method-btn.active .guide-method-badge {
             color: var(--tier-accent);
         }
         .guide-method-title {
-            font-size: 11.5px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            font-size: 12px;
             font-weight: 700;
             color: var(--text-main);
-            line-height: 1.2;
+            line-height: 1.25;
+        }
+        .guide-tab-icon {
+            width: 13px;
+            height: 13px;
+            flex-shrink: 0;
+            display: inline-block;
         }
         .guide-method-sub {
-            font-size: 9.5px;
+            font-size: 11px;
             color: var(--text-muted);
-            line-height: 1.2;
+            line-height: 1.3;
         }
 
         /* Store Link Cards Grid */
@@ -1146,6 +1108,9 @@
             grid-template-columns: repeat(2, 1fr);
             gap: 8px;
             margin: 10px 0;
+        }
+        .guide-store-grid:has(> :only-child) {
+            grid-template-columns: 1fr;
         }
         @media (max-width: 480px) {
             .guide-store-grid {
@@ -1156,44 +1121,82 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
+            gap: 12px;
             background: rgba(255, 255, 255, 0.04);
             border: 1px solid var(--border-subtle);
-            border-radius: 11px;
-            padding: 9px 12px;
+            border-radius: 12px;
+            padding: 10px 14px;
             text-decoration: none;
             color: var(--text-main);
             transition: all 120ms ease;
+            text-align: left;
+            min-height: 52px;
         }
         .guide-store-card:hover {
             background: rgba(255, 255, 255, 0.08);
             border-color: var(--border-strong);
             transform: translateY(-1px);
         }
+        .guide-store-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-width: 0;
+            flex: 1;
+        }
+        .guide-store-icon {
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-main);
+            flex-shrink: 0;
+        }
+        .guide-store-icon svg {
+            width: 22px;
+            height: 22px;
+            fill: currentColor;
+        }
+        .guide-store-icon svg[fill="none"] {
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2;
+        }
         .guide-store-info {
             display: flex;
             flex-direction: column;
             gap: 2px;
+            min-width: 0;
+            flex: 1;
         }
         .guide-store-name {
-            font-size: 12.5px;
+            font-size: 13px;
             font-weight: 700;
             color: var(--text-main);
+            line-height: 1.3;
+            word-break: break-word;
         }
         .guide-store-sub {
-            font-size: 10px;
+            font-size: 11px;
             color: var(--text-muted);
+            line-height: 1.35;
+            word-break: break-word;
         }
         .guide-store-badge {
-            font-size: 10.5px;
+            font-size: 11.5px;
             font-weight: 600;
             color: var(--tier-accent);
             background: var(--tier-badge-glow);
             border: 1px solid var(--tier-highlight-line);
-            padding: 4px 8px;
-            border-radius: 6px;
+            padding: 6px 11px;
+            border-radius: 8px;
             display: inline-flex;
             align-items: center;
+            justify-content: center;
             gap: 4px;
+            flex-shrink: 0;
+            min-height: 32px;
         }
 
         /* Video & Real Screenshot Styles */
@@ -1217,22 +1220,194 @@
             background: rgba(16, 185, 129, 0.16);
             transform: translateY(-1px);
         }
+        @keyframes screenshotShimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+        }
         .guide-screenshot-wrapper {
-            margin: 10px 0;
-            border-radius: 12px;
+            position: relative;
+            margin: 12px auto;
+            border-radius: 14px;
             overflow: hidden;
             border: 1px solid rgba(255, 255, 255, 0.08);
-            background: rgba(0, 0, 0, 0.3);
-            text-align: center;
-            padding: 4px;
+            background: linear-gradient(90deg, rgba(255, 255, 255, 0.02) 20%, rgba(255, 255, 255, 0.07) 50%, rgba(255, 255, 255, 0.02) 80%);
+            background-size: 200% 100%;
+            animation: screenshotShimmer 2.2s infinite linear;
+            cursor: zoom-in;
+            transition: border-color 140ms ease, box-shadow 140ms ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-sizing: border-box;
+        }
+        .guide-screenshot-wrapper.vertical {
+            width: 100%;
+            max-width: 204px;
+            aspect-ratio: 9 / 16;
+            max-height: 362px;
+        }
+        .guide-screenshot-wrapper.horizontal {
+            width: 100%;
+            max-width: 440px;
+            aspect-ratio: 16 / 9;
+            max-height: 230px;
+        }
+        .guide-screenshot-wrapper.img-loaded,
+        .guide-screenshot-wrapper:has(img.loaded) {
+            animation: none;
+            background: rgba(0, 0, 0, 0.35);
+        }
+        .guide-screenshot-wrapper:hover {
+            border-color: rgba(16, 185, 129, 0.45);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+        }
+        .guide-screenshot-wrapper::after {
+            content: "🔍 Нажмите для увеличения";
+            position: absolute;
+            bottom: 8px;
+            right: 8px;
+            background: rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            color: #e4e4e7;
+            font-size: 10px;
+            font-weight: 500;
+            padding: 3px 8px;
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            pointer-events: none;
+            opacity: 0.85;
+            transition: all 120ms ease;
+            z-index: 2;
+        }
+        .guide-screenshot-wrapper:hover::after {
+            opacity: 1;
+            color: #6ee7b7;
+            border-color: rgba(16, 185, 129, 0.5);
+            background: rgba(0, 0, 0, 0.85);
         }
         .guide-real-screenshot {
-            max-width: 100%;
-            max-height: 360px;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            border-radius: 10px;
+            cursor: zoom-in;
+            opacity: 0;
+            transition: opacity 280ms cubic-bezier(0.16, 1, 0.3, 1);
+            display: block;
+        }
+        .guide-real-screenshot.loaded {
+            opacity: 1;
+        }
+
+        /* Lightbox Modal */
+        .image-lightbox {
+            position: fixed;
+            inset: 0;
+            margin: auto;
+            padding: 0;
+            border: none;
+            background: transparent;
+            max-width: 100vw;
+            max-height: 100vh;
+            width: 100%;
+            height: 100%;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            outline: none;
+            box-sizing: border-box;
+        }
+        .image-lightbox[open] {
+            display: flex;
+        }
+        .image-lightbox::backdrop {
+            background: rgba(0, 0, 0, 0.88);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+        }
+        .lightbox-container {
+            position: relative;
+            max-width: 96vw;
+            max-height: 94vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 12px;
+            box-sizing: border-box;
+        }
+        .lightbox-img-wrap {
+            max-width: 95vw;
+            max-height: 84vh;
+            overflow: auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 12px;
+            scrollbar-width: thin;
+        }
+        .lightbox-img {
+            max-width: 92vw;
+            max-height: 80vh;
+            width: auto;
             height: auto;
-            display: inline-block;
-            vertical-align: middle;
-            border-radius: 8px;
+            object-fit: contain;
+            border-radius: 10px;
+            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.15);
+            cursor: zoom-in;
+            transition: max-width 180ms ease, max-height 180ms ease;
+        }
+        .lightbox-img.zoomed {
+            max-width: none;
+            max-height: none;
+            cursor: zoom-out;
+        }
+        .lightbox-close-btn {
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            background: rgba(30, 30, 34, 0.9);
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 100;
+            backdrop-filter: blur(8px);
+            transition: all 120ms ease;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+        }
+        .lightbox-close-btn:hover {
+            background: rgba(255, 255, 255, 0.25);
+            transform: scale(1.08);
+        }
+        .lightbox-close-btn svg {
+            width: 18px;
+            height: 18px;
+        }
+        .lightbox-caption {
+            margin-top: 10px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #ffffff;
+            text-align: center;
+            background: rgba(18, 18, 20, 0.85);
+            padding: 6px 14px;
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            max-width: 90vw;
+        }
+        .lightbox-tip {
+            margin-top: 6px;
+            font-size: 11px;
+            color: #a1a1aa;
+            text-align: center;
         }
 
         /* Step Cards */
@@ -1242,12 +1417,14 @@
             border-radius: 14px;
             padding: 14px;
             margin-bottom: 12px;
+            text-align: left;
         }
         .guide-step-header {
             display: flex;
             align-items: center;
             gap: 9px;
             margin-bottom: 8px;
+            text-align: left;
         }
         .guide-step-num {
             width: 22px;
@@ -1267,12 +1444,14 @@
             font-weight: 600;
             color: var(--text-main);
             line-height: 1.3;
+            text-align: left;
         }
         .guide-step-desc {
             font-size: 12px;
             color: var(--text-sub);
             line-height: 1.45;
             margin-bottom: 8px;
+            text-align: left;
         }
         .guide-step-desc strong {
             color: var(--text-main);
@@ -1304,160 +1483,75 @@
             margin-top: 1px;
         }
 
-        /* Realistic UI Mockup Frame */
-        .ui-mockup-frame {
-            background: #09090b;
-            border: 1px solid rgba(255, 255, 255, 0.12);
+        /* Clean Data Table Card (e.g. Kazakhstan Address) */
+        .guide-data-card {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-subtle);
             border-radius: 12px;
-            padding: 12px;
-            margin-top: 8px;
-            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-            position: relative;
-            overflow: hidden;
+            padding: 12px 14px;
+            margin-top: 10px;
         }
-        .mockup-status-bar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 9.5px;
+        .guide-data-card-title {
+            font-size: 11px;
+            font-weight: 700;
             color: var(--text-muted);
             margin-bottom: 8px;
-            padding-bottom: 4px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
-        .mockup-island {
-            width: 44px;
-            height: 8px;
-            background: #000000;
-            border-radius: 8px;
-        }
-        .mockup-row {
+        .guide-data-row {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 7px 0;
+            padding: 8px 0;
             border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-            font-size: 11.5px;
+            font-size: 12px;
         }
-        .mockup-row:last-child {
+        .guide-data-row:last-child {
             border-bottom: none;
         }
-        .mockup-row-label {
+        .guide-data-label {
             color: var(--text-sub);
         }
-        .mockup-row-value {
-            color: var(--text-main);
-            font-weight: 500;
-        }
-        .mockup-row-highlight {
-            background: rgba(16, 185, 129, 0.12);
-            border: 1px solid rgba(16, 185, 129, 0.3);
-            border-radius: 7px;
-            padding: 6px 8px;
-            margin: 4px 0;
-        }
-        .mockup-row-highlight .mockup-row-label {
-            color: #6ee7b7;
-            font-weight: 600;
-        }
-        .mockup-row-highlight .mockup-row-value {
-            color: #ffffff;
-            font-weight: 700;
-        }
-
-        /* 1-Tap Copyable Mockup Row */
-        .mockup-copyable-val {
+        .guide-data-val-group {
             display: inline-flex;
             align-items: center;
-            gap: 6px;
+            gap: 8px;
+        }
+        .guide-data-value {
+            color: var(--text-main);
+            font-weight: 600;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 12px;
         }
         .mini-copy-btn {
             display: inline-flex;
             align-items: center;
-            gap: 3px;
-            background: rgba(255, 255, 255, 0.08);
+            gap: 5px;
+            background: rgba(255, 255, 255, 0.06);
             border: 1px solid rgba(255, 255, 255, 0.14);
-            border-radius: 6px;
-            padding: 3px 6px;
+            border-radius: 8px;
+            padding: 6px 11px;
             color: var(--text-sub);
-            font-size: 10px;
-            font-weight: 500;
+            font-size: 11.5px;
+            font-weight: 600;
             cursor: pointer;
+            min-height: 30px;
             transition: all 120ms ease;
         }
         .mini-copy-btn svg {
-            width: 11px;
-            height: 11px;
+            width: 12px;
+            height: 12px;
         }
         .mini-copy-btn:hover {
-            background: rgba(255, 255, 255, 0.16);
+            background: rgba(255, 255, 255, 0.12);
             color: var(--text-main);
-            border-color: rgba(255, 255, 255, 0.3);
+            border-color: rgba(255, 255, 255, 0.25);
         }
         .mini-copy-btn.copied {
-            background: rgba(16, 185, 129, 0.2);
+            background: rgba(16, 185, 129, 0.15);
             border-color: #10b981;
             color: #6ee7b7;
-        }
-
-        /* System Dialog Mockup */
-        .mockup-system-dialog {
-            background: #1c1c1e;
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            border-radius: 14px;
-            padding: 14px;
-            text-align: center;
-            margin: 6px 0;
-            box-shadow: 0 10px 24px rgba(0, 0, 0, 0.6);
-        }
-        .dialog-title {
-            font-size: 12.5px;
-            font-weight: 600;
-            color: #ffffff;
-            margin-bottom: 4px;
-        }
-        .dialog-desc {
-            font-size: 11px;
-            color: #a1a1aa;
-            line-height: 1.35;
-            margin-bottom: 12px;
-        }
-        .dialog-actions {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 8px;
-        }
-        .dialog-btn-cancel {
-            padding: 7px;
-            background: rgba(255, 255, 255, 0.08);
-            border: none;
-            border-radius: 8px;
-            color: #a1a1aa;
-            font-size: 12px;
-            font-weight: 500;
-        }
-        .dialog-btn-primary {
-            padding: 7px;
-            background: #007aff;
-            border: none;
-            border-radius: 8px;
-            color: #ffffff;
-            font-size: 12px;
-            font-weight: 600;
-            box-shadow: 0 0 10px rgba(0, 122, 255, 0.4);
-        }
-        .tap-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            background: rgba(16, 185, 129, 0.2);
-            border: 1px solid #10b981;
-            color: #a7f3d0;
-            font-size: 10px;
-            font-weight: 700;
-            padding: 2px 7px;
-            border-radius: 4px;
-            margin-top: 6px;
         }
 
         /* FAQ Accordion in Guides */
@@ -1502,6 +1596,7 @@
             border-top: 1px solid rgba(255, 255, 255, 0.04);
             margin-top: 4px;
             padding-top: 10px;
+            text-align: left;
         }
         .guide-faq-item.open .guide-faq-a {
             display: block;
@@ -1721,16 +1816,12 @@
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="client-glyph"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                         <span class="client-name">Happ</span>
                     </div>
-                    <span class="pc-badge">Альтернатива</span>
+                    <span class="pc-badge">Прямой APK</span>
                 </div>
-                <div class="store-grid">
-                    <a href="https://play.google.com/store/apps/details?id=com.happproxy" target="_blank" rel="noopener" class="store-card">
-                        <div class="store-card-icon"><svg viewBox="0 0 24 24"><path d="M3.61 1.814L13.793 12 3.61 22.186a1.05 1.05 0 0 1-.61-.959V2.773c0-.419.246-.785.61-.959zm10.89 10.893l2.302 2.302-10.937 6.333 8.635-8.635zm3.199-3.198l2.807 1.626a1 1 0 0 1 0 1.73l-2.808 1.626L15.206 12l2.493-2.491zM5.864 2.658L16.8 8.99l-2.302 2.302-8.634-8.634z"/></svg></div>
-                        <div class="store-card-content"><span class="store-card-title">Google Play</span><span class="store-card-desc">Официальный магазин</span></div>
-                    </a>
+                <div class="store-grid" style="grid-template-columns: 1fr;">
                     <a href="https://github.com/Happ-proxy/happ-android/releases/latest/download/Happ.apk" target="_blank" rel="noopener" class="store-card">
                         <div class="store-card-icon"><svg viewBox="0 0 24 24" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div>
-                        <div class="store-card-content"><span class="store-card-title">Скачать APK</span><span class="store-card-desc">Прямой файл (.apk)</span></div>
+                        <div class="store-card-content"><span class="store-card-title">Скачать официальный APK</span><span class="store-card-desc">Прямой файл с GitHub (без Google Play)</span></div>
                     </a>
                 </div>
             </div>
@@ -1837,32 +1928,22 @@
         </div>
 
         <!-- Guides Banner Trigger -->
-        <div class="guides-trigger-card">
-            <div class="guides-trigger-clickable" onclick="openGuidesTab('ios')" role="button" tabindex="0" aria-label="Открыть центр инструкций">
-                <div class="guides-trigger-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
-                        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
-                    </svg>
-                </div>
-                <div class="guides-trigger-body">
-                    <div class="guides-trigger-title">Центр инструкций и база знаний</div>
-                    <div class="guides-trigger-sub">Смена региона App Store, первый запуск, Face ID и APK</div>
-                </div>
-                <div class="guides-trigger-arrow">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <polyline points="9 18 15 12 9 6"/>
-                    </svg>
-                </div>
-            </div>
-            <button type="button" class="guides-trigger-popout" onclick="openGuidesInNewTab()" title="Открыть в отдельной вкладке" aria-label="Открыть в отдельной вкладке">
+        <div class="guides-trigger-card" onclick="openGuidesTab('ios')" role="button" tabindex="0" aria-label="Открыть центр инструкций">
+            <div class="guides-trigger-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-                    <polyline points="15 3 21 3 21 9"/>
-                    <line x1="10" y1="14" x2="21" y2="3"/>
+                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
                 </svg>
-                <span>Вкладка</span>
-            </button>
+            </div>
+            <div class="guides-trigger-body">
+                <div class="guides-trigger-title">Центр инструкций и база знаний</div>
+                <div class="guides-trigger-sub">Смена региона App Store, первый запуск, Face ID и APK</div>
+            </div>
+            <div class="guides-trigger-arrow">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="9 18 15 12 9 6"/>
+                </svg>
+            </div>
         </div>
         </div><!-- end mainView -->
 
@@ -1875,49 +1956,39 @@
                     </svg>
                     <span>Назад к подключению</span>
                 </button>
-                <div class="sticky-right-actions">
-                    <button type="button" class="guides-external-btn" onclick="openGuidesInNewTab()" title="Открыть в отдельной вкладке браузера">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-                            <polyline points="15 3 21 3 21 9"/>
-                            <line x1="10" y1="14" x2="21" y2="3"/>
-                        </svg>
-                        <span>В отдельной вкладке</span>
-                    </button>
-                    <span class="guides-badge-tag">База знаний</span>
-                </div>
+                <span class="guides-badge-tag">База знаний</span>
             </div>
 
             <div class="guides-header-title">
                 <h2>Центр инструкций</h2>
-                <p>Наглядные шаги со скриншотами экранов для любой платформы</p>
+                <p>Инструкции по быстрой установке и настройке</p>
             </div>
 
-            <div class="guide-nav-tabs">
-                <button type="button" class="guide-nav-btn active" id="guideNavBtnIos" onclick="switchGuideTab('ios')">iOS</button>
-                <button type="button" class="guide-nav-btn" id="guideNavBtnAndroid" onclick="switchGuideTab('android')">Android</button>
-                <button type="button" class="guide-nav-btn" id="guideNavBtnDesktop" onclick="switchGuideTab('desktop')">ПК / Mac</button>
-                <button type="button" class="guide-nav-btn" id="guideNavBtnFaq" onclick="switchGuideTab('faq')">Вопросы</button>
+            <div class="guide-nav-tabs" role="tablist" aria-label="Платформы">
+                <button type="button" class="guide-nav-btn active" id="guideNavBtnIos" onclick="switchGuideTab('ios')" role="tab" aria-selected="true">iOS</button>
+                <button type="button" class="guide-nav-btn" id="guideNavBtnAndroid" onclick="switchGuideTab('android')" role="tab" aria-selected="false">Android</button>
+                <button type="button" class="guide-nav-btn" id="guideNavBtnDesktop" onclick="switchGuideTab('desktop')" role="tab" aria-selected="false">ПК / Mac</button>
+                <button type="button" class="guide-nav-btn" id="guideNavBtnFaq" onclick="switchGuideTab('faq')" role="tab" aria-selected="false">Вопросы</button>
             </div>
 
             <!-- iOS Guide Content -->
             <div id="guideSectionIos" class="guide-section">
-                <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Шаг 1. Выберите способ установки:</div>
+                <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; text-align: left;">Шаг 1. Выберите способ установки:</div>
                 <div class="guide-method-tabs">
-                    <button type="button" class="guide-method-btn active" id="tabBtnIosTf" onclick="switchIosMethod('tf')">
+                    <button type="button" class="guide-method-btn active" id="tabBtnIosTf" onclick="switchIosMethod('tf')" role="tab" aria-selected="true">
                         <span class="guide-method-badge">Быстро</span>
-                        <span class="guide-method-title">⚡ TestFlight</span>
+                        <span class="guide-method-title"><svg class="guide-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>TestFlight</span>
                         <span class="guide-method-sub">Без смены региона</span>
                     </button>
-                    <button type="button" class="guide-method-btn" id="tabBtnIosRegion" onclick="switchIosMethod('region')">
+                    <button type="button" class="guide-method-btn" id="tabBtnIosRegion" onclick="switchIosMethod('region')" role="tab" aria-selected="false">
                         <span class="guide-method-badge">Навсегда</span>
-                        <span class="guide-method-title">🇰🇿 Казахстан</span>
+                        <span class="guide-method-title"><svg class="guide-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>Казахстан</span>
                         <span class="guide-method-sub">App Store (без карты)</span>
                     </button>
-                    <button type="button" class="guide-method-btn" id="tabBtnIosNewId" onclick="switchIosMethod('newid')">
+                    <button type="button" class="guide-method-btn" id="tabBtnIosNewId" onclick="switchIosMethod('newid')" role="tab" aria-selected="false">
                         <span class="guide-method-badge">Запасной</span>
-                        <span class="guide-method-title">👤 Второй Apple ID</span>
-                        <span class="guide-method-sub">Только для магазина</span>
+                        <span class="guide-method-title"><svg class="guide-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>Второй ID</span>
+                        <span class="guide-method-sub">Новый Apple ID</span>
                     </button>
                 </div>
 
@@ -1925,7 +1996,7 @@
                 <div id="iosSubGuideTf">
                     <div class="guide-callout">
                         <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                        <div><strong>Установка без смены региона:</strong> Apple TestFlight доступен в российском App Store официально. Устанавливается в 1 клик с вашего обычного российского аккаунта.</div>
+                        <div><strong>Установка без смены региона:</strong> TestFlight доступен в App Store РФ и устанавливается с обычного аккаунта без смены страны.</div>
                     </div>
 
                     <div class="guide-step-card">
@@ -1936,11 +2007,14 @@
                         <div class="guide-step-desc">
                             Откройте официальный российский App Store и скачайте приложение TestFlight:
                         </div>
-                        <div class="guide-store-grid">
+                        <div class="guide-store-grid" style="grid-template-columns: 1fr;">
                             <a href="https://apps.apple.com/app/testflight/id899247664" target="_blank" rel="noopener" class="guide-store-card">
-                                <div class="guide-store-info">
-                                    <span class="guide-store-name">Apple TestFlight</span>
-                                    <span class="guide-store-sub">Официально из App Store РФ</span>
+                                <div class="guide-store-left">
+                                    <div class="guide-store-icon"><svg viewBox="0 0 24 24"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.33c.64-.78 1.08-1.86.96-2.94-.93.04-2.06.62-2.72 1.4-.58.68-1.1 1.79-.96 2.84 1.04.08 2.08-.52 2.72-1.3"/></svg></div>
+                                    <div class="guide-store-info">
+                                        <span class="guide-store-name">Apple TestFlight</span>
+                                        <span class="guide-store-sub">Официально из App Store РФ</span>
+                                    </div>
                                 </div>
                                 <span class="guide-store-badge">Установить ↗</span>
                             </a>
@@ -1957,33 +2031,45 @@
                         </div>
                         <div class="guide-store-grid">
                             <a href="https://testflight.apple.com/join/dFw66h3a" target="_blank" rel="noopener" class="guide-store-card">
-                                <div class="guide-store-info">
-                                    <span class="guide-store-name">INCY (Рекомендуется)</span>
-                                    <span class="guide-store-sub">TestFlight приглашение</span>
+                                <div class="guide-store-left">
+                                    <div class="guide-store-icon"><svg viewBox="0 0 24 24"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z"/></svg></div>
+                                    <div class="guide-store-info">
+                                        <span class="guide-store-name">INCY (Рекомендуется)</span>
+                                        <span class="guide-store-sub">TestFlight приглашение</span>
+                                    </div>
                                 </div>
                                 <span class="guide-store-badge">Открыть ↗</span>
                             </a>
                             <a href="https://testflight.apple.com/join/XMls6Ckd" target="_blank" rel="noopener" class="guide-store-card">
-                                <div class="guide-store-info">
-                                    <span class="guide-store-name">Happ</span>
-                                    <span class="guide-store-sub">TestFlight приглашение</span>
+                                <div class="guide-store-left">
+                                    <div class="guide-store-icon"><svg viewBox="0 0 24 24" fill="none"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
+                                    <div class="guide-store-info">
+                                        <span class="guide-store-name">Happ</span>
+                                        <span class="guide-store-sub">TestFlight приглашение</span>
+                                    </div>
                                 </div>
                                 <span class="guide-store-badge">Открыть ↗</span>
                             </a>
                         </div>
-                        <!-- UI Mockup Frame: TestFlight -->
-                        <div class="ui-mockup-frame">
-                            <div class="mockup-status-bar"><span>9:41</span><div class="mockup-island"></div><span>5G 100%</span></div>
-                            <div class="mockup-system-dialog">
-                                <div style="font-size: 24px; margin-bottom: 6px;">⚡</div>
-                                <div class="dialog-title">INCY / Happ</div>
-                                <div class="dialog-desc">Приглашение на тестирование версии клиента</div>
-                                <button type="button" class="dialog-btn-primary" style="width: 100%;">Принять и установить</button>
-                                <div><span class="tap-badge">НАЖМИТЕ ЭТУ КНОПКУ</span></div>
+                        <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--card-border); border-radius: 12px; padding: 12px; margin-top: 10px;">
+                            <div style="font-size: 12px; font-weight: 600; color: #10b981; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                                <span>Как принять приглашение в TestFlight:</span>
+                            </div>
+                            <div style="font-size: 12px; color: var(--text-sub); line-height: 1.6;">
+                                1. В открывшемся TestFlight нажмите кнопку <strong>«Принять»</strong> (Accept).<br>
+                                2. Затем нажмите <strong>«Установить»</strong> (Install) — приложение появится на домашнем экране.<br>
+                                3. Дополнительных кодов или Apple ID вводить не нужно.
+                            </div>
+                            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, 0.05); font-size: 11.5px;">
+                                <a href="https://testflight.apple.com" target="_blank" rel="noopener" style="color: var(--accent-light); text-decoration: none; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; font-size: 11.5px; font-weight: 500; min-height: 32px;">
+                                    <span>Официальное руководство Apple по TestFlight ↗</span>
+                                </a>
                             </div>
                         </div>
-                        <div style="margin-top: 8px; font-size: 11px; color: var(--text-muted);">
-                            💡 <em>Если TestFlight пишет «Этот бета-тест заполнен», переключитесь на способ <strong>«Казахстан»</strong> выше — он работает всегда.</em>
+                        <div style="margin-top: 8px; font-size: 11px; color: var(--text-muted); display: flex; align-items: flex-start; gap: 6px;">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px; flex-shrink: 0; margin-top: 1px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                            <span>Если TestFlight пишет «Этот бета-тест заполнен», переключитесь на способ <strong>«Казахстан»</strong> выше — он работает всегда.</span>
                         </div>
                     </div>
                 </div>
@@ -1992,12 +2078,12 @@
                 <div id="iosSubGuideRegion" style="display: none;">
                     <div class="guide-callout">
                         <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                        <div><strong>Почему Казахстан?</strong> Интерфейс остаётся русскоязычным, а в способе оплаты доступен пункт «Нет» — банковская карта не нужна. После скачивания можно сразу вернуть регион РФ.</div>
+                        <div><strong>Установка через App Store Казахстана:</strong> В магазине Казахстана интерфейс на русском языке, а карта для скачивания не требуется. После установки можно сразу вернуть регион РФ.</div>
                     </div>
 
                     <div class="guide-callout guide-callout-warning">
                         <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                        <div><strong>Условия смены:</strong> Баланс Apple ID должен быть строго 0.00 ₽ (без остатка) и не должно быть активных платных подписок Apple (отменяются в Настройки → Профиль → Подписки).</div>
+                        <div><strong>Условия смены:</strong> На балансе Apple ID не должно быть остатка (0 ₽) и действующих платных подписок Apple.</div>
                     </div>
 
                     <!-- Video Guide Toggle -->
@@ -2022,8 +2108,8 @@
                         <div class="guide-step-desc">
                             Зайдите в <strong>App Store</strong> → нажмите на <strong>иконку своего профиля</strong> в правом верхнем углу → нажмите на первую строчку (своё имя и Apple ID) → выберите <strong>«Страна/регион»</strong> → <strong>«Изменить страну или регион»</strong>.
                         </div>
-                        <div class="guide-screenshot-wrapper">
-                            <img src="https://happ.info/imgs/apple-region/01-appstore-profile.png" alt="Профиль App Store" class="guide-real-screenshot" loading="lazy">
+                        <div class="guide-screenshot-wrapper vertical">
+                            <img src="https://happ.info/imgs/apple-region/01-appstore-profile.png" alt="Профиль App Store" class="guide-real-screenshot" loading="lazy" decoding="async" onload="markImgLoaded(this)">
                         </div>
                     </div>
 
@@ -2035,8 +2121,8 @@
                         <div class="guide-step-desc">
                             Найдите в списке <strong>«Казахстан»</strong>, нажмите <strong>«Принять»</strong> в верхнем правом углу.
                         </div>
-                        <div class="guide-screenshot-wrapper">
-                            <img src="https://happ.info/imgs/apple-region/04-kazakhstan.png" alt="Выбор Казахстана" class="guide-real-screenshot" loading="lazy">
+                        <div class="guide-screenshot-wrapper vertical">
+                            <img src="https://happ.info/imgs/apple-region/04-kazakhstan.png" alt="Выбор Казахстана" class="guide-real-screenshot" loading="lazy" decoding="async" onload="markImgLoaded(this)">
                         </div>
                     </div>
 
@@ -2048,48 +2134,47 @@
                         <div class="guide-step-desc">
                             В способах оплаты выберите <strong>«Нет»</strong> (банковская карта не требуется). В поля адреса введите проверенные данные г. Алматы (нажмите «Копировать» у каждого поля):
                         </div>
-                        <div class="guide-screenshot-wrapper">
-                            <img src="https://happ.info/imgs/apple-region/07-payment-none.png" alt="Способ оплаты Нет и адрес" class="guide-real-screenshot" loading="lazy">
+                        <div class="guide-screenshot-wrapper vertical">
+                            <img src="https://happ.info/imgs/apple-region/07-payment-none.png" alt="Способ оплаты Нет и адрес" class="guide-real-screenshot" loading="lazy" decoding="async" onload="markImgLoaded(this)">
                         </div>
                         <!-- Address Copy Fields -->
-                        <div class="ui-mockup-frame">
-                            <div class="mockup-status-bar"><span>9:41</span><div class="mockup-island"></div><span>5G 100%</span></div>
-                            <div style="font-size: 11px; font-weight: 700; color: #a1a1aa; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">АДРЕС ДЛЯ ВЫСТАВЛЕНИЯ СЧЁТА</div>
-                            <div class="mockup-row">
-                                <span class="mockup-row-label">Улица</span>
-                                <div class="mockup-copyable-val">
-                                    <span class="mockup-row-value">ул. Абая, 1</span>
-                                    <button type="button" class="mini-copy-btn" onclick="copyMockupField('ул. Абая, 1', this)" title="Скопировать" aria-label="Скопировать улицу">
+                        <div class="guide-data-card">
+                            <div class="guide-data-card-title">Адрес для выставления счёта (Казахстан)</div>
+                            <div class="guide-data-row">
+                                <span class="guide-data-label">Улица</span>
+                                <div class="guide-data-val-group">
+                                    <span class="guide-data-value">ул. Абая, 1</span>
+                                    <button type="button" class="mini-copy-btn" onclick="copyGuideField('ул. Абая, 1', this)" title="Скопировать" aria-label="Скопировать улицу">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                                         <span class="copy-lbl">Копировать</span>
                                     </button>
                                 </div>
                             </div>
-                            <div class="mockup-row">
-                                <span class="mockup-row-label">Город</span>
-                                <div class="mockup-copyable-val">
-                                    <span class="mockup-row-value">Алматы</span>
-                                    <button type="button" class="mini-copy-btn" onclick="copyMockupField('Алматы', this)" title="Скопировать" aria-label="Скопировать город">
+                            <div class="guide-data-row">
+                                <span class="guide-data-label">Город</span>
+                                <div class="guide-data-val-group">
+                                    <span class="guide-data-value">Алматы</span>
+                                    <button type="button" class="mini-copy-btn" onclick="copyGuideField('Алматы', this)" title="Скопировать" aria-label="Скопировать город">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                                         <span class="copy-lbl">Копировать</span>
                                     </button>
                                 </div>
                             </div>
-                            <div class="mockup-row">
-                                <span class="mockup-row-label">Индекс</span>
-                                <div class="mockup-copyable-val">
-                                    <span class="mockup-row-value">050000</span>
-                                    <button type="button" class="mini-copy-btn" onclick="copyMockupField('050000', this)" title="Скопировать" aria-label="Скопировать индекс">
+                            <div class="guide-data-row">
+                                <span class="guide-data-label">Индекс</span>
+                                <div class="guide-data-val-group">
+                                    <span class="guide-data-value">050000</span>
+                                    <button type="button" class="mini-copy-btn" onclick="copyGuideField('050000', this)" title="Скопировать" aria-label="Скопировать индекс">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                                         <span class="copy-lbl">Копировать</span>
                                     </button>
                                 </div>
                             </div>
-                            <div class="mockup-row">
-                                <span class="mockup-row-label">Телефон</span>
-                                <div class="mockup-copyable-val">
-                                    <span class="mockup-row-value">(701) 123-4567</span>
-                                    <button type="button" class="mini-copy-btn" onclick="copyMockupField('7011234567', this)" title="Скопировать" aria-label="Скопировать телефон">
+                            <div class="guide-data-row">
+                                <span class="guide-data-label">Телефон</span>
+                                <div class="guide-data-val-group">
+                                    <span class="guide-data-value">(701) 123-4567</span>
+                                    <button type="button" class="mini-copy-btn" onclick="copyGuideField('7011234567', this)" title="Скопировать" aria-label="Скопировать телефон">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                                         <span class="copy-lbl">Копировать</span>
                                     </button>
@@ -2097,7 +2182,7 @@
                             </div>
                         </div>
                         <div style="margin-top: 8px; font-size: 11.5px; color: var(--text-sub);">
-                            Нажмите <strong>«Далее»</strong> в правом верхнем углу. Регион изменится моментально!
+                            Нажмите <strong>«Далее»</strong> в правом верхнем углу. Регион изменится сразу.
                         </div>
                     </div>
 
@@ -2109,8 +2194,8 @@
                         <div class="guide-step-desc">
                             В поиске App Store введите <strong>INCY</strong> (рекомендуется) или <strong>Happ</strong> и нажмите <strong>«Загрузить»</strong>. После установки вы можете вернуть регион App Store обратно на РФ — приложение продолжит работать и обновляться.
                         </div>
-                        <div class="guide-screenshot-wrapper">
-                            <img src="https://happ.info/imgs/apple-region/08-happ-appstore.png" alt="Happ в App Store" class="guide-real-screenshot" loading="lazy">
+                        <div class="guide-screenshot-wrapper vertical">
+                            <img src="https://happ.info/imgs/apple-region/08-happ-appstore.png" alt="Happ в App Store" class="guide-real-screenshot" loading="lazy" decoding="async" onload="markImgLoaded(this)">
                         </div>
                     </div>
                 </div>
@@ -2119,7 +2204,7 @@
                 <div id="iosSubGuideNewId" style="display: none;">
                     <div class="guide-callout">
                         <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                        <div><strong>Когда нужен второй Apple ID?</strong> Если у вас есть семейный доступ или активные подписки на основном аккаунте. Фото, контакты и iCloud не затрагиваются — аккаунт меняется только в App Store.</div>
+                        <div><strong>Второй аккаунт Apple ID:</strong> Подходит, если на основном аккаунте оформлены семейный доступ или подписки. Фото, iCloud и контакты не затрагиваются: аккаунт меняется только для App Store.</div>
                     </div>
 
                     <div class="guide-step-card">
@@ -2128,7 +2213,7 @@
                             <span class="guide-step-title">Создайте аккаунт на сайте Apple</span>
                         </div>
                         <div class="guide-step-desc">
-                            В браузере Safari откройте <strong>account.apple.com</strong> → «Создать Apple ID». Укажите страну <strong>Казахстан</strong> или <strong>США</strong> и свой свободный email. Телефон можно указать обычный российский (+7), SMS приходят моментально.
+                            В браузере Safari откройте <strong>account.apple.com</strong> → «Создать Apple ID». Укажите страну <strong>Казахстан</strong> или <strong>США</strong> и свой свободный email. В поле номера телефона укажите свой обычный российский номер (+7) — SMS с кодом подтверждения приходит штатно.
                         </div>
                     </div>
 
@@ -2155,55 +2240,42 @@
                     </div>
                 </div>
 
-                <!-- Step 3 (Common for all iOS): First Connect & Face ID -->
+                <!-- Step 3 (Common for all iOS): First Connect & System Permission -->
                 <div class="guide-step-card">
                     <div class="guide-step-header">
                         <span class="guide-step-num">3</span>
                         <span class="guide-step-title">Первое подключение и системное разрешение</span>
                     </div>
                     <div class="guide-step-desc">
-                        Нажмите круглую кнопку подключения по центру экрана приложения. Появится системное диалоговое окно Apple:
-                    </div>
-                    <!-- UI Mockup Frame: iOS Face ID Prompt -->
-                    <div class="ui-mockup-frame">
-                        <div class="mockup-status-bar"><span>9:41</span><div class="mockup-island"></div><span>5G 100%</span></div>
-                        <div class="mockup-system-dialog">
-                            <div class="dialog-title">Приложение запрашивает разрешение на добавление сетевой конфигурации</div>
-                            <div class="dialog-desc">Все сетевые операции будут защищены данным профилем.</div>
-                            <div class="dialog-actions">
-                                <div class="dialog-btn-cancel">Не разрешать</div>
-                                <div class="dialog-btn-primary">Разрешить</div>
-                            </div>
-                            <div><span class="tap-badge">НАЖМИТЕ «РАЗРЕШИТЬ» И ПОДТВЕРДИТЕ FACE ID</span></div>
-                        </div>
+                        Нажмите круглую кнопку подключения в центре экрана приложения и подтвердите системный запрос iOS (нажмите <strong>«Разрешить»</strong> через Face ID или код-пароль).
                     </div>
                     <div style="margin-top: 8px; font-size: 11.5px; color: var(--text-sub);">
-                        Кнопка в приложении станет зелёной — защищенное подключение успешно установлено!
+                        Кнопка в приложении станет зелёной — подключение активно.
                     </div>
                 </div>
             </div>
 
             <!-- Android Guide Content -->
             <div id="guideSectionAndroid" class="guide-section" style="display: none;">
-                <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Шаг 1. Выберите способ установки:</div>
-                <div class="guide-method-tabs" style="grid-template-columns: repeat(2, 1fr);">
-                    <button type="button" class="guide-method-btn active" id="tabBtnAndroidPlay" onclick="switchAndroidMethod('play')">
+                <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; text-align: left;">Шаг 1. Выберите способ установки:</div>
+                <div class="guide-method-tabs" style="grid-template-columns: repeat(2, 1fr);" role="tablist" aria-label="Способ установки Android">
+                    <button type="button" class="guide-method-btn active" id="tabBtnAndroidPlay" onclick="switchAndroidMethod('play')" role="tab" aria-selected="true">
                         <span class="guide-method-badge">Рекомендуется</span>
-                        <span class="guide-method-title">Google Play</span>
+                        <span class="guide-method-title"><svg class="guide-tab-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M3.61 1.814L13.793 12 3.61 22.186a1.05 1.05 0 0 1-.61-.959V2.773c0-.419.246-.785.61-.959zm10.89 10.893l2.302 2.302-10.937 6.333 8.635-8.635zm3.199-3.198l2.807 1.626a1 1 0 0 1 0 1.73l-2.808 1.626L15.206 12l2.493-2.491zM5.864 2.658L16.8 8.99l-2.302 2.302-8.634-8.634z"/></svg>Google Play</span>
                         <span class="guide-method-sub">Официальный магазин</span>
                     </button>
-                    <button type="button" class="guide-method-btn" id="tabBtnAndroidApk" onclick="switchAndroidMethod('apk')">
+                    <button type="button" class="guide-method-btn" id="tabBtnAndroidApk" onclick="switchAndroidMethod('apk')" role="tab" aria-selected="false">
                         <span class="guide-method-badge">Без сервисов</span>
-                        <span class="guide-method-title">Прямой APK</span>
+                        <span class="guide-method-title"><svg class="guide-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Прямой APK</span>
                         <span class="guide-method-sub">Для Huawei / Honor</span>
                     </button>
                 </div>
 
                 <!-- Android Sub 1: Google Play -->
                 <div id="androidSubPlay">
-                    <div class="guide-callout">
-                        <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                        <div><strong>Установка из официального магазина:</strong> Приложения доступны в Google Play в РФ без смены региона и обновляются автоматически.</div>
+                    <div class="guide-callout" style="border-left: 3px solid #f59e0b; background: rgba(245, 158, 11, 0.08);">
+                        <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                        <div><strong>Внимание:</strong> Приложение Happ временно удалено из Google Play, а в поиске появились небезопасные копии. Для установки из Google Play используйте <strong>INCY</strong>, либо скачивайте проверенный APK Happ напрямую с GitHub.</div>
                     </div>
 
                     <div class="guide-step-card">
@@ -2212,20 +2284,16 @@
                             <span class="guide-step-title">Установите приложение из Google Play</span>
                         </div>
                         <div class="guide-step-desc">
-                            Выберите любое приложение и установите его прямо из магазина:
+                            В Google Play официально доступно проверенное приложение <strong>INCY</strong>:
                         </div>
-                        <div class="guide-store-grid">
-                            <a href="https://play.google.com/store/apps/details?id=com.happproxy" target="_blank" rel="noopener" class="guide-store-card">
-                                <div class="guide-store-info">
-                                    <span class="guide-store-name">Happ в Google Play</span>
-                                    <span class="guide-store-sub">Быстрая установка</span>
-                                </div>
-                                <span class="guide-store-badge">Установить ↗</span>
-                            </a>
+                        <div class="guide-store-grid" style="grid-template-columns: 1fr;">
                             <a href="https://play.google.com/store/apps/details?id=llc.itdev.incy" target="_blank" rel="noopener" class="guide-store-card">
-                                <div class="guide-store-info">
-                                    <span class="guide-store-name">INCY в Google Play</span>
-                                    <span class="guide-store-sub">Быстрая установка</span>
+                                <div class="guide-store-left">
+                                    <div class="guide-store-icon"><svg viewBox="0 0 24 24"><path d="M3.61 1.814L13.793 12 3.61 22.186a1.05 1.05 0 0 1-.61-.959V2.773c0-.419.246-.785.61-.959zm10.89 10.893l2.302 2.302-10.937 6.333 8.635-8.635zm3.199-3.198l2.807 1.626a1 1 0 0 1 0 1.73l-2.808 1.626L15.206 12l2.493-2.491zM5.864 2.658L16.8 8.99l-2.302 2.302-8.634-8.634z"/></svg></div>
+                                    <div class="guide-store-info">
+                                        <span class="guide-store-name">INCY в Google Play</span>
+                                        <span class="guide-store-sub">Официально в магазине • Доступно в РФ</span>
+                                    </div>
                                 </div>
                                 <span class="guide-store-badge">Установить ↗</span>
                             </a>
@@ -2237,7 +2305,7 @@
                 <div id="androidSubApk" style="display: none;">
                     <div class="guide-callout">
                         <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
-                        <div><strong>Для устройств без Google Play:</strong> Скачайте официальный установочный файл APK напрямую.</div>
+                        <div><strong>Для устройств без Google Play:</strong> Скачайте официальный установочный файл APK Happ напрямую с GitHub.</div>
                     </div>
 
                     <div class="guide-step-card">
@@ -2246,31 +2314,25 @@
                             <span class="guide-step-title">Скачайте установочный APK-файл</span>
                         </div>
                         <div class="guide-step-desc">
-                            Нажмите кнопку скачивания APK (браузер Chrome может показать стандартное окно безопасности):
+                            Нажмите кнопку скачивания APK (браузер может показать системный запрос):
                         </div>
-                        <div class="guide-store-grid">
+                        <div class="guide-store-grid" style="grid-template-columns: 1fr;">
                             <a href="https://github.com/Happ-proxy/happ-android/releases/latest/download/Happ.apk" target="_blank" rel="noopener" class="guide-store-card">
-                                <div class="guide-store-info">
-                                    <span class="guide-store-name">Happ.apk</span>
-                                    <span class="guide-store-sub">Прямой файл с GitHub</span>
+                                <div class="guide-store-left">
+                                    <div class="guide-store-icon"><svg viewBox="0 0 24 24" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div>
+                                    <div class="guide-store-info">
+                                        <span class="guide-store-name">Happ.apk</span>
+                                        <span class="guide-store-sub">Официальный релиз с GitHub</span>
+                                    </div>
                                 </div>
                                 <span class="guide-store-badge">Скачать APK ↗</span>
                             </a>
                         </div>
-                        <!-- UI Mockup Frame: Android Download Warning -->
-                        <div class="ui-mockup-frame">
-                            <div class="mockup-system-dialog">
-                                <div class="dialog-title">Файл может быть опасным</div>
-                                <div class="dialog-desc">Вы действительно хотите скачать файл Happ.apk?</div>
-                                <div class="dialog-actions">
-                                    <div class="dialog-btn-cancel">Отмена</div>
-                                    <div class="dialog-btn-primary" style="background: #10b981;">Всё равно скачать</div>
-                                </div>
-                                <div><span class="tap-badge">НАЖМИТЕ «ВСЁ РАВНО СКАЧАТЬ»</span></div>
-                            </div>
+                        <div class="guide-screenshot-wrapper horizontal">
+                            <img src="https://cdn.flysmartavia.com/smart-data/public/site/content/images/info/app/step-2@2x.png" alt="Окно подтверждения скачивания APK" class="guide-real-screenshot" loading="lazy" decoding="async" onload="markImgLoaded(this)">
                         </div>
                         <div style="margin-top: 8px; font-size: 11.5px; color: var(--text-sub);">
-                            Это стандартное уведомление Android при скачивании любых программ не из Google Play. Файл чист и безопасен.
+                            Это стандартное предупреждение браузера при загрузке файлов напрямую. Нажмите <strong>«Всё равно скачать»</strong>.
                         </div>
                     </div>
                 </div>
@@ -2294,38 +2356,26 @@
                         <span class="guide-step-title">Первое подключение и подтверждение</span>
                     </div>
                     <div class="guide-step-desc">
-                        Откройте приложение и нажмите кнопку включения. Появится стандартный запрос Android:
-                    </div>
-                    <!-- UI Mockup Frame: Android Connection Request -->
-                    <div class="ui-mockup-frame">
-                        <div class="mockup-system-dialog">
-                            <div class="dialog-title">Запрос на подключение</div>
-                            <div class="dialog-desc">Приложение Happ запрашивает разрешение на настройку сети. Нажмите ОК для подтверждения.</div>
-                            <div class="dialog-actions">
-                                <div class="dialog-btn-cancel">Отмена</div>
-                                <div class="dialog-btn-primary" style="background: #10b981;">ОК</div>
-                            </div>
-                            <div><span class="tap-badge">НАЖМИТЕ «ОК»</span></div>
-                        </div>
+                        Откройте приложение, нажмите кнопку включения и подтвердите стандартный системный <strong>«Запрос на подключение»</strong> Android (нажмите <strong>«ОК»</strong>).
                     </div>
                     <div style="margin-top: 8px; font-size: 11.5px; color: var(--text-sub);">
-                        В строке состояния вверху экрана появится значок ключа — защищенная связь установлена!
+                        В строке состояния вверху экрана появится значок ключа — подключение активно.
                     </div>
                 </div>
             </div>
 
             <!-- Desktop (PC/Mac) Guide Content -->
             <div id="guideSectionDesktop" class="guide-section" style="display: none;">
-                <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Выберите операционную систему:</div>
-                <div class="guide-method-tabs" style="grid-template-columns: repeat(2, 1fr);">
-                    <button type="button" class="guide-method-btn active" id="tabBtnDesktopWin" onclick="switchDesktopMethod('win')">
+                <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; text-align: left;">Выберите операционную систему:</div>
+                <div class="guide-method-tabs" style="grid-template-columns: repeat(2, 1fr);" role="tablist" aria-label="Операционная система">
+                    <button type="button" class="guide-method-btn active" id="tabBtnDesktopWin" onclick="switchDesktopMethod('win')" role="tab" aria-selected="true">
                         <span class="guide-method-badge">ПК</span>
-                        <span class="guide-method-title">💻 Windows</span>
+                        <span class="guide-method-title"><svg class="guide-tab-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M3 5.45L10.5 4.36V11.27H3V5.45ZM10.5 12.73V19.64L3 18.55V12.73H10.5ZM12 4.14L21 2.85V11.27H12V4.14ZM21 12.73V21.15L12 19.86V12.73H21Z"/></svg>Windows</span>
                         <span class="guide-method-sub">Windows 10 / 11</span>
                     </button>
-                    <button type="button" class="guide-method-btn" id="tabBtnDesktopMac" onclick="switchDesktopMethod('mac')">
+                    <button type="button" class="guide-method-btn" id="tabBtnDesktopMac" onclick="switchDesktopMethod('mac')" role="tab" aria-selected="false">
                         <span class="guide-method-badge">Mac</span>
-                        <span class="guide-method-title">🍏 macOS</span>
+                        <span class="guide-method-title"><svg class="guide-tab-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.33c.64-.78 1.08-1.86.96-2.94-.93.04-2.06.62-2.72 1.4-.58.68-1.1 1.79-.96 2.84 1.04.08 2.08-.52 2.72-1.3"/></svg>macOS</span>
                         <span class="guide-method-sub">Apple Silicon & Intel</span>
                     </button>
                 </div>
@@ -2342,27 +2392,31 @@
                         </div>
                         <div class="guide-store-grid" style="grid-template-columns: 1fr;">
                             <a href="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe" target="_blank" rel="noopener" class="guide-store-card">
-                                <div class="guide-store-info">
-                                    <span class="guide-store-name">Happ для Windows (.exe)</span>
-                                    <span class="guide-store-sub">Официальный релиз с GitHub</span>
+                                <div class="guide-store-left">
+                                    <div class="guide-store-icon"><svg viewBox="0 0 24 24"><path d="M3 5.45L10.5 4.36V11.27H3V5.45ZM10.5 12.73V19.64L3 18.55V12.73H10.5ZM12 4.14L21 2.85V11.27H12V4.14ZM21 12.73V21.15L12 19.86V12.73H21Z"/></svg></div>
+                                    <div class="guide-store-info">
+                                        <span class="guide-store-name">Happ для Windows (.exe)</span>
+                                        <span class="guide-store-sub">Официальный релиз с GitHub</span>
+                                    </div>
                                 </div>
                                 <span class="guide-store-badge">Скачать setup.exe ↗</span>
                             </a>
                         </div>
-                        <div class="guide-step-desc" style="margin-top: 8px;">
-                            При первом запуске Windows может показать синее окно защиты SmartScreen:
-                        </div>
-                        <!-- UI Mockup Frame: Windows SmartScreen -->
-                        <div class="ui-mockup-frame" style="background: #005a9e; border-color: rgba(255,255,255,0.2);">
-                            <div style="font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 4px;">Система Windows защитила ваш компьютер</div>
-                            <div style="font-size: 11px; color: #d0e8ff; margin-bottom: 10px;">Фильтр Microsoft Defender SmartScreen предотвратил запуск неопознанного приложения.</div>
-                            <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.2); padding: 8px 10px; border-radius: 8px;">
-                                <span style="color: #6ee7b7; font-size: 12px; font-weight: 700; text-decoration: underline; cursor: pointer;">1. Нажмите «Подробнее»</span>
-                                <span style="background: #fff; color: #005a9e; font-size: 11.5px; font-weight: 700; padding: 4px 10px; border-radius: 6px;">2. «Выполнить в любом случае»</span>
+                        <div style="background: rgba(0, 90, 158, 0.15); border: 1px solid rgba(0, 90, 158, 0.3); border-radius: 10px; padding: 12px 14px; margin-top: 10px;">
+                            <div style="font-size: 12px; font-weight: 600; color: #6ee7b7; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                                <span>Если появилось синее окно защиты Windows (SmartScreen):</span>
                             </div>
-                        </div>
-                        <div style="margin-top: 8px; font-size: 11.5px; color: var(--text-sub);">
-                            Это стандартное уведомление Windows для независимых программ без платного корпоративного сертификата Microsoft.
+                            <div style="font-size: 12px; color: var(--text-sub); line-height: 1.6;">
+                                1. Нажмите ссылку <strong>«Подробнее» (More info)</strong> в окне предупреждения.<br>
+                                2. Появится кнопка <strong>«Выполнить в любом случае» (Run anyway)</strong> — нажмите её.<br>
+                                3. Это штатное системное окно Windows для программ, скачанных из браузера.
+                            </div>
+                            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(0, 90, 158, 0.2); font-size: 11.5px;">
+                                <a href="https://docs.happ.info/main/faq" target="_blank" rel="noopener" style="color: #6ee7b7; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: rgba(0, 90, 158, 0.2); border: 1px solid rgba(0, 90, 158, 0.35); border-radius: 8px; font-size: 11.5px; font-weight: 500; min-height: 32px;">
+                                    <span>Официальная база знаний Happ Desktop ↗</span>
+                                </a>
+                            </div>
                         </div>
                     </div>
 
@@ -2401,9 +2455,12 @@
                         </div>
                         <div class="guide-store-grid" style="grid-template-columns: 1fr;">
                             <a href="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/Happ.macOS.universal.dmg" target="_blank" rel="noopener" class="guide-store-card">
-                                <div class="guide-store-info">
-                                    <span class="guide-store-name">Happ для macOS (.dmg)</span>
-                                    <span class="guide-store-sub">Универсальная версия (Apple Silicon / Intel)</span>
+                                <div class="guide-store-left">
+                                    <div class="guide-store-icon"><svg viewBox="0 0 24 24"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.33c.64-.78 1.08-1.86.96-2.94-.93.04-2.06.62-2.72 1.4-.58.68-1.1 1.79-.96 2.84 1.04.08 2.08-.52 2.72-1.3"/></svg></div>
+                                    <div class="guide-store-info">
+                                        <span class="guide-store-name">Happ для macOS (.dmg)</span>
+                                        <span class="guide-store-sub">Универсальная версия (Apple Silicon / Intel)</span>
+                                    </div>
                                 </div>
                                 <span class="guide-store-badge">Скачать .dmg ↗</span>
                             </a>
@@ -2438,27 +2495,27 @@
             <!-- FAQ Guide Content -->
             <div id="guideSectionFaq" class="guide-section" style="display: none;">
                 <div class="guide-faq-item open">
-                    <button type="button" class="guide-faq-q" onclick="toggleGuideFaq(this)">
+                    <button type="button" class="guide-faq-q" onclick="toggleGuideFaq(this)" aria-expanded="true">
                         <span>Нужно ли отключать при входе в банки или Госуслуги?</span>
                         <svg class="guide-faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
                     </button>
                     <div class="guide-faq-a">
-                        <strong>Нет, отключать не требуется!</strong> Сервис настроен по принципу выборочной маршрутизации: все российские банки (Сбербанк, Т-Банк, ВТБ, Альфа и др.), Госуслуги и маркетплейсы открываются напрямую на максимальной скорости вашего провайдера.
+                        <strong>Нет, не требуется.</strong> Сервис настроен по принципу выборочной маршрутизации: российские банки, государственные сервисы и маркетплейсы открываются напрямую на максимальной скорости вашего провайдера.
                     </div>
                 </div>
 
                 <div class="guide-faq-item">
-                    <button type="button" class="guide-faq-q" onclick="toggleGuideFaq(this)">
+                    <button type="button" class="guide-faq-q" onclick="toggleGuideFaq(this)" aria-expanded="false">
                         <span>Как вернуть регион App Store обратно на Россию?</span>
                         <svg class="guide-faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
                     </button>
                     <div class="guide-faq-a">
-                        Сразу после загрузки клиента (INCY или Happ) вы можете вернуться в App Store → иконка профиля → Имя/Apple ID → «Страна или регион» → выбрать «Россия» и способ оплаты «Нет». Установленные приложения останутся на вашем телефоне и продолжат работать и обновляться!
+                        Сразу после загрузки клиента (INCY или Happ) вы можете вернуться в App Store → иконка профиля → Имя/Apple ID → «Страна или регион» → выбрать «Россия» и способ оплаты «Нет». Приложение останется на устройстве и продолжит обновляться.
                     </div>
                 </div>
 
                 <div class="guide-faq-item">
-                    <button type="button" class="guide-faq-q" onclick="toggleGuideFaq(this)">
+                    <button type="button" class="guide-faq-q" onclick="toggleGuideFaq(this)" aria-expanded="false">
                         <span>Что делать, если в TestFlight пишет «Этот бета-тест заполнен»?</span>
                         <svg class="guide-faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
                     </button>
@@ -2468,7 +2525,7 @@
                 </div>
 
                 <div class="guide-faq-item">
-                    <button type="button" class="guide-faq-q" onclick="toggleGuideFaq(this)">
+                    <button type="button" class="guide-faq-q" onclick="toggleGuideFaq(this)" aria-expanded="false">
                         <span>Что делать, если пропал доступ или страницы не грузятся?</span>
                         <svg class="guide-faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
                     </button>
@@ -2481,7 +2538,17 @@
                 </div>
 
                 <div class="guide-faq-item">
-                    <button type="button" class="guide-faq-q" onclick="toggleGuideFaq(this)">
+                    <button type="button" class="guide-faq-q" onclick="toggleGuideFaq(this)" aria-expanded="false">
+                        <span>Что делать, если на Android не включается соединение?</span>
+                        <svg class="guide-faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="guide-faq-a">
+                        Если на телефоне ранее были установлены другие сетевые приложения или блокировщики, Android может отклонять подключение. Откройте <strong>Настройки телефона → Подключения (или Сеть и интернет) → Сетевые профили</strong> и убедитесь, что у других ранее установленных программ выключены переключатели <strong>«Постоянное соединение»</strong> и <strong>«Блокировать соединения»</strong>.
+                    </div>
+                </div>
+
+                <div class="guide-faq-item">
+                    <button type="button" class="guide-faq-q" onclick="toggleGuideFaq(this)" aria-expanded="false">
                         <span>Сколько устройств можно подключить?</span>
                         <svg class="guide-faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
                     </button>
@@ -2504,6 +2571,23 @@
     </div>
 
     <div id="copyToast" class="copy-toast" aria-live="polite">Адрес подключения скопирован в буфер</div>
+
+    <!-- Image Zoom Lightbox Modal -->
+    <dialog id="imageLightbox" class="image-lightbox" aria-labelledby="lightboxCaption" aria-modal="true" onclick="onLightboxBackdropClick(event)">
+        <div class="lightbox-container">
+            <button type="button" class="lightbox-close-btn" onclick="closeImageLightbox()" aria-label="Закрыть (Esc)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"/>
+                    <line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+            </button>
+            <div class="lightbox-img-wrap">
+                <img id="lightboxImg" src="" alt="" class="lightbox-img" onclick="toggleLightboxZoom(event)">
+            </div>
+            <div id="lightboxCaption" class="lightbox-caption"></div>
+            <div class="lightbox-tip">Нажмите на фото для масштаба 100% • Esc или клик в фон, чтобы закрыть</div>
+        </div>
+    </dialog>
 
     <script>
         const subUrl = window.location.href;
@@ -2794,8 +2878,12 @@
             tabs.forEach(function(t) {
                 const btn = document.getElementById("guideNavBtn" + t.charAt(0).toUpperCase() + t.slice(1));
                 const sec = document.getElementById("guideSection" + t.charAt(0).toUpperCase() + t.slice(1));
-                if (btn) btn.classList.toggle("active", t === tab);
-                if (sec) sec.style.display = (t === tab) ? "block" : "none";
+                const isActive = (t === tab);
+                if (btn) {
+                    btn.classList.toggle("active", isActive);
+                    btn.setAttribute("aria-selected", isActive ? "true" : "false");
+                }
+                if (sec) sec.style.display = isActive ? "block" : "none";
             });
         }
 
@@ -2808,8 +2896,12 @@
             Object.keys(methods).forEach(function(k) {
                 const b = document.getElementById(methods[k].btn);
                 const s = document.getElementById(methods[k].sec);
-                if (b) b.classList.toggle("active", k === method);
-                if (s) s.style.display = (k === method) ? "block" : "none";
+                const isActive = (k === method);
+                if (b) {
+                    b.classList.toggle("active", isActive);
+                    b.setAttribute("aria-selected", isActive ? "true" : "false");
+                }
+                if (s) s.style.display = isActive ? "block" : "none";
             });
         }
 
@@ -2818,10 +2910,17 @@
             const btnApk = document.getElementById("tabBtnAndroidApk");
             const secPlay = document.getElementById("androidSubPlay");
             const secApk = document.getElementById("androidSubApk");
-            if (btnPlay) btnPlay.classList.toggle("active", method === "play");
-            if (btnApk) btnApk.classList.toggle("active", method === "apk");
-            if (secPlay) secPlay.style.display = (method === "play") ? "block" : "none";
-            if (secApk) secApk.style.display = (method === "apk") ? "block" : "none";
+            const isPlay = (method === "play");
+            if (btnPlay) {
+                btnPlay.classList.toggle("active", isPlay);
+                btnPlay.setAttribute("aria-selected", isPlay ? "true" : "false");
+            }
+            if (btnApk) {
+                btnApk.classList.toggle("active", !isPlay);
+                btnApk.setAttribute("aria-selected", !isPlay ? "true" : "false");
+            }
+            if (secPlay) secPlay.style.display = isPlay ? "block" : "none";
+            if (secApk) secApk.style.display = !isPlay ? "block" : "none";
         }
 
         function switchDesktopMethod(method) {
@@ -2829,10 +2928,17 @@
             const btnMac = document.getElementById("tabBtnDesktopMac");
             const secWin = document.getElementById("desktopSubWin");
             const secMac = document.getElementById("desktopSubMac");
-            if (btnWin) btnWin.classList.toggle("active", method === "win");
-            if (btnMac) btnMac.classList.toggle("active", method === "mac");
-            if (secWin) secWin.style.display = (method === "win") ? "block" : "none";
-            if (secMac) secMac.style.display = (method === "mac") ? "block" : "none";
+            const isWin = (method === "win");
+            if (btnWin) {
+                btnWin.classList.toggle("active", isWin);
+                btnWin.setAttribute("aria-selected", isWin ? "true" : "false");
+            }
+            if (btnMac) {
+                btnMac.classList.toggle("active", !isWin);
+                btnMac.setAttribute("aria-selected", !isWin ? "true" : "false");
+            }
+            if (secWin) secWin.style.display = isWin ? "block" : "none";
+            if (secMac) secMac.style.display = !isWin ? "block" : "none";
         }
 
         function toggleGuideVideo() {
@@ -2852,7 +2958,7 @@
             }
         }
 
-        function copyMockupField(text, btn) {
+        function copyGuideField(text, btn) {
             function onSuccess() {
                 btn.classList.add("copied");
                 const originalHtml = btn.innerHTML;
@@ -2879,15 +2985,80 @@
             }
         }
 
-        function openGuidesInNewTab() {
-            const url = window.location.href.split("#")[0] + "#guides";
-            window.open(url, "_blank");
-        }
-
         function toggleGuideFaq(btn) {
             const item = btn.closest(".guide-faq-item");
-            if (item) item.classList.toggle("open");
+            if (item) {
+                const isOpen = item.classList.toggle("open");
+                btn.setAttribute("aria-expanded", isOpen ? "true" : "false");
+            }
         }
+
+        function markImgLoaded(img) {
+            if (!img) return;
+            img.classList.add("loaded");
+            const w = img.closest(".guide-screenshot-wrapper");
+            if (w) w.classList.add("img-loaded");
+        }
+
+        let lastFocusedElementBeforeLightbox = null;
+
+        function openImageLightbox(imgSrc, imgAlt) {
+            const lightbox = document.getElementById("imageLightbox");
+            const img = document.getElementById("lightboxImg");
+            const caption = document.getElementById("lightboxCaption");
+            if (!lightbox || !img) return;
+            lastFocusedElementBeforeLightbox = document.activeElement;
+            img.src = imgSrc;
+            img.alt = imgAlt || "";
+            img.classList.remove("zoomed");
+            if (caption) caption.textContent = imgAlt || "Скриншот настройки";
+            if (typeof lightbox.showModal === "function") {
+                lightbox.showModal();
+            } else {
+                lightbox.setAttribute("open", "");
+            }
+            document.body.style.overflow = "hidden";
+            const closeBtn = lightbox.querySelector(".lightbox-close-btn");
+            if (closeBtn) closeBtn.focus();
+        }
+
+        function closeImageLightbox() {
+            const lightbox = document.getElementById("imageLightbox");
+            if (!lightbox) return;
+            if (typeof lightbox.close === "function") {
+                lightbox.close();
+            } else {
+                lightbox.removeAttribute("open");
+            }
+            document.body.style.overflow = "";
+            if (lastFocusedElementBeforeLightbox && typeof lastFocusedElementBeforeLightbox.focus === "function") {
+                lastFocusedElementBeforeLightbox.focus();
+            }
+        }
+
+        function toggleLightboxZoom(event) {
+            if (event) event.stopPropagation();
+            const img = document.getElementById("lightboxImg");
+            if (img) img.classList.toggle("zoomed");
+        }
+
+        function onLightboxBackdropClick(event) {
+            if (event.target && event.target.id === "lightboxImg") return;
+            if (event.target && event.target.closest && event.target.closest(".lightbox-caption")) return;
+            closeImageLightbox();
+        }
+
+        document.addEventListener("keydown", function(e) {
+            if (e.key === "Escape") closeImageLightbox();
+        });
+
+        document.addEventListener("click", function(e) {
+            const wrapper = e.target.closest(".guide-screenshot-wrapper");
+            if (wrapper) {
+                const img = wrapper.querySelector("img");
+                if (img) openImageLightbox(img.src, img.alt);
+            }
+        });
 
         window.addEventListener("hashchange", function() {
             if (window.location.hash === "#guides") {
@@ -2900,6 +3071,13 @@
         if (window.location.hash === "#guides") {
             openGuidesTab("ios");
         }
+
+        // Initialize any cached images that loaded before DOMContentLoaded
+        document.querySelectorAll(".guide-real-screenshot").forEach(function(img) {
+            if (img.complete && img.naturalWidth > 0) {
+                markImgLoaded(img);
+            }
+        });
     </script>
 </body>
 </html>

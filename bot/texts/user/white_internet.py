@@ -100,7 +100,6 @@ WL_INCY_INSTRUCTIONS_TEXT = (
     "   <b>Happ (Рекомендуется для ПК):</b>\n"
     "   💻 <a href=\"https://github.com/Happ-proxy/happ-desktop/releases\">Для ПК / Windows (GitHub)</a> — <i>рекомендуется для компьютеров</i>\n"
     "   🍏 <a href=\"https://testflight.apple.com/join/XMls6Ckd\">TestFlight (iOS РФ)</a> | <a href=\"https://apps.apple.com/app/happ-proxy-utility/id6504287215\">App Store</a>\n"
-    "   🤖 <a href=\"https://play.google.com/store/apps/details?id=com.happproxy\">Google Play (Android)</a>\n"
     "   📦 <a href=\"https://github.com/Happ-proxy/happ-android/releases\">APK для Android (GitHub)</a>\n\n"
     "   <b>INCY:</b>\n"
     "   🍏 <a href=\"https://testflight.apple.com/join/dFw66h3a\">TestFlight (iOS РФ)</a> | <a href=\"https://apps.apple.com/app/incy/id6756943388\">App Store</a>\n"
