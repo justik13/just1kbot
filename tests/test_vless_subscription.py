@@ -220,6 +220,9 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             self.assertIn("incy://add/", body)
             self.assertIn(texts.LANDING_VLESS_PAGE_TITLE, body)
             self.assertIn("testflight.apple.com/join/dFw66h3a", body)
+            self.assertIn("apps.apple.com/app/incy", body)
+            self.assertIn("testflight.apple.com/join/XMls6Ckd", body)
+            self.assertIn("apps.apple.com/app/happ-proxy-utility", body)
 
     async def test_browser_request_financial_hold_returns_paused_landing(self):
         mock_session = AsyncMock()

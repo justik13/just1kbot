@@ -157,12 +157,12 @@ VLESS_SUB_SCREEN_TEXT = """⚡️ <b>Подключение по ссылке (H
 1️⃣ <b>Установите приложение:</b>
    <b>Happ (Рекомендуется для ПК):</b>
    💻 <a href="https://github.com/Happ-proxy/happ-desktop/releases">Для ПК / Windows (GitHub)</a> — <i>рекомендуется для компьютеров</i>
-   🍏 <a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215">App Store (iPhone / iPad)</a>
+   🍏 <a href="https://testflight.apple.com/join/XMls6Ckd">TestFlight (iOS РФ)</a> | <a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215">App Store</a>
    🤖 <a href="https://play.google.com/store/apps/details?id=com.happproxy">Google Play (Android)</a>
    📦 <a href="https://github.com/Happ-proxy/happ-android/releases">APK для Android (GitHub)</a>
 
    <b>INCY:</b>
-   🍏 <a href="https://apps.apple.com/app/incy/id6756943388">App Store (iPhone / iPad)</a>
+   🍏 <a href="https://testflight.apple.com/join/dFw66h3a">TestFlight (iOS РФ)</a> | <a href="https://apps.apple.com/app/incy/id6756943388">App Store</a>
    🤖 <a href="https://play.google.com/store/apps/details?id=llc.itdev.incy">Google Play (Android)</a>
    💻 / 📦 <a href="https://github.com/INCY-DEV/incy-platforms/releases">Для ПК / APK (GitHub)</a>
 
