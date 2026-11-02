@@ -128,7 +128,7 @@ DEVICE_MIGRATE_SUCCESS_NOTICE = """🎉 <b>Сервер успешно изме�
 <b>2.</b> Откройте приложение для подключения.
 <b>3.</b> Нажмите кнопку <b>«+»</b> (или «Добавить») → выберите «Вставить из буфера».
 <b>4.</b> Подключитесь к новому серверу.
-<b>5.</b> Старое подключение в приложении можно смело удалить."""
+<b>5.</b> Старое подключение в приложении можно удалить."""
 
 DEVICE_MIGRATE_FAILED_NOTICE = """⚠️ <b>Не удалось настроить новый сервер</b>
 
@@ -158,7 +158,6 @@ VLESS_SUB_SCREEN_TEXT = """⚡️ <b>Подключение по ссылке (H
    <b>Happ (Рекомендуется для ПК):</b>
    💻 <a href="https://github.com/Happ-proxy/happ-desktop/releases">Для ПК / Windows (GitHub)</a> — <i>рекомендуется для компьютеров</i>
    🍏 <a href="https://testflight.apple.com/join/XMls6Ckd">TestFlight (iOS РФ)</a> | <a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215">App Store</a>
-   🤖 <a href="https://play.google.com/store/apps/details?id=com.happproxy">Google Play (Android)</a>
    📦 <a href="https://github.com/Happ-proxy/happ-android/releases">APK для Android (GitHub)</a>
 
    <b>INCY:</b>

@@ -100,7 +100,6 @@ WL_INCY_INSTRUCTIONS_TEXT = (
     "   <b>Happ (Рекомендуется для ПК):</b>\n"
     "   💻 <a href=\"https://github.com/Happ-proxy/happ-desktop/releases\">Для ПК / Windows (GitHub)</a> — <i>рекомендуется для компьютеров</i>\n"
     "   🍏 <a href=\"https://testflight.apple.com/join/XMls6Ckd\">TestFlight (iOS РФ)</a> | <a href=\"https://apps.apple.com/app/happ-proxy-utility/id6504287215\">App Store</a>\n"
-    "   🤖 <a href=\"https://play.google.com/store/apps/details?id=com.happproxy\">Google Play (Android)</a>\n"
     "   📦 <a href=\"https://github.com/Happ-proxy/happ-android/releases\">APK для Android (GitHub)</a>\n\n"
     "   <b>INCY:</b>\n"
     "   🍏 <a href=\"https://testflight.apple.com/join/dFw66h3a\">TestFlight (iOS РФ)</a> | <a href=\"https://apps.apple.com/app/incy/id6756943388\">App Store</a>\n"
@@ -221,7 +220,7 @@ WL_TRAFFIC_EXHAUSTED_TRIAL_ALERT = (
 WL_TRAFFIC_90P_ALERT = (
     "⚪️ <b>Белый Интернет: Осталось 10% трафика</b>\n\n"
     "Вы израсходовали 90% пакета трафика. "
-    "Рекомендуем докупить дополнительный пакет заранее в боте, чтобы интернет не отключился в неподходящий момент."
+    "Рекомендуем докупить пакет заранее в боте, чтобы доступ не прерывался."
 )
 WL_TRAFFIC_90P_TRIAL_ALERT = (
     "⚪️ <b>Белый Интернет: Осталось 10% трафика</b>\n\n"
