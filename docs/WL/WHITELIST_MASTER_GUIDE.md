@@ -10,7 +10,7 @@
 >
 > *Актуальность: 31 октября 2026 года. Официальный baseline апстрима: Xray-core v26.10.29 (29.10.2026, PR #5067 VLESS Native Encryption ML-KEM-768 постквантовое 0-RTT шифрование полезной нагрузки; v26.10.21 релиз безопасности с очисткой RootCA на Go 1.27.3) с поддержкой XDRIVE (network: "xdrive", PR #5645, PR #6748, PR #6754, PR #7231 S3, PR #7187 HTTP/3), XHTTP с downlinkGzipMs (PR #7211), каноническим профилем Bodiless GET Uplink (uplinkDataPlacement: "header") для парирования инцидента 413 Yandex Cloud CDN от 28–29.09.2026, PR #6632 (Request.GetBody() retry при HTTP/2 GOAWAY), PR #6307 (чистые пути без трейлинг-слэшей), PR #5414 (кастомные uplinkHTTPMethod).*
 >
-> ℹ️ **ПРИМЕЧАНИЕ О ВЕРСИИ В ПРОДАКШЕНЕ:** Боевые узлы проекта `just1knode` строго зафиксированы на проверенной версии `XRAY_VERSION="26.7.28"` (`modules/xray/core.sh:6`) для гарантированной стабильности и совместимости с клиентами INCY.
+> ℹ️ **ПРИМЕЧАНИЕ О ВЕРСИИ В ПРОДАКШЕНЕ:** Боевые узлы проекта `just1knode` зафиксированы на актуальной версии безопасности `XRAY_VERSION_PINNED="26.10.31"` (`modules/xray/core.sh:6`) с защитой от уязвимостей Linux kernel MPTCP и постквантовым шифрованием VLESS (PR #5067).
 
 ---
 

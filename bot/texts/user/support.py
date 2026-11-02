@@ -95,7 +95,7 @@ SUPPORT_INCY_INSTRUCTION_TEXT = """📱 <b>Инструкция по подкл�
 • 📦 <a href="https://github.com/Happ-proxy/happ-android/releases">APK для Android (GitHub)</a>
 
 <b>2. Приложение INCY:</b>
-• 🍏 <a href="https://apps.apple.com/app/incy/id6756943388">Установить из App Store (iPhone / iPad)</a>
+• 🍏 <a href="https://testflight.apple.com/join/dFw66h3a">Установить для iOS (TestFlight)</a> | <a href="https://apps.apple.com/app/incy/id6756943388">App Store</a>
 • 🤖 <a href="https://play.google.com/store/apps/details?id=llc.itdev.incy">Установить из Google Play (Android)</a>
 • 💻 <a href="https://github.com/INCY-DEV/incy-platforms/releases">Версия для ПК / APK (GitHub)</a>
 
