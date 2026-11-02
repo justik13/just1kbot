@@ -1377,6 +1377,8 @@
             justify-content: center;
             border-radius: 12px;
             scrollbar-width: thin;
+            -webkit-overflow-scrolling: touch;
+            touch-action: pan-x pan-y;
         }
         .lightbox-img {
             max-width: 92vw;
@@ -1388,6 +1390,7 @@
             box-shadow: 0 25px 60px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.15);
             cursor: zoom-in;
             transition: max-width 180ms ease, max-height 180ms ease;
+            touch-action: pan-x pan-y pinch-zoom;
         }
         .lightbox-img.zoomed {
             max-width: none;
@@ -2008,9 +2011,9 @@
             </div>
 
             <!-- iOS Guide Content -->
-            <div id="guideSectionIos" class="guide-section">
+            <div id="guideSectionIos" class="guide-section" role="tabpanel" aria-labelledby="guideNavBtnIos">
                 <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; text-align: left;">Шаг 1. Выберите способ установки:</div>
-                <div class="guide-method-tabs">
+                <div class="guide-method-tabs" role="tablist" aria-label="Способ установки iOS">
                     <button type="button" class="guide-method-btn active" id="tabBtnIosTf" onclick="switchIosMethod('tf')" role="tab" aria-selected="true">
                         <span class="guide-method-badge">Быстро</span>
                         <span class="guide-method-title"><svg class="guide-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>TestFlight</span>
@@ -2292,7 +2295,7 @@
             </div>
 
             <!-- Android Guide Content -->
-            <div id="guideSectionAndroid" class="guide-section" style="display: none;">
+            <div id="guideSectionAndroid" class="guide-section" role="tabpanel" aria-labelledby="guideNavBtnAndroid" style="display: none;">
                 <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; text-align: left;">Шаг 1. Выберите способ установки:</div>
                 <div class="guide-method-tabs" style="grid-template-columns: repeat(2, 1fr);" role="tablist" aria-label="Способ установки Android">
                     <button type="button" class="guide-method-btn active" id="tabBtnAndroidPlay" onclick="switchAndroidMethod('play')" role="tab" aria-selected="true">
@@ -2411,7 +2414,7 @@
             </div>
 
             <!-- Desktop (PC/Mac) Guide Content -->
-            <div id="guideSectionDesktop" class="guide-section" style="display: none;">
+            <div id="guideSectionDesktop" class="guide-section" role="tabpanel" aria-labelledby="guideNavBtnDesktop" style="display: none;">
                 <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; text-align: left;">Выберите операционную систему:</div>
                 <div class="guide-method-tabs" style="grid-template-columns: repeat(2, 1fr);" role="tablist" aria-label="Операционная система">
                     <button type="button" class="guide-method-btn active" id="tabBtnDesktopWin" onclick="switchDesktopMethod('win')" role="tab" aria-selected="true">
@@ -2539,7 +2542,7 @@
             </div>
 
             <!-- FAQ Guide Content -->
-            <div id="guideSectionFaq" class="guide-section" style="display: none;">
+            <div id="guideSectionFaq" class="guide-section" role="tabpanel" aria-labelledby="guideNavBtnFaq" style="display: none;">
                 <div class="guide-faq-item open">
                     <button type="button" class="guide-faq-q" onclick="toggleGuideFaq(this)" aria-expanded="true">
                         <span>Нужно ли отключать при входе в банки или Госуслуги?</span>
@@ -3108,9 +3111,27 @@
         }
 
         function onLightboxBackdropClick(event) {
-            if (event.target && event.target.id === "lightboxImg") return;
-            if (event.target && event.target.closest && event.target.closest(".lightbox-caption")) return;
+            if (event.target && (
+                event.target.id === "lightboxImg" ||
+                event.target.closest(".lightbox-img-wrap") ||
+                event.target.closest(".lightbox-caption") ||
+                event.target.closest(".lightbox-tip") ||
+                event.target.closest(".lightbox-close-btn")
+            )) {
+                return;
+            }
             closeImageLightbox();
+        }
+
+        const lightboxModal = document.getElementById("imageLightbox");
+        if (lightboxModal) {
+            const onLightboxDismiss = function() {
+                document.body.style.overflow = "";
+                const img = document.getElementById("lightboxImg");
+                if (img) img.classList.remove("zoomed");
+            };
+            lightboxModal.addEventListener("close", onLightboxDismiss);
+            lightboxModal.addEventListener("cancel", onLightboxDismiss);
         }
 
         document.addEventListener("keydown", function(e) {
