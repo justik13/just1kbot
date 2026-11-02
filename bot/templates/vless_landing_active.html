@@ -849,10 +849,579 @@
             .card { padding: 22px 14px 18px; border-radius: 20px; }
             .btn-row { grid-template-columns: 1fr; }
         }
+    
+        /* View Switcher */
+        #mainView, #guidesView {
+            transition: opacity 180ms cubic-bezier(0.16, 1, 0.3, 1), transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .view-hidden {
+            display: none !important;
+        }
+
+        /* Micro-interactions & Tactile Tap */
+        button:active, .sub-pill:active, .guide-nav-btn:active, .mini-copy-btn:active, .guides-trigger-card:active {
+            transform: scale(0.98);
+        }
+        @media (prefers-reduced-motion: reduce) {
+            #mainView, #guidesView, .guide-faq-a, .guide-faq-chevron, button, .sub-pill {
+                transition: none !important;
+                animation: none !important;
+            }
+        }
+
+        /* Guides Trigger Banner on Main View */
+        .guides-trigger-card {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-top: 14px;
+            padding: 12px 14px;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.02) 100%);
+            border: 1px solid var(--border-subtle);
+            border-radius: 14px;
+            transition: all 150ms ease;
+        }
+        .guides-trigger-card:hover {
+            background: rgba(255, 255, 255, 0.07);
+            border-color: var(--border-strong);
+            transform: translateY(-1px);
+        }
+        .guides-trigger-clickable {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex: 1;
+            min-width: 0;
+            cursor: pointer;
+            background: none;
+            border: none;
+            padding: 0;
+            text-align: left;
+        }
+        .guides-trigger-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.06);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--tier-accent);
+            flex-shrink: 0;
+        }
+        .guides-trigger-icon svg {
+            width: 20px;
+            height: 20px;
+        }
+        .guides-trigger-body {
+            flex: 1;
+            min-width: 0;
+        }
+        .guides-trigger-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-main);
+            line-height: 1.3;
+        }
+        .guides-trigger-sub {
+            font-size: 11px;
+            color: var(--text-muted);
+            line-height: 1.3;
+            margin-top: 2px;
+        }
+        .guides-trigger-arrow {
+            color: var(--text-muted);
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            margin-right: 4px;
+        }
+        .guides-trigger-arrow svg {
+            width: 16px;
+            height: 16px;
+        }
+        .guides-trigger-popout {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 7px 10px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 8px;
+            color: var(--text-sub);
+            font-size: 11px;
+            font-weight: 500;
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: all 150ms ease;
+        }
+        .guides-trigger-popout:hover {
+            background: rgba(255, 255, 255, 0.14);
+            color: var(--text-main);
+            border-color: var(--border-strong);
+        }
+        .guides-trigger-popout svg {
+            width: 13px;
+            height: 13px;
+        }
+
+        /* Guides Screen Header */
+        .guides-sticky-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 14px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .guides-back-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-subtle);
+            border-radius: 10px;
+            padding: 7px 12px;
+            color: var(--text-main);
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 120ms ease;
+        }
+        .guides-back-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: var(--border-strong);
+        }
+        .guides-back-btn svg {
+            width: 14px;
+            height: 14px;
+        }
+        .sticky-right-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .guides-external-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 6px 10px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 8px;
+            color: var(--text-sub);
+            font-size: 11px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 120ms ease;
+        }
+        .guides-external-btn:hover {
+            background: rgba(255, 255, 255, 0.12);
+            color: var(--text-main);
+            border-color: var(--border-strong);
+        }
+        .guides-external-btn svg {
+            width: 13px;
+            height: 13px;
+        }
+        .guides-badge-tag {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--tier-accent);
+            background: var(--tier-badge-glow);
+            border: 1px solid var(--tier-highlight-line);
+            padding: 3px 8px;
+            border-radius: 6px;
+        }
+        .guides-header-title {
+            text-align: left;
+            margin-bottom: 14px;
+        }
+        .guides-header-title h2 {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text-main);
+            margin: 0 0 4px 0;
+            letter-spacing: -0.3px;
+        }
+        .guides-header-title p {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin: 0;
+            line-height: 1.4;
+        }
+
+        /* Platform Tabs */
+        .guide-nav-tabs {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 6px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: 4px;
+            margin-bottom: 14px;
+        }
+        .guide-nav-btn {
+            background: transparent;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 4px;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-sub);
+            cursor: pointer;
+            transition: all 120ms ease;
+            text-align: center;
+        }
+        .guide-nav-btn.active {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-main);
+            font-weight: 700;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+        }
+
+        /* Sub-Guide Filter Pills */
+        .sub-guide-pills {
+            display: flex;
+            gap: 6px;
+            overflow-x: auto;
+            padding-bottom: 6px;
+            margin-bottom: 14px;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+        }
+        .sub-guide-pills::-webkit-scrollbar {
+            display: none;
+        }
+        .sub-pill {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border-subtle);
+            border-radius: 20px;
+            padding: 6px 12px;
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--text-sub);
+            cursor: pointer;
+            white-space: nowrap;
+            flex-shrink: 0;
+            transition: all 120ms ease;
+        }
+        .sub-pill.active {
+            background: var(--tier-accent);
+            color: #050505;
+            border-color: var(--tier-accent);
+            font-weight: 700;
+        }
+
+        /* Step Cards */
+        .guide-step-card {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-subtle);
+            border-radius: 14px;
+            padding: 14px;
+            margin-bottom: 12px;
+        }
+        .guide-step-header {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            margin-bottom: 8px;
+        }
+        .guide-step-num {
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: var(--tier-accent);
+            color: #050505;
+            font-size: 11.5px;
+            font-weight: 800;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .guide-step-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-main);
+            line-height: 1.3;
+        }
+        .guide-step-desc {
+            font-size: 12px;
+            color: var(--text-sub);
+            line-height: 1.45;
+            margin-bottom: 8px;
+        }
+        .guide-step-desc strong {
+            color: var(--text-main);
+        }
+
+        /* Callout Box */
+        .guide-callout {
+            display: flex;
+            gap: 9px;
+            background: rgba(56, 189, 248, 0.06);
+            border: 1px solid rgba(56, 189, 248, 0.2);
+            border-radius: 10px;
+            padding: 10px 12px;
+            margin-bottom: 12px;
+            font-size: 11.5px;
+            color: #bae6fd;
+            line-height: 1.4;
+            text-align: left;
+        }
+        .guide-callout-warning {
+            background: rgba(245, 158, 11, 0.08);
+            border-color: rgba(245, 158, 11, 0.25);
+            color: #fde68a;
+        }
+        .guide-callout-svg {
+            width: 17px;
+            height: 17px;
+            flex-shrink: 0;
+            margin-top: 1px;
+        }
+
+        /* Realistic UI Mockup Frame */
+        .ui-mockup-frame {
+            background: #09090b;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 12px;
+            padding: 12px;
+            margin-top: 8px;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            position: relative;
+            overflow: hidden;
+        }
+        .mockup-status-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 9.5px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+        }
+        .mockup-island {
+            width: 44px;
+            height: 8px;
+            background: #000000;
+            border-radius: 8px;
+        }
+        .mockup-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 7px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            font-size: 11.5px;
+        }
+        .mockup-row:last-child {
+            border-bottom: none;
+        }
+        .mockup-row-label {
+            color: var(--text-sub);
+        }
+        .mockup-row-value {
+            color: var(--text-main);
+            font-weight: 500;
+        }
+        .mockup-row-highlight {
+            background: rgba(16, 185, 129, 0.12);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 7px;
+            padding: 6px 8px;
+            margin: 4px 0;
+        }
+        .mockup-row-highlight .mockup-row-label {
+            color: #6ee7b7;
+            font-weight: 600;
+        }
+        .mockup-row-highlight .mockup-row-value {
+            color: #ffffff;
+            font-weight: 700;
+        }
+
+        /* 1-Tap Copyable Mockup Row */
+        .mockup-copyable-val {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .mini-copy-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 6px;
+            padding: 3px 6px;
+            color: var(--text-sub);
+            font-size: 10px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 120ms ease;
+        }
+        .mini-copy-btn svg {
+            width: 11px;
+            height: 11px;
+        }
+        .mini-copy-btn:hover {
+            background: rgba(255, 255, 255, 0.16);
+            color: var(--text-main);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+        .mini-copy-btn.copied {
+            background: rgba(16, 185, 129, 0.2);
+            border-color: #10b981;
+            color: #6ee7b7;
+        }
+
+        /* System Dialog Mockup */
+        .mockup-system-dialog {
+            background: #1c1c1e;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 14px;
+            padding: 14px;
+            text-align: center;
+            margin: 6px 0;
+            box-shadow: 0 10px 24px rgba(0, 0, 0, 0.6);
+        }
+        .dialog-title {
+            font-size: 12.5px;
+            font-weight: 600;
+            color: #ffffff;
+            margin-bottom: 4px;
+        }
+        .dialog-desc {
+            font-size: 11px;
+            color: #a1a1aa;
+            line-height: 1.35;
+            margin-bottom: 12px;
+        }
+        .dialog-actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+        .dialog-btn-cancel {
+            padding: 7px;
+            background: rgba(255, 255, 255, 0.08);
+            border: none;
+            border-radius: 8px;
+            color: #a1a1aa;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .dialog-btn-primary {
+            padding: 7px;
+            background: #007aff;
+            border: none;
+            border-radius: 8px;
+            color: #ffffff;
+            font-size: 12px;
+            font-weight: 600;
+            box-shadow: 0 0 10px rgba(0, 122, 255, 0.4);
+        }
+        .tap-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            background: rgba(16, 185, 129, 0.2);
+            border: 1px solid #10b981;
+            color: #a7f3d0;
+            font-size: 10px;
+            font-weight: 700;
+            padding: 2px 7px;
+            border-radius: 4px;
+            margin-top: 6px;
+        }
+
+        /* FAQ Accordion in Guides */
+        .guide-faq-item {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            margin-bottom: 8px;
+            overflow: hidden;
+        }
+        .guide-faq-q {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 14px;
+            background: transparent;
+            border: none;
+            color: var(--text-main);
+            font-size: 12.5px;
+            font-weight: 600;
+            text-align: left;
+            cursor: pointer;
+            gap: 10px;
+        }
+        .guide-faq-chevron {
+            width: 14px;
+            height: 14px;
+            color: var(--text-muted);
+            transition: transform 180ms ease;
+            flex-shrink: 0;
+        }
+        .guide-faq-item.open .guide-faq-chevron {
+            transform: rotate(180deg);
+        }
+        .guide-faq-a {
+            display: none;
+            padding: 0 14px 12px 14px;
+            font-size: 12px;
+            color: var(--text-sub);
+            line-height: 1.5;
+            border-top: 1px solid rgba(255, 255, 255, 0.04);
+            margin-top: 4px;
+            padding-top: 10px;
+        }
+        .guide-faq-item.open .guide-faq-a {
+            display: block;
+        }
+
+        /* Bottom return bar */
+        .guides-bottom-bar {
+            margin-top: 20px;
+            padding-top: 14px;
+            border-top: 1px solid var(--border-subtle);
+        }
+        .guides-return-btn {
+            width: 100%;
+            padding: 12px;
+            border-radius: 12px;
+            background: #ffffff;
+            color: #09090b;
+            font-size: 13px;
+            font-weight: 700;
+            border: none;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: all 120ms ease;
+        }
+        .guides-return-btn:hover {
+            background: #e4e4e7;
+        }
+        .guides-return-btn svg {
+            width: 16px;
+            height: 16px;
+        }
     </style>
 </head>
 <body data-tier="{tier}">
     <div class="card">
+        <div id="mainView">
         <div class="header-top">
             <div class="status-pill">
                 <span class="status-dot"></span>
@@ -1147,6 +1716,497 @@
                 <li><span class="step-num">3</span><span>Включите тумблер в приложении для запуска связи.</span></li>
             </ol>
         </div>
+
+        <!-- Guides Banner Trigger -->
+        <div class="guides-trigger-card">
+            <div class="guides-trigger-clickable" onclick="openGuidesTab('ios')" role="button" tabindex="0" aria-label="Открыть центр инструкций">
+                <div class="guides-trigger-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+                    </svg>
+                </div>
+                <div class="guides-trigger-body">
+                    <div class="guides-trigger-title">Центр инструкций и база знаний</div>
+                    <div class="guides-trigger-sub">Смена региона App Store, первый запуск, Face ID и APK</div>
+                </div>
+                <div class="guides-trigger-arrow">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="9 18 15 12 9 6"/>
+                    </svg>
+                </div>
+            </div>
+            <button type="button" class="guides-trigger-popout" onclick="openGuidesInNewTab()" title="Открыть в отдельной вкладке" aria-label="Открыть в отдельной вкладке">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                    <polyline points="15 3 21 3 21 9"/>
+                    <line x1="10" y1="14" x2="21" y2="3"/>
+                </svg>
+                <span>Вкладка</span>
+            </button>
+        </div>
+        </div><!-- end mainView -->
+
+        <!-- Dedicated Guides View -->
+        <div id="guidesView" class="view-hidden">
+            <div class="guides-sticky-bar">
+                <button type="button" class="guides-back-btn" onclick="closeGuidesTab()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="15 18 9 12 15 6"/>
+                    </svg>
+                    <span>Назад к подключению</span>
+                </button>
+                <div class="sticky-right-actions">
+                    <button type="button" class="guides-external-btn" onclick="openGuidesInNewTab()" title="Открыть в отдельной вкладке браузера">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                            <polyline points="15 3 21 3 21 9"/>
+                            <line x1="10" y1="14" x2="21" y2="3"/>
+                        </svg>
+                        <span>В отдельной вкладке</span>
+                    </button>
+                    <span class="guides-badge-tag">База знаний</span>
+                </div>
+            </div>
+
+            <div class="guides-header-title">
+                <h2>Центр инструкций</h2>
+                <p>Наглядные шаги со скриншотами экранов для любой платформы</p>
+            </div>
+
+            <div class="guide-nav-tabs">
+                <button type="button" class="guide-nav-btn active" id="guideNavBtnIos" onclick="switchGuideTab('ios')">iOS</button>
+                <button type="button" class="guide-nav-btn" id="guideNavBtnAndroid" onclick="switchGuideTab('android')">Android</button>
+                <button type="button" class="guide-nav-btn" id="guideNavBtnDesktop" onclick="switchGuideTab('desktop')">ПК / Mac</button>
+                <button type="button" class="guide-nav-btn" id="guideNavBtnFaq" onclick="switchGuideTab('faq')">Вопросы</button>
+            </div>
+
+            <!-- iOS Guide Content -->
+            <div id="guideSectionIos" class="guide-section">
+                <div class="sub-guide-pills">
+                    <button type="button" class="sub-pill active" id="pillBtnIosRegion" onclick="switchIosSubGuide('region')">Казахстан (Без карты)</button>
+                    <button type="button" class="sub-pill" id="pillBtnIosTf" onclick="switchIosSubGuide('testflight')">Apple TestFlight</button>
+                    <button type="button" class="sub-pill" id="pillBtnIosFirst" onclick="switchIosSubGuide('firstlaunch')">Первый запуск (Face ID)</button>
+                    <button type="button" class="sub-pill" id="pillBtnIosOffload" onclick="switchIosSubGuide('offload')">Лайфхак: Сгрузить и вернуть</button>
+                    <button type="button" class="sub-pill" id="pillBtnIosNewId" onclick="switchIosSubGuide('newappleid')">Новый Apple ID</button>
+                </div>
+
+                <!-- Sub-Guide 1: Region Change to Kazakhstan -->
+                <div id="iosSubGuideRegion">
+                    <div class="guide-callout">
+                        <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                        <div><strong>Почему Казахстан?</strong> Интерфейс остаётся полностью русскоязычным, а в способе оплаты доступен пункт «Нет» — иностранная карта не требуется. После скачивания можно сразу вернуть регион РФ.</div>
+                    </div>
+
+                    <div class="guide-callout guide-callout-warning">
+                        <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                        <div><strong>Условия смены:</strong> Баланс Apple ID должен быть 0 ₽ (без остатка) и не должно быть активных платных подписок (отменяются в Настройки → Профиль → Подписки).</div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">1</span>
+                            <span class="guide-step-title">Откройте меню смены страны в App Store</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Зайдите в <strong>App Store</strong> → нажмите на <strong>иконку своего профиля</strong> в правом верхнем углу → нажмите на первую строчку (своё имя и Apple ID) → выберите <strong>«Страна/регион»</strong> → <strong>«Изменить страну или регион»</strong>.
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">2</span>
+                            <span class="guide-step-title">Выберите Казахстан и способ оплаты «Нет»</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Найдите в списке <strong>«Казахстан»</strong>, нажмите <strong>«Принять»</strong> в верхнем правом углу. В способах оплаты выберите <strong>«Нет»</strong> (None).
+                        </div>
+                        <!-- UI Mockup Frame: Payment Method -->
+                        <div class="ui-mockup-frame">
+                            <div class="mockup-status-bar"><span>9:41</span><div class="mockup-island"></div><span>5G 100%</span></div>
+                            <div style="font-size: 11px; font-weight: 700; color: #fff; margin-bottom: 6px;">СПОСОБ ОПЛАТЫ</div>
+                            <div class="mockup-row">
+                                <span class="mockup-row-label">Кредитная или дебетовая карта</span>
+                                <span class="mockup-row-value">○</span>
+                            </div>
+                            <div class="mockup-row-highlight">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <div>
+                                        <span class="mockup-row-label">● Нет (карта не требуется)</span>
+                                    </div>
+                                    <span class="tap-badge">ВЫБРАТЬ ЭТОТ ПУНКТ</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">3</span>
+                            <span class="guide-step-title">Заполните адрес для счёта</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Apple требует заполнить поля адреса. Введите готовые проверенные данные г. Алматы (нажмите «Копировать» у каждого поля):
+                        </div>
+                        <!-- UI Mockup Frame: Address -->
+                        <div class="ui-mockup-frame">
+                            <div class="mockup-status-bar"><span>9:41</span><div class="mockup-island"></div><span>5G 100%</span></div>
+                            <div style="font-size: 11px; font-weight: 700; color: #a1a1aa; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">АДРЕС ДЛЯ ВЫСТАВЛЕНИЯ СЧЁТА</div>
+                            <div class="mockup-row">
+                                <span class="mockup-row-label">Улица</span>
+                                <div class="mockup-copyable-val">
+                                    <span class="mockup-row-value">ул. Абая, 1</span>
+                                    <button type="button" class="mini-copy-btn" onclick="copyMockupField('ул. Абая, 1', this)" title="Скопировать" aria-label="Скопировать улицу">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                                        <span class="copy-lbl">Копировать</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="mockup-row">
+                                <span class="mockup-row-label">Город</span>
+                                <div class="mockup-copyable-val">
+                                    <span class="mockup-row-value">Алматы</span>
+                                    <button type="button" class="mini-copy-btn" onclick="copyMockupField('Алматы', this)" title="Скопировать" aria-label="Скопировать город">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                                        <span class="copy-lbl">Копировать</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="mockup-row">
+                                <span class="mockup-row-label">Индекс</span>
+                                <div class="mockup-copyable-val">
+                                    <span class="mockup-row-value">050000</span>
+                                    <button type="button" class="mini-copy-btn" onclick="copyMockupField('050000', this)" title="Скопировать" aria-label="Скопировать индекс">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                                        <span class="copy-lbl">Копировать</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="mockup-row">
+                                <span class="mockup-row-label">Телефон</span>
+                                <div class="mockup-copyable-val">
+                                    <span class="mockup-row-value">(701) 123-4567</span>
+                                    <button type="button" class="mini-copy-btn" onclick="copyMockupField('7011234567', this)" title="Скопировать" aria-label="Скопировать телефон">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                                        <span class="copy-lbl">Копировать</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div style="margin-top: 8px; font-size: 11.5px; color: var(--text-sub);">
+                            Нажмите <strong>«Далее»</strong> в правом верхнем углу. Регион изменится моментально!
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">4</span>
+                            <span class="guide-step-title">Скачайте клиент в App Store</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            В поиске App Store введите <strong>INCY</strong> (рекомендуется) или <strong>Happ</strong> и нажмите <strong>«Загрузить»</strong>. После установки вы можете вернуть регион App Store обратно на РФ — приложение продолжит работать и обновляться.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sub-Guide 2: TestFlight -->
+                <div id="iosSubGuideTf" style="display: none;">
+                    <div class="guide-callout">
+                        <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                        <div><strong>Установка без смены региона:</strong> Apple TestFlight доступен в российском App Store официально. Устанавливается в пару кликов без изменения настроек Apple ID.</div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">1</span>
+                            <span class="guide-step-title">Установите Apple TestFlight</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Откройте обычный App Store РФ, найдите официальное приложение <strong>Apple TestFlight</strong> и установите его.
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">2</span>
+                            <span class="guide-step-title">Нажмите ссылку приглашения</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            На главной странице нашего сайта нажмите на карточку <strong>«TestFlight»</strong> под вкладкой iOS (доступны клиенты <strong>INCY</strong> и <strong>Happ</strong>).
+                        </div>
+                        <!-- UI Mockup Frame: TestFlight -->
+                        <div class="ui-mockup-frame">
+                            <div class="mockup-status-bar"><span>9:41</span><div class="mockup-island"></div><span>5G 100%</span></div>
+                            <div class="mockup-system-dialog">
+                                <div style="font-size: 24px; margin-bottom: 6px;">⚡</div>
+                                <div class="dialog-title">INCY / Happ</div>
+                                <div class="dialog-desc">Приглашение на тестирование версии клиента</div>
+                                <button type="button" class="dialog-btn-primary" style="width: 100%;">Принять и установить</button>
+                                <div><span class="tap-badge">НАЖМИТЕ ЭТУ КНОПКУ</span></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sub-Guide 3: First Launch & Face ID -->
+                <div id="iosSubGuideFirst" style="display: none;">
+                    <div class="guide-callout">
+                        <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                        <div><strong>Системное подтверждение:</strong> При первом включении iOS запрашивает подтверждение Face ID или код-пароль. Это стандартное системное окно Apple для добавления сетевой конфигурации.</div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">1</span>
+                            <span class="guide-step-title">Добавьте подключение</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Нажмите большую кнопку <strong>«Подключить в INCY»</strong> или <strong>«Подключить в Happ»</strong> на главной странице (или скопируйте ссылку и нажмите «+» в приложении).
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">2</span>
+                            <span class="guide-step-title">Подтвердите системный запрос</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Нажмите круглую кнопку по центру экрана. Появится системное диалоговое окно iOS:
+                        </div>
+                        <!-- UI Mockup Frame: iOS Face ID Prompt -->
+                        <div class="ui-mockup-frame">
+                            <div class="mockup-status-bar"><span>9:41</span><div class="mockup-island"></div><span>5G 100%</span></div>
+                            <div class="mockup-system-dialog">
+                                <div class="dialog-title">Клиент запрашивает разрешение на добавление сетевой конфигурации</div>
+                                <div class="dialog-desc">Все сетевые операции будут защищены данным профилем.</div>
+                                <div class="dialog-actions">
+                                    <div class="dialog-btn-cancel">Не разрешать</div>
+                                    <div class="dialog-btn-primary">Разрешить</div>
+                                </div>
+                                <div><span class="tap-badge">НАЖМИТЕ «РАЗРЕШИТЬ»</span></div>
+                            </div>
+                        </div>
+                        <div style="margin-top: 8px; font-size: 11.5px; color: var(--text-sub);">
+                            Подтвердите через Face ID или код-пароль. Кнопка станет зелёной — связь активна!
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sub-Guide 4: Offload & Reinstall (Apple trick) -->
+                <div id="iosSubGuideOffload" style="display: none;">
+                    <div class="guide-callout">
+                        <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                        <div><strong>Быстрый лайфхак Apple:</strong> Если приложение INCY или Happ уже когда-то устанавливалось на ваш аккаунт (даже если сейчас скрыто в App Store), его можно переустановить без смены региона!</div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">1</span>
+                            <span class="guide-step-title">Откройте меню хранилища iPhone</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Перейдите в <strong>Настройки iPhone → Основные → Хранилище iPhone</strong>. Дождитесь загрузки списка всех приложений.
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">2</span>
+                            <span class="guide-step-title">Найдите клиент в списке</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            В списке найдите <strong>INCY</strong> или <strong>Happ</strong> и нажмите на него.
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">3</span>
+                            <span class="guide-step-title">Нажмите «Сгрузить», затем «Переустановить»</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Нажмите синюю кнопку <strong>«Сгрузить приложение»</strong> (ваши данные и профили сохранятся). Сразу после этого на том же месте появится кнопка <strong>«Переустановить приложение»</strong> — нажмите её. iOS моментально загрузит свежую версию напрямую с серверов Apple!
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sub-Guide 5: New Apple ID -->
+                <div id="iosSubGuideNewId" style="display: none;">
+                    <div class="guide-callout">
+                        <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                        <div><strong>Когда нужен второй Apple ID?</strong> Если у вас есть семейный доступ или активные подписки на основном аккаунте, которые нельзя отменить.</div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">1</span>
+                            <span class="guide-step-title">Создайте аккаунт на сайте Apple</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            В браузере Safari откройте <strong>account.apple.com</strong> → «Создать Apple ID». Укажите страну <strong>США</strong> или <strong>Казахстан</strong> и любой свободный email. В качестве телефона можно использовать свой обычный номер (+7 РФ), SMS доходят штатно.
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">2</span>
+                            <span class="guide-step-title">Войдите в App Store</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            В App Store нажмите аватарку → пролистайте в самый низ → <strong>«Выйти»</strong>. Войдите под новым Apple ID, скачайте INCY или Happ, затем вернитесь в свой основной Apple ID. Скачанное приложение останется навсегда.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Android Guide Content -->
+            <div id="guideSectionAndroid" class="guide-section" style="display: none;">
+                <div class="guide-callout">
+                    <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+                    <div><strong>Для Android доступно 2 способа:</strong> Установка напрямую через Google Play или через прямой APK-файл без магазина.</div>
+                </div>
+
+                <div class="guide-step-card">
+                    <div class="guide-step-header">
+                        <span class="guide-step-num">1</span>
+                        <span class="guide-step-title">Скачивание APK без Google Play</span>
+                    </div>
+                    <div class="guide-step-desc">
+                        Нажмите кнопку скачивания APK на главной странице. Браузер Chrome может показать стандартное окно:
+                    </div>
+                    <!-- UI Mockup Frame: Android Download Warning -->
+                    <div class="ui-mockup-frame">
+                        <div class="mockup-system-dialog">
+                            <div class="dialog-title">Файл может быть опасным</div>
+                            <div class="dialog-desc">Вы действительно хотите скачать файл Happ.apk?</div>
+                            <div class="dialog-actions">
+                                <div class="dialog-btn-cancel">Отмена</div>
+                                <div class="dialog-btn-primary" style="background: #10b981;">Всё равно скачать</div>
+                            </div>
+                            <div><span class="tap-badge">НАЖМИТЕ «ВСЁ РАВНО СКАЧАТЬ»</span></div>
+                        </div>
+                    </div>
+                    <div style="margin-top: 8px; font-size: 11.5px; color: var(--text-sub);">
+                        Это стандартное уведомление системы при скачивании любых программ не из Google Play. Файл проверен и безопасен.
+                    </div>
+                </div>
+
+                <div class="guide-step-card">
+                    <div class="guide-step-header">
+                        <span class="guide-step-num">2</span>
+                        <span class="guide-step-title">Первый запуск: Запрос на подключение</span>
+                    </div>
+                    <div class="guide-step-desc">
+                        Откройте приложение и нажмите кнопку включения. Появится системный запрос Android:
+                    </div>
+                    <!-- UI Mockup Frame: Android Connection Request -->
+                    <div class="ui-mockup-frame">
+                        <div class="mockup-system-dialog">
+                            <div class="dialog-title">Запрос на подключение</div>
+                            <div class="dialog-desc">Приложение Happ запрашивает разрешение на настройку сети. Нажмите ОК для подтверждения.</div>
+                            <div class="dialog-actions">
+                                <div class="dialog-btn-cancel">Отмена</div>
+                                <div class="dialog-btn-primary" style="background: #10b981;">ОК</div>
+                            </div>
+                            <div><span class="tap-badge">НАЖМИТЕ «ОК»</span></div>
+                        </div>
+                    </div>
+                    <div style="margin-top: 8px; font-size: 11.5px; color: var(--text-sub);">
+                        В строке состояния появится значок ключа — соединение установлено.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Desktop (PC/Mac) Guide Content -->
+            <div id="guideSectionDesktop" class="guide-section" style="display: none;">
+                <div class="guide-step-card">
+                    <div class="guide-step-header">
+                        <span class="guide-step-num">1</span>
+                        <span class="guide-step-title">Windows: Фильтр SmartScreen</span>
+                    </div>
+                    <div class="guide-step-desc">
+                        При первом запуске установщика Windows может показать синее окно защиты SmartScreen:
+                    </div>
+                    <!-- UI Mockup Frame: Windows SmartScreen -->
+                    <div class="ui-mockup-frame" style="background: #005a9e; border-color: rgba(255,255,255,0.2);">
+                        <div style="font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 4px;">Система Windows защитила ваш компьютер</div>
+                        <div style="font-size: 11px; color: #d0e8ff; margin-bottom: 10px;">Фильтр Microsoft Defender SmartScreen предотвратил запуск неопознанного приложения.</div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.2); padding: 8px 10px; border-radius: 8px;">
+                            <span style="color: #6ee7b7; font-size: 12px; font-weight: 700; text-decoration: underline; cursor: pointer;">1. Нажмите «Подробнее»</span>
+                            <span style="background: #fff; color: #005a9e; font-size: 11.5px; font-weight: 700; padding: 4px 10px; border-radius: 6px;">2. «Выполнить в любом случае»</span>
+                        </div>
+                    </div>
+                    <div style="margin-top: 8px; font-size: 11.5px; color: var(--text-sub);">
+                        Это стандартное окно для независимых программ без платного корпоративного сертификата Microsoft.
+                    </div>
+                </div>
+
+                <div class="guide-step-card">
+                    <div class="guide-step-header">
+                        <span class="guide-step-num">2</span>
+                        <span class="guide-step-title">macOS: Разрешение в настройках</span>
+                    </div>
+                    <div class="guide-step-desc">
+                        Откройте скачанный <code>.dmg</code> файл, перетащите иконку в папку <strong>«Программы»</strong>. При первом запуске разрешите системное расширение в меню <strong>«Системные настройки → Конфиденциальность и безопасность → Разрешить»</strong>.
+                    </div>
+                </div>
+            </div>
+
+            <!-- FAQ Guide Content -->
+            <div id="guideSectionFaq" class="guide-section" style="display: none;">
+                <div class="guide-faq-item open">
+                    <button type="button" class="guide-faq-q" onclick="toggleGuideFaq(this)">
+                        <span>Нужно ли отключать при входе в банки или Госуслуги?</span>
+                        <svg class="guide-faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="guide-faq-a">
+                        <strong>Нет, отключать не требуется!</strong> Сервис настроен по принципу выборочной маршрутизации: все российские банки (Сбербанк, Т-Банк, ВТБ), Госуслуги и маркетплейсы открываются напрямую на максимальной скорости вашего провайдера.
+                    </div>
+                </div>
+
+                <div class="guide-faq-item">
+                    <button type="button" class="guide-faq-q" onclick="toggleGuideFaq(this)">
+                        <span>Что делать, если пропал доступ или страницы не грузятся?</span>
+                        <svg class="guide-faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="guide-faq-a">
+                        1. Потяните список вниз (Pull-to-refresh) на главном экране Happ или INCY — подписка обновит актуальные узлы.<br>
+                        2. Выключите и снова включите круглый тумблер соединения.<br>
+                        3. Проверьте срок действия подписки в боте.
+                    </div>
+                </div>
+
+                <div class="guide-faq-item">
+                    <button type="button" class="guide-faq-q" onclick="toggleGuideFaq(this)">
+                        <span>Сколько устройств можно подключить?</span>
+                        <svg class="guide-faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="guide-faq-a">
+                        В рамках тарифа доступно одновременное подключение до 2 устройств (например, телефон и ноутбук). Управлять активными устройствами и при необходимости сбрасывать их можно прямо в боте.
+                    </div>
+                </div>
+
+                <div class="guide-faq-item">
+                    <button type="button" class="guide-faq-q" onclick="toggleGuideFaq(this)">
+                        <span>Как вернуть регион App Store обратно на Россию?</span>
+                        <svg class="guide-faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="guide-faq-a">
+                        Сразу после загрузки клиента (INCY или Happ) вы можете вернуться в App Store → иконка профиля → Страна/регион → выбрать «Россия» и способ оплаты «Нет». Установленные приложения останутся на вашем телефоне и продолжат работать!
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bottom Return Button -->
+            <div class="guides-bottom-bar">
+                <button type="button" class="guides-return-btn" onclick="closeGuidesTab()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 16px; height: 16px;">
+                        <polyline points="15 18 9 12 15 6"/>
+                    </svg>
+                    <span>Вернуться к экрану подключения</span>
+                </button>
+            </div>
+        </div>
     </div>
 
     <div id="copyToast" class="copy-toast" aria-live="polite">Адрес подключения скопирован в буфер</div>
@@ -1412,6 +2472,102 @@
                 statusMsg.innerHTML = "";
             }
             if (contactInput) contactInput.focus();
+        }
+    
+        function openGuidesTab(platform) {
+            const main = document.getElementById("mainView");
+            const guides = document.getElementById("guidesView");
+            if (main) main.classList.add("view-hidden");
+            if (guides) guides.classList.remove("view-hidden");
+            if (platform) switchGuideTab(platform);
+            window.location.hash = "guides";
+            window.scrollTo({ top: 0, behavior: "smooth" });
+        }
+
+        function closeGuidesTab() {
+            const main = document.getElementById("mainView");
+            const guides = document.getElementById("guidesView");
+            if (guides) guides.classList.add("view-hidden");
+            if (main) main.classList.remove("view-hidden");
+            if (window.location.hash === "#guides") {
+                history.replaceState(null, document.title, window.location.pathname + window.location.search);
+            }
+            window.scrollTo({ top: 0, behavior: "smooth" });
+        }
+
+        function switchGuideTab(tab) {
+            const tabs = ["ios", "android", "desktop", "faq"];
+            tabs.forEach(function(t) {
+                const btn = document.getElementById("guideNavBtn" + t.charAt(0).toUpperCase() + t.slice(1));
+                const sec = document.getElementById("guideSection" + t.charAt(0).toUpperCase() + t.slice(1));
+                if (btn) btn.classList.toggle("active", t === tab);
+                if (sec) sec.style.display = (t === tab) ? "block" : "none";
+            });
+        }
+
+        function switchIosSubGuide(sub) {
+            const subs = {
+                "region": { pill: "pillBtnIosRegion", sec: "iosSubGuideRegion" },
+                "testflight": { pill: "pillBtnIosTf", sec: "iosSubGuideTf" },
+                "firstlaunch": { pill: "pillBtnIosFirst", sec: "iosSubGuideFirst" },
+                "offload": { pill: "pillBtnIosOffload", sec: "iosSubGuideOffload" },
+                "newappleid": { pill: "pillBtnIosNewId", sec: "iosSubGuideNewId" }
+            };
+            Object.keys(subs).forEach(function(k) {
+                const p = document.getElementById(subs[k].pill);
+                const s = document.getElementById(subs[k].sec);
+                if (p) p.classList.toggle("active", k === sub);
+                if (s) s.style.display = (k === sub) ? "block" : "none";
+            });
+        }
+
+        function copyMockupField(text, btn) {
+            function onSuccess() {
+                btn.classList.add("copied");
+                const originalHtml = btn.innerHTML;
+                btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:11px;height:11px;"><polyline points="20 6 9 17 4 12"/></svg><span class="copy-lbl">Скопировано</span>';
+                setTimeout(function() {
+                    btn.classList.remove("copied");
+                    btn.innerHTML = originalHtml;
+                }, 1400);
+            }
+
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(text).then(onSuccess).catch(function() {
+                        fallbackCopyText(text);
+                        onSuccess();
+                    });
+                } else {
+                    fallbackCopyText(text);
+                    onSuccess();
+                }
+            } catch (e) {
+                fallbackCopyText(text);
+                onSuccess();
+            }
+        }
+
+        function openGuidesInNewTab() {
+            const url = window.location.href.split("#")[0] + "#guides";
+            window.open(url, "_blank");
+        }
+
+        function toggleGuideFaq(btn) {
+            const item = btn.closest(".guide-faq-item");
+            if (item) item.classList.toggle("open");
+        }
+
+        window.addEventListener("hashchange", function() {
+            if (window.location.hash === "#guides") {
+                openGuidesTab("ios");
+            } else if (!window.location.hash) {
+                closeGuidesTab();
+            }
+        });
+
+        if (window.location.hash === "#guides") {
+            openGuidesTab("ios");
         }
     </script>
 </body>
