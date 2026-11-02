@@ -4,7 +4,7 @@ from __future__ import annotations
 
 BTN_WL_BUY_ACCESS = "🚀 Оформить доступ ({price} ₽ / {days} дней)"
 BTN_WL_ACTIVATE_TRIAL = "🎁 Активировать бесплатно (3 дня / 5 ГБ)"
-BTN_WL_CONNECT_CLIENT = "📱 Подключить в приложении"
+BTN_WL_CONNECT_CLIENT = "Подключить"
 BTN_WL_INCY_INSTRUCTIONS = "📱 Инструкция по подключению"
 BTN_WL_REFRESH_STATUS = "🔄 Обновить статус"
 BTN_WL_TOPUP = "➕ Докупить трафик"
