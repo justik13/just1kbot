@@ -830,6 +830,12 @@
             transform: translateX(-50%) translateY(0) scale(1);
         }
 
+        .copy-toast.error {
+            background: rgba(26, 12, 14, 0.96);
+            border-color: rgba(239, 68, 68, 0.5);
+            color: #f87171;
+        }
+
         @media (min-width: 640px) {
             .card {
                 max-width: 560px;
@@ -1201,37 +1207,97 @@
         // Auto-detect device
         (function initDevice() {
             const ua = navigator.userAgent || "";
-            if (/iPad|iPhone|iPod/.test(ua) && !window.MSStream) {
+            const isMac = /(Macintosh)|(MacIntel)/i.test(ua);
+            const isTouch = ("ontouchend" in document) || (navigator.maxTouchPoints > 0);
+            const isIOS = /(iPad|iPhone|iPod)/i.test(ua) || (isMac && isTouch);
+
+            if (isIOS && !window.MSStream) {
                 switchPlatformTab("ios");
-            } else if (/Android/.test(ua)) {
+            } else if (/Android/i.test(ua)) {
                 switchPlatformTab("android");
-            } else if (/Macintosh|Mac OS X/.test(ua)) {
+            } else if (isMac) {
                 switchPlatformTab("macos");
-            } else if (/Windows|Win32|Win64/.test(ua)) {
+            } else if (/Windows|Win32|Win64/i.test(ua)) {
                 switchPlatformTab("windows");
+            } else if (/Linux/i.test(ua)) {
+                switchPlatformTab("github");
             } else {
                 switchPlatformTab("ios");
             }
         })();
 
         let copyResetTimer = null;
-        function copyLink() {
-            navigator.clipboard.writeText(subUrl).then(function() {
-                const toast = document.getElementById("copyToast");
-                const btn = document.getElementById("copyUrlBtn");
+
+        function showCopyToast(msg, isError) {
+            const toast = document.getElementById("copyToast");
+            if (!toast) return;
+            toast.textContent = msg;
+            if (isError) {
+                toast.classList.add("error");
+            } else {
+                toast.classList.remove("error");
+            }
+            toast.classList.add("visible");
+            if (copyResetTimer) clearTimeout(copyResetTimer);
+            copyResetTimer = setTimeout(function() {
+                toast.classList.remove("visible");
+                toast.classList.remove("error");
                 const label = document.getElementById("copyBtnLabel");
+                const btn = document.getElementById("copyUrlBtn");
+                if (label) label.textContent = "Скопировать";
+                if (btn) btn.classList.remove("copied");
+            }, 2200);
+        }
+
+        function fallbackCopyText(text) {
+            try {
+                const ta = document.createElement("textarea");
+                ta.value = text;
+                ta.style.position = "fixed";
+                ta.style.left = "-9999px";
+                ta.style.top = "-9999px";
+                ta.style.opacity = "0";
+                ta.setAttribute("readonly", "");
+                document.body.appendChild(ta);
+                ta.focus();
+                ta.select();
+                const ok = document.execCommand("copy");
+                document.body.removeChild(ta);
+                return ok;
+            } catch (e) {
+                return false;
+            }
+        }
+
+        function copyLink() {
+            const btn = document.getElementById("copyUrlBtn");
+            const label = document.getElementById("copyBtnLabel");
+
+            function onCopySuccess() {
                 if (label) label.textContent = "Скопировано";
                 if (btn) btn.classList.add("copied");
-                if (toast) toast.classList.add("visible");
-                if (copyResetTimer) clearTimeout(copyResetTimer);
-                copyResetTimer = setTimeout(function() {
-                    if (toast) toast.classList.remove("visible");
-                    if (label) label.textContent = "Скопировать";
-                    if (btn) btn.classList.remove("copied");
-                }, 2000);
-            }).catch(function() {
-                alert("Скопировано в буфер");
-            });
+                showCopyToast("Адрес подключения скопирован в буфер", false);
+            }
+
+            function onCopyFail() {
+                showCopyToast("Не удалось скопировать. Выделите адрес вручную", true);
+            }
+
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(subUrl).then(onCopySuccess).catch(function() {
+                    if (fallbackCopyText(subUrl)) {
+                        onCopySuccess();
+                    } else {
+                        onCopyFail();
+                    }
+                });
+            } else {
+                if (fallbackCopyText(subUrl)) {
+                    onCopySuccess();
+                } else {
+                    onCopyFail();
+                }
+            }
         }
 
         function toggleSupportForm() {
