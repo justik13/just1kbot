@@ -851,8 +851,12 @@
         }
     
         /* View Switcher */
-        #mainView, #guidesView {
-            transition: opacity 180ms cubic-bezier(0.16, 1, 0.3, 1), transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
+        @keyframes viewFadeIn {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        #mainView:not(.view-hidden), #guidesView:not(.view-hidden) {
+            animation: viewFadeIn 180ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
         }
         #guidesView {
             text-align: left;
@@ -941,13 +945,39 @@
 
         /* Guides Screen Header */
         .guides-sticky-bar {
+            position: sticky;
+            top: 0;
+            z-index: 25;
+            background: rgba(9, 9, 11, 0.94);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
             display: flex;
             align-items: center;
             justify-content: space-between;
             gap: 8px;
             margin-bottom: 14px;
-            padding-bottom: 12px;
+            padding: 8px 0 12px 0;
             border-bottom: 1px solid var(--border-subtle);
+        }
+        .guides-popout-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            padding: 6px 10px;
+            min-height: 32px;
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--text-sub);
+            text-decoration: none;
+            transition: all 140ms ease;
+        }
+        .guides-popout-btn:hover {
+            color: var(--text-main);
+            background: rgba(255, 255, 255, 0.08);
+            border-color: var(--border-strong);
         }
         .guides-back-btn {
             display: inline-flex;
@@ -1067,7 +1097,7 @@
         .guide-method-btn.active {
             background: rgba(16, 185, 129, 0.1);
             border-color: var(--tier-accent);
-            box-shadow: 0 0 10px var(--tier-accent-glow);
+            box-shadow: 0 0 10px var(--tier-badge-glow);
         }
         .guide-method-badge {
             font-size: 10.5px;
@@ -1928,7 +1958,7 @@
         </div>
 
         <!-- Guides Banner Trigger -->
-        <div class="guides-trigger-card" onclick="openGuidesTab('ios')" role="button" tabindex="0" aria-label="Открыть центр инструкций">
+        <div class="guides-trigger-card" onclick="openGuidesTab('ios')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openGuidesTab('ios');}" role="button" tabindex="0" aria-label="Открыть центр инструкций">
             <div class="guides-trigger-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
@@ -1956,7 +1986,13 @@
                     </svg>
                     <span>Назад к подключению</span>
                 </button>
-                <span class="guides-badge-tag">База знаний</span>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <a href="#guides" target="_blank" rel="noopener" class="guides-popout-btn" title="Открыть базу знаний в новой вкладке" aria-label="В новой вкладке">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                        <span>Вкладка</span>
+                    </a>
+                    <span class="guides-badge-tag">База знаний</span>
+                </div>
             </div>
 
             <div class="guides-header-title">
@@ -2051,7 +2087,7 @@
                                 <span class="guide-store-badge">Открыть ↗</span>
                             </a>
                         </div>
-                        <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--card-border); border-radius: 12px; padding: 12px; margin-top: 10px;">
+                        <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 12px; margin-top: 10px;">
                             <div style="font-size: 12px; font-weight: 600; color: #10b981; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
                                 <span>Как принять приглашение в TestFlight:</span>
@@ -2062,14 +2098,14 @@
                                 3. Дополнительных кодов или Apple ID вводить не нужно.
                             </div>
                             <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, 0.05); font-size: 11.5px;">
-                                <a href="https://testflight.apple.com" target="_blank" rel="noopener" style="color: var(--accent-light); text-decoration: none; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; font-size: 11.5px; font-weight: 500; min-height: 32px;">
+                                <a href="https://testflight.apple.com" target="_blank" rel="noopener" style="color: var(--tier-accent); text-decoration: none; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; font-size: 11.5px; font-weight: 500; min-height: 32px;">
                                     <span>Официальное руководство Apple по TestFlight ↗</span>
                                 </a>
                             </div>
                         </div>
                         <div style="margin-top: 8px; font-size: 11px; color: var(--text-muted); display: flex; align-items: flex-start; gap: 6px;">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px; flex-shrink: 0; margin-top: 1px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                            <span>Если TestFlight пишет «Этот бета-тест заполнен», переключитесь на способ <strong>«Казахстан»</strong> выше — он работает всегда.</span>
+                            <span>Если TestFlight пишет «Этот бета-тест заполнен», переключитесь на способ <strong>«Казахстан»</strong> выше — он позволяет установить клиент напрямую из App Store.</span>
                         </div>
                     </div>
                 </div>
@@ -2083,7 +2119,7 @@
 
                     <div class="guide-callout guide-callout-warning">
                         <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                        <div><strong>Условия смены:</strong> На балансе Apple ID не должно быть остатка (0 ₽) и действующих платных подписок Apple.</div>
+                        <div><strong>Условия смены:</strong> На балансе Apple ID не должно быть остатка (0 ₽), действующих платных подписок Apple (или дождитесь окончания их периода), незавершённых заказов и семейного доступа.</div>
                     </div>
 
                     <!-- Video Guide Toggle -->
@@ -2235,7 +2271,7 @@
                         <span class="guide-step-title">Добавьте подписку в приложение</span>
                     </div>
                     <div class="guide-step-desc">
-                        После установки вернитесь на эту страницу и нажмите <strong>«Подключить в 1 клик»</strong> вверху (приложение откроется само и загрузит все серверы).<br>
+                        После установки вернитесь на эту страницу и нажмите кнопку <strong>«Подключить в INCY»</strong> или <strong>«Подключить в Happ»</strong> вверху (приложение откроется само и загрузит все серверы).<br>
                         Либо нажмите <strong>«Скопировать адрес»</strong>, откройте приложение, нажмите <strong>«+»</strong> в правом верхнем углу и выберите <strong>«Вставить из буфера»</strong>.
                     </div>
                 </div>
@@ -2275,7 +2311,7 @@
                 <div id="androidSubPlay">
                     <div class="guide-callout" style="border-left: 3px solid #f59e0b; background: rgba(245, 158, 11, 0.08);">
                         <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                        <div><strong>Внимание:</strong> Приложение Happ временно удалено из Google Play, а в поиске появились небезопасные копии. Для установки из Google Play используйте <strong>INCY</strong>, либо скачивайте проверенный APK Happ напрямую с GitHub.</div>
+                        <div><strong>Внимание:</strong> Приложение Happ временно недоступно в Google Play для региона РФ, а в поиске появились небезопасные копии. Для установки из официального магазина используйте <strong>INCY</strong>, либо скачивайте проверенный APK Happ напрямую с GitHub.</div>
                     </div>
 
                     <div class="guide-step-card">
@@ -2328,11 +2364,21 @@
                                 <span class="guide-store-badge">Скачать APK ↗</span>
                             </a>
                         </div>
-                        <div class="guide-screenshot-wrapper horizontal">
-                            <img src="https://cdn.flysmartavia.com/smart-data/public/site/content/images/info/app/step-2@2x.png" alt="Окно подтверждения скачивания APK" class="guide-real-screenshot" loading="lazy" decoding="async" onload="markImgLoaded(this)">
-                        </div>
-                        <div style="margin-top: 8px; font-size: 11.5px; color: var(--text-sub);">
-                            Это стандартное предупреждение браузера при загрузке файлов напрямую. Нажмите <strong>«Всё равно скачать»</strong>.
+                        <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 12px; margin-top: 10px;">
+                            <div style="font-size: 12px; font-weight: 600; color: #facc15; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                <span>Предупреждение браузера Chrome:</span>
+                            </div>
+                            <div style="font-size: 12px; color: var(--text-sub); line-height: 1.6;">
+                                1. При загрузке APK Chrome покажет: <em>«Файл может быть опасным»</em>.<br>
+                                2. Нажмите <strong>«Всё равно скачать»</strong> — файл скачивается напрямую из официального репозитория разработчика на GitHub.<br>
+                                3. После загрузки откройте файл и выберите <strong>«Установить»</strong>.
+                            </div>
+                            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, 0.05); font-size: 11.5px;">
+                                <a href="https://github.com/Happ-proxy/happ-android/releases" target="_blank" rel="noopener" style="color: var(--tier-accent); text-decoration: none; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: rgba(255, 255, 255, 0.04); border: 1px solid var(--border-subtle); border-radius: 8px; font-size: 11.5px; font-weight: 500; min-height: 32px;">
+                                    <span>Релизы Happ Android на GitHub ↗</span>
+                                </a>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2344,7 +2390,7 @@
                         <span class="guide-step-title">Добавьте подписку в приложение</span>
                     </div>
                     <div class="guide-step-desc">
-                        Вернитесь на эту страницу и нажмите <strong>«Подключить в 1 клик»</strong> вверху (приложение откроется само со списком всех серверов).<br>
+                        Вернитесь на эту страницу и нажмите кнопку <strong>«Подключить в INCY»</strong> или <strong>«Подключить в Happ»</strong> вверху (приложение откроется само со списком всех серверов).<br>
                         Либо нажмите <strong>«Скопировать адрес»</strong>, откройте приложение, нажмите <strong>«+»</strong> и выберите <strong>«Вставить из буфера»</strong>.
                     </div>
                 </div>
@@ -2500,7 +2546,7 @@
                         <svg class="guide-faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
                     </button>
                     <div class="guide-faq-a">
-                        <strong>Нет, не требуется.</strong> Сервис настроен по принципу выборочной маршрутизации: российские банки, государственные сервисы и маркетплейсы открываются напрямую на максимальной скорости вашего провайдера.
+                        <strong>Нет, не требуется.</strong> Сервис настроен по принципу выборочной маршрутизации: все российские банки, государственные сервисы и маркетплейсы остаются полностью доступными и работают на высокой скорости без ограничений.
                     </div>
                 </div>
 
@@ -2553,7 +2599,7 @@
                         <svg class="guide-faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
                     </button>
                     <div class="guide-faq-a">
-                        В рамках тарифа доступно одновременное подключение до 2 устройств (например, телефон и ноутбук). Управлять активными устройствами и при необходимости сбрасывать их можно прямо в боте.
+                        В рамках вашего тарифа доступно одновременное подключение до {device_limit} устройств (например, телефон и ноутбук). Управлять активными устройствами и при необходимости сбрасывать их можно прямо в боте.
                     </div>
                 </div>
             </div>
@@ -2969,19 +3015,38 @@
                 }, 1400);
             }
 
+            function onFail() {
+                btn.classList.add("copy-failed");
+                const originalHtml = btn.innerHTML;
+                btn.innerHTML = '<span class="copy-lbl" style="color:var(--error);">Ошибка</span>';
+                setTimeout(function() {
+                    btn.classList.remove("copy-failed");
+                    btn.innerHTML = originalHtml;
+                }, 1400);
+            }
+
             try {
                 if (navigator.clipboard && navigator.clipboard.writeText) {
                     navigator.clipboard.writeText(text).then(onSuccess).catch(function() {
-                        fallbackCopyText(text);
-                        onSuccess();
+                        if (fallbackCopyText(text)) {
+                            onSuccess();
+                        } else {
+                            onFail();
+                        }
                     });
                 } else {
-                    fallbackCopyText(text);
-                    onSuccess();
+                    if (fallbackCopyText(text)) {
+                        onSuccess();
+                    } else {
+                        onFail();
+                    }
                 }
             } catch (e) {
-                fallbackCopyText(text);
-                onSuccess();
+                if (fallbackCopyText(text)) {
+                    onSuccess();
+                } else {
+                    onFail();
+                }
             }
         }
 
