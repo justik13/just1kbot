@@ -1083,37 +1083,156 @@
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
         }
 
-        /* Sub-Guide Filter Pills */
-        .sub-guide-pills {
-            display: flex;
+        /* Responsive Method Switcher Tabs (No horizontal scrolling / no cutoff) */
+        .guide-method-tabs {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
             gap: 6px;
-            overflow-x: auto;
-            padding-bottom: 6px;
             margin-bottom: 14px;
-            -webkit-overflow-scrolling: touch;
-            scrollbar-width: none;
         }
-        .sub-guide-pills::-webkit-scrollbar {
-            display: none;
+        @media (max-width: 480px) {
+            .guide-method-tabs {
+                gap: 4px;
+            }
         }
-        .sub-pill {
+        .guide-method-btn {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border-subtle);
+            border-radius: 11px;
+            padding: 8px 5px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 120ms cubic-bezier(0.16, 1, 0.3, 1);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 2px;
+        }
+        .guide-method-btn:hover {
+            background: rgba(255, 255, 255, 0.06);
+            border-color: var(--border-strong);
+        }
+        .guide-method-btn.active {
+            background: rgba(16, 185, 129, 0.1);
+            border-color: var(--tier-accent);
+            box-shadow: 0 0 10px var(--tier-accent-glow);
+        }
+        .guide-method-badge {
+            font-size: 9px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            color: var(--text-muted);
+        }
+        .guide-method-btn.active .guide-method-badge {
+            color: var(--tier-accent);
+        }
+        .guide-method-title {
+            font-size: 11.5px;
+            font-weight: 700;
+            color: var(--text-main);
+            line-height: 1.2;
+        }
+        .guide-method-sub {
+            font-size: 9.5px;
+            color: var(--text-muted);
+            line-height: 1.2;
+        }
+
+        /* Store Link Cards Grid */
+        .guide-store-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+            margin: 10px 0;
+        }
+        @media (max-width: 480px) {
+            .guide-store-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        .guide-store-card {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
             background: rgba(255, 255, 255, 0.04);
             border: 1px solid var(--border-subtle);
-            border-radius: 20px;
-            padding: 6px 12px;
-            font-size: 11px;
-            font-weight: 500;
-            color: var(--text-sub);
-            cursor: pointer;
-            white-space: nowrap;
-            flex-shrink: 0;
+            border-radius: 11px;
+            padding: 9px 12px;
+            text-decoration: none;
+            color: var(--text-main);
             transition: all 120ms ease;
         }
-        .sub-pill.active {
-            background: var(--tier-accent);
-            color: #050505;
-            border-color: var(--tier-accent);
+        .guide-store-card:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: var(--border-strong);
+            transform: translateY(-1px);
+        }
+        .guide-store-info {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .guide-store-name {
+            font-size: 12.5px;
             font-weight: 700;
+            color: var(--text-main);
+        }
+        .guide-store-sub {
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+        .guide-store-badge {
+            font-size: 10.5px;
+            font-weight: 600;
+            color: var(--tier-accent);
+            background: var(--tier-badge-glow);
+            border: 1px solid var(--tier-highlight-line);
+            padding: 4px 8px;
+            border-radius: 6px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        /* Video & Real Screenshot Styles */
+        .guide-video-toggle-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            width: 100%;
+            padding: 10px 14px;
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px solid var(--tier-accent);
+            border-radius: 12px;
+            color: var(--tier-accent);
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 140ms cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .guide-video-toggle-btn:hover {
+            background: rgba(16, 185, 129, 0.16);
+            transform: translateY(-1px);
+        }
+        .guide-screenshot-wrapper {
+            margin: 10px 0;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(0, 0, 0, 0.3);
+            text-align: center;
+            padding: 4px;
+        }
+        .guide-real-screenshot {
+            max-width: 100%;
+            max-height: 360px;
+            height: auto;
+            display: inline-block;
+            vertical-align: middle;
+            border-radius: 8px;
         }
 
         /* Step Cards */
@@ -1783,24 +1902,116 @@
 
             <!-- iOS Guide Content -->
             <div id="guideSectionIos" class="guide-section">
-                <div class="sub-guide-pills">
-                    <button type="button" class="sub-pill active" id="pillBtnIosRegion" onclick="switchIosSubGuide('region')">Казахстан (Без карты)</button>
-                    <button type="button" class="sub-pill" id="pillBtnIosTf" onclick="switchIosSubGuide('testflight')">Apple TestFlight</button>
-                    <button type="button" class="sub-pill" id="pillBtnIosFirst" onclick="switchIosSubGuide('firstlaunch')">Первый запуск (Face ID)</button>
-                    <button type="button" class="sub-pill" id="pillBtnIosOffload" onclick="switchIosSubGuide('offload')">Лайфхак: Сгрузить и вернуть</button>
-                    <button type="button" class="sub-pill" id="pillBtnIosNewId" onclick="switchIosSubGuide('newappleid')">Новый Apple ID</button>
+                <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Шаг 1. Выберите способ установки:</div>
+                <div class="guide-method-tabs">
+                    <button type="button" class="guide-method-btn active" id="tabBtnIosTf" onclick="switchIosMethod('tf')">
+                        <span class="guide-method-badge">Быстро</span>
+                        <span class="guide-method-title">⚡ TestFlight</span>
+                        <span class="guide-method-sub">Без смены региона</span>
+                    </button>
+                    <button type="button" class="guide-method-btn" id="tabBtnIosRegion" onclick="switchIosMethod('region')">
+                        <span class="guide-method-badge">Навсегда</span>
+                        <span class="guide-method-title">🇰🇿 Казахстан</span>
+                        <span class="guide-method-sub">App Store (без карты)</span>
+                    </button>
+                    <button type="button" class="guide-method-btn" id="tabBtnIosNewId" onclick="switchIosMethod('newid')">
+                        <span class="guide-method-badge">Запасной</span>
+                        <span class="guide-method-title">👤 Второй Apple ID</span>
+                        <span class="guide-method-sub">Только для магазина</span>
+                    </button>
                 </div>
 
-                <!-- Sub-Guide 1: Region Change to Kazakhstan -->
-                <div id="iosSubGuideRegion">
+                <!-- Sub-Guide 1: TestFlight (Fastest) -->
+                <div id="iosSubGuideTf">
+                    <div class="guide-callout">
+                        <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                        <div><strong>Установка без смены региона:</strong> Apple TestFlight доступен в российском App Store официально. Устанавливается в 1 клик с вашего обычного российского аккаунта.</div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">1</span>
+                            <span class="guide-step-title">Установите приложение Apple TestFlight</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Откройте официальный российский App Store и скачайте приложение TestFlight:
+                        </div>
+                        <div class="guide-store-grid">
+                            <a href="https://apps.apple.com/app/testflight/id899247664" target="_blank" rel="noopener" class="guide-store-card">
+                                <div class="guide-store-info">
+                                    <span class="guide-store-name">Apple TestFlight</span>
+                                    <span class="guide-store-sub">Официально из App Store РФ</span>
+                                </div>
+                                <span class="guide-store-badge">Установить ↗</span>
+                            </a>
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">2</span>
+                            <span class="guide-step-title">Откройте ссылку тестирования</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Нажмите на ссылку клиента для перехода в TestFlight:
+                        </div>
+                        <div class="guide-store-grid">
+                            <a href="https://testflight.apple.com/join/dFw66h3a" target="_blank" rel="noopener" class="guide-store-card">
+                                <div class="guide-store-info">
+                                    <span class="guide-store-name">INCY (Рекомендуется)</span>
+                                    <span class="guide-store-sub">TestFlight приглашение</span>
+                                </div>
+                                <span class="guide-store-badge">Открыть ↗</span>
+                            </a>
+                            <a href="https://testflight.apple.com/join/XMls6Ckd" target="_blank" rel="noopener" class="guide-store-card">
+                                <div class="guide-store-info">
+                                    <span class="guide-store-name">Happ</span>
+                                    <span class="guide-store-sub">TestFlight приглашение</span>
+                                </div>
+                                <span class="guide-store-badge">Открыть ↗</span>
+                            </a>
+                        </div>
+                        <!-- UI Mockup Frame: TestFlight -->
+                        <div class="ui-mockup-frame">
+                            <div class="mockup-status-bar"><span>9:41</span><div class="mockup-island"></div><span>5G 100%</span></div>
+                            <div class="mockup-system-dialog">
+                                <div style="font-size: 24px; margin-bottom: 6px;">⚡</div>
+                                <div class="dialog-title">INCY / Happ</div>
+                                <div class="dialog-desc">Приглашение на тестирование версии клиента</div>
+                                <button type="button" class="dialog-btn-primary" style="width: 100%;">Принять и установить</button>
+                                <div><span class="tap-badge">НАЖМИТЕ ЭТУ КНОПКУ</span></div>
+                            </div>
+                        </div>
+                        <div style="margin-top: 8px; font-size: 11px; color: var(--text-muted);">
+                            💡 <em>Если TestFlight пишет «Этот бета-тест заполнен», переключитесь на способ <strong>«Казахстан»</strong> выше — он работает всегда.</em>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sub-Guide 2: Region Change to Kazakhstan -->
+                <div id="iosSubGuideRegion" style="display: none;">
                     <div class="guide-callout">
                         <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                        <div><strong>Почему Казахстан?</strong> Интерфейс остаётся полностью русскоязычным, а в способе оплаты доступен пункт «Нет» — иностранная карта не требуется. После скачивания можно сразу вернуть регион РФ.</div>
+                        <div><strong>Почему Казахстан?</strong> Интерфейс остаётся русскоязычным, а в способе оплаты доступен пункт «Нет» — банковская карта не нужна. После скачивания можно сразу вернуть регион РФ.</div>
                     </div>
 
                     <div class="guide-callout guide-callout-warning">
                         <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                        <div><strong>Условия смены:</strong> Баланс Apple ID должен быть 0 ₽ (без остатка) и не должно быть активных платных подписок (отменяются в Настройки → Профиль → Подписки).</div>
+                        <div><strong>Условия смены:</strong> Баланс Apple ID должен быть строго 0.00 ₽ (без остатка) и не должно быть активных платных подписок Apple (отменяются в Настройки → Профиль → Подписки).</div>
+                    </div>
+
+                    <!-- Video Guide Toggle -->
+                    <div style="margin-bottom: 14px;">
+                        <button type="button" class="guide-video-toggle-btn" onclick="toggleGuideVideo()">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                            <span id="videoToggleLabel">Показать видеоинструкцию (запись с экрана iPhone, 2 мин)</span>
+                        </button>
+                        <div id="guideVideoContainer" style="display: none; margin-top: 10px; border-radius: 14px; overflow: hidden; border: 1px solid var(--border-subtle); background: #000; text-align: center;">
+                            <video id="guideVideoPlayer" controls playsinline preload="metadata" style="max-width: 100%; max-height: 480px; display: inline-block; border-radius: 14px;">
+                                <source src="https://happ.info/media/happ-instrukciya-720x1280-web.mp4" type="video/mp4">
+                                Ваш браузер не поддерживает воспроизведение видео.
+                            </video>
+                        </div>
                     </div>
 
                     <div class="guide-step-card">
@@ -1811,44 +2022,36 @@
                         <div class="guide-step-desc">
                             Зайдите в <strong>App Store</strong> → нажмите на <strong>иконку своего профиля</strong> в правом верхнем углу → нажмите на первую строчку (своё имя и Apple ID) → выберите <strong>«Страна/регион»</strong> → <strong>«Изменить страну или регион»</strong>.
                         </div>
+                        <div class="guide-screenshot-wrapper">
+                            <img src="https://happ.info/imgs/apple-region/01-appstore-profile.png" alt="Профиль App Store" class="guide-real-screenshot" loading="lazy">
+                        </div>
                     </div>
 
                     <div class="guide-step-card">
                         <div class="guide-step-header">
                             <span class="guide-step-num">2</span>
-                            <span class="guide-step-title">Выберите Казахстан и способ оплаты «Нет»</span>
+                            <span class="guide-step-title">Выберите Казахстан и примите условия</span>
                         </div>
                         <div class="guide-step-desc">
-                            Найдите в списке <strong>«Казахстан»</strong>, нажмите <strong>«Принять»</strong> в верхнем правом углу. В способах оплаты выберите <strong>«Нет»</strong> (None).
+                            Найдите в списке <strong>«Казахстан»</strong>, нажмите <strong>«Принять»</strong> в верхнем правом углу.
                         </div>
-                        <!-- UI Mockup Frame: Payment Method -->
-                        <div class="ui-mockup-frame">
-                            <div class="mockup-status-bar"><span>9:41</span><div class="mockup-island"></div><span>5G 100%</span></div>
-                            <div style="font-size: 11px; font-weight: 700; color: #fff; margin-bottom: 6px;">СПОСОБ ОПЛАТЫ</div>
-                            <div class="mockup-row">
-                                <span class="mockup-row-label">Кредитная или дебетовая карта</span>
-                                <span class="mockup-row-value">○</span>
-                            </div>
-                            <div class="mockup-row-highlight">
-                                <div style="display: flex; justify-content: space-between; align-items: center;">
-                                    <div>
-                                        <span class="mockup-row-label">● Нет (карта не требуется)</span>
-                                    </div>
-                                    <span class="tap-badge">ВЫБРАТЬ ЭТОТ ПУНКТ</span>
-                                </div>
-                            </div>
+                        <div class="guide-screenshot-wrapper">
+                            <img src="https://happ.info/imgs/apple-region/04-kazakhstan.png" alt="Выбор Казахстана" class="guide-real-screenshot" loading="lazy">
                         </div>
                     </div>
 
                     <div class="guide-step-card">
                         <div class="guide-step-header">
                             <span class="guide-step-num">3</span>
-                            <span class="guide-step-title">Заполните адрес для счёта</span>
+                            <span class="guide-step-title">Способ оплаты «Нет» и адрес для счёта</span>
                         </div>
                         <div class="guide-step-desc">
-                            Apple требует заполнить поля адреса. Введите готовые проверенные данные г. Алматы (нажмите «Копировать» у каждого поля):
+                            В способах оплаты выберите <strong>«Нет»</strong> (банковская карта не требуется). В поля адреса введите проверенные данные г. Алматы (нажмите «Копировать» у каждого поля):
                         </div>
-                        <!-- UI Mockup Frame: Address -->
+                        <div class="guide-screenshot-wrapper">
+                            <img src="https://happ.info/imgs/apple-region/07-payment-none.png" alt="Способ оплаты Нет и адрес" class="guide-real-screenshot" loading="lazy">
+                        </div>
+                        <!-- Address Copy Fields -->
                         <div class="ui-mockup-frame">
                             <div class="mockup-status-bar"><span>9:41</span><div class="mockup-island"></div><span>5G 100%</span></div>
                             <div style="font-size: 11px; font-weight: 700; color: #a1a1aa; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">АДРЕС ДЛЯ ВЫСТАВЛЕНИЯ СЧЁТА</div>
@@ -1906,135 +2109,17 @@
                         <div class="guide-step-desc">
                             В поиске App Store введите <strong>INCY</strong> (рекомендуется) или <strong>Happ</strong> и нажмите <strong>«Загрузить»</strong>. После установки вы можете вернуть регион App Store обратно на РФ — приложение продолжит работать и обновляться.
                         </div>
-                    </div>
-                </div>
-
-                <!-- Sub-Guide 2: TestFlight -->
-                <div id="iosSubGuideTf" style="display: none;">
-                    <div class="guide-callout">
-                        <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                        <div><strong>Установка без смены региона:</strong> Apple TestFlight доступен в российском App Store официально. Устанавливается в пару кликов без изменения настроек Apple ID.</div>
-                    </div>
-
-                    <div class="guide-step-card">
-                        <div class="guide-step-header">
-                            <span class="guide-step-num">1</span>
-                            <span class="guide-step-title">Установите Apple TestFlight</span>
-                        </div>
-                        <div class="guide-step-desc">
-                            Откройте обычный App Store РФ, найдите официальное приложение <strong>Apple TestFlight</strong> и установите его.
-                        </div>
-                    </div>
-
-                    <div class="guide-step-card">
-                        <div class="guide-step-header">
-                            <span class="guide-step-num">2</span>
-                            <span class="guide-step-title">Нажмите ссылку приглашения</span>
-                        </div>
-                        <div class="guide-step-desc">
-                            На главной странице нашего сайта нажмите на карточку <strong>«TestFlight»</strong> под вкладкой iOS (доступны клиенты <strong>INCY</strong> и <strong>Happ</strong>).
-                        </div>
-                        <!-- UI Mockup Frame: TestFlight -->
-                        <div class="ui-mockup-frame">
-                            <div class="mockup-status-bar"><span>9:41</span><div class="mockup-island"></div><span>5G 100%</span></div>
-                            <div class="mockup-system-dialog">
-                                <div style="font-size: 24px; margin-bottom: 6px;">⚡</div>
-                                <div class="dialog-title">INCY / Happ</div>
-                                <div class="dialog-desc">Приглашение на тестирование версии клиента</div>
-                                <button type="button" class="dialog-btn-primary" style="width: 100%;">Принять и установить</button>
-                                <div><span class="tap-badge">НАЖМИТЕ ЭТУ КНОПКУ</span></div>
-                            </div>
+                        <div class="guide-screenshot-wrapper">
+                            <img src="https://happ.info/imgs/apple-region/08-happ-appstore.png" alt="Happ в App Store" class="guide-real-screenshot" loading="lazy">
                         </div>
                     </div>
                 </div>
 
-                <!-- Sub-Guide 3: First Launch & Face ID -->
-                <div id="iosSubGuideFirst" style="display: none;">
-                    <div class="guide-callout">
-                        <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                        <div><strong>Системное подтверждение:</strong> При первом включении iOS запрашивает подтверждение Face ID или код-пароль. Это стандартное системное окно Apple для добавления сетевой конфигурации.</div>
-                    </div>
-
-                    <div class="guide-step-card">
-                        <div class="guide-step-header">
-                            <span class="guide-step-num">1</span>
-                            <span class="guide-step-title">Добавьте подключение</span>
-                        </div>
-                        <div class="guide-step-desc">
-                            Нажмите большую кнопку <strong>«Подключить в INCY»</strong> или <strong>«Подключить в Happ»</strong> на главной странице (или скопируйте ссылку и нажмите «+» в приложении).
-                        </div>
-                    </div>
-
-                    <div class="guide-step-card">
-                        <div class="guide-step-header">
-                            <span class="guide-step-num">2</span>
-                            <span class="guide-step-title">Подтвердите системный запрос</span>
-                        </div>
-                        <div class="guide-step-desc">
-                            Нажмите круглую кнопку по центру экрана. Появится системное диалоговое окно iOS:
-                        </div>
-                        <!-- UI Mockup Frame: iOS Face ID Prompt -->
-                        <div class="ui-mockup-frame">
-                            <div class="mockup-status-bar"><span>9:41</span><div class="mockup-island"></div><span>5G 100%</span></div>
-                            <div class="mockup-system-dialog">
-                                <div class="dialog-title">Клиент запрашивает разрешение на добавление сетевой конфигурации</div>
-                                <div class="dialog-desc">Все сетевые операции будут защищены данным профилем.</div>
-                                <div class="dialog-actions">
-                                    <div class="dialog-btn-cancel">Не разрешать</div>
-                                    <div class="dialog-btn-primary">Разрешить</div>
-                                </div>
-                                <div><span class="tap-badge">НАЖМИТЕ «РАЗРЕШИТЬ»</span></div>
-                            </div>
-                        </div>
-                        <div style="margin-top: 8px; font-size: 11.5px; color: var(--text-sub);">
-                            Подтвердите через Face ID или код-пароль. Кнопка станет зелёной — связь активна!
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Sub-Guide 4: Offload & Reinstall (Apple trick) -->
-                <div id="iosSubGuideOffload" style="display: none;">
-                    <div class="guide-callout">
-                        <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                        <div><strong>Быстрый лайфхак Apple:</strong> Если приложение INCY или Happ уже когда-то устанавливалось на ваш аккаунт (даже если сейчас скрыто в App Store), его можно переустановить без смены региона!</div>
-                    </div>
-
-                    <div class="guide-step-card">
-                        <div class="guide-step-header">
-                            <span class="guide-step-num">1</span>
-                            <span class="guide-step-title">Откройте меню хранилища iPhone</span>
-                        </div>
-                        <div class="guide-step-desc">
-                            Перейдите в <strong>Настройки iPhone → Основные → Хранилище iPhone</strong>. Дождитесь загрузки списка всех приложений.
-                        </div>
-                    </div>
-
-                    <div class="guide-step-card">
-                        <div class="guide-step-header">
-                            <span class="guide-step-num">2</span>
-                            <span class="guide-step-title">Найдите клиент в списке</span>
-                        </div>
-                        <div class="guide-step-desc">
-                            В списке найдите <strong>INCY</strong> или <strong>Happ</strong> и нажмите на него.
-                        </div>
-                    </div>
-
-                    <div class="guide-step-card">
-                        <div class="guide-step-header">
-                            <span class="guide-step-num">3</span>
-                            <span class="guide-step-title">Нажмите «Сгрузить», затем «Переустановить»</span>
-                        </div>
-                        <div class="guide-step-desc">
-                            Нажмите синюю кнопку <strong>«Сгрузить приложение»</strong> (ваши данные и профили сохранятся). Сразу после этого на том же месте появится кнопка <strong>«Переустановить приложение»</strong> — нажмите её. iOS моментально загрузит свежую версию напрямую с серверов Apple!
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Sub-Guide 5: New Apple ID -->
+                <!-- Sub-Guide 3: New Apple ID (Alternative) -->
                 <div id="iosSubGuideNewId" style="display: none;">
                     <div class="guide-callout">
                         <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                        <div><strong>Когда нужен второй Apple ID?</strong> Если у вас есть семейный доступ или активные подписки на основном аккаунте, которые нельзя отменить.</div>
+                        <div><strong>Когда нужен второй Apple ID?</strong> Если у вас есть семейный доступ или активные подписки на основном аккаунте. Фото, контакты и iCloud не затрагиваются — аккаунт меняется только в App Store.</div>
                     </div>
 
                     <div class="guide-step-card">
@@ -2043,61 +2128,173 @@
                             <span class="guide-step-title">Создайте аккаунт на сайте Apple</span>
                         </div>
                         <div class="guide-step-desc">
-                            В браузере Safari откройте <strong>account.apple.com</strong> → «Создать Apple ID». Укажите страну <strong>США</strong> или <strong>Казахстан</strong> и любой свободный email. В качестве телефона можно использовать свой обычный номер (+7 РФ), SMS доходят штатно.
+                            В браузере Safari откройте <strong>account.apple.com</strong> → «Создать Apple ID». Укажите страну <strong>Казахстан</strong> или <strong>США</strong> и свой свободный email. Телефон можно указать обычный российский (+7), SMS приходят моментально.
                         </div>
                     </div>
 
                     <div class="guide-step-card">
                         <div class="guide-step-header">
                             <span class="guide-step-num">2</span>
-                            <span class="guide-step-title">Войдите в App Store</span>
+                            <span class="guide-step-title">Войдите в App Store и скачайте клиент</span>
                         </div>
                         <div class="guide-step-desc">
-                            В App Store нажмите аватарку → пролистайте в самый низ → <strong>«Выйти»</strong>. Войдите под новым Apple ID, скачайте INCY или Happ, затем вернитесь в свой основной Apple ID. Скачанное приложение останется навсегда.
+                            В App Store нажмите аватарку → пролистайте вниз → <strong>«Выйти»</strong> (только из магазина, из настроек iPhone выходить не нужно). Войдите под новым аккаунтом, скачайте <strong>INCY</strong> или <strong>Happ</strong>, затем вернитесь в свой основной Apple ID. Приложение останется на устройстве навсегда.
                         </div>
+                    </div>
+                </div>
+
+                <!-- Step 2 (Common for all iOS): Add Subscription -->
+                <div class="guide-step-card" style="border-color: rgba(16, 185, 129, 0.25); background: rgba(16, 185, 129, 0.03);">
+                    <div class="guide-step-header">
+                        <span class="guide-step-num" style="background: #10b981;">2</span>
+                        <span class="guide-step-title">Добавьте подписку в приложение</span>
+                    </div>
+                    <div class="guide-step-desc">
+                        После установки вернитесь на эту страницу и нажмите <strong>«Подключить в 1 клик»</strong> вверху (приложение откроется само и загрузит все серверы).<br>
+                        Либо нажмите <strong>«Скопировать адрес»</strong>, откройте приложение, нажмите <strong>«+»</strong> в правом верхнем углу и выберите <strong>«Вставить из буфера»</strong>.
+                    </div>
+                </div>
+
+                <!-- Step 3 (Common for all iOS): First Connect & Face ID -->
+                <div class="guide-step-card">
+                    <div class="guide-step-header">
+                        <span class="guide-step-num">3</span>
+                        <span class="guide-step-title">Первое подключение и системное разрешение</span>
+                    </div>
+                    <div class="guide-step-desc">
+                        Нажмите круглую кнопку подключения по центру экрана приложения. Появится системное диалоговое окно Apple:
+                    </div>
+                    <!-- UI Mockup Frame: iOS Face ID Prompt -->
+                    <div class="ui-mockup-frame">
+                        <div class="mockup-status-bar"><span>9:41</span><div class="mockup-island"></div><span>5G 100%</span></div>
+                        <div class="mockup-system-dialog">
+                            <div class="dialog-title">Приложение запрашивает разрешение на добавление сетевой конфигурации</div>
+                            <div class="dialog-desc">Все сетевые операции будут защищены данным профилем.</div>
+                            <div class="dialog-actions">
+                                <div class="dialog-btn-cancel">Не разрешать</div>
+                                <div class="dialog-btn-primary">Разрешить</div>
+                            </div>
+                            <div><span class="tap-badge">НАЖМИТЕ «РАЗРЕШИТЬ» И ПОДТВЕРДИТЕ FACE ID</span></div>
+                        </div>
+                    </div>
+                    <div style="margin-top: 8px; font-size: 11.5px; color: var(--text-sub);">
+                        Кнопка в приложении станет зелёной — защищенное подключение успешно установлено!
                     </div>
                 </div>
             </div>
 
             <!-- Android Guide Content -->
             <div id="guideSectionAndroid" class="guide-section" style="display: none;">
-                <div class="guide-callout">
-                    <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
-                    <div><strong>Для Android доступно 2 способа:</strong> Установка напрямую через Google Play или через прямой APK-файл без магазина.</div>
+                <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Шаг 1. Выберите способ установки:</div>
+                <div class="guide-method-tabs" style="grid-template-columns: repeat(2, 1fr);">
+                    <button type="button" class="guide-method-btn active" id="tabBtnAndroidPlay" onclick="switchAndroidMethod('play')">
+                        <span class="guide-method-badge">Рекомендуется</span>
+                        <span class="guide-method-title">Google Play</span>
+                        <span class="guide-method-sub">Официальный магазин</span>
+                    </button>
+                    <button type="button" class="guide-method-btn" id="tabBtnAndroidApk" onclick="switchAndroidMethod('apk')">
+                        <span class="guide-method-badge">Без сервисов</span>
+                        <span class="guide-method-title">Прямой APK</span>
+                        <span class="guide-method-sub">Для Huawei / Honor</span>
+                    </button>
                 </div>
 
-                <div class="guide-step-card">
-                    <div class="guide-step-header">
-                        <span class="guide-step-num">1</span>
-                        <span class="guide-step-title">Скачивание APK без Google Play</span>
+                <!-- Android Sub 1: Google Play -->
+                <div id="androidSubPlay">
+                    <div class="guide-callout">
+                        <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                        <div><strong>Установка из официального магазина:</strong> Приложения доступны в Google Play в РФ без смены региона и обновляются автоматически.</div>
                     </div>
-                    <div class="guide-step-desc">
-                        Нажмите кнопку скачивания APK на главной странице. Браузер Chrome может показать стандартное окно:
-                    </div>
-                    <!-- UI Mockup Frame: Android Download Warning -->
-                    <div class="ui-mockup-frame">
-                        <div class="mockup-system-dialog">
-                            <div class="dialog-title">Файл может быть опасным</div>
-                            <div class="dialog-desc">Вы действительно хотите скачать файл Happ.apk?</div>
-                            <div class="dialog-actions">
-                                <div class="dialog-btn-cancel">Отмена</div>
-                                <div class="dialog-btn-primary" style="background: #10b981;">Всё равно скачать</div>
-                            </div>
-                            <div><span class="tap-badge">НАЖМИТЕ «ВСЁ РАВНО СКАЧАТЬ»</span></div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">1</span>
+                            <span class="guide-step-title">Установите приложение из Google Play</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Выберите любое приложение и установите его прямо из магазина:
+                        </div>
+                        <div class="guide-store-grid">
+                            <a href="https://play.google.com/store/apps/details?id=com.happproxy" target="_blank" rel="noopener" class="guide-store-card">
+                                <div class="guide-store-info">
+                                    <span class="guide-store-name">Happ в Google Play</span>
+                                    <span class="guide-store-sub">Быстрая установка</span>
+                                </div>
+                                <span class="guide-store-badge">Установить ↗</span>
+                            </a>
+                            <a href="https://play.google.com/store/apps/details?id=llc.itdev.incy" target="_blank" rel="noopener" class="guide-store-card">
+                                <div class="guide-store-info">
+                                    <span class="guide-store-name">INCY в Google Play</span>
+                                    <span class="guide-store-sub">Быстрая установка</span>
+                                </div>
+                                <span class="guide-store-badge">Установить ↗</span>
+                            </a>
                         </div>
                     </div>
-                    <div style="margin-top: 8px; font-size: 11.5px; color: var(--text-sub);">
-                        Это стандартное уведомление системы при скачивании любых программ не из Google Play. Файл проверен и безопасен.
+                </div>
+
+                <!-- Android Sub 2: Direct APK -->
+                <div id="androidSubApk" style="display: none;">
+                    <div class="guide-callout">
+                        <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+                        <div><strong>Для устройств без Google Play:</strong> Скачайте официальный установочный файл APK напрямую.</div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">1</span>
+                            <span class="guide-step-title">Скачайте установочный APK-файл</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Нажмите кнопку скачивания APK (браузер Chrome может показать стандартное окно безопасности):
+                        </div>
+                        <div class="guide-store-grid">
+                            <a href="https://github.com/Happ-proxy/happ-android/releases/latest/download/Happ.apk" target="_blank" rel="noopener" class="guide-store-card">
+                                <div class="guide-store-info">
+                                    <span class="guide-store-name">Happ.apk</span>
+                                    <span class="guide-store-sub">Прямой файл с GitHub</span>
+                                </div>
+                                <span class="guide-store-badge">Скачать APK ↗</span>
+                            </a>
+                        </div>
+                        <!-- UI Mockup Frame: Android Download Warning -->
+                        <div class="ui-mockup-frame">
+                            <div class="mockup-system-dialog">
+                                <div class="dialog-title">Файл может быть опасным</div>
+                                <div class="dialog-desc">Вы действительно хотите скачать файл Happ.apk?</div>
+                                <div class="dialog-actions">
+                                    <div class="dialog-btn-cancel">Отмена</div>
+                                    <div class="dialog-btn-primary" style="background: #10b981;">Всё равно скачать</div>
+                                </div>
+                                <div><span class="tap-badge">НАЖМИТЕ «ВСЁ РАВНО СКАЧАТЬ»</span></div>
+                            </div>
+                        </div>
+                        <div style="margin-top: 8px; font-size: 11.5px; color: var(--text-sub);">
+                            Это стандартное уведомление Android при скачивании любых программ не из Google Play. Файл чист и безопасен.
+                        </div>
                     </div>
                 </div>
 
-                <div class="guide-step-card">
+                <!-- Step 2: Add Subscription -->
+                <div class="guide-step-card" style="border-color: rgba(16, 185, 129, 0.25); background: rgba(16, 185, 129, 0.03);">
                     <div class="guide-step-header">
-                        <span class="guide-step-num">2</span>
-                        <span class="guide-step-title">Первый запуск: Запрос на подключение</span>
+                        <span class="guide-step-num" style="background: #10b981;">2</span>
+                        <span class="guide-step-title">Добавьте подписку в приложение</span>
                     </div>
                     <div class="guide-step-desc">
-                        Откройте приложение и нажмите кнопку включения. Появится системный запрос Android:
+                        Вернитесь на эту страницу и нажмите <strong>«Подключить в 1 клик»</strong> вверху (приложение откроется само со списком всех серверов).<br>
+                        Либо нажмите <strong>«Скопировать адрес»</strong>, откройте приложение, нажмите <strong>«+»</strong> и выберите <strong>«Вставить из буфера»</strong>.
+                    </div>
+                </div>
+
+                <!-- Step 3: First Connect -->
+                <div class="guide-step-card">
+                    <div class="guide-step-header">
+                        <span class="guide-step-num">3</span>
+                        <span class="guide-step-title">Первое подключение и подтверждение</span>
+                    </div>
+                    <div class="guide-step-desc">
+                        Откройте приложение и нажмите кнопку включения. Появится стандартный запрос Android:
                     </div>
                     <!-- UI Mockup Frame: Android Connection Request -->
                     <div class="ui-mockup-frame">
@@ -2112,42 +2309,128 @@
                         </div>
                     </div>
                     <div style="margin-top: 8px; font-size: 11.5px; color: var(--text-sub);">
-                        В строке состояния появится значок ключа — соединение установлено.
+                        В строке состояния вверху экрана появится значок ключа — защищенная связь установлена!
                     </div>
                 </div>
             </div>
 
             <!-- Desktop (PC/Mac) Guide Content -->
             <div id="guideSectionDesktop" class="guide-section" style="display: none;">
-                <div class="guide-step-card">
-                    <div class="guide-step-header">
-                        <span class="guide-step-num">1</span>
-                        <span class="guide-step-title">Windows: Фильтр SmartScreen</span>
-                    </div>
-                    <div class="guide-step-desc">
-                        При первом запуске установщика Windows может показать синее окно защиты SmartScreen:
-                    </div>
-                    <!-- UI Mockup Frame: Windows SmartScreen -->
-                    <div class="ui-mockup-frame" style="background: #005a9e; border-color: rgba(255,255,255,0.2);">
-                        <div style="font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 4px;">Система Windows защитила ваш компьютер</div>
-                        <div style="font-size: 11px; color: #d0e8ff; margin-bottom: 10px;">Фильтр Microsoft Defender SmartScreen предотвратил запуск неопознанного приложения.</div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.2); padding: 8px 10px; border-radius: 8px;">
-                            <span style="color: #6ee7b7; font-size: 12px; font-weight: 700; text-decoration: underline; cursor: pointer;">1. Нажмите «Подробнее»</span>
-                            <span style="background: #fff; color: #005a9e; font-size: 11.5px; font-weight: 700; padding: 4px 10px; border-radius: 6px;">2. «Выполнить в любом случае»</span>
+                <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Выберите операционную систему:</div>
+                <div class="guide-method-tabs" style="grid-template-columns: repeat(2, 1fr);">
+                    <button type="button" class="guide-method-btn active" id="tabBtnDesktopWin" onclick="switchDesktopMethod('win')">
+                        <span class="guide-method-badge">ПК</span>
+                        <span class="guide-method-title">💻 Windows</span>
+                        <span class="guide-method-sub">Windows 10 / 11</span>
+                    </button>
+                    <button type="button" class="guide-method-btn" id="tabBtnDesktopMac" onclick="switchDesktopMethod('mac')">
+                        <span class="guide-method-badge">Mac</span>
+                        <span class="guide-method-title">🍏 macOS</span>
+                        <span class="guide-method-sub">Apple Silicon & Intel</span>
+                    </button>
+                </div>
+
+                <!-- Desktop Sub 1: Windows -->
+                <div id="desktopSubWin">
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">1</span>
+                            <span class="guide-step-title">Скачайте и установите программу</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Скачайте официальный установщик Happ для Windows:
+                        </div>
+                        <div class="guide-store-grid" style="grid-template-columns: 1fr;">
+                            <a href="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe" target="_blank" rel="noopener" class="guide-store-card">
+                                <div class="guide-store-info">
+                                    <span class="guide-store-name">Happ для Windows (.exe)</span>
+                                    <span class="guide-store-sub">Официальный релиз с GitHub</span>
+                                </div>
+                                <span class="guide-store-badge">Скачать setup.exe ↗</span>
+                            </a>
+                        </div>
+                        <div class="guide-step-desc" style="margin-top: 8px;">
+                            При первом запуске Windows может показать синее окно защиты SmartScreen:
+                        </div>
+                        <!-- UI Mockup Frame: Windows SmartScreen -->
+                        <div class="ui-mockup-frame" style="background: #005a9e; border-color: rgba(255,255,255,0.2);">
+                            <div style="font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 4px;">Система Windows защитила ваш компьютер</div>
+                            <div style="font-size: 11px; color: #d0e8ff; margin-bottom: 10px;">Фильтр Microsoft Defender SmartScreen предотвратил запуск неопознанного приложения.</div>
+                            <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.2); padding: 8px 10px; border-radius: 8px;">
+                                <span style="color: #6ee7b7; font-size: 12px; font-weight: 700; text-decoration: underline; cursor: pointer;">1. Нажмите «Подробнее»</span>
+                                <span style="background: #fff; color: #005a9e; font-size: 11.5px; font-weight: 700; padding: 4px 10px; border-radius: 6px;">2. «Выполнить в любом случае»</span>
+                            </div>
+                        </div>
+                        <div style="margin-top: 8px; font-size: 11.5px; color: var(--text-sub);">
+                            Это стандартное уведомление Windows для независимых программ без платного корпоративного сертификата Microsoft.
                         </div>
                     </div>
-                    <div style="margin-top: 8px; font-size: 11.5px; color: var(--text-sub);">
-                        Это стандартное окно для независимых программ без платного корпоративного сертификата Microsoft.
+
+                    <div class="guide-step-card" style="border-color: rgba(16, 185, 129, 0.25); background: rgba(16, 185, 129, 0.03);">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num" style="background: #10b981;">2</span>
+                            <span class="guide-step-title">Добавьте подписку</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Скопируйте ссылку на подписку на этой странице. В программе Happ Desktop нажмите иконку <strong>«+» (Добавить)</strong> в левом верхнем углу и выберите <strong>«Вставить из буфера»</strong>. Появится карточка подписки со списком серверов.
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">3</span>
+                            <span class="guide-step-title">Подключение и выбор режима</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Выберите локацию (например, Россия или Нидерланды) и нажмите переключатель связи. В нижней панели Happ можно выбрать режим:<br>
+                            • <strong>Системный прокси</strong> — перенаправляет браузеры.<br>
+                            • <strong>TUN (Рекомендуется)</strong> — полный перехват трафика для всей системы, программ и игр.
+                        </div>
                     </div>
                 </div>
 
-                <div class="guide-step-card">
-                    <div class="guide-step-header">
-                        <span class="guide-step-num">2</span>
-                        <span class="guide-step-title">macOS: Разрешение в настройках</span>
+                <!-- Desktop Sub 2: macOS -->
+                <div id="desktopSubMac" style="display: none;">
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">1</span>
+                            <span class="guide-step-title">Скачайте и установите образ</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Скачайте образ Happ для macOS (подходит для процессоров Apple Silicon M1–M4 и Intel):
+                        </div>
+                        <div class="guide-store-grid" style="grid-template-columns: 1fr;">
+                            <a href="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/Happ.macOS.universal.dmg" target="_blank" rel="noopener" class="guide-store-card">
+                                <div class="guide-store-info">
+                                    <span class="guide-store-name">Happ для macOS (.dmg)</span>
+                                    <span class="guide-store-sub">Универсальная версия (Apple Silicon / Intel)</span>
+                                </div>
+                                <span class="guide-store-badge">Скачать .dmg ↗</span>
+                            </a>
+                        </div>
+                        <div class="guide-step-desc" style="margin-top: 8px;">
+                            Откройте скачанный <code>.dmg</code> файл и перетащите иконку программы в папку <strong>«Программы»</strong> (Applications). При первом запуске разрешите системное расширение в меню <strong>«Системные настройки → Конфиденциальность и безопасность → Разрешить»</strong>.
+                        </div>
                     </div>
-                    <div class="guide-step-desc">
-                        Откройте скачанный <code>.dmg</code> файл, перетащите иконку в папку <strong>«Программы»</strong>. При первом запуске разрешите системное расширение в меню <strong>«Системные настройки → Конфиденциальность и безопасность → Разрешить»</strong>.
+
+                    <div class="guide-step-card" style="border-color: rgba(16, 185, 129, 0.25); background: rgba(16, 185, 129, 0.03);">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num" style="background: #10b981;">2</span>
+                            <span class="guide-step-title">Добавьте подписку</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Скопируйте ссылку подписки и добавьте её в Happ через кнопку <strong>«+»</strong>.
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">3</span>
+                            <span class="guide-step-title">Включение связи</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Нажмите кнопку подключения и подтвердите системный запрос macOS на добавление сетевого профиля.
+                        </div>
                     </div>
                 </div>
             </div>
@@ -2160,7 +2443,27 @@
                         <svg class="guide-faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
                     </button>
                     <div class="guide-faq-a">
-                        <strong>Нет, отключать не требуется!</strong> Сервис настроен по принципу выборочной маршрутизации: все российские банки (Сбербанк, Т-Банк, ВТБ), Госуслуги и маркетплейсы открываются напрямую на максимальной скорости вашего провайдера.
+                        <strong>Нет, отключать не требуется!</strong> Сервис настроен по принципу выборочной маршрутизации: все российские банки (Сбербанк, Т-Банк, ВТБ, Альфа и др.), Госуслуги и маркетплейсы открываются напрямую на максимальной скорости вашего провайдера.
+                    </div>
+                </div>
+
+                <div class="guide-faq-item">
+                    <button type="button" class="guide-faq-q" onclick="toggleGuideFaq(this)">
+                        <span>Как вернуть регион App Store обратно на Россию?</span>
+                        <svg class="guide-faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="guide-faq-a">
+                        Сразу после загрузки клиента (INCY или Happ) вы можете вернуться в App Store → иконка профиля → Имя/Apple ID → «Страна или регион» → выбрать «Россия» и способ оплаты «Нет». Установленные приложения останутся на вашем телефоне и продолжат работать и обновляться!
+                    </div>
+                </div>
+
+                <div class="guide-faq-item">
+                    <button type="button" class="guide-faq-q" onclick="toggleGuideFaq(this)">
+                        <span>Что делать, если в TestFlight пишет «Этот бета-тест заполнен»?</span>
+                        <svg class="guide-faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="guide-faq-a">
+                        Apple ограничивает количество мест в публичных тестах. В этом случае воспользуйтесь вторым способом: выберите способ «Казахстан» во вкладке iOS выше — смените регион App Store без банковской карты (занимает 2 минуты) и скачайте приложение навсегда.
                     </div>
                 </div>
 
@@ -2172,7 +2475,8 @@
                     <div class="guide-faq-a">
                         1. Потяните список вниз (Pull-to-refresh) на главном экране Happ или INCY — подписка обновит актуальные узлы.<br>
                         2. Выключите и снова включите круглый тумблер соединения.<br>
-                        3. Проверьте срок действия подписки в боте.
+                        3. Выберите другой сервер из списка.<br>
+                        4. Проверьте срок действия подписки в боте.
                     </div>
                 </div>
 
@@ -2183,16 +2487,6 @@
                     </button>
                     <div class="guide-faq-a">
                         В рамках тарифа доступно одновременное подключение до 2 устройств (например, телефон и ноутбук). Управлять активными устройствами и при необходимости сбрасывать их можно прямо в боте.
-                    </div>
-                </div>
-
-                <div class="guide-faq-item">
-                    <button type="button" class="guide-faq-q" onclick="toggleGuideFaq(this)">
-                        <span>Как вернуть регион App Store обратно на Россию?</span>
-                        <svg class="guide-faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-                    </button>
-                    <div class="guide-faq-a">
-                        Сразу после загрузки клиента (INCY или Happ) вы можете вернуться в App Store → иконка профиля → Страна/регион → выбрать «Россия» и способ оплаты «Нет». Установленные приложения останутся на вашем телефоне и продолжат работать!
                     </div>
                 </div>
             </div>
@@ -2505,20 +2799,57 @@
             });
         }
 
-        function switchIosSubGuide(sub) {
-            const subs = {
-                "region": { pill: "pillBtnIosRegion", sec: "iosSubGuideRegion" },
-                "testflight": { pill: "pillBtnIosTf", sec: "iosSubGuideTf" },
-                "firstlaunch": { pill: "pillBtnIosFirst", sec: "iosSubGuideFirst" },
-                "offload": { pill: "pillBtnIosOffload", sec: "iosSubGuideOffload" },
-                "newappleid": { pill: "pillBtnIosNewId", sec: "iosSubGuideNewId" }
+        function switchIosMethod(method) {
+            const methods = {
+                "tf": { btn: "tabBtnIosTf", sec: "iosSubGuideTf" },
+                "region": { btn: "tabBtnIosRegion", sec: "iosSubGuideRegion" },
+                "newid": { btn: "tabBtnIosNewId", sec: "iosSubGuideNewId" }
             };
-            Object.keys(subs).forEach(function(k) {
-                const p = document.getElementById(subs[k].pill);
-                const s = document.getElementById(subs[k].sec);
-                if (p) p.classList.toggle("active", k === sub);
-                if (s) s.style.display = (k === sub) ? "block" : "none";
+            Object.keys(methods).forEach(function(k) {
+                const b = document.getElementById(methods[k].btn);
+                const s = document.getElementById(methods[k].sec);
+                if (b) b.classList.toggle("active", k === method);
+                if (s) s.style.display = (k === method) ? "block" : "none";
             });
+        }
+
+        function switchAndroidMethod(method) {
+            const btnPlay = document.getElementById("tabBtnAndroidPlay");
+            const btnApk = document.getElementById("tabBtnAndroidApk");
+            const secPlay = document.getElementById("androidSubPlay");
+            const secApk = document.getElementById("androidSubApk");
+            if (btnPlay) btnPlay.classList.toggle("active", method === "play");
+            if (btnApk) btnApk.classList.toggle("active", method === "apk");
+            if (secPlay) secPlay.style.display = (method === "play") ? "block" : "none";
+            if (secApk) secApk.style.display = (method === "apk") ? "block" : "none";
+        }
+
+        function switchDesktopMethod(method) {
+            const btnWin = document.getElementById("tabBtnDesktopWin");
+            const btnMac = document.getElementById("tabBtnDesktopMac");
+            const secWin = document.getElementById("desktopSubWin");
+            const secMac = document.getElementById("desktopSubMac");
+            if (btnWin) btnWin.classList.toggle("active", method === "win");
+            if (btnMac) btnMac.classList.toggle("active", method === "mac");
+            if (secWin) secWin.style.display = (method === "win") ? "block" : "none";
+            if (secMac) secMac.style.display = (method === "mac") ? "block" : "none";
+        }
+
+        function toggleGuideVideo() {
+            const container = document.getElementById("guideVideoContainer");
+            const label = document.getElementById("videoToggleLabel");
+            const player = document.getElementById("guideVideoPlayer");
+            if (!container) return;
+            const isHidden = container.style.display === "none";
+            if (isHidden) {
+                container.style.display = "block";
+                if (label) label.textContent = "Скрыть видеоинструкцию";
+                if (player) player.play().catch(function() {});
+            } else {
+                container.style.display = "none";
+                if (label) label.textContent = "Показать видеоинструкцию (запись с экрана iPhone, 2 мин)";
+                if (player) player.pause();
+            }
         }
 
         function copyMockupField(text, btn) {
