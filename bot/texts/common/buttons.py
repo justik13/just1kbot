@@ -47,7 +47,7 @@ BTN_CONTACT_SUPPORT = "💬 Написать в поддержку"
 
 BTN_DISMISS = "✅ Прочитано"
 
-BTN_DISMISS_ALERT = "🗑 Прочитано"
+BTN_DISMISS_ALERT = "Закрыть"
 
 BTN_DISMISS_NOTIFICATION = "✅ Прочитано (убрать)"
 
