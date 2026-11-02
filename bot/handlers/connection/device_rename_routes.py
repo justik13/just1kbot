@@ -17,7 +17,6 @@ from database.repositories.profiles_repo import (
     update_profile,
 )
 from services.subscription import SubscriptionService
-from utils.callbacks import parse_callback_id
 from utils.telegram import EFFECT_LIKE, render_hub, safe
 
 from .common import DEVICE_NAME_REGEX, _render_connections
@@ -33,59 +32,10 @@ async def rename_device_start(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    profile_id = parse_callback_id(callback.data, 1)
-
-    if profile_id is None:
-        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
-        return
-
-    profile = await get_profile_by_id(session, profile_id)
-
-    if not profile or not db_user or profile.user_id != db_user.id:
-        await callback.answer(
-            texts.ERROR_ACCESS_DENIED,
-            show_alert=True,
-        )
-        return
-
-    if profile.provisioning_status in ("deleting", "create_cleanup_pending", "pending_create"):
-        if profile.provisioning_status == "deleting":
-            msg = texts.DEVICE_DELETE_ALREADY_IN_PROGRESS
-        elif profile.provisioning_status == "pending_create":
-            msg = texts.DEVICE_CREATE_IN_PROGRESS
-        else:
-            msg = texts.DEVICE_SELF_HEALING_IN_PROGRESS
-        await callback.answer(msg, show_alert=True)
-        return
-
-    from services.device_service import DeviceService
-
-    if await DeviceService.has_active_migration(session, profile.id):
-        await callback.answer(texts.DEVICE_MIGRATE_IN_PROGRESS, show_alert=True)
-        return
-
-    has_access = await SubscriptionService.check_access(
-        session,
-        db_user.telegram_id,
-    )
-
-    if not has_access:
-        await callback.answer(
-            texts.DEVICE_ACCESS_INACTIVE,
-            show_alert=True,
-        )
-        return
-
-    await callback.answer(show_alert=False)
-    await state.update_data(profile_id=profile_id)
-    await state.set_state(DeviceManagementStates.rename_device)
-
-    await render_hub(
-        callback.bot,
-        callback.message.chat.id,
-        texts.DEVICE_RENAME_PROMPT,
-        get_back_button(f"manage_device:{profile_id}", text=texts.BTN_BACK_TO_DEVICE),
-    )
+    await state.clear()
+    await callback.answer(texts.ALERT_AMNEZIA_DECOMMISSIONED, show_alert=True)
+    if db_user:
+        await _render_connections(callback.message, db_user, session)
 
 
 @router.message(DeviceManagementStates.rename_device)

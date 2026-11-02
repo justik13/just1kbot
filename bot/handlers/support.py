@@ -76,35 +76,23 @@ async def hub_menu_support(
     )
 
 
-def _extract_device_id(data: str) -> int | None:
-    if ":" in data and "device_" in data:
-        parts = data.split(":")
-        for p in parts:
-            if p.startswith("device_") and p.replace("device_", "").isdigit():
-                return int(p.replace("device_", ""))
-    return None
-
-
 @router.callback_query(F.data.startswith("support_help"))
 async def show_support_help(callback: CallbackQuery):
     await callback.answer(show_alert=False)
-    device_id = _extract_device_id(callback.data)
-    suffix = f":device_{device_id}" if device_id else ""
-
     text = texts.SUPPORT_HELP_ROOT_TEXT
 
     builder = InlineKeyboardBuilder()
     builder.button(
         text=texts.BTN_INSTRUCTION_INCY,
-        callback_data=f"help_incy{suffix}",
+        callback_data="help_incy",
     )
     builder.button(
         text=texts.BTN_SPLIT_TUNNELING,
-        callback_data=f"help_split{suffix}",
+        callback_data="help_split",
     )
     builder.button(
         text=texts.BTN_BACK,
-        callback_data=f"manage_device:{device_id}" if device_id else "menu_support",
+        callback_data="menu_support",
     )
     builder.button(
         text=texts.BTN_MAIN_MENU_NAV,
@@ -123,9 +111,6 @@ async def show_support_help(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("help_incy"))
 async def show_help_incy(callback: CallbackQuery):
     await callback.answer(show_alert=False)
-    device_id = _extract_device_id(callback.data)
-    back_cb = f"support_help:device_{device_id}" if device_id else "support_help"
-
     text = texts.SUPPORT_INCY_INSTRUCTION_TEXT
 
     builder = InlineKeyboardBuilder()
@@ -139,7 +124,7 @@ async def show_help_incy(callback: CallbackQuery):
     )
     builder.button(
         text=texts.BTN_BACK,
-        callback_data=back_cb,
+        callback_data="support_help",
     )
     builder.button(
         text=texts.BTN_MAIN_MENU_NAV,
@@ -158,9 +143,6 @@ async def show_help_incy(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("help_split"))
 async def show_help_split(callback: CallbackQuery):
     await callback.answer(show_alert=False)
-    device_id = _extract_device_id(callback.data)
-    back_cb = f"support_help:device_{device_id}" if device_id else "support_help"
-
     text = texts.SUPPORT_SPLIT_TUNNELING_TEXT
 
     builder = InlineKeyboardBuilder()
@@ -174,7 +156,7 @@ async def show_help_split(callback: CallbackQuery):
     )
     builder.button(
         text=texts.BTN_BACK,
-        callback_data=back_cb,
+        callback_data="support_help",
     )
     builder.button(
         text=texts.BTN_MAIN_MENU_NAV,

@@ -188,8 +188,6 @@ VLESS_RESET_SUCCESS = "✅ Привязка устройств по ссылке
 VLESS_RESET_EMPTY = "ℹ️ У вас нет привязанных устройств по ссылке."
 VLESS_DEFAULT_SERVER_DESCRIPTION = "Прямой доступ"
 
-BTN_AMNEZIA_DEVICES = "🛡 Архивные устройства"
-BTN_AMNEZIA_DEVICES_COUNT = "🛡 Архивные устройства ({count})"
 LABEL_ARCHIVED_CONNECTION = "Архивное подключение"
 BTN_BACK_TO_CONNECTION = "◀️ Назад к подключению"
 BTN_ADD_DEVICE = "➕ Добавить устройство"
@@ -224,24 +222,6 @@ BTN_SUB_CONNECT_INCY = "🚀 Подключить в приложении"
 BTN_SUB_COPY_LINK = "📋 Скопировать ссылку"
 BTN_INCY_INSTRUCTIONS = "📱 Инструкция (INCY / Happ)"
 VLESS_WEB_TOO_MANY_REQUESTS = "Слишком много запросов к подписке. Попробуйте позже."
-AMNEZIA_SCREEN_TEXT = """🛡 <b>Архивные устройства</b>
-
-Управление ранее созданными устройствами.
-
-📱 <b>Устройства:</b> {active} из {limit} <i>(по ссылке: {vless_count} • архивные: {legacy_count})</i>
-📊 <b>Трафик за месяц:</b> {monthly_traffic}
-{profiles_block}
-<i>Нажмите на устройство ниже для управления:</i>"""
-
-AMNEZIA_SCREEN_EMPTY_TEXT = """🛡 <b>Архивные устройства</b>
-
-Управление ранее созданными устройствами.
-
-📱 <b>Устройства:</b> {active} из {limit} <i>(по ссылке: {vless_count} • архивные: 0)</i>
-📊 <b>Трафик за месяц:</b> {monthly_traffic}
-
-<i>У вас нет архивных устройств.</i>"""
-
 VLESS_FEED_EXPIRED_TITLE = "⚠️ Подписка закончилась"
 VLESS_FEED_EXPIRED_NOTICE = "⚠️ Подписка закончилась. Продлите доступ: @{bot_username}"
 VLESS_FEED_DEVICE_LIMIT_TITLE = "⚠️ Лимит устройств"
