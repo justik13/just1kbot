@@ -19,9 +19,8 @@ from database.repositories.profiles_repo import (
     PROFILE_LIST_HIDDEN_STATUSES,
 )
 from database.repositories.servers_repo import (
+    is_awg_capable_server,
     is_server_allocatable,
-    is_vless_capable_server,
-    is_white_internet_origin_server,
 )
 from services.amnezia_capacity import (
     ServerAtCapacity,
@@ -232,7 +231,7 @@ class DeviceService:
         if len(manual_peer_ids) + server_count >= server.max_clients:
             raise ServerUnavailable("Server is full")
 
-        if not is_vless_capable_server(server) and not is_white_internet_origin_server(server):
+        if is_awg_capable_server(server):
             try:
                 await ensure_server_capacity(
                     api_url=server.api_url,
@@ -456,7 +455,7 @@ class DeviceService:
         if len(manual_peer_ids) + server_count >= target_server.max_clients:
             raise ServerUnavailable("Server is full")
 
-        if not is_vless_capable_server(target_server) and not is_white_internet_origin_server(target_server):
+        if is_awg_capable_server(target_server):
             try:
                 await ensure_server_capacity(
                     api_url=target_server.api_url,

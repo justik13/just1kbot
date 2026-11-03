@@ -13,7 +13,6 @@ from cachetools import TTLCache
 from sqlalchemy import and_, delete, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from config.constants import (
-    AMNEZIA_PROTOCOLS,
     AdminAuditAction,
     GRACE_PERIOD_HOURS,
     VPN_ACCESS_GRACE_HOURS,
@@ -694,18 +693,12 @@ async def _cleanup_dangling_peers():
         servers_result = await session.execute(
             select(Server).where(
                 Server.is_active.is_(True),
-                Server.protocol.in_(AMNEZIA_PROTOCOLS),
             )
         )
         all_servers = servers_result.scalars().all()
-        from database.repositories.servers_repo import (
-            is_vless_capable_server,
-            is_white_internet_origin_server,
-        )
-        servers = [
-            s for s in all_servers
-            if not is_vless_capable_server(s) and not is_white_internet_origin_server(s)
-        ]
+        from database.repositories.servers_repo import is_awg_capable_server
+
+        servers = [s for s in all_servers if is_awg_capable_server(s)]
 
         result = await session.execute(select(VPNProfile.server_id, VPNProfile.peer_id))
         db_server_peers = {

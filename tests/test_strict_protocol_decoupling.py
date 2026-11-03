@@ -238,3 +238,67 @@ class StrictProtocolDecouplingTests(unittest.IsolatedAsyncioTestCase):
             count = await get_real_peer_count(s_invalid, force_refresh=True)
             self.assertEqual(count, -1)
             mock_amnezia_cls.assert_not_called()
+
+    def test_is_awg_capable_server_strictly_excludes_vless_variants(self):
+        from database.repositories.servers_repo import is_awg_capable_server, is_pure_vless_server
+
+        s_vless_no_proto = Server(id=1, name="VLESS no proto", protocol=None, capabilities=["vless"])
+        s_vless_proto = Server(id=2, name="VLESS explicit", protocol="vless", capabilities=[])
+        s_vless_dual_cap = Server(id=3, name="VLESS dual cap", protocol="vless", capabilities=["awg"])
+        s_xray_vless = Server(id=4, name="Xray VLESS", protocol=None, capabilities=["xray_vless"])
+        s_origin = Server(id=5, name="Origin", protocol="xray", capabilities=["xray_origin"])
+        s_awg_clean = Server(id=6, name="AWG clean", protocol=AMNEZIA_PROTOCOL, capabilities=[])
+        s_awg_cap_only = Server(id=7, name="AWG cap only", protocol=None, capabilities=["awg"])
+        s_empty = Server(id=8, name="Empty", protocol=None, capabilities=[])
+
+        self.assertFalse(is_awg_capable_server(s_vless_no_proto))
+        self.assertTrue(is_pure_vless_server(s_vless_no_proto))
+
+        self.assertFalse(is_awg_capable_server(s_vless_proto))
+        self.assertTrue(is_pure_vless_server(s_vless_proto))
+
+        self.assertFalse(is_awg_capable_server(s_vless_dual_cap))
+        self.assertTrue(is_pure_vless_server(s_vless_dual_cap))
+
+        self.assertFalse(is_awg_capable_server(s_xray_vless))
+        self.assertTrue(is_pure_vless_server(s_xray_vless))
+
+        self.assertFalse(is_awg_capable_server(s_origin))
+        self.assertFalse(is_pure_vless_server(s_origin))
+
+        self.assertTrue(is_awg_capable_server(s_awg_clean))
+        self.assertFalse(is_pure_vless_server(s_awg_clean))
+
+        self.assertTrue(is_awg_capable_server(s_awg_cap_only))
+        self.assertFalse(is_pure_vless_server(s_awg_cap_only))
+
+        self.assertTrue(is_awg_capable_server(s_empty))
+        self.assertFalse(is_pure_vless_server(s_empty))
+
+    async def test_traffic_sync_skips_vless_nodes_without_polling_amnezia(self):
+        from services.workers.traffic import _traffic_sync_once
+
+        s_vless = Server(
+            id=10,
+            name="VLESS Node",
+            protocol=None,
+            capabilities=["vless"],
+            api_url="https://vless:8443",
+            api_key="key",
+            is_active=True,
+        )
+
+        dummy_session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [s_vless]
+        dummy_session.execute.return_value = mock_result
+
+        @asynccontextmanager
+        async def dummy_scope():
+            yield dummy_session
+
+        with patch("services.workers.traffic.session_scope", side_effect=dummy_scope), \
+             patch("services.workers.traffic.AmneziaClient") as mock_amnezia_cls:
+
+            await _traffic_sync_once()
+            mock_amnezia_cls.assert_not_called()

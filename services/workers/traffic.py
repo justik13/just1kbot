@@ -10,7 +10,6 @@ from cachetools import TTLCache
 from sqlalchemy import bindparam, case, func, select, update
 
 from config.constants import (
-    AMNEZIA_PROTOCOLS,
     TRAFFIC_SYNC_INTERVAL,
     WORKER_ERROR_SLEEP_INTERVAL,
 )
@@ -114,23 +113,18 @@ async def traffic_sync_loop(
 async def _traffic_sync_once(bot: Bot | None = None):
     servers = []
     async with session_scope() as session:
-        stmt = (
-            select(
-                Server.id,
-                Server.api_url,
-                Server.api_key,
-                Server.name,
-                Server.is_active,
-                Server.capabilities,
-                Server.protocol,
-            )
-            .where(
-                Server.is_active.is_(True),
-                Server.protocol.in_(AMNEZIA_PROTOCOLS),
-            )
+        stmt = select(Server).where(
+            Server.is_active.is_(True),
         )
         result = await session.execute(stmt)
-        raw_rows = result.all() if hasattr(result, "all") else []
+        from database.repositories.servers_repo import is_awg_capable_server
+
+        raw_rows = []
+        if hasattr(result, "all"):
+            raw_rows = result.all()
+        elif hasattr(result, "scalars"):
+            raw_rows = result.scalars().all()
+
         for row in raw_rows:
             if hasattr(row, "id"):
                 s_id = row.id
@@ -147,18 +141,22 @@ async def _traffic_sync_once(bot: Bot | None = None):
                 caps = row[5] if len(row) > 5 else []
                 proto = row[6] if len(row) > 6 else None
 
-            if not isinstance(caps, (list, tuple, set)):
-                caps = []
-            proto_str = str(proto or "").strip().lower()
-            if "vless" in caps or "xray_vless" in caps or proto_str == "vless" or "xray_origin" in caps:
-                continue
-
-            servers.append({
+            s_obj = type("ServerMock", (), {
                 "id": s_id,
                 "api_url": api_url,
                 "api_key": api_key,
                 "name": name,
-            })
+                "capabilities": caps,
+                "protocol": proto,
+            })()
+
+            if is_awg_capable_server(s_obj) and api_url and api_key:
+                servers.append({
+                    "id": s_id,
+                    "api_url": api_url,
+                    "api_key": api_key,
+                    "name": name,
+                })
 
     if not servers:
         return

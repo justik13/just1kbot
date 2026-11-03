@@ -24,6 +24,7 @@ from database.models import (
 from database.repositories.servers_repo import (
     get_server_by_api_url,
     get_server_by_id,
+    get_server_xray_api_url,
     is_vless_capable_server,
     is_white_internet_origin_server,
     update_server,
@@ -838,11 +839,12 @@ async def process_edit_server_key(
         from services.xray_node_client import XrayNodeClient
 
         is_healthy = False
+        xray_url = get_server_xray_api_url(server) or server.api_url
         try:
             async with XrayNodeClient(timeout=5.0, max_retries=0) as xclient:
-                is_healthy, _node_epoch, _ = await xclient.check_health(server.api_url, new_key)
+                is_healthy, _node_epoch, _ = await xclient.check_health(xray_url, new_key)
         except Exception as e:
-            logger.warning("Xray health check failed for %s: %s", server.api_url, e)
+            logger.warning("Xray health check failed for %s: %s", xray_url, e)
             is_healthy = False
         if not is_healthy:
             await render_hub(

@@ -1,5 +1,6 @@
 """Live Amnezia capacity checks kept outside the device domain service."""
 
+from config.constants import VLESS_PROTOCOL, XRAY_PROTOCOL
 from services.amnezia_client import AmneziaClient
 
 
@@ -17,7 +18,10 @@ async def ensure_server_capacity(
     api_key: str,
     max_clients: int,
     live_client_count: int | None = None,
+    protocol: str | None = None,
 ) -> None:
+    if protocol and protocol.strip().lower() in (VLESS_PROTOCOL, XRAY_PROTOCOL):
+        return
     if live_client_count is not None:
         count = live_client_count
     else:

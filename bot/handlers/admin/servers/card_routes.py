@@ -3,6 +3,7 @@ import logging
 import time
 
 from config.constants import (
+    AMNEZIA_PROTOCOL,
     AMNEZIA_PROTOCOLS,
     VLESS_PROTOCOL,
     XRAY_PROTOCOL,
@@ -415,11 +416,14 @@ async def ping_server(
             caps = []
         raw_proto = getattr(server, "protocol", None)
         if not isinstance(raw_proto, str) or not raw_proto.strip():
-            raw_proto = XRAY_PROTOCOL if "xray_origin" in caps else "amneziawg"
+            raw_proto = (
+                VLESS_PROTOCOL if ("vless" in caps or "xray_vless" in caps)
+                else (XRAY_PROTOCOL if "xray_origin" in caps else AMNEZIA_PROTOCOL)
+            )
         proto = raw_proto.strip().lower()
 
         has_xray_or_vless = is_vless_capable_server(server) or is_white_internet_origin_server(server)
-        has_awg = is_awg_capable_server(server) and not has_xray_or_vless
+        has_awg = is_awg_capable_server(server)
 
         awg_ok = True
         xray_ok = True

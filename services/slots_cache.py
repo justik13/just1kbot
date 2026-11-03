@@ -8,7 +8,6 @@ from cachetools import TTLCache
 
 from config.constants import (
     AMNEZIA_PROTOCOL,
-    AMNEZIA_PROTOCOLS,
     VLESS_PROTOCOL,
     XRAY_ORIGIN_CAPABILITY,
     XRAY_PROTOCOL,
@@ -33,10 +32,16 @@ async def capture_server_peer_snapshot(server_id: int) -> ServerPeerSnapshot:
         if not server:
             raise LookupError("server not found")
         server_proto = getattr(server, "protocol", None)
+        caps = getattr(server, "capabilities", None) or []
+        if not isinstance(caps, (list, tuple, set)):
+            caps = []
         if not server_proto:
-            caps = getattr(server, "capabilities", None) or []
-            server_proto = XRAY_PROTOCOL if XRAY_ORIGIN_CAPABILITY in caps else AMNEZIA_PROTOCOL
+            server_proto = (
+                VLESS_PROTOCOL if ("vless" in caps or "xray_vless" in caps)
+                else (XRAY_PROTOCOL if XRAY_ORIGIN_CAPABILITY in caps else AMNEZIA_PROTOCOL)
+            )
         from database.repositories.servers_repo import (
+            is_awg_capable_server,
             is_vless_capable_server,
             is_white_internet_origin_server,
         )
@@ -52,7 +57,7 @@ async def capture_server_peer_snapshot(server_id: int) -> ServerPeerSnapshot:
                 frozenset(),
                 datetime.now(timezone.utc),
             )
-        elif server_proto in AMNEZIA_PROTOCOLS:
+        elif is_awg_capable_server(server):
             from services.amnezia_client import is_server_circuit_available
 
             if not await is_server_circuit_available(server.api_url):
@@ -172,11 +177,17 @@ async def get_real_peer_count(server: Server, force_refresh: bool = False) -> in
         gen = get_server_generation(server.id)
 
         server_proto = getattr(server, "protocol", None)
+        caps = getattr(server, "capabilities", None) or []
+        if not isinstance(caps, (list, tuple, set)):
+            caps = []
         if not server_proto:
-            caps = getattr(server, "capabilities", None) or []
-            server_proto = XRAY_PROTOCOL if XRAY_ORIGIN_CAPABILITY in caps else AMNEZIA_PROTOCOL
+            server_proto = (
+                VLESS_PROTOCOL if ("vless" in caps or "xray_vless" in caps)
+                else (XRAY_PROTOCOL if XRAY_ORIGIN_CAPABILITY in caps else AMNEZIA_PROTOCOL)
+            )
 
         from database.repositories.servers_repo import (
+            is_awg_capable_server,
             is_vless_capable_server,
             is_white_internet_origin_server,
         )
@@ -205,7 +216,7 @@ async def get_real_peer_count(server: Server, force_refresh: bool = False) -> in
             )
             return count
 
-        elif server_proto in AMNEZIA_PROTOCOLS:
+        elif is_awg_capable_server(server):
             client = AmneziaClient(server.api_url, server.api_key)
             try:
                 clients = await client.get_all_clients()
