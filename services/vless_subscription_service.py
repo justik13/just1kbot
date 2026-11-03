@@ -9,14 +9,13 @@ import os
 import re
 import urllib.parse
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.constants import VALID_VLESS_TLS_FINGERPRINTS, VLESS_TLS_FINGERPRINT
 from config.enums import ServerHealthState, ServerLifecycleStatus
-from database.models import Server, User, VlessSubscription, VPNProfile
+from database.models import Server, User, VlessSubscription
 from database.repositories import vless_subscription_repo
-from services.device_service import RESERVING_STATUSES
 from services.xray_node_client import XrayNodeClient
 from utils.datetime_helpers import now_utc
 from utils.incy_routing import generate_incy_routing_header as _generate_incy_routing_header
@@ -240,18 +239,9 @@ class VlessSubscriptionService:
         user: User,
     ) -> tuple[int, int, int]:
         """Returns (total_active, awg_active_count, vless_hwid_count)."""
-        awg_count = (
-            await session.execute(
-                select(func.count(VPNProfile.id)).where(
-                    VPNProfile.user_id == user.id,
-                    VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
-                )
-            )
-        ).scalar_one()
-
         vless_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
-        total = awg_count + vless_count
-        return total, awg_count, vless_count
+        total = vless_count
+        return total, 0, vless_count
 
     @staticmethod
     async def get_eligible_vless_servers(
