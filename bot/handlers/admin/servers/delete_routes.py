@@ -190,14 +190,8 @@ async def confirm_delete_server(
     profiles = list((await session.execute(select(VPNProfile).where(
         VPNProfile.server_id == server.id))).scalars().all())
     deleted_profiles = len(profiles)
-    operations = list((await session.execute(select(APIOperation).where(
-        APIOperation.server_id == server.id,
-        APIOperation.status.in_(("pending", "retry", "processing")),
-    ).with_for_update())).scalars().all())
-    processing_update = any(
-        op.status == "processing" and op.operation_type == "update_peer"
-        for op in operations
-    )
+    operations = []
+    processing_update = False
 
     active_wl_subs = list((await session.execute(
         select(WhiteInternetSubscription).where(
@@ -271,14 +265,20 @@ async def confirm_delete_server(
     # cannot allocate it, and releases the Server lock to eliminate lock graph cycles.
     server.is_active = False
     server.lifecycle_status = ServerLifecycleStatus.DECOMMISSIONING
-    for operation in operations:
-        if operation.operation_type in {"create_peer", "update_peer"} and operation.status in {
-            "pending", "retry"
-        }:
-            operation.status = "cancelled"
-            operation.completed_at = now_utc()
-            operation.locked_at = operation.locked_by = None
-            operation.last_error_code = "server_deleting"
+    await session.execute(
+        update(APIOperation)
+        .where(
+            APIOperation.server_id == server.id,
+            APIOperation.status.in_(("pending", "retry", "processing")),
+        )
+        .values(
+            status="cancelled",
+            completed_at=now_utc(),
+            locked_at=None,
+            locked_by=None,
+            last_error_code="server_deleting",
+        )
+    )
     await session.commit()
 
     # Phase 2: Archive device traffic and delete profiles per user in canonical lock hierarchy (User -> VPNProfile).

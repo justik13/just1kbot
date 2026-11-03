@@ -408,7 +408,11 @@ def _apply_audience_filters(stmt, audience: str, *, admin_tg_id: int | None = No
             User.id.in_(
                 select(WhiteInternetSubscription.user_id).where(
                     WhiteInternetSubscription.origin_node_id == target_server_id,
-                    WhiteInternetStatus.ACTIVE == WhiteInternetSubscription.status,
+                    WhiteInternetSubscription.status.in_([
+                        WhiteInternetStatus.ACTIVE,
+                        WhiteInternetStatus.PENDING,
+                        WhiteInternetStatus.EXHAUSTED,
+                    ]),
                     WhiteInternetSubscription.expires_at > current_time,
                     WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
                 )

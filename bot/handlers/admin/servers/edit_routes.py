@@ -16,7 +16,6 @@ from bot.keyboards import get_back_button
 from bot.states import AdminStates
 from config.enums import WhiteInternetStatus
 from database.models import (
-    APIOperation,
     VPNProfile,
     WhiteInternetSubscription,
 )
@@ -572,14 +571,7 @@ async def process_edit_server_url(
             )
         ).scalar_one()
 
-        active_ops_count = (
-            await session.execute(
-                select(func.count(APIOperation.id)).where(
-                    APIOperation.server_id == server_id,
-                    APIOperation.status.in_(("pending", "processing", "retry")),
-                )
-            )
-        ).scalar_one()
+        active_ops_count = 0
 
         wl_subs_count = (
             await session.scalar(
@@ -594,7 +586,7 @@ async def process_edit_server_url(
             )
         ) or 0
 
-        if profiles_count > 0 or active_ops_count > 0 or wl_subs_count > 0:
+        if profiles_count > 0 or wl_subs_count > 0:
             await render_hub(
                 message.bot,
                 message.chat.id,
@@ -853,14 +845,7 @@ async def process_edit_server_key(
             )
         ).scalar_one()
 
-        active_ops_count = (
-            await session.execute(
-                select(func.count(APIOperation.id)).where(
-                    APIOperation.server_id == server_id,
-                    APIOperation.status.in_(("pending", "processing", "retry")),
-                )
-            )
-        ).scalar_one()
+        active_ops_count = 0
 
         wl_subs_count = (
             await session.scalar(
@@ -875,7 +860,7 @@ async def process_edit_server_key(
             )
         ) or 0
 
-        if profiles_count > 0 or active_ops_count > 0 or wl_subs_count > 0:
+        if profiles_count > 0 or wl_subs_count > 0:
             await render_hub(
                 message.bot,
                 message.chat.id,
