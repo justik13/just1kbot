@@ -242,24 +242,13 @@ async def register_hwid_atomic(
         return False, len(active), 0
 
     if effective_limit is None:
-        from database.models import VPNProfile
-        from services.device_service import RESERVING_STATUSES
-
-        awg_stmt = select(func.count(VPNProfile.id)).where(
-            VPNProfile.user_id == getattr(sub, "user_id", None),
-            VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
-        )
-        awg_count = (await session.scalar(awg_stmt)) or 0
-        if not isinstance(awg_count, int):
-            awg_count = 0
-
         user_limit = (
             await SubscriptionService.get_effective_device_limit(session, user)
             if user
             else 5
         )
         user_limit_int = user_limit if isinstance(user_limit, int) else 5
-        effective_limit = max(0, user_limit_int - awg_count)
+        effective_limit = user_limit_int
 
     clean_hwid = str(hwid).strip().lower()[:128]
     if not clean_hwid:

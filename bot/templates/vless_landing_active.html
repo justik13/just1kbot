@@ -2639,7 +2639,7 @@
     </dialog>
 
     <script>
-        const subUrl = window.location.href;
+        const subUrl = window.location.origin + window.location.pathname.replace(/\/$/, "");
 
         // Populate dynamic deep links and visible address text
         const subUrlTextEl = document.getElementById("subUrlText");
@@ -2912,6 +2912,8 @@
         }
 
         function closeGuidesTab() {
+            const p = document.getElementById("guideVideoPlayer");
+            if (p) p.pause();
             const main = document.getElementById("mainView");
             const guides = document.getElementById("guidesView");
             if (guides) guides.classList.add("view-hidden");
@@ -2923,6 +2925,8 @@
         }
 
         function switchGuideTab(tab) {
+            const p = document.getElementById("guideVideoPlayer");
+            if (p) p.pause();
             const tabs = ["ios", "android", "desktop", "faq"];
             tabs.forEach(function(t) {
                 const btn = document.getElementById("guideNavBtn" + t.charAt(0).toUpperCase() + t.slice(1));
@@ -3008,6 +3012,7 @@
         }
 
         function copyGuideField(text, btn) {
+            if (!btn || btn.classList.contains("copied") || btn.classList.contains("copy-failed")) return;
             function onSuccess() {
                 btn.classList.add("copied");
                 const originalHtml = btn.innerHTML;
