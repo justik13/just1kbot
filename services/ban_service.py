@@ -13,7 +13,6 @@ from database.repositories.users_repo import (
 )
 from services.audit_service import AuditService
 from services.order_service import OrderService
-from services.profile_deletion_service import ProfileDeletionService
 from services.white_internet_service import WhiteInternetService
 from utils.datetime_helpers import now_utc
 
@@ -174,15 +173,7 @@ class BanService:
             is_banned=True,
         )
 
-        # Только durable DB-операции. HTTP к Amnezia здесь не выполняется.
-        deleted_profiles = (
-            await ProfileDeletionService.delete_profiles_for_user(
-                session,
-                locked_user.id,
-                reason="ban_delete",
-                background=True,
-            )
-        )
+        deleted_profiles = 0
 
         disabled_wl_subs = (
             await WhiteInternetService.deactivate_user_subscriptions(
@@ -194,21 +185,27 @@ class BanService:
 
         from database.repositories import vless_subscription_repo
         from services.vless_subscription_service import VlessSubscriptionService
+        import uuid as _uuid
         vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, locked_user.id)
-        if vless_sub and getattr(vless_sub, "is_active", False) is True:
+        if vless_sub:
+            old_uuid = vless_sub.uuid
             vless_sub.is_active = False
             vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1
+            vless_sub.active_hwids = {}
+            vless_sub.node_traffic_snapshots = {"_fresh": True}
+            vless_sub.uuid = str(_uuid.uuid4())
             pending = list(getattr(vless_sub, "pending_revoked_uuids", None) or [])
-            if vless_sub.uuid and vless_sub.uuid not in pending:
-                pending.append(vless_sub.uuid)
+            if old_uuid and old_uuid not in pending:
+                pending.append(old_uuid)
             vless_sub.pending_revoked_uuids = pending
             session.add(vless_sub)
-            VlessSubscriptionService.deprovision_background(
-                vless_sub.uuid,
-                version=vless_sub.version,
-                sub_id=vless_sub.id,
-                session=session,
-            )
+            if old_uuid:
+                VlessSubscriptionService.deprovision_background(
+                    old_uuid,
+                    version=vless_sub.version,
+                    sub_id=vless_sub.id,
+                    session=session,
+                )
 
         await AuditService.log_action(
             session,

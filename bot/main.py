@@ -45,7 +45,6 @@ from bot.middlewares.ban_check import BanCheckMiddleware
 from bot.middlewares.clean_chat import stop_clean_chat_worker
 from config.settings import get_settings
 from database.connection import close_db, init_db
-from services.amnezia_client import close_http_session
 from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
 from services.workers import (
     shutdown_event,
@@ -617,11 +616,6 @@ async def main():
                 await bot.session.close()
             except Exception as e:
                 logger.error("Failed to close Telegram bot session: %s", e)
-
-        try:
-            await close_http_session()
-        except Exception as e:
-            logger.error("Failed to close Amnezia HTTP session: %s", e)
 
         try:
             await close_yookassa_client()

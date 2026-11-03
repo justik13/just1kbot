@@ -175,8 +175,8 @@ class TestCleanupRetentionExtended(unittest.IsolatedAsyncioTestCase):
             matches_webhook_retention("dead", recent_dt), "Recent dead webhook must NOT be deleted"
         )
 
-    async def test_cleanup_expired_profiles_grace_handles_vless_only_inactive_sub(self):
-        from services.workers.cleanup import _cleanup_expired_profiles_grace
+    async def test_cleanup_expired_vless_retention_grace_handles_hwid_reset_and_uuid_rotation(self):
+        from services.workers.cleanup import _cleanup_expired_vless_retention_grace
 
         user = MagicMock()
         user.id = 123
@@ -198,10 +198,7 @@ class TestCleanupRetentionExtended(unittest.IsolatedAsyncioTestCase):
         mock_session_query.execute.return_value = MagicMock(all=lambda: [(123,)])
 
         mock_session_user = AsyncMock()
-        mock_session_user.execute.side_effect = [
-            MagicMock(scalar_one_or_none=lambda: user),
-            MagicMock(scalars=lambda: MagicMock(all=lambda: [])),
-        ]
+        mock_session_user.get.return_value = user
 
         sessions = [mock_session_query, mock_session_user]
 
@@ -227,13 +224,15 @@ class TestCleanupRetentionExtended(unittest.IsolatedAsyncioTestCase):
             ),
             patch("services.vless_subscription_service.VlessSubscriptionService.deprovision_background") as mock_deprovision,
             patch("services.vless_subscription_service.VlessSubscriptionService.ensure_synced_background") as mock_ensure_synced,
-            patch("services.audit_service.AuditService.log_action", new_callable=AsyncMock),
+            patch("services.audit_service.AuditService.log_action", new_callable=AsyncMock) as mock_audit,
         ):
-            await _cleanup_expired_profiles_grace(bot)
+            await _cleanup_expired_vless_retention_grace(bot)
 
         mock_sync.assert_awaited_once()
         mock_deprovision.assert_called_once_with(
             "old-uuid-1234", version=vless_sub.version, sub_id=vless_sub.id, session=mock_session_user
         )
         mock_ensure_synced.assert_called_once_with(123, is_active=False, session=mock_session_user)
+        mock_audit.assert_awaited_once()
         bot.send_message.assert_awaited_once()
+

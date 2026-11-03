@@ -542,24 +542,11 @@ def get_admin_confirm_action_keyboard(
 
 def get_admin_user_devices_keyboard(
     telegram_id: int,
-    profiles: list,
+    profiles: list | None = None,
     vless_sub_url: str | None = None,
     has_vless_hwids: bool = False,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-
-    for profile in profiles:
-        name = (
-            getattr(profile, "device_name", None)
-            or texts.ADMIN_DEVICE_NAME_TEMPLATE.format(v0=profile.id)
-        )
-
-        builder.button(
-            text=truncate_button_text(texts.ADMIN_DEVICE_DELETE_BUTTON_LABEL.format(v0=name)),
-            callback_data=(
-                f"admin_delete_device:{telegram_id}:{profile.id}"
-            ),
-        )
 
     if vless_sub_url:
         if 1 <= len(vless_sub_url) <= 256:

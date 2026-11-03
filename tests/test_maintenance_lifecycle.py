@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-from bot.handlers.connection.device_create_routes import start_add_device
 from bot.handlers.payment.balance_routes import (
     accept_custom_amount,
     choose_topup_amount,
@@ -139,20 +138,4 @@ class TestMaintenanceServiceLifecycle(unittest.IsolatedAsyncioTestCase):
             mock_render_maint.assert_called_once_with(callback, session, back_to="payment_showcase")
 
 
-    async def test_device_creation_blocked_during_maintenance(self):
-        callback = MagicMock(spec=CallbackQuery)
-        callback.from_user = MagicMock(id=88888)
-        callback.data = "create_device"
-        callback.bot = MagicMock()
-        callback.message = MagicMock(chat=MagicMock(id=88888), message_id=106)
-        callback.answer = AsyncMock()
 
-        state = MagicMock(spec=FSMContext)
-        session = AsyncMock()
-        db_user = User(id=1, telegram_id=88888, username="test", first_name="Test")
-
-        with patch("bot.handlers.connection.device_create_routes.MaintenanceService.can_user_perform_action", new=AsyncMock(return_value=False)), \
-             patch("bot.handlers.connection.device_create_routes._render_maintenance", new_callable=AsyncMock) as mock_render_maint:
-
-            await start_add_device(callback, state, session, db_user=db_user)
-            mock_render_maint.assert_called_once_with(callback.message, session, back_to="back_to_connections")

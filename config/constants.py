@@ -40,15 +40,9 @@ AMNEZIA_PROTOCOLS: tuple[str, ...] = (
     "amneziawg3",
     "amneziawg3.1",
 )
-AMNEZIA_DOCKER_CONTAINER = "amnezia-awg2"
 XRAY_PROTOCOL = "xray"
 VLESS_PROTOCOL = "vless"
 XRAY_ORIGIN_CAPABILITY = "xray_origin"
-
-# Default AmneziaWG Client Network Settings
-DEFAULT_AWG_DNS1 = "8.8.8.8"
-DEFAULT_AWG_DNS2 = "8.8.4.4"
-DEFAULT_AWG_MTU = "1280"
 
 # VPN Configuration transport limits
 MAX_RAW_CONFIG_BYTES = 65536  # 64 KiB max raw config payload
@@ -276,7 +270,6 @@ CANONICAL_XHTTP_PROFILE: dict[str, Any] = {
 
 
 __all__ = [
-    "AMNEZIA_DOCKER_CONTAINER",
     "AMNEZIA_PROTOCOL",
     "AMNEZIA_PROTOCOLS",
     "API_CONCURRENCY_LIMIT",
@@ -287,9 +280,6 @@ __all__ = [
     "ApiOperationStatus",
     "CANONICAL_XHTTP_PROFILE",
     "ApiOperationType",
-    "DEFAULT_AWG_DNS1",
-    "DEFAULT_AWG_DNS2",
-    "DEFAULT_AWG_MTU",
     "DEFAULT_FALLBACK_BOT_USERNAME",
     "DEFAULT_VLESS_PROFILE_TITLE",
     "DEFAULT_WHITE_INTERNET_CHANNEL_URL",

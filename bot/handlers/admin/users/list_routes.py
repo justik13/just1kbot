@@ -346,8 +346,8 @@ async def show_user_card(
         f_type, f_param, page_num = parts[3], parts[4], parts[5]
         back_cb = f"admin_users_filter:{f_type}:{f_param}:{page_num}"
     elif len(parts) >= 5 and parts[2] == "server_peers":
-        srv_id, page_num = parts[3], parts[4]
-        back_cb = f"admin_server_peers:{srv_id}:{page_num}"
+        srv_id = parts[3]
+        back_cb = f"admin_server_card:{srv_id}"
 
     await _render_user_card(callback, user, session, back_callback=back_cb)
 

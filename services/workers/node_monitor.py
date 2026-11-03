@@ -41,11 +41,8 @@ from bot.texts.runtime.notifications import (
     TIME_MINUTES_FORMAT,
 )
 from config.constants import (
-    AMNEZIA_PROTOCOLS,
     ServerHealthState,
     WHITE_INTERNET_SUB_PATH_PREFIX,
-    VLESS_PROTOCOL,
-    XRAY_PROTOCOL,
 )
 from config.settings import get_settings
 from database.connection import session_scope
@@ -54,14 +51,12 @@ from database.repositories.servers_repo import (
     get_all_servers,
     get_server_by_id,
     get_server_xray_api_url,
-    is_awg_capable_server,
     is_vless_capable_server,
     is_white_internet_origin_server,
     update_server,
     update_server_health_snapshot,
     update_server_xray_epoch_cas,
 )
-from services.amnezia_client import AmneziaClient
 from utils.datetime_helpers import now_utc
 from utils.telegram import safe, safe_send_message
 
@@ -347,44 +342,24 @@ async def check_node_resources_and_alerts(bot: Bot):
         caps = getattr(server, "capabilities", None) or []
         if not isinstance(caps, (list, tuple, set)):
             caps = []
-        raw_proto = getattr(server, "protocol", None)
-        if not isinstance(raw_proto, str) or not raw_proto.strip():
-            raw_proto = XRAY_PROTOCOL if "xray_origin" in caps else "amneziawg"
-        server_proto = raw_proto.strip().lower()
 
-        has_amnezia = is_awg_capable_server(server)
         has_xray = is_vless_capable_server(server) or is_white_internet_origin_server(server)
 
-        if not has_amnezia and not has_xray:
+        if not has_xray:
             logger.warning(
                 "Server %s (%s) has unsupported or unassigned protocol '%s', skipping healthcheck",
-                server.id, server.name, server.protocol,
+                server.id, server.name, getattr(server, "protocol", "unknown"),
             )
             return
 
         is_xray_node = has_xray
-        is_amnezia_node = has_amnezia
 
         # 4a. Исполнение проверки Core Node API с гарантированным отловом любых сетевых ошибок/таймаутов
         is_healthy = False
         xray_epoch = None
         xray_data = None
         relays_probe_result: list[dict] | None = None
-        client = None
-
-        awg_ok = True
         xray_ok = True
-
-        if has_amnezia:
-            try:
-                client = AmneziaClient(server.api_url, server.api_key)
-                awg_ok = await client.healthcheck()
-            except Exception as exc:
-                logger.warning(
-                    "AWG healthcheck exception for server %s (%s): %s",
-                    server.id, server.name, exc,
-                )
-                awg_ok = False
 
         if has_xray:
             try:
@@ -438,15 +413,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                 )
                 xray_ok = False
 
-        if server_proto in AMNEZIA_PROTOCOLS:
-            is_healthy = awg_ok
-        elif server_proto in (XRAY_PROTOCOL, VLESS_PROTOCOL):
-            is_healthy = xray_ok
-        elif has_amnezia and has_xray:
-            is_healthy = awg_ok and xray_ok
-        elif has_amnezia:
-            is_healthy = awg_ok
-        elif has_xray:
+        if has_xray:
             is_healthy = xray_ok
         else:
             is_healthy = False
@@ -994,22 +961,9 @@ async def check_node_resources_and_alerts(bot: Bot):
                         "target_alert_state": ServerHealthState.ONLINE,
                     })
 
-                # Проверка диска (с 1-часовым кулдауном) для Amnezia и Xray узлов
+                # Проверка диска (с 1-часовым кулдауном) для Xray узлов
                 disk_percent = None
-                if is_amnezia_node and client is not None:
-                    try:
-                        load_info = await client.get_server_load()
-                        if load_info and isinstance(load_info, dict):
-                            raw_dp = (
-                                load_info.get("disk_percent")
-                                or load_info.get("disk_used_percent")
-                                or load_info.get("disk")
-                            )
-                            if raw_dp is not None and isinstance(raw_dp, (int, float)):
-                                disk_percent = float(raw_dp)
-                    except Exception as exc:
-                        logger.warning("Error reading server load for server %s: %s", server.id, exc)
-                elif is_xray_node and xray_data and isinstance(xray_data, dict):
+                if is_xray_node and xray_data and isinstance(xray_data, dict):
                     try:
                         disk_usage = xray_data.get("disk_usage", {})
                         if isinstance(disk_usage, dict):

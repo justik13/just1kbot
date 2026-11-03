@@ -7,13 +7,12 @@ Validates:
 """
 
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from aiogram.types import Message
 from aiogram.types import User as TgUser
 
 from database.models import User
-from services.api_operations_executor import _is_usable_created_config
 
 
 class MockSession:
@@ -46,57 +45,6 @@ class MockSession:
         if model is User and self._user and self._user.id == ident:
             return self._user
         return None
-
-
-class AmneziaWGValidationTests(unittest.TestCase):
-    """Verifies strict AmneziaWG configuration validation in executor."""
-
-    def test_valid_awg_vpn_uri_accepted(self):
-        """A valid vpn:// URI containing AWG container must be accepted."""
-        with patch("utils.vpn_parser.is_valid_vpn_uri", return_value=True):
-            self.assertTrue(_is_usable_created_config("vpn://awg_valid_sample_config_string"))
-
-    def test_valid_wireguard_ini_accepted(self):
-        """A raw AWG 2.0+ .conf containing [Interface], [Peer] and mandatory parameters must be accepted."""
-        conf = (
-            "[Interface]\n"
-            "PrivateKey = aaaa=\n"
-            "Address = 10.0.0.2/32\n"
-            "Jc = 4\nJmin = 10\nJmax = 50\nS1 = 87\nS2 = 61\nS3 = 49\nS4 = 1\n"
-            "H1 = 100-200\nH2 = 300-400\nH3 = 500-600\nH4 = 700-800\n"
-            "[Peer]\n"
-            "PublicKey = bbbb=\n"
-            "Endpoint = 1.2.3.4:51820\n"
-        )
-        self.assertTrue(_is_usable_created_config(conf))
-
-    def test_html_error_page_rejected(self):
-        """HTML 502/504 Bad Gateway responses must be strictly rejected."""
-        html_502 = "<!DOCTYPE html><html><head><title>502 Bad Gateway</title></head><body><h1>502 Bad Gateway</h1></body></html>"
-        self.assertFalse(_is_usable_created_config(html_502))
-
-        html_nginx = "<html>\r\n<head><title>504 Gateway Time-out</title></head>\r\n<body>\r\n<center><h1>504 Gateway Time-out</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>"
-        self.assertFalse(_is_usable_created_config(html_nginx))
-
-    def test_json_error_rejected(self):
-        """JSON error responses must be strictly rejected."""
-        json_error = '{"status": 500, "error": "Internal Server Error", "message": "Docker container unreachable"}'
-        self.assertFalse(_is_usable_created_config(json_error))
-
-    def test_foreign_protocols_rejected(self):
-        """Foreign protocols (vless, vmess, ss, trojan) must be strictly rejected."""
-        self.assertFalse(_is_usable_created_config("vless://uuid@domain:443?security=reality"))
-        self.assertFalse(_is_usable_created_config("vmess://eyJhZGRyIjoiMS4yLjMuNCJ9"))
-        self.assertFalse(_is_usable_created_config("ss://YWVzLTEyOC1nY206cGFzc3dvcmRAMS4yLjMuNDo4Mzgw"))
-        self.assertFalse(_is_usable_created_config("trojan://pass@domain:443"))
-
-    def test_empty_and_garbage_rejected(self):
-        """Empty, None, 'invalid', and arbitrary strings without AWG structure must be rejected."""
-        self.assertFalse(_is_usable_created_config(None))
-        self.assertFalse(_is_usable_created_config(""))
-        self.assertFalse(_is_usable_created_config("   "))
-        self.assertFalse(_is_usable_created_config("invalid"))
-        self.assertFalse(_is_usable_created_config("arbitrary_string_that_is_longer_than_twenty_characters_and_not_awg"))
 
 
 class UserContextMiddlewareCacheTests(unittest.IsolatedAsyncioTestCase):

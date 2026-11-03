@@ -2068,52 +2068,6 @@ class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
         finally:
             VlessSubscriptionService._ACTIVE_SERVER_SYNCS.discard(99)
 
-    async def test_create_device_enforces_combined_quota(self):
-        from database.models import Server, User
-        from services.device_service import DeviceLimitExceeded, DeviceService
-        from services.slots_cache import ServerPeerSnapshot
-
-        user = User(
-            id=1,
-            telegram_id=123,
-            device_limit=2,
-            is_deleted=False,
-            is_banned=False,
-            financial_hold=False,
-            subscription_end=datetime.now(timezone.utc) + timedelta(days=10),
-            device_creations_today=0,
-            last_creation_date=None,
-        )
-        server = Server(id=1, name="Test", is_active=True, max_clients=100)
-        snapshot = ServerPeerSnapshot(server_id=1, peer_ids=frozenset(), captured_at=datetime.now(timezone.utc))
-
-        mock_session = AsyncMock()
-        mock_session.execute = AsyncMock(side_effect=[
-            # 1. select User FOR UPDATE
-            MagicMock(scalar_one=MagicMock(return_value=user)),
-            # 2. select Server FOR UPDATE
-            MagicMock(scalar_one_or_none=MagicMock(return_value=server)),
-            # 3. select user profiles -> []
-            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
-            # 4. duplicate -> None
-            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
-            # 5. user_count -> 1 (with vless_count=1 -> 1 + 1 = 2 >= device_limit 2 -> DeviceLimitExceeded)
-            MagicMock(scalar_one=MagicMock(return_value=1)),
-        ])
-
-        with (
-            patch("services.device_service.is_admin", return_value=False),
-            patch("database.repositories.vless_subscription_repo.get_active_hwid_count", new=AsyncMock(return_value=1)),
-        ):
-            with self.assertRaises(DeviceLimitExceeded):
-                await DeviceService.create_device(
-                    mock_session,
-                    user_id=1,
-                    server_id=1,
-                    snapshot=snapshot,
-                    vless_count=1,
-                )
-
     async def test_sync_user_to_nodes_handles_version_conflict_by_bumping(self):
         from database.models import User, Server, VlessSubscription
         from services.vless_subscription_service import VlessSubscriptionService

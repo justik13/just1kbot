@@ -1,7 +1,6 @@
 import logging
 
 from config.constants import (
-    AMNEZIA_PROTOCOLS,
     AdminAuditAction,
     VLESS_PROTOCOL,
     XRAY_PROTOCOL,
@@ -17,18 +16,16 @@ from bot.keyboards import get_back_button
 from bot.states import AdminStates
 from config.enums import WhiteInternetStatus
 from database.models import (
-    APIOperation,
     VPNProfile,
     WhiteInternetSubscription,
 )
 from database.repositories.servers_repo import (
     get_server_by_api_url,
     get_server_by_id,
+    get_server_xray_api_url,
+    is_vless_capable_server,
+    is_white_internet_origin_server,
     update_server,
-)
-from services.amnezia_client import (
-    AmneziaClient,
-    cleanup_server_circuit_breakers,
 )
 from services.audit_service import AuditService
 from utils.admin import is_admin
@@ -479,50 +476,11 @@ async def process_edit_server_url(
 
         return
 
-    if server.protocol in AMNEZIA_PROTOCOLS:
-        client = AmneziaClient(new_url, server.api_key)
-
-        if not await client.healthcheck():
-            await render_hub(
-                message.bot,
-                message.chat.id,
-                texts.ERROR_SERVER_UNREACHABLE,
-                get_back_button("admin_servers"),
-                parse_mode="HTML",
-            )
-            await state.clear()
-            return
-
-        server_info = await client.get_server_info()
-
-        if not server_info:
-            await render_hub(
-                message.bot,
-                message.chat.id,
-                texts.ERROR_SERVER_API_INFO_FAILED,
-                get_back_button("admin_servers"),
-                parse_mode="HTML",
-            )
-            await state.clear()
-            return
-
-        if not any(p in AMNEZIA_PROTOCOLS for p in server_info.protocols):
-            await render_hub(
-                message.bot,
-                message.chat.id,
-                texts.ERROR_PROTOCOL_NOT_SUPPORTED.format(
-                    protocols=safe(
-                        ", ".join(server_info.protocols)
-                        if server_info.protocols
-                        else texts.LABEL_UNKNOWN_LOWER
-                    ),
-                ),
-                get_back_button("admin_servers"),
-                parse_mode="HTML",
-            )
-            await state.clear()
-            return
-    elif server.protocol in (XRAY_PROTOCOL, VLESS_PROTOCOL):
+    if (
+        is_vless_capable_server(server)
+        or is_white_internet_origin_server(server)
+        or server.protocol in (XRAY_PROTOCOL, VLESS_PROTOCOL)
+    ):
         from services.xray_node_client import XrayNodeClient
 
         is_healthy = False
@@ -550,6 +508,8 @@ async def process_edit_server_url(
             get_back_button("admin_servers"),
             parse_mode="HTML",
         )
+        await state.clear()
+        return
         await state.clear()
         return
 
@@ -611,14 +571,7 @@ async def process_edit_server_url(
             )
         ).scalar_one()
 
-        active_ops_count = (
-            await session.execute(
-                select(func.count(APIOperation.id)).where(
-                    APIOperation.server_id == server_id,
-                    APIOperation.status.in_(("pending", "processing", "retry")),
-                )
-            )
-        ).scalar_one()
+        active_ops_count = 0
 
         wl_subs_count = (
             await session.scalar(
@@ -633,7 +586,7 @@ async def process_edit_server_url(
             )
         ) or 0
 
-        if profiles_count > 0 or active_ops_count > 0 or wl_subs_count > 0:
+        if profiles_count > 0 or wl_subs_count > 0:
             await render_hub(
                 message.bot,
                 message.chat.id,
@@ -646,8 +599,6 @@ async def process_edit_server_url(
             )
             await state.clear()
             return
-
-    old_url = server.api_url
 
     update_kwargs = {"api_url": new_url}
     from urllib.parse import urlsplit
@@ -676,17 +627,10 @@ async def process_edit_server_url(
         if extra_changed:
             update_kwargs["extra_data"] = current_extra
 
-    if server.protocol in AMNEZIA_PROTOCOLS and server_info:
-        detected_proto = server_info.get_protocol()
-        if detected_proto and detected_proto != server.protocol:
-            update_kwargs["protocol"] = detected_proto
-
     await update_server(session, server, **update_kwargs)
 
     from services.slots_cache import invalidate_server_cache
     invalidate_server_cache(server_id)
-
-    cleanup_server_circuit_breakers(old_url)
 
     await AuditService.log_action(
         session,
@@ -821,59 +765,20 @@ async def process_edit_server_key(
         )
         return
 
-
-    if server.protocol in AMNEZIA_PROTOCOLS:
-        client = AmneziaClient(server.api_url, new_key)
-
-        if not await client.healthcheck():
-            await render_hub(
-                message.bot,
-                message.chat.id,
-                texts.ERROR_SERVER_UNREACHABLE,
-                get_back_button("admin_servers"),
-                parse_mode="HTML",
-            )
-            await state.clear()
-            return
-
-        server_info = await client.get_server_info()
-
-        if not server_info:
-            await render_hub(
-                message.bot,
-                message.chat.id,
-                texts.ERROR_SERVER_API_INFO_FAILED,
-                get_back_button("admin_servers"),
-                parse_mode="HTML",
-            )
-            await state.clear()
-            return
-
-        if not any(p in AMNEZIA_PROTOCOLS for p in server_info.protocols):
-            await render_hub(
-                message.bot,
-                message.chat.id,
-                texts.ERROR_PROTOCOL_NOT_SUPPORTED.format(
-                    protocols=safe(
-                        ", ".join(server_info.protocols)
-                        if server_info.protocols
-                        else texts.LABEL_UNKNOWN_LOWER
-                    ),
-                ),
-                get_back_button("admin_servers"),
-                parse_mode="HTML",
-            )
-            await state.clear()
-            return
-    elif server.protocol in (XRAY_PROTOCOL, VLESS_PROTOCOL):
+    if (
+        is_vless_capable_server(server)
+        or is_white_internet_origin_server(server)
+        or server.protocol in (XRAY_PROTOCOL, VLESS_PROTOCOL)
+    ):
         from services.xray_node_client import XrayNodeClient
 
         is_healthy = False
+        xray_url = get_server_xray_api_url(server) or server.api_url
         try:
             async with XrayNodeClient(timeout=5.0, max_retries=0) as xclient:
-                is_healthy, _node_epoch, _ = await xclient.check_health(server.api_url, new_key)
+                is_healthy, _node_epoch, _ = await xclient.check_health(xray_url, new_key)
         except Exception as e:
-            logger.warning("Xray health check failed for %s: %s", server.api_url, e)
+            logger.warning("Xray health check failed for %s: %s", xray_url, e)
             is_healthy = False
         if not is_healthy:
             await render_hub(
@@ -940,14 +845,7 @@ async def process_edit_server_key(
             )
         ).scalar_one()
 
-        active_ops_count = (
-            await session.execute(
-                select(func.count(APIOperation.id)).where(
-                    APIOperation.server_id == server_id,
-                    APIOperation.status.in_(("pending", "processing", "retry")),
-                )
-            )
-        ).scalar_one()
+        active_ops_count = 0
 
         wl_subs_count = (
             await session.scalar(
@@ -962,7 +860,7 @@ async def process_edit_server_key(
             )
         ) or 0
 
-        if profiles_count > 0 or active_ops_count > 0 or wl_subs_count > 0:
+        if profiles_count > 0 or wl_subs_count > 0:
             await render_hub(
                 message.bot,
                 message.chat.id,
@@ -977,11 +875,6 @@ async def process_edit_server_key(
             return
 
     update_kwargs = {"api_key": new_key}
-    if server.protocol in AMNEZIA_PROTOCOLS and server_info:
-        detected_proto = server_info.get_protocol()
-        if detected_proto and detected_proto != server.protocol:
-            update_kwargs["protocol"] = detected_proto
-
     await update_server(session, server, **update_kwargs)
 
     from services.slots_cache import invalidate_server_cache

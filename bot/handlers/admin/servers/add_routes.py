@@ -1,8 +1,9 @@
 import logging
 
 from config.constants import (
-    AMNEZIA_PROTOCOLS,
     AdminAuditAction,
+    VLESS_PROTOCOL,
+    XRAY_PROTOCOL,
 )
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
@@ -82,8 +83,8 @@ async def select_add_server_protocol(
     protocol = parts[1]
     filter_type = parts[2] if len(parts) > 2 else None
 
-    if protocol in AMNEZIA_PROTOCOLS:
-        await callback.answer(texts.ALERT_AMNEZIA_DECOMMISSIONED, show_alert=True)
+    if protocol not in (VLESS_PROTOCOL, XRAY_PROTOCOL):
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
     await callback.answer(show_alert=False)
@@ -432,12 +433,11 @@ async def process_add_server(
             await state.clear()
             return
 
-        # Любой другой протокол (в т.ч. AWG из старого сохранённого FSM) не поддерживается.
         await state.clear()
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.ALERT_AMNEZIA_DECOMMISSIONED,
+            texts.ERROR_INVALID_REQUEST,
             get_back_button(back_servers),
             parse_mode="HTML",
         )

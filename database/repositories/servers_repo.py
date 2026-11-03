@@ -27,23 +27,6 @@ CAPACITY_CONSUMING_STATUSES = (
 )
 
 
-def is_awg_capable_server(server) -> bool:
-    """Whether a server can serve AmneziaWG clients.
-
-    True if protocol is in AMNEZIA_PROTOCOLS, or 'awg'/'amnezia' capability is present.
-    """
-    if not server:
-        return False
-    caps = getattr(server, "capabilities", None) or []
-    if not isinstance(caps, (list, tuple, set)):
-        caps = []
-    raw_proto = getattr(server, "protocol", None)
-    if not isinstance(raw_proto, str) or not raw_proto.strip():
-        raw_proto = XRAY_PROTOCOL if XRAY_ORIGIN_CAPABILITY in caps else AMNEZIA_PROTOCOL
-    proto = raw_proto.strip().lower()
-    return proto in AMNEZIA_PROTOCOLS or any(c in ("awg", "amnezia") for c in caps)
-
-
 def is_vless_capable_server(server) -> bool:
     """Whether a server can serve direct VLESS TLS clients.
 
@@ -73,6 +56,29 @@ def is_white_internet_origin_server(server) -> bool:
     if XRAY_ORIGIN_CAPABILITY in caps:
         return True
     return proto == XRAY_PROTOCOL and not is_vless_capable_server(server)
+
+
+def is_awg_capable_server(server) -> bool:
+    """Whether a server can serve AmneziaWG clients.
+
+    Returns False if server is VLESS or White Internet Origin capable.
+    """
+    if not server:
+        return False
+    if is_vless_capable_server(server) or is_white_internet_origin_server(server):
+        return False
+    caps = getattr(server, "capabilities", None) or []
+    if not isinstance(caps, (list, tuple, set)):
+        caps = []
+    raw_proto = getattr(server, "protocol", None)
+    if not isinstance(raw_proto, str) or not raw_proto.strip():
+        if any(c in ("vless", "xray_vless", "xray_origin") for c in caps):
+            return False
+        return True
+    proto = raw_proto.strip().lower()
+    if proto in (VLESS_PROTOCOL, XRAY_PROTOCOL):
+        return False
+    return proto in AMNEZIA_PROTOCOLS or any(c in ("awg", "amnezia") for c in caps)
 
 
 def is_pure_vless_server(server) -> bool:

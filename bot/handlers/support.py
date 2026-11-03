@@ -172,18 +172,6 @@ async def show_help_split(callback: CallbackQuery):
     )
 
 
-@router.callback_query(
-    F.data.startswith("help_download")
-    | F.data.startswith("help_ios")
-    | F.data.startswith("help_windows")
-)
-async def decommissioned_amnezia_help(callback: CallbackQuery):
-    await callback.answer(
-        texts.ALERT_AMNEZIA_DECOMMISSIONED,
-        show_alert=True,
-    )
-
-
 @router.callback_query(F.data == "faq")
 async def show_faq(callback: CallbackQuery):
     await callback.answer(show_alert=False)

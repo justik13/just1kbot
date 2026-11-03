@@ -15,7 +15,6 @@ from config.enums import WhiteInternetProvisioningStatus
 from database.models import Server, Tariff, User, VlessSubscription, WhiteInternetSubscription
 from database.repositories import white_internet_repo
 from database.repositories.white_internet_repo import count_active_hwids
-from database.repositories.profiles_repo import get_user_profiles
 from database.repositories.tariffs_repo import get_tariff_by_id
 from database.repositories.users_repo import (
     get_user_by_telegram_id,
@@ -628,7 +627,7 @@ async def _render_user_card(
     back_callback: str = "admin_users",
 ):
     from database.repositories.account_ledger_repo import get_account_balance
-    profiles = await get_user_profiles(session, user.id)
+    profiles: list = []
 
     referrals_count = await get_user_referrals_count(
         session,
@@ -690,7 +689,7 @@ async def _show_user_card_edit(
     notice: str | None = None,
 ):
     from database.repositories.account_ledger_repo import get_account_balance
-    profiles = await get_user_profiles(session, user.id)
+    profiles: list = []
 
     referrals_count = await get_user_referrals_count(
         session,

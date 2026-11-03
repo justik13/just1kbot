@@ -4,9 +4,6 @@ import os
 import time
 from pathlib import Path
 
-from services.amnezia_client import _circuit_breakers
-from utils.logging_security import safe_url_target
-
 logger = logging.getLogger(__name__)
 
 PRODUCTION_HEARTBEAT_FILE = Path("/run/just1kbot/heartbeat")
@@ -44,7 +41,6 @@ async def heartbeat_loop(
                 pass
             if health_check():
                 _write_heartbeat()
-            await _check_circuit_breakers()
         except asyncio.CancelledError:
             logger.info("Heartbeat worker cancelled")
             break
@@ -59,19 +55,6 @@ async def heartbeat_loop(
     if health_check():
         _write_heartbeat(final=True)
     logger.info("Heartbeat worker stopped gracefully")
-
-
-async def _check_circuit_breakers():
-    for api_url, cb in list(_circuit_breakers.items()):
-        safe_target = safe_url_target(api_url)
-        if cb.is_open:
-            logger.warning(
-                "CircuitBreaker OPEN for server endpoint '%s' (recovery_timeout=%.0fs).",
-                safe_target,
-                cb.recovery_timeout,
-            )
-        else:
-            logger.debug("CircuitBreaker CLOSED / healthy for server endpoint '%s'", safe_target)
 
 
 def _write_heartbeat(final: bool = False):

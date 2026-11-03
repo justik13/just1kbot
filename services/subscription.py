@@ -12,20 +12,15 @@ from config.constants import (
     VPN_ACCESS_GRACE_HOURS,
 )
 from database.models import User
-from database.repositories.profiles_repo import (
-    get_user_profiles,
-)
 from database.repositories.tariffs_repo import get_tariff_by_id
 from database.repositories.users_repo import (
     create_user,
     get_user_by_telegram_id,
     get_user_by_telegram_id_any,
 )
-from services.api_operations_queue import enqueue_api_operation
 from services.user_cache import invalidate_user_cache
 from utils.datetime_helpers import (
     is_expired,
-    is_permanent_subscription,
     is_vpn_access_expired,
     now_utc,
 )
@@ -442,67 +437,6 @@ class SubscriptionService:
 
     @staticmethod
     async def _sync_access_state(session: AsyncSession, user: User) -> None:
-        target_active = bool(
-            user.subscription_end
-            and not is_vpn_access_expired(user.subscription_end, grace_hours=VPN_ACCESS_GRACE_HOURS)
-            and not user.is_banned
-            and not user.financial_hold
-            and not user.is_deleted
-        )
-        profiles = await get_user_profiles(session, user.id)
-        for profile in profiles:
-            if profile.provisioning_status in {
-                "deleting",
-                "create_failed",
-                "delete_failed",
-                "create_cleanup_pending",
-            }:
-                continue
-            was_pending_create = profile.provisioning_status == "pending_create"
-            profile.desired_version += 1
-            profile.desired_is_active = target_active
-            profile.desired_expires_at = (
-                user.subscription_end if target_active else None
-            )
-            profile.is_active = target_active
-            profile.provisioning_status = (
-                "pending_create" if was_pending_create else "pending_update"
-            )
-            if was_pending_create:
-                continue
-            permanent = bool(
-                target_active
-                and user.subscription_end
-                and is_permanent_subscription(user.subscription_end)
-            )
-            expires_at = (
-                int(user.subscription_end.timestamp())
-                if target_active and user.subscription_end and not permanent
-                else None
-            )
-            server = profile.server
-            if not server or not getattr(server, "is_active", True):
-                continue
-            await enqueue_api_operation(
-                session,
-                operation_type="update_peer",
-                idempotency_key=f"update-peer:{profile.id}:v{profile.desired_version}",
-                server_id=profile.server_id,
-                profile_id=profile.id,
-                peer_id=profile.peer_id,
-                server_name_snapshot=server.name if server else None,
-                api_url_snapshot=server.api_url if server else None,
-                api_key_snapshot=server.api_key if server else None,
-                client_name=profile.client_name,
-                payload={
-                    "desired_version": profile.desired_version,
-                    "status": "active" if target_active else "disabled",
-                    "expires_at": expires_at,
-                    "clear_expires_at": target_active and expires_at is None,
-                    "protocol": server.protocol if server else None,
-                },
-            )
-
         from database.repositories import vless_subscription_repo
         from services.vless_subscription_service import VlessSubscriptionService
 
