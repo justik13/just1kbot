@@ -9,9 +9,8 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 import os
-from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -416,42 +415,6 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertIn("not leased", str(ctx.exception))
 
-    async def test_45_postgres_rename_device_process_with_for_update(self):
-        """Rename device uses row-level lock and updates device_name atomically on PostgreSQL."""
-        from bot.handlers.connection.device_rename_routes import rename_device_process
-
-        async with self.sessions.begin() as s:
-            prof = VPNProfile(
-                user_id=self.uid,
-                server_id=self.sid,
-                device_name="Old Device #1",
-                client_name="tg_rename_test",
-                provisioning_status="active",
-            )
-            s.add(prof)
-            await s.flush()
-            prof_id = prof.id
-
-        message = MagicMock()
-        message.bot = MagicMock()
-        message.chat.id = 987654
-        message.from_user.id = 987654
-        message.text = "New Device Name"
-        state = AsyncMock()
-        state.get_data = AsyncMock(return_value={"profile_id": prof_id})
-        db_user = SimpleNamespace(id=self.uid, telegram_id=987654)
-
-        async with self.sessions.begin() as session:
-            with (
-                patch("bot.handlers.connection.device_rename_routes.SubscriptionService.check_access", new=AsyncMock(return_value=True)),
-                patch("bot.handlers.connection.device_rename_routes.render_device_screen", new=AsyncMock()) as mock_hub,
-            ):
-                await rename_device_process(message, state, session, db_user=db_user)
-                self.assertTrue(mock_hub.called)
-
-        async with self.sessions() as s:
-            updated = await s.get(VPNProfile, prof_id)
-            self.assertEqual(updated.device_name, "New Device Name #1")
 
     async def test_46_profile_deletion_no_deadlock_with_finalizer(self):
         """ProfileDeletionService._delete_profiles does not deadlock with finalizer locking on PostgreSQL."""
@@ -623,54 +586,6 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             prof_after = await s.get(VPNProfile, prof_id)
             self.assertEqual(prof_after.provisioning_status, "deleting")
 
-    async def test_50_rename_device_process_rejects_duplicate_with_deleting_profile(self):
-        """rename_device_process rejects rename when a deleting profile holds the same target name."""
-        from bot.handlers.connection.device_rename_routes import rename_device_process
-        from database.models import VPNProfile
-
-        async with self.sessions.begin() as s:
-            # Existing deleting profile
-            prof_deleting = VPNProfile(
-                user_id=self.uid,
-                server_id=self.sid,
-                device_name="Phone #1",
-                client_name="tg_del_1",
-                provisioning_status="deleting",
-            )
-            # Profile to rename
-            prof_active = VPNProfile(
-                user_id=self.uid,
-                server_id=self.sid,
-                device_name="Laptop #1",
-                client_name="tg_act_1",
-                provisioning_status="active",
-            )
-            s.add_all([prof_deleting, prof_active])
-            await s.flush()
-            active_id = prof_active.id
-
-        message = MagicMock()
-        message.bot = MagicMock()
-        message.chat.id = 987654
-        message.from_user.id = 987654
-        message.text = "Phone"
-        state = AsyncMock()
-        state.get_data = AsyncMock(return_value={"profile_id": active_id})
-        db_user = SimpleNamespace(id=self.uid, telegram_id=987654)
-
-        async with self.sessions.begin() as session:
-            with (
-                patch("bot.handlers.connection.device_rename_routes.SubscriptionService.check_access", new=AsyncMock(return_value=True)),
-                patch("bot.handlers.connection.device_rename_routes.render_hub", new=AsyncMock()) as mock_hub,
-            ):
-                await rename_device_process(message, state, session, db_user=db_user)
-                self.assertTrue(mock_hub.called)
-                text_arg = mock_hub.call_args.args[2]
-                self.assertIn("уже существует", text_arg)
-
-        async with self.sessions() as s:
-            unchanged = await s.get(VPNProfile, active_id)
-            self.assertEqual(unchanged.device_name, "Laptop #1")
 
     async def test_62_postgres_claim_exhausted_sync_vs_finalizer_deadlock(self):
         """Prove that claim_api_operations terminal sync and finalizer lock in same order without deadlock."""

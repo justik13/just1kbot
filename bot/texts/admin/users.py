@@ -16,8 +16,6 @@ ADMIN_BTN_BACK_TO_CARD = "← К карточке"
 ADMIN_BTN_BACK_TO_SUB = "← К подписке"
 ADMIN_USER_TRAFFIC_MONTHLY_BREAKDOWN = (
     "\n• <b>Стандартный доступ (за месяц):</b> {monthly_std}"
-    "\n   ├ AWG: {monthly_awg}"
-    "\n   └ VLESS: {monthly_vless}"
     "\n• <b>Белый Интернет (за месяц):</b> {monthly_wi}"
 )
 
@@ -658,7 +656,16 @@ ADMIN_VLESS_DEVICE_STATUS_INACTIVE = "неактивно (VLESS)"
 ADMIN_BTN_VLESS_COPY_LINK = "📋 Ссылка VLESS"
 ADMIN_BTN_VLESS_HWID_RESET = "🔄 Сбросить VLESS HWID"
 ADMIN_BTN_VLESS_TOKEN_ROTATE = "🔄 Перевыпустить ссылку VLESS"
+ADMIN_VLESS_HWID_RESET_CONFIRM_TITLE = """🔄 <b>Сброс привязок устройств (HWID)</b>
+
+Вы уверены, что хотите сбросить все привязанные устройства пользователя <code>{telegram_id}</code>?
+<i>Пользователь сможет подключиться с новых устройств без ожидания кулдауна.</i>"""
+ADMIN_VLESS_TOKEN_ROTATE_CONFIRM_TITLE = """🔗 <b>Перевыпуск ссылки подписки (VLESS)</b>
+
+Вы уверены, что хотите перевыпустить ссылку подписки пользователя <code>{telegram_id}</code>?
+
+⚠️ <i>Старая ссылка перестанет работать немедленно. Привязки устройств (HWID) будут сброшены, а текущие соединения разорваны. Пользователю потребуется заново вставить ссылку в приложении INCY / Happ.</i>"""
 ADMIN_ALERT_VLESS_HWID_RESET_SUCCESS = "✅ Привязки HWID VLESS успешно сброшены"
 ADMIN_ALERT_VLESS_TOKEN_ROTATE_SUCCESS = "✅ Ссылка VLESS перевыпущена. Старая ссылка аннулирована"
-ADMIN_BTN_SUB_STANDARD = "⚡️ Стандартная (VLESS/AWG)"
+ADMIN_BTN_SUB_STANDARD = "⚡️ Стандартная (VLESS)"
 ADMIN_SUB_STATUS_VLESS_INFO = "\n\n🌐 <b>VLESS (INCY):</b> {vless_count} устр.\n<code>{vless_sub_url}</code>"

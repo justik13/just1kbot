@@ -237,6 +237,8 @@ DASHBOARD_USERS_I_SUBSCRIPTION = """📊 <b>Пользователи и Подп
 
 DASHBOARD_VPN_SERVERS_I_POOL_IP = """🖥 <b>Серверы и Пул IP:</b>
 """
+ADMIN_DASHBOARD_SERVERS_SECTION = """🖥 <b>Серверы:</b>
+"""
 
 DASHBOARD_VVOD_SSYLKI_MTPROTO_PROXY = """🚀 <b>Ввод ссылки MTProto Proxy:</b>
 
@@ -318,7 +320,7 @@ BTN_WI_TARIFFS = "📋 Тарифы Белого Интернета"
 ADMIN_DASHBOARD_SECTION_STD_SUB = """{header}💎 <b>Стандартная подписка:</b>
 
 Управление стандартными подключениями:
-• Серверы AmneziaWG + VLESS TLS
+• Серверы VLESS TLS
 • Общее оформление подписки INCY
 • Тарифы подписки
 

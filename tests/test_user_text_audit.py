@@ -24,15 +24,19 @@ FORBIDDEN_USER_WORDING = (
     "белый список",
     "белые списки",
     "белых списков",
+    "amnezia",
+    "amneziawg",
+    "amneziavpn",
+    "defaultvpn",
 )
 
 
 def _effective_user_text_values() -> list[str]:
-    from bot.texts import connection, payment, user
+    from bot.texts import common, connection, payment, user
     from bot.texts.runtime import notifications
 
     values: list[str] = []
-    for mod in (user, connection, payment, notifications):
+    for mod in (user, connection, payment, notifications, common):
         for name in dir(mod):
             if name.isupper() and not name.startswith("_"):
                 value = getattr(mod, name)
@@ -49,25 +53,22 @@ class TestUserTextAudit(unittest.TestCase):
 
     def test_generic_vpn_wording_is_not_used_in_user_facing_texts(self):
         effective_text = "\n".join(_effective_user_text_values())
-        clean_text = effective_text.replace(".vpn", "").replace("vpn://", "")
-        assert re.search(r"(?<![A-Za-zА-Яа-я])VPN(?![A-Za-zА-Яа-я])", clean_text) is None
-        assert "ВПН" not in effective_text.upper()
+        assert re.search(r"vpn", effective_text, re.IGNORECASE) is None
+        assert "впн" not in effective_text.casefold()
 
     def test_protocol_terms_are_not_exposed_to_users(self):
         effective_text = "\n".join(_effective_user_text_values())
         clean_text = re.sub(r"\{[a-zA-Z0-9_]+\}", "", effective_text).lower()
         assert "vless" not in clean_text
         assert "wireguard" not in clean_text
+        assert "amnezia" not in clean_text
+        assert "amneziawg" not in clean_text
+        assert re.search(r"\bawg\b", clean_text) is None
 
     def test_technical_connection_identifiers_are_preserved(self):
         faq = texts.FAQ_TEXT
-        assert "AmneziaVPN" in faq
-        assert "AmneziaWG" in faq
-        assert "DefaultVPN" in faq
         assert "INCY" in faq
-        assert "vpn://" in faq
-        assert ".vpn" in faq
-        assert ".conf" in faq
+        assert "Happ" in faq
 
     def test_referral_texts_do_not_keep_removed_profile_screens(self):
         assert "PROFILE_TEXT_ACTIVE_REFERRAL_BALANCE" not in dir(REFERRAL_TEXTS)

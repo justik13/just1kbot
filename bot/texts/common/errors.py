@@ -87,11 +87,11 @@ ERROR_POSITIVE_NUMBER = "⚠️ Введите положительное чис
 
 ERROR_PROFILE_NOT_FOUND = "❌ Профиль не найден"
 
-ERROR_PROTOCOL_NOT_SUPPORTED = """⚠️ <b>Протокол amneziawg2 не поддерживается!</b>
+ERROR_PROTOCOL_NOT_SUPPORTED = """⚠️ <b>Протокол сервера не поддерживается!</b>
 
 Доступные протоколы на сервере: <code>{protocols}</code>
 
-Этот бот работает только с протоколом <b>amneziawg2</b>."""
+Требуется совместимый протокол."""
 
 ERROR_SERVER_API_INFO_FAILED = """❌ <b>Ошибка подключения к API!</b>
 

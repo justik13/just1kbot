@@ -26,11 +26,6 @@ def get_device_keyboard(
             callback_data=f"alt_connection:{profile_id}",
         )
         adjustments.append(1)
-        builder.button(
-            text=texts.BTN_CHANGE_SERVER,
-            callback_data=f"migrate_device:{profile_id}",
-        )
-        adjustments.append(1)
 
     if show_delete:
         builder.button(
@@ -41,8 +36,8 @@ def get_device_keyboard(
         adjustments.append(1)
 
     builder.button(
-        text=texts.BTN_BACK_TO_DEVICES,
-        callback_data="back_to_amnezia_devices",
+        text=texts.BTN_BACK_TO_CONNECTION,
+        callback_data="back_to_connections",
     )
     builder.button(
         text=texts.BTN_MAIN_MENU_NAV,

@@ -739,54 +739,6 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
             mock_ensure.assert_not_called()
 
 
-    async def test_rename_device_canonical_lock_order_and_archive_update(self):
-        """Device rename acquires User FOR UPDATE before VPNProfile FOR UPDATE and updates archive."""
-        from aiogram.fsm.context import FSMContext
-        from bot.handlers.connection.device_rename_routes import rename_device_process
-
-        mock_session = AsyncMock()
-        mock_session.begin_nested = None
-        mock_user = User(
-            id=10,
-            telegram_id=123456,
-            archived_device_traffic={"Phone #1": 500},
-        )
-        mock_profile = VPNProfile(
-            id=5,
-            user_id=10,
-            device_name="Phone #1",
-            provisioning_status="active",
-        )
-        mock_session.get.return_value = mock_user
-
-        mock_res = MagicMock()
-        mock_res.scalar_one_or_none.return_value = mock_profile
-        mock_session.execute.return_value = mock_res
-
-        message = MagicMock()
-        message.from_user.id = 123456
-        message.chat.id = 123456
-        message.text = "Work Phone"
-        message.bot = AsyncMock()
-
-        state = AsyncMock(spec=FSMContext)
-        state.get_data.return_value = {"profile_id": 5}
-
-        with patch("bot.handlers.connection.device_rename_routes.SubscriptionService.check_access", return_value=True), \
-             patch("services.device_service.DeviceService.has_active_migration", return_value=False), \
-             patch("bot.handlers.connection.device_rename_routes.get_user_profiles", return_value=[]), \
-             patch("bot.handlers.connection.device_rename_routes.update_profile", new_callable=AsyncMock), \
-             patch("bot.handlers.connection.device_rename_routes.render_hub", new_callable=AsyncMock), \
-             patch("bot.handlers.connection.device_rename_routes.render_device_screen", new_callable=AsyncMock), \
-             patch("services.audit_service.AuditService.log_action", new_callable=AsyncMock):
-            await rename_device_process(message, state, mock_session, db_user=mock_user)
-
-        # 1. User was locked first via session.get with for_update
-        mock_session.get.assert_awaited_once_with(User, 10, with_for_update=True)
-        # 2. Archive was updated on user_obj with slot key
-        self.assertIsNotNone(mock_user.archived_device_traffic)
-        self.assertIn("slot_1", mock_user.archived_device_traffic)
-        self.assertEqual(mock_user.archived_device_traffic["slot_1"], 500)
 
     async def test_white_internet_worker_locks_user_before_deduction(self):
         """White Internet traffic worker acquires User lock before deducting to eliminate deadlock."""
@@ -1159,8 +1111,6 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("<b>Трафик туннелей:</b> 20.0 GiB", card_text)
         self.assertIn("• <b>Стандартный доступ (за месяц):</b> 13.0 GiB", card_text)
-        self.assertIn("├ AWG: 10.0 GiB", card_text)
-        self.assertIn("└ VLESS: 3.0 GiB", card_text)
         self.assertIn("• <b>Белый Интернет (за месяц):</b> 2.0 GiB", card_text)
 
     def test_format_user_card_resets_monthly_traffic_on_cycle_rotation(self):
@@ -1190,8 +1140,6 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("<b>Трафик туннелей:</b> 13.0 GiB", card_text)
         self.assertIn("• <b>Стандартный доступ (за месяц):</b> 0 B", card_text)
-        self.assertIn("├ AWG: 0 B", card_text)
-        self.assertIn("└ VLESS: 0 B", card_text)
         self.assertIn("• <b>Белый Интернет (за месяц):</b> 0 B", card_text)
 
     async def test_record_vless_traffic_atomic_multi_server_isolation(self):

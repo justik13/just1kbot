@@ -27,7 +27,7 @@ from sqlalchemy.orm import (
     relationship,
 )
 
-from config.constants import AMNEZIA_PROTOCOL
+from config.constants import VLESS_PROTOCOL
 from config.enums import (
     AccountLedgerEntryType,
     ApiOperationStatus,
@@ -322,7 +322,7 @@ class Server(Base):
     api_key: Mapped[str] = mapped_column(EncryptedString(critical=True), nullable=False)
 
     protocol: Mapped[str] = mapped_column(
-        String(50), nullable=False, default=AMNEZIA_PROTOCOL, server_default=AMNEZIA_PROTOCOL
+        String(50), nullable=False, default=VLESS_PROTOCOL, server_default=VLESS_PROTOCOL
     )
     max_clients: Mapped[int] = mapped_column(Integer, default=50)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

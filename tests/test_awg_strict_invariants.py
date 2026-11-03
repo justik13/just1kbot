@@ -222,11 +222,11 @@ class AWGStrictInvariantsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(call_kwargs["payload"]["protocol"], "amneziawg3.1")
 
     def test_protocol_display_maps_all_amnezia_protocols(self):
-        """Invariant: _format_protocol displays 'AmneziaWG' for all supported AMNEZIA_PROTOCOLS."""
+        """Invariant: _format_protocol displays neutral label for all supported AMNEZIA_PROTOCOLS."""
         from bot.handlers.connection.common import _format_protocol
 
         for proto in AMNEZIA_PROTOCOLS:
-            self.assertEqual(_format_protocol(proto), "AmneziaWG")
+            self.assertEqual(_format_protocol(proto), "Архивное подключение")
 
     def test_is_vless_capable_server_protocol_and_capabilities(self):
         """Invariant: pure AWG nodes are excluded from VLESS, while dual AWG+VLESS nodes are supported."""

@@ -76,187 +76,23 @@ async def hub_menu_support(
     )
 
 
-def _extract_device_id(data: str) -> int | None:
-    if ":" in data and "device_" in data:
-        parts = data.split(":")
-        for p in parts:
-            if p.startswith("device_") and p.replace("device_", "").isdigit():
-                return int(p.replace("device_", ""))
-    return None
-
-
 @router.callback_query(F.data.startswith("support_help"))
 async def show_support_help(callback: CallbackQuery):
     await callback.answer(show_alert=False)
-    device_id = _extract_device_id(callback.data)
-    suffix = f":device_{device_id}" if device_id else ""
-
     text = texts.SUPPORT_HELP_ROOT_TEXT
 
     builder = InlineKeyboardBuilder()
     builder.button(
         text=texts.BTN_INSTRUCTION_INCY,
-        callback_data=f"help_incy{suffix}",
-    )
-    builder.button(
-        text=texts.BTN_DOWNLOAD_AMNEZIA,
-        callback_data=f"help_download{suffix}",
-    )
-    builder.button(
-        text=texts.BTN_INSTRUCTION_IOS,
-        callback_data=f"help_ios{suffix}",
-    )
-    builder.button(
-        text=texts.BTN_INSTRUCTION_WINDOWS,
-        callback_data=f"help_windows{suffix}",
+        callback_data="help_incy",
     )
     builder.button(
         text=texts.BTN_SPLIT_TUNNELING,
-        callback_data=f"help_split{suffix}",
-    )
-    builder.button(
-        text=texts.BTN_AMNEZIA_DOCS,
-        url=texts.AMNEZIA_DOCS,
+        callback_data="help_split",
     )
     builder.button(
         text=texts.BTN_BACK,
-        callback_data=f"manage_device:{device_id}" if device_id else "menu_support",
-    )
-    builder.button(
-        text=texts.BTN_MAIN_MENU_NAV,
-        callback_data="back_to_main_menu",
-    )
-    builder.adjust(1, 1, 1, 1, 1, 1, 2)
-
-    await render_hub(
-        callback.bot,
-        callback.message.chat.id,
-        text,
-        builder.as_markup(),
-    )
-
-
-@router.callback_query(F.data.startswith("help_incy"))
-async def show_help_incy(callback: CallbackQuery):
-    await callback.answer(show_alert=False)
-    device_id = _extract_device_id(callback.data)
-    back_cb = f"support_help:device_{device_id}" if device_id else "support_help"
-
-    text = texts.SUPPORT_INCY_INSTRUCTION_TEXT
-
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text=texts.BTN_WHITE_INTERNET,
-        callback_data="white_internet",
-    )
-    builder.button(
-        text=texts.BTN_BACK,
-        callback_data=back_cb,
-    )
-    builder.button(
-        text=texts.BTN_MAIN_MENU_NAV,
-        callback_data="back_to_main_menu",
-    )
-    builder.adjust(1, 2)
-
-    await render_hub(
-        callback.bot,
-        callback.message.chat.id,
-        text,
-        builder.as_markup(),
-    )
-
-
-@router.callback_query(F.data.startswith("help_download"))
-async def show_help_download(callback: CallbackQuery):
-    await callback.answer(show_alert=False)
-    device_id = _extract_device_id(callback.data)
-    back_cb = f"support_help:device_{device_id}" if device_id else "support_help"
-
-    text = texts.SUPPORT_DOWNLOAD_CLIENT_TEXT
-
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text=texts.BTN_DOWNLOAD_MIRROR,
-        url=texts.AMNEZIA_DOWNLOAD_MIRROR,
-    )
-    builder.button(
-        text=texts.BTN_LATEST_VERSION_GITHUB,
-        url=texts.AMNEZIA_GITHUB_LATEST,
-    )
-    builder.button(
-        text=texts.BTN_OFFICIAL_SITE_AMNEZIA,
-        url=texts.AMNEZIA_OFFICIAL_SITE,
-    )
-    builder.button(
-        text=texts.BTN_BACK,
-        callback_data=back_cb,
-    )
-    builder.button(
-        text=texts.BTN_MAIN_MENU_NAV,
-        callback_data="back_to_main_menu",
-    )
-    builder.adjust(1, 1, 1, 2)
-
-    await render_hub(
-        callback.bot,
-        callback.message.chat.id,
-        text,
-        builder.as_markup(),
-    )
-
-
-@router.callback_query(F.data.startswith("help_ios"))
-async def show_help_ios(callback: CallbackQuery):
-    await callback.answer(show_alert=False)
-    device_id = _extract_device_id(callback.data)
-    back_cb = f"support_help:device_{device_id}" if device_id else "support_help"
-
-    text = texts.SUPPORT_IOS_INSTRUCTION_TEXT
-
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text=texts.BTN_OPEN_IOS_INSTRUCTION,
-        url=texts.AMNEZIA_IOS_RU,
-    )
-    builder.button(
-        text=texts.BTN_BACK,
-        callback_data=back_cb,
-    )
-    builder.button(
-        text=texts.BTN_MAIN_MENU_NAV,
-        callback_data="back_to_main_menu",
-    )
-    builder.adjust(1, 2)
-
-    await render_hub(
-        callback.bot,
-        callback.message.chat.id,
-        text,
-        builder.as_markup(),
-    )
-
-
-@router.callback_query(F.data.startswith("help_windows"))
-async def show_help_windows(callback: CallbackQuery):
-    await callback.answer(show_alert=False)
-    device_id = _extract_device_id(callback.data)
-    back_cb = f"support_help:device_{device_id}" if device_id else "support_help"
-
-    text = texts.SUPPORT_WINDOWS_INSTRUCTION_TEXT
-
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text=texts.BTN_INSTALL_WINDOWS,
-        url=texts.AMNEZIA_WIN_INSTALL,
-    )
-    builder.button(
-        text=texts.BTN_UPDATE_WINDOWS,
-        url=texts.AMNEZIA_WIN_UPDATE,
-    )
-    builder.button(
-        text=texts.BTN_BACK,
-        callback_data=back_cb,
+        callback_data="menu_support",
     )
     builder.button(
         text=texts.BTN_MAIN_MENU_NAV,
@@ -272,34 +108,79 @@ async def show_help_windows(callback: CallbackQuery):
     )
 
 
-@router.callback_query(F.data.startswith("help_split"))
-async def show_help_split(callback: CallbackQuery):
+@router.callback_query(F.data.startswith("help_incy"))
+async def show_help_incy(callback: CallbackQuery):
     await callback.answer(show_alert=False)
-    device_id = _extract_device_id(callback.data)
-    back_cb = f"support_help:device_{device_id}" if device_id else "support_help"
-
-    text = texts.SUPPORT_SPLIT_TUNNELING_TEXT
+    text = texts.SUPPORT_INCY_INSTRUCTION_TEXT
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=texts.BTN_OPEN_SPLIT_TUNNEL_INSTRUCTION,
-        url=texts.AMNEZIA_SPLIT_TUNNELING,
+        text=texts.BTN_CONNECTIONS,
+        callback_data="menu_connections",
+    )
+    builder.button(
+        text=texts.BTN_WHITE_INTERNET,
+        callback_data="white_internet",
     )
     builder.button(
         text=texts.BTN_BACK,
-        callback_data=back_cb,
+        callback_data="support_help",
     )
     builder.button(
         text=texts.BTN_MAIN_MENU_NAV,
         callback_data="back_to_main_menu",
     )
-    builder.adjust(1, 2)
+    builder.adjust(2, 2)
 
     await render_hub(
         callback.bot,
         callback.message.chat.id,
         text,
         builder.as_markup(),
+    )
+
+
+@router.callback_query(F.data.startswith("help_split"))
+async def show_help_split(callback: CallbackQuery):
+    await callback.answer(show_alert=False)
+    text = texts.SUPPORT_SPLIT_TUNNELING_TEXT
+
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=texts.BTN_CONNECTIONS,
+        callback_data="menu_connections",
+    )
+    builder.button(
+        text=texts.BTN_WHITE_INTERNET,
+        callback_data="white_internet",
+    )
+    builder.button(
+        text=texts.BTN_BACK,
+        callback_data="support_help",
+    )
+    builder.button(
+        text=texts.BTN_MAIN_MENU_NAV,
+        callback_data="back_to_main_menu",
+    )
+    builder.adjust(2, 2)
+
+    await render_hub(
+        callback.bot,
+        callback.message.chat.id,
+        text,
+        builder.as_markup(),
+    )
+
+
+@router.callback_query(
+    F.data.startswith("help_download")
+    | F.data.startswith("help_ios")
+    | F.data.startswith("help_windows")
+)
+async def decommissioned_amnezia_help(callback: CallbackQuery):
+    await callback.answer(
+        texts.ALERT_AMNEZIA_DECOMMISSIONED,
+        show_alert=True,
     )
 
 

@@ -13,7 +13,6 @@ from bot.keyboards.admin.users import (
     get_admin_confirm_action_keyboard,
 )
 from bot.middlewares.user_context import invalidate_user_cache
-from database.repositories.profiles_repo import get_user_profiles_count
 from database.repositories.tariffs_repo import get_tariff_by_id
 from services.audit_service import AuditService
 from services.subscription import SubscriptionService
@@ -70,9 +69,8 @@ async def admin_sub_change_tariff(
     groups = await _get_tariff_groups(session)
 
     from database.repositories import vless_subscription_repo
-    profiles_count = await get_user_profiles_count(session, user.id)
     vless_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
-    total_devices = profiles_count + vless_count
+    total_devices = vless_count
 
     current_tariff_name = texts.PLACEHOLDER_DASH
 
@@ -163,9 +161,8 @@ async def admin_sub_select_group(
     new_tariff = _get_representative_tariff(tariffs)
 
     from database.repositories import vless_subscription_repo
-    profiles_count = await get_user_profiles_count(session, user.id)
     vless_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
-    total_devices = profiles_count + vless_count
+    total_devices = vless_count
 
     new_limit = new_tariff.device_limit
 
@@ -325,9 +322,8 @@ async def admin_sub_apply_tariff(
             return
 
         from database.repositories import vless_subscription_repo
-        profiles_count = await get_user_profiles_count(session, user.id)
         vless_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
-        total_devices = profiles_count + vless_count
+        total_devices = vless_count
 
         if total_devices > new_tariff.device_limit:
             text = texts.ADMIN_SUB_DOWNGRADE_BLOCKED.format(

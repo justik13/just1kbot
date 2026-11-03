@@ -4,7 +4,7 @@ from __future__ import annotations
 
 BTN_WL_BUY_ACCESS = "🚀 Оформить доступ ({price} ₽ / {days} дней)"
 BTN_WL_ACTIVATE_TRIAL = "🎁 Активировать бесплатно (3 дня / 5 ГБ)"
-BTN_WL_CONNECT_CLIENT = "📱 Подключить в приложении"
+BTN_WL_CONNECT_CLIENT = "Подключить"
 BTN_WL_INCY_INSTRUCTIONS = "📱 Инструкция по подключению"
 BTN_WL_REFRESH_STATUS = "🔄 Обновить статус"
 BTN_WL_TOPUP = "➕ Докупить трафик"
@@ -79,7 +79,8 @@ WL_OVERVIEW_ACTIVE = (
 WL_OVERVIEW_SUB_URL_BLOCK = (
     "\n\n📋 <b>Ваша ссылка на подписку:</b>\n"
     "<code>{sub_url}</code>\n"
-    "<i>(нажмите на ссылку для копирования)</i>"
+    "<i>(нажмите на ссылку для копирования)</i>\n\n"
+    "💡 <i>Одна ссылка для всех ваших устройств в рамках тарифа.</i>"
 )
 
 WL_TOPUP_MENU_TEXT = (
@@ -93,24 +94,25 @@ WL_ALERT_TRAFFIC_UP_TO_DATE = "Данные о трафике актуальны
 WL_ALERT_TRAFFIC_UPDATED = "Данные о трафике обновлены."
 
 WL_INCY_INSTRUCTIONS_TEXT = (
-    "📱 <b>Подключение Белого Интернета (INCY / Happ)</b>\n\n"
+    "📱 <b>Подключение Белого Интернета (Happ / INCY)</b>\n\n"
+    "Одна ссылка дает доступ сразу на всех ваших устройствах в рамках тарифа.\n\n"
     "1️⃣ <b>Установите приложение:</b>\n"
+    "   <b>Happ (Рекомендуется для ПК):</b>\n"
+    "   💻 <a href=\"https://github.com/Happ-proxy/happ-desktop/releases\">Для ПК / Windows (GitHub)</a> — <i>рекомендуется для компьютеров</i>\n"
+    "   🍏 <a href=\"https://testflight.apple.com/join/XMls6Ckd\">TestFlight (iOS РФ)</a> | <a href=\"https://apps.apple.com/app/happ-proxy-utility/id6504287215\">App Store</a>\n"
+    "   📦 <a href=\"https://github.com/Happ-proxy/happ-android/releases\">APK для Android (GitHub)</a>\n\n"
     "   <b>INCY:</b>\n"
-    "   🍏 <a href=\"https://apps.apple.com/app/incy/id6756943388\">App Store (iPhone / iPad)</a>\n"
+    "   🍏 <a href=\"https://testflight.apple.com/join/dFw66h3a\">TestFlight (iOS РФ)</a> | <a href=\"https://apps.apple.com/app/incy/id6756943388\">App Store</a>\n"
     "   🤖 <a href=\"https://play.google.com/store/apps/details?id=llc.itdev.incy\">Google Play (Android)</a>\n"
     "   💻 / 📦 <a href=\"https://github.com/INCY-DEV/incy-platforms/releases\">Для ПК / APK (GitHub)</a>\n\n"
-    "   <b>Happ:</b>\n"
-    "   🍏 <a href=\"https://apps.apple.com/app/happ-proxy-utility/id6504287215\">App Store (iPhone / iPad)</a>\n"
-    "   🤖 <a href=\"https://play.google.com/store/apps/details?id=com.happproxy\">Google Play (Android)</a>\n"
-    "   📦 <a href=\"https://github.com/Happ-proxy/happ-android/releases\">APK для Android (GitHub)</a>\n"
-    "   💻 <a href=\"https://github.com/Happ-proxy/happ-desktop/releases\">Для ПК (GitHub)</a>\n\n"
     "2️⃣ <b>Скопируйте вашу ссылку подписки:</b>\n"
     "<code>{url}</code>\n"
-    "<i>(нажмите на ссылку выше для копирования)</i>\n\n"
+    "<i>(нажмите на ссылку для копирования)</i>\n\n"
     "3️⃣ <b>Добавьте подписку:</b>\n"
-    "   • Откройте приложение (<b>INCY</b> или <b>Happ</b>)\n"
-    "   • Вставьте скопированную ссылку подписки и сохраните\n"
-    "   • Нажмите кнопку подключения!"
+    "   • Откройте приложение (<b>Happ</b> или <b>INCY</b>)\n"
+    "   • Вставьте скопированную ссылку подписки через «+» и включите связь\n"
+    "   <i>(при первом запуске подтвердите системный запрос на подключение)</i>\n\n"
+    "💡 <i>Первое подключение к шлюзу может занять 1–2 секунды на согласование связи.</i>"
 )
 
 WL_SHOW_LINK_TEXT = WL_INCY_INSTRUCTIONS_TEXT
@@ -218,7 +220,7 @@ WL_TRAFFIC_EXHAUSTED_TRIAL_ALERT = (
 WL_TRAFFIC_90P_ALERT = (
     "⚪️ <b>Белый Интернет: Осталось 10% трафика</b>\n\n"
     "Вы израсходовали 90% пакета трафика. "
-    "Рекомендуем докупить дополнительный пакет заранее в боте, чтобы интернет не отключился в неподходящий момент."
+    "Рекомендуем докупить пакет заранее в боте, чтобы доступ не прерывался."
 )
 WL_TRAFFIC_90P_TRIAL_ALERT = (
     "⚪️ <b>Белый Интернет: Осталось 10% трафика</b>\n\n"

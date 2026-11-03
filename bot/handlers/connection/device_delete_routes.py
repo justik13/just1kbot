@@ -15,7 +15,7 @@ from services.device_service import DeviceService
 from utils.callbacks import parse_callback_id
 from utils.telegram import render_hub, safe
 
-from .common import _render_amnezia_devices
+from .common import _render_connections
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -47,7 +47,7 @@ async def request_delete_device(
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
 
-    from .device_view_routes import can_show_delete_action, render_device_screen
+    from .device_view_routes import can_show_delete_action
 
     if not can_show_delete_action(profile):
         status = getattr(profile, "provisioning_status", "")
@@ -60,7 +60,8 @@ async def request_delete_device(
         else:
             msg = texts.DEVICE_ACTION_UNAVAILABLE_STATE
         await callback.answer(msg, show_alert=True)
-        await render_device_screen(callback.bot, callback.message.chat.id, profile, db_user, session)
+        if db_user:
+            await _render_connections(callback.message, db_user, session)
         return
 
     if await DeviceService.has_active_migration(session, profile.id):
@@ -99,15 +100,8 @@ async def cancel_delete_device(
         return
 
     await callback.answer(texts.DEVICE_DELETE_CANCELLED, show_alert=False)
-
-    from .device_view_routes import render_device_screen
-    await render_device_screen(
-        callback.bot,
-        callback.message.chat.id,
-        profile,
-        db_user,
-        session,
-    )
+    if db_user:
+        await _render_connections(callback.message, db_user, session)
 
 
 @router.callback_query(F.data.startswith("confirm_delete_device:"))
@@ -129,7 +123,7 @@ async def confirm_delete_device(
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
 
-    from .device_view_routes import can_show_delete_action, render_device_screen
+    from .device_view_routes import can_show_delete_action
 
     if not can_show_delete_action(profile):
         status = getattr(profile, "provisioning_status", "")
@@ -142,7 +136,8 @@ async def confirm_delete_device(
         else:
             msg = texts.DEVICE_ACTION_UNAVAILABLE_STATE
         await callback.answer(msg, show_alert=True)
-        await render_device_screen(callback.bot, callback.message.chat.id, profile, db_user, session)
+        if db_user:
+            await _render_connections(callback.message, db_user, session)
         return
 
     if profile_id in _deleting_devices:
@@ -197,7 +192,7 @@ async def confirm_delete_device(
         )
 
         if user:
-            await _render_amnezia_devices(callback.message, user, session)
+            await _render_connections(callback.message, user, session)
     except Exception:
         logger.exception("Unexpected error in confirm_delete_device for profile_id=%s", profile_id)
         if not answered:

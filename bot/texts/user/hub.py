@@ -12,14 +12,14 @@ CURRENCY_RUB_SYMBOL = "₽"
 
 HUB_HEADER = """🏠 <b>Главное меню</b>
 
-👋 Привет, <b>{name}</b>!
-🆔 <b>Telegram ID:</b> <code>{telegram_id}</code>
+Привет, <b>{name}</b>!
 
-<b>📊 Статус подписки:</b> {status}
-<b>⏳ Действует до:</b> {valid_until} ({days_left})
-<b>📱 Подключено устройств:</b> {devices_count}/{device_limit}{white_internet_line}
+<b>Статус:</b> {status}
+<b>Действует до:</b> {valid_until} ({days_left})
+<b>Устройства:</b> {devices_count} из {device_limit}{white_internet_line}
 
-<b>💰 Баланс:</b> {real_balance} ₽{bonus_line}{inviter_line}
+<b>Баланс:</b> {real_balance} ₽{bonus_line}{inviter_line}
+<i>ID: <code>{telegram_id}</code></i>
 
 Выберите нужный раздел:"""
 

@@ -654,161 +654,61 @@ class TestMigrationFinalizerHook(unittest.IsolatedAsyncioTestCase):
 
 
 class TestDeviceMigrateRoutes(unittest.IsolatedAsyncioTestCase):
-    """Test start_migrate_device and route guards."""
+    """Test decommissioned migration routes answering with alert."""
 
-    @patch("bot.handlers.connection.device_migrate_routes.SubscriptionService.check_access", new_callable=AsyncMock)
-    @patch("bot.handlers.connection.device_migrate_routes.MaintenanceService.can_user_perform_action", new_callable=AsyncMock)
-    @patch("bot.handlers.connection.device_migrate_routes.get_profile_by_id", new_callable=AsyncMock)
-    @patch("bot.handlers.connection.device_migrate_routes.get_user_by_telegram_id", new_callable=AsyncMock)
-    @patch.object(DeviceService, "has_active_migration", new_callable=AsyncMock)
-    @patch.object(DeviceService, "get_last_migration_time", new_callable=AsyncMock)
-    @patch("bot.handlers.connection.device_migrate_routes.get_available_servers", new_callable=AsyncMock)
-    @patch("bot.handlers.connection.device_migrate_routes.get_server_by_id", new_callable=AsyncMock)
-    @patch("bot.handlers.connection.device_migrate_routes.render_hub", new_callable=AsyncMock)
-    async def test_start_migrate_device_allows_recent_device_and_renders_servers(
-        self,
-        mock_render,
-        mock_get_server,
-        mock_get_available,
-        mock_get_last_migrated,
-        mock_has_active,
-        mock_get_user,
-        mock_get_profile,
-        mock_can_perform,
-        mock_check_access,
-    ):
-        from bot.handlers.connection.device_migrate_routes import start_migrate_device
-
-        mock_can_perform.return_value = True
-        mock_check_access.return_value = True
-        mock_has_active.return_value = False
-        mock_get_last_migrated.return_value = None  # Never migrated before
-
-        user = User(id=1, telegram_id=12345)
-        profile = VPNProfile(
-            id=10,
-            user_id=1,
-            server_id=100,
-            device_name="Phone #1",
-            provisioning_status="active",
-            created_at=now_utc() - timedelta(minutes=1),  # Created 1 min ago
-        )
-        mock_get_user.return_value = user
-        mock_get_profile.return_value = profile
-
-        curr_server = Server(id=100, name="Server 1", country_flag="🇩🇪")
-        target_server = Server(id=200, name="Server 2", country_flag="🇳🇱")
-        mock_get_server.return_value = curr_server
-        mock_get_available.return_value = [curr_server, target_server]
-
-        callback = MagicMock()
-        callback.from_user.id = 12345
-        callback.data = "migrate_device:10"
-        callback.answer = AsyncMock()
-        state = AsyncMock()
-        session = AsyncMock()
-
-        await start_migrate_device(callback, state, session, db_user=user)
-
-        # Must succeed and render target server selection
-        mock_render.assert_called_once()
-        callback.answer.assert_called_once_with(show_alert=False)
-
-    @patch("bot.handlers.connection.device_migrate_routes.SubscriptionService.check_access", new_callable=AsyncMock)
-    @patch("bot.handlers.connection.device_migrate_routes.MaintenanceService.can_user_perform_action", new_callable=AsyncMock)
-    @patch("bot.handlers.connection.device_migrate_routes.get_profile_by_id", new_callable=AsyncMock)
-    @patch("bot.handlers.connection.device_migrate_routes.get_user_by_telegram_id", new_callable=AsyncMock)
-    @patch.object(DeviceService, "has_active_migration", new_callable=AsyncMock)
-    async def test_start_migrate_device_blocked_during_active_migration(
-        self,
-        mock_has_active,
-        mock_get_user,
-        mock_get_profile,
-        mock_can_perform,
-        mock_check_access,
-    ):
+    @patch("bot.handlers.connection.device_migrate_routes._render_connections", new_callable=AsyncMock)
+    async def test_start_migrate_device_decommissioned(self, mock_render):
         from bot.handlers.connection.device_migrate_routes import start_migrate_device
         from bot import texts
 
-        mock_can_perform.return_value = True
-        mock_check_access.return_value = True
-        mock_has_active.return_value = True  # In-flight migration
-
-        user = User(id=1, telegram_id=12345)
-        profile = VPNProfile(
-            id=10,
-            user_id=1,
-            server_id=100,
-            device_name="Phone #1",
-            provisioning_status="active",
-        )
-        mock_get_user.return_value = user
-        mock_get_profile.return_value = profile
-
         callback = MagicMock()
-        callback.from_user.id = 12345
-        callback.data = "migrate_device:10"
         callback.answer = AsyncMock()
+        callback.message = MagicMock()
         state = AsyncMock()
         session = AsyncMock()
+        user = User(id=1, telegram_id=12345)
+
         await start_migrate_device(callback, state, session, db_user=user)
 
-        callback.answer.assert_called_once_with(texts.DEVICE_MIGRATE_IN_PROGRESS, show_alert=True)
+        state.clear.assert_awaited_once()
+        callback.answer.assert_awaited_once_with(texts.ALERT_AMNEZIA_DECOMMISSIONED, show_alert=True)
+        mock_render.assert_awaited_once_with(callback.message, user, session)
 
-    @patch("bot.handlers.connection.device_migrate_routes.MaintenanceService.can_user_perform_action", new_callable=AsyncMock)
-    @patch("bot.handlers.connection.device_migrate_routes.get_profile_by_id", new_callable=AsyncMock)
-    @patch("bot.handlers.connection.device_migrate_routes.get_user_by_telegram_id", new_callable=AsyncMock)
-    @patch("bot.handlers.connection.device_migrate_routes.get_server_by_id", new_callable=AsyncMock)
-    @patch("bot.handlers.connection.device_migrate_routes.render_hub", new_callable=AsyncMock)
-    @patch("bot.handlers.connection.device_migrate_routes.capture_server_peer_snapshot", new_callable=AsyncMock)
-    @patch("bot.handlers.connection.device_migrate_routes.DeviceService.migrate_device", new_callable=AsyncMock)
-    @patch("bot.handlers.connection.device_migrate_routes._render_device_screen_safe", new_callable=AsyncMock)
-    async def test_confirm_migrate_device_rollback_renders_screen_safely(
-        self,
-        mock_render_safe,
-        mock_migrate_device,
-        mock_capture_snapshot,
-        mock_render_hub,
-        mock_get_server,
-        mock_get_user,
-        mock_get_profile,
-        mock_can_perform,
-    ):
+    @patch("bot.handlers.connection.device_migrate_routes._render_connections", new_callable=AsyncMock)
+    async def test_select_migrate_target_server_decommissioned(self, mock_render):
+        from bot.handlers.connection.device_migrate_routes import select_migrate_target_server
+        from bot import texts
+
+        callback = MagicMock()
+        callback.answer = AsyncMock()
+        callback.message = MagicMock()
+        state = AsyncMock()
+        session = AsyncMock()
+        user = User(id=1, telegram_id=12345)
+
+        await select_migrate_target_server(callback, state, session, db_user=user)
+
+        state.clear.assert_awaited_once()
+        callback.answer.assert_awaited_once_with(texts.ALERT_AMNEZIA_DECOMMISSIONED, show_alert=True)
+        mock_render.assert_awaited_once_with(callback.message, user, session)
+
+    @patch("bot.handlers.connection.device_migrate_routes._render_connections", new_callable=AsyncMock)
+    async def test_confirm_migrate_device_decommissioned(self, mock_render):
         from bot.handlers.connection.device_migrate_routes import confirm_migrate_device
-        from services.device_service import ServerUnavailable
         from bot import texts
 
-        mock_can_perform.return_value = True
-        user = User(id=1, telegram_id=12345)
-        profile = VPNProfile(
-            id=10,
-            user_id=1,
-            server_id=100,
-            device_name="Phone #1",
-            provisioning_status="active",
-        )
-        target_server = Server(id=200, name="Server 2", is_active=True)
-
-        mock_get_user.return_value = user
-        mock_get_profile.return_value = profile
-        mock_get_server.return_value = target_server
-        mock_capture_snapshot.return_value = MagicMock()
-        mock_migrate_device.side_effect = ServerUnavailable("Server is full")
-
         callback = MagicMock()
-        callback.from_user.id = 12345
-        callback.data = "confirm_migrate_device:10:200"
         callback.answer = AsyncMock()
-        callback.bot = MagicMock()
-        callback.message.chat.id = 12345
+        callback.message = MagicMock()
         state = AsyncMock()
         session = AsyncMock()
+        user = User(id=1, telegram_id=12345)
 
         await confirm_migrate_device(callback, state, session, db_user=user)
 
-        session.rollback.assert_awaited()
-        mock_render_safe.assert_awaited_once()
-        callback.answer.assert_called_once_with(texts.ERROR_SERVER_FULL, show_alert=True)
+        state.clear.assert_awaited_once()
+        callback.answer.assert_awaited_once_with(texts.ALERT_AMNEZIA_DECOMMISSIONED, show_alert=True)
+        mock_render.assert_awaited_once_with(callback.message, user, session)
 
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not set")

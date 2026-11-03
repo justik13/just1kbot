@@ -10,22 +10,22 @@
         :root {
             --bg-color: #050505;
             --card-bg: #0c0c0e;
-            --surface-elevated: #141417;
-            --surface-hover: #24242c;
+            --surface-elevated: #131316;
+            --surface-hover: #1c1c22;
             --surface-subtle: rgba(255, 255, 255, 0.03);
             --border-subtle: rgba(255, 255, 255, 0.08);
-            --border-strong: rgba(255, 255, 255, 0.22);
-            --text-main: #fafafa;
+            --border-strong: rgba(255, 255, 255, 0.18);
+            --text-main: #f4f4f5;
             --text-sub: #a1a1aa;
             --text-muted: #71717a;
-            --cta-bg: #fafafa;
+            --cta-bg: #ffffff;
             --cta-hover: #e4e4e7;
             --cta-text: #09090b;
             --success: #10b981;
-            --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
-            --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+            --error: #ef4444;
+            --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 
-            /* Tier illumination tokens (default: basic) */
+            /* Tier illumination tokens default (standard access / emerald) */
             --tier-glow-color: rgba(16, 185, 129, 0.07);
             --tier-highlight-line: rgba(52, 211, 153, 0.32);
             --tier-badge-glow: rgba(16, 185, 129, 0.14);
@@ -33,10 +33,10 @@
         }
 
         body[data-tier="pro"] {
-            --tier-glow-color: rgba(99, 102, 241, 0.08);
-            --tier-highlight-line: rgba(129, 140, 248, 0.30);
-            --tier-badge-glow: rgba(99, 102, 241, 0.16);
-            --tier-accent: #818cf8;
+            --tier-glow-color: rgba(56, 189, 248, 0.08);
+            --tier-highlight-line: rgba(56, 189, 248, 0.32);
+            --tier-badge-glow: rgba(56, 189, 248, 0.14);
+            --tier-accent: #38bdf8;
         }
 
         body[data-tier="family"] {
@@ -57,7 +57,7 @@
             box-sizing: border-box;
             margin: 0;
             padding: 0;
-            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', 'Segoe UI', Roboto, sans-serif;
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
         }
@@ -65,8 +65,8 @@
         body {
             background-color: var(--bg-color);
             background-image:
-                radial-gradient(ellipse 90% 55% at 50% -10%, var(--tier-glow-color), transparent 70%),
-                radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.03) 0%, transparent 75%);
+                radial-gradient(ellipse 90% 50% at 50% -10%, var(--tier-glow-color), transparent 70%),
+                radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.025) 0%, transparent 70%);
             color: var(--text-main);
             min-height: 100vh;
             min-height: 100dvh;
@@ -82,7 +82,7 @@
             max-width: 420px;
             background-color: var(--card-bg);
             border-radius: 24px;
-            padding: 28px 24px 24px;
+            padding: 26px 22px 22px;
             text-align: center;
             overflow: hidden;
             box-shadow:
@@ -104,45 +104,23 @@
         }
 
         @keyframes cardEnter {
-            from {
-                opacity: 0;
-                transform: translateY(8px) scale(0.98);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0) scale(1);
-            }
+            from { opacity: 0; transform: translateY(8px) scale(0.98); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
         }
-
-        @keyframes itemEnter {
-            from {
-                opacity: 0;
-                transform: translateY(6px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        .stagger-1 { animation: itemEnter 260ms var(--ease-out) 35ms both; }
-        .stagger-2 { animation: itemEnter 260ms var(--ease-out) 70ms both; }
-        .stagger-3 { animation: itemEnter 260ms var(--ease-out) 105ms both; }
-        .stagger-4 { animation: itemEnter 260ms var(--ease-out) 140ms both; }
 
         .header-top {
             display: flex;
             flex-direction: column;
             align-items: center;
-            gap: 14px;
-            margin-bottom: 14px;
+            gap: 12px;
+            margin-bottom: 12px;
         }
 
         .status-pill {
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            padding: 5px 11px;
+            padding: 4px 10px;
             border-radius: 999px;
             background: rgba(16, 185, 129, 0.08);
             border: 1px solid rgba(16, 185, 129, 0.22);
@@ -162,15 +140,15 @@
         }
 
         .icon-badge {
-            width: 52px;
-            height: 52px;
-            border-radius: 15px;
-            background: linear-gradient(180deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.02) 100%);
+            width: 48px;
+            height: 48px;
+            border-radius: 14px;
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.02) 100%);
             box-shadow:
                 inset 0 1px 0 rgba(255, 255, 255, 0.16),
                 0 0 0 1px var(--border-subtle),
                 0 8px 20px rgba(0, 0, 0, 0.5),
-                0 0 24px var(--tier-badge-glow);
+                0 0 20px var(--tier-badge-glow);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -178,8 +156,8 @@
         }
 
         .icon-badge svg {
-            width: 24px;
-            height: 24px;
+            width: 22px;
+            height: 22px;
             stroke: var(--tier-accent);
         }
 
@@ -187,190 +165,167 @@
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            padding: 4px 10px;
+            gap: 5px;
+            padding: 3px 9px;
             border-radius: 6px;
-            background: rgba(255, 255, 255, 0.035);
+            background: rgba(255, 255, 255, 0.06);
             border: 1px solid var(--tier-highlight-line);
             color: var(--tier-accent);
             font-size: 11px;
-            font-weight: 700;
-            letter-spacing: 0.06em;
+            font-weight: 600;
+            letter-spacing: 0.08em;
             text-transform: uppercase;
             margin-bottom: 8px;
         }
 
         h1 {
-            font-size: clamp(20px, 5vw, 23px);
+            font-size: 21px;
             font-weight: 600;
             letter-spacing: -0.025em;
             color: var(--text-main);
-            margin-bottom: 6px;
+            margin-bottom: 5px;
             line-height: 1.3;
         }
 
         p.subtitle {
-            font-size: 14px;
+            font-size: 13.5px;
             color: var(--text-sub);
-            margin-bottom: 22px;
-            line-height: 1.5;
+            margin-bottom: 18px;
+            line-height: 1.45;
         }
 
-        /* Buttons & Interactions */
-        .btn {
+        /* Action Buttons */
+        .actions-group {
             display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .btn-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .btn {
+            display: inline-flex;
             align-items: center;
             justify-content: center;
-            gap: 10px;
-            width: 100%;
-            min-height: 52px;
-            padding: 10px 16px;
-            border-radius: 14px;
-            font-size: 14.5px;
+            gap: 8px;
+            min-height: 48px;
+            padding: 9px 14px;
+            border-radius: 12px;
+            font-size: 13.5px;
             font-weight: 600;
             letter-spacing: -0.01em;
             text-decoration: none;
             cursor: pointer;
             user-select: none;
-            -webkit-tap-highlight-color: transparent;
-            transition:
-                transform 120ms var(--ease-out),
-                background-color 150ms ease,
-                border-color 150ms ease,
-                color 150ms ease,
-                box-shadow 150ms ease;
-            margin-bottom: 10px;
+            transition: transform 120ms var(--ease-out), background-color 150ms ease, border-color 150ms ease, color 150ms ease;
             border: 1px solid transparent;
         }
 
-        .btn-inner-stack {
-            display: inline-flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 3px;
-        }
-
-        .btn-main-row {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            line-height: 1.2;
-        }
-
-        .btn-title {
-            font-size: 14.5px;
-            font-weight: 600;
-            color: inherit;
-        }
-
-        .btn-subtitle {
-            font-size: 11px;
-            font-weight: 400;
-            color: var(--text-sub);
-            letter-spacing: 0.01em;
-            line-height: 1.2;
-            transition: color 150ms ease;
-        }
-
-        .btn:hover .btn-subtitle {
-            color: var(--text-main);
-        }
-
-        .btn svg, .store-btn svg {
-            width: 18px;
-            height: 18px;
-            flex-shrink: 0;
-            transition: transform 150ms var(--ease-out);
-        }
-
-        .btn:active, .store-btn:active {
-            transform: scale(0.975);
+        .btn:active {
+            transform: scale(0.98);
         }
 
         .btn-primary {
             background-color: var(--cta-bg);
             color: var(--cta-text);
-            border-color: transparent;
-            box-shadow:
-                0 1px 2px rgba(0, 0, 0, 0.5),
-                inset 0 1px 0 #ffffff;
-        }
-
-        .btn-happ {
-            min-height: 52px;
-            padding: 7px 16px;
-            background-color: rgba(255, 255, 255, 0.05);
-            color: var(--text-main);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 2px 4px rgba(0, 0, 0, 0.25);
-            margin-bottom: 10px;
-        }
-
-        .btn-secondary {
-            min-height: 52px;
-            padding: 10px 16px;
-            background-color: rgba(255, 255, 255, 0.05);
-            color: var(--text-main);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 2px 4px rgba(0, 0, 0, 0.25);
-            margin-bottom: 10px;
-        }
-
-        .btn-secondary.copied {
-            border-color: var(--tier-highlight-line);
-            background-color: rgba(255, 255, 255, 0.08);
-            color: var(--tier-accent);
-        }
-
-        #copyBtnContent {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 14.5px;
-            font-weight: 600;
-            transition:
-                opacity 150ms var(--ease-out),
-                transform 150ms var(--ease-out),
-                filter 150ms var(--ease-out);
-        }
-
-        #copyBtnContent.morphing {
-            opacity: 0;
-            transform: scale(0.96);
-            filter: blur(2px);
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), inset 0 1px 0 #ffffff;
         }
 
         .btn-primary:hover {
             background-color: var(--cta-hover);
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(255, 255, 255, 0.15);
         }
 
-        .btn-happ:hover, .btn-secondary:hover {
-            background-color: rgba(255, 255, 255, 0.09);
-            border-color: rgba(255, 255, 255, 0.24);
-            transform: translateY(-1px);
-            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 4px 10px rgba(0, 0, 0, 0.35);
+        .btn-secondary {
+            background-color: var(--surface-elevated);
+            color: var(--text-main);
+            border-color: var(--border-subtle);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
         }
 
-        .store-btn:hover {
+        .btn-secondary:hover {
             background-color: var(--surface-hover);
             border-color: var(--border-strong);
-            color: var(--text-main);
         }
 
-        /* Collapsible Support Disclosure Accordion */
+        .btn svg {
+            width: 16px;
+            height: 16px;
+            flex-shrink: 0;
+        }
+
+        /* Subscription URL Capsule */
+        .sub-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background-color: #08080a;
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: 5px 6px 5px 12px;
+            gap: 8px;
+            transition: border-color 150ms ease;
+        }
+
+        .sub-bar:hover {
+            border-color: var(--border-strong);
+        }
+
+        .sub-bar-text {
+            font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+            font-size: 12px;
+            color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            text-align: left;
+            user-select: all;
+        }
+
+        .sub-copy-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background-color: var(--surface-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            color: var(--text-main);
+            font-size: 12px;
+            font-weight: 500;
+            padding: 7px 11px;
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
+        }
+
+        .sub-copy-btn:hover {
+            background-color: var(--surface-hover);
+            border-color: var(--border-strong);
+        }
+
+        .sub-copy-btn.copied {
+            background-color: rgba(56, 189, 248, 0.1);
+            border-color: var(--tier-highlight-line);
+            color: var(--tier-accent);
+        }
+
+        .sub-copy-btn svg {
+            width: 14px;
+            height: 14px;
+        }
+
+        /* Support Accordion */
         .support-accordion {
             background-color: var(--surface-elevated);
             border: 1px solid var(--border-subtle);
-            border-radius: 14px;
+            border-radius: 12px;
             overflow: hidden;
-            margin-bottom: 10px;
-            transition:
-                background-color 150ms ease,
-                border-color 200ms ease,
-                box-shadow 200ms ease;
+            margin-top: 8px;
+            transition: border-color 150ms ease;
         }
 
         .support-accordion:hover {
@@ -382,15 +337,14 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 14px 16px;
+            padding: 12px 14px;
             background: transparent;
             border: none;
-            color: var(--text-main);
-            font-size: 14px;
+            color: var(--text-sub);
+            font-size: 13px;
             font-weight: 500;
             cursor: pointer;
             user-select: none;
-            -webkit-tap-highlight-color: transparent;
             transition: color 150ms ease;
         }
 
@@ -401,32 +355,20 @@
         .support-header-left {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
         }
 
         .support-icon {
-            width: 18px;
-            height: 18px;
-            flex-shrink: 0;
-            color: var(--text-sub);
-            transition: color 150ms ease;
-        }
-
-        .support-accordion:hover .support-icon,
-        .support-accordion.open .support-icon {
-            color: var(--text-main);
+            width: 16px;
+            height: 16px;
+            color: var(--text-muted);
         }
 
         .support-chevron {
-            width: 16px;
-            height: 16px;
-            flex-shrink: 0;
-            color: var(--text-sub);
-            transition: transform 240ms cubic-bezier(0.16, 1, 0.3, 1), color 150ms ease;
-        }
-
-        .support-accordion:hover .support-chevron {
-            color: var(--text-main);
+            width: 15px;
+            height: 15px;
+            color: var(--text-muted);
+            transition: transform 220ms var(--ease-out);
         }
 
         .support-accordion.open .support-chevron {
@@ -437,7 +379,7 @@
         .support-form-container {
             display: grid;
             grid-template-rows: 0fr;
-            transition: grid-template-rows 260ms cubic-bezier(0.16, 1, 0.3, 1), visibility 260ms;
+            transition: grid-template-rows 240ms var(--ease-out), visibility 240ms;
             overflow: hidden;
             visibility: hidden;
         }
@@ -450,199 +392,171 @@
         .support-form-inner {
             min-height: 0;
             overflow: hidden;
-            padding: 0 16px;
+            padding: 0 14px;
             opacity: 0;
-            transform: translateY(-4px);
-            transition: opacity 180ms ease, transform 200ms ease, padding 260ms ease;
+            transition: opacity 180ms ease, padding 240ms ease;
             text-align: left;
             border-top: 1px solid transparent;
         }
 
         .support-accordion.open .support-form-inner {
-            padding: 8px 16px 16px;
+            padding: 6px 14px 14px;
             opacity: 1;
-            transform: translateY(0);
-            border-top-color: rgba(255, 255, 255, 0.06);
+            border-top-color: rgba(255, 255, 255, 0.05);
         }
 
         .support-intro {
-            font-size: 12.5px;
-            color: var(--text-sub);
-            line-height: 1.45;
-            margin-bottom: 12px;
-            padding-top: 4px;
+            font-size: 12px;
+            color: var(--text-muted);
+            line-height: 1.4;
+            margin-bottom: 10px;
         }
 
         .support-field {
-            margin-bottom: 12px;
+            margin-bottom: 10px;
         }
 
         .support-label {
             display: block;
-            font-size: 12px;
+            font-size: 11.5px;
             font-weight: 500;
             color: var(--text-sub);
-            margin-bottom: 6px;
+            margin-bottom: 5px;
         }
 
         .support-input, .support-textarea {
             width: 100%;
             background-color: #09090b;
             border: 1px solid var(--border-subtle);
-            border-radius: 10px;
-            padding: 11px 13px;
-            font-size: 13.5px;
+            border-radius: 9px;
+            padding: 9px 11px;
+            font-size: 13px;
             color: var(--text-main);
             outline: none;
             font-family: inherit;
-            transition: border-color 150ms ease, box-shadow 150ms ease;
-            box-sizing: border-box;
-        }
-
-        .support-input::placeholder, .support-textarea::placeholder {
-            color: var(--text-muted);
-            opacity: 0.9;
         }
 
         .support-input:focus, .support-textarea:focus {
             border-color: var(--border-strong);
-            box-shadow: 0 0 0 1px var(--border-strong);
-        }
-
-        .support-input:disabled, .support-textarea:disabled {
-            opacity: 0.55;
-            cursor: not-allowed;
-            background-color: rgba(255, 255, 255, 0.03);
-            border-color: var(--border-subtle);
-        }
-
-        .support-reset-btn {
-            background: none;
-            border: none;
-            color: var(--text-sub);
-            font-size: 12px;
-            cursor: pointer;
-            text-decoration: underline;
-            margin-top: 8px;
-            display: inline-block;
-            padding: 0;
-            font-family: inherit;
-            transition: color 150ms ease;
-        }
-
-        .support-reset-btn:hover {
-            color: var(--text-main);
         }
 
         .support-textarea {
             resize: vertical;
-            min-height: 74px;
-            line-height: 1.45;
+            min-height: 60px;
+            line-height: 1.4;
         }
 
         .support-submit-btn {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
             width: 100%;
-            min-height: 46px;
-            padding: 12px 16px;
-            border-radius: 11px;
+            min-height: 40px;
+            padding: 8px 14px;
+            border-radius: 9px;
             background-color: var(--cta-bg);
             color: var(--cta-text);
-            font-size: 14px;
+            font-size: 13px;
             font-weight: 600;
             border: none;
             cursor: pointer;
-            transition: opacity 150ms ease, background-color 150ms ease, transform 120ms var(--ease-out);
-            user-select: none;
-            -webkit-tap-highlight-color: transparent;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: background-color 150ms ease, opacity 150ms ease;
         }
 
         .support-submit-btn:hover {
             background-color: var(--cta-hover);
         }
 
-        .support-submit-btn:active {
-            transform: scale(0.975);
-        }
-
         .support-submit-btn:disabled {
-            opacity: 0.65;
+            opacity: 0.6;
             cursor: not-allowed;
         }
 
         .support-spinner {
-            width: 15px;
-            height: 15px;
-            border: 2px solid rgba(0, 0, 0, 0.25);
-            border-top-color: #09090b;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(0, 0, 0, 0.2);
+            border-top-color: #000000;
             border-radius: 50%;
-            animation: supportSpin 600ms linear infinite;
+            animation: spin 700ms linear infinite;
         }
 
-        @keyframes supportSpin {
+        @keyframes spin {
             to { transform: rotate(360deg); }
         }
 
         .support-status-msg {
-            display: none;
-            padding: 11px 13px;
-            border-radius: 10px;
-            font-size: 12.5px;
-            line-height: 1.4;
             margin-top: 10px;
-            text-align: center;
-        }
-
-        .support-status-msg.success {
-            background-color: rgba(16, 185, 129, 0.1);
-            border: 1px solid rgba(16, 185, 129, 0.25);
-            color: #34d399;
+            padding: 8px 10px;
+            border-radius: 8px;
+            font-size: 12px;
+            line-height: 1.4;
+            display: none;
         }
 
         .support-status-msg.error {
-            background-color: rgba(239, 68, 68, 0.1);
-            border: 1px solid rgba(239, 68, 68, 0.25);
-            color: #f87171;
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #fca5a5;
+        }
+
+        .support-status-msg.success {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            color: #6ee7b7;
+        }
+
+        .support-reset-btn {
+            display: inline-block;
+            margin-top: 6px;
+            background: transparent;
+            border: none;
+            color: var(--tier-accent);
+            text-decoration: underline;
+            font-size: 11.5px;
+            cursor: pointer;
+            padding: 0;
         }
 
         .divider {
             height: 1px;
             background: linear-gradient(90deg, transparent, var(--border-subtle) 15%, var(--border-subtle) 85%, transparent);
-            margin: 20px 0 18px;
+            margin: 18px 0 16px;
+        }
+
+        .section-header-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            padding: 0 2px;
         }
 
         .section-title {
-            font-size: 11px;
+            font-size: 11.5px;
             font-weight: 600;
             color: var(--text-muted);
+            letter-spacing: 0.06em;
             text-transform: uppercase;
-            letter-spacing: 0.08em;
-            margin-bottom: 6px;
         }
 
-        .section-hint {
-            font-size: 12.5px;
+        .section-desc {
+            font-size: 12px;
             color: var(--text-sub);
-            margin-bottom: 12px;
             line-height: 1.4;
+            margin: -4px 0 10px 0;
+            text-align: left;
         }
 
-        .section-hint strong {
-            color: var(--text-sub);
-            font-weight: 600;
-        }
-
-        /* Segmented control for apps */
+        /* 5-Platform Tabs: iOS, Android, Win, Mac, GitHub */
         .app-tabs {
             display: flex;
-            gap: 6px;
+            gap: 3px;
             background-color: var(--surface-elevated);
-            padding: 4px;
+            padding: 3px;
             border-radius: 12px;
-            margin-bottom: 12px;
+            margin-bottom: 14px;
             border: 1px solid var(--border-subtle);
         }
 
@@ -651,100 +565,211 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 6px;
-            min-height: 40px;
-            padding: 9px 12px;
-            border-radius: 8px;
-            font-size: 13px;
-            font-weight: 600;
+            gap: 4px;
+            min-height: 38px;
+            padding: 6px 2px;
+            border-radius: 9px;
+            font-size: 11px;
+            font-weight: 500;
             color: var(--text-sub);
             background: transparent;
             border: none;
             cursor: pointer;
             transition: background-color 150ms ease, color 150ms ease, box-shadow 150ms ease;
             user-select: none;
-            -webkit-tap-highlight-color: transparent;
+            white-space: nowrap;
+        }
+
+        .tab-svg {
+            width: 14px;
+            height: 14px;
+            flex-shrink: 0;
+            fill: currentColor;
+            opacity: 0.8;
+            transition: opacity 150ms ease;
         }
 
         .app-tab.active {
             background-color: var(--surface-hover);
             color: var(--text-main);
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+            font-weight: 600;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.06);
         }
 
-        .app-tab:hover:not(.active) {
+        .app-tab.active .tab-svg {
+            opacity: 1;
+        }
+
+        .platform-panel {
+            animation: fadeIn 150ms ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(2px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .client-group {
+            margin-bottom: 12px;
+        }
+
+        .client-group:last-child {
+            margin-bottom: 0;
+        }
+
+        .client-group-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin: 0 2px 7px;
+        }
+
+        .client-title-wrap {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            font-weight: 600;
             color: var(--text-main);
-            background-color: rgba(255, 255, 255, 0.04);
+            letter-spacing: -0.01em;
         }
 
-        /* Smooth tab transition */
-        .tab-pane {
-            animation: tabFadeIn 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+        .client-glyph {
+            width: 13px;
+            height: 13px;
+            color: var(--text-muted);
+            flex-shrink: 0;
         }
 
-        @keyframes tabFadeIn {
-            from {
-                opacity: 0;
-                transform: translateY(4px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
+        .pc-badge {
+            font-size: 10px;
+            font-weight: 500;
+            padding: 2px 7px;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: var(--text-muted);
+            letter-spacing: 0.02em;
         }
 
-        /* 2x2 Store buttons grid */
-        .store-buttons {
+        .pc-badge-recommended {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.16);
+            color: var(--text-main);
+            font-weight: 600;
+        }
+
+        .store-grid,
+        .platform-row {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 8px;
-            margin-bottom: 8px;
+            gap: 7px;
         }
 
-        .store-btn {
+        .store-card,
+        .platform-card {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            min-height: 50px;
+            padding: 8px 10px;
+            border-radius: 11px;
+            background-color: var(--surface-elevated);
+            border: 1px solid var(--border-subtle);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+            color: var(--text-main);
+            text-decoration: none;
+            user-select: none;
+            text-align: left;
+            transition: transform 120ms var(--ease-out), background-color 140ms ease, border-color 140ms ease;
+        }
+
+        .store-card:hover,
+        .platform-card:hover {
+            background-color: var(--surface-hover);
+            border-color: var(--border-strong);
+        }
+
+        .store-card:active,
+        .platform-card:active {
+            transform: scale(0.985);
+        }
+
+        .store-card-icon,
+        .platform-card-icon {
+            width: 22px;
+            height: 22px;
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 8px;
-            min-height: 46px;
-            padding: 10px 12px;
-            border-radius: 12px;
-            background-color: var(--surface-elevated);
-            border: 1px solid var(--border-subtle);
-            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
             color: var(--text-main);
-            text-decoration: none;
-            font-size: 13px;
-            font-weight: 500;
-            user-select: none;
-            -webkit-tap-highlight-color: transparent;
-            transition:
-                transform 120ms var(--ease-out),
-                background-color 150ms ease,
-                border-color 150ms ease,
-                color 150ms ease;
+            flex-shrink: 0;
         }
 
-        /* How to connect steps */
+        .store-card-icon svg,
+        .platform-card-icon svg {
+            width: 20px;
+            height: 20px;
+            fill: currentColor;
+        }
+
+        .store-card-icon svg[fill="none"],
+        .platform-card-icon svg[fill="none"] {
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2;
+        }
+
+        .store-card-content,
+        .platform-card-content {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 0;
+            flex: 1;
+        }
+
+        .store-card-title,
+        .platform-card-title {
+            font-size: 12.5px;
+            font-weight: 600;
+            color: var(--text-main);
+            line-height: 1.2;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .store-card-desc,
+        .platform-card-desc {
+            font-size: 10px;
+            color: var(--text-muted);
+            line-height: 1.2;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
         .steps {
             text-align: left;
             background-color: var(--surface-subtle);
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            border-radius: 14px;
-            padding: 14px 16px;
-            font-size: 13px;
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            border-radius: 12px;
+            padding: 12px 14px;
+            font-size: 12.5px;
             color: var(--text-sub);
-            line-height: 1.5;
-            margin-top: 14px;
+            line-height: 1.45;
+            margin-top: 12px;
         }
 
         .steps-title {
             display: block;
-            font-size: 12px;
+            font-size: 11px;
             font-weight: 600;
-            color: var(--text-main);
-            margin-bottom: 10px;
-            letter-spacing: -0.01em;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 8px;
         }
 
         .steps ol {
@@ -753,34 +778,29 @@
             margin: 0;
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            gap: 6px;
         }
 
         .steps li {
             display: flex;
             align-items: flex-start;
-            gap: 10px;
+            gap: 8px;
         }
 
         .step-num {
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            width: 20px;
-            height: 20px;
-            border-radius: 6px;
+            width: 18px;
+            height: 18px;
+            border-radius: 5px;
             background-color: var(--surface-elevated);
             border: 1px solid var(--border-subtle);
             color: var(--text-main);
-            font-size: 11px;
+            font-size: 10.5px;
             font-weight: 600;
             flex-shrink: 0;
             margin-top: 1px;
-        }
-
-        .steps strong {
-            color: var(--text-main);
-            font-weight: 600;
         }
 
         .copy-toast {
@@ -789,24 +809,20 @@
             bottom: max(20px, env(safe-area-inset-bottom));
             z-index: 50;
             width: max-content;
-            max-width: min(380px, calc(100vw - 32px));
-            padding: 9px 16px;
-            border-radius: 18px;
-            background: rgba(20, 20, 23, 0.94);
+            max-width: min(360px, calc(100vw - 32px));
+            padding: 8px 14px;
+            border-radius: 14px;
+            background: rgba(18, 18, 22, 0.96);
             border: 1px solid var(--tier-highlight-line);
-            box-shadow: 0 12px 28px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+            box-shadow: 0 12px 28px rgba(0, 0, 0, 0.7);
             backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
-            font-size: 13px;
-            line-height: 1.35;
-            text-align: center;
+            font-size: 12.5px;
             color: var(--tier-accent);
             font-weight: 500;
-            white-space: normal;
             opacity: 0;
-            transform: translateX(-50%) translateY(10px) scale(0.95);
+            transform: translateX(-50%) translateY(10px) scale(0.96);
             pointer-events: none;
-            transition: opacity 180ms var(--ease-out), transform 180ms var(--ease-out);
+            transition: opacity 160ms var(--ease-out), transform 160ms var(--ease-out);
         }
 
         .copy-toast.visible {
@@ -814,120 +830,891 @@
             transform: translateX(-50%) translateY(0) scale(1);
         }
 
+        .copy-toast.error {
+            background: rgba(26, 12, 14, 0.96);
+            border-color: rgba(239, 68, 68, 0.5);
+            color: #f87171;
+        }
+
+        @media (min-width: 640px) {
+            .card {
+                max-width: 560px;
+                padding: 28px 26px 24px;
+            }
+            .app-tab { font-size: 12px; }
+        }
+
         @media (max-width: 480px) {
-            body {
-                padding: max(12px, env(safe-area-inset-top)) 12px max(16px, env(safe-area-inset-bottom)) 12px;
-            }
-            .card {
-                padding: 24px 18px 20px;
-                border-radius: 22px;
-            }
-            .btn {
-                min-height: 52px;
-                font-size: 14px;
-            }
-            .btn-title {
-                font-size: 14px;
-            }
-            .store-btn {
-                min-height: 46px;
-                font-size: 13px;
-            }
+            body { padding: max(10px, env(safe-area-inset-top)) 10px max(14px, env(safe-area-inset-bottom)) 10px; }
+            .card { padding: 22px 14px 18px; border-radius: 20px; }
+            .btn-row { grid-template-columns: 1fr; }
+        }
+    
+        /* View Switcher */
+        @keyframes viewFadeIn {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        #mainView:not(.view-hidden), #guidesView:not(.view-hidden) {
+            animation: viewFadeIn 180ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+        #guidesView {
+            text-align: left;
+        }
+        .guide-section {
+            text-align: left;
+        }
+        .view-hidden {
+            display: none !important;
         }
 
-        @media (max-width: 360px) {
-            body {
-                padding: max(8px, env(safe-area-inset-top)) 8px max(12px, env(safe-area-inset-bottom)) 8px;
-            }
-            .card {
-                padding: 20px 14px 18px;
-                border-radius: 18px;
-            }
-            .btn {
-                min-height: 50px;
-                font-size: 13.5px;
-                padding: 9px 10px;
-                gap: 8px;
-            }
-            .btn-title {
-                font-size: 13.5px;
-            }
-            .btn-subtitle {
-                font-size: 10.5px;
-            }
-            .store-btn {
-                padding: 8px 6px;
-                font-size: 12px;
-                gap: 6px;
-            }
-            .support-accordion-header {
-                padding: 13px 14px;
-                font-size: 13.5px;
-            }
+        /* Micro-interactions & Tactile Tap */
+        button:active, .sub-pill:active, .guide-nav-btn:active, .mini-copy-btn:active, .guides-trigger-card:active, .guide-method-btn:active, .guide-store-card:active {
+            transform: scale(0.98);
         }
-
         @media (prefers-reduced-motion: reduce) {
             *, *::before, *::after {
                 animation-duration: 0.01ms !important;
-                animation-delay: 0ms !important;
+                animation-iteration-count: 1 !important;
                 transition-duration: 0.01ms !important;
+                scroll-behavior: auto !important;
             }
+        }
+
+        /* Guides Trigger Banner on Main View */
+        .guides-trigger-card {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-top: 14px;
+            padding: 12px 14px;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.02) 100%);
+            border: 1px solid var(--border-subtle);
+            border-radius: 14px;
+            cursor: pointer;
+            transition: all 150ms ease;
+            text-align: left;
+        }
+        .guides-trigger-card:hover {
+            background: rgba(255, 255, 255, 0.07);
+            border-color: var(--border-strong);
+            transform: translateY(-1px);
+        }
+        .guides-trigger-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.06);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--tier-accent);
+            flex-shrink: 0;
+        }
+        .guides-trigger-icon svg {
+            width: 20px;
+            height: 20px;
+        }
+        .guides-trigger-body {
+            flex: 1;
+            min-width: 0;
+        }
+        .guides-trigger-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-main);
+            line-height: 1.3;
+        }
+        .guides-trigger-sub {
+            font-size: 11px;
+            color: var(--text-muted);
+            line-height: 1.3;
+            margin-top: 2px;
+        }
+        .guides-trigger-arrow {
+            color: var(--text-muted);
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            margin-right: 4px;
+        }
+        .guides-trigger-arrow svg {
+            width: 16px;
+            height: 16px;
+        }
+
+        /* Guides Screen Header */
+        .guides-sticky-bar {
+            position: sticky;
+            top: 0;
+            z-index: 25;
+            background: rgba(9, 9, 11, 0.94);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 14px;
+            padding: 8px 0 12px 0;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .guides-popout-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            padding: 6px 10px;
+            min-height: 32px;
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--text-sub);
+            text-decoration: none;
+            transition: all 140ms ease;
+        }
+        .guides-popout-btn:hover {
+            color: var(--text-main);
+            background: rgba(255, 255, 255, 0.08);
+            border-color: var(--border-strong);
+        }
+        .guides-back-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-subtle);
+            border-radius: 10px;
+            padding: 8px 14px;
+            min-height: 38px;
+            color: var(--text-main);
+            font-size: 12.5px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 120ms ease;
+        }
+        .guides-back-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: var(--border-strong);
+        }
+        .guides-back-btn svg {
+            width: 14px;
+            height: 14px;
+        }
+        .guides-badge-tag {
+            font-size: 11.5px;
+            font-weight: 600;
+            color: var(--tier-accent);
+            background: var(--tier-badge-glow);
+            border: 1px solid var(--tier-highlight-line);
+            padding: 4px 9px;
+            border-radius: 7px;
+        }
+        .guides-header-title {
+            text-align: left;
+            margin-bottom: 14px;
+        }
+        .guides-header-title h2 {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text-main);
+            margin: 0 0 4px 0;
+            letter-spacing: -0.3px;
+        }
+        .guides-header-title p {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin: 0;
+            line-height: 1.4;
+        }
+
+        /* Platform Tabs */
+        .guide-nav-tabs {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 6px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: 4px;
+            margin-bottom: 14px;
+        }
+        .guide-nav-btn {
+            background: transparent;
+            border: none;
+            border-radius: 9px;
+            padding: 10px 6px;
+            min-height: 38px;
+            font-size: 12.5px;
+            font-weight: 500;
+            color: var(--text-sub);
+            cursor: pointer;
+            transition: all 120ms ease;
+            text-align: center;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .guide-nav-btn.active {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-main);
+            font-weight: 700;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+        }
+
+        /* Responsive Method Switcher Tabs (No horizontal scrolling / no cutoff) */
+        .guide-method-tabs {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6px;
+            margin-bottom: 14px;
+        }
+        @media (max-width: 480px) {
+            .guide-method-tabs {
+                gap: 4px;
+            }
+        }
+        .guide-method-btn {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: 8px 6px;
+            min-height: 58px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 120ms cubic-bezier(0.16, 1, 0.3, 1);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 3px;
+        }
+        .guide-method-btn:hover {
+            background: rgba(255, 255, 255, 0.06);
+            border-color: var(--border-strong);
+        }
+        .guide-method-btn.active {
+            background: rgba(16, 185, 129, 0.1);
+            border-color: var(--tier-accent);
+            box-shadow: 0 0 10px var(--tier-badge-glow);
+        }
+        .guide-method-badge {
+            font-size: 10.5px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            line-height: 1;
+        }
+        .guide-method-btn.active .guide-method-badge {
+            color: var(--tier-accent);
+        }
+        .guide-method-title {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--text-main);
+            line-height: 1.25;
+        }
+        .guide-tab-icon {
+            width: 13px;
+            height: 13px;
+            flex-shrink: 0;
+            display: inline-block;
+        }
+        .guide-method-sub {
+            font-size: 11px;
+            color: var(--text-muted);
+            line-height: 1.3;
+        }
+
+        /* Store Link Cards Grid */
+        .guide-store-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+            margin: 10px 0;
+        }
+        .guide-store-grid:has(> :only-child) {
+            grid-template-columns: 1fr;
+        }
+        @media (max-width: 480px) {
+            .guide-store-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        .guide-store-card {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: 10px 14px;
+            text-decoration: none;
+            color: var(--text-main);
+            transition: all 120ms ease;
+            text-align: left;
+            min-height: 52px;
+        }
+        .guide-store-card:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: var(--border-strong);
+            transform: translateY(-1px);
+        }
+        .guide-store-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-width: 0;
+            flex: 1;
+        }
+        .guide-store-icon {
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-main);
+            flex-shrink: 0;
+        }
+        .guide-store-icon svg {
+            width: 22px;
+            height: 22px;
+            fill: currentColor;
+        }
+        .guide-store-icon svg[fill="none"] {
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2;
+        }
+        .guide-store-info {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 0;
+            flex: 1;
+        }
+        .guide-store-name {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--text-main);
+            line-height: 1.3;
+            word-break: break-word;
+        }
+        .guide-store-sub {
+            font-size: 11px;
+            color: var(--text-muted);
+            line-height: 1.35;
+            word-break: break-word;
+        }
+        .guide-store-badge {
+            font-size: 11.5px;
+            font-weight: 600;
+            color: var(--tier-accent);
+            background: var(--tier-badge-glow);
+            border: 1px solid var(--tier-highlight-line);
+            padding: 6px 11px;
+            border-radius: 8px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            flex-shrink: 0;
+            min-height: 32px;
+        }
+
+        /* Video & Real Screenshot Styles */
+        .guide-video-toggle-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            width: 100%;
+            padding: 10px 14px;
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px solid var(--tier-accent);
+            border-radius: 12px;
+            color: var(--tier-accent);
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 140ms cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .guide-video-toggle-btn:hover {
+            background: rgba(16, 185, 129, 0.16);
+            transform: translateY(-1px);
+        }
+        @keyframes screenshotShimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+        }
+        .guide-screenshot-wrapper {
+            position: relative;
+            margin: 12px auto;
+            border-radius: 14px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: linear-gradient(90deg, rgba(255, 255, 255, 0.02) 20%, rgba(255, 255, 255, 0.07) 50%, rgba(255, 255, 255, 0.02) 80%);
+            background-size: 200% 100%;
+            animation: screenshotShimmer 2.2s infinite linear;
+            cursor: zoom-in;
+            transition: border-color 140ms ease, box-shadow 140ms ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-sizing: border-box;
+        }
+        .guide-screenshot-wrapper.vertical {
+            width: 100%;
+            max-width: 204px;
+            aspect-ratio: 9 / 16;
+            max-height: 362px;
+        }
+        .guide-screenshot-wrapper.horizontal {
+            width: 100%;
+            max-width: 440px;
+            aspect-ratio: 16 / 9;
+            max-height: 230px;
+        }
+        .guide-screenshot-wrapper.img-loaded,
+        .guide-screenshot-wrapper:has(img.loaded) {
+            animation: none;
+            background: rgba(0, 0, 0, 0.35);
+        }
+        .guide-screenshot-wrapper:hover {
+            border-color: rgba(16, 185, 129, 0.45);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+        }
+        .guide-screenshot-wrapper::after {
+            content: "🔍 Нажмите для увеличения";
+            position: absolute;
+            bottom: 8px;
+            right: 8px;
+            background: rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            color: #e4e4e7;
+            font-size: 10px;
+            font-weight: 500;
+            padding: 3px 8px;
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            pointer-events: none;
+            opacity: 0.85;
+            transition: all 120ms ease;
+            z-index: 2;
+        }
+        .guide-screenshot-wrapper:hover::after {
+            opacity: 1;
+            color: #6ee7b7;
+            border-color: rgba(16, 185, 129, 0.5);
+            background: rgba(0, 0, 0, 0.85);
+        }
+        .guide-real-screenshot {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            border-radius: 10px;
+            cursor: zoom-in;
+            opacity: 0;
+            transition: opacity 280ms cubic-bezier(0.16, 1, 0.3, 1);
+            display: block;
+        }
+        .guide-real-screenshot.loaded {
+            opacity: 1;
+        }
+
+        /* Lightbox Modal */
+        .image-lightbox {
+            position: fixed;
+            inset: 0;
+            margin: auto;
+            padding: 0;
+            border: none;
+            background: transparent;
+            max-width: 100vw;
+            max-height: 100vh;
+            width: 100%;
+            height: 100%;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            outline: none;
+            box-sizing: border-box;
+        }
+        .image-lightbox[open] {
+            display: flex;
+        }
+        .image-lightbox::backdrop {
+            background: rgba(0, 0, 0, 0.88);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+        }
+        .lightbox-container {
+            position: relative;
+            max-width: 96vw;
+            max-height: 94vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 12px;
+            box-sizing: border-box;
+        }
+        .lightbox-img-wrap {
+            max-width: 95vw;
+            max-height: 84vh;
+            overflow: auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 12px;
+            scrollbar-width: thin;
+            -webkit-overflow-scrolling: touch;
+            touch-action: pan-x pan-y;
+        }
+        .lightbox-img {
+            max-width: 92vw;
+            max-height: 80vh;
+            width: auto;
+            height: auto;
+            object-fit: contain;
+            border-radius: 10px;
+            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.15);
+            cursor: zoom-in;
+            transition: max-width 180ms ease, max-height 180ms ease;
+            touch-action: pan-x pan-y pinch-zoom;
+        }
+        .lightbox-img.zoomed {
+            max-width: none;
+            max-height: none;
+            cursor: zoom-out;
+        }
+        .lightbox-close-btn {
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            background: rgba(30, 30, 34, 0.9);
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 100;
+            backdrop-filter: blur(8px);
+            transition: all 120ms ease;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+        }
+        .lightbox-close-btn:hover {
+            background: rgba(255, 255, 255, 0.25);
+            transform: scale(1.08);
+        }
+        .lightbox-close-btn svg {
+            width: 18px;
+            height: 18px;
+        }
+        .lightbox-caption {
+            margin-top: 10px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #ffffff;
+            text-align: center;
+            background: rgba(18, 18, 20, 0.85);
+            padding: 6px 14px;
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            max-width: 90vw;
+        }
+        .lightbox-tip {
+            margin-top: 6px;
+            font-size: 11px;
+            color: #a1a1aa;
+            text-align: center;
+        }
+
+        /* Step Cards */
+        .guide-step-card {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-subtle);
+            border-radius: 14px;
+            padding: 14px;
+            margin-bottom: 12px;
+            text-align: left;
+        }
+        .guide-step-header {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            margin-bottom: 8px;
+            text-align: left;
+        }
+        .guide-step-num {
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: var(--tier-accent);
+            color: #050505;
+            font-size: 11.5px;
+            font-weight: 800;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .guide-step-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-main);
+            line-height: 1.3;
+            text-align: left;
+        }
+        .guide-step-desc {
+            font-size: 12px;
+            color: var(--text-sub);
+            line-height: 1.45;
+            margin-bottom: 8px;
+            text-align: left;
+        }
+        .guide-step-desc strong {
+            color: var(--text-main);
+        }
+
+        /* Callout Box */
+        .guide-callout {
+            display: flex;
+            gap: 9px;
+            background: rgba(56, 189, 248, 0.06);
+            border: 1px solid rgba(56, 189, 248, 0.2);
+            border-radius: 10px;
+            padding: 10px 12px;
+            margin-bottom: 12px;
+            font-size: 11.5px;
+            color: #bae6fd;
+            line-height: 1.4;
+            text-align: left;
+        }
+        .guide-callout-warning {
+            background: rgba(245, 158, 11, 0.08);
+            border-color: rgba(245, 158, 11, 0.25);
+            color: #fde68a;
+        }
+        .guide-callout-svg {
+            width: 17px;
+            height: 17px;
+            flex-shrink: 0;
+            margin-top: 1px;
+        }
+
+        /* Clean Data Table Card (e.g. Kazakhstan Address) */
+        .guide-data-card {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: 12px 14px;
+            margin-top: 10px;
+        }
+        .guide-data-card-title {
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .guide-data-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            font-size: 12px;
+        }
+        .guide-data-row:last-child {
+            border-bottom: none;
+        }
+        .guide-data-label {
+            color: var(--text-sub);
+        }
+        .guide-data-val-group {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .guide-data-value {
+            color: var(--text-main);
+            font-weight: 600;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 12px;
+        }
+        .mini-copy-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 8px;
+            padding: 6px 11px;
+            color: var(--text-sub);
+            font-size: 11.5px;
+            font-weight: 600;
+            cursor: pointer;
+            min-height: 30px;
+            transition: all 120ms ease;
+        }
+        .mini-copy-btn svg {
+            width: 12px;
+            height: 12px;
+        }
+        .mini-copy-btn:hover {
+            background: rgba(255, 255, 255, 0.12);
+            color: var(--text-main);
+            border-color: rgba(255, 255, 255, 0.25);
+        }
+        .mini-copy-btn.copied {
+            background: rgba(16, 185, 129, 0.15);
+            border-color: #10b981;
+            color: #6ee7b7;
+        }
+
+        /* FAQ Accordion in Guides */
+        .guide-faq-item {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            margin-bottom: 8px;
+            overflow: hidden;
+        }
+        .guide-faq-q {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 14px;
+            background: transparent;
+            border: none;
+            color: var(--text-main);
+            font-size: 12.5px;
+            font-weight: 600;
+            text-align: left;
+            cursor: pointer;
+            gap: 10px;
+        }
+        .guide-faq-chevron {
+            width: 14px;
+            height: 14px;
+            color: var(--text-muted);
+            transition: transform 180ms ease;
+            flex-shrink: 0;
+        }
+        .guide-faq-item.open .guide-faq-chevron {
+            transform: rotate(180deg);
+        }
+        .guide-faq-a {
+            display: none;
+            padding: 0 14px 12px 14px;
+            font-size: 12px;
+            color: var(--text-sub);
+            line-height: 1.5;
+            border-top: 1px solid rgba(255, 255, 255, 0.04);
+            margin-top: 4px;
+            padding-top: 10px;
+            text-align: left;
+        }
+        .guide-faq-item.open .guide-faq-a {
+            display: block;
+        }
+
+        /* Bottom return bar */
+        .guides-bottom-bar {
+            margin-top: 20px;
+            padding-top: 14px;
+            border-top: 1px solid var(--border-subtle);
+        }
+        .guides-return-btn {
+            width: 100%;
+            padding: 12px;
+            border-radius: 12px;
+            background: #ffffff;
+            color: #09090b;
+            font-size: 13px;
+            font-weight: 700;
+            border: none;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: all 120ms ease;
+        }
+        .guides-return-btn:hover {
+            background: #e4e4e7;
+        }
+        .guides-return-btn svg {
+            width: 16px;
+            height: 16px;
         }
     </style>
 </head>
 <body data-tier="{tier}">
     <div class="card">
-        <div class="stagger-1">
-            <div class="header-top">
-                <div class="status-pill">
-                    <span class="status-dot"></span>
-                    <span>Активный доступ</span>
-                </div>
-                <div class="icon-badge" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-                    </svg>
-                </div>
+        <div id="mainView">
+        <div class="header-top">
+            <div class="status-pill">
+                <span class="status-dot"></span>
+                <span>Активный доступ</span>
             </div>
-            {tariff_badge_html}
-            <h1>{page_title}</h1>
-            <p class="subtitle">Открытие приложения для автоматической настройки доступа.</p>
+            <div class="icon-badge" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                </svg>
+            </div>
         </div>
 
-        <div class="stagger-2">
-            <a id="deepLinkIncy" href="#" class="btn btn-primary">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M15 3h6v6"/>
-                    <path d="M10 14L21 3"/>
-                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-                </svg>
-                <span>Открыть в приложении INCY</span>
-            </a>
-            <a id="deepLinkHapp" href="#" class="btn btn-happ">
-                <span class="btn-inner-stack">
-                    <span class="btn-main-row">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                            <path d="M15 3h6v6"/>
-                            <path d="M10 14L21 3"/>
-                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-                        </svg>
-                        <span class="btn-title">Открыть в приложении Happ</span>
-                    </span>
-                    <span class="btn-subtitle">Рекомендуется для Windows</span>
-                </span>
-            </a>
+        {tariff_badge_html}
 
-            <button id="copyBtn" type="button" class="btn btn-secondary" onclick="copyLink()">
-                <span id="copyBtnContent">
-                    <svg id="copyIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <h1>{page_title}</h1>
+        <p class="subtitle">Персональная ссылка для настройки подключения на ваших устройствах.</p>
+
+        <div class="actions-group">
+            <div class="btn-row">
+                <a id="deepLinkHapp" href="#" class="btn btn-primary">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                    </svg>
+                    <span>Подключить в Happ</span>
+                </a>
+
+                <a id="deepLinkIncy" href="#" class="btn btn-secondary">
+                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z"/>
+                    </svg>
+                    <span>Подключить в INCY</span>
+                </a>
+            </div>
+
+            <div class="sub-bar">
+                <span class="sub-bar-text" id="subUrlText">...</span>
+                <button type="button" class="sub-copy-btn" id="copyUrlBtn" onclick="copyLink()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                         <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
                     </svg>
-                    <span id="copyBtnText">Скопировать ссылку</span>
-                </span>
-            </button>
+                    <span id="copyBtnLabel">Скопировать</span>
+                </button>
+            </div>
 
-            <!-- Support Disclosure Accordion -->
+            <!-- Support Accordion -->
             <div id="supportAccordion" class="support-accordion">
                 <button id="supportToggleBtn" type="button" class="support-accordion-header" onclick="toggleSupportForm()" aria-expanded="false" aria-controls="supportFormContainer">
                     <span class="support-header-left">
@@ -942,210 +1729,1070 @@
                 </button>
                 <div id="supportFormContainer" class="support-form-container" role="region" aria-label="Форма связи с поддержкой" aria-hidden="true">
                     <div class="support-form-inner">
-                        <p class="support-intro">Оставьте контакты для связи — мы напишем вам в удобное приложение и поможем с настройкой.</p>
+                        <p class="support-intro">Укажите контакт и вопрос: оператор поддержки ответит и поможет с настройкой.</p>
                         <form id="emergencySupportForm" onsubmit="submitSupportReport(event)">
                             <div class="support-field">
-                                <label for="supportContact" class="support-label">Куда вам написать?</label>
-                                <input type="text" id="supportContact" class="support-input" placeholder="Telegram @username, WhatsApp, телефон или другой контакт" maxlength="120" required>
+                                <label for="supportContact" class="support-label">Контакт для связи</label>
+                                <input type="text" id="supportContact" class="support-input" placeholder="Telegram @username или телефон" maxlength="120" required>
                             </div>
                             <div class="support-field">
-                                <label for="supportMessage" class="support-label">Что произошло?</label>
-                                <textarea id="supportMessage" class="support-textarea" placeholder="Опишите проблему или что не получается настроить" maxlength="1000" rows="3" required></textarea>
+                                <label for="supportMessage" class="support-label">Сообщение</label>
+                                <textarea id="supportMessage" class="support-textarea" placeholder="Опишите вопрос или проблему" maxlength="1000" rows="3" required></textarea>
                             </div>
                             <button type="submit" id="supportSubmitBtn" class="support-submit-btn">
-                                <span id="supportSubmitBtnText">Отправить контакты</span>
+                                <span>Отправить</span>
                             </button>
-                            <div id="supportStatusMsg" class="support-status-msg" aria-live="polite"></div>
+                            <div id="supportStatusMsg" class="support-status-msg" role="status" aria-live="polite"></div>
                         </form>
                     </div>
                 </div>
             </div>
         </div>
 
-        <div class="divider stagger-3"></div>
+        <div class="divider"></div>
 
-        <div class="stagger-3">
-            <div class="section-title">Приложения для подключения</div>
-            <div class="app-tabs">
-                <button type="button" class="app-tab active" onclick="switchAppTab('incy')">INCY</button>
-                <button type="button" class="app-tab" onclick="switchAppTab('happ')">Happ</button>
+        <div class="section-header-row">
+            <span class="section-title">Приложения</span>
+        </div>
+        <p class="section-desc">Приложения для подключения. Если одно недоступно у вашего провайдера, используйте второе.</p>
+
+        <!-- 5 Tabs: iOS, Android, Win, Mac, GitHub -->
+        <div class="app-tabs">
+            <button type="button" id="tabBtnIos" class="app-tab" onclick="switchPlatformTab('ios')">
+                <svg viewBox="0 0 24 24" class="tab-svg" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.33c.64-.78 1.08-1.86.96-2.94-.93.04-2.06.62-2.72 1.4-.58.68-1.1 1.79-.96 2.84 1.04.08 2.08-.52 2.72-1.3"/></svg>
+                <span>iOS</span>
+            </button>
+            <button type="button" id="tabBtnAndroid" class="app-tab" onclick="switchPlatformTab('android')">
+                <svg viewBox="0 0 24 24" class="tab-svg" fill="currentColor"><path d="M6 18c0 .55.45 1 1 1h1v3.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5V19h2v3.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5V19h1c.55 0 1-.45 1-1V8H6v10zM3.5 8C2.67 8 2 8.67 2 9.5v7c0 .83.67 1.5 1.5 1.5S5 17.33 5 16.5v-7C5 8.67 4.33 8 3.5 8zm17 0c-.83 0-1.5.67-1.5 1.5v7c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5v-7c0-.83-.67-1.5-1.5-1.5zm-4.97-4.84l1.3-1.3c.2-.2.2-.51 0-.71-.2-.2-.51-.2-.71 0l-1.48 1.48C13.85 2.23 12.95 2 12 2c-.96 0-1.86.23-2.66.63L7.85 1.15c-.2-.2-.51-.2-.71 0-.2.2-.2.51 0 .71l1.31 1.31C6.97 4.26 6 5.92 6 7.8h12c0-1.88-.97-3.54-2.47-4.64zM9 6c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm6 0c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1z"/></svg>
+                <span>Android</span>
+            </button>
+            <button type="button" id="tabBtnWindows" class="app-tab" onclick="switchPlatformTab('windows')">
+                <svg viewBox="0 0 24 24" class="tab-svg" fill="currentColor"><path d="M3 5.45L10.5 4.36V11.27H3V5.45ZM10.5 12.73V19.64L3 18.55V12.73H10.5ZM12 4.14L21 2.85V11.27H12V4.14ZM21 12.73V21.15L12 19.86V12.73H21Z"/></svg>
+                <span>Win</span>
+            </button>
+            <button type="button" id="tabBtnMacos" class="app-tab" onclick="switchPlatformTab('macos')">
+                <svg viewBox="0 0 24 24" class="tab-svg" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.33c.64-.78 1.08-1.86.96-2.94-.93.04-2.06.62-2.72 1.4-.58.68-1.1 1.79-.96 2.84 1.04.08 2.08-.52 2.72-1.3"/></svg>
+                <span>Mac</span>
+            </button>
+            <button type="button" id="tabBtnGithub" class="app-tab" onclick="switchPlatformTab('github')">
+                <svg viewBox="0 0 24 24" class="tab-svg" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 4.335 9.688 10.35 10.125.6.11.825-.26.825-.58 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+                <span>GitHub</span>
+            </button>
+        </div>
+
+        <!-- iOS Platform Panel -->
+        <div id="tab-ios" class="platform-panel" style="display: none;">
+            <div class="client-group">
+                <div class="client-group-header">
+                    <div class="client-title-wrap">
+                        <svg viewBox="0 0 24 24" fill="currentColor" class="client-glyph"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z"/></svg>
+                        <span class="client-name">INCY</span>
+                    </div>
+                    <span class="pc-badge pc-badge-recommended">Рекомендуется</span>
+                </div>
+                <div class="store-grid">
+                    <a href="https://testflight.apple.com/join/dFw66h3a" target="_blank" rel="noopener" class="store-card">
+                        <div class="store-card-icon"><svg viewBox="0 0 24 24"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.33c.64-.78 1.08-1.86.96-2.94-.93.04-2.06.62-2.72 1.4-.58.68-1.1 1.79-.96 2.84 1.04.08 2.08-.52 2.72-1.3"/></svg></div>
+                        <div class="store-card-content"><span class="store-card-title">TestFlight</span><span class="store-card-desc">Для РФ (без смены региона)</span></div>
+                    </a>
+                    <a href="https://apps.apple.com/app/incy/id6756943388" target="_blank" rel="noopener" class="store-card">
+                        <div class="store-card-icon"><svg viewBox="0 0 24 24"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.33c.64-.78 1.08-1.86.96-2.94-.93.04-2.06.62-2.72 1.4-.58.68-1.1 1.79-.96 2.84 1.04.08 2.08-.52 2.72-1.3"/></svg></div>
+                        <div class="store-card-content"><span class="store-card-title">App Store</span><span class="store-card-desc">Зарубежный Apple ID</span></div>
+                    </a>
+                </div>
             </div>
-
-            <!-- INCY Downloads: Unified 2x2 Grid with clear client context -->
-            <div id="tab-incy" class="tab-pane">
-                <div class="store-buttons">
-                    <a href="https://apps.apple.com/app/incy/id6756943388" target="_blank" rel="noopener" class="store-btn">
-                        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                            <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.33c.64-.78 1.08-1.86.96-2.94-.93.04-2.06.62-2.72 1.4-.58.68-1.1 1.79-.96 2.84 1.04.08 2.08-.52 2.72-1.3"/>
-                        </svg>
-                        <span>App Store (INCY)</span>
-                    </a>
-                    <a href="https://play.google.com/store/apps/details?id=llc.itdev.incy" target="_blank" rel="noopener" class="store-btn">
-                        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                            <path d="M3.61 1.814L13.793 12 3.61 22.186a1.05 1.05 0 0 1-.61-.959V2.773c0-.419.246-.785.61-.959zm10.89 10.893l2.302 2.302-10.937 6.333 8.635-8.635zm3.199-3.198l2.807 1.626a1 1 0 0 1 0 1.73l-2.808 1.626L15.206 12l2.493-2.491zM5.864 2.658L16.8 8.99l-2.302 2.302-8.634-8.634z"/>
-                        </svg>
-                        <span>Google Play (INCY)</span>
-                    </a>
+            <div class="client-group">
+                <div class="client-group-header">
+                    <div class="client-title-wrap">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="client-glyph"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                        <span class="client-name">Happ</span>
+                    </div>
+                    <span class="pc-badge">Альтернатива</span>
                 </div>
-                <div class="store-buttons">
-                    <a href="https://github.com/INCY-DEV/incy-platforms/releases" target="_blank" rel="noopener" class="store-btn">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                            <polyline points="7 10 12 15 17 10"/>
-                            <line x1="12" y1="15" x2="12" y2="3"/>
-                        </svg>
-                        <span>INCY APK</span>
+                <div class="store-grid">
+                    <a href="https://testflight.apple.com/join/XMls6Ckd" target="_blank" rel="noopener" class="store-card">
+                        <div class="store-card-icon"><svg viewBox="0 0 24 24"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.33c.64-.78 1.08-1.86.96-2.94-.93.04-2.06.62-2.72 1.4-.58.68-1.1 1.79-.96 2.84 1.04.08 2.08-.52 2.72-1.3"/></svg></div>
+                        <div class="store-card-content"><span class="store-card-title">TestFlight</span><span class="store-card-desc">Для РФ (без смены региона)</span></div>
                     </a>
-                    <a href="https://github.com/INCY-DEV/incy-platforms/releases" target="_blank" rel="noopener" class="store-btn">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
-                            <line x1="8" y1="21" x2="16" y2="21"/>
-                            <line x1="12" y1="17" x2="12" y2="21"/>
-                        </svg>
-                        <span>INCY для Windows</span>
-                    </a>
-                </div>
-            </div>
-
-            <!-- Happ Downloads: Unified 2x2 Grid with clear client context -->
-            <div id="tab-happ" class="tab-pane" style="display: none;">
-                <div class="store-buttons">
-                    <a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215" target="_blank" rel="noopener" class="store-btn">
-                        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                            <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.33c.64-.78 1.08-1.86.96-2.94-.93.04-2.06.62-2.72 1.4-.58.68-1.1 1.79-.96 2.84 1.04.08 2.08-.52 2.72-1.3"/>
-                        </svg>
-                        <span>App Store (Happ)</span>
-                    </a>
-                    <a href="https://play.google.com/store/apps/details?id=com.happproxy" target="_blank" rel="noopener" class="store-btn">
-                        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                            <path d="M3.61 1.814L13.793 12 3.61 22.186a1.05 1.05 0 0 1-.61-.959V2.773c0-.419.246-.785.61-.959zm10.89 10.893l2.302 2.302-10.937 6.333 8.635-8.635zm3.199-3.198l2.807 1.626a1 1 0 0 1 0 1.73l-2.808 1.626L15.206 12l2.493-2.491zM5.864 2.658L16.8 8.99l-2.302 2.302-8.634-8.634z"/>
-                        </svg>
-                        <span>Google Play (Happ)</span>
-                    </a>
-                </div>
-                <div class="store-buttons">
-                    <a href="https://github.com/Happ-proxy/happ-android/releases" target="_blank" rel="noopener" class="store-btn">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                            <polyline points="7 10 12 15 17 10"/>
-                            <line x1="12" y1="15" x2="12" y2="3"/>
-                        </svg>
-                        <span>Happ APK</span>
-                    </a>
-                    <a href="https://github.com/Happ-proxy/happ-desktop/releases" target="_blank" rel="noopener" class="store-btn">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
-                            <line x1="8" y1="21" x2="16" y2="21"/>
-                            <line x1="12" y1="17" x2="12" y2="21"/>
-                        </svg>
-                        <span>Happ для Windows</span>
+                    <a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215" target="_blank" rel="noopener" class="store-card">
+                        <div class="store-card-icon"><svg viewBox="0 0 24 24"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.33c.64-.78 1.08-1.86.96-2.94-.93.04-2.06.62-2.72 1.4-.58.68-1.1 1.79-.96 2.84 1.04.08 2.08-.52 2.72-1.3"/></svg></div>
+                        <div class="store-card-content"><span class="store-card-title">App Store</span><span class="store-card-desc">Зарубежный Apple ID</span></div>
                     </a>
                 </div>
             </div>
         </div>
 
-        <div class="steps stagger-4">
-            <span class="steps-title">Как подключить:</span>
+        <!-- Android Platform Panel -->
+        <div id="tab-android" class="platform-panel" style="display: none;">
+            <div class="client-group">
+                <div class="client-group-header">
+                    <div class="client-title-wrap">
+                        <svg viewBox="0 0 24 24" fill="currentColor" class="client-glyph"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z"/></svg>
+                        <span class="client-name">INCY</span>
+                    </div>
+                    <span class="pc-badge pc-badge-recommended">Рекомендуется</span>
+                </div>
+                <div class="store-grid">
+                    <a href="https://play.google.com/store/apps/details?id=llc.itdev.incy" target="_blank" rel="noopener" class="store-card">
+                        <div class="store-card-icon"><svg viewBox="0 0 24 24"><path d="M3.61 1.814L13.793 12 3.61 22.186a1.05 1.05 0 0 1-.61-.959V2.773c0-.419.246-.785.61-.959zm10.89 10.893l2.302 2.302-10.937 6.333 8.635-8.635zm3.199-3.198l2.807 1.626a1 1 0 0 1 0 1.73l-2.808 1.626L15.206 12l2.493-2.491zM5.864 2.658L16.8 8.99l-2.302 2.302-8.634-8.634z"/></svg></div>
+                        <div class="store-card-content"><span class="store-card-title">Google Play</span><span class="store-card-desc">Официальный магазин</span></div>
+                    </a>
+                    <a href="https://github.com/INCY-DEV/incy-platforms/releases/download/latest/Incy.apk" target="_blank" rel="noopener" class="store-card">
+                        <div class="store-card-icon"><svg viewBox="0 0 24 24" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div>
+                        <div class="store-card-content"><span class="store-card-title">Скачать APK</span><span class="store-card-desc">Прямой файл (.apk)</span></div>
+                    </a>
+                </div>
+            </div>
+            <div class="client-group">
+                <div class="client-group-header">
+                    <div class="client-title-wrap">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="client-glyph"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                        <span class="client-name">Happ</span>
+                    </div>
+                    <span class="pc-badge">Прямой APK</span>
+                </div>
+                <div class="store-grid" style="grid-template-columns: 1fr;">
+                    <a href="https://github.com/Happ-proxy/happ-android/releases/latest/download/Happ.apk" target="_blank" rel="noopener" class="store-card">
+                        <div class="store-card-icon"><svg viewBox="0 0 24 24" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div>
+                        <div class="store-card-content"><span class="store-card-title">Скачать официальный APK</span><span class="store-card-desc">Прямой файл с GitHub (без Google Play)</span></div>
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Windows Platform Panel -->
+        <div id="tab-windows" class="platform-panel" style="display: none;">
+            <div class="client-group">
+                <div class="client-group-header">
+                    <div class="client-title-wrap">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="client-glyph"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                        <span class="client-name">Happ Desktop</span>
+                    </div>
+                    <span class="pc-badge pc-badge-recommended">Рекомендуется</span>
+                </div>
+                <div class="platform-row">
+                    <a href="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe" target="_blank" rel="noopener" class="platform-card" style="grid-column: span 2;">
+                        <div class="platform-card-icon"><svg viewBox="0 0 24 24"><path d="M3 5.45L10.5 4.36V11.27H3V5.45ZM10.5 12.73V19.64L3 18.55V12.73H10.5ZM12 4.14L21 2.85V11.27H12V4.14ZM21 12.73V21.15L12 19.86V12.73H21Z"/></svg></div>
+                        <div class="platform-card-content"><span class="platform-card-title">Happ для Windows</span><span class="platform-card-desc">setup-Happ.x64.exe (прямой файл)</span></div>
+                    </a>
+                </div>
+            </div>
+            <div class="client-group">
+                <div class="client-group-header">
+                    <div class="client-title-wrap">
+                        <svg viewBox="0 0 24 24" fill="currentColor" class="client-glyph"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z"/></svg>
+                        <span class="client-name">INCY Desktop</span>
+                    </div>
+                    <span class="pc-badge">Альтернатива</span>
+                </div>
+                <div class="platform-row">
+                    <a href="https://github.com/INCY-DEV/incy-platforms/releases/download/latest/incy-windows-setup.exe" target="_blank" rel="noopener" class="platform-card" style="grid-column: span 2;">
+                        <div class="platform-card-icon"><svg viewBox="0 0 24 24"><path d="M3 5.45L10.5 4.36V11.27H3V5.45ZM10.5 12.73V19.64L3 18.55V12.73H10.5ZM12 4.14L21 2.85V11.27H12V4.14ZM21 12.73V21.15L12 19.86V12.73H21Z"/></svg></div>
+                        <div class="platform-card-content"><span class="platform-card-title">INCY для Windows</span><span class="platform-card-desc">incy-windows-setup.exe (прямой файл)</span></div>
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- macOS Platform Panel -->
+        <div id="tab-macos" class="platform-panel" style="display: none;">
+            <div class="client-group">
+                <div class="client-group-header">
+                    <div class="client-title-wrap">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="client-glyph"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                        <span class="client-name">Happ Desktop</span>
+                    </div>
+                    <span class="pc-badge pc-badge-recommended">Рекомендуется</span>
+                </div>
+                <div class="platform-row">
+                    <a href="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/Happ.macOS.universal.dmg" target="_blank" rel="noopener" class="platform-card" style="grid-column: span 2;">
+                        <div class="platform-card-icon"><svg viewBox="0 0 24 24"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.33c.64-.78 1.08-1.86.96-2.94-.93.04-2.06.62-2.72 1.4-.58.68-1.1 1.79-.96 2.84 1.04.08 2.08-.52 2.72-1.3"/></svg></div>
+                        <div class="platform-card-content"><span class="platform-card-title">Happ для macOS</span><span class="platform-card-desc">Happ.macOS.universal.dmg (Apple Silicon & Intel)</span></div>
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- GitHub Repositories Panel -->
+        <div id="tab-github" class="platform-panel" style="display: none;">
+            <div class="client-group">
+                <div class="client-group-header">
+                    <div class="client-title-wrap">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="client-glyph"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                        <span class="client-name">Happ на GitHub</span>
+                    </div>
+                    <span class="pc-badge">2 репозитория</span>
+                </div>
+                <div class="store-grid">
+                    <a href="https://github.com/Happ-proxy/happ-android/releases" target="_blank" rel="noopener" class="store-card">
+                        <div class="store-card-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 4.335 9.688 10.35 10.125.6.11.825-.26.825-.58 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg></div>
+                        <div class="store-card-content"><span class="store-card-title">Happ Android</span><span class="store-card-desc">Все версии (.apk)</span></div>
+                    </a>
+                    <a href="https://github.com/Happ-proxy/happ-desktop/releases" target="_blank" rel="noopener" class="store-card">
+                        <div class="store-card-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 4.335 9.688 10.35 10.125.6.11.825-.26.825-.58 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg></div>
+                        <div class="store-card-content"><span class="store-card-title">Happ Desktop</span><span class="store-card-desc">Windows / Mac / Linux</span></div>
+                    </a>
+                </div>
+            </div>
+            <div class="client-group">
+                <div class="client-group-header">
+                    <div class="client-title-wrap">
+                        <svg viewBox="0 0 24 24" fill="currentColor" class="client-glyph"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z"/></svg>
+                        <span class="client-name">INCY на GitHub</span>
+                    </div>
+                    <span class="pc-badge">Репозиторий</span>
+                </div>
+                <div class="platform-row">
+                    <a href="https://github.com/INCY-DEV/incy-platforms/releases" target="_blank" rel="noopener" class="platform-card" style="grid-column: span 2;">
+                        <div class="platform-card-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 4.335 9.688 10.35 10.125.6.11.825-.26.825-.58 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg></div>
+                        <div class="platform-card-content"><span class="platform-card-title">INCY Platforms</span><span class="platform-card-desc">Все релизы для Android, Windows, macOS</span></div>
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <div class="steps">
+            <span class="steps-title">Порядок настройки</span>
             <ol>
-                <li>
-                    <span class="step-num">1</span>
-                    <span>Установите приложение <strong>INCY</strong> или <strong>Happ</strong> (для Windows рекомендуется <strong>Happ</strong>).</span>
-                </li>
-                <li>
-                    <span class="step-num">2</span>
-                    <span>Нажмите кнопку <strong>«Открыть в приложении...»</strong> выше либо скопируйте ссылку и добавьте её в приложении.</span>
-                </li>
+                <li><span class="step-num">1</span><span>Установите подходящее приложение для вашего устройства из списка выше.</span></li>
+                <li><span class="step-num">2</span><span>Нажмите кнопку «Подключить в Happ» или «Подключить в INCY» вверху: профиль добавится автоматически. Либо скопируйте адрес.</span></li>
+                <li><span class="step-num">3</span><span>Включите тумблер в приложении для запуска связи.</span></li>
             </ol>
+        </div>
+
+        <!-- Guides Banner Trigger -->
+        <div class="guides-trigger-card" onclick="openGuidesTab('ios')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openGuidesTab('ios');}" role="button" tabindex="0" aria-label="Открыть центр инструкций">
+            <div class="guides-trigger-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+                </svg>
+            </div>
+            <div class="guides-trigger-body">
+                <div class="guides-trigger-title">Центр инструкций и база знаний</div>
+                <div class="guides-trigger-sub">Смена региона App Store, первый запуск, Face ID и APK</div>
+            </div>
+            <div class="guides-trigger-arrow">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="9 18 15 12 9 6"/>
+                </svg>
+            </div>
+        </div>
+        </div><!-- end mainView -->
+
+        <!-- Dedicated Guides View -->
+        <div id="guidesView" class="view-hidden">
+            <div class="guides-sticky-bar">
+                <button type="button" class="guides-back-btn" onclick="closeGuidesTab()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="15 18 9 12 15 6"/>
+                    </svg>
+                    <span>Назад к подключению</span>
+                </button>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <a href="#guides" target="_blank" rel="noopener" class="guides-popout-btn" title="Открыть базу знаний в новой вкладке" aria-label="В новой вкладке">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                        <span>Вкладка</span>
+                    </a>
+                    <span class="guides-badge-tag">База знаний</span>
+                </div>
+            </div>
+
+            <div class="guides-header-title">
+                <h2>Центр инструкций</h2>
+                <p>Инструкции по установке и настройке на всех устройствах</p>
+            </div>
+
+            <div class="guide-nav-tabs" role="tablist" aria-label="Платформы">
+                <button type="button" class="guide-nav-btn active" id="guideNavBtnIos" onclick="switchGuideTab('ios')" role="tab" aria-selected="true">iOS</button>
+                <button type="button" class="guide-nav-btn" id="guideNavBtnAndroid" onclick="switchGuideTab('android')" role="tab" aria-selected="false">Android</button>
+                <button type="button" class="guide-nav-btn" id="guideNavBtnDesktop" onclick="switchGuideTab('desktop')" role="tab" aria-selected="false">ПК / Mac</button>
+                <button type="button" class="guide-nav-btn" id="guideNavBtnFaq" onclick="switchGuideTab('faq')" role="tab" aria-selected="false">Вопросы</button>
+            </div>
+
+            <!-- iOS Guide Content -->
+            <div id="guideSectionIos" class="guide-section" role="tabpanel" aria-labelledby="guideNavBtnIos">
+                <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; text-align: left;">Шаг 1. Выберите способ установки:</div>
+                <div class="guide-method-tabs" role="tablist" aria-label="Способ установки iOS">
+                    <button type="button" class="guide-method-btn active" id="tabBtnIosTf" onclick="switchIosMethod('tf')" role="tab" aria-selected="true">
+                        <span class="guide-method-badge">Быстро</span>
+                        <span class="guide-method-title"><svg class="guide-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>TestFlight</span>
+                        <span class="guide-method-sub">Без смены региона</span>
+                    </button>
+                    <button type="button" class="guide-method-btn" id="tabBtnIosRegion" onclick="switchIosMethod('region')" role="tab" aria-selected="false">
+                        <span class="guide-method-badge">Навсегда</span>
+                        <span class="guide-method-title"><svg class="guide-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>Казахстан</span>
+                        <span class="guide-method-sub">App Store (без карты)</span>
+                    </button>
+                    <button type="button" class="guide-method-btn" id="tabBtnIosNewId" onclick="switchIosMethod('newid')" role="tab" aria-selected="false">
+                        <span class="guide-method-badge">Запасной</span>
+                        <span class="guide-method-title"><svg class="guide-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>Второй ID</span>
+                        <span class="guide-method-sub">Новый Apple ID</span>
+                    </button>
+                </div>
+
+                <!-- Sub-Guide 1: TestFlight (Fastest) -->
+                <div id="iosSubGuideTf">
+                    <div class="guide-callout">
+                        <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                        <div><strong>Установка без смены региона:</strong> TestFlight доступен в App Store РФ и устанавливается с обычного аккаунта без смены страны.</div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">1</span>
+                            <span class="guide-step-title">Установите приложение Apple TestFlight</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Откройте официальный российский App Store и скачайте приложение TestFlight:
+                        </div>
+                        <div class="guide-store-grid" style="grid-template-columns: 1fr;">
+                            <a href="https://apps.apple.com/app/testflight/id899247664" target="_blank" rel="noopener" class="guide-store-card">
+                                <div class="guide-store-left">
+                                    <div class="guide-store-icon"><svg viewBox="0 0 24 24"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.33c.64-.78 1.08-1.86.96-2.94-.93.04-2.06.62-2.72 1.4-.58.68-1.1 1.79-.96 2.84 1.04.08 2.08-.52 2.72-1.3"/></svg></div>
+                                    <div class="guide-store-info">
+                                        <span class="guide-store-name">Apple TestFlight</span>
+                                        <span class="guide-store-sub">Официально из App Store РФ</span>
+                                    </div>
+                                </div>
+                                <span class="guide-store-badge">Установить ↗</span>
+                            </a>
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">2</span>
+                            <span class="guide-step-title">Откройте ссылку тестирования</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Нажмите на ссылку клиента для перехода в TestFlight:
+                        </div>
+                        <div class="guide-store-grid">
+                            <a href="https://testflight.apple.com/join/dFw66h3a" target="_blank" rel="noopener" class="guide-store-card">
+                                <div class="guide-store-left">
+                                    <div class="guide-store-icon"><svg viewBox="0 0 24 24"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z"/></svg></div>
+                                    <div class="guide-store-info">
+                                        <span class="guide-store-name">INCY (Рекомендуется)</span>
+                                        <span class="guide-store-sub">TestFlight приглашение</span>
+                                    </div>
+                                </div>
+                                <span class="guide-store-badge">Открыть ↗</span>
+                            </a>
+                            <a href="https://testflight.apple.com/join/XMls6Ckd" target="_blank" rel="noopener" class="guide-store-card">
+                                <div class="guide-store-left">
+                                    <div class="guide-store-icon"><svg viewBox="0 0 24 24" fill="none"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
+                                    <div class="guide-store-info">
+                                        <span class="guide-store-name">Happ</span>
+                                        <span class="guide-store-sub">TestFlight приглашение</span>
+                                    </div>
+                                </div>
+                                <span class="guide-store-badge">Открыть ↗</span>
+                            </a>
+                        </div>
+                        <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 12px; margin-top: 10px;">
+                            <div style="font-size: 12px; font-weight: 600; color: #10b981; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                                <span>Как принять приглашение в TestFlight:</span>
+                            </div>
+                            <div style="font-size: 12px; color: var(--text-sub); line-height: 1.6;">
+                                1. В открывшемся TestFlight нажмите кнопку <strong>«Принять»</strong> (Accept).<br>
+                                2. Затем нажмите <strong>«Установить»</strong> (Install): приложение появится на домашнем экране.<br>
+                                3. Дополнительных кодов или Apple ID вводить не нужно.
+                            </div>
+                            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, 0.05); font-size: 11.5px;">
+                                <a href="https://testflight.apple.com" target="_blank" rel="noopener" style="color: var(--tier-accent); text-decoration: none; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; font-size: 11.5px; font-weight: 500; min-height: 32px;">
+                                    <span>Официальное руководство Apple по TestFlight ↗</span>
+                                </a>
+                            </div>
+                        </div>
+                        <div style="margin-top: 8px; font-size: 11px; color: var(--text-muted); display: flex; align-items: flex-start; gap: 6px;">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px; flex-shrink: 0; margin-top: 1px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                            <span>Если TestFlight пишет «Этот бета-тест заполнен», выберите способ <strong>«Казахстан»</strong> выше: он позволяет установить клиент напрямую из App Store.</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sub-Guide 2: Region Change to Kazakhstan -->
+                <div id="iosSubGuideRegion" style="display: none;">
+                    <div class="guide-callout">
+                        <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                        <div><strong>Установка через App Store Казахстана:</strong> В магазине Казахстана интерфейс на русском языке, а карта для скачивания не требуется. После установки можно сразу вернуть регион РФ.</div>
+                    </div>
+
+                    <div class="guide-callout guide-callout-warning">
+                        <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                        <div><strong>Условия смены:</strong> На балансе Apple ID не должно быть остатка (0 ₽), действующих платных подписок Apple (или дождитесь окончания их периода), незавершённых заказов и семейного доступа.</div>
+                    </div>
+
+                    <!-- Video Guide Toggle -->
+                    <div style="margin-bottom: 14px;">
+                        <button type="button" class="guide-video-toggle-btn" onclick="toggleGuideVideo()">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                            <span id="videoToggleLabel">Показать видеоинструкцию (запись с экрана iPhone, 2 мин)</span>
+                        </button>
+                        <div id="guideVideoContainer" style="display: none; margin-top: 10px; border-radius: 14px; overflow: hidden; border: 1px solid var(--border-subtle); background: #000; text-align: center;">
+                            <video id="guideVideoPlayer" controls playsinline preload="metadata" style="max-width: 100%; max-height: 480px; display: inline-block; border-radius: 14px;">
+                                <source src="https://happ.info/media/happ-instrukciya-720x1280-web.mp4" type="video/mp4">
+                                Ваш браузер не поддерживает воспроизведение видео.
+                            </video>
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">1</span>
+                            <span class="guide-step-title">Откройте меню смены страны в App Store</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Зайдите в <strong>App Store</strong> → нажмите на <strong>иконку своего профиля</strong> в правом верхнем углу → нажмите на первую строчку (своё имя и Apple ID) → выберите <strong>«Страна/регион»</strong> → <strong>«Изменить страну или регион»</strong>.
+                        </div>
+                        <div class="guide-screenshot-wrapper vertical">
+                            <img src="https://happ.info/imgs/apple-region/01-appstore-profile.png" alt="Профиль App Store" class="guide-real-screenshot" loading="lazy" decoding="async" onload="markImgLoaded(this)">
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">2</span>
+                            <span class="guide-step-title">Выберите Казахстан и примите условия</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Найдите в списке <strong>«Казахстан»</strong>, нажмите <strong>«Принять»</strong> в верхнем правом углу.
+                        </div>
+                        <div class="guide-screenshot-wrapper vertical">
+                            <img src="https://happ.info/imgs/apple-region/04-kazakhstan.png" alt="Выбор Казахстана" class="guide-real-screenshot" loading="lazy" decoding="async" onload="markImgLoaded(this)">
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">3</span>
+                            <span class="guide-step-title">Способ оплаты «Нет» и адрес для счёта</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            В способах оплаты выберите <strong>«Нет»</strong> (банковская карта не требуется). В поля адреса введите данные г. Алматы (нажмите «Копировать» рядом с нужным полем):
+                        </div>
+                        <div class="guide-screenshot-wrapper vertical">
+                            <img src="https://happ.info/imgs/apple-region/07-payment-none.png" alt="Способ оплаты Нет и адрес" class="guide-real-screenshot" loading="lazy" decoding="async" onload="markImgLoaded(this)">
+                        </div>
+                        <!-- Address Copy Fields -->
+                        <div class="guide-data-card">
+                            <div class="guide-data-card-title">Адрес для выставления счёта (Казахстан)</div>
+                            <div class="guide-data-row">
+                                <span class="guide-data-label">Улица</span>
+                                <div class="guide-data-val-group">
+                                    <span class="guide-data-value">ул. Абая, 1</span>
+                                    <button type="button" class="mini-copy-btn" onclick="copyGuideField('ул. Абая, 1', this)" title="Скопировать" aria-label="Скопировать улицу">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                                        <span class="copy-lbl">Копировать</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="guide-data-row">
+                                <span class="guide-data-label">Город</span>
+                                <div class="guide-data-val-group">
+                                    <span class="guide-data-value">Алматы</span>
+                                    <button type="button" class="mini-copy-btn" onclick="copyGuideField('Алматы', this)" title="Скопировать" aria-label="Скопировать город">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                                        <span class="copy-lbl">Копировать</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="guide-data-row">
+                                <span class="guide-data-label">Индекс</span>
+                                <div class="guide-data-val-group">
+                                    <span class="guide-data-value">050000</span>
+                                    <button type="button" class="mini-copy-btn" onclick="copyGuideField('050000', this)" title="Скопировать" aria-label="Скопировать индекс">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                                        <span class="copy-lbl">Копировать</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="guide-data-row">
+                                <span class="guide-data-label">Телефон</span>
+                                <div class="guide-data-val-group">
+                                    <span class="guide-data-value">(701) 123-4567</span>
+                                    <button type="button" class="mini-copy-btn" onclick="copyGuideField('7011234567', this)" title="Скопировать" aria-label="Скопировать телефон">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                                        <span class="copy-lbl">Копировать</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div style="margin-top: 8px; font-size: 11.5px; color: var(--text-sub);">
+                            Нажмите <strong>«Далее»</strong> в правом верхнем углу. Регион изменится сразу.
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">4</span>
+                            <span class="guide-step-title">Скачайте клиент в App Store</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            В поиске App Store введите <strong>INCY</strong> (рекомендуется) или <strong>Happ</strong> и нажмите <strong>«Загрузить»</strong>. После установки вы можете вернуть регион App Store на РФ: приложение продолжит работать и обновляться.
+                        </div>
+                        <div class="guide-screenshot-wrapper vertical">
+                            <img src="https://happ.info/imgs/apple-region/08-happ-appstore.png" alt="Happ в App Store" class="guide-real-screenshot" loading="lazy" decoding="async" onload="markImgLoaded(this)">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sub-Guide 3: New Apple ID (Alternative) -->
+                <div id="iosSubGuideNewId" style="display: none;">
+                    <div class="guide-callout">
+                        <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                        <div><strong>Второй аккаунт Apple ID:</strong> Подходит, если на основном аккаунте оформлены семейный доступ или подписки. Фото, iCloud и контакты не затрагиваются: аккаунт меняется только для App Store.</div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">1</span>
+                            <span class="guide-step-title">Создайте аккаунт на сайте Apple</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            В браузере Safari откройте <strong>account.apple.com</strong> → «Создать Apple ID». Укажите страну <strong>Казахстан</strong> или <strong>США</strong> и свой свободный email. В поле номера телефона укажите свой российский номер (+7): SMS с кодом подтверждения приходит без задержек.
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">2</span>
+                            <span class="guide-step-title">Войдите в App Store и скачайте клиент</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            В App Store нажмите аватарку → пролистайте вниз → <strong>«Выйти»</strong> (только из магазина, из настроек iPhone выходить не нужно). Войдите под новым аккаунтом, скачайте <strong>INCY</strong> или <strong>Happ</strong>, затем вернитесь в свой основной Apple ID. Приложение останется на устройстве навсегда.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 2 (Common for all iOS): Add Subscription -->
+                <div class="guide-step-card" style="border-color: rgba(16, 185, 129, 0.25); background: rgba(16, 185, 129, 0.03);">
+                    <div class="guide-step-header">
+                        <span class="guide-step-num" style="background: #10b981;">2</span>
+                        <span class="guide-step-title">Добавьте подписку в приложение</span>
+                    </div>
+                    <div class="guide-step-desc">
+                        После установки вернитесь на эту страницу и нажмите кнопку <strong>«Подключить в INCY»</strong> или <strong>«Подключить в Happ»</strong> вверху (приложение откроется само и загрузит все серверы).<br>
+                        Либо нажмите <strong>«Скопировать адрес»</strong>, откройте приложение, нажмите <strong>«+»</strong> в правом верхнем углу и выберите <strong>«Вставить из буфера»</strong>.
+                    </div>
+                </div>
+
+                <!-- Step 3 (Common for all iOS): First Connect & System Permission -->
+                <div class="guide-step-card">
+                    <div class="guide-step-header">
+                        <span class="guide-step-num">3</span>
+                        <span class="guide-step-title">Первое подключение и системное разрешение</span>
+                    </div>
+                    <div class="guide-step-desc">
+                        Нажмите круглую кнопку подключения в центре экрана приложения и подтвердите системный запрос iOS (нажмите <strong>«Разрешить»</strong> через Face ID или код-пароль).
+                    </div>
+                    <div style="margin-top: 8px; font-size: 11.5px; color: var(--text-sub);">
+                        Кнопка станет зелёной: соединение активно.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Android Guide Content -->
+            <div id="guideSectionAndroid" class="guide-section" role="tabpanel" aria-labelledby="guideNavBtnAndroid" style="display: none;">
+                <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; text-align: left;">Шаг 1. Выберите способ установки:</div>
+                <div class="guide-method-tabs" style="grid-template-columns: repeat(2, 1fr);" role="tablist" aria-label="Способ установки Android">
+                    <button type="button" class="guide-method-btn active" id="tabBtnAndroidPlay" onclick="switchAndroidMethod('play')" role="tab" aria-selected="true">
+                        <span class="guide-method-badge">Рекомендуется</span>
+                        <span class="guide-method-title"><svg class="guide-tab-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M3.61 1.814L13.793 12 3.61 22.186a1.05 1.05 0 0 1-.61-.959V2.773c0-.419.246-.785.61-.959zm10.89 10.893l2.302 2.302-10.937 6.333 8.635-8.635zm3.199-3.198l2.807 1.626a1 1 0 0 1 0 1.73l-2.808 1.626L15.206 12l2.493-2.491zM5.864 2.658L16.8 8.99l-2.302 2.302-8.634-8.634z"/></svg>Google Play</span>
+                        <span class="guide-method-sub">Официальный магазин</span>
+                    </button>
+                    <button type="button" class="guide-method-btn" id="tabBtnAndroidApk" onclick="switchAndroidMethod('apk')" role="tab" aria-selected="false">
+                        <span class="guide-method-badge">Без сервисов</span>
+                        <span class="guide-method-title"><svg class="guide-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Прямой APK</span>
+                        <span class="guide-method-sub">Для Huawei / Honor</span>
+                    </button>
+                </div>
+
+                <!-- Android Sub 1: Google Play -->
+                <div id="androidSubPlay">
+                    <div class="guide-callout" style="border-left: 3px solid #f59e0b; background: rgba(245, 158, 11, 0.08);">
+                        <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                        <div><strong>Внимание:</strong> Приложение Happ временно недоступно в Google Play для региона РФ, а в поиске появились небезопасные копии. Для установки из магазина используйте <strong>INCY</strong>, либо скачивайте официальный APK Happ с GitHub.</div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">1</span>
+                            <span class="guide-step-title">Установите приложение из Google Play</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            В Google Play доступно приложение <strong>INCY</strong>:
+                        </div>
+                        <div class="guide-store-grid" style="grid-template-columns: 1fr;">
+                            <a href="https://play.google.com/store/apps/details?id=llc.itdev.incy" target="_blank" rel="noopener" class="guide-store-card">
+                                <div class="guide-store-left">
+                                    <div class="guide-store-icon"><svg viewBox="0 0 24 24"><path d="M3.61 1.814L13.793 12 3.61 22.186a1.05 1.05 0 0 1-.61-.959V2.773c0-.419.246-.785.61-.959zm10.89 10.893l2.302 2.302-10.937 6.333 8.635-8.635zm3.199-3.198l2.807 1.626a1 1 0 0 1 0 1.73l-2.808 1.626L15.206 12l2.493-2.491zM5.864 2.658L16.8 8.99l-2.302 2.302-8.634-8.634z"/></svg></div>
+                                    <div class="guide-store-info">
+                                        <span class="guide-store-name">INCY в Google Play</span>
+                                        <span class="guide-store-sub">Официально в магазине • Доступно в РФ</span>
+                                    </div>
+                                </div>
+                                <span class="guide-store-badge">Установить ↗</span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Android Sub 2: Direct APK -->
+                <div id="androidSubApk" style="display: none;">
+                    <div class="guide-callout">
+                        <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+                        <div><strong>Для устройств без Google Play:</strong> Скачайте официальный установочный файл APK Happ напрямую с GitHub.</div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">1</span>
+                            <span class="guide-step-title">Скачайте установочный APK-файл</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Нажмите кнопку скачивания APK (браузер может показать системный запрос):
+                        </div>
+                        <div class="guide-store-grid" style="grid-template-columns: 1fr;">
+                            <a href="https://github.com/Happ-proxy/happ-android/releases/latest/download/Happ.apk" target="_blank" rel="noopener" class="guide-store-card">
+                                <div class="guide-store-left">
+                                    <div class="guide-store-icon"><svg viewBox="0 0 24 24" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div>
+                                    <div class="guide-store-info">
+                                        <span class="guide-store-name">Happ.apk</span>
+                                        <span class="guide-store-sub">Официальный релиз с GitHub</span>
+                                    </div>
+                                </div>
+                                <span class="guide-store-badge">Скачать APK ↗</span>
+                            </a>
+                        </div>
+                        <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 12px; margin-top: 10px;">
+                            <div style="font-size: 12px; font-weight: 600; color: #facc15; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                <span>Предупреждение браузера Chrome:</span>
+                            </div>
+                            <div style="font-size: 12px; color: var(--text-sub); line-height: 1.6;">
+                                1. При загрузке APK Chrome покажет: <em>«Файл может быть опасным»</em>.<br>
+                                2. Нажмите <strong>«Всё равно скачать»</strong>: файл скачивается напрямую из официального репозитория разработчика на GitHub.<br>
+                                3. После загрузки откройте файл и выберите <strong>«Установить»</strong>.
+                            </div>
+                            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, 0.05); font-size: 11.5px;">
+                                <a href="https://github.com/Happ-proxy/happ-android/releases" target="_blank" rel="noopener" style="color: var(--tier-accent); text-decoration: none; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: rgba(255, 255, 255, 0.04); border: 1px solid var(--border-subtle); border-radius: 8px; font-size: 11.5px; font-weight: 500; min-height: 32px;">
+                                    <span>Релизы Happ Android на GitHub ↗</span>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 2: Add Subscription -->
+                <div class="guide-step-card" style="border-color: rgba(16, 185, 129, 0.25); background: rgba(16, 185, 129, 0.03);">
+                    <div class="guide-step-header">
+                        <span class="guide-step-num" style="background: #10b981;">2</span>
+                        <span class="guide-step-title">Добавьте подписку в приложение</span>
+                    </div>
+                    <div class="guide-step-desc">
+                        Вернитесь на эту страницу и нажмите кнопку <strong>«Подключить в INCY»</strong> или <strong>«Подключить в Happ»</strong> вверху (приложение откроется само со списком всех серверов).<br>
+                        Либо нажмите <strong>«Скопировать адрес»</strong>, откройте приложение, нажмите <strong>«+»</strong> и выберите <strong>«Вставить из буфера»</strong>.
+                    </div>
+                </div>
+
+                <!-- Step 3: First Connect -->
+                <div class="guide-step-card">
+                    <div class="guide-step-header">
+                        <span class="guide-step-num">3</span>
+                        <span class="guide-step-title">Первое подключение и подтверждение</span>
+                    </div>
+                    <div class="guide-step-desc">
+                        Откройте приложение, нажмите кнопку включения и подтвердите стандартный системный <strong>«Запрос на подключение»</strong> Android (нажмите <strong>«ОК»</strong>).
+                    </div>
+                    <div style="margin-top: 8px; font-size: 11.5px; color: var(--text-sub);">
+                        В строке состояния вверху экрана появится значок ключа: соединение активно.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Desktop (PC/Mac) Guide Content -->
+            <div id="guideSectionDesktop" class="guide-section" role="tabpanel" aria-labelledby="guideNavBtnDesktop" style="display: none;">
+                <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; text-align: left;">Выберите операционную систему:</div>
+                <div class="guide-method-tabs" style="grid-template-columns: repeat(2, 1fr);" role="tablist" aria-label="Операционная система">
+                    <button type="button" class="guide-method-btn active" id="tabBtnDesktopWin" onclick="switchDesktopMethod('win')" role="tab" aria-selected="true">
+                        <span class="guide-method-badge">ПК</span>
+                        <span class="guide-method-title"><svg class="guide-tab-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M3 5.45L10.5 4.36V11.27H3V5.45ZM10.5 12.73V19.64L3 18.55V12.73H10.5ZM12 4.14L21 2.85V11.27H12V4.14ZM21 12.73V21.15L12 19.86V12.73H21Z"/></svg>Windows</span>
+                        <span class="guide-method-sub">Windows 10 / 11</span>
+                    </button>
+                    <button type="button" class="guide-method-btn" id="tabBtnDesktopMac" onclick="switchDesktopMethod('mac')" role="tab" aria-selected="false">
+                        <span class="guide-method-badge">Mac</span>
+                        <span class="guide-method-title"><svg class="guide-tab-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.33c.64-.78 1.08-1.86.96-2.94-.93.04-2.06.62-2.72 1.4-.58.68-1.1 1.79-.96 2.84 1.04.08 2.08-.52 2.72-1.3"/></svg>macOS</span>
+                        <span class="guide-method-sub">Apple Silicon & Intel</span>
+                    </button>
+                </div>
+
+                <!-- Desktop Sub 1: Windows -->
+                <div id="desktopSubWin">
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">1</span>
+                            <span class="guide-step-title">Скачайте и установите программу</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Скачайте официальный установщик Happ для Windows:
+                        </div>
+                        <div class="guide-store-grid" style="grid-template-columns: 1fr;">
+                            <a href="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe" target="_blank" rel="noopener" class="guide-store-card">
+                                <div class="guide-store-left">
+                                    <div class="guide-store-icon"><svg viewBox="0 0 24 24"><path d="M3 5.45L10.5 4.36V11.27H3V5.45ZM10.5 12.73V19.64L3 18.55V12.73H10.5ZM12 4.14L21 2.85V11.27H12V4.14ZM21 12.73V21.15L12 19.86V12.73H21Z"/></svg></div>
+                                    <div class="guide-store-info">
+                                        <span class="guide-store-name">Happ для Windows (.exe)</span>
+                                        <span class="guide-store-sub">Официальный релиз с GitHub</span>
+                                    </div>
+                                </div>
+                                <span class="guide-store-badge">Скачать setup.exe ↗</span>
+                            </a>
+                        </div>
+                        <div style="background: rgba(0, 90, 158, 0.15); border: 1px solid rgba(0, 90, 158, 0.3); border-radius: 10px; padding: 12px 14px; margin-top: 10px;">
+                            <div style="font-size: 12px; font-weight: 600; color: #6ee7b7; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                                <span>Если появилось синее окно защиты Windows (SmartScreen):</span>
+                            </div>
+                            <div style="font-size: 12px; color: var(--text-sub); line-height: 1.6;">
+                                1. Нажмите ссылку <strong>«Подробнее» (More info)</strong> в окне предупреждения.<br>
+                                2. Появится кнопка <strong>«Выполнить в любом случае» (Run anyway)</strong>: нажмите её.<br>
+                                3. Это стандартное предупреждение Windows для программ, загруженных из интернета.
+                            </div>
+                            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(0, 90, 158, 0.2); font-size: 11.5px;">
+                                <a href="https://docs.happ.info/main/faq" target="_blank" rel="noopener" style="color: #6ee7b7; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: rgba(0, 90, 158, 0.2); border: 1px solid rgba(0, 90, 158, 0.35); border-radius: 8px; font-size: 11.5px; font-weight: 500; min-height: 32px;">
+                                    <span>Официальная база знаний Happ Desktop ↗</span>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card" style="border-color: rgba(16, 185, 129, 0.25); background: rgba(16, 185, 129, 0.03);">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num" style="background: #10b981;">2</span>
+                            <span class="guide-step-title">Добавьте подписку</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Скопируйте ссылку на подписку на этой странице. В программе Happ Desktop нажмите иконку <strong>«+» (Добавить)</strong> в левом верхнем углу и выберите <strong>«Вставить из буфера»</strong>. Появится карточка подписки со списком серверов.
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">3</span>
+                            <span class="guide-step-title">Подключение и выбор режима</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Выберите локацию (например, Россия или Нидерланды) и нажмите переключатель связи. В нижней панели Happ можно выбрать режим:<br>
+                            • <strong>Системный прокси</strong>: перенаправляет трафик браузеров.<br>
+                            • <strong>TUN (Рекомендуется)</strong>: направляет трафик всей системы, браузеров и приложений.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Desktop Sub 2: macOS -->
+                <div id="desktopSubMac" style="display: none;">
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">1</span>
+                            <span class="guide-step-title">Скачайте и установите образ</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Скачайте образ Happ для macOS (подходит для процессоров Apple Silicon M1–M4 и Intel):
+                        </div>
+                        <div class="guide-store-grid" style="grid-template-columns: 1fr;">
+                            <a href="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/Happ.macOS.universal.dmg" target="_blank" rel="noopener" class="guide-store-card">
+                                <div class="guide-store-left">
+                                    <div class="guide-store-icon"><svg viewBox="0 0 24 24"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.33c.64-.78 1.08-1.86.96-2.94-.93.04-2.06.62-2.72 1.4-.58.68-1.1 1.79-.96 2.84 1.04.08 2.08-.52 2.72-1.3"/></svg></div>
+                                    <div class="guide-store-info">
+                                        <span class="guide-store-name">Happ для macOS (.dmg)</span>
+                                        <span class="guide-store-sub">Универсальная версия (Apple Silicon / Intel)</span>
+                                    </div>
+                                </div>
+                                <span class="guide-store-badge">Скачать .dmg ↗</span>
+                            </a>
+                        </div>
+                        <div class="guide-step-desc" style="margin-top: 8px;">
+                            Откройте скачанный <code>.dmg</code> файл и перетащите иконку программы в папку <strong>«Программы»</strong> (Applications). При первом запуске разрешите системное расширение в меню <strong>«Системные настройки → Конфиденциальность и безопасность → Разрешить»</strong>.
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card" style="border-color: rgba(16, 185, 129, 0.25); background: rgba(16, 185, 129, 0.03);">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num" style="background: #10b981;">2</span>
+                            <span class="guide-step-title">Добавьте подписку</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Скопируйте ссылку подписки и добавьте её в Happ через кнопку <strong>«+»</strong>.
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">3</span>
+                            <span class="guide-step-title">Включение связи</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Нажмите кнопку подключения и подтвердите системный запрос macOS на добавление сетевого профиля.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- FAQ Guide Content -->
+            <div id="guideSectionFaq" class="guide-section" role="tabpanel" aria-labelledby="guideNavBtnFaq" style="display: none;">
+                <div class="guide-faq-item open">
+                    <button type="button" class="guide-faq-q" onclick="toggleGuideFaq(this)" aria-expanded="true">
+                        <span>Нужно ли отключать при входе в банки или Госуслуги?</span>
+                        <svg class="guide-faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="guide-faq-a">
+                        <strong>Нет, не требуется.</strong> Настроена выборочная маршрутизация: банки, Госуслуги и российские сервисы открываются напрямую на обычной скорости вашего провайдера.
+                    </div>
+                </div>
+
+                <div class="guide-faq-item">
+                    <button type="button" class="guide-faq-q" onclick="toggleGuideFaq(this)" aria-expanded="false">
+                        <span>Как вернуть регион App Store обратно на Россию?</span>
+                        <svg class="guide-faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="guide-faq-a">
+                        Сразу после загрузки клиента (INCY или Happ) вы можете вернуться в App Store → иконка профиля → Имя/Apple ID → «Страна или регион» → выбрать «Россия» и способ оплаты «Нет». Приложение останется на устройстве и продолжит обновляться.
+                    </div>
+                </div>
+
+                <div class="guide-faq-item">
+                    <button type="button" class="guide-faq-q" onclick="toggleGuideFaq(this)" aria-expanded="false">
+                        <span>Что делать, если в TestFlight пишет «Этот бета-тест заполнен»?</span>
+                        <svg class="guide-faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="guide-faq-a">
+                        Apple ограничивает количество мест в публичных тестах. В этом случае выберите способ «Казахстан» во вкладке iOS выше: смените регион App Store без банковской карты (займёт 2 минуты) и установите приложение напрямую из магазина.
+                    </div>
+                </div>
+
+                <div class="guide-faq-item">
+                    <button type="button" class="guide-faq-q" onclick="toggleGuideFaq(this)" aria-expanded="false">
+                        <span>Что делать, если пропал доступ или страницы не грузятся?</span>
+                        <svg class="guide-faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="guide-faq-a">
+                        1. Потяните список вниз (Pull-to-refresh) на главном экране Happ или INCY: список серверов обновится.<br>
+                        2. Выключите и снова включите круглый тумблер соединения.<br>
+                        3. Выберите другой сервер из списка.<br>
+                        4. Проверьте срок действия подписки в боте.
+                    </div>
+                </div>
+
+                <div class="guide-faq-item">
+                    <button type="button" class="guide-faq-q" onclick="toggleGuideFaq(this)" aria-expanded="false">
+                        <span>Что делать, если на Android не включается соединение?</span>
+                        <svg class="guide-faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="guide-faq-a">
+                        Если на телефоне ранее были установлены другие сетевые приложения или блокировщики, Android может отклонять подключение. Откройте <strong>Настройки телефона → Подключения (или Сеть и интернет) → Сетевые профили</strong> и убедитесь, что у других ранее установленных программ выключены переключатели <strong>«Постоянное соединение»</strong> и <strong>«Блокировать соединения»</strong>.
+                    </div>
+                </div>
+
+                <div class="guide-faq-item">
+                    <button type="button" class="guide-faq-q" onclick="toggleGuideFaq(this)" aria-expanded="false">
+                        <span>Сколько устройств можно подключить?</span>
+                        <svg class="guide-faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="guide-faq-a">
+                        В рамках вашего тарифа доступно одновременное подключение до {device_limit} устройств (например, телефон и ноутбук). Управлять активными устройствами и при необходимости сбрасывать их можно прямо в боте.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bottom Return Button -->
+            <div class="guides-bottom-bar">
+                <button type="button" class="guides-return-btn" onclick="closeGuidesTab()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width: 16px; height: 16px;">
+                        <polyline points="15 18 9 12 15 6"/>
+                    </svg>
+                    <span>Вернуться к экрану подключения</span>
+                </button>
+            </div>
         </div>
     </div>
 
-    <div id="copyToast" class="copy-toast" aria-live="polite">Ссылка скопирована! Откройте приложение и нажмите «Вставить»</div>
+    <div id="copyToast" class="copy-toast" aria-live="polite">Адрес подключения скопирован в буфер</div>
+
+    <!-- Image Zoom Lightbox Modal -->
+    <dialog id="imageLightbox" class="image-lightbox" aria-labelledby="lightboxCaption" aria-modal="true" onclick="onLightboxBackdropClick(event)">
+        <div class="lightbox-container">
+            <button type="button" class="lightbox-close-btn" onclick="closeImageLightbox()" aria-label="Закрыть (Esc)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"/>
+                    <line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+            </button>
+            <div class="lightbox-img-wrap">
+                <img id="lightboxImg" src="" alt="" class="lightbox-img" onclick="toggleLightboxZoom(event)">
+            </div>
+            <div id="lightboxCaption" class="lightbox-caption"></div>
+            <div class="lightbox-tip">Нажмите на фото для масштаба 100% • Esc или клик в фон, чтобы закрыть</div>
+        </div>
+    </dialog>
 
     <script>
-        const subUrl = window.location.href;
-        const deepLinkIncy = "incy://add/" + subUrl;
-        const deepLinkHapp = "happ://add/" + subUrl;
-        const btnIncy = document.getElementById("deepLinkIncy");
-        const btnHapp = document.getElementById("deepLinkHapp");
-        if (btnIncy) {
-            btnIncy.href = deepLinkIncy;
-        }
-        if (btnHapp) {
-            btnHapp.href = deepLinkHapp;
-        }
+        const subUrl = window.location.origin + window.location.pathname.replace(/\/$/, "");
 
-        function switchAppTab(app) {
-            const tabIncy = document.getElementById("tab-incy");
-            const tabHapp = document.getElementById("tab-happ");
-            const tabs = document.querySelectorAll(".app-tab");
-            if (app === "incy") {
-                if (tabHapp) tabHapp.style.display = "none";
-                if (tabIncy) {
-                    tabIncy.style.display = "block";
-                    tabIncy.style.animation = "none";
-                    void tabIncy.offsetWidth;
-                    tabIncy.style.animation = "tabFadeIn 180ms cubic-bezier(0.16, 1, 0.3, 1) both";
-                }
-                if (tabs[0]) tabs[0].classList.add("active");
-                if (tabs[1]) tabs[1].classList.remove("active");
+        // Populate dynamic deep links and visible address text
+        const subUrlTextEl = document.getElementById("subUrlText");
+        if (subUrlTextEl) subUrlTextEl.textContent = subUrl;
+
+        const deepLinkHapp = document.getElementById("deepLinkHapp");
+        if (deepLinkHapp) deepLinkHapp.href = "happ://add/" + subUrl;
+
+        const deepLinkIncy = document.getElementById("deepLinkIncy");
+        if (deepLinkIncy) deepLinkIncy.href = "incy://add/" + subUrl;
+
+        function updateActiveClient(client) {
+            const btnHapp = document.getElementById("deepLinkHapp");
+            const btnIncy = document.getElementById("deepLinkIncy");
+            if (!btnHapp || !btnIncy) return;
+
+            if (client === "happ") {
+                btnHapp.classList.add("btn-primary");
+                btnHapp.classList.remove("btn-secondary");
+                btnIncy.classList.add("btn-secondary");
+                btnIncy.classList.remove("btn-primary");
             } else {
-                if (tabIncy) tabIncy.style.display = "none";
-                if (tabHapp) {
-                    tabHapp.style.display = "block";
-                    tabHapp.style.animation = "none";
-                    void tabHapp.offsetWidth;
-                    tabHapp.style.animation = "tabFadeIn 180ms cubic-bezier(0.16, 1, 0.3, 1) both";
-                }
-                if (tabs[0]) tabs[0].classList.remove("active");
-                if (tabs[1]) tabs[1].classList.add("active");
+                btnIncy.classList.add("btn-primary");
+                btnIncy.classList.remove("btn-secondary");
+                btnHapp.classList.add("btn-secondary");
+                btnHapp.classList.remove("btn-primary");
             }
         }
 
-        const COPY_ICON_PATH = '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>';
-        const CHECK_ICON_PATH = '<polyline points="20 6 9 17 4 12"/>';
+        function switchPlatformTab(platform) {
+            const platforms = ["ios", "android", "windows", "macos", "github"];
+            platforms.forEach(function(p) {
+                const panel = document.getElementById("tab-" + p);
+                const btnId = "tabBtn" + p.charAt(0).toUpperCase() + p.slice(1);
+                const btn = document.getElementById(btnId);
+                if (panel) panel.style.display = (p === platform) ? "block" : "none";
+                if (btn) {
+                    if (p === platform) {
+                        btn.classList.add("active");
+                    } else {
+                        btn.classList.remove("active");
+                    }
+                }
+            });
+            if (platform === "windows" || platform === "macos") {
+                updateActiveClient("happ");
+            } else if (platform === "ios" || platform === "android") {
+                updateActiveClient("incy");
+            }
+        }
+
+        // Auto-detect device
+        (function initDevice() {
+            const ua = navigator.userAgent || "";
+            const isMac = /(Macintosh)|(MacIntel)/i.test(ua);
+            const isTouch = ("ontouchend" in document) || (navigator.maxTouchPoints > 0);
+            const isIOS = /(iPad|iPhone|iPod)/i.test(ua) || (isMac && isTouch);
+
+            if (isIOS && !window.MSStream) {
+                switchPlatformTab("ios");
+            } else if (/Android/i.test(ua)) {
+                switchPlatformTab("android");
+            } else if (isMac) {
+                switchPlatformTab("macos");
+            } else if (/Windows|Win32|Win64/i.test(ua)) {
+                switchPlatformTab("windows");
+            } else if (/Linux/i.test(ua) && !/Android/i.test(ua)) {
+                switchPlatformTab("github");
+            } else {
+                switchPlatformTab("ios");
+            }
+        })();
 
         let copyResetTimer = null;
-        function setCopyButtonState(newText, isCopied) {
-            const copyBtn = document.getElementById("copyBtn");
-            const copyBtnContent = document.getElementById("copyBtnContent");
-            const copyBtnText = document.getElementById("copyBtnText");
-            const copyIcon = document.getElementById("copyIcon");
-            if (!copyBtn || !copyBtnContent || !copyBtnText) return;
-            copyBtnContent.classList.add("morphing");
-            setTimeout(function() {
-                copyBtnText.textContent = newText;
-                if (copyIcon) {
-                    copyIcon.innerHTML = isCopied ? CHECK_ICON_PATH : COPY_ICON_PATH;
-                }
-                if (isCopied) {
-                    copyBtn.classList.add("copied");
-                } else {
-                    copyBtn.classList.remove("copied");
-                }
-                copyBtnContent.classList.remove("morphing");
-            }, 130);
+
+        function showCopyToast(msg, isError) {
+            const toast = document.getElementById("copyToast");
+            if (!toast) return;
+            toast.textContent = msg;
+            if (isError) {
+                toast.classList.add("error");
+            } else {
+                toast.classList.remove("error");
+            }
+            toast.classList.add("visible");
+            if (copyResetTimer) clearTimeout(copyResetTimer);
+            copyResetTimer = setTimeout(function() {
+                toast.classList.remove("visible");
+                toast.classList.remove("error");
+                const label = document.getElementById("copyBtnLabel");
+                const btn = document.getElementById("copyUrlBtn");
+                if (label) label.textContent = "Скопировать";
+                if (btn) btn.classList.remove("copied");
+            }, 2200);
+        }
+
+        function fallbackCopyText(text) {
+            try {
+                const ta = document.createElement("textarea");
+                ta.value = text;
+                ta.style.position = "fixed";
+                ta.style.left = "-9999px";
+                ta.style.top = "-9999px";
+                ta.style.opacity = "0";
+                ta.setAttribute("readonly", "");
+                document.body.appendChild(ta);
+                ta.focus();
+                ta.select();
+                const ok = document.execCommand("copy");
+                document.body.removeChild(ta);
+                return ok;
+            } catch (e) {
+                return false;
+            }
         }
 
         function copyLink() {
-            navigator.clipboard.writeText(subUrl).then(function() {
-                const toast = document.getElementById("copyToast");
-                setCopyButtonState("Ссылка скопирована", true);
-                if (toast) {
-                    toast.textContent = "Ссылка скопирована! Откройте приложение и нажмите «Вставить»";
-                    toast.classList.add("visible");
+            const btn = document.getElementById("copyUrlBtn");
+            const label = document.getElementById("copyBtnLabel");
+
+            function onCopySuccess() {
+                if (label) label.textContent = "Скопировано";
+                if (btn) btn.classList.add("copied");
+                showCopyToast("Адрес подключения скопирован в буфер", false);
+            }
+
+            function onCopyFail() {
+                showCopyToast("Не удалось скопировать. Выделите адрес вручную", true);
+            }
+
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                try {
+                    navigator.clipboard.writeText(subUrl).then(onCopySuccess).catch(function() {
+                        if (fallbackCopyText(subUrl)) {
+                            onCopySuccess();
+                        } else {
+                            onCopyFail();
+                        }
+                    });
+                } catch (e) {
+                    if (fallbackCopyText(subUrl)) {
+                        onCopySuccess();
+                    } else {
+                        onCopyFail();
+                    }
                 }
-                if (copyResetTimer) clearTimeout(copyResetTimer);
-                copyResetTimer = setTimeout(function() {
-                    if (toast) toast.classList.remove("visible");
-                    setCopyButtonState("Скопировать ссылку", false);
-                }, 2200);
-            }).catch(function() {
-                const toast = document.getElementById("copyToast");
-                if (toast) {
-                    toast.textContent = "Не удалось скопировать";
-                    toast.classList.add("visible");
+            } else {
+                if (fallbackCopyText(subUrl)) {
+                    onCopySuccess();
+                } else {
+                    onCopyFail();
                 }
-            });
+            }
         }
 
         function toggleSupportForm() {
@@ -1180,15 +2827,13 @@
             const contact = contactInput.value.trim();
             const message = messageInput.value.trim();
             if (contact.length < 3) {
-                const alertIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;display:inline-block;vertical-align:-2px;margin-right:6px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
-                statusMsg.innerHTML = alertIcon + "Укажите контакт для связи (минимум 3 символа)";
+                statusMsg.textContent = "Укажите контакт для связи (минимум 3 символа)";
                 statusMsg.className = "support-status-msg error";
                 statusMsg.style.display = "block";
                 return;
             }
             if (message.length < 5) {
-                const alertIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;display:inline-block;vertical-align:-2px;margin-right:6px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
-                statusMsg.innerHTML = alertIcon + "Опишите проблему подробнее (минимум 5 символов)";
+                statusMsg.textContent = "Опишите вопрос подробнее (минимум 5 символов)";
                 statusMsg.className = "support-status-msg error";
                 statusMsg.style.display = "block";
                 return;
@@ -1208,8 +2853,7 @@
 
                 const data = await response.json().catch(() => ({}));
                 if (response.ok && data.ok) {
-                    const checkIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;display:inline-block;vertical-align:-2px;margin-right:6px;"><polyline points="20 6 9 17 4 12"/></svg>';
-                    statusMsg.innerHTML = checkIcon + '<span>Контакты отправлены. Мы скоро свяжемся с вами!</span><br><button type="button" class="support-reset-btn" onclick="resetSupportForm()">Отправить ещё сообщение</button>';
+                    statusMsg.innerHTML = '<span>Контакты отправлены. Мы скоро свяжемся с вами!</span><br><button type="button" class="support-reset-btn" onclick="resetSupportForm()">Отправить ещё сообщение</button>';
                     statusMsg.className = "support-status-msg success";
                     statusMsg.style.display = "block";
                     contactInput.disabled = true;
@@ -1217,20 +2861,18 @@
                     submitBtn.style.display = "none";
                 } else {
                     const errText = data.error || "Не удалось отправить. Попробуйте позже.";
-                    const alertIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;display:inline-block;vertical-align:-2px;margin-right:6px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
-                    statusMsg.innerHTML = alertIcon + errText;
+                    statusMsg.textContent = errText;
                     statusMsg.className = "support-status-msg error";
                     statusMsg.style.display = "block";
                     submitBtn.disabled = false;
-                    submitBtn.innerHTML = '<span>Отправить контакты</span>';
+                    submitBtn.innerHTML = '<span>Отправить</span>';
                 }
             } catch (err) {
-                const alertIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;display:inline-block;vertical-align:-2px;margin-right:6px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
-                statusMsg.innerHTML = alertIcon + "Ошибка сети при отправке. Пожалуйста, проверьте соединение.";
+                statusMsg.textContent = "Ошибка сети при отправке. Пожалуйста, проверьте соединение.";
                 statusMsg.className = "support-status-msg error";
                 statusMsg.style.display = "block";
                 submitBtn.disabled = false;
-                submitBtn.innerHTML = '<span>Отправить контакты</span>';
+                submitBtn.innerHTML = '<span>Отправить</span>';
             }
         }
 
@@ -1250,7 +2892,7 @@
             if (submitBtn) {
                 submitBtn.disabled = false;
                 submitBtn.style.display = "";
-                submitBtn.innerHTML = '<span>Отправить контакты</span>';
+                submitBtn.innerHTML = '<span>Отправить</span>';
             }
             if (statusMsg) {
                 statusMsg.style.display = "none";
@@ -1258,6 +2900,281 @@
             }
             if (contactInput) contactInput.focus();
         }
+    
+        function openGuidesTab(platform) {
+            const main = document.getElementById("mainView");
+            const guides = document.getElementById("guidesView");
+            if (main) main.classList.add("view-hidden");
+            if (guides) guides.classList.remove("view-hidden");
+            if (platform) switchGuideTab(platform);
+            window.location.hash = "guides";
+            window.scrollTo({ top: 0, behavior: "smooth" });
+        }
+
+        function closeGuidesTab() {
+            const p = document.getElementById("guideVideoPlayer");
+            if (p) p.pause();
+            const main = document.getElementById("mainView");
+            const guides = document.getElementById("guidesView");
+            if (guides) guides.classList.add("view-hidden");
+            if (main) main.classList.remove("view-hidden");
+            if (window.location.hash === "#guides") {
+                history.replaceState(null, document.title, window.location.pathname + window.location.search);
+            }
+            window.scrollTo({ top: 0, behavior: "smooth" });
+        }
+
+        function switchGuideTab(tab) {
+            const p = document.getElementById("guideVideoPlayer");
+            if (p) p.pause();
+            const tabs = ["ios", "android", "desktop", "faq"];
+            tabs.forEach(function(t) {
+                const btn = document.getElementById("guideNavBtn" + t.charAt(0).toUpperCase() + t.slice(1));
+                const sec = document.getElementById("guideSection" + t.charAt(0).toUpperCase() + t.slice(1));
+                const isActive = (t === tab);
+                if (btn) {
+                    btn.classList.toggle("active", isActive);
+                    btn.setAttribute("aria-selected", isActive ? "true" : "false");
+                }
+                if (sec) sec.style.display = isActive ? "block" : "none";
+            });
+        }
+
+        function switchIosMethod(method) {
+            const p = document.getElementById("guideVideoPlayer");
+            if (p && method !== "region") p.pause();
+            const methods = {
+                "tf": { btn: "tabBtnIosTf", sec: "iosSubGuideTf" },
+                "region": { btn: "tabBtnIosRegion", sec: "iosSubGuideRegion" },
+                "newid": { btn: "tabBtnIosNewId", sec: "iosSubGuideNewId" }
+            };
+            Object.keys(methods).forEach(function(k) {
+                const b = document.getElementById(methods[k].btn);
+                const s = document.getElementById(methods[k].sec);
+                const isActive = (k === method);
+                if (b) {
+                    b.classList.toggle("active", isActive);
+                    b.setAttribute("aria-selected", isActive ? "true" : "false");
+                }
+                if (s) s.style.display = isActive ? "block" : "none";
+            });
+        }
+
+        function switchAndroidMethod(method) {
+            const btnPlay = document.getElementById("tabBtnAndroidPlay");
+            const btnApk = document.getElementById("tabBtnAndroidApk");
+            const secPlay = document.getElementById("androidSubPlay");
+            const secApk = document.getElementById("androidSubApk");
+            const isPlay = (method === "play");
+            if (btnPlay) {
+                btnPlay.classList.toggle("active", isPlay);
+                btnPlay.setAttribute("aria-selected", isPlay ? "true" : "false");
+            }
+            if (btnApk) {
+                btnApk.classList.toggle("active", !isPlay);
+                btnApk.setAttribute("aria-selected", !isPlay ? "true" : "false");
+            }
+            if (secPlay) secPlay.style.display = isPlay ? "block" : "none";
+            if (secApk) secApk.style.display = !isPlay ? "block" : "none";
+        }
+
+        function switchDesktopMethod(method) {
+            const btnWin = document.getElementById("tabBtnDesktopWin");
+            const btnMac = document.getElementById("tabBtnDesktopMac");
+            const secWin = document.getElementById("desktopSubWin");
+            const secMac = document.getElementById("desktopSubMac");
+            const isWin = (method === "win");
+            if (btnWin) {
+                btnWin.classList.toggle("active", isWin);
+                btnWin.setAttribute("aria-selected", isWin ? "true" : "false");
+            }
+            if (btnMac) {
+                btnMac.classList.toggle("active", !isWin);
+                btnMac.setAttribute("aria-selected", !isWin ? "true" : "false");
+            }
+            if (secWin) secWin.style.display = isWin ? "block" : "none";
+            if (secMac) secMac.style.display = !isWin ? "block" : "none";
+        }
+
+        function toggleGuideVideo() {
+            const container = document.getElementById("guideVideoContainer");
+            const label = document.getElementById("videoToggleLabel");
+            const player = document.getElementById("guideVideoPlayer");
+            if (!container) return;
+            const isHidden = container.style.display === "none";
+            if (isHidden) {
+                container.style.display = "block";
+                if (label) label.textContent = "Скрыть видеоинструкцию";
+                if (player) player.play().catch(function() {});
+            } else {
+                container.style.display = "none";
+                if (label) label.textContent = "Показать видеоинструкцию (запись с экрана iPhone, 2 мин)";
+                if (player) player.pause();
+            }
+        }
+
+        function copyGuideField(text, btn) {
+            if (!btn || btn.classList.contains("copied") || btn.classList.contains("copy-failed")) return;
+            const originalHtml = btn.getAttribute("data-original-html") || btn.innerHTML;
+            btn.setAttribute("data-original-html", originalHtml);
+            btn.classList.add("copied");
+
+            function onSuccess() {
+                btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:11px;height:11px;"><polyline points="20 6 9 17 4 12"/></svg><span class="copy-lbl">Скопировано</span>';
+                setTimeout(function() {
+                    btn.classList.remove("copied");
+                    btn.innerHTML = btn.getAttribute("data-original-html") || originalHtml;
+                    btn.removeAttribute("data-original-html");
+                }, 1400);
+            }
+
+            function onFail() {
+                btn.classList.remove("copied");
+                btn.classList.add("copy-failed");
+                btn.innerHTML = '<span class="copy-lbl" style="color:var(--error);">Ошибка</span>';
+                setTimeout(function() {
+                    btn.classList.remove("copy-failed");
+                    btn.innerHTML = btn.getAttribute("data-original-html") || originalHtml;
+                    btn.removeAttribute("data-original-html");
+                }, 1400);
+            }
+
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(text).then(onSuccess).catch(function() {
+                        if (fallbackCopyText(text)) {
+                            onSuccess();
+                        } else {
+                            onFail();
+                        }
+                    });
+                } else {
+                    if (fallbackCopyText(text)) {
+                        onSuccess();
+                    } else {
+                        onFail();
+                    }
+                }
+            } catch (e) {
+                if (fallbackCopyText(text)) {
+                    onSuccess();
+                } else {
+                    onFail();
+                }
+            }
+        }
+
+        function toggleGuideFaq(btn) {
+            const item = btn.closest(".guide-faq-item");
+            if (item) {
+                const isOpen = item.classList.toggle("open");
+                btn.setAttribute("aria-expanded", isOpen ? "true" : "false");
+            }
+        }
+
+        function markImgLoaded(img) {
+            if (!img) return;
+            img.classList.add("loaded");
+            const w = img.closest(".guide-screenshot-wrapper");
+            if (w) w.classList.add("img-loaded");
+        }
+
+        let lastFocusedElementBeforeLightbox = null;
+
+        function openImageLightbox(imgSrc, imgAlt) {
+            const lightbox = document.getElementById("imageLightbox");
+            const img = document.getElementById("lightboxImg");
+            const caption = document.getElementById("lightboxCaption");
+            if (!lightbox || !img) return;
+            lastFocusedElementBeforeLightbox = document.activeElement;
+            img.src = imgSrc;
+            img.alt = imgAlt || "";
+            img.classList.remove("zoomed");
+            if (caption) caption.textContent = imgAlt || "Скриншот настройки";
+            if (typeof lightbox.showModal === "function") {
+                lightbox.showModal();
+            } else {
+                lightbox.setAttribute("open", "");
+            }
+            document.body.style.overflow = "hidden";
+            const closeBtn = lightbox.querySelector(".lightbox-close-btn");
+            if (closeBtn) closeBtn.focus();
+        }
+
+        function closeImageLightbox() {
+            const lightbox = document.getElementById("imageLightbox");
+            if (!lightbox) return;
+            if (typeof lightbox.close === "function") {
+                lightbox.close();
+            } else {
+                lightbox.removeAttribute("open");
+            }
+            document.body.style.overflow = "";
+            if (lastFocusedElementBeforeLightbox && typeof lastFocusedElementBeforeLightbox.focus === "function") {
+                lastFocusedElementBeforeLightbox.focus();
+            }
+        }
+
+        function toggleLightboxZoom(event) {
+            if (event) event.stopPropagation();
+            const img = document.getElementById("lightboxImg");
+            if (img) img.classList.toggle("zoomed");
+        }
+
+        function onLightboxBackdropClick(event) {
+            if (event.target && (
+                event.target.id === "lightboxImg" ||
+                event.target.closest(".lightbox-img-wrap") ||
+                event.target.closest(".lightbox-caption") ||
+                event.target.closest(".lightbox-tip") ||
+                event.target.closest(".lightbox-close-btn")
+            )) {
+                return;
+            }
+            closeImageLightbox();
+        }
+
+        const lightboxModal = document.getElementById("imageLightbox");
+        if (lightboxModal) {
+            const onLightboxDismiss = function() {
+                document.body.style.overflow = "";
+                const img = document.getElementById("lightboxImg");
+                if (img) img.classList.remove("zoomed");
+            };
+            lightboxModal.addEventListener("close", onLightboxDismiss);
+            lightboxModal.addEventListener("cancel", onLightboxDismiss);
+        }
+
+        document.addEventListener("keydown", function(e) {
+            if (e.key === "Escape") closeImageLightbox();
+        });
+
+        document.addEventListener("click", function(e) {
+            const wrapper = e.target.closest(".guide-screenshot-wrapper");
+            if (wrapper) {
+                const img = wrapper.querySelector("img");
+                if (img) openImageLightbox(img.src, img.alt);
+            }
+        });
+
+        window.addEventListener("hashchange", function() {
+            if (window.location.hash === "#guides") {
+                openGuidesTab("ios");
+            } else if (!window.location.hash) {
+                closeGuidesTab();
+            }
+        });
+
+        if (window.location.hash === "#guides") {
+            openGuidesTab("ios");
+        }
+
+        // Initialize any cached images that loaded before DOMContentLoaded
+        document.querySelectorAll(".guide-real-screenshot").forEach(function(img) {
+            if (img.complete && img.naturalWidth > 0) {
+                markImgLoaded(img);
+            }
+        });
     </script>
 </body>
 </html>

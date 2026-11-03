@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from database.models import User
 
-from .common import _render_amnezia_devices, _render_connections
+from .common import _render_connections
 
 router = Router()
 
@@ -45,21 +45,10 @@ async def hub_amnezia_devices(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    await callback.answer(show_alert=False)
     await state.clear()
-
-    if not db_user:
-        try:
-            await callback.answer(
-                texts.ERROR_USER_NOT_FOUND,
-                show_alert=True,
-            )
-        except Exception:
-            pass
-        return
-
-    await _render_amnezia_devices(
-        callback.message,
-        db_user,
-        session,
+    await callback.answer(
+        texts.ALERT_AMNEZIA_DECOMMISSIONED,
+        show_alert=True,
     )
+    if db_user:
+        await _render_connections(callback.message, db_user, session)

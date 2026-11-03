@@ -20,7 +20,6 @@ from bot.keyboards import (
 from utils.support import get_support_url
 from config.constants import REFERRAL_WELCOME_DISCOUNT_PERCENT
 from database.repositories.account_ledger_repo import get_account_balance
-from database.repositories.profiles_repo import get_user_profiles_count
 from database.repositories.tariffs_repo import (
     get_active_tariffs,
     get_tariff_by_id,
@@ -210,9 +209,8 @@ async def select_tariff(
 
     if source == "change":
         from database.repositories import vless_subscription_repo
-        profiles_count = await get_user_profiles_count(session, db_user.id)
         vless_count = await vless_subscription_repo.get_active_hwid_count(session, db_user.id)
-        total_devices = profiles_count + vless_count
+        total_devices = vless_count
         if total_devices > device_limit:
             await render_hub(
                 callback.bot,
@@ -560,11 +558,8 @@ async def render_tariff_duration_selection(
 
     if db_user:
         from database.repositories import vless_subscription_repo
-        profiles_count = await get_user_profiles_count(
-            session, db_user.id
-        )
         vless_count = await vless_subscription_repo.get_active_hwid_count(session, db_user.id)
-        total_devices = profiles_count + vless_count
+        total_devices = vless_count
 
         if total_devices > device_limit:
             await render_hub(

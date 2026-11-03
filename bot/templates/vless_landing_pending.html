@@ -316,21 +316,25 @@
         }
 
         .support-reset-btn {
-            background: none;
-            border: none;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
             color: var(--text-sub);
             font-size: 12px;
             cursor: pointer;
-            text-decoration: underline;
-            margin-top: 8px;
-            display: inline-block;
-            padding: 0;
+            margin-top: 10px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 36px;
+            padding: 6px 14px;
             font-family: inherit;
-            transition: color 150ms ease;
+            transition: color 150ms ease, background-color 150ms ease;
         }
 
         .support-reset-btn:hover {
             color: var(--text-main);
+            background-color: rgba(255, 255, 255, 0.09);
         }
 
         .support-textarea {

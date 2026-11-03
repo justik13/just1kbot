@@ -14,7 +14,6 @@ from config.constants import (
 from database.models import User
 from database.repositories.profiles_repo import (
     get_user_profiles,
-    get_user_profiles_count,
 )
 from database.repositories.tariffs_repo import get_tariff_by_id
 from database.repositories.users_repo import (
@@ -328,10 +327,9 @@ class SubscriptionService:
             return None
 
         if new_device_limit is not None:
-            profiles_count = await get_user_profiles_count(session, user.id)
             from database.repositories import vless_subscription_repo
             vless_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
-            total_count = profiles_count + vless_count
+            total_count = vless_count
 
             if total_count > new_device_limit:
                 raise ValueError(
@@ -417,10 +415,9 @@ class SubscriptionService:
             raise ValueError("subscription_end must be timezone-aware")
         if subscription_end <= now_utc():
             raise ValueError("converted subscription must remain active")
-        profiles_count = await get_user_profiles_count(session, user.id)
         from database.repositories import vless_subscription_repo
         vless_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
-        total_count = profiles_count + vless_count
+        total_count = vless_count
         if total_count > device_limit:
             raise ValueError(
                 f"Cannot downgrade: {total_count} devices > "
@@ -484,6 +481,8 @@ class SubscriptionService:
                 else None
             )
             server = profile.server
+            if not server or not getattr(server, "is_active", True):
+                continue
             await enqueue_api_operation(
                 session,
                 operation_type="update_peer",
