@@ -2941,6 +2941,8 @@
         }
 
         function switchIosMethod(method) {
+            const p = document.getElementById("guideVideoPlayer");
+            if (p && method !== "region") p.pause();
             const methods = {
                 "tf": { btn: "tabBtnIosTf", sec: "iosSubGuideTf" },
                 "region": { btn: "tabBtnIosRegion", sec: "iosSubGuideRegion" },
@@ -3013,23 +3015,27 @@
 
         function copyGuideField(text, btn) {
             if (!btn || btn.classList.contains("copied") || btn.classList.contains("copy-failed")) return;
+            const originalHtml = btn.getAttribute("data-original-html") || btn.innerHTML;
+            btn.setAttribute("data-original-html", originalHtml);
+            btn.classList.add("copied");
+
             function onSuccess() {
-                btn.classList.add("copied");
-                const originalHtml = btn.innerHTML;
                 btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:11px;height:11px;"><polyline points="20 6 9 17 4 12"/></svg><span class="copy-lbl">Скопировано</span>';
                 setTimeout(function() {
                     btn.classList.remove("copied");
-                    btn.innerHTML = originalHtml;
+                    btn.innerHTML = btn.getAttribute("data-original-html") || originalHtml;
+                    btn.removeAttribute("data-original-html");
                 }, 1400);
             }
 
             function onFail() {
+                btn.classList.remove("copied");
                 btn.classList.add("copy-failed");
-                const originalHtml = btn.innerHTML;
                 btn.innerHTML = '<span class="copy-lbl" style="color:var(--error);">Ошибка</span>';
                 setTimeout(function() {
                     btn.classList.remove("copy-failed");
-                    btn.innerHTML = originalHtml;
+                    btn.innerHTML = btn.getAttribute("data-original-html") || originalHtml;
+                    btn.removeAttribute("data-original-html");
                 }, 1400);
             }
 
