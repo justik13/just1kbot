@@ -406,20 +406,20 @@ class TestRelaysHealthAndNodeLimits(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(rows_xray[7]), 1)
         self.assertEqual(rows_xray[7][0].callback_data, "admin_servers:wi")
 
-        # AWG server card layout
-        kb_awg = get_admin_server_card_keyboard(server_id=2, is_active=True, used_clients=10, max_clients=200, is_xray=False)
-        rows_awg = kb_awg.inline_keyboard
-        self.assertEqual(len(rows_awg), 7, f"Expected 7 rows for AWG server card, got {len(rows_awg)}")
-        # Row 1: Peers + Users (2 buttons)
-        self.assertEqual(len(rows_awg[0]), 2)
-        self.assertIn("admin_server_peers:2:1", rows_awg[0][0].callback_data)
-        # Row 5: Change Limit (1 button)
-        self.assertEqual(len(rows_awg[4]), 1)
+        # Standard VLESS server card layout
+        kb_vless = get_admin_server_card_keyboard(server_id=2, is_active=True, is_xray=False)
+        rows_vless = kb_vless.inline_keyboard
+        self.assertEqual(len(rows_vless), 7, f"Expected 7 rows for VLESS server card, got {len(rows_vless)}")
+        # Row 1: INCY (1 button)
+        self.assertEqual(len(rows_vless[0]), 1)
+        self.assertIn("admin_server_incy:2", rows_vless[0][0].callback_data)
+        # Row 2: Users + Broadcast (2 buttons)
+        self.assertEqual(len(rows_vless[1]), 2)
         # Row 6: Toggle + Delete (2 buttons)
-        self.assertEqual(len(rows_awg[5]), 2)
+        self.assertEqual(len(rows_vless[5]), 2)
         # Row 7: Back to servers (1 button)
-        self.assertEqual(len(rows_awg[6]), 1)
-        self.assertEqual(rows_awg[6][0].callback_data, "admin_servers:std")
+        self.assertEqual(len(rows_vless[6]), 1)
+        self.assertEqual(rows_vless[6][0].callback_data, "admin_servers:std")
 
     async def test_white_internet_overview_keyboard_2_column_layout(self):
         from bot.handlers.white_internet import get_white_internet_overview_keyboard

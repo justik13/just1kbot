@@ -348,7 +348,7 @@ async def check_node_resources_and_alerts(bot: Bot):
         if not has_xray:
             logger.warning(
                 "Server %s (%s) has unsupported or unassigned protocol '%s', skipping healthcheck",
-                server.id, server.name, server.protocol,
+                server.id, server.name, getattr(server, "protocol", "unknown"),
             )
             return
 

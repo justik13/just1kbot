@@ -406,9 +406,7 @@ class HeartbeatLoopTests(unittest.IsolatedAsyncioTestCase):
         def write(final=False):
             writes.append(final)
 
-        with patch.object(heartbeat, "_write_heartbeat", side_effect=write), patch.object(
-            heartbeat, "_check_circuit_breakers", new=AsyncMock()
-        ):
+        with patch.object(heartbeat, "_write_heartbeat", side_effect=write):
             task = asyncio.create_task(
                 heartbeat.heartbeat_loop(event, lambda: allowed[0], interval=0)
             )

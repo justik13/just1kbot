@@ -78,6 +78,7 @@ class NodeMonitorConcurrencyUnitTests(unittest.IsolatedAsyncioTestCase):
         server_initial = SimpleNamespace(
             id=100,
             name="DE-Node",
+            protocol="vless",
             api_url="http://127.0.0.1:3000",
             api_key="secret",
             is_active=True,
@@ -95,8 +96,8 @@ class NodeMonitorConcurrencyUnitTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(st.health_state, "ONLINE")
 
         # Simulate network failure during healthcheck
-        client_mock = AsyncMock()
-        client_mock.healthcheck.return_value = False
+        xray_client_mock = AsyncMock()
+        xray_client_mock.check_health.return_value = (False, None, None)
 
         mock_scope = AsyncMock()
         mock_scope.__aenter__.return_value = AsyncMock()
@@ -121,11 +122,15 @@ class NodeMonitorConcurrencyUnitTests(unittest.IsolatedAsyncioTestCase):
         settings_obj = MagicMock()
         settings_obj.ADMIN_IDS = [999]
 
+        mock_xray_cls = MagicMock()
+        mock_xray_cls.return_value.__aenter__.return_value = xray_client_mock
+        mock_xray_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
         with (
             patch("services.workers.node_monitor.session_scope", return_value=mock_scope),
             patch("services.workers.node_monitor.get_all_servers", AsyncMock(return_value=[server_initial])),
             patch("services.workers.node_monitor.update_server_health_snapshot", AsyncMock(return_value=(server_disabled_in_db, False))),
-            patch("services.workers.node_monitor.AmneziaClient", return_value=client_mock),
+            patch("services.xray_node_client.XrayNodeClient", mock_xray_cls),
             patch("services.workers.node_monitor.get_settings", return_value=settings_obj),
             patch("config.settings.get_settings", return_value=settings_obj),
         ):
@@ -139,6 +144,7 @@ class NodeMonitorConcurrencyUnitTests(unittest.IsolatedAsyncioTestCase):
         server_initial = SimpleNamespace(
             id=200,
             name="FR-Node",
+            protocol="vless",
             api_url="http://127.0.0.1:3001",
             api_key="secret",
             is_active=True,
@@ -155,8 +161,8 @@ class NodeMonitorConcurrencyUnitTests(unittest.IsolatedAsyncioTestCase):
         st = get_server_monitor_state(200, server_initial)
 
         # Healthcheck fails -> state machine generates PROBLEM alert
-        client_mock = AsyncMock()
-        client_mock.healthcheck.return_value = False
+        xray_client_mock = AsyncMock()
+        xray_client_mock.check_health.return_value = (False, None, None)
 
         mock_scope = AsyncMock()
         mock_scope.__aenter__.return_value = AsyncMock()
@@ -179,69 +185,22 @@ class NodeMonitorConcurrencyUnitTests(unittest.IsolatedAsyncioTestCase):
         )
 
         send_alert_mock = AsyncMock()
+        mock_xray_cls = MagicMock()
+        mock_xray_cls.return_value.__aenter__.return_value = xray_client_mock
+        mock_xray_cls.return_value.__aexit__ = AsyncMock(return_value=None)
 
         with (
             patch("services.workers.node_monitor.session_scope", return_value=mock_scope),
             patch("services.workers.node_monitor.get_all_servers", AsyncMock(return_value=[server_initial])),
             patch("services.workers.node_monitor.update_server_health_snapshot", AsyncMock(return_value=(server_disabled_in_db, False))),
             patch("services.workers.node_monitor._send_admin_alert_msg", send_alert_mock),
-            patch("services.workers.node_monitor.AmneziaClient", return_value=client_mock),
+            patch("services.xray_node_client.XrayNodeClient", mock_xray_cls),
         ):
             await check_node_resources_and_alerts(bot)
 
             # Verification: Because CAS returned applied=False, Telegram alert WAS NOT SENT!
             send_alert_mock.assert_not_called()
             self.assertEqual(st.health_state, "MANUAL_DISABLED")
-
-    async def test_strict_protocol_decoupling_amnezia_with_stale_xray_origin_capability(self):
-        """AmneziaWG server with stale 'xray_origin' capability must invoke AmneziaClient, NOT XrayNodeClient."""
-        from services.workers.node_monitor import clear_monitor_states
-        clear_monitor_states()
-
-        bot = AsyncMock()
-        server_awg = SimpleNamespace(
-            id=300,
-            name="AWG-Node",
-            protocol="amneziawg2",
-            capabilities=["xray_origin"],  # Stale capability
-            api_url="https://awg.example.com:8443",
-            api_key="secret",
-            is_active=True,
-            disabled_reason=None,
-            health_state="ONLINE",
-            extra_data={},
-            xray_instance_epoch=None,
-            consecutive_fails=0,
-            consecutive_successes=0,
-            problem_started_at=None,
-            next_check_at=None,
-            recovery_notice_sent=False,
-            last_alert_sent_state=None,
-        )
-
-        st = get_server_monitor_state(300, server_awg)
-        mock_scope = AsyncMock()
-        mock_scope.__aenter__.return_value = AsyncMock()
-
-        amnezia_client_mock = AsyncMock()
-        amnezia_client_mock.healthcheck.return_value = True
-
-        with (
-            patch("services.workers.node_monitor.session_scope", return_value=mock_scope),
-            patch("services.workers.node_monitor.get_all_servers", AsyncMock(return_value=[server_awg])),
-            patch("services.workers.node_monitor.update_server_health_snapshot", AsyncMock(return_value=(server_awg, True))),
-            patch("services.workers.node_monitor.AmneziaClient", return_value=amnezia_client_mock) as mock_amnezia_cls,
-            patch("services.xray_node_client.XrayNodeClient") as mock_xray_cls,
-        ):
-            await check_node_resources_and_alerts(bot)
-
-            # AmneziaClient must be called
-            mock_amnezia_cls.assert_called_once_with(server_awg.api_url, server_awg.api_key)
-            amnezia_client_mock.healthcheck.assert_awaited_once()
-
-            # XrayNodeClient must NEVER be instantiated or called
-            mock_xray_cls.assert_not_called()
-            self.assertEqual(st.health_state, "ONLINE")
 
     async def test_unknown_protocol_is_skipped_without_state_mutation(self):
         """Server with unknown protocol must be SKIPPED without transitioning to PROBLEM or AUTO_DISABLED."""
