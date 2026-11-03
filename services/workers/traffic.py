@@ -147,7 +147,6 @@ async def _send_quota_alert(
             telegram_id=telegram_id,
             cycle=safe(cycle),
             total_traffic=format_traffic(total_bytes),
-            awg_traffic=format_traffic(awg_bytes),
             vless_traffic=format_traffic(vless_bytes),
         )
         reply_markup = get_traffic_alert_keyboard(telegram_id)

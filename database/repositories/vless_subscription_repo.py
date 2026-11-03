@@ -22,6 +22,22 @@ logger = logging.getLogger(__name__)
 VLESS_HWID_TTL_HOURS = 48
 
 
+def _parse_hwid_last_seen_dt(val: Any) -> datetime:
+    """Parse last_seen from HWID dict or raw timestamp into timezone-aware UTC datetime."""
+    try:
+        raw_ts = val.get("last_seen") if isinstance(val, dict) else val
+        if isinstance(raw_ts, datetime):
+            return raw_ts if raw_ts.tzinfo else raw_ts.replace(tzinfo=timezone.utc)
+        if isinstance(raw_ts, (int, float)):
+            return datetime.fromtimestamp(raw_ts, tz=timezone.utc)
+        if isinstance(raw_ts, str):
+            dt = datetime.fromisoformat(raw_ts)
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        pass
+    return datetime.min.replace(tzinfo=timezone.utc)
+
+
 def prune_stale_hwids(current_hwids: dict | None, ttl_hours: int = VLESS_HWID_TTL_HOURS) -> dict[str, Any]:
     """Filter out HWIDs older than ttl_hours, supporting both ISO timestamp strings and enriched metadata dicts."""
     if not isinstance(current_hwids, dict):
@@ -35,20 +51,7 @@ def prune_stale_hwids(current_hwids: dict | None, ttl_hours: int = VLESS_HWID_TT
     res: dict[str, Any] = {}
     for h, val in current_hwids.items():
         try:
-            if isinstance(val, dict):
-                raw_ts = val.get("last_seen")
-            else:
-                raw_ts = val
-            if isinstance(raw_ts, datetime):
-                dt = raw_ts
-            elif isinstance(raw_ts, (int, float)):
-                dt = datetime.fromtimestamp(raw_ts, tz=timezone.utc)
-            elif isinstance(raw_ts, str):
-                dt = datetime.fromisoformat(raw_ts)
-            else:
-                continue
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
+            dt = _parse_hwid_last_seen_dt(val)
             if dt >= cutoff:
                 if isinstance(val, dict):
                     res[h] = val
@@ -255,12 +258,23 @@ async def register_hwid_atomic(
         active = prune_stale_hwids(getattr(sub, "active_hwids", None), ttl_hours=ttl_hours)
         return False, len(active), effective_limit
 
-    active_hwids = prune_stale_hwids(getattr(sub, "active_hwids", None), ttl_hours=ttl_hours)
+    current_raw_hwids = getattr(sub, "active_hwids", None) or {}
+    active_hwids = prune_stale_hwids(current_raw_hwids, ttl_hours=ttl_hours)
     now = now_utc()
 
     if effective_limit <= 0:
         return False, len(active_hwids), 0
 
+    # If active devices exceed limit (e.g. after tariff downgrade), prune to effective_limit most recently active
+    if len(active_hwids) > effective_limit:
+        sorted_hwids = sorted(
+            active_hwids.items(),
+            key=lambda item: _parse_hwid_last_seen_dt(item[1]),
+            reverse=True,
+        )
+        active_hwids = dict(sorted_hwids[:effective_limit])
+
+    has_pruned_hwids = len(active_hwids) != len(current_raw_hwids)
     entry: dict[str, Any] = {"last_seen": now.isoformat()}
     if device_info and isinstance(device_info, dict):
         for k, v in device_info.items():
@@ -276,7 +290,7 @@ async def register_hwid_atomic(
             if prev_last_seen_str:
                 try:
                     prev_dt = datetime.fromisoformat(prev_last_seen_str)
-                    if (now - prev_dt).total_seconds() < 900:
+                    if (now - prev_dt).total_seconds() < 900 and not has_pruned_hwids:
                         should_update = False
                 except Exception:
                     should_update = True

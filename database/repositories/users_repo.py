@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
 from config.constants import (
-    AMNEZIA_PROTOCOLS,
     PERMANENT_END_DATE,
     PERMANENT_SUBSCRIPTION_DAYS,
     REFERRAL_ACTIVE_MIN_TOPUP_RUB,
@@ -14,8 +13,7 @@ from config.constants import (
     XRAY_PROTOCOL,
 )
 from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
-from database.models import Order, Payment, Server, Tariff, User, VPNProfile, VlessSubscription, WhiteInternetSubscription
-from database.repositories.profiles_repo import PROFILE_LIST_HIDDEN_STATUSES
+from database.models import Order, Payment, Server, Tariff, User, VlessSubscription, WhiteInternetSubscription
 from utils.datetime_helpers import now_utc
 
 ALLOWED_USER_UPDATE_FIELDS = {
@@ -492,7 +490,7 @@ async def get_user_by_username(session: AsyncSession, username: str) -> User | N
             func.lower(User.username) == clean.lower(),
             User.is_deleted.is_(False),
         )
-        .options(selectinload(User.profiles))
+        .options(selectinload(User.vless_subscription))
     )
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
@@ -514,7 +512,7 @@ async def search_user_flexible(session: AsyncSession, query: str) -> User | None
             stmt = (
                 select(User)
                 .where(User.id == num_id, User.is_deleted.is_(False))
-                .options(selectinload(User.profiles))
+                .options(selectinload(User.vless_subscription))
             )
             result = await session.execute(stmt)
             user = result.scalar_one_or_none()
@@ -529,6 +527,19 @@ async def search_user_flexible(session: AsyncSession, query: str) -> User | None
 
     # 3. Canonical client UUID or Order UUID (36 chars: 8-4-4-4-12)
     if len(query_str) == 36 and query_str.count("-") == 4:
+        vless_user_id = await session.scalar(
+            select(VlessSubscription.user_id)
+            .where(VlessSubscription.uuid == query_str)
+            .limit(1)
+        )
+        if vless_user_id:
+            stmt = (
+                select(User)
+                .where(User.id == vless_user_id, User.is_deleted.is_(False))
+                .options(selectinload(User.vless_subscription))
+            )
+            return (await session.execute(stmt)).scalar_one_or_none()
+
         sub_user_id = await session.scalar(
             select(WhiteInternetSubscription.user_id)
             .where(WhiteInternetSubscription.uuid == query_str)
@@ -538,7 +549,7 @@ async def search_user_flexible(session: AsyncSession, query: str) -> User | None
             stmt = (
                 select(User)
                 .where(User.id == sub_user_id, User.is_deleted.is_(False))
-                .options(selectinload(User.profiles))
+                .options(selectinload(User.vless_subscription))
             )
             return (await session.execute(stmt)).scalar_one_or_none()
 
@@ -554,25 +565,39 @@ async def search_user_flexible(session: AsyncSession, query: str) -> User | None
                 stmt = (
                     select(User)
                     .where(User.id == order_user_id, User.is_deleted.is_(False))
-                    .options(selectinload(User.profiles))
+                    .options(selectinload(User.vless_subscription))
                 )
                 return (await session.execute(stmt)).scalar_one_or_none()
         except (ValueError, TypeError):
             pass
 
-    # 4. Peer ID (AmneziaWG)
-    peer_user_id = await session.scalar(
-        select(VPNProfile.user_id)
-        .where(VPNProfile.peer_id == query_str)
-        .limit(1)
-    )
-    if peer_user_id:
-        stmt = (
-            select(User)
-            .where(User.id == peer_user_id, User.is_deleted.is_(False))
-            .options(selectinload(User.profiles))
+    # 4. Subscription token lookup (16..64 chars without spaces)
+    if 16 <= len(query_str) <= 64 and " " not in query_str:
+        vless_token_user_id = await session.scalar(
+            select(VlessSubscription.user_id)
+            .where(VlessSubscription.token == query_str)
+            .limit(1)
         )
-        return (await session.execute(stmt)).scalar_one_or_none()
+        if vless_token_user_id:
+            stmt = (
+                select(User)
+                .where(User.id == vless_token_user_id, User.is_deleted.is_(False))
+                .options(selectinload(User.vless_subscription))
+            )
+            return (await session.execute(stmt)).scalar_one_or_none()
+
+        wi_token_user_id = await session.scalar(
+            select(WhiteInternetSubscription.user_id)
+            .where(WhiteInternetSubscription.token == query_str)
+            .limit(1)
+        )
+        if wi_token_user_id:
+            stmt = (
+                select(User)
+                .where(User.id == wi_token_user_id, User.is_deleted.is_(False))
+                .options(selectinload(User.vless_subscription))
+            )
+            return (await session.execute(stmt)).scalar_one_or_none()
 
     # 5. Order external_id or Payment ID (external_id)
     order_user_id = await session.scalar(
@@ -584,7 +609,7 @@ async def search_user_flexible(session: AsyncSession, query: str) -> User | None
         stmt = (
             select(User)
             .where(User.id == order_user_id, User.is_deleted.is_(False))
-            .options(selectinload(User.profiles))
+            .options(selectinload(User.vless_subscription))
         )
         return (await session.execute(stmt)).scalar_one_or_none()
 
@@ -597,12 +622,25 @@ async def search_user_flexible(session: AsyncSession, query: str) -> User | None
         stmt = (
             select(User)
             .where(User.id == payment_user_id, User.is_deleted.is_(False))
-            .options(selectinload(User.profiles))
+            .options(selectinload(User.vless_subscription))
         )
         return (await session.execute(stmt)).scalar_one_or_none()
 
     # 6. HWID lookup (GIN index on active_hwids)
     if len(query_str) >= 8:
+        vless_hwid_user_id = await session.scalar(
+            select(VlessSubscription.user_id)
+            .where(VlessSubscription.active_hwids.has_key(query_str))
+            .limit(1)
+        )
+        if vless_hwid_user_id:
+            stmt = (
+                select(User)
+                .where(User.id == vless_hwid_user_id, User.is_deleted.is_(False))
+                .options(selectinload(User.vless_subscription))
+            )
+            return (await session.execute(stmt)).scalar_one_or_none()
+
         hwid_user_id = await session.scalar(
             select(WhiteInternetSubscription.user_id)
             .where(WhiteInternetSubscription.active_hwids.has_key(query_str))
@@ -612,7 +650,7 @@ async def search_user_flexible(session: AsyncSession, query: str) -> User | None
             stmt = (
                 select(User)
                 .where(User.id == hwid_user_id, User.is_deleted.is_(False))
-                .options(selectinload(User.profiles))
+                .options(selectinload(User.vless_subscription))
             )
             return (await session.execute(stmt)).scalar_one_or_none()
 
@@ -740,18 +778,6 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
         server_proto_subq = select(Server.protocol).where(Server.id == target_server_id).scalar_subquery()
         server_caps_subq = select(cast(Server.capabilities, String)).where(Server.id == target_server_id).scalar_subquery()
 
-        awg_cond = and_(
-            (
-                server_proto_subq.in_(AMNEZIA_PROTOCOLS)
-                | server_caps_subq.like('%"awg"%')
-                | server_caps_subq.like('%"amnezia"%')
-            ),
-            User.profiles.any(
-                (VPNProfile.server_id == target_server_id)
-                & (VPNProfile.provisioning_status.notin_(PROFILE_LIST_HIDDEN_STATUSES))
-            ),
-        )
-
         is_vless_capable = (
             (server_proto_subq == VLESS_PROTOCOL)
             | server_caps_subq.like('%"vless"%')
@@ -771,7 +797,6 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
                 (server_proto_subq == XRAY_PROTOCOL)
                 | server_caps_subq.like('%"xray_origin"%')
             ),
-            ~server_proto_subq.in_(AMNEZIA_PROTOCOLS),
             User.id.in_(
                 select(WhiteInternetSubscription.user_id).where(
                     WhiteInternetSubscription.origin_node_id == target_server_id,
@@ -784,7 +809,7 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
                 )
             ),
         )
-        stmt = stmt.where(or_(awg_cond, vless_cond, xray_cond))
+        stmt = stmt.where(or_(vless_cond, xray_cond))
     elif filter_type == "country" and filter_param:
         country_str = str(filter_param)
         vless_country_exists = select(Server.id).where(
@@ -809,7 +834,6 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
         )
         stmt = stmt.where(
             or_(
-                User.profiles.any(VPNProfile.server.has(Server.country_flag == country_str)),
                 vless_country_cond,
                 User.id.in_(xray_country_users_subq),
             )
@@ -891,7 +915,7 @@ async def get_filtered_users_paginated(
         order_clause = User.created_at.desc()
 
     stmt = (
-        stmt.options(selectinload(User.profiles))
+        stmt.options(selectinload(User.vless_subscription))
         .order_by(order_clause, User.id.desc())
         .offset(offset)
         .limit(per_page)

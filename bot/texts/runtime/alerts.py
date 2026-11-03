@@ -54,8 +54,7 @@ ALERT_TRAFFIC_OVERUSAGE = """⚠️ <b>Fair Usage Policy: Превышение 1
 👤 <b>Пользователь:</b> <code>{telegram_id}</code>
 📅 <b>Период:</b> {cycle}
 📊 <b>Всего за месяц:</b> <b>{total_traffic}</b>
-   ├ <b>AmneziaWG:</b> {awg_traffic}
-   └ <b>VLESS:</b> {vless_traffic}
+   └ <b>Стандартный доступ:</b> {vless_traffic}
 ━━━━━━━━━━━━━━━━━━━━
 <i>Доступ не заблокирован. Рекомендуется проверить активность пользователя.</i>"""
 
