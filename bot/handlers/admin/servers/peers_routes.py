@@ -1,9 +1,7 @@
-import asyncio
 from datetime import datetime, timezone
 import logging
 import math
 
-import aiohttp
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery
@@ -15,7 +13,6 @@ from bot import texts
 from bot.formatters import format_admin_breadcrumbs, get_server_protocol_badge
 from bot.keyboards.admin.servers import get_admin_server_peers_keyboard
 from database.models import Server, User, VPNProfile
-from services.amnezia_client import AmneziaClient
 from utils.admin import is_admin
 from utils.datetime_helpers import now_utc
 from utils.telegram import safe
@@ -97,25 +94,8 @@ async def show_server_peers(
     )
     profiles = list((await session.scalars(stmt)).all())
 
-    # 2. Fetch live peers from Amnezia node.
-    # IMPORTANT: get_all_clients() returns None on failure (not []).
-    # We must preserve None to signal "API unavailable" vs [] for "truly empty node".
-    client = AmneziaClient(server.api_url, server.api_key)
+    real_clients = []
     api_available = True
-    try:
-        real_clients = await asyncio.wait_for(client.get_all_clients(), timeout=10.0)
-        if real_clients is None:
-            # API returned None — node responded but data is unavailable
-            api_available = False
-            real_clients = []
-    except (asyncio.TimeoutError, TimeoutError, aiohttp.ClientError, OSError) as e:
-        logger.warning("Failed to fetch live clients for server %s: %s", server.id, e)
-        api_available = False
-        real_clients = []
-    except Exception as e:
-        logger.exception("Unexpected error fetching live clients for server %s: %s", server.id, e)
-        api_available = False
-        real_clients = []
 
     real_peer_ids: set[str] = {c.id for c in real_clients if getattr(c, "id", None)}
     real_clients_by_id = {c.id: c for c in real_clients if getattr(c, "id", None)}

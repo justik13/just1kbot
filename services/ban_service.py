@@ -13,7 +13,6 @@ from database.repositories.users_repo import (
 )
 from services.audit_service import AuditService
 from services.order_service import OrderService
-from services.profile_deletion_service import ProfileDeletionService
 from services.white_internet_service import WhiteInternetService
 from utils.datetime_helpers import now_utc
 
@@ -174,15 +173,7 @@ class BanService:
             is_banned=True,
         )
 
-        # Только durable DB-операции. HTTP к Amnezia здесь не выполняется.
-        deleted_profiles = (
-            await ProfileDeletionService.delete_profiles_for_user(
-                session,
-                locked_user.id,
-                reason="ban_delete",
-                background=True,
-            )
-        )
+        deleted_profiles = 0
 
         disabled_wl_subs = (
             await WhiteInternetService.deactivate_user_subscriptions(

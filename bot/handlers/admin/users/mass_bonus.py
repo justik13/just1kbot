@@ -250,11 +250,10 @@ def _build_server_audience_condition(server_or_id, now: datetime):
     if server_or_id is None:
         return User.id == -1
 
-    from config.constants import AMNEZIA_PROTOCOLS, VLESS_PROTOCOL, XRAY_PROTOCOL
+    from config.constants import VLESS_PROTOCOL, XRAY_PROTOCOL
     from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
-    from database.models import Server, VPNProfile, VlessSubscription, WhiteInternetSubscription
+    from database.models import Server, VlessSubscription, WhiteInternetSubscription
     from database.repositories.servers_repo import (
-        is_awg_capable_server,
         is_vless_capable_server,
         is_white_internet_origin_server,
     )
@@ -268,21 +267,6 @@ def _build_server_audience_condition(server_or_id, now: datetime):
 
         server_proto_subq = select(Server.protocol).where(Server.id == server_id).scalar_subquery()
         server_caps_subq = select(cast(Server.capabilities, String)).where(Server.id == server_id).scalar_subquery()
-
-        awg_cond = (
-            (
-                server_proto_subq.in_(AMNEZIA_PROTOCOLS)
-                | server_caps_subq.like('%"awg"%')
-                | server_caps_subq.like('%"amnezia"%')
-            )
-            & (User.subscription_end > now)
-            & User.profiles.any(
-                (VPNProfile.server_id == server_id)
-                & (VPNProfile.is_active.is_(True))
-                & (VPNProfile.desired_is_active.is_(True))
-                & (VPNProfile.provisioning_status.notin_(("deleting", "create_failed", "create_cleanup_pending")))
-            )
-        )
 
         is_vless_capable = (
             (server_proto_subq == VLESS_PROTOCOL)
@@ -304,7 +288,6 @@ def _build_server_audience_condition(server_or_id, now: datetime):
                 (server_proto_subq == XRAY_PROTOCOL)
                 | server_caps_subq.like('%"xray_origin"%')
             )
-            & ~server_proto_subq.in_(AMNEZIA_PROTOCOLS)
             & User.id.in_(
                 select(WhiteInternetSubscription.user_id).where(
                     WhiteInternetSubscription.origin_node_id == server_id,
@@ -319,20 +302,10 @@ def _build_server_audience_condition(server_or_id, now: datetime):
                 )
             )
         )
-        return or_(awg_cond, vless_cond, xray_cond)
+        return or_(vless_cond, xray_cond)
 
     server = server_or_id
     conds = []
-    if is_awg_capable_server(server):
-        conds.append(
-            (User.subscription_end > now)
-            & User.profiles.any(
-                (VPNProfile.server_id == server.id)
-                & (VPNProfile.is_active.is_(True))
-                & (VPNProfile.desired_is_active.is_(True))
-                & (VPNProfile.provisioning_status.notin_(("deleting", "create_failed", "create_cleanup_pending")))
-            )
-        )
     if is_vless_capable_server(server):
         conds.append(
             (User.subscription_end > now)

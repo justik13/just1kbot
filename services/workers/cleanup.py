@@ -1,36 +1,27 @@
 import asyncio
 import logging
 import time
-import uuid
 from datetime import timedelta
 from typing import Any
 
 from aiogram import Bot
-from aiogram.exceptions import TelegramForbiddenError
-from bot.keyboards.notifications import get_devices_deleted_keyboard
-from bot.texts.runtime.notifications import NOTIFY_DEVICES_DELETED
 from cachetools import TTLCache
-from sqlalchemy import and_, delete, or_, select, text, update
+from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from config.constants import (
-    AdminAuditAction,
-    GRACE_PERIOD_HOURS,
     VPN_ACCESS_GRACE_HOURS,
 )
 from database.connection import session_scope
 from database.models import (
     AdminOperationIdempotency,
-    APIOperation,
     BroadcastProgress,
     HubMessage,
     Order,
     User,
     VlessSubscription,
-    VPNProfile,
     WebhookInbox,
 )
 from database.repositories.audit_repo import clear_audit_logs
-from services.profile_deletion_service import ProfileDeletionService
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc
 
@@ -72,9 +63,7 @@ async def cleanup_dangling_peers_loop(
 
     if isinstance(bot_or_shutdown, asyncio.Event):
         event = bot_or_shutdown
-        bot = None
     else:
-        bot = bot_or_shutdown
         event = shutdown_event or asyncio.Event()
 
     try:
@@ -91,8 +80,6 @@ async def cleanup_dangling_peers_loop(
         try:
             now = time.monotonic()
             if now - _last_heavy_cleanup >= CLEANUP_LOOP_INTERVAL:
-                await _cleanup_stuck_profiles()
-                await _cleanup_expired_profiles_grace(bot)
                 await _cleanup_expired_vless_network_grace()
                 await _sweep_vless_pending_revocations()
                 _last_heavy_cleanup = now
@@ -125,191 +112,7 @@ async def cleanup_dangling_peers_loop(
     logger.info("Cleanup worker stopped gracefully")
 
 
-async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
-    current_time = now_utc()
-    threshold = current_time - timedelta(hours=GRACE_PERIOD_HOURS)
 
-    async with session_scope() as session:
-        stmt = (
-            select(User.id)
-            .where(
-                User.is_deleted.is_(False),
-                User.subscription_end.is_not(None),
-                (User.subscription_end < threshold) | User.financial_hold,
-                or_(
-                    select(VPNProfile.id).where(VPNProfile.user_id == User.id).exists(),
-                    select(VlessSubscription.id).where(
-                        VlessSubscription.user_id == User.id,
-                        or_(
-                            VlessSubscription.is_active.is_(True),
-                            and_(
-                                VlessSubscription.active_hwids.is_not(None),
-                                VlessSubscription.active_hwids != text("'{}'::jsonb"),
-                            ),
-                        ),
-                    ).exists(),
-                ),
-            )
-            .order_by(User.subscription_end.asc())
-            .limit(50)
-        )
-        result = await session.execute(stmt)
-        user_ids = [row[0] for row in result.all()]
-
-    if not user_ids:
-        return
-
-    deleted_users_count = 0
-    deleted_profiles_count = 0
-
-    for user_id in user_ids:
-        notify_tg_id = None
-        try:
-            async with session_scope() as session:
-                user_stmt = select(User).where(User.id == user_id).with_for_update()
-                user_result = await session.execute(user_stmt)
-                user = user_result.scalar_one_or_none()
-
-                if user is None:
-                    continue
-                if user.is_deleted:
-                    continue
-                if user.subscription_end is None:
-                    continue
-                from utils.datetime_helpers import is_permanent_subscription
-
-                if is_permanent_subscription(user.subscription_end):
-                    continue
-                if not user.financial_hold and user.subscription_end >= threshold:
-                    continue
-
-                if user.financial_hold and user.subscription_end >= threshold:
-                    # Active subscription under financial hold (dispute/chargeback):
-                    # disable access via desired-state sync, NEVER delete paid devices.
-                    # Deletion is reserved for actually expired subscriptions.
-                    await SubscriptionService.sync_access_state(session, user)
-                    logger.info(
-                        "Grace cleanup disabled (not deleted) profiles for user %s "
-                        "with active subscription under financial_hold",
-                        _safe_log_value(user.id),
-                    )
-                    continue
-
-                from database.repositories import vless_subscription_repo
-                from services.vless_subscription_service import VlessSubscriptionService
-
-                vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
-                had_vless_devices = bool(vless_sub and (vless_sub.active_hwids or vless_sub.is_active))
-
-                await SubscriptionService.sync_access_state(session, user)
-
-                profiles_stmt = select(VPNProfile).where(
-                    VPNProfile.user_id == user.id,
-                )
-                profiles_result = await session.execute(profiles_stmt)
-                profiles = list(profiles_result.scalars().all())
-
-                vless_deleted = False
-                if vless_sub and had_vless_devices:
-                    old_uuid, new_uuid = await vless_subscription_repo.reset_hwids(session, vless_sub.id)
-                    if not old_uuid:
-                        old_uuid = vless_sub.uuid
-                        new_uuid = str(uuid.uuid4())
-                        vless_sub.uuid = new_uuid
-                        vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1
-                        vless_sub.active_hwids = {}
-                        vless_sub.node_traffic_snapshots = {"_fresh": True}
-                        pending = list(getattr(vless_sub, "pending_revoked_uuids", None) or [])
-                        if old_uuid and old_uuid not in pending:
-                            pending.append(old_uuid)
-                        vless_sub.pending_revoked_uuids = pending
-                    vless_sub.is_active = False
-                    await session.flush()
-                    if old_uuid:
-                        VlessSubscriptionService.deprovision_background(
-                            old_uuid, version=vless_sub.version, sub_id=vless_sub.id, session=session
-                        )
-                    VlessSubscriptionService.ensure_synced_background(user.id, is_active=False, session=session)
-                    vless_deleted = True
-
-                if not profiles and not vless_deleted:
-                    continue
-
-                deleted = 0
-                if profiles:
-                    deleted = await ProfileDeletionService.delete_profiles_list(
-                        session,
-                        profiles,
-                        reason="grace_delete",
-                        background=True,
-                    )
-
-                if deleted > 0 or vless_deleted:
-                    deleted_users_count += 1
-                    deleted_profiles_count += deleted
-                    notify_tg_id = user.telegram_id
-                    from services.audit_service import AuditService
-
-                    await AuditService.log_action(
-                        session,
-                        admin_id=0,
-                        action=AdminAuditAction.CLEANUP_DEVICE_DELETE,
-                        target_type="user",
-                        target_id=user.id,
-                        details={
-                            "profiles_deleted": deleted,
-                            "vless_deleted": vless_deleted,
-                            "reason": "grace_delete",
-                        },
-                    )
-                    logger.info(
-                        "Grace cleanup: removed %s expired profiles (vless=%s) "
-                        "for user_id=%s (subscription_end=%s)",
-                        deleted,
-                        vless_deleted,
-                        user_id,
-                        user.subscription_end,
-                    )
-
-            # Отправка уведомления об удалении устройств ПОСЛЕ завершения транзакции
-            if notify_tg_id and bot:
-                try:
-                    await bot.send_message(
-                        notify_tg_id,
-                        NOTIFY_DEVICES_DELETED,
-                        reply_markup=get_devices_deleted_keyboard(),
-                        parse_mode="HTML",
-                    )
-                except TelegramForbiddenError:
-                    async with session_scope() as blocked_session:
-                        b_user = await blocked_session.get(User, user_id)
-                        if b_user:
-                            b_user.is_bot_blocked = True
-                    logger.info(
-                        "User %s blocked the bot (grace cleanup notification)",
-                        notify_tg_id,
-                    )
-                except Exception as e:
-                    logger.warning(
-                        "Failed to send grace cleanup notification to user %s: %s",
-                        notify_tg_id,
-                        e,
-                    )
-
-        except Exception as e:
-            logger.error(
-                "Grace cleanup failed for user_id=%s: %s",
-                user_id,
-                e,
-                exc_info=True,
-            )
-
-    if deleted_users_count > 0:
-        logger.info(
-            "Grace cleanup completed: %s users, %s profiles removed",
-            deleted_users_count,
-            deleted_profiles_count,
-        )
 
 
 async def _cleanup_expired_vless_network_grace() -> None:
@@ -443,248 +246,6 @@ async def _sweep_vless_pending_revocations() -> None:
                 logger.warning("VLESS server epoch convergence failed for server %s: %s", srv_id, e)
     except Exception as e:
         logger.warning("Error in _sweep_vless_pending_revocations: %s", e)
-
-
-async def _cleanup_stuck_profiles():
-    # Cleanup dangling pending_create, create_cleanup_pending, deleting, and delete_failed profiles.
-    # Only clean up profiles that do NOT have an active APIOperation in flight.
-    from sqlalchemy import func
-    from sqlalchemy import update as sa_update
-
-    async with session_scope() as session:
-        cutoff_time = now_utc() - timedelta(hours=1)
-
-        stuck_profiles = (
-            (
-                await session.execute(
-                    select(VPNProfile)
-                    .where(
-                        VPNProfile.provisioning_status.in_(
-                            ["pending_create", "create_cleanup_pending", "deleting", "delete_failed"]
-                        ),
-                        VPNProfile.created_at < cutoff_time,
-                    )
-                    .limit(100)
-                    .with_for_update(skip_locked=True)
-                )
-            )
-            .scalars()
-            .all()
-        )
-
-        for profile in stuck_profiles:
-            active_op_res = await session.execute(
-                select(APIOperation.id)
-                .where(
-                    APIOperation.profile_id == profile.id,
-                    APIOperation.status.in_(["pending", "processing", "retry"]),
-                )
-                .limit(1)
-            )
-            if active_op_res.scalar_one_or_none() is not None:
-                logger.debug(
-                    "Skipping profile %s cleanup: APIOperation is still active", profile.id
-                )
-                continue
-
-            peer_id = profile.peer_id
-            create_op = None
-            if not peer_id:
-                create_op_res = await session.execute(
-                    select(APIOperation)
-                    .where(
-                        APIOperation.profile_id == profile.id,
-                        APIOperation.operation_type == "create_peer",
-                    )
-                    .order_by(APIOperation.id.desc())
-                    .limit(1)
-                )
-                create_op = create_op_res.scalar_one_or_none()
-                if create_op is not None:
-                    peer_id = getattr(create_op, "peer_id", None)
-
-            if peer_id:
-                profile.peer_id = peer_id
-                from database.models import Server
-
-                server = await session.get(Server, profile.server_id)
-                if server and getattr(server, "is_active", True) is False:
-                    logger.info(
-                        "Skipping delete_peer queue for profile %s: server %s is inactive",
-                        profile.id,
-                        profile.server_id,
-                    )
-                    continue
-
-                from config.enums import ServerHealthState
-
-                if server and getattr(server, "health_state", None) in (
-                    ServerHealthState.AUTO_DISABLED,
-                    ServerHealthState.MANUAL_DISABLED,
-                    ServerHealthState.PROBLEM,
-                ):
-                    logger.info(
-                        "Skipping delete_peer queue for profile %s: server %s is in %s",
-                        profile.id,
-                        profile.server_id,
-                        server.health_state,
-                    )
-                    continue
-
-                # For delete_failed profiles, avoid infinite retry loops when operation reached dead status.
-                # Require at least 6 hours cooldown after the dead operation before cleanup revives it.
-                if profile.provisioning_status == "delete_failed":
-                    dead_op_res = await session.execute(
-                        select(APIOperation)
-                        .where(
-                            APIOperation.profile_id == profile.id,
-                            APIOperation.operation_type == "delete_peer",
-                            APIOperation.status.in_(["dead", "cancelled"]),
-                        )
-                        .order_by(APIOperation.id.desc())
-                        .limit(1)
-                    )
-                    dead_op = dead_op_res.scalar_one_or_none()
-                    if dead_op:
-                        op_time = dead_op.completed_at or dead_op.updated_at
-                        if op_time and op_time > now_utc() - timedelta(hours=6):
-                            logger.debug(
-                                "Skipping delete_failed profile %s retry: dead operation %s in cooldown",
-                                profile.id,
-                                dead_op.id,
-                            )
-                            continue
-
-                try:
-                    from services.api_operations_queue import (
-                        ensure_delete_operation,
-                        resolve_profile_endpoint_snapshot,
-                    )
-
-                    (
-                        server_id,
-                        server_name,
-                        api_url,
-                        api_key,
-                    ) = await resolve_profile_endpoint_snapshot(session, profile)
-                    await ensure_delete_operation(
-                        session,
-                        idempotency_key=f"delete-peer:{profile.id}:{peer_id}",
-                        server_id=server_id,
-                        profile_id=profile.id,
-                        server_name_snapshot=server_name,
-                        api_url_snapshot=api_url,
-                        api_key_snapshot=api_key,
-                        peer_id=peer_id,
-                        client_name=profile.client_name,
-                        audit_reason="stuck_cleanup_worker",
-                    )
-                    profile.provisioning_status = "deleting"
-                except Exception as exc:
-                    logger.warning(
-                        "Failed to queue delete_peer operation during stuck profile cleanup: %s",
-                        exc,
-                    )
-                    if profile.provisioning_status != "delete_failed":
-                        profile.provisioning_status = "create_cleanup_pending"
-            elif profile.provisioning_status in {"create_cleanup_pending", "deleting", "delete_failed"}:
-                # Peer ID unknown: requeue create_peer for reconciliation by client_name on Amnezia
-                if create_op and create_op.status in {"dead", "cancelled"}:
-                    from database.models import Server
-
-                    server = await session.get(Server, profile.server_id)
-                    if server and getattr(server, "is_active", True):
-                        await session.execute(
-                            sa_update(APIOperation)
-                            .where(APIOperation.id == create_op.id)
-                            .values(
-                                status="retry",
-                                attempts=0,
-                                next_attempt_at=func.now(),
-                                completed_at=None,
-                                locked_at=None,
-                                locked_by=None,
-                                updated_at=func.now(),
-                                last_error_code="stuck_cleanup_requeued",
-                                last_error="Requeued by stuck profile cleanup worker for peer reconciliation",
-                            )
-                        )
-                        logger.info(
-                            "Requeued create_peer op %s for profile %s reconciliation",
-                            create_op.id,
-                            profile.id,
-                        )
-                elif not create_op and profile.provisioning_status == "create_cleanup_pending":
-                    # Recreate the durable reconciliation command instead of
-                    # deleting a state that explicitly means a peer may exist.
-                    from database.models import Server
-
-                    server = await session.get(Server, profile.server_id)
-                    if server and getattr(server, "is_active", True) is False:
-                        logger.info(
-                            "Skipping CREATE reconciliation op for profile %s: server %s is inactive",
-                            profile.id,
-                            profile.server_id,
-                        )
-                        continue
-
-                    try:
-                        from services.api_operations_queue import (
-                            enqueue_api_operation,
-                            resolve_profile_endpoint_snapshot,
-                        )
-
-                        (
-                            server_id,
-                            server_name,
-                            api_url,
-                            api_key,
-                        ) = await resolve_profile_endpoint_snapshot(session, profile)
-                        await enqueue_api_operation(
-                            session,
-                            operation_type="create_peer",
-                            idempotency_key=f"create-peer:{profile.id}:v{profile.desired_version}",
-                            server_id=server_id,
-                            profile_id=profile.id,
-                            server_name_snapshot=server_name,
-                            api_url_snapshot=api_url,
-                            api_key_snapshot=api_key,
-                            client_name=profile.client_name,
-                            payload={
-                                "desired_version": profile.desired_version,
-                                "protocol": server.protocol if server else None,
-                            },
-                        )
-                        logger.info(
-                            "Recreated missing CREATE reconciliation op for profile %s",
-                            profile.id,
-                        )
-                    except Exception as exc:
-                        logger.warning(
-                            "Failed to recreate CREATE reconciliation op for profile %s: %s",
-                            profile.id,
-                            type(exc).__name__,
-                        )
-                elif not create_op and profile.provisioning_status in {"deleting", "delete_failed"}:
-                    # No operation ever existed and no peer_id; safe to delete local tombstone
-                    await session.delete(profile)
-                    logger.info(
-                        "Deleted orphaned tombstone profile %s without operations (status=%s)",
-                        profile.id,
-                        profile.provisioning_status,
-                    )
-            else:
-                # pending_create where attempts == 0: safe to fail closed without side effects
-                profile.provisioning_status = "create_failed"
-                profile.last_sync_error = "Creation timed out by cleanup worker"
-                logger.info(
-                    "Marked unattempted pending_create profile %s as create_failed", profile.id
-                )
-
-
-async def _cleanup_dangling_peers():
-    """Decommissioned legacy AWG dangling peer cleanup (no-op)."""
-    return
 
 
 BATCH_DELETE_CHUNK_SIZE = 500

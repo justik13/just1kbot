@@ -3,7 +3,6 @@ import html
 import logging
 
 from config.constants import (
-    AMNEZIA_PROTOCOLS,
     VLESS_PROTOCOL,
     XRAY_PROTOCOL,
     AdminAuditAction,
@@ -23,7 +22,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
-from database.repositories.profiles_repo import PROFILE_LIST_HIDDEN_STATUSES
 from bot.formatters import get_server_protocol_badge
 from bot.keyboards import get_back_button
 from bot.keyboards.admin.broadcast import (
@@ -39,7 +37,6 @@ from database.models import (
     BroadcastProgress,
     Server,
     User,
-    VPNProfile,
     VlessSubscription,
     WhiteInternetSubscription,
 )
@@ -385,24 +382,6 @@ def _apply_audience_filters(stmt, audience: str, *, admin_tg_id: int | None = No
         server_proto_subq = select(Server.protocol).where(Server.id == target_server_id).scalar_subquery()
         server_caps_subq = select(cast(Server.capabilities, String)).where(Server.id == target_server_id).scalar_subquery()
 
-        # AmneziaWG (awg) condition:
-        # Target users with active subscription and active profile on this AWG node.
-        # Strict Fail-Closed: excludes profiles in hidden/deleting states and inactive profiles.
-        awg_user_condition = and_(
-            (
-                server_proto_subq.in_(AMNEZIA_PROTOCOLS)
-                | server_caps_subq.like('%"awg"%')
-                | server_caps_subq.like('%"amnezia"%')
-            ),
-            User.subscription_end > current_time,
-            User.profiles.any(
-                (VPNProfile.server_id == target_server_id)
-                & (VPNProfile.is_active.is_(True))
-                & (VPNProfile.desired_is_active.is_(True))
-                & (VPNProfile.provisioning_status.notin_(PROFILE_LIST_HIDDEN_STATUSES))
-            ),
-        )
-
         is_vless_capable = (
             (server_proto_subq == VLESS_PROTOCOL)
             | server_caps_subq.like('%"vless"%')
@@ -426,22 +405,17 @@ def _apply_audience_filters(stmt, audience: str, *, admin_tg_id: int | None = No
                 (server_proto_subq == XRAY_PROTOCOL)
                 | server_caps_subq.like('%"xray_origin"%')
             ),
-            ~server_proto_subq.in_(AMNEZIA_PROTOCOLS),
             User.id.in_(
                 select(WhiteInternetSubscription.user_id).where(
                     WhiteInternetSubscription.origin_node_id == target_server_id,
-                    WhiteInternetSubscription.status.in_([
-                        WhiteInternetStatus.ACTIVE,
-                        WhiteInternetStatus.PENDING,
-                        WhiteInternetStatus.EXHAUSTED,
-                    ]),
+                    WhiteInternetStatus.ACTIVE == WhiteInternetSubscription.status,
                     WhiteInternetSubscription.expires_at > current_time,
                     WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
                 )
             ),
         )
 
-        stmt = stmt.where(or_(awg_user_condition, vless_user_condition, xray_user_condition))
+        stmt = stmt.where(or_(vless_user_condition, xray_user_condition))
     return stmt
 
 

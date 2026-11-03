@@ -1,9 +1,4 @@
 import logging
-import re
-from config.constants import (
-    AMNEZIA_PROTOCOLS,
-    GRACE_PERIOD_HOURS,
-)
 from datetime import timedelta
 
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -11,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from bot.keyboards import get_back_button, get_dispute_blocked_keyboard
+from config.constants import GRACE_PERIOD_HOURS
 from config.settings import get_settings
 from database.models import User
 from services.subscription import SubscriptionService
@@ -19,16 +15,6 @@ from utils.support import get_support_url
 from utils.telegram import render_hub
 
 logger = logging.getLogger(__name__)
-
-DEVICE_NAME_REGEX = re.compile(r"^[a-zA-Z\u0400-\u04FF0-9\s_#-]+$")
-
-_PROTOCOL_DISPLAY = {p: texts.LABEL_ARCHIVED_CONNECTION for p in AMNEZIA_PROTOCOLS}
-
-
-def _format_protocol(raw_protocol: str | None) -> str:
-    if not raw_protocol:
-        return texts.PLACEHOLDER_DASH
-    return _PROTOCOL_DISPLAY.get(raw_protocol, raw_protocol)
 
 
 async def _get_effective_device_limit(
@@ -142,7 +128,7 @@ async def _build_connections_screen(
             if (
                 user_tariff
                 and getattr(user_tariff, "name", None)
-                and (getattr(user_tariff, "service_type", None) or "standard") in ("standard", "awg")
+                and (getattr(user_tariff, "service_type", None) or "standard") == "standard"
             ):
                 tariff_name = user_tariff.name
         if not tariff_name:
@@ -286,11 +272,4 @@ async def _render_connections(
         trigger_message_id=getattr(target, "message_id", None),
     )
 
-
-async def _render_amnezia_devices(
-    target,
-    user: User,
-    session: AsyncSession,
-):
-    await _render_connections(target, user, session)
 

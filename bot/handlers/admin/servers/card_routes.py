@@ -1,10 +1,7 @@
-import asyncio
 import logging
 import time
 
 from config.constants import (
-    AMNEZIA_PROTOCOL,
-    AMNEZIA_PROTOCOLS,
     VLESS_PROTOCOL,
     XRAY_PROTOCOL,
     AdminAuditAction,
@@ -27,7 +24,6 @@ from database.repositories.servers_repo import (
     capacity_consuming_wl_condition,
     get_server_by_id,
     get_server_xray_api_url,
-    is_awg_capable_server,
     is_vless_capable_server,
     is_white_internet_origin_server,
     migrate_origin_subscriptions,
@@ -322,7 +318,6 @@ async def toggle_server_apply(
     new_status = not server.is_active
 
     from config.constants import ServerHealthState
-    from services.amnezia_client import cleanup_server_circuit_breakers
     from services.workers.node_monitor import reset_server_monitor_state
     from utils.datetime_helpers import now_utc
 
@@ -354,7 +349,6 @@ async def toggle_server_apply(
             next_check_at=None,
         )
         reset_server_monitor_state(server_id, ServerHealthState.MANUAL_DISABLED)
-        cleanup_server_circuit_breakers(server.api_url)
 
     await AuditService.log_action(
         session,
@@ -418,14 +412,12 @@ async def ping_server(
         if not isinstance(raw_proto, str) or not raw_proto.strip():
             raw_proto = (
                 VLESS_PROTOCOL if ("vless" in caps or "xray_vless" in caps)
-                else (XRAY_PROTOCOL if "xray_origin" in caps else AMNEZIA_PROTOCOL)
+                else XRAY_PROTOCOL
             )
         proto = raw_proto.strip().lower()
 
         has_xray_or_vless = is_vless_capable_server(server) or is_white_internet_origin_server(server)
-        has_awg = is_awg_capable_server(server)
 
-        awg_ok = True
         xray_ok = True
 
         if has_xray_or_vless:
@@ -443,28 +435,8 @@ async def ping_server(
                 async with XrayNodeClient(timeout=4.0, max_retries=0) as xclient:
                     x_ok, _epoch, _detail = await xclient.check_health(xray_url, server.api_key)
             xray_ok = x_ok
-        elif has_awg:
-            from services.amnezia_client import AmneziaClient, is_server_circuit_available
 
-            if not await is_server_circuit_available(server.api_url):
-                awg_ok = False
-            else:
-                client = AmneziaClient(server.api_url, server.api_key)
-                try:
-                    awg_ok = await asyncio.wait_for(client.healthcheck(), timeout=4.0)
-                except Exception:
-                    awg_ok = False
-
-        if has_xray_or_vless:
-            is_healthy = xray_ok
-        elif has_awg:
-            is_healthy = awg_ok
-        elif proto in (XRAY_PROTOCOL, VLESS_PROTOCOL):
-            is_healthy = xray_ok
-        elif proto in AMNEZIA_PROTOCOLS:
-            is_healthy = awg_ok
-        else:
-            is_healthy = False
+        is_healthy = xray_ok if (has_xray_or_vless or proto in (XRAY_PROTOCOL, VLESS_PROTOCOL)) else False
 
         duration_ms = int((time.monotonic() - start_t) * 1000)
         if is_healthy:

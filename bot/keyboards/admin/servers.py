@@ -13,31 +13,15 @@ def get_admin_server_card_keyboard(
     is_xray: bool = False,
     has_vless: bool = False,
     is_origin: bool = False,
-    has_awg: bool = True,
+    has_awg: bool = False,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
-    if not is_xray:
-        if has_awg:
-            if used_clients is not None and max_clients is not None:
-                peers_btn_text = texts.ADMIN_SERVER_BTN_PEERS.format(used=used_clients, total=max_clients)
-            else:
-                peers_btn_text = texts.ADMIN_SERVER_BTN_PEERS_NO_COUNT
-
-            builder.button(
-                text=peers_btn_text,
-                callback_data=f"admin_server_peers:{server_id}:1",
-            )
-        if has_vless:
-            builder.button(
-                text=texts.ADMIN_SERVER_BTN_INCY,
-                callback_data=f"admin_server_incy:{server_id}",
-            )
-    else:
-        builder.button(
-            text=texts.ADMIN_SERVER_BTN_INCY,
-            callback_data=f"admin_server_incy:{server_id}",
-        )
+    builder.button(
+        text=texts.ADMIN_SERVER_BTN_INCY,
+        callback_data=f"admin_server_incy:{server_id}",
+    )
+    if is_xray:
         builder.button(
             text=texts.ADMIN_SERVER_BTN_RELAYS,
             callback_data=f"admin_server_relays:{server_id}",
@@ -46,11 +30,10 @@ def get_admin_server_card_keyboard(
             text=texts.ADMIN_SERVER_BTN_MIGRATE,
             callback_data=f"admin_server_migrate:{server_id}",
         )
-    if has_awg or has_vless or is_xray:
-        builder.button(
-            text=texts.ADMIN_SERVER_BTN_SERVER_USERS,
-            callback_data=f"admin_users_filter:server:{server_id}:1",
-        )
+    builder.button(
+        text=texts.ADMIN_SERVER_BTN_SERVER_USERS,
+        callback_data=f"admin_users_filter:server:{server_id}:1",
+    )
     builder.button(
         text=texts.ADMIN_SERVER_BTN_BROADCAST,
         callback_data=f"admin_server_broadcast:{server_id}",

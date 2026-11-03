@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from cachetools import TTLCache
 
 from config.constants import (
-    AMNEZIA_PROTOCOL,
     VLESS_PROTOCOL,
     XRAY_ORIGIN_CAPABILITY,
     XRAY_PROTOCOL,
@@ -16,15 +15,21 @@ from database.models import Server
 
 logger = logging.getLogger(__name__)
 
+
+class ServerUnavailable(Exception):
+    """Server is temporarily unavailable or unsupported."""
+    pass
+
+
 @dataclass(frozen=True)
 class ServerPeerSnapshot:
     server_id: int
     peer_ids: frozenset[str]
     captured_at: datetime
 
+
 async def capture_server_peer_snapshot(server_id: int) -> ServerPeerSnapshot:
     from database.connection import session_scope
-    from services.device_service import ServerUnavailable
 
     async with session_scope() as session:
         server = await session.get(Server, server_id)
@@ -147,8 +152,7 @@ async def get_real_peer_count(server: Server, force_refresh: bool = False) -> in
             caps = []
         if not server_proto:
             server_proto = (
-                VLESS_PROTOCOL if ("vless" in caps or "xray_vless" in caps)
-                else (XRAY_PROTOCOL if XRAY_ORIGIN_CAPABILITY in caps else AMNEZIA_PROTOCOL)
+                XRAY_PROTOCOL if XRAY_ORIGIN_CAPABILITY in caps else VLESS_PROTOCOL
             )
 
         from database.repositories.servers_repo import (

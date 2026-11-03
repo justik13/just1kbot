@@ -31,11 +31,6 @@ from database.repositories.servers_repo import (
     delete_server,
     get_server_by_id,
 )
-from services.amnezia_client import cleanup_server_circuit_breakers
-from services.api_operations_queue import (
-    classify_create_side_effect_risk,
-    ensure_delete_operation,
-)
 from services.audit_service import AuditService
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
@@ -54,8 +49,7 @@ def _has_unfinished_create_cleanup(profiles, operations) -> bool:
     }
     unsafe_create = any(
         op.operation_type == "create_peer" and op.status != "succeeded"
-        and (op.profile_id in cleanup_profile_ids or op.peer_id is not None
-             or classify_create_side_effect_risk(op) in {"may_have_created_peer", "cleanup_required"})
+        and (op.profile_id in cleanup_profile_ids or op.peer_id is not None)
         and not (op.status == "cancelled" and op.profile_id is None
                  and op.peer_id is None and op.last_error_code not in {
                     "create_ambiguous_reconcile", "invalid_created_config_cleanup",
@@ -192,9 +186,6 @@ async def confirm_delete_server(
         return
 
     server_name = server.name
-    api_url = server.api_url
-    api_key = server.api_key
-    server_protocol = server.protocol
 
     profiles = list((await session.execute(select(VPNProfile).where(
         VPNProfile.server_id == server.id))).scalars().all())
@@ -309,20 +300,6 @@ async def confirm_delete_server(
                 user_obj.archived_device_traffic = record_device_traffic_archive(
                     archived, p.device_name, cur_bytes
                 )
-            if p.peer_id:
-                await ensure_delete_operation(
-                    session,
-                    idempotency_key=f"delete-peer:{p.id}:{p.peer_id}",
-                    server_id=server_id,
-                    profile_id=None,
-                    server_name_snapshot=server_name,
-                    api_url_snapshot=api_url,
-                    api_key_snapshot=api_key,
-                    peer_id=p.peer_id,
-                    client_name=p.client_name,
-                    protocol=server_protocol,
-                    audit_reason="server_delete",
-                )
             await session.delete(p)
 
     # Any remaining profiles without user_id
@@ -357,7 +334,6 @@ async def confirm_delete_server(
 
     session.expire_all()
 
-    cleanup_server_circuit_breakers(api_url)
     from services.slots_cache import invalidate_server_cache
     invalidate_server_cache(server_id)
     from services.workers.node_monitor import clear_server_monitor_state

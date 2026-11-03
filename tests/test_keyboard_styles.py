@@ -10,12 +10,6 @@ from bot.keyboards import (
     get_hub_keyboard,
     get_order_invoice_keyboard,
 )
-from bot.keyboards.device import (
-    get_alt_connection_keyboard,
-    get_device_delete_confirm_keyboard,
-    get_device_keyboard,
-    get_device_migrate_confirm_keyboard,
-)
 
 # Telegram Bot API 8.0+ supported InlineKeyboardButton styles:
 # "danger" (red), "success" (green), "primary" (blue).
@@ -118,32 +112,6 @@ class TestKeyboardRuntimeStyles(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(rows), 2)
         self.assertEqual(rows[0][0].url, test_support_url)
         self.assertEqual(rows[1][0].callback_data, "menu_balance")
-
-    def test_device_keyboards_styles(self):
-        """Test device management keyboards styles."""
-        del_kb = get_device_delete_confirm_keyboard(profile_id=42)
-        del_rows = del_kb.inline_keyboard
-        self.assertEqual(del_rows[0][0].style, "danger")
-
-        migrate_kb = get_device_migrate_confirm_keyboard(profile_id=42, target_server_id=1)
-        migrate_rows = migrate_kb.inline_keyboard
-        self.assertEqual(migrate_rows[0][0].style, "success")
-
-        alt_kb = get_alt_connection_keyboard(profile_id=42)
-        for row in alt_kb.inline_keyboard:
-            for btn in row:
-                if btn.style is not None:
-                    self.assertIn(btn.style, ALLOWED_TELEGRAM_BUTTON_STYLES)
-
-        manage_kb = get_device_keyboard(
-            profile_id=42,
-            config_ready=True,
-            show_delete=True,
-        )
-        for row in manage_kb.inline_keyboard:
-            for btn in row:
-                if btn.style is not None:
-                    self.assertIn(btn.style, ALLOWED_TELEGRAM_BUTTON_STYLES)
 
     def test_hub_keyboard_styles(self):
         """Test hub keyboard buttons styles."""

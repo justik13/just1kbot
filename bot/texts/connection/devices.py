@@ -187,14 +187,7 @@ VLESS_RESET_SUCCESS = "✅ Привязка устройств по ссылке
 VLESS_RESET_EMPTY = "ℹ️ У вас нет привязанных устройств по ссылке."
 VLESS_DEFAULT_SERVER_DESCRIPTION = "Прямой доступ"
 
-LABEL_ARCHIVED_CONNECTION = "Архивное подключение"
 BTN_BACK_TO_CONNECTION = "← К подключению"
-BTN_ADD_DEVICE = "➕ Добавить устройство"
-
-ALERT_AMNEZIA_DECOMMISSIONED = (
-    "ℹ️ Индивидуальные конфигурации отключены.\n\n"
-    "Всё подключение работает через единую ссылку в приложении INCY / Happ."
-)
 
 CONNECTION_HUB_ACTIVE_TEXT = """🌐 <b>Подключение</b>
 

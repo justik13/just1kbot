@@ -1,7 +1,6 @@
 import logging
 
 from config.constants import (
-    AMNEZIA_PROTOCOLS,
     AdminAuditAction,
     VLESS_PROTOCOL,
     XRAY_PROTOCOL,
@@ -28,10 +27,6 @@ from database.repositories.servers_repo import (
     is_vless_capable_server,
     is_white_internet_origin_server,
     update_server,
-)
-from services.amnezia_client import (
-    AmneziaClient,
-    cleanup_server_circuit_breakers,
 )
 from services.audit_service import AuditService
 from utils.admin import is_admin
@@ -482,7 +477,6 @@ async def process_edit_server_url(
 
         return
 
-    server_info = None
     if (
         is_vless_capable_server(server)
         or is_white_internet_origin_server(server)
@@ -507,49 +501,6 @@ async def process_edit_server_url(
             )
             await state.clear()
             return
-    elif server.protocol in AMNEZIA_PROTOCOLS:
-        client = AmneziaClient(new_url, server.api_key)
-
-        if not await client.healthcheck():
-            await render_hub(
-                message.bot,
-                message.chat.id,
-                texts.ERROR_SERVER_UNREACHABLE,
-                get_back_button("admin_servers"),
-                parse_mode="HTML",
-            )
-            await state.clear()
-            return
-
-        server_info = await client.get_server_info()
-
-        if not server_info:
-            await render_hub(
-                message.bot,
-                message.chat.id,
-                texts.ERROR_SERVER_API_INFO_FAILED,
-                get_back_button("admin_servers"),
-                parse_mode="HTML",
-            )
-            await state.clear()
-            return
-
-        if not any(p in AMNEZIA_PROTOCOLS for p in server_info.protocols):
-            await render_hub(
-                message.bot,
-                message.chat.id,
-                texts.ERROR_PROTOCOL_NOT_SUPPORTED.format(
-                    protocols=safe(
-                        ", ".join(server_info.protocols)
-                        if server_info.protocols
-                        else texts.LABEL_UNKNOWN_LOWER
-                    ),
-                ),
-                get_back_button("admin_servers"),
-                parse_mode="HTML",
-            )
-            await state.clear()
-            return
     else:
         await render_hub(
             message.bot,
@@ -558,6 +509,8 @@ async def process_edit_server_url(
             get_back_button("admin_servers"),
             parse_mode="HTML",
         )
+        await state.clear()
+        return
         await state.clear()
         return
 
@@ -655,8 +608,6 @@ async def process_edit_server_url(
             await state.clear()
             return
 
-    old_url = server.api_url
-
     update_kwargs = {"api_url": new_url}
     from urllib.parse import urlsplit
     parsed_new = urlsplit(new_url)
@@ -684,17 +635,10 @@ async def process_edit_server_url(
         if extra_changed:
             update_kwargs["extra_data"] = current_extra
 
-    if server.protocol in AMNEZIA_PROTOCOLS and server_info:
-        detected_proto = server_info.get_protocol()
-        if detected_proto and detected_proto != server.protocol:
-            update_kwargs["protocol"] = detected_proto
-
     await update_server(session, server, **update_kwargs)
 
     from services.slots_cache import invalidate_server_cache
     invalidate_server_cache(server_id)
-
-    cleanup_server_circuit_breakers(old_url)
 
     await AuditService.log_action(
         session,
@@ -829,8 +773,6 @@ async def process_edit_server_key(
         )
         return
 
-
-    server_info = None
     if (
         is_vless_capable_server(server)
         or is_white_internet_origin_server(server)
@@ -851,49 +793,6 @@ async def process_edit_server_key(
                 message.bot,
                 message.chat.id,
                 texts.ERROR_SERVER_UNREACHABLE,
-                get_back_button("admin_servers"),
-                parse_mode="HTML",
-            )
-            await state.clear()
-            return
-    elif server.protocol in AMNEZIA_PROTOCOLS:
-        client = AmneziaClient(server.api_url, new_key)
-
-        if not await client.healthcheck():
-            await render_hub(
-                message.bot,
-                message.chat.id,
-                texts.ERROR_SERVER_UNREACHABLE,
-                get_back_button("admin_servers"),
-                parse_mode="HTML",
-            )
-            await state.clear()
-            return
-
-        server_info = await client.get_server_info()
-
-        if not server_info:
-            await render_hub(
-                message.bot,
-                message.chat.id,
-                texts.ERROR_SERVER_API_INFO_FAILED,
-                get_back_button("admin_servers"),
-                parse_mode="HTML",
-            )
-            await state.clear()
-            return
-
-        if not any(p in AMNEZIA_PROTOCOLS for p in server_info.protocols):
-            await render_hub(
-                message.bot,
-                message.chat.id,
-                texts.ERROR_PROTOCOL_NOT_SUPPORTED.format(
-                    protocols=safe(
-                        ", ".join(server_info.protocols)
-                        if server_info.protocols
-                        else texts.LABEL_UNKNOWN_LOWER
-                    ),
-                ),
                 get_back_button("admin_servers"),
                 parse_mode="HTML",
             )
@@ -991,11 +890,6 @@ async def process_edit_server_key(
             return
 
     update_kwargs = {"api_key": new_key}
-    if server.protocol in AMNEZIA_PROTOCOLS and server_info:
-        detected_proto = server_info.get_protocol()
-        if detected_proto and detected_proto != server.protocol:
-            update_kwargs["protocol"] = detected_proto
-
     await update_server(session, server, **update_kwargs)
 
     from services.slots_cache import invalidate_server_cache

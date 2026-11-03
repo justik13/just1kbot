@@ -9,8 +9,9 @@ class CircularImportRegressionTests(unittest.TestCase):
     """Verify key application entrypoints, constants, and modules import cleanly in isolated Python runtimes."""
 
     def _assert_isolated_code(self, python_code: str) -> None:
+        repo_root = Path(__file__).resolve().parent.parent
         cmd = [sys.executable, "-c", python_code]
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False, cwd=str(repo_root))
         self.assertEqual(
             proc.returncode,
             0,
@@ -38,9 +39,6 @@ class CircularImportRegressionTests(unittest.TestCase):
     def test_utils_http_rate_limiter_import(self):
         self._assert_isolated_code("import utils.http_rate_limiter")
 
-    def test_utils_vpn_parser_import(self):
-        self._assert_isolated_code("import utils.vpn_parser")
-
     def test_integrations_package_import(self):
         self._assert_isolated_code("import integrations")
 
@@ -48,12 +46,12 @@ class CircularImportRegressionTests(unittest.TestCase):
         self._assert_isolated_code("import database.repositories.users_repo; import database.repositories.servers_repo")
 
     def test_services_clean_imports(self):
-        self._assert_isolated_code("import services.subscription; import services.device_service; import services.ban_service")
+        self._assert_isolated_code("import services.subscription; import services.vless_subscription_service; import services.ban_service")
 
     def test_order_dependent_import_permutations(self):
         permutations = [
-            "import integrations; import utils.vpn_parser; import bot.main",
-            "import utils.vpn_parser; import integrations; import bot.main",
+            "import integrations; import services.vless_subscription_service; import bot.main",
+            "import services.vless_subscription_service; import integrations; import bot.main",
             "import bot.handlers.webhook; import utils.http_rate_limiter; import integrations",
         ]
         for code in permutations:

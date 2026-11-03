@@ -12,13 +12,6 @@ import bot.handlers.webhook as webhook_module
 from bot.handlers.webhook import healthcheck_handler
 from database.models import Server
 from scripts.reencrypt_database import reencrypt_all
-from services import amnezia_client
-from services.amnezia_client import (
-    _MAX_CLIENT_CACHE_ENTRIES,
-    _get_circuit_breaker,
-    _get_rate_limiter,
-    cleanup_server_circuit_breakers,
-)
 from utils.encryption import EncryptedString, _get_active_keys, _get_fernet_engine
 
 BASE_MOCK_ENV = {
@@ -232,27 +225,6 @@ class HealthcheckCacheTests(unittest.IsolatedAsyncioTestCase):
             # Single-flight lock guarantees only 1 DB execute and 1 Redis ping occurred
             self.assertEqual(mock_session.execute.call_count, 1)
             self.assertEqual(mock_redis.ping.call_count, 1)
-
-
-class AmneziaClientCacheTests(unittest.TestCase):
-    def test_circuit_breaker_and_rate_limiter_lru_bounding(self):
-        amnezia_client._circuit_breakers.clear()
-        amnezia_client._rate_limiters.clear()
-
-        # Populate cache exceeding max entries
-        for i in range(_MAX_CLIENT_CACHE_ENTRIES + 100):
-            url = f"https://server-{i}.vpn.internal"
-            cb = _get_circuit_breaker(url)
-            rl = _get_rate_limiter(url)
-            self.assertIsNotNone(cb)
-            self.assertIsNotNone(rl)
-
-        # Assert strict LRU upper bound enforcement
-        self.assertLessEqual(len(amnezia_client._circuit_breakers), _MAX_CLIENT_CACHE_ENTRIES)
-        self.assertLessEqual(len(amnezia_client._rate_limiters), _MAX_CLIENT_CACHE_ENTRIES)
-
-        # Ensure cleanup removes specific entry
-        cleanup_server_circuit_breakers("https://server-550.vpn.internal")
 
 
 class DatabaseReencryptionScriptTests(unittest.IsolatedAsyncioTestCase):

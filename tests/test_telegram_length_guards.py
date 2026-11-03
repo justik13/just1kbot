@@ -3,121 +3,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from aiogram.types import CopyTextButton, DisabledButton, InlineKeyboardButton, InlineKeyboardMarkup
-from bot.handlers.connection.device_view_routes import build_display_vpn_key, render_device_screen
 from utils.telegram import render_hub, sanitize_reply_markup
 
 
 class TestTelegramLengthGuards(unittest.IsolatedAsyncioTestCase):
-    def test_build_display_vpn_key_standardized(self):
-        profile = SimpleNamespace(id=1, device_name='iPhone #1')
-        server = SimpleNamespace(id=1, name='Germany')
-        key = 'vpn://testkey'
-
-        with patch('bot.handlers.connection.device_view_routes.customize_vpn_uri') as mock_cust:
-            mock_cust.return_value = 'vpn://customized'
-            res = build_display_vpn_key(key, profile, server)
-            self.assertEqual(res, 'vpn://customized')
-            mock_cust.assert_called_once_with(
-                key,
-                description='Germany #1',
-                dns1='8.8.8.8',
-                dns2='8.8.4.4',
-                mtu='1280',
-            )
-
-    async def test_render_device_screen_truncates_huge_key_block_to_prevent_telegram_overflow(self):
-        bot = MagicMock()
-        session = AsyncMock()
-        profile = SimpleNamespace(
-            id=1,
-            server_id=1,
-            device_name='MyDevice',
-            provisioning_status='active',
-            traffic_down=0,
-            traffic_up=0,
-            last_connected=None,
-            raw_config='vpn://' + 'x' * 5000,
-        )
-        user = SimpleNamespace(id=10, telegram_id=12345)
-        server = SimpleNamespace(id=1, country_flag='🇩🇪', name='Germany', protocol='amneziawg2')
-
-        with patch('bot.handlers.connection.device_view_routes.get_server_by_id', new=AsyncMock(return_value=server)), \
-             patch('bot.handlers.connection.device_view_routes.SubscriptionService.check_access', new=AsyncMock(return_value=True)), \
-             patch('bot.handlers.connection.device_view_routes.can_show_config_actions', return_value=True), \
-             patch('bot.handlers.connection.device_view_routes.can_show_delete_action', return_value=True), \
-             patch('bot.handlers.connection.device_view_routes.render_hub', new=AsyncMock()) as mock_hub:
-
-            await render_device_screen(bot, chat_id=12345, profile=profile, user=user, session=session)
-
-            self.assertTrue(mock_hub.called)
-            rendered_text = mock_hub.call_args[0][2]
-            # Must not exceed Telegram 4096 character limit
-            self.assertLessEqual(len(rendered_text), 4096)
-            self.assertIn('Локация: <b>🇩🇪 Germany</b>', rendered_text)
-            self.assertIn('.conf', rendered_text)
-
-
-    async def test_alt_connection_decommissioned_answers_alert(self):
-        from bot.handlers.connection.device_view_routes import alt_connection
-        from bot import texts
-
-        callback = MagicMock()
-        callback.data = 'alt_connection:1'
-        callback.message = MagicMock()
-        callback.answer = AsyncMock()
-
-        state = AsyncMock()
-        session = AsyncMock()
-        db_user = SimpleNamespace(id=10, telegram_id=12345)
-
-        with patch('bot.handlers.connection.device_view_routes._render_connections', new=AsyncMock()) as mock_render:
-            await alt_connection(callback, state, session, db_user)
-            callback.answer.assert_called_once_with(texts.ALERT_AMNEZIA_DECOMMISSIONED, show_alert=True)
-            mock_render.assert_called_once()
-
-    def test_build_conf_fallback_omits_empty_i_parameters(self):
-        from utils.vpn_parser import _build_conf_fallback
-        data = {'hostName': '1.2.3.4', 'port': 51820}
-        last_config = {
-            'client_priv_key': 'priv',
-            'server_pub_key': 'pub',
-            'client_ip': '10.0.0.2',
-            'Jc': 4, 'Jmin': 10, 'Jmax': 50,
-            'S1': 15, 'S2': 20, 'S3': 5, 'S4': 10,
-            'H1': '100', 'H2': '200', 'H3': '300', 'H4': '400',
-            'I1': '<r 2>',
-            'I2': '',  # Empty
-            'I3': None, # None
-            'I4': '   ', # Whitespace
-            'I5': '',
-        }
-        conf = _build_conf_fallback(data, last_config)
-        self.assertIsNotNone(conf)
-        self.assertIn('I1 = <r 2>', conf)
-        self.assertNotIn('I2 =', conf)
-        self.assertNotIn('I3 =', conf)
-        self.assertNotIn('I4 =', conf)
-        self.assertNotIn('I5 =', conf)
-
-
-    async def test_manage_device_decommissioned_answers_alert(self):
-        from bot.handlers.connection.device_view_routes import manage_device
-        from bot import texts
-
-        callback = MagicMock()
-        callback.data = 'manage_device:1'
-        callback.message = MagicMock()
-        callback.answer = AsyncMock()
-
-        state = AsyncMock()
-        session = AsyncMock()
-        db_user = SimpleNamespace(id=10, telegram_id=12345)
-
-        with patch('bot.handlers.connection.device_view_routes._render_connections', new=AsyncMock()) as mock_render:
-            await manage_device(callback, state, session, db_user)
-            callback.answer.assert_called_once_with(texts.ALERT_AMNEZIA_DECOMMISSIONED, show_alert=True)
-            mock_render.assert_called_once()
-
     async def test_render_connections_financial_hold_shows_dispute_notice(self):
         from bot.handlers.connection.common import _render_connections
         from bot import texts
@@ -326,12 +215,6 @@ class TestTelegramBotApi103KeyboardAudit(unittest.IsolatedAsyncioTestCase):
             get_admin_wi_traffic_add_keyboard,
         )
         from bot.keyboards.common import get_back_button, get_hub_keyboard
-        from bot.keyboards.device import (
-            get_alt_connection_keyboard,
-            get_device_delete_confirm_keyboard,
-            get_device_keyboard,
-            get_device_migrate_confirm_keyboard,
-        )
         from bot.keyboards.notifications import (
             get_devices_deleted_keyboard,
             get_node_monitor_alert_keyboard,
@@ -414,13 +297,9 @@ class TestTelegramBotApi103KeyboardAudit(unittest.IsolatedAsyncioTestCase):
             get_admin_server_relays_keyboard(1),
             get_server_delete_confirm_keyboard(1),
             get_admin_tariff_card_keyboard(1, is_active=True),
-            # Common & device keyboards
+            # Common keyboards
             get_back_button("back"),
             get_hub_keyboard(),
-            get_alt_connection_keyboard(1),
-            get_device_delete_confirm_keyboard(1),
-            get_device_keyboard(1, config_ready=True, show_delete=True),
-            get_device_migrate_confirm_keyboard(1, 2),
             # Notifications keyboards
             get_devices_deleted_keyboard(),
             get_node_monitor_alert_keyboard(1, False).as_markup(),
