@@ -81,7 +81,7 @@ class StrictProtocolDecouplingTests(unittest.IsolatedAsyncioTestCase):
              patch("services.workers.node_monitor.get_all_servers", return_value=[xray_server]), \
              patch("services.workers.node_monitor.get_server_by_id", return_value=xray_server), \
              patch("services.workers.node_monitor.update_server"), \
-             patch("services.workers.node_monitor.AmneziaClient") as mock_amnezia_cls, \
+             patch("services.amnezia_client.AmneziaClient") as mock_amnezia_cls, \
              patch("services.xray_node_client.XrayNodeClient.check_health", return_value=(True, "epoch-1", {"boot_id": "b1"})) as mock_xray_health:
 
             await check_node_resources_and_alerts(mock_bot)
@@ -103,7 +103,7 @@ class StrictProtocolDecouplingTests(unittest.IsolatedAsyncioTestCase):
             max_clients=500,
         )
 
-        with patch("services.slots_cache.AmneziaClient") as mock_amnezia_cls, \
+        with patch("services.amnezia_client.AmneziaClient") as mock_amnezia_cls, \
              patch("database.connection.session_scope") as mock_scope:
             mock_session = AsyncMock()
             mock_scalar = MagicMock()
@@ -223,7 +223,7 @@ class StrictProtocolDecouplingTests(unittest.IsolatedAsyncioTestCase):
             max_clients=100,
         )
 
-        with patch("services.slots_cache.AmneziaClient") as mock_amnezia_cls, \
+        with patch("services.amnezia_client.AmneziaClient") as mock_amnezia_cls, \
              patch("database.connection.session_scope") as mock_scope:
             mock_session = AsyncMock()
             mock_session.get.return_value = s_invalid
@@ -298,7 +298,7 @@ class StrictProtocolDecouplingTests(unittest.IsolatedAsyncioTestCase):
             yield dummy_session
 
         with patch("services.workers.traffic.session_scope", side_effect=dummy_scope), \
-             patch("services.workers.traffic.AmneziaClient") as mock_amnezia_cls:
+             patch("services.amnezia_client.AmneziaClient") as mock_amnezia_cls:
 
             await _traffic_sync_once()
             mock_amnezia_cls.assert_not_called()

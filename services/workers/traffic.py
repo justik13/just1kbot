@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import time
 from datetime import datetime, timezone
 
 from aiogram import Bot
@@ -16,8 +15,6 @@ from config.constants import (
 from config.settings import get_settings
 from database.connection import session_scope
 from database.models import Server, User, VPNProfile
-from services.amnezia_client import AmneziaClient
-from services.slots_cache import update_cached_peer_count
 from utils.datetime_helpers import now_utc
 from utils.telegram import safe, safe_send_message
 from utils.traffic_helpers import accumulate_host_traffic_cycle
@@ -66,39 +63,31 @@ async def traffic_sync_loop(
         pass
 
     while not event.is_set():
-        awg_backoff: float | None = None
+        vless_backoff: float | None = None
         try:
-            await _traffic_sync_once(bot)
+            await _vless_traffic_sync_once(bot)
             _consecutive_crashes = 0
         except asyncio.CancelledError:
             logger.info("Traffic sync worker cancelled")
             break
         except Exception as e:
             _consecutive_crashes += 1
-            awg_backoff = min(
+            vless_backoff = min(
                 WORKER_ERROR_SLEEP_INTERVAL
                 * (2 ** min(_consecutive_crashes - 1, 4)),
                 TRAFFIC_MAX_BACKOFF,
             )
             logger.error(
-                "Traffic sync worker crashed (attempt %s), backing off for %ss: %s",
+                "VLESS traffic sync pass failed (attempt %s), backing off for %ss: %s",
                 _consecutive_crashes,
-                awg_backoff,
+                vless_backoff,
                 e,
                 exc_info=True,
             )
             if event.is_set():
                 break
 
-        try:
-            await _vless_traffic_sync_once(bot)
-        except asyncio.CancelledError:
-            logger.info("Traffic sync worker cancelled")
-            break
-        except Exception as e:
-            logger.error("VLESS traffic sync pass failed: %s", e, exc_info=True)
-
-        sleep_duration = awg_backoff if awg_backoff is not None else TRAFFIC_SYNC_INTERVAL
+        sleep_duration = vless_backoff if vless_backoff is not None else TRAFFIC_SYNC_INTERVAL
         try:
             await asyncio.wait_for(
                 event.wait(), timeout=sleep_duration
@@ -111,106 +100,8 @@ async def traffic_sync_loop(
 
 
 async def _traffic_sync_once(bot: Bot | None = None):
-    servers = []
-    async with session_scope() as session:
-        stmt = select(Server).where(
-            Server.is_active.is_(True),
-        )
-        result = await session.execute(stmt)
-        from database.repositories.servers_repo import is_awg_capable_server
-
-        raw_rows = []
-        if hasattr(result, "all"):
-            raw_rows = result.all()
-        elif hasattr(result, "scalars"):
-            raw_rows = result.scalars().all()
-
-        for row in raw_rows:
-            if hasattr(row, "id"):
-                s_id = row.id
-                api_url = row.api_url
-                api_key = row.api_key
-                name = row.name
-                caps = getattr(row, "capabilities", None) or []
-                proto = getattr(row, "protocol", None)
-            else:
-                s_id = row[0]
-                api_url = row[1]
-                api_key = row[2]
-                name = row[3]
-                caps = row[5] if len(row) > 5 else []
-                proto = row[6] if len(row) > 6 else None
-
-            s_obj = type("ServerMock", (), {
-                "id": s_id,
-                "api_url": api_url,
-                "api_key": api_key,
-                "name": name,
-                "capabilities": caps,
-                "protocol": proto,
-            })()
-
-            if is_awg_capable_server(s_obj) and api_url and api_key:
-                servers.append({
-                    "id": s_id,
-                    "api_url": api_url,
-                    "api_key": api_key,
-                    "name": name,
-                })
-
-    if not servers:
-        return
-
-    async def _fetch_server_traffic(server_info):
-        from services.slots_cache import get_server_generation
-        client = AmneziaClient(
-            server_info["api_url"], server_info["api_key"]
-        )
-        gen = get_server_generation(server_info["id"])
-        try:
-            api_clients_list = await client.get_all_clients()
-            t_done = time.monotonic()
-            if api_clients_list is None:
-                return server_info["id"], None, None, t_done, gen
-            load_data = None
-            try:
-                load_data = await client.get_server_load(timeout=2.0)
-            except Exception:
-                pass
-            return server_info["id"], {
-                c.id: c for c in api_clients_list
-            }, load_data, t_done, gen
-        except Exception as e:
-            t_done = time.monotonic()
-            logger.error(
-                "Failed to fetch traffic from server %s: %s", server_info["name"], e
-            )
-            return server_info["id"], None, None, t_done, gen
-
-    tasks = [_fetch_server_traffic(s) for s in servers]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    api_data_by_server = {
-        r[0]: (r[1], r[2], r[3], r[4])
-        for r in results
-        if not isinstance(r, Exception) and r is not None and r[1] is not None
-    }
-
-    for server_info in servers:
-        server_id = server_info["id"]
-        if server_id not in api_data_by_server:
-            continue
-        api_clients, load_data, t_done, gen = api_data_by_server[server_id]
-
-        from services.slots_cache import get_server_generation
-        if gen != get_server_generation(server_id):
-            logger.info("Skipping traffic processing for server %s due to configuration generation change", server_id)
-            continue
-
-        # ── ИСПРАВЛЕНО: обновляем slots_cache реальными данными ──
-        update_cached_peer_count(server_id, len(api_clients), timestamp=t_done, generation=gen)
-
-        await _process_server_traffic(server_info, api_clients, bot, expected_gen=gen, load_data=load_data)
+    """Decommissioned legacy AWG traffic pass (no-op)."""
+    return
 
 
 async def _process_server_traffic(

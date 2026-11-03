@@ -36,19 +36,3 @@ async def hub_menu_connections(
         db_user,
         session,
     )
-
-
-@router.callback_query(F.data.in_({"amnezia_devices", "back_to_amnezia_devices"}))
-async def hub_amnezia_devices(
-    callback: CallbackQuery,
-    state: FSMContext,
-    session: AsyncSession,
-    db_user: User | None = None,
-):
-    await state.clear()
-    await callback.answer(
-        texts.ALERT_AMNEZIA_DECOMMISSIONED,
-        show_alert=True,
-    )
-    if db_user:
-        await _render_connections(callback.message, db_user, session)

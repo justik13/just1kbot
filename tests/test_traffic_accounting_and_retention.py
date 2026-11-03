@@ -272,52 +272,6 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         # WI total must render the 50 GB from total_wi_traffic_bytes
         self.assertIn("50", sent_text)
 
-    async def test_manage_device_view_shows_profile_traffic_isolated(self):
-        """render_device_screen displays live profile traffic without slot archived pollution."""
-        from bot.handlers.connection.device_view_routes import render_device_screen
-
-        mock_profile = VPNProfile(
-            id=15,
-            user_id=88,
-            server_id=1,
-            device_name="Устройство #1",
-            traffic_down=1000,
-            traffic_up=500,
-            provisioning_status="active",
-            is_active=True,
-        )
-        mock_user = User(
-            id=88,
-            archived_device_traffic={"Устройство #1": 5000},
-            subscription_end=datetime(2028, 1, 1, tzinfo=timezone.utc),
-        )
-        mock_server = Server(
-            id=1,
-            name="DE-1",
-            country_flag="🇩🇪",
-            is_active=True,
-        )
-
-        mock_session = AsyncMock()
-        mock_bot = AsyncMock()
-
-        with patch("bot.handlers.connection.device_view_routes.get_server_by_id", return_value=mock_server), \
-             patch("bot.handlers.connection.device_view_routes.render_hub") as mock_hub:
-            await render_device_screen(
-                bot=mock_bot,
-                chat_id=12345,
-                profile=mock_profile,
-                user=mock_user,
-                session=mock_session,
-            )
-
-            self.assertTrue(mock_hub.called)
-            rendered_text = mock_hub.call_args[0][2]
-            # Profile traffic displayed must be strictly 1500 (live), not 6500 (with archived slot)
-            # format_traffic(1500) produces "1.5 KiB"
-            self.assertIn("1.5 KiB", rendered_text)
-            self.assertNotIn("6.3 KiB", rendered_text)
-
     def test_accumulate_host_traffic_cycle_logic(self):
         """Host monthly traffic accumulates deltas, detects reboots, and rolls over cycles."""
         from utils.traffic_helpers import accumulate_host_traffic_cycle
@@ -1403,43 +1357,14 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sub.node_traffic_snapshots["1"]["up"], 2000)
         self.assertEqual(sub.node_traffic_snapshots["1"]["down"], 8000)
 
-    async def test_traffic_sync_loop_awg_error_does_not_skip_vless(self):
-        """Errors in _traffic_sync_once do not skip _vless_traffic_sync_once in the current pass."""
-        from services.workers.traffic import traffic_sync_loop
-
-        stop_event = asyncio.Event()
-
-        awg_call_count = 0
-        vless_call_count = 0
-
-        async def fake_failing_awg_sync(bot):
-            nonlocal awg_call_count
-            awg_call_count += 1
-            raise RuntimeError("AWG transient DB timeout")
-
-        async def fake_vless_sync(bot):
-            nonlocal vless_call_count
-            vless_call_count += 1
-            stop_event.set()
-
-        with patch("services.workers.traffic._traffic_sync_once", side_effect=fake_failing_awg_sync), \
-             patch("services.workers.traffic._vless_traffic_sync_once", side_effect=fake_vless_sync), \
-             patch("services.workers.traffic.WORKER_START_DELAY", 0.0), \
-             patch("services.workers.traffic.WORKER_ERROR_SLEEP_INTERVAL", 0.01), \
-             patch("services.workers.traffic.TRAFFIC_SYNC_INTERVAL", 0.01):
-            task = asyncio.create_task(traffic_sync_loop(None, stop_event))
-            await asyncio.wait_for(task, timeout=2.0)
-
-        self.assertEqual(awg_call_count, 1)
-        self.assertEqual(vless_call_count, 1)
-
     async def test_traffic_sync_loop_vless_error_isolation(self):
-        """Errors in _vless_traffic_sync_once are logged and do not crash or back off traffic_sync_loop."""
+        """Errors in _vless_traffic_sync_once are logged and backed off without crashing traffic_sync_loop."""
         from services.workers.traffic import traffic_sync_loop
 
         stop_event = asyncio.Event()
 
         call_count = 0
+
         async def fake_vless_sync(bot):
             nonlocal call_count
             call_count += 1
@@ -1447,12 +1372,10 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
                 raise RuntimeError("Simulated transient VLESS node failure")
             stop_event.set()
 
-        async def fake_traffic_sync(bot):
-            pass
-
-        with patch("services.workers.traffic._traffic_sync_once", side_effect=fake_traffic_sync), \
-             patch("services.workers.traffic._vless_traffic_sync_once", side_effect=fake_vless_sync), \
+        with patch("services.workers.traffic._vless_traffic_sync_once", side_effect=fake_vless_sync), \
              patch("services.workers.traffic.WORKER_START_DELAY", 0.0), \
+             patch("services.workers.traffic.WORKER_ERROR_SLEEP_INTERVAL", 0.01), \
+             patch("services.workers.traffic.TRAFFIC_MAX_BACKOFF", 0.05), \
              patch("services.workers.traffic.TRAFFIC_SYNC_INTERVAL", 0.01):
             task = asyncio.create_task(traffic_sync_loop(None, stop_event))
             await asyncio.wait_for(task, timeout=2.0)

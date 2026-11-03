@@ -13,7 +13,6 @@ from config.constants import (
     XRAY_PROTOCOL,
 )
 from database.models import Server
-from services.amnezia_client import AmneziaClient
 
 logger = logging.getLogger(__name__)
 
@@ -31,54 +30,20 @@ async def capture_server_peer_snapshot(server_id: int) -> ServerPeerSnapshot:
         server = await session.get(Server, server_id)
         if not server:
             raise LookupError("server not found")
-        server_proto = getattr(server, "protocol", None)
-        caps = getattr(server, "capabilities", None) or []
-        if not isinstance(caps, (list, tuple, set)):
-            caps = []
-        if not server_proto:
-            server_proto = (
-                VLESS_PROTOCOL if ("vless" in caps or "xray_vless" in caps)
-                else (XRAY_PROTOCOL if XRAY_ORIGIN_CAPABILITY in caps else AMNEZIA_PROTOCOL)
-            )
         from database.repositories.servers_repo import (
-            is_awg_capable_server,
             is_vless_capable_server,
             is_white_internet_origin_server,
         )
-
-        is_xray = (
-            server_proto in (XRAY_PROTOCOL, VLESS_PROTOCOL)
-            or is_vless_capable_server(server)
+        if not (
+            is_vless_capable_server(server)
             or is_white_internet_origin_server(server)
-        )
-        if is_xray:
-            return ServerPeerSnapshot(
-                server_id,
-                frozenset(),
-                datetime.now(timezone.utc),
-            )
-        elif is_awg_capable_server(server):
-            from services.amnezia_client import is_server_circuit_available
+            or getattr(server, "protocol", None) in (VLESS_PROTOCOL, XRAY_PROTOCOL)
+        ):
+            raise ServerUnavailable(f"Unsupported protocol for server {server_id}")
 
-            if not await is_server_circuit_available(server.api_url):
-                raise ServerUnavailable("server circuit breaker open")
-            endpoint = (server.api_url, server.api_key)
-        else:
-            logger.error(
-                "Refusing to invoke AmneziaClient for server %s with unsupported protocol: %r",
-                server_id,
-                server_proto,
-            )
-            raise ServerUnavailable(f"Unsupported protocol {server_proto!r} for server {server_id}")
-    try:
-        clients = await asyncio.wait_for(AmneziaClient(*endpoint).get_all_clients(), timeout=10.0)
-    except Exception as exc:
-        raise ServerUnavailable(f"server peer snapshot unavailable: {exc}") from exc
-    if clients is None:
-        raise ServerUnavailable("server peer snapshot unavailable")
     return ServerPeerSnapshot(
         server_id,
-        frozenset(item.id for item in clients),
+        frozenset(),
         datetime.now(timezone.utc),
     )
 
@@ -187,7 +152,6 @@ async def get_real_peer_count(server: Server, force_refresh: bool = False) -> in
             )
 
         from database.repositories.servers_repo import (
-            is_awg_capable_server,
             is_vless_capable_server,
             is_white_internet_origin_server,
         )
@@ -216,39 +180,11 @@ async def get_real_peer_count(server: Server, force_refresh: bool = False) -> in
             )
             return count
 
-        elif is_awg_capable_server(server):
-            client = AmneziaClient(server.api_url, server.api_key)
-            try:
-                clients = await client.get_all_clients()
-                t_done = time.monotonic()
-            except Exception as e:
-                logger.error(
-                    "Failed to get real peer count for server %s (%s): %s",
-                    server.id, server.name, e,
-                )
-                return -1
-
-            if clients is None:
-                logger.warning(
-                    "API returned no data for server %s (%s). "
-                    "Peer count is unknown, returning -1.",
-                    server.id, server.name,
-                )
-                return -1
-
-            count = len(clients)
-            update_cached_peer_count(server.id, count, timestamp=t_done, generation=gen)
-            logger.info(
-                "Cached real peer count for server %s (%s): %s/%s",
-                server.id, server.name, count, server.max_clients,
-            )
-            return count
         else:
-            logger.error(
-                "Refusing to invoke AmneziaClient for server %s (%s) with unsupported protocol: %r",
+            logger.warning(
+                "Cannot compute peer count for server %s: unsupported protocol '%s'",
                 server.id,
-                server.name,
-                server_proto,
+                server.protocol,
             )
             return -1
 

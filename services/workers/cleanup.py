@@ -24,14 +24,12 @@ from database.models import (
     BroadcastProgress,
     HubMessage,
     Order,
-    Server,
     User,
     VlessSubscription,
     VPNProfile,
     WebhookInbox,
 )
 from database.repositories.audit_repo import clear_audit_logs
-from services.amnezia_client import AmneziaClient
 from services.profile_deletion_service import ProfileDeletionService
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc
@@ -97,7 +95,6 @@ async def cleanup_dangling_peers_loop(
                 await _cleanup_expired_profiles_grace(bot)
                 await _cleanup_expired_vless_network_grace()
                 await _sweep_vless_pending_revocations()
-                await _cleanup_dangling_peers()
                 _last_heavy_cleanup = now
 
             await _reconcile_stale_pending_orders()
@@ -686,151 +683,8 @@ async def _cleanup_stuck_profiles():
 
 
 async def _cleanup_dangling_peers():
-    servers_data = []
-    db_server_peers = set()
-
-    async with session_scope() as session:
-        servers_result = await session.execute(
-            select(Server).where(
-                Server.is_active.is_(True),
-            )
-        )
-        all_servers = servers_result.scalars().all()
-        from database.repositories.servers_repo import is_awg_capable_server
-
-        servers = [s for s in all_servers if is_awg_capable_server(s)]
-
-        result = await session.execute(select(VPNProfile.server_id, VPNProfile.peer_id))
-        db_server_peers = {
-            (row[0], row[1]) for row in result.all() if row[0] is not None and row[1]
-        }
-
-        servers_data = [
-            {
-                "api_url": s.api_url,
-                "api_key": s.api_key,
-                "name": s.name,
-                "id": s.id,
-            }
-            for s in servers
-            if s.api_url and s.api_key
-        ]
-
-    if not servers_data:
-        return
-
-    async def _fetch_api_peers(server_info):
-        from services.slots_cache import get_server_generation
-
-        client = AmneziaClient(
-            server_info["api_url"],
-            server_info["api_key"],
-        )
-        gen = get_server_generation(server_info["id"])
-        try:
-            api_clients_list = await client.get_all_clients()
-            t_done = time.monotonic()
-            if api_clients_list is None:
-                return server_info, None, t_done, gen
-            return server_info, api_clients_list, t_done, gen
-        except Exception as e:
-            t_done = time.monotonic()
-            logger.error(
-                "Failed to fetch clients from server %s: %s",
-                server_info["name"],
-                e,
-            )
-            return server_info, None, t_done, gen
-
-    tasks = [_fetch_api_peers(s) for s in servers_data]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    unmanaged_count = 0
-
-    for result in results:
-        if isinstance(result, Exception) or result is None:
-            continue
-
-        server_info, api_clients_list, t_done, gen = result
-        from services.slots_cache import get_server_generation
-
-        if gen != get_server_generation(server_info["id"]):
-            logger.info(
-                "Skipping cleanup for server %s due to configuration generation change",
-                server_info["name"],
-            )
-            continue
-
-        if api_clients_list is not None:
-            from services.slots_cache import update_cached_peer_count
-
-            update_cached_peer_count(
-                server_info["id"], len(api_clients_list), timestamp=t_done, generation=gen
-            )
-        if not api_clients_list:
-            continue
-
-        for api_client in api_clients_list:
-            client_id = api_client.id
-            client_name = api_client.clientName or api_client.name
-
-            if not client_name or not client_name.startswith("tg_"):
-                continue
-
-            if (server_info["id"], client_id) in db_server_peers:
-                continue
-
-            peer_exists_in_db = False
-            try:
-                async with session_scope() as session:
-                    fresh_result = await session.execute(
-                        select(VPNProfile.id).where(
-                            VPNProfile.server_id == server_info["id"],
-                            VPNProfile.peer_id == client_id,
-                        )
-                    )
-                    peer_exists_in_db = fresh_result.first() is not None
-            except Exception as e:
-                logger.error(
-                    "Double-check failed for server_id=%s, peer=%s..., error_kind=%s",
-                    server_info["id"],
-                    _safe_log_value(client_id, 16),
-                    type(e).__name__,
-                )
-                continue
-
-            if peer_exists_in_db:
-                continue
-
-            peer_key = (server_info["id"], client_id)
-            now_ts = time.monotonic()
-            last_logged = _unmanaged_peers_log_cache.get(peer_key)
-            if (
-                last_logged is None or now_ts - last_logged >= 3600.0
-            ):  # Log at most once per hour per peer
-                _unmanaged_peers_log_cache[peer_key] = now_ts
-                logger.warning(
-                    "Unmanaged VPN peer detected: server_id=%s, "
-                    "server=%s, peer=%s..., client=%s; "
-                    "automatic deletion disabled",
-                    server_info["id"],
-                    _safe_log_value(server_info["name"]),
-                    _safe_log_value(client_id, 16),
-                    _safe_log_value(client_name),
-                )
-            unmanaged_count += 1
-
-    global _unmanaged_peers_summary_last_logged
-    now_ts = time.monotonic()
-    if unmanaged_count and (
-        _unmanaged_peers_summary_last_logged is None
-        or now_ts - _unmanaged_peers_summary_last_logged >= 3600.0
-    ):
-        _unmanaged_peers_summary_last_logged = now_ts
-        logger.warning(
-            "Unmanaged VPN peers detected: %s; automatic deletion disabled",
-            unmanaged_count,
-        )
+    """Decommissioned legacy AWG dangling peer cleanup (no-op)."""
+    return
 
 
 BATCH_DELETE_CHUNK_SIZE = 500

@@ -656,9 +656,9 @@ class TestMigrationFinalizerHook(unittest.IsolatedAsyncioTestCase):
 class TestDeviceMigrateRoutes(unittest.IsolatedAsyncioTestCase):
     """Test decommissioned migration routes answering with alert."""
 
-    @patch("bot.handlers.connection.device_migrate_routes._render_connections", new_callable=AsyncMock)
-    async def test_start_migrate_device_decommissioned(self, mock_render):
-        from bot.handlers.connection.device_migrate_routes import start_migrate_device
+    @patch("bot.handlers.connection.legacy_routes._render_connections", new_callable=AsyncMock)
+    async def test_handle_decommissioned_amnezia_action(self, mock_render):
+        from bot.handlers.connection.legacy_routes import handle_decommissioned_amnezia_action
         from bot import texts
 
         callback = MagicMock()
@@ -668,47 +668,12 @@ class TestDeviceMigrateRoutes(unittest.IsolatedAsyncioTestCase):
         session = AsyncMock()
         user = User(id=1, telegram_id=12345)
 
-        await start_migrate_device(callback, state, session, db_user=user)
+        await handle_decommissioned_amnezia_action(callback, state, session, db_user=user)
 
         state.clear.assert_awaited_once()
         callback.answer.assert_awaited_once_with(texts.ALERT_AMNEZIA_DECOMMISSIONED, show_alert=True)
         mock_render.assert_awaited_once_with(callback.message, user, session)
 
-    @patch("bot.handlers.connection.device_migrate_routes._render_connections", new_callable=AsyncMock)
-    async def test_select_migrate_target_server_decommissioned(self, mock_render):
-        from bot.handlers.connection.device_migrate_routes import select_migrate_target_server
-        from bot import texts
-
-        callback = MagicMock()
-        callback.answer = AsyncMock()
-        callback.message = MagicMock()
-        state = AsyncMock()
-        session = AsyncMock()
-        user = User(id=1, telegram_id=12345)
-
-        await select_migrate_target_server(callback, state, session, db_user=user)
-
-        state.clear.assert_awaited_once()
-        callback.answer.assert_awaited_once_with(texts.ALERT_AMNEZIA_DECOMMISSIONED, show_alert=True)
-        mock_render.assert_awaited_once_with(callback.message, user, session)
-
-    @patch("bot.handlers.connection.device_migrate_routes._render_connections", new_callable=AsyncMock)
-    async def test_confirm_migrate_device_decommissioned(self, mock_render):
-        from bot.handlers.connection.device_migrate_routes import confirm_migrate_device
-        from bot import texts
-
-        callback = MagicMock()
-        callback.answer = AsyncMock()
-        callback.message = MagicMock()
-        state = AsyncMock()
-        session = AsyncMock()
-        user = User(id=1, telegram_id=12345)
-
-        await confirm_migrate_device(callback, state, session, db_user=user)
-
-        state.clear.assert_awaited_once()
-        callback.answer.assert_awaited_once_with(texts.ALERT_AMNEZIA_DECOMMISSIONED, show_alert=True)
-        mock_render.assert_awaited_once_with(callback.message, user, session)
 
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not set")

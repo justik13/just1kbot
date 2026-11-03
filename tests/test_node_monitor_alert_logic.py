@@ -73,41 +73,61 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             side_effect=mock_update_snapshot,
         )
 
+        self.mock_xray_client = AsyncMock()
+        self.mock_xray_client.check_health = AsyncMock(return_value=(True, "epoch-1", {}))
+        self.patcher_xray = patch("services.xray_node_client.XrayNodeClient")
+        self.mock_xray_cls = self.patcher_xray.start()
+        self.mock_xray_cls.return_value.__aenter__.return_value = self.mock_xray_client
+        self.mock_xray_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        self.patcher_cas = patch("services.workers.node_monitor.update_server_xray_epoch_cas", new_callable=AsyncMock)
+        self.mock_cas = self.patcher_cas.start()
+        self.mock_cas.side_effect = lambda *args, **kwargs: (True, MagicMock())
+
         self.patcher_settings_1.start()
         self.patcher_settings_2.start()
         self.patcher_scope.start()
         self.patcher_snapshot.start()
 
     def tearDown(self):
+        self.patcher_cas.stop()
+        self.patcher_xray.stop()
         self.patcher_snapshot.stop()
         self.patcher_scope.stop()
         self.patcher_settings_2.stop()
         self.patcher_settings_1.stop()
         _server_states.clear()
 
+    def _make_server(self, server_id=1, name="Server-1", **kwargs):
+        s = MagicMock(spec=Server)
+        s.id = server_id
+        s.name = name
+        s.protocol = "vless"
+        s.capabilities = ["vless"]
+        s.extra_data = {}
+        s.api_url = f"https://vpn{server_id}.example.com:8443"
+        s.api_key = "secret"
+        s.is_active = True
+        s.disabled_reason = None
+        s.health_state = "ONLINE"
+        s.consecutive_fails = 0
+        s.consecutive_successes = 0
+        s.problem_started_at = None
+        s.next_check_at = None
+        s.recovery_notice_sent = False
+        s.last_alert_sent_state = None
+        for k, v in kwargs.items():
+            setattr(s, k, v)
+        return s
+
     async def test_healthy_server_no_alerts(self):
-        server = MagicMock(spec=Server)
-        server.id = 1
-        server.name = "Germany-1"
-        server.api_url = "https://vpn.example.com"
-        server.api_key = "secret_key"
-        server.is_active = True
-        server.disabled_reason = None
-        server.health_state = "ONLINE"
-        server.consecutive_fails = 0
-        server.consecutive_successes = 0
-        server.problem_started_at = None
-        server.next_check_at = None
-        server.recovery_notice_sent = False
+        server = self._make_server(1, "Germany-1")
 
         with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
-             patch("services.workers.node_monitor.AmneziaClient") as mock_client_cls, \
              patch("services.workers.node_monitor.get_server_by_id", return_value=server), \
              patch("services.workers.node_monitor.update_server"):
 
-            client_instance = mock_client_cls.return_value
-            client_instance.healthcheck = AsyncMock(return_value=True)
-            client_instance.get_server_load = AsyncMock(return_value={"disk_percent": 30.0})
+            self.mock_xray_client.check_health.return_value = (True, "epoch-1", {})
 
             await check_node_resources_and_alerts(self.mock_bot)
 
@@ -118,29 +138,14 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_transient_glitch_resets_consecutive_successes_to_zero(self):
         """FAIL #1 puts server in WAITING_CONFIRMATION. Next check OK resets consecutive_successes to 0."""
-        server = MagicMock(spec=Server)
-        server.id = 2
-        server.name = "Finland-1"
-        server.api_url = "https://vpn2.example.com"
-        server.api_key = "secret"
-        server.is_active = True
-        server.disabled_reason = None
-        server.health_state = "ONLINE"
-        server.consecutive_fails = 0
-        server.consecutive_successes = 5
-        server.problem_started_at = None
-        server.next_check_at = None
-        server.recovery_notice_sent = False
+        server = self._make_server(2, "Finland-1", consecutive_successes=5)
 
         with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
-             patch("services.workers.node_monitor.AmneziaClient") as mock_client_cls, \
              patch("services.workers.node_monitor.get_server_by_id", return_value=server), \
              patch("services.workers.node_monitor.update_server"):
 
-            client_instance = mock_client_cls.return_value
-
             # Tick 1: healthcheck fails -> WAITING_CONFIRMATION
-            client_instance.healthcheck = AsyncMock(return_value=False)
+            self.mock_xray_client.check_health.return_value = (False, None, None)
             await check_node_resources_and_alerts(self.mock_bot)
 
             st = get_server_monitor_state(2)
@@ -148,8 +153,7 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
 
             # Fast-forward 30 seconds -> healthcheck succeeds -> returns to ONLINE with consecutive_successes=0
             st.next_check_at = time.monotonic() - 1.0
-            client_instance.healthcheck = AsyncMock(return_value=True)
-            client_instance.get_server_load = AsyncMock(return_value={"disk_percent": 25.0})
+            self.mock_xray_client.check_health.return_value = (True, "epoch-1", {})
             await check_node_resources_and_alerts(self.mock_bot)
 
             self.mock_bot.send_message.assert_not_called()
@@ -158,20 +162,15 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_recovery_streak_persisted_across_bot_restarts(self):
         """Every recovery check in PROBLEM saves consecutive_successes to DB and persists across restarts."""
-        server = MagicMock(spec=Server)
-        server.id = 50
-        server.name = "Streak-Node"
-        server.api_url = "https://vpn50.example.com"
-        server.api_key = "secret"
-        server.is_active = True
-        server.disabled_reason = None
-        server.health_state = "PROBLEM"
-        server.consecutive_fails = 2
-        server.consecutive_successes = 0
-        server.problem_started_at = now_utc() - timedelta(minutes=5)
-        server.next_check_at = None
-        server.recovery_notice_sent = False
-        server.last_alert_sent_state = "PROBLEM"
+        server = self._make_server(
+            50,
+            "Streak-Node",
+            health_state="PROBLEM",
+            consecutive_fails=2,
+            consecutive_successes=0,
+            problem_started_at=now_utc() - timedelta(minutes=5),
+            last_alert_sent_state="PROBLEM",
+        )
 
         async def fake_update_server(session, db_srv, **kwargs):
             for k, v in kwargs.items():
@@ -179,13 +178,10 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             return db_srv
 
         with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
-             patch("services.workers.node_monitor.AmneziaClient") as mock_client_cls, \
              patch("services.workers.node_monitor.get_server_by_id", return_value=server), \
              patch("services.workers.node_monitor.update_server", side_effect=fake_update_server):
 
-            client_instance = mock_client_cls.return_value
-            client_instance.healthcheck = AsyncMock(return_value=True)
-            client_instance.get_server_load = AsyncMock(return_value={"disk_percent": 30.0})
+            self.mock_xray_client.check_health.return_value = (True, "epoch-1", {})
 
             # Check 1: OK #1 -> consecutive_successes = 1
             await check_node_resources_and_alerts(self.mock_bot)
@@ -212,19 +208,16 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_manual_enable_resets_db_and_allows_subsequent_recovery_notice(self):
         """Manual enable by admin resets recovery_notice_sent=False so subsequent failure cycles send recovery notice."""
-        server = MagicMock(spec=Server)
-        server.id = 77
-        server.name = "Manual-Enable-Node"
-        server.api_url = "https://vpn77.example.com"
-        server.api_key = "secret"
-        server.is_active = False
-        server.disabled_reason = "AUTO_UNAVAILABLE"
-        server.health_state = "AUTO_DISABLED"
-        server.consecutive_fails = 3
-        server.consecutive_successes = 3
-        server.problem_started_at = None
-        server.next_check_at = None
-        server.recovery_notice_sent = True
+        server = self._make_server(
+            77,
+            "Manual-Enable-Node",
+            is_active=False,
+            disabled_reason="AUTO_UNAVAILABLE",
+            health_state="AUTO_DISABLED",
+            consecutive_fails=3,
+            consecutive_successes=3,
+            recovery_notice_sent=True,
+        )
 
         async def fake_update_server(session, db_srv, **kwargs):
             for k, v in kwargs.items():
@@ -232,13 +225,10 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             return db_srv
 
         with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
-             patch("services.workers.node_monitor.AmneziaClient") as mock_client_cls, \
              patch("services.workers.node_monitor.get_server_by_id", return_value=server), \
              patch("services.workers.node_monitor.update_server", side_effect=fake_update_server):
 
-            client_instance = mock_client_cls.return_value
-            client_instance.healthcheck = AsyncMock(return_value=True)
-            client_instance.get_server_load = AsyncMock(return_value={"disk_percent": 30.0})
+            self.mock_xray_client.check_health.return_value = (True, "epoch-1", {})
 
             # Admin toggles server ACTIVE (is_active = True)
             server.is_active = True
@@ -252,7 +242,7 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(st.recovery_notice_sent)
 
             # Server fails again: ONLINE -> WAITING_CONFIRMATION -> PROBLEM -> AUTO_DISABLED
-            client_instance.healthcheck = AsyncMock(return_value=False)
+            self.mock_xray_client.check_health.return_value = (False, None, None)
             st.next_check_at = time.monotonic() - 1.0
             await check_node_resources_and_alerts(self.mock_bot)  # WAITING_CONFIRMATION
             st.next_check_at = time.monotonic() - 1.0
@@ -262,7 +252,7 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(st.health_state, ServerHealthState.AUTO_DISABLED)
 
             # Server recovers again in AUTO_DISABLED (3x OK)
-            client_instance.healthcheck = AsyncMock(return_value=True)
+            self.mock_xray_client.check_health.return_value = (True, "epoch-1", {})
             self.mock_bot.send_message.reset_mock()
 
             st.next_check_at = time.monotonic() - 1.0
@@ -280,27 +270,21 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_auto_disabled_next_check_at_persisted_and_restored_on_restart(self):
         """AUTO_DISABLED next_check_at is saved in DB and restored on bot restart to respect 15m schedule."""
-        server = MagicMock(spec=Server)
-        server.id = 88
-        server.name = "Auto-Schedule-Node"
-        server.api_url = "https://vpn88.example.com"
-        server.api_key = "secret"
-        server.is_active = False
-        server.disabled_reason = "AUTO_UNAVAILABLE"
-        server.health_state = "AUTO_DISABLED"
-        server.consecutive_fails = 3
-        server.consecutive_successes = 0
-        server.problem_started_at = None
-        server.next_check_at = now_utc() + timedelta(minutes=10)
-        server.recovery_notice_sent = False
+        server = self._make_server(
+            88,
+            "Auto-Schedule-Node",
+            is_active=False,
+            disabled_reason="AUTO_UNAVAILABLE",
+            health_state="AUTO_DISABLED",
+            consecutive_fails=3,
+            next_check_at=now_utc() + timedelta(minutes=10),
+        )
 
         with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
-             patch("services.workers.node_monitor.AmneziaClient") as mock_client_cls, \
              patch("services.workers.node_monitor.get_server_by_id", return_value=server), \
              patch("services.workers.node_monitor.update_server"):
 
-            client_instance = mock_client_cls.return_value
-            client_instance.healthcheck = AsyncMock(return_value=True)
+            self.mock_xray_client.check_health.return_value = (True, "epoch-1", {})
 
             # Re-hydrate state from DB server (simulating bot restart)
             _server_states.clear()
@@ -312,23 +296,11 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
 
             # Worker tick runs -> should skip checking because 10m remaining!
             await check_node_resources_and_alerts(self.mock_bot)
-            client_instance.healthcheck.assert_not_called()
+            self.mock_xray_client.check_health.assert_not_called()
 
     async def test_full_lifecycle_flow(self):
         """ONLINE -> WAITING_CONFIRMATION -> PROBLEM -> AUTO_DISABLED -> RECOVERY -> ONLINE."""
-        server = MagicMock(spec=Server)
-        server.id = 99
-        server.name = "Lifecycle-Node"
-        server.api_url = "https://vpn99.example.com"
-        server.api_key = "secret"
-        server.is_active = True
-        server.disabled_reason = None
-        server.health_state = "ONLINE"
-        server.consecutive_fails = 0
-        server.consecutive_successes = 0
-        server.problem_started_at = None
-        server.next_check_at = None
-        server.recovery_notice_sent = False
+        server = self._make_server(99, "Lifecycle-Node")
 
         async def fake_update_server(session, db_srv, **kwargs):
             for k, v in kwargs.items():
@@ -336,15 +308,11 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             return db_srv
 
         with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
-             patch("services.workers.node_monitor.AmneziaClient") as mock_client_cls, \
              patch("services.workers.node_monitor.get_server_by_id", return_value=server), \
              patch("services.workers.node_monitor.update_server", side_effect=fake_update_server):
 
-            client_instance = mock_client_cls.return_value
-            client_instance.get_server_load = AsyncMock(return_value={"disk_percent": 30.0})
-
             # 1. FAIL #1 -> WAITING_CONFIRMATION
-            client_instance.healthcheck = AsyncMock(return_value=False)
+            self.mock_xray_client.check_health.return_value = (False, None, None)
             await check_node_resources_and_alerts(self.mock_bot)
             st = get_server_monitor_state(99)
             self.assertEqual(st.health_state, ServerHealthState.WAITING_CONFIRMATION)
@@ -366,7 +334,7 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Сервер автоматически отключён", self.mock_bot.send_message.call_args.kwargs["text"])
 
             # 4. 3x OK in AUTO_DISABLED -> 1 recovery notice, remains is_active=False
-            client_instance.healthcheck = AsyncMock(return_value=True)
+            self.mock_xray_client.check_health.return_value = (True, "epoch-1", {})
             self.mock_bot.send_message.reset_mock()
 
             # OK #1
@@ -405,20 +373,7 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_telegram_send_failure_retries_until_delivered(self):
         """If Telegram message delivery fails, node_monitor retries on subsequent ticks until delivered."""
-        server = MagicMock(spec=Server)
-        server.id = 101
-        server.name = "Retry-Alert-Node"
-        server.api_url = "https://vpn101.example.com"
-        server.api_key = "secret"
-        server.is_active = True
-        server.disabled_reason = None
-        server.health_state = "ONLINE"
-        server.consecutive_fails = 0
-        server.consecutive_successes = 0
-        server.problem_started_at = None
-        server.next_check_at = None
-        server.recovery_notice_sent = False
-        server.last_alert_sent_state = None
+        server = self._make_server(101, "Retry-Alert-Node")
 
         async def fake_update_server(session, db_srv, **kwargs):
             for k, v in kwargs.items():
@@ -426,12 +381,10 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             return db_srv
 
         with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
-             patch("services.workers.node_monitor.AmneziaClient") as mock_client_cls, \
              patch("services.workers.node_monitor.get_server_by_id", return_value=server), \
              patch("services.workers.node_monitor.update_server", side_effect=fake_update_server):
 
-            client_instance = mock_client_cls.return_value
-            client_instance.healthcheck = AsyncMock(return_value=False)
+            self.mock_xray_client.check_health.return_value = (False, None, None)
 
             st = get_server_monitor_state(101, server)
 
@@ -462,109 +415,6 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(st.last_alert_sent_state, ServerHealthState.PROBLEM)
             self.assertEqual(server.last_alert_sent_state, ServerHealthState.PROBLEM)
 
-    async def test_awg_server_health_ignores_xray_failure(self):
-        server = MagicMock(spec=Server)
-        server.id = 201
-        server.name = "Poland-AWG"
-        server.protocol = "amneziawg3.1"
-        server.capabilities = ["awg", "vless"]
-        server.extra_data = {"xray_api_url": "https://pl.example.com:8444"}
-        server.api_url = "https://pl.example.com:8443"
-        server.api_key = "secret"
-        server.is_active = True
-        server.disabled_reason = None
-        server.health_state = "ONLINE"
-        server.consecutive_fails = 0
-        server.consecutive_successes = 0
-        server.problem_started_at = None
-        server.next_check_at = None
-        server.recovery_notice_sent = False
-        server.last_alert_sent_state = None
-
-        with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
-             patch("services.workers.node_monitor.AmneziaClient") as mock_client_cls, \
-             patch("services.xray_node_client.XrayNodeClient") as mock_xray_cls:
-
-            mock_client_cls.return_value.healthcheck = AsyncMock(return_value=True)
-            mock_xray_client = AsyncMock()
-            mock_xray_client.check_health = AsyncMock(return_value=(False, None, "Connection refused"))
-            mock_xray_cls.return_value.__aenter__.return_value = mock_xray_client
-            mock_xray_cls.return_value.__aexit__ = AsyncMock(return_value=None)
-
-            st = get_server_monitor_state(201, server)
-            await check_node_resources_and_alerts(self.mock_bot)
-            mock_xray_client.check_health.assert_called_once_with(
-                "https://pl.example.com:8444", "secret"
-            )
-            self.assertEqual(st.health_state, ServerHealthState.ONLINE)
-
-    async def test_awg_server_without_xray_url_does_not_call_xray_client(self):
-        server = MagicMock(spec=Server)
-        server.id = 204
-        server.name = "Poland-AWG-NoXrayUrl"
-        server.protocol = "amneziawg3.1"
-        server.capabilities = ["awg", "vless"]
-        server.extra_data = {}
-        server.api_url = "https://pl.example.com:8443"
-        server.api_key = "secret"
-        server.is_active = True
-        server.disabled_reason = None
-        server.health_state = "ONLINE"
-        server.consecutive_fails = 0
-        server.consecutive_successes = 0
-        server.problem_started_at = None
-        server.next_check_at = None
-        server.recovery_notice_sent = False
-        server.last_alert_sent_state = None
-
-        with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
-             patch("services.workers.node_monitor.AmneziaClient") as mock_client_cls, \
-             patch("services.xray_node_client.XrayNodeClient") as mock_xray_cls:
-
-            mock_client_cls.return_value.healthcheck = AsyncMock(return_value=True)
-            mock_xray_client = AsyncMock()
-            mock_xray_cls.return_value.__aenter__.return_value = mock_xray_client
-            mock_xray_cls.return_value.__aexit__ = AsyncMock(return_value=None)
-
-            st = get_server_monitor_state(204, server)
-            await check_node_resources_and_alerts(self.mock_bot)
-            mock_xray_client.check_health.assert_not_called()
-            self.assertEqual(st.health_state, ServerHealthState.ONLINE)
-
-    async def test_awg_server_health_ignores_xray_exception(self):
-        server = MagicMock(spec=Server)
-        server.id = 203
-        server.name = "Poland-AWG-Exc"
-        server.protocol = "amneziawg3.1"
-        server.capabilities = ["awg", "vless"]
-        server.extra_data = {"xray_api_url": "https://pl.example.com:8444"}
-        server.api_url = "https://pl.example.com:8443"
-        server.api_key = "secret"
-        server.is_active = True
-        server.disabled_reason = None
-        server.health_state = "ONLINE"
-        server.consecutive_fails = 0
-        server.consecutive_successes = 0
-        server.problem_started_at = None
-        server.next_check_at = None
-        server.recovery_notice_sent = False
-        server.last_alert_sent_state = None
-
-        with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
-             patch("services.workers.node_monitor.AmneziaClient") as mock_client_cls, \
-             patch("services.xray_node_client.XrayNodeClient") as mock_xray_cls:
-
-            mock_client_cls.return_value.healthcheck = AsyncMock(return_value=True)
-            mock_xray_client = AsyncMock()
-            mock_xray_client.check_health = AsyncMock(side_effect=RuntimeError("Xray client crashed"))
-            mock_xray_cls.return_value.__aenter__.return_value = mock_xray_client
-            mock_xray_cls.return_value.__aexit__ = AsyncMock(return_value=None)
-
-            st = get_server_monitor_state(203, server)
-            await check_node_resources_and_alerts(self.mock_bot)
-            mock_xray_client.check_health.assert_called_once()
-            self.assertEqual(st.health_state, ServerHealthState.ONLINE)
-
     async def test_vless_server_health_ignores_awg_failure(self):
         server = MagicMock(spec=Server)
         server.id = 202
@@ -585,7 +435,7 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
         server.last_alert_sent_state = None
 
         with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
-             patch("services.workers.node_monitor.AmneziaClient") as mock_client_cls, \
+             patch("services.amnezia_client.AmneziaClient") as mock_client_cls, \
              patch("services.xray_node_client.XrayNodeClient") as mock_xray_cls, \
              patch("services.workers.node_monitor.update_server_xray_epoch_cas", new_callable=AsyncMock) as mock_cas:
 
@@ -621,7 +471,7 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
         server.last_alert_sent_state = None
 
         with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
-             patch("services.workers.node_monitor.AmneziaClient") as mock_client_cls, \
+             patch("services.amnezia_client.AmneziaClient") as mock_client_cls, \
              patch("services.xray_node_client.XrayNodeClient") as mock_xray_cls, \
              patch("services.workers.node_monitor.update_server_xray_epoch_cas", new_callable=AsyncMock) as mock_cas:
 
@@ -744,20 +594,15 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_auto_disabled_server_hourly_outage_reminder(self):
         """AUTO_DISABLED server triggers periodic reminder alert every 1 hour (3600s)."""
-        server = MagicMock(spec=Server)
-        server.id = 201
-        server.name = "Disabled-Remind-Node"
-        server.api_url = "https://vpn201.example.com"
-        server.api_key = "secret"
-        server.is_active = False
-        server.disabled_reason = "AUTO_UNAVAILABLE"
-        server.health_state = "AUTO_DISABLED"
-        server.consecutive_fails = 5
-        server.consecutive_successes = 0
-        server.problem_started_at = None
-        server.next_check_at = None
-        server.recovery_notice_sent = False
-        server.last_alert_sent_state = ServerHealthState.AUTO_DISABLED
+        server = self._make_server(
+            201,
+            "Disabled-Remind-Node",
+            is_active=False,
+            disabled_reason="AUTO_UNAVAILABLE",
+            health_state="AUTO_DISABLED",
+            consecutive_fails=5,
+            last_alert_sent_state=ServerHealthState.AUTO_DISABLED,
+        )
 
         async def fake_update_server(session, db_srv, **kwargs):
             for k, v in kwargs.items():
@@ -765,12 +610,10 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             return db_srv
 
         with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
-             patch("services.workers.node_monitor.AmneziaClient") as mock_client_cls, \
              patch("services.workers.node_monitor.get_server_by_id", return_value=server), \
              patch("services.workers.node_monitor.update_server", side_effect=fake_update_server):
 
-            client_instance = mock_client_cls.return_value
-            client_instance.healthcheck = AsyncMock(return_value=False)
+            self.mock_xray_client.check_health.return_value = (False, None, None)
 
             st = get_server_monitor_state(201, server)
             st.health_state = ServerHealthState.AUTO_DISABLED
