@@ -418,23 +418,11 @@ async def ping_server(
             raw_proto = XRAY_PROTOCOL if "xray_origin" in caps else "amneziawg"
         proto = raw_proto.strip().lower()
 
-        has_awg = is_awg_capable_server(server)
         has_xray_or_vless = is_vless_capable_server(server) or is_white_internet_origin_server(server)
+        has_awg = is_awg_capable_server(server) and not has_xray_or_vless
 
         awg_ok = True
         xray_ok = True
-
-        if has_awg:
-            from services.amnezia_client import AmneziaClient, is_server_circuit_available
-
-            if not await is_server_circuit_available(server.api_url):
-                awg_ok = False
-            else:
-                client = AmneziaClient(server.api_url, server.api_key)
-                try:
-                    awg_ok = await asyncio.wait_for(client.healthcheck(), timeout=4.0)
-                except Exception:
-                    awg_ok = False
 
         if has_xray_or_vless:
             from services.xray_node_client import XrayNodeClient
@@ -451,17 +439,26 @@ async def ping_server(
                 async with XrayNodeClient(timeout=4.0, max_retries=0) as xclient:
                     x_ok, _epoch, _detail = await xclient.check_health(xray_url, server.api_key)
             xray_ok = x_ok
+        elif has_awg:
+            from services.amnezia_client import AmneziaClient, is_server_circuit_available
 
-        if proto in AMNEZIA_PROTOCOLS:
+            if not await is_server_circuit_available(server.api_url):
+                awg_ok = False
+            else:
+                client = AmneziaClient(server.api_url, server.api_key)
+                try:
+                    awg_ok = await asyncio.wait_for(client.healthcheck(), timeout=4.0)
+                except Exception:
+                    awg_ok = False
+
+        if has_xray_or_vless:
+            is_healthy = xray_ok
+        elif has_awg:
             is_healthy = awg_ok
         elif proto in (XRAY_PROTOCOL, VLESS_PROTOCOL):
             is_healthy = xray_ok
-        elif has_awg and has_xray_or_vless:
-            is_healthy = awg_ok and xray_ok
-        elif has_awg:
+        elif proto in AMNEZIA_PROTOCOLS:
             is_healthy = awg_ok
-        elif has_xray_or_vless:
-            is_healthy = xray_ok
         else:
             is_healthy = False
 

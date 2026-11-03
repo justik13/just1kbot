@@ -36,7 +36,16 @@ async def capture_server_peer_snapshot(server_id: int) -> ServerPeerSnapshot:
         if not server_proto:
             caps = getattr(server, "capabilities", None) or []
             server_proto = XRAY_PROTOCOL if XRAY_ORIGIN_CAPABILITY in caps else AMNEZIA_PROTOCOL
-        is_xray = server_proto in (XRAY_PROTOCOL, VLESS_PROTOCOL)
+        from database.repositories.servers_repo import (
+            is_vless_capable_server,
+            is_white_internet_origin_server,
+        )
+
+        is_xray = (
+            server_proto in (XRAY_PROTOCOL, VLESS_PROTOCOL)
+            or is_vless_capable_server(server)
+            or is_white_internet_origin_server(server)
+        )
         if is_xray:
             return ServerPeerSnapshot(
                 server_id,
@@ -166,7 +175,17 @@ async def get_real_peer_count(server: Server, force_refresh: bool = False) -> in
         if not server_proto:
             caps = getattr(server, "capabilities", None) or []
             server_proto = XRAY_PROTOCOL if XRAY_ORIGIN_CAPABILITY in caps else AMNEZIA_PROTOCOL
-        if server_proto == XRAY_PROTOCOL:
+
+        from database.repositories.servers_repo import (
+            is_vless_capable_server,
+            is_white_internet_origin_server,
+        )
+
+        if is_vless_capable_server(server) or server_proto == VLESS_PROTOCOL:
+            t_done = time.monotonic()
+            update_cached_peer_count(server.id, 0, timestamp=t_done, generation=gen)
+            return 0
+        elif server_proto == XRAY_PROTOCOL or is_white_internet_origin_server(server):
             from database.connection import session_scope
             from database.models import WhiteInternetSubscription
             from database.repositories.servers_repo import capacity_consuming_wl_condition
@@ -213,10 +232,6 @@ async def get_real_peer_count(server: Server, force_refresh: bool = False) -> in
                 server.id, server.name, count, server.max_clients,
             )
             return count
-        elif server_proto == VLESS_PROTOCOL:
-            t_done = time.monotonic()
-            update_cached_peer_count(server.id, 0, timestamp=t_done, generation=gen)
-            return 0
         else:
             logger.error(
                 "Refusing to invoke AmneziaClient for server %s (%s) with unsupported protocol: %r",

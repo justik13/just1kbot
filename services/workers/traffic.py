@@ -121,6 +121,8 @@ async def _traffic_sync_once(bot: Bot | None = None):
                 Server.api_key,
                 Server.name,
                 Server.is_active,
+                Server.capabilities,
+                Server.protocol,
             )
             .where(
                 Server.is_active.is_(True),
@@ -128,16 +130,35 @@ async def _traffic_sync_once(bot: Bot | None = None):
             )
         )
         result = await session.execute(stmt)
-        servers = [
-            {
-                "id": row[0],
-                "api_url": row[1],
-                "api_key": row[2],
-                "name": row[3],
-                "is_active": row[4],
-            }
-            for row in result.all()
-        ]
+        raw_rows = result.all() if hasattr(result, "all") else []
+        for row in raw_rows:
+            if hasattr(row, "id"):
+                s_id = row.id
+                api_url = row.api_url
+                api_key = row.api_key
+                name = row.name
+                caps = getattr(row, "capabilities", None) or []
+                proto = getattr(row, "protocol", None)
+            else:
+                s_id = row[0]
+                api_url = row[1]
+                api_key = row[2]
+                name = row[3]
+                caps = row[5] if len(row) > 5 else []
+                proto = row[6] if len(row) > 6 else None
+
+            if not isinstance(caps, (list, tuple, set)):
+                caps = []
+            proto_str = str(proto or "").strip().lower()
+            if "vless" in caps or "xray_vless" in caps or proto_str == "vless" or "xray_origin" in caps:
+                continue
+
+            servers.append({
+                "id": s_id,
+                "api_url": api_url,
+                "api_key": api_key,
+                "name": name,
+            })
 
     if not servers:
         return

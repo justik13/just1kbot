@@ -30,7 +30,8 @@ CAPACITY_CONSUMING_STATUSES = (
 def is_awg_capable_server(server) -> bool:
     """Whether a server can serve AmneziaWG clients.
 
-    True if protocol is in AMNEZIA_PROTOCOLS, or 'awg'/'amnezia' capability is present.
+    True if protocol is in AMNEZIA_PROTOCOLS, or 'awg'/'amnezia' capability is present
+    without primary protocol being VLESS or Xray.
     """
     if not server:
         return False
@@ -41,7 +42,10 @@ def is_awg_capable_server(server) -> bool:
     if not isinstance(raw_proto, str) or not raw_proto.strip():
         raw_proto = XRAY_PROTOCOL if XRAY_ORIGIN_CAPABILITY in caps else AMNEZIA_PROTOCOL
     proto = raw_proto.strip().lower()
+    if proto in (VLESS_PROTOCOL, XRAY_PROTOCOL):
+        return False
     return proto in AMNEZIA_PROTOCOLS or any(c in ("awg", "amnezia") for c in caps)
+
 
 
 def is_vless_capable_server(server) -> bool:

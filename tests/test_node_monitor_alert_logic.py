@@ -598,7 +598,7 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
 
             st = get_server_monitor_state(202, server)
             await check_node_resources_and_alerts(self.mock_bot)
-            mock_client_cls.return_value.healthcheck.assert_called_once()
+            mock_client_cls.return_value.healthcheck.assert_not_called()
             self.assertEqual(st.health_state, ServerHealthState.ONLINE)
 
     async def test_vless_server_health_ignores_awg_exception(self):
@@ -634,7 +634,7 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
 
             st = get_server_monitor_state(204, server)
             await check_node_resources_and_alerts(self.mock_bot)
-            mock_client_cls.return_value.healthcheck.assert_called_once()
+            mock_client_cls.return_value.healthcheck.assert_not_called()
             self.assertEqual(st.health_state, ServerHealthState.ONLINE)
 
     async def test_origin_relays_tspu_alert_and_recovery(self):

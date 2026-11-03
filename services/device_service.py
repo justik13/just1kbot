@@ -18,7 +18,11 @@ from database.repositories.profiles_repo import (
     ALLOWED_DELETE_STATES,
     PROFILE_LIST_HIDDEN_STATUSES,
 )
-from database.repositories.servers_repo import is_server_allocatable
+from database.repositories.servers_repo import (
+    is_server_allocatable,
+    is_vless_capable_server,
+    is_white_internet_origin_server,
+)
 from services.amnezia_capacity import (
     ServerAtCapacity,
     ServerCapacityUnavailable,
@@ -228,17 +232,18 @@ class DeviceService:
         if len(manual_peer_ids) + server_count >= server.max_clients:
             raise ServerUnavailable("Server is full")
 
-        try:
-            await ensure_server_capacity(
-                api_url=server.api_url,
-                api_key=server.api_key,
-                max_clients=server.max_clients,
-                live_client_count=len(snapshot.peer_ids),
-            )
-        except ServerAtCapacity as exc:
-            raise ServerUnavailable("Server is full") from exc
-        except ServerCapacityUnavailable as exc:
-            raise ServerUnavailable("Unable to verify server capacity") from exc
+        if not is_vless_capable_server(server) and not is_white_internet_origin_server(server):
+            try:
+                await ensure_server_capacity(
+                    api_url=server.api_url,
+                    api_key=server.api_key,
+                    max_clients=server.max_clients,
+                    live_client_count=len(snapshot.peer_ids),
+                )
+            except ServerAtCapacity as exc:
+                raise ServerUnavailable("Server is full") from exc
+            except ServerCapacityUnavailable as exc:
+                raise ServerUnavailable("Unable to verify server capacity") from exc
 
         profile = VPNProfile(
             user_id=user.id,
@@ -451,17 +456,18 @@ class DeviceService:
         if len(manual_peer_ids) + server_count >= target_server.max_clients:
             raise ServerUnavailable("Server is full")
 
-        try:
-            await ensure_server_capacity(
-                api_url=target_server.api_url,
-                api_key=target_server.api_key,
-                max_clients=target_server.max_clients,
-                live_client_count=len(snapshot.peer_ids),
-            )
-        except ServerAtCapacity as exc:
-            raise ServerUnavailable("Server is full") from exc
-        except ServerCapacityUnavailable as exc:
-            raise ServerUnavailable("Unable to verify server capacity") from exc
+        if not is_vless_capable_server(target_server) and not is_white_internet_origin_server(target_server):
+            try:
+                await ensure_server_capacity(
+                    api_url=target_server.api_url,
+                    api_key=target_server.api_key,
+                    max_clients=target_server.max_clients,
+                    live_client_count=len(snapshot.peer_ids),
+                )
+            except ServerAtCapacity as exc:
+                raise ServerUnavailable("Server is full") from exc
+            except ServerCapacityUnavailable as exc:
+                raise ServerUnavailable("Unable to verify server capacity") from exc
 
         device_name = old_profile.device_name
         duplicate = (

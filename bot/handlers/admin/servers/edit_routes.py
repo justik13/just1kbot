@@ -24,6 +24,8 @@ from database.models import (
 from database.repositories.servers_repo import (
     get_server_by_api_url,
     get_server_by_id,
+    is_vless_capable_server,
+    is_white_internet_origin_server,
     update_server,
 )
 from services.amnezia_client import (
@@ -479,7 +481,32 @@ async def process_edit_server_url(
 
         return
 
-    if server.protocol in AMNEZIA_PROTOCOLS:
+    server_info = None
+    if (
+        is_vless_capable_server(server)
+        or is_white_internet_origin_server(server)
+        or server.protocol in (XRAY_PROTOCOL, VLESS_PROTOCOL)
+    ):
+        from services.xray_node_client import XrayNodeClient
+
+        is_healthy = False
+        try:
+            async with XrayNodeClient(timeout=5.0, max_retries=0) as xclient:
+                is_healthy, _node_epoch, _ = await xclient.check_health(new_url, server.api_key)
+        except Exception as e:
+            logger.warning("Xray health check failed for %s: %s", new_url, e)
+            is_healthy = False
+        if not is_healthy:
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                texts.ERROR_SERVER_UNREACHABLE,
+                get_back_button("admin_servers"),
+                parse_mode="HTML",
+            )
+            await state.clear()
+            return
+    elif server.protocol in AMNEZIA_PROTOCOLS:
         client = AmneziaClient(new_url, server.api_key)
 
         if not await client.healthcheck():
@@ -517,26 +544,6 @@ async def process_edit_server_url(
                         else texts.LABEL_UNKNOWN_LOWER
                     ),
                 ),
-                get_back_button("admin_servers"),
-                parse_mode="HTML",
-            )
-            await state.clear()
-            return
-    elif server.protocol in (XRAY_PROTOCOL, VLESS_PROTOCOL):
-        from services.xray_node_client import XrayNodeClient
-
-        is_healthy = False
-        try:
-            async with XrayNodeClient(timeout=5.0, max_retries=0) as xclient:
-                is_healthy, _node_epoch, _ = await xclient.check_health(new_url, server.api_key)
-        except Exception as e:
-            logger.warning("Xray health check failed for %s: %s", new_url, e)
-            is_healthy = False
-        if not is_healthy:
-            await render_hub(
-                message.bot,
-                message.chat.id,
-                texts.ERROR_SERVER_UNREACHABLE,
                 get_back_button("admin_servers"),
                 parse_mode="HTML",
             )
@@ -822,7 +829,32 @@ async def process_edit_server_key(
         return
 
 
-    if server.protocol in AMNEZIA_PROTOCOLS:
+    server_info = None
+    if (
+        is_vless_capable_server(server)
+        or is_white_internet_origin_server(server)
+        or server.protocol in (XRAY_PROTOCOL, VLESS_PROTOCOL)
+    ):
+        from services.xray_node_client import XrayNodeClient
+
+        is_healthy = False
+        try:
+            async with XrayNodeClient(timeout=5.0, max_retries=0) as xclient:
+                is_healthy, _node_epoch, _ = await xclient.check_health(server.api_url, new_key)
+        except Exception as e:
+            logger.warning("Xray health check failed for %s: %s", server.api_url, e)
+            is_healthy = False
+        if not is_healthy:
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                texts.ERROR_SERVER_UNREACHABLE,
+                get_back_button("admin_servers"),
+                parse_mode="HTML",
+            )
+            await state.clear()
+            return
+    elif server.protocol in AMNEZIA_PROTOCOLS:
         client = AmneziaClient(server.api_url, new_key)
 
         if not await client.healthcheck():
@@ -860,26 +892,6 @@ async def process_edit_server_key(
                         else texts.LABEL_UNKNOWN_LOWER
                     ),
                 ),
-                get_back_button("admin_servers"),
-                parse_mode="HTML",
-            )
-            await state.clear()
-            return
-    elif server.protocol in (XRAY_PROTOCOL, VLESS_PROTOCOL):
-        from services.xray_node_client import XrayNodeClient
-
-        is_healthy = False
-        try:
-            async with XrayNodeClient(timeout=5.0, max_retries=0) as xclient:
-                is_healthy, _node_epoch, _ = await xclient.check_health(server.api_url, new_key)
-        except Exception as e:
-            logger.warning("Xray health check failed for %s: %s", server.api_url, e)
-            is_healthy = False
-        if not is_healthy:
-            await render_hub(
-                message.bot,
-                message.chat.id,
-                texts.ERROR_SERVER_UNREACHABLE,
                 get_back_button("admin_servers"),
                 parse_mode="HTML",
             )

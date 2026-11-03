@@ -697,7 +697,15 @@ async def _cleanup_dangling_peers():
                 Server.protocol.in_(AMNEZIA_PROTOCOLS),
             )
         )
-        servers = servers_result.scalars().all()
+        all_servers = servers_result.scalars().all()
+        from database.repositories.servers_repo import (
+            is_vless_capable_server,
+            is_white_internet_origin_server,
+        )
+        servers = [
+            s for s in all_servers
+            if not is_vless_capable_server(s) and not is_white_internet_origin_server(s)
+        ]
 
         result = await session.execute(select(VPNProfile.server_id, VPNProfile.peer_id))
         db_server_peers = {

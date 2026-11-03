@@ -352,7 +352,7 @@ async def check_node_resources_and_alerts(bot: Bot):
             raw_proto = XRAY_PROTOCOL if "xray_origin" in caps else "amneziawg"
         server_proto = raw_proto.strip().lower()
 
-        has_amnezia = is_awg_capable_server(server)
+        has_amnezia = is_awg_capable_server(server) and server_proto not in (XRAY_PROTOCOL, VLESS_PROTOCOL)
         has_xray = is_vless_capable_server(server) or is_white_internet_origin_server(server)
 
         if not has_amnezia and not has_xray:
