@@ -565,11 +565,6 @@ async def record_vless_traffic_atomic(
                         (User.traffic_cycle == current_cycle, func.coalesce(User.monthly_vless_bytes, 0) + total_delta),
                         else_=total_delta,
                     ),
-                    monthly_awg_bytes=case(
-                        (User.traffic_cycle > current_cycle, User.monthly_awg_bytes),
-                        (User.traffic_cycle == current_cycle, func.coalesce(User.monthly_awg_bytes, 0)),
-                        else_=0,
-                    ),
                     monthly_wi_bytes=case(
                         (User.traffic_cycle > current_cycle, User.monthly_wi_bytes),
                         (User.traffic_cycle == current_cycle, func.coalesce(User.monthly_wi_bytes, 0)),

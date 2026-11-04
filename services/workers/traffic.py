@@ -103,8 +103,8 @@ def _check_user_quota_alert(
     user_id: int,
     telegram_id: int,
     current_cycle: str,
-    awg_bytes: int,
     vless_bytes: int,
+    awg_bytes: int = 0,
 ):
     total_monthly = max(0, awg_bytes) + max(0, vless_bytes)
     if total_monthly > TRAFFIC_QUOTA_BYTES:
@@ -311,13 +311,12 @@ async def _vless_traffic_sync_once(bot: Bot | None = None):
                                 select(
                                     User.id,
                                     User.telegram_id,
-                                    User.monthly_awg_bytes,
                                     User.monthly_vless_bytes,
                                     User.traffic_cycle,
                                 ).where(User.id.in_(affected_user_ids))
                             )
                         ).all()
-                        for uid_val, tg_id_val, m_awg, m_vless, u_cycle in user_rows:
+                        for uid_val, tg_id_val, m_vless, u_cycle in user_rows:
                             if u_cycle != current_cycle:
                                 continue
                             _check_user_quota_alert(
@@ -325,7 +324,6 @@ async def _vless_traffic_sync_once(bot: Bot | None = None):
                                 user_id=uid_val,
                                 telegram_id=tg_id_val,
                                 current_cycle=current_cycle,
-                                awg_bytes=int(m_awg or 0),
                                 vless_bytes=int(m_vless or 0),
                             )
                 except Exception as alert_err:

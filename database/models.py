@@ -40,7 +40,6 @@ from config.enums import (
     PaymentReconciliationStatus,
     ServerHealthState,
     ServerLifecycleStatus,
-    VPNProvisioningStatus,
     WebhookInboxStatus,
 )
 from database.sql_helpers import sql_enum_in
@@ -174,9 +173,6 @@ class User(Base):
     total_wi_traffic_bytes: Mapped[int] = mapped_column(
         BigInteger, default=0, server_default=text("0")
     )
-    monthly_awg_bytes: Mapped[int] = mapped_column(
-        BigInteger, default=0, server_default=text("0")
-    )
     monthly_vless_bytes: Mapped[int] = mapped_column(
         BigInteger, default=0, server_default=text("0")
     )
@@ -191,12 +187,6 @@ class User(Base):
     )
     show_in_leaderboard: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
-    )
-
-    profiles = relationship(
-        "VPNProfile",
-        back_populates="user",
-        cascade="all, delete-orphan",
     )
 
     payments = relationship(
@@ -220,85 +210,6 @@ class User(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
-
-
-class VPNProfile(Base):
-    __tablename__ = "vpn_profiles"
-
-    __table_args__ = (
-        CheckConstraint(
-            sql_enum_in("provisioning_status", VPNProvisioningStatus),
-            name="ck_vpn_profiles_provisioning_status",
-        ),
-        CheckConstraint("desired_version > 0", name="ck_vpn_profiles_desired_version_positive"),
-        Index(
-            "uq_vpn_profiles_server_peer_id_not_null",
-            "server_id",
-            "peer_id",
-            unique=True,
-            postgresql_where=text("peer_id IS NOT NULL"),
-        ),
-        Index(
-            "uq_vpn_profiles_user_server_device_name",
-            "user_id",
-            "server_id",
-            text("lower(device_name)"),
-            unique=True,
-        ),
-    )
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-
-    user_id: Mapped[int] = mapped_column(
-        Integer,
-        ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-
-    server_id: Mapped[int] = mapped_column(
-        Integer,
-        ForeignKey("servers.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-
-    device_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    peer_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    client_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
-
-    raw_config: Mapped[str | None] = mapped_column(EncryptedString(critical=True), nullable=True)
-
-    traffic_down: Mapped[int] = mapped_column(BigInteger, default=0)
-    traffic_up: Mapped[int] = mapped_column(BigInteger, default=0)
-    raw_last_down: Mapped[int] = mapped_column(
-        BigInteger, default=0, server_default=text("0")
-    )
-    raw_last_up: Mapped[int] = mapped_column(
-        BigInteger, default=0, server_default=text("0")
-    )
-
-    last_connected: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    provisioning_status: Mapped[str] = mapped_column(
-        String(30), nullable=False, default="active", server_default=text("'active'")
-    )
-    desired_is_active: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=True, server_default=text("true")
-    )
-    actual_is_active: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    desired_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    actual_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    desired_version: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=1, server_default=text("1")
-    )
-    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    last_sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-
-    user = relationship("User", back_populates="profiles")
-    server = relationship("Server")
 
 
 class Server(Base):
@@ -926,7 +837,6 @@ class APIOperation(Base):
             postgresql_where=text("status = 'processing'"),
         ),
         Index("ix_api_operations_server_id", "server_id"),
-        Index("ix_api_operations_profile_id", "profile_id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -938,9 +848,6 @@ class APIOperation(Base):
 
     server_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("servers.id", ondelete="SET NULL"), nullable=True
-    )
-    profile_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("vpn_profiles.id", ondelete="SET NULL"), nullable=True
     )
 
     server_name_snapshot: Mapped[str | None] = mapped_column(String(255), nullable=True)

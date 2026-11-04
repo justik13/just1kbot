@@ -15,7 +15,6 @@ from bot.formatters import get_server_protocol_badge
 from bot.keyboards import get_admin_server_card_keyboard
 from database.repositories.servers_repo import (
     get_server_peer_counts,
-    is_awg_capable_server,
     is_pure_vless_server,
     is_vless_capable_server,
     is_white_internet_origin_server,
@@ -223,7 +222,6 @@ async def _show_server_card(
     actual_peers = cached_used
     max_clients = server.max_clients or 240
     has_vless = is_vless_capable_server(server)
-    has_awg = is_awg_capable_server(server)
     is_origin = is_white_internet_origin_server(server)
     section_crumb = texts.BTN_WI_SERVERS if is_origin else texts.BTN_STD_SERVERS
     proto_badge = get_server_protocol_badge(server)
@@ -287,7 +285,6 @@ async def _show_server_card(
                 is_xray=is_origin,
                 has_vless=has_vless,
                 is_origin=is_origin,
-                has_awg=has_awg,
             ),
             parse_mode="HTML",
         )

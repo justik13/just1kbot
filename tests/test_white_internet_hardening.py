@@ -38,7 +38,6 @@ from config.enums import (
 )
 from database.models import (
     Server,
-    VPNProfile,
     WhiteInternetSubscription,
 )
 from database.repositories import servers_repo, white_internet_repo
@@ -126,7 +125,9 @@ class TestGroupCAlembicMigration0017(unittest.TestCase):
     def test_alembic_heads_and_chain(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
         heads = scripts.get_heads()
-        self.assertEqual(heads, ["0042_servers_proto_vless"])
+        self.assertEqual(heads, ["0043_purge_legacy_awg_and_vpn_profiles"])
+        rev = scripts.get_revision("0043_purge_legacy_awg_and_vpn_profiles")
+        self.assertEqual(rev.down_revision, "0042_servers_proto_vless")
         rev = scripts.get_revision("0042_servers_proto_vless")
         self.assertEqual(rev.down_revision, "0041_reset_notification_flags")
         rev = scripts.get_revision("0041_reset_notification_flags")
@@ -673,8 +674,6 @@ class TestGroupQProtocolInvariantAndZeroSecrets(unittest.TestCase):
     def test_no_wireguard_wg_protocol_assignment(self):
         srv = Server(protocol=AMNEZIA_PROTOCOL)
         self.assertEqual(srv.protocol, "amneziawg2")
-        vp = VPNProfile(device_name="device1", server_id=1)
-        self.assertNotEqual(vp.device_name, "")
 
 
 class TestGroupRAtomicTraffic90pEmitsWithoutPrematureFlag(unittest.IsolatedAsyncioTestCase):

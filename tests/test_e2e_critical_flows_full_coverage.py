@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from database.models import Tariff
 from database.repositories import (
     account_ledger_repo,
-    profiles_repo,
     servers_repo,
     users_repo,
 )
@@ -88,7 +87,7 @@ class E2ECriticalFlowsFullCoverageTests(unittest.IsolatedAsyncioTestCase):
             await session.flush()
 
             # 3. Server creation
-            server = await servers_repo.create_server(
+            await servers_repo.create_server(
                 session, name="E2E Node 1", api_url="https://node1.example.test", api_key="secret"
             )
 
@@ -118,18 +117,6 @@ class E2ECriticalFlowsFullCoverageTests(unittest.IsolatedAsyncioTestCase):
             u_updated = await users_repo.get_user_by_telegram_id(session, user.telegram_id)
             self.assertIsNotNone(u_updated.subscription_end)
 
-            # 6. Device Creation
-            prof = await profiles_repo.create_profile(
-                session,
-                user_id=u_updated.id,
-                server_id=server.id,
-                device_name="My iPhone",
-                peer_id="peer_e2e_1",
-                raw_config="ss://createdkey@node1:8388",
-            )
-            self.assertIsNotNone(prof)
-            self.assertEqual(prof.device_name, "My iPhone")
-
     async def test_e2e_referral_bonus_flow(self):
         async with self.sessions.begin() as session:
             # Referrer & Referee
@@ -152,13 +139,8 @@ class E2ECriticalFlowsFullCoverageTests(unittest.IsolatedAsyncioTestCase):
     async def test_e2e_ban_revocation_flow(self):
         async with self.sessions.begin() as session:
             u = await users_repo.create_user(session, telegram_id=33333, username="bad_user")
-            s = await servers_repo.create_server(session, name="S1", api_url="https://s1.test", api_key="k")
+            await servers_repo.create_server(session, name="S1", api_url="https://s1.test", api_key="k")
             await session.flush()
-
-            p = await profiles_repo.create_profile(
-                session, user_id=u.id, server_id=s.id, device_name="Dev1", peer_id="peer1", raw_config="cfg"
-            )
-            self.assertIsNotNone(p)
 
             success, msg = await ban_service.BanService.toggle_ban(
                 session, admin_id=123, telegram_id=u.telegram_id

@@ -34,7 +34,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from config.settings import get_settings
 from database.connection import session_scope
-from database.models import APIOperation, Server, VPNProfile
+from database.models import APIOperation, Server
 from utils.logging_security import install_sensitive_data_filter
 
 logging.basicConfig(
@@ -108,42 +108,7 @@ async def reencrypt_all(*, force: bool = False) -> None:
             # session_scope() automatically commits on block exit
             logger.info("Re-encrypted batch of servers up to ID %d (total: %d)", last_server_id, total_servers)
 
-    # 2. Re-encrypt VPN profiles in batches
-    last_profile_id = 0
-    while True:
-        async with session_scope() as session:
-            profiles = (
-                await session.scalars(
-                    select(VPNProfile)
-                    .where(
-                        VPNProfile.id > last_profile_id,
-                        VPNProfile.raw_config.is_not(None),
-                    )
-                    .order_by(VPNProfile.id)
-                    .limit(BATCH_SIZE)
-                )
-            ).all()
-            if not profiles:
-                break
-
-            for profile in profiles:
-                try:
-                    if profile.raw_config:
-                        profile.raw_config = str(profile.raw_config)
-                        flag_modified(profile, "raw_config")
-                except Exception as exc:
-                    logger.warning(
-                        "Skipping legacy VPNProfile ID %s during re-encryption: %s",
-                        profile.id,
-                        exc,
-                    )
-                last_profile_id = profile.id
-                total_profiles += 1
-
-            # session_scope() automatically commits on block exit
-            logger.info("Re-encrypted batch of VPN profiles up to ID %d (total: %d)", last_profile_id, total_profiles)
-
-    # 3. Re-encrypt API Operations in batches
+    # 2. Re-encrypt API Operations in batches
     total_operations = 0
     last_op_id = 0
     while True:
@@ -186,22 +151,6 @@ async def reencrypt_all(*, force: bool = False) -> None:
                     raise RuntimeError(
                         f"Server ID {s_id} is not encrypted with the new primary key: {exc}"
                     ) from exc
-
-        profile_rows = (
-            await session.execute(
-                text("SELECT id, raw_config FROM vpn_profiles WHERE raw_config IS NOT NULL")
-            )
-        ).all()
-        for p_id, raw_config in profile_rows:
-            if raw_config:
-                try:
-                    primary_fernet.decrypt(raw_config.encode("utf-8"))
-                except Exception as exc:
-                    logger.warning(
-                        "VPNProfile ID %s raw_config could not be decrypted with primary key (legacy AWG): %s",
-                        p_id,
-                        exc,
-                    )
 
         op_rows = (
             await session.execute(

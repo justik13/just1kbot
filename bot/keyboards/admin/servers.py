@@ -13,7 +13,6 @@ def get_admin_server_card_keyboard(
     is_xray: bool = False,
     has_vless: bool = False,
     is_origin: bool = False,
-    has_awg: bool = False,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
@@ -59,11 +58,6 @@ def get_admin_server_card_keyboard(
         text=texts.ADMIN_SERVER_BTN_CHANGE_KEY,
         callback_data=f"admin_server_edit_key:{server_id}",
     )
-    if has_awg:
-        builder.button(
-            text=texts.ADMIN_SERVER_BTN_CHANGE_LIMIT,
-            callback_data=f"admin_server_edit_max_clients:{server_id}",
-        )
 
     if is_active:
         status_text = texts.BTN_DISABLE_SERVER
@@ -88,48 +82,6 @@ def get_admin_server_card_keyboard(
         builder.adjust(1, 2, 2, 2, 2, 1, 2, 1)
     else:
         builder.adjust(1, 2, 2, 1, 2, 1)
-    return builder.as_markup()
-
-
-def get_admin_server_peers_keyboard(
-    server_id: int,
-    page: int,
-    total_pages: int,
-    peers_buttons: list[tuple[str, str]],
-) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    for btn_text, btn_cb in peers_buttons:
-        builder.button(text=btn_text, callback_data=btn_cb)
-
-    nav_count = 0
-    if page > 1:
-        builder.button(
-            text=texts.BTN_BACK,
-            callback_data=f"admin_server_peers:{server_id}:{page - 1}",
-        )
-        nav_count += 1
-    if page < total_pages:
-        builder.button(
-            text=texts.BTN_PAGINATION_NEXT,
-            callback_data=f"admin_server_peers:{server_id}:{page + 1}",
-        )
-        nav_count += 1
-
-    builder.button(
-        text=texts.ADMIN_SERVER_BTN_SERVER_USERS,
-        callback_data=f"admin_users_filter:server:{server_id}:1",
-    )
-    builder.button(
-        text=texts.ADMIN_SERVER_BTN_BACK_TO_CARD,
-        callback_data=f"admin_server_card:{server_id}",
-    )
-
-    item_count = len(peers_buttons)
-    pattern = ([1] * item_count)
-    if nav_count > 0:
-        pattern.append(nav_count)
-    pattern.extend([1, 1])
-    builder.adjust(*pattern)
     return builder.as_markup()
 
 

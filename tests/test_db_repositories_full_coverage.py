@@ -12,7 +12,6 @@ from database.models import (
 from database.repositories import (
     audit_repo,
     maintenance_repo,
-    profiles_repo,
     servers_repo,
     tariffs_repo,
     users_repo,
@@ -134,28 +133,6 @@ class DBRepositoriesFullCoverageTests(unittest.IsolatedAsyncioTestCase):
 
             by_id = await tariffs_repo.get_tariff_by_id(session, t.id)
             self.assertIsNotNone(by_id)
-
-    async def test_profiles_repo(self):
-        async with self.sessions.begin() as session:
-            u = await users_repo.create_user(session, telegram_id=999888, username="profile_u")
-            s = await servers_repo.create_server(session, name="ProfServer", api_url="https://ps.test", api_key="k")
-            await session.flush()
-
-            p = await profiles_repo.create_profile(
-                session,
-                user_id=u.id,
-                server_id=s.id,
-                device_name="My iPhone",
-                peer_id="peer_123",
-                raw_config="vpn://config",
-            )
-            self.assertIsNotNone(p.id)
-
-            profs = await profiles_repo.get_user_profiles(session, u.id)
-            self.assertEqual(len(profs), 1)
-
-            upd = await profiles_repo.update_profile(session, p, device_name="iPhone 15")
-            self.assertEqual(upd.device_name, "iPhone 15")
 
     async def test_maintenance_repo(self):
         async with self.sessions.begin() as session:

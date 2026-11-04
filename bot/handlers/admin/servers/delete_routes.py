@@ -21,13 +21,10 @@ from config.enums import (
 from database.models import (
     APIOperation,
     Server,
-    User,
-    VPNProfile,
     WhiteInternetOrphanCleanup,
     WhiteInternetSubscription,
 )
 from database.repositories.servers_repo import (
-    delete_profiles_by_server_id,
     delete_server,
     get_server_by_id,
 )
@@ -92,11 +89,7 @@ async def request_delete_server(
         )
         return
 
-    profiles_count = await session.scalar(
-        select(func.count(VPNProfile.id)).where(
-            VPNProfile.server_id == server.id
-        ),
-    ) or 0
+    profiles_count = 0
 
     wl_subs_count = await session.scalar(
         select(func.count(WhiteInternetSubscription.id)).where(
@@ -187,9 +180,8 @@ async def confirm_delete_server(
 
     server_name = server.name
 
-    profiles = list((await session.execute(select(VPNProfile).where(
-        VPNProfile.server_id == server.id))).scalars().all())
-    deleted_profiles = len(profiles)
+    profiles = []
+    deleted_profiles = 0
     operations = []
     processing_update = False
 
@@ -281,45 +273,12 @@ async def confirm_delete_server(
     )
     await session.commit()
 
-    # Phase 2: Archive device traffic and delete profiles per user in canonical lock hierarchy (User -> VPNProfile).
-    user_ids = sorted({p.user_id for p in profiles if p.user_id})
-    for uid in user_ids:
-        user_obj = await session.get(User, uid, with_for_update=True)
-        user_profiles = list((await session.execute(
-            select(VPNProfile)
-            .where(VPNProfile.user_id == uid, VPNProfile.server_id == server_id)
-            .with_for_update()
-        )).scalars().all())
-
-        for p in user_profiles:
-            cur_bytes = (getattr(p, "traffic_down", 0) or 0) + (getattr(p, "traffic_up", 0) or 0)
-            if cur_bytes > 0 and user_obj and p.device_name:
-                from utils.traffic_helpers import record_device_traffic_archive
-
-                archived = dict(user_obj.archived_device_traffic or {})
-                user_obj.archived_device_traffic = record_device_traffic_archive(
-                    archived, p.device_name, cur_bytes
-                )
-            await session.delete(p)
-
-    # Any remaining profiles without user_id
-    orphan_profiles = list((await session.execute(
-        select(VPNProfile)
-        .where(VPNProfile.user_id.is_(None), VPNProfile.server_id == server_id)
-        .with_for_update()
-    )).scalars().all())
-    for op in orphan_profiles:
-        await session.delete(op)
-
-    await session.commit()
-
-    # Phase 3: Final server removal and cache invalidation.
+    # Phase 2: Final server removal and cache invalidation.
     server_to_delete = (await session.execute(
         select(Server).where(Server.id == server_id).with_for_update()
     )).scalar_one_or_none()
 
     if server_to_delete:
-        await delete_profiles_by_server_id(session, server_id)
         await session.execute(
             update(WhiteInternetSubscription)
             .where(WhiteInternetSubscription.origin_node_id == server_id)

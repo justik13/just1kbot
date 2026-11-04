@@ -93,7 +93,7 @@ def record_device_traffic_archive(archived: dict, device_name: str | None, cur_b
 
 
 def get_user_monthly_standard_traffic(user: object | None, current_cycle: str | None = None) -> int:
-    """Returns combined standard subscription traffic (AWG + VLESS) for the active cycle."""
+    """Returns standard subscription VLESS traffic for the active cycle."""
     if not user:
         return 0
     if current_cycle is None:
@@ -103,8 +103,7 @@ def get_user_monthly_standard_traffic(user: object | None, current_cycle: str | 
     user_cycle = getattr(user, "traffic_cycle", None)
     if user_cycle != current_cycle:
         return 0
-    awg = getattr(user, "monthly_awg_bytes", 0) or 0
     vless = getattr(user, "monthly_vless_bytes", 0) or 0
-    return max(0, int(awg)) + max(0, int(vless))
+    return max(0, int(vless))
 
 

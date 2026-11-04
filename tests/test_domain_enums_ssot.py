@@ -71,13 +71,7 @@ class DomainEnumsSSOTTests(unittest.TestCase):
 
     def test_database_model_constraints_match_enums(self):
         """Extract CheckConstraint IN (...) definitions on SQLAlchemy models and ensure 0 drift against Enums."""
-        # 1. VPNProfile provisioning_status
-        self.assertEqual(
-            _extract_check_constraint_in(models.VPNProfile.__table__, "ck_vpn_profiles_provisioning_status"),
-            set(config.enums.VPNProvisioningStatus),
-        )
-
-        # 2. Payment provider_status, fulfillment_status, reconciliation_status, checkout_status
+        # 1. Payment provider_status, fulfillment_status, reconciliation_status, checkout_status
         self.assertEqual(
             _extract_check_constraint_in(models.Payment.__table__, "ck_payments_provider_status"),
             set(config.enums.PaymentProviderStatus),

@@ -193,7 +193,6 @@ class TestTelegramBotApi103KeyboardAudit(unittest.IsolatedAsyncioTestCase):
         )
         from bot.keyboards.admin.servers import (
             get_admin_server_card_keyboard,
-            get_admin_server_peers_keyboard,
             get_admin_server_relays_keyboard,
             get_server_delete_confirm_keyboard,
         )
@@ -293,7 +292,6 @@ class TestTelegramBotApi103KeyboardAudit(unittest.IsolatedAsyncioTestCase):
             get_broadcast_result_keyboard(),
             # Admin servers keyboards
             get_admin_server_card_keyboard(1, False),
-            get_admin_server_peers_keyboard(1, 1, 1, []),
             get_admin_server_relays_keyboard(1),
             get_server_delete_confirm_keyboard(1),
             get_admin_tariff_card_keyboard(1, is_active=True),

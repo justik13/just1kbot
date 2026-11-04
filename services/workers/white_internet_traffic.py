@@ -305,11 +305,6 @@ class WhiteInternetTrafficWorker:
                                         (User.traffic_cycle == current_cycle, func.coalesce(User.monthly_wi_bytes, 0) + consumed),
                                         else_=consumed,
                                     ),
-                                    monthly_awg_bytes=case(
-                                        (User.traffic_cycle > current_cycle, User.monthly_awg_bytes),
-                                        (User.traffic_cycle == current_cycle, func.coalesce(User.monthly_awg_bytes, 0)),
-                                        else_=0,
-                                    ),
                                     monthly_vless_bytes=case(
                                         (User.traffic_cycle > current_cycle, User.monthly_vless_bytes),
                                         (User.traffic_cycle == current_cycle, func.coalesce(User.monthly_vless_bytes, 0)),
