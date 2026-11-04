@@ -5,7 +5,7 @@ Standard access is served exclusively by VLESS TLS with device accounting via ac
 This migration drops the legacy vpn_profiles table, decouples api_operations,
 and drops the obsolete monthly_awg_bytes column from users.
 
-Revision ID: 0043_purge_legacy_awg_and_vpn_profiles
+Revision ID: 0043_purge_legacy_awg
 Revises: 0042_servers_proto_vless
 Create Date: 2026-11-04 00:00:00.000000
 """
@@ -16,7 +16,7 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "0043_purge_legacy_awg_and_vpn_profiles"
+revision: str = "0043_purge_legacy_awg"
 down_revision: str | None = "0042_servers_proto_vless"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
