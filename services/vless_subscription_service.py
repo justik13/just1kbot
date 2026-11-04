@@ -238,7 +238,7 @@ class VlessSubscriptionService:
         session: AsyncSession,
         user: User,
     ) -> tuple[int, int, int]:
-        """Returns (total_active, awg_active_count, vless_hwid_count)."""
+        """Returns (total_active, legacy_active_count, vless_hwid_count)."""
         vless_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
         total = vless_count
         return total, 0, vless_count
