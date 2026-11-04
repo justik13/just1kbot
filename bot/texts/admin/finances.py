@@ -65,6 +65,7 @@ ADMIN_PAYMENT_SERVICE_WI_QUOTA = "Белый Интернет (Докупка т
 ADMIN_PAYMENT_SERVICE_WI_RENEW = "Белый Интернет (Продление)"
 ADMIN_PAYMENT_SERVICE_WI_TRIAL = "Белый Интернет (Триал)"
 ADMIN_PAYMENT_SERVICE_WI_DEFAULT = "Белый Интернет"
+ADMIN_PAYMENT_SERVICE_STANDARD = "Стандартная"
 ADMIN_PAYMENT_SERVICE_RENEW_FMT = "{name} (Продление)"
 ADMIN_PAYMENT_SERVICE_CHANGE_FMT = "{name} (Смена тарифа)"
 ADMIN_PAYMENT_STATUS_NOTE = " ({status_name})"
