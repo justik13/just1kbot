@@ -62,7 +62,7 @@ class FulfillmentService:
             await SubscriptionService.sync_access_state(session, user)
             invalidate_user_cache(user.telegram_id)
             logger.info(
-                "Fulfilled AWG order %s for user %s: +%s days (until %s, tariff_change=%s)",
+                "Fulfilled standard order %s for user %s: +%s days (until %s, tariff_change=%s)",
                 order.id,
                 user.id,
                 order.duration_days,
@@ -167,7 +167,7 @@ class FulfillmentService:
             await SubscriptionService.sync_access_state(session, user)
             invalidate_user_cache(user.telegram_id)
             logger.info(
-                "Revoked AWG order %s for user %s (subscription_end=%s)",
+                "Revoked standard order %s for user %s (subscription_end=%s)",
                 order.id,
                 user.id,
                 user.subscription_end,

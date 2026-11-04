@@ -114,7 +114,6 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
             total_traffic_bytes=5000000000,
             total_wi_traffic_bytes=2000000000,
             avg_traffic_bytes_active=1000000000,
-            avg_monthly_awg_bytes=800000000,
             avg_monthly_vless_bytes=200000000,
             avg_monthly_wi_bytes=300000000,
         )
@@ -125,7 +124,7 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         stats = await get_dashboard_stats(mock_session)
         self.assertEqual(stats["total"], 10)
         self.assertEqual(stats["active"], 5)
-        self.assertEqual(stats["avg_monthly_awg_bytes"], 800000000)
+        self.assertEqual(stats["avg_monthly_awg_bytes"], 0)
         self.assertEqual(stats["avg_monthly_vless_bytes"], 200000000)
         self.assertEqual(stats["avg_monthly_wi_bytes"], 300000000)
         self.assertEqual(stats["total_wi_traffic_bytes"], 2000000000)
@@ -529,8 +528,7 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
             first_name="Tester",
             total_traffic_bytes=15 * 1024 * 1024 * 1024,
             total_wi_traffic_bytes=5 * 1024 * 1024 * 1024,
-            monthly_awg_bytes=10 * 1024 * 1024 * 1024,
-            monthly_vless_bytes=3 * 1024 * 1024 * 1024,
+            monthly_vless_bytes=13 * 1024 * 1024 * 1024,
             monthly_wi_bytes=2 * 1024 * 1024 * 1024,
             traffic_cycle="2026-10",
         )
@@ -558,7 +556,6 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
             first_name="Tester",
             total_traffic_bytes=10 * 1024 * 1024 * 1024,
             total_wi_traffic_bytes=3 * 1024 * 1024 * 1024,
-            monthly_awg_bytes=10 * 1024 * 1024 * 1024,
             monthly_vless_bytes=3 * 1024 * 1024 * 1024,
             monthly_wi_bytes=3 * 1024 * 1024 * 1024,
             traffic_cycle="2026-09",
@@ -704,8 +701,7 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
             device_limit=2,
             subscription_end=datetime.now(timezone.utc),
             traffic_cycle=cur_cycle,
-            monthly_awg_bytes=2 * 1024 * 1024 * 1024,
-            monthly_vless_bytes=4 * 1024 * 1024 * 1024,
+            monthly_vless_bytes=6 * 1024 * 1024 * 1024,
         )
         sub = VlessSubscription(
             id=10,
@@ -988,8 +984,8 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
             "total_traffic_bytes": 100 * 1024 * 1024 * 1024,
             "total_wi_traffic_bytes": 50 * 1024 * 1024 * 1024,
             "avg_traffic_bytes_active": 4 * 1024 * 1024 * 1024,
-            "avg_monthly_awg_bytes": 1024 * 1024 * 1024,
-            "avg_monthly_vless_bytes": 2 * 1024 * 1024 * 1024,
+            "avg_monthly_awg_bytes": 0,
+            "avg_monthly_vless_bytes": 3 * 1024 * 1024 * 1024,
             "avg_monthly_wi_bytes": 0,
         }
         wl_stats_mock = {
@@ -1108,15 +1104,14 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(mock_start.call_count, 2)
 
     def test_get_user_monthly_standard_traffic_ssot(self):
-        """get_user_monthly_standard_traffic correctly sums AWG+VLESS for active cycle and handles rotation/None."""
+        """get_user_monthly_standard_traffic correctly returns VLESS traffic for active cycle and handles rotation/None."""
         from utils.traffic_helpers import get_user_monthly_standard_traffic
 
-        # 1. Active cycle: sums AWG + VLESS
+        # 1. Active cycle: returns VLESS traffic
         user_ok = User(
             id=1,
             traffic_cycle="2026-10",
-            monthly_awg_bytes=5 * 1024**3,
-            monthly_vless_bytes=3 * 1024**3,
+            monthly_vless_bytes=8 * 1024**3,
         )
         self.assertEqual(get_user_monthly_standard_traffic(user_ok, "2026-10"), 8 * 1024**3)
 
@@ -1124,17 +1119,15 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         user_old = User(
             id=2,
             traffic_cycle="2026-09",
-            monthly_awg_bytes=5 * 1024**3,
-            monthly_vless_bytes=3 * 1024**3,
+            monthly_vless_bytes=8 * 1024**3,
         )
         self.assertEqual(get_user_monthly_standard_traffic(user_old, "2026-10"), 0)
 
-        # 3. None user or None fields: safely returns 0 or non-null sum
+        # 3. None user or None fields: safely returns 0
         self.assertEqual(get_user_monthly_standard_traffic(None, "2026-10"), 0)
         user_partial = User(
             id=3,
             traffic_cycle="2026-10",
-            monthly_awg_bytes=None,
             monthly_vless_bytes=2 * 1024**3,
         )
         self.assertEqual(get_user_monthly_standard_traffic(user_partial, "2026-10"), 2 * 1024**3)

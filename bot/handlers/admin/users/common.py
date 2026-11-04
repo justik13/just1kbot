@@ -6,7 +6,6 @@ from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from bot import texts
 from bot.keyboards.admin.users import get_admin_user_card_keyboard
@@ -52,14 +51,14 @@ def format_user_card_text(
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
 
-    has_awg = bool(user.subscription_end and user.subscription_end > now)
+    has_std = bool(user.subscription_end and user.subscription_end > now)
     has_wi = bool(
         wi_sub
         and getattr(wi_sub, "status", None) in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING, WhiteInternetStatus.EXHAUSTED)
         and getattr(wi_sub, "expires_at", None)
         and wi_sub.expires_at > now
     )
-    has_access = has_awg or has_wi
+    has_access = has_std or has_wi
     referrals_count = len(referrals) if isinstance(referrals, list) else int(referrals or 0)
 
     status_str = texts.STATUS_ACTIVE_BADGE if has_access else texts.STATUS_INACTIVE_BADGE
@@ -70,7 +69,7 @@ def format_user_card_text(
 
     resolved_limit = effective_device_limit if effective_device_limit is not None else (user.device_limit or 0)
 
-    if has_awg:
+    if has_std:
         valid_until_str = format_datetime(user.subscription_end)
         days_left_str = format_days_left(user.subscription_end)
         devices_count = f"{vless_hwid_count}"
@@ -86,18 +85,17 @@ def format_user_card_text(
         devices_count = f"{vless_hwid_count}"
         device_limit = resolved_limit
 
-    awg_total = getattr(user, "total_traffic_bytes", 0) or 0
+    std_total = getattr(user, "total_traffic_bytes", 0) or 0
     wi_total = getattr(user, "total_wi_traffic_bytes", 0) or 0
-    awg_m = getattr(user, "monthly_awg_bytes", 0) or 0
     vless_m = getattr(user, "monthly_vless_bytes", 0) or 0
     wi_m = getattr(user, "monthly_wi_bytes", 0) or 0
     current_cycle = now.strftime("%Y-%m")
     if getattr(user, "traffic_cycle", None) != current_cycle:
-        awg_m, vless_m, wi_m = 0, 0, 0
+        vless_m, wi_m = 0, 0
 
-    total_traffic_str = format_traffic(awg_total + wi_total)
+    total_traffic_str = format_traffic(std_total + wi_total)
     total_traffic_str += texts.ADMIN_USER_TRAFFIC_MONTHLY_BREAKDOWN.format(
-        monthly_std=format_traffic(awg_m + vless_m),
+        monthly_std=format_traffic(vless_m),
         monthly_wi=format_traffic(wi_m),
     )
 
@@ -246,7 +244,6 @@ async def _get_user_with_profiles(
     stmt = (
         select(User)
         .where(User.telegram_id == telegram_id)
-        .options(selectinload(User.profiles))
     )
 
     result = await session.execute(stmt)
@@ -379,7 +376,7 @@ async def _build_users_list_text_and_kb(
             uid = getattr(user, "id", None)
             wi_sub = wi_subs_map.get(uid) if uid is not None else None
             vless_sub = vless_subs_map.get(uid) if uid is not None else None
-            has_awg = bool(user.subscription_end and user.subscription_end > current_time)
+            has_std = bool(user.subscription_end and user.subscription_end > current_time)
             has_wi = bool(
                 wi_sub
                 and wi_sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING, WhiteInternetStatus.EXHAUSTED)
@@ -387,7 +384,7 @@ async def _build_users_list_text_and_kb(
                 and wi_sub.expires_at > current_time
             )
 
-            status = "🟢" if (has_awg or has_wi) else "🔴"
+            status = "🟢" if (has_std or has_wi) else "🔴"
             ban = texts.COMMON_BAN if user.is_banned else (texts.COMMON_BLOK_BOTA if user.is_bot_blocked else "")
             username = (
                 f"@{user.username}" if user.username else texts.ADMIN_USER_ID_FORMAT.format(telegram_id=user.telegram_id)
@@ -399,7 +396,7 @@ async def _build_users_list_text_and_kb(
                 else 0
             )
 
-            if has_awg:
+            if has_std:
                 days = format_days_left(user.subscription_end)
                 profiles_count = vless_hwid_count
             elif has_wi and wi_sub and wi_sub.expires_at:

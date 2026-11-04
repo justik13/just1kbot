@@ -56,7 +56,7 @@ ERROR_INVALID_URL = """⚠️ Некорректный формат URL.
 
 URL должен начинаться с <code>https://</code>
 
-Пример: <code>https://api.example.com:8443</code>"""
+Пример: <code>https://api.example.com:8444</code>"""
 
 ERROR_LOCATION_NOT_FOUND = "❌ Локация не найдена"
 

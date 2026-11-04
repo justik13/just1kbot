@@ -24,12 +24,11 @@ from bot.states import AdminStates
 from config.constants import AdminAuditAction
 from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
 from database.connection import session_scope
-from database.models import Server, User, VlessSubscription, VPNProfile, WhiteInternetSubscription
+from database.models import Server, User, VlessSubscription, WhiteInternetSubscription
 from database.repositories import white_internet_repo
 from database.repositories.servers_repo import (
     get_all_servers,
     get_server_by_id,
-    is_awg_capable_server,
     is_vless_capable_server,
     is_white_internet_origin_server,
 )
@@ -93,16 +92,6 @@ def _build_mass_extend_audience_filter(target_aud: str, now: datetime, server: S
             return User.id == -1
 
         conds = []
-        if is_awg_capable_server(server):
-            conds.append(
-                (User.subscription_end > now)
-                & User.profiles.any(
-                    (VPNProfile.server_id == server.id)
-                    & (VPNProfile.is_active.is_(True))
-                    & (VPNProfile.desired_is_active.is_(True))
-                    & (VPNProfile.provisioning_status.notin_(("deleting", "create_failed", "create_cleanup_pending")))
-                )
-            )
         if is_vless_capable_server(server):
             conds.append(
                 (User.subscription_end > now)
@@ -110,6 +99,7 @@ def _build_mass_extend_audience_filter(target_aud: str, now: datetime, server: S
                     (VlessSubscription.is_active.is_(True))
                     & (VlessSubscription.active_hwids.is_not(None))
                     & (cast(VlessSubscription.active_hwids, String) != "{}")
+                    & (VlessSubscription.node_traffic_snapshots.has_key(str(server.id)))
                 )
             )
         if is_white_internet_origin_server(server):
@@ -1101,7 +1091,7 @@ async def _run_mass_extend_background(
                                         if res_sub:
                                             extended = True
                                             invalidate_user_cache(tg_id)
-                                elif is_awg_capable_server(server) or is_vless_capable_server(server):
+                                elif is_vless_capable_server(server):
                                     if user.subscription_end and user.subscription_end > current_now:
                                         res = await SubscriptionService.extend_subscription(
                                             session,

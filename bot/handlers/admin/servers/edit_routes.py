@@ -8,7 +8,7 @@ from config.constants import (
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
@@ -16,7 +16,6 @@ from bot.keyboards import get_back_button
 from bot.states import AdminStates
 from config.enums import WhiteInternetStatus
 from database.models import (
-    VPNProfile,
     WhiteInternetSubscription,
 )
 from database.repositories.servers_repo import (
@@ -550,27 +549,7 @@ async def process_edit_server_url(
             await state.clear()
             return
 
-        profiles_count = (
-            await session.execute(
-                select(func.count(VPNProfile.id)).where(
-                    VPNProfile.server_id == server_id,
-                    or_(
-                        VPNProfile.peer_id.is_not(None),
-                        VPNProfile.provisioning_status.in_((
-                            "pending_create",
-                            "pending_update",
-                            "deleting",
-                            "create_cleanup_pending",
-                            "create_failed",
-                            "update_failed",
-                            "delete_failed",
-                            "active",
-                        )),
-                    ),
-                )
-            )
-        ).scalar_one()
-
+        profiles_count = 0
         active_ops_count = 0
 
         wl_subs_count = (
@@ -824,27 +803,7 @@ async def process_edit_server_key(
             )
             await state.clear()
             return
-        profiles_count = (
-            await session.execute(
-                select(func.count(VPNProfile.id)).where(
-                    VPNProfile.server_id == server_id,
-                    or_(
-                        VPNProfile.peer_id.is_not(None),
-                        VPNProfile.provisioning_status.in_((
-                            "pending_create",
-                            "pending_update",
-                            "deleting",
-                            "create_cleanup_pending",
-                            "create_failed",
-                            "update_failed",
-                            "delete_failed",
-                            "active",
-                        )),
-                    ),
-                )
-            )
-        ).scalar_one()
-
+        profiles_count = 0
         active_ops_count = 0
 
         wl_subs_count = (
@@ -1012,15 +971,22 @@ async def process_edit_server_max_clients(
         )
         return
 
-    profiles_count = await session.scalar(
-        select(func.count(VPNProfile.id)).where(
-            VPNProfile.server_id == server_id,
+    profiles_count = 0
+    wl_count = await session.scalar(
+        select(func.count(WhiteInternetSubscription.id)).where(
+            WhiteInternetSubscription.origin_node_id == server_id,
+            WhiteInternetSubscription.status.in_([
+                WhiteInternetStatus.PENDING,
+                WhiteInternetStatus.ACTIVE,
+                WhiteInternetStatus.EXHAUSTED,
+            ]),
         )
     ) or 0
+    current_used = max(profiles_count, wl_count)
 
-    if profiles_count > new_value:
+    if current_used > new_value:
         warning = texts.ADMIN_SERVER_MAX_CLIENTS_WARNING.format(
-            current=profiles_count,
+            current=current_used,
             new=new_value,
         )
 

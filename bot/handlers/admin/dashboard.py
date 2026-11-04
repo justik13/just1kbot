@@ -120,9 +120,7 @@ async def _get_servers_capacity_summary(session: AsyncSession) -> str:
     from database.repositories.servers_repo import (
         get_all_servers,
         get_server_peer_counts,
-        is_awg_capable_server,
         is_pure_vless_server,
-        is_vless_capable_server,
         is_white_internet_origin_server,
     )
     from services.slots_cache import get_cached_peer_count
@@ -146,7 +144,6 @@ async def _get_servers_capacity_summary(session: AsyncSession) -> str:
 
         vless_users_count, vless_devices_count = await vless_subscription_repo.get_active_vless_counts(session)
 
-    awg_lines: list[str] = []
     vless_lines: list[str] = []
     origin_lines: list[str] = []
     inactive_lines: list[str] = []
@@ -159,8 +156,6 @@ async def _get_servers_capacity_summary(session: AsyncSession) -> str:
             and getattr(s, "lifecycle_status", ServerLifecycleStatus.ACTIVE) == ServerLifecycleStatus.ACTIVE
         )
 
-        has_awg = is_awg_capable_server(s)
-        has_vless = is_vless_capable_server(s)
         has_wl = is_white_internet_origin_server(s)
         is_pure_vless = is_pure_vless_server(s)
 
@@ -190,15 +185,10 @@ async def _get_servers_capacity_summary(session: AsyncSession) -> str:
                 pct = int((effective_used / total) * 100) if total > 0 else 0
                 status_icon = "🟢" if pct < 80 else ("🟡" if pct < 90 else "🔴")
 
-                if has_awg and has_vless:
-                    display_name = f"[AWG+VLESS] {safe(s.name)}"
-                else:
-                    display_name = safe(s.name)
-
                 formatted_row = texts.ADMIN_DASHBOARD_SERVER_ROW_FORMAT.format(
                     status_icon=status_icon,
                     flag=flag,
-                    name=display_name,
+                    name=safe(s.name),
                     used=effective_used,
                     total=total,
                     pct=pct,
@@ -207,7 +197,7 @@ async def _get_servers_capacity_summary(session: AsyncSession) -> str:
                 if has_wl:
                     origin_lines.append(formatted_row)
                 else:
-                    awg_lines.append(formatted_row)
+                    vless_lines.append(formatted_row)
         else:
             reason = getattr(s, "disabled_reason", None)
             if reason == "MANUAL":
@@ -237,8 +227,6 @@ async def _get_servers_capacity_summary(session: AsyncSession) -> str:
                 ))
 
     section_parts: list[str] = []
-    if awg_lines:
-        section_parts.append(f"{texts.ADMIN_DASHBOARD_SECTION_AWG}\n" + "\n".join(awg_lines))
     if vless_lines:
         section_parts.append(f"{texts.ADMIN_DASHBOARD_SECTION_VLESS}\n" + "\n".join(vless_lines))
     if origin_lines:
@@ -273,9 +261,9 @@ async def _show_admin_dashboard(
         )
 
     awg_total_str = format_traffic(stats.get("total_traffic_bytes", 0))
-    avg_m_awg = stats.get("avg_monthly_awg_bytes", 0) + stats.get("avg_monthly_vless_bytes", 0)
-    if avg_m_awg > 0:
-        awg_avg_str = f"{format_traffic(avg_m_awg)}{texts.DASHBOARD_PER_MONTH_SUFFIX}"
+    avg_m_std = stats.get("avg_monthly_vless_bytes", 0)
+    if avg_m_std > 0:
+        awg_avg_str = f"{format_traffic(avg_m_std)}{texts.DASHBOARD_PER_MONTH_SUFFIX}"
     else:
         awg_avg_str = f"{format_traffic(0)}{texts.DASHBOARD_PER_MONTH_SUFFIX}"
 
