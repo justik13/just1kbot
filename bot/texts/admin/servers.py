@@ -226,7 +226,7 @@ ADMIN_SERVER_TOGGLE_SUCCESS = "✅ Статус сервера изменен: <
 ADMIN_SERVER_URL_FORBIDDEN = """⚠️ <b>URL запрещён правилами безопасности</b>
 Использование приватных IP-адресов, loopback и metadata endpoints запрещено."""
 
-ADMIN_SERVER_URL_PROMPT = "🔗 Введите API URL сервера (например: https://api.example.com:8443):"
+ADMIN_SERVER_URL_PROMPT = "🔗 Введите API URL сервера (например: https://api.example.com:8444):"
 
 ADMIN_SERVER_URL_UPDATED = "✅ API URL сервера обновлен на <code>{api_url}</code>."
 

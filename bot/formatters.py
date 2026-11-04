@@ -170,4 +170,4 @@ def get_server_protocol_badge(server) -> str:
         return texts.ADMIN_SERVER_PROTO_VLESS_BADGE
     if has_wl:
         return texts.ADMIN_SERVER_PROTO_ORIGIN_BADGE
-    return texts.ADMIN_SERVER_PROTO_AWG_BADGE
+    return texts.ADMIN_SERVER_PROTO_VLESS_BADGE
