@@ -127,9 +127,16 @@ async def reencrypt_all(*, force: bool = False) -> None:
                 break
 
             for profile in profiles:
-                if profile.raw_config:
-                    profile.raw_config = str(profile.raw_config)
-                    flag_modified(profile, "raw_config")
+                try:
+                    if profile.raw_config:
+                        profile.raw_config = str(profile.raw_config)
+                        flag_modified(profile, "raw_config")
+                except Exception as exc:
+                    logger.warning(
+                        "Skipping legacy VPNProfile ID %s during re-encryption: %s",
+                        profile.id,
+                        exc,
+                    )
                 last_profile_id = profile.id
                 total_profiles += 1
 
@@ -190,9 +197,11 @@ async def reencrypt_all(*, force: bool = False) -> None:
                 try:
                     primary_fernet.decrypt(raw_config.encode("utf-8"))
                 except Exception as exc:
-                    raise RuntimeError(
-                        f"VPNProfile ID {p_id} is not encrypted with the new primary key: {exc}"
-                    ) from exc
+                    logger.warning(
+                        "VPNProfile ID %s raw_config could not be decrypted with primary key (legacy AWG): %s",
+                        p_id,
+                        exc,
+                    )
 
         op_rows = (
             await session.execute(

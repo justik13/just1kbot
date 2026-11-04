@@ -280,6 +280,7 @@ def _build_server_audience_condition(server_or_id, now: datetime):
                 (VlessSubscription.is_active.is_(True))
                 & (VlessSubscription.active_hwids.is_not(None))
                 & (cast(VlessSubscription.active_hwids, String) != "{}")
+                & (VlessSubscription.node_traffic_snapshots.has_key(str(server_id)))
             )
         )
 

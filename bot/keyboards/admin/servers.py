@@ -59,7 +59,7 @@ def get_admin_server_card_keyboard(
         text=texts.ADMIN_SERVER_BTN_CHANGE_KEY,
         callback_data=f"admin_server_edit_key:{server_id}",
     )
-    if has_awg:
+    if has_awg or is_origin:
         builder.button(
             text=texts.ADMIN_SERVER_BTN_CHANGE_LIMIT,
             callback_data=f"admin_server_edit_max_clients:{server_id}",

@@ -6,7 +6,6 @@ from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from bot import texts
 from bot.keyboards.admin.users import get_admin_user_card_keyboard
@@ -246,7 +245,6 @@ async def _get_user_with_profiles(
     stmt = (
         select(User)
         .where(User.telegram_id == telegram_id)
-        .options(selectinload(User.profiles))
     )
 
     result = await session.execute(stmt)

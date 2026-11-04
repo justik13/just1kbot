@@ -1017,10 +1017,21 @@ async def process_edit_server_max_clients(
             VPNProfile.server_id == server_id,
         )
     ) or 0
+    wl_count = await session.scalar(
+        select(func.count(WhiteInternetSubscription.id)).where(
+            WhiteInternetSubscription.origin_node_id == server_id,
+            WhiteInternetSubscription.status.in_([
+                WhiteInternetStatus.PENDING,
+                WhiteInternetStatus.ACTIVE,
+                WhiteInternetStatus.EXHAUSTED,
+            ]),
+        )
+    ) or 0
+    current_used = max(profiles_count, wl_count)
 
-    if profiles_count > new_value:
+    if current_used > new_value:
         warning = texts.ADMIN_SERVER_MAX_CLIENTS_WARNING.format(
-            current=profiles_count,
+            current=current_used,
             new=new_value,
         )
 
