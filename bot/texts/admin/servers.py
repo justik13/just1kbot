@@ -5,11 +5,13 @@ ADMIN_BTN_ADD_SERVER = "➕ Добавить сервер"
 ADMIN_SERVER_SELECT_PROTO_PROMPT = """🛠 Админка › ➕ <b>Добавление сервера</b>
 
 Выберите протокол узла:"""
+ADMIN_SERVER_BTN_PROTO_AWG = "🛡 AmneziaWG"
 ADMIN_SERVER_BTN_PROTO_VLESS = "⚡ VLESS Direct"
 ADMIN_SERVER_BTN_PROTO_XRAY = "⚡ Xray (Белый Интернет)"
 
 PROTOCOL_XRAY_ORIGIN = "Xray (Origin)"
 PROTOCOL_VLESS = "VLESS TLS"
+ADMIN_SERVER_PROTO_AWG_BADGE = "[AWG]"
 ADMIN_SERVER_PROTO_VLESS_BADGE = "[VLESS]"
 ADMIN_SERVER_PROTO_ORIGIN_BADGE = "[Origin РФ]"
 ADMIN_SERVER_PROTO_AWG_VLESS_BADGE = "[AWG+VLESS]"
@@ -165,6 +167,7 @@ ADMIN_SERVER_BTN_PEERS = "👥 Пиры на узле ({used}/{total})"
 ADMIN_SERVER_BTN_PEERS_NO_COUNT = "👥 Пиры на узле"
 ADMIN_SERVER_BTN_SERVER_USERS = "👥 Все пользователи этого сервера"
 ADMIN_SERVER_BTN_BROADCAST = "📢 Рассылка пользователям"
+ADMIN_SERVER_PEERS_AWG_ONLY = "Управление пирами доступно только для серверов AmneziaWG."
 ADMIN_SERVER_PEERS_HEADER = """{header}👥 <b>Пиры сервера {flag} {server_name}</b>{status_banner}
 • На узле: <b>{live_peers}</b> (Бот: {bot_peers}, Внешние: {external_peers}){deleting_note}{missing_note}{pending_note}
 Стр. {page}/{total_pages}:

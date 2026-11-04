@@ -51,14 +51,14 @@ def format_user_card_text(
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
 
-    has_std = bool(user.subscription_end and user.subscription_end > now)
+    has_awg = bool(user.subscription_end and user.subscription_end > now)
     has_wi = bool(
         wi_sub
         and getattr(wi_sub, "status", None) in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING, WhiteInternetStatus.EXHAUSTED)
         and getattr(wi_sub, "expires_at", None)
         and wi_sub.expires_at > now
     )
-    has_access = has_std or has_wi
+    has_access = has_awg or has_wi
     referrals_count = len(referrals) if isinstance(referrals, list) else int(referrals or 0)
 
     status_str = texts.STATUS_ACTIVE_BADGE if has_access else texts.STATUS_INACTIVE_BADGE
@@ -69,7 +69,7 @@ def format_user_card_text(
 
     resolved_limit = effective_device_limit if effective_device_limit is not None else (user.device_limit or 0)
 
-    if has_std:
+    if has_awg:
         valid_until_str = format_datetime(user.subscription_end)
         days_left_str = format_days_left(user.subscription_end)
         devices_count = f"{vless_hwid_count}"
@@ -377,7 +377,7 @@ async def _build_users_list_text_and_kb(
             uid = getattr(user, "id", None)
             wi_sub = wi_subs_map.get(uid) if uid is not None else None
             vless_sub = vless_subs_map.get(uid) if uid is not None else None
-            has_std = bool(user.subscription_end and user.subscription_end > current_time)
+            has_awg = bool(user.subscription_end and user.subscription_end > current_time)
             has_wi = bool(
                 wi_sub
                 and wi_sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING, WhiteInternetStatus.EXHAUSTED)
@@ -385,7 +385,7 @@ async def _build_users_list_text_and_kb(
                 and wi_sub.expires_at > current_time
             )
 
-            status = "🟢" if (has_std or has_wi) else "🔴"
+            status = "🟢" if (has_awg or has_wi) else "🔴"
             ban = texts.COMMON_BAN if user.is_banned else (texts.COMMON_BLOK_BOTA if user.is_bot_blocked else "")
             username = (
                 f"@{user.username}" if user.username else texts.ADMIN_USER_ID_FORMAT.format(telegram_id=user.telegram_id)
@@ -397,7 +397,7 @@ async def _build_users_list_text_and_kb(
                 else 0
             )
 
-            if has_std:
+            if has_awg:
                 days = format_days_left(user.subscription_end)
                 profiles_count = vless_hwid_count
             elif has_wi and wi_sub and wi_sub.expires_at:

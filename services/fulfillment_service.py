@@ -167,7 +167,7 @@ class FulfillmentService:
             await SubscriptionService.sync_access_state(session, user)
             invalidate_user_cache(user.telegram_id)
             logger.info(
-                "Revoked standard order %s for user %s (subscription_end=%s)",
+                "Revoked AWG order %s for user %s (subscription_end=%s)",
                 order.id,
                 user.id,
                 user.subscription_end,

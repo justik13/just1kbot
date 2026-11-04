@@ -34,6 +34,9 @@ CONNECTION_CONFIG_DEVICE_VIEW_CONFIG_DEVICES_OBNO = """
 
 CONNECTION_CONFIG_DEVICE_VIEW_CONFIG_DOSTUPNA_CHEREZ = "<i>Конфигурация доступна через кнопку «🔄 Другой способ подключения» ниже.</i>"
 
+CONNECTION_CONFIG_DEVICE_VIEW_CONF_FOR_AMNEZIAWG_DEFAULTVPN = """   • <code>.conf</code> — для роутеров и совместимых приложений
+"""
+
 CONNECTION_CONFIG_DEVICE_VIEW_DEVICE_NE_NAYDENO_ILI_BYLO = "Устройство не найдено или было удалено"
 
 CONNECTION_CONFIG_DEVICE_VIEW_DEVICE_SOZDAETSYA_NA_SERVE = """
