@@ -41,5 +41,79 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Legacy AWG is permanently decommissioned and archived in git branch archive/amnezia-awg.
-    pass
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+
+    # 1. Restore monthly_awg_bytes to users for symmetrical rollback down to 0035
+    user_cols = [c["name"] for c in insp.get_columns("users")]
+    if "monthly_awg_bytes" not in user_cols:
+        op.add_column(
+            "users",
+            sa.Column(
+                "monthly_awg_bytes",
+                sa.BigInteger(),
+                nullable=False,
+                server_default="0",
+            ),
+        )
+
+    # 2. Restore legacy vpn_profiles table for symmetrical rollback down to 0001
+    if "vpn_profiles" not in insp.get_table_names():
+        op.create_table(
+            "vpn_profiles",
+            sa.Column("id", sa.Integer(), primary_key=True),
+            sa.Column(
+                "user_id",
+                sa.Integer(),
+                sa.ForeignKey("users.id", ondelete="CASCADE"),
+                nullable=False,
+            ),
+            sa.Column(
+                "server_id",
+                sa.Integer(),
+                sa.ForeignKey("servers.id", ondelete="CASCADE"),
+                nullable=False,
+            ),
+            sa.Column("device_name", sa.String(length=255), nullable=False),
+            sa.Column("peer_id", sa.String(length=255), nullable=True),
+            sa.Column("client_name", sa.String(length=255), nullable=True),
+            sa.Column("raw_config", sa.Text(), nullable=True),
+            sa.Column("traffic_down", sa.BigInteger(), nullable=False, server_default="0"),
+            sa.Column("traffic_up", sa.BigInteger(), nullable=False, server_default="0"),
+            sa.Column("raw_last_down", sa.BigInteger(), nullable=False, server_default="0"),
+            sa.Column("raw_last_up", sa.BigInteger(), nullable=False, server_default="0"),
+            sa.Column("last_connected", sa.DateTime(timezone=True), nullable=True),
+            sa.Column("is_active", sa.Boolean(), nullable=False, server_default="true"),
+            sa.Column(
+                "provisioning_status",
+                sa.String(length=30),
+                nullable=False,
+                server_default="active",
+            ),
+            sa.Column("desired_is_active", sa.Boolean(), nullable=False, server_default="true"),
+            sa.Column("actual_is_active", sa.Boolean(), nullable=True),
+            sa.Column("desired_expires_at", sa.DateTime(timezone=True), nullable=True),
+            sa.Column("actual_expires_at", sa.DateTime(timezone=True), nullable=True),
+            sa.Column("desired_version", sa.Integer(), nullable=False, server_default="1"),
+            sa.Column("last_synced_at", sa.DateTime(timezone=True), nullable=True),
+            sa.Column("last_sync_error", sa.Text(), nullable=True),
+            sa.Column(
+                "created_at",
+                sa.DateTime(timezone=True),
+                nullable=False,
+                server_default=sa.func.now(),
+            ),
+        )
+
+    # 3. Restore profile_id to api_operations
+    api_cols = [c["name"] for c in insp.get_columns("api_operations")]
+    if "profile_id" not in api_cols:
+        op.add_column(
+            "api_operations",
+            sa.Column(
+                "profile_id",
+                sa.Integer(),
+                sa.ForeignKey("vpn_profiles.id", ondelete="SET NULL"),
+                nullable=True,
+            ),
+        )
