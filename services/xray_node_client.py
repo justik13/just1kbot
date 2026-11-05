@@ -143,7 +143,8 @@ class XrayNodeClient:
         safe_url = _sanitize_url(url)
         session = await self._get_session()
         retries_limit = self.max_retries if max_retries is None else max_retries
-        client_timeout = aiohttp.ClientTimeout(total=request_timeout) if request_timeout is not None else None
+        effective_timeout = request_timeout if request_timeout is not None else self.timeout
+        client_timeout = aiohttp.ClientTimeout(total=effective_timeout) if effective_timeout is not None else None
 
         for attempt in range(retries_limit + 1):
             try:
@@ -185,12 +186,12 @@ class XrayNodeClient:
         return 0, None, "Max retries exceeded"
 
     async def check_health(
-        self, api_url: str, api_key: str
+        self, api_url: str, api_key: str, timeout: float | None = None
     ) -> tuple[bool, str | None, dict[str, Any] | None]:
         """Check node health fail-closed: must have status=ok, xray_running=True, grpc_ok=True."""
         url = f"{api_url.rstrip('/')}/v1/health"
         headers = self._get_headers(api_key)
-        status_code, data, err = await self._make_request("GET", url, headers)
+        status_code, data, err = await self._make_request("GET", url, headers, request_timeout=timeout)
 
         if status_code == 200 and isinstance(data, dict):
             is_ok = (

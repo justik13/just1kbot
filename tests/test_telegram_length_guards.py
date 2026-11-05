@@ -300,7 +300,7 @@ class TestTelegramBotApi103KeyboardAudit(unittest.IsolatedAsyncioTestCase):
             get_hub_keyboard(),
             # Notifications keyboards
             get_devices_deleted_keyboard(),
-            get_node_monitor_alert_keyboard(1, False).as_markup(),
+            get_node_monitor_alert_keyboard(1).as_markup(),
             get_post_expiry_keyboard(),
             get_pre_expiry_keyboard(),
             get_referral_bonus_keyboard(),

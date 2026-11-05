@@ -202,8 +202,6 @@ async def _get_servers_capacity_summary(session: AsyncSession) -> str:
             reason = getattr(s, "disabled_reason", None)
             if reason == "MANUAL":
                 reason_text = texts.DASHBOARD_DISABLED_REASON_MANUAL
-            elif reason == "AUTO_UNAVAILABLE":
-                reason_text = texts.DASHBOARD_DISABLED_REASON_AUTO
             elif reason:
                 reason_text = f" ({safe(reason)})"
             else:

@@ -178,8 +178,8 @@ class ServerMonitorConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
                 api_url="http://127.0.0.1:8446",
                 api_key="secret",
                 is_active=False,
-                disabled_reason="AUTO_UNAVAILABLE",
-                health_state="AUTO_DISABLED",
+                disabled_reason="MANUAL",
+                health_state="MANUAL_DISABLED",
                 consecutive_fails=5,
             )
             s.add(server)

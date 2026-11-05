@@ -17,8 +17,6 @@ COMMON_ALL_USERS_LABEL = "Все пользователи"
 
 COMMON_ACTIVE_SUBSCRIPTIONS_LABEL = "Активные подписки"
 
-COMMON_AVTOMATICHESKI_OTKLYUCHEN = "🔴 <b>Автоматически отключён</b>"
-
 COMMON_BAN = " [БАН]"
 
 COMMON_BEZ_SUBSCRIPTION = "🔴 Без подписки"
@@ -55,6 +53,12 @@ COMMON_PROTOKOL = """• Протокол: <code>{safe_server_protocol}</code>
 COMMON_PRYAMOY_PEREKHOD = "Прямой переход"
 
 COMMON_REASON_API_NEDOSTUPEN_NESTAB = """• Причина: <b>API недоступен / нестабильное соединение</b>
+"""
+
+COMMON_SERVER_CONNECTIVITY_PROBLEM = """• Связь: <b>API недоступен</b>
+"""
+
+COMMON_SERVER_CONNECTIVITY_CHECKING = """• Связь: <i>Проверка...</i>
 """
 
 COMMON_REZULTAT_PROVERKI_SVYAZI = """

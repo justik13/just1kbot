@@ -88,7 +88,6 @@ class NodeMonitorConcurrencyUnitTests(unittest.IsolatedAsyncioTestCase):
             next_check_at=None,
             consecutive_fails=0,
             consecutive_successes=0,
-            recovery_notice_sent=False,
             last_alert_sent_state=None,
         )
 
@@ -115,7 +114,6 @@ class NodeMonitorConcurrencyUnitTests(unittest.IsolatedAsyncioTestCase):
             next_check_at=None,
             consecutive_fails=0,
             consecutive_successes=0,
-            recovery_notice_sent=False,
             last_alert_sent_state=None,
         )
 
@@ -154,7 +152,6 @@ class NodeMonitorConcurrencyUnitTests(unittest.IsolatedAsyncioTestCase):
             next_check_at=None,
             consecutive_fails=1,
             consecutive_successes=0,
-            recovery_notice_sent=False,
             last_alert_sent_state=None,
         )
 
@@ -180,7 +177,6 @@ class NodeMonitorConcurrencyUnitTests(unittest.IsolatedAsyncioTestCase):
             next_check_at=None,
             consecutive_fails=0,
             consecutive_successes=0,
-            recovery_notice_sent=False,
             last_alert_sent_state=None,
         )
 
@@ -203,7 +199,7 @@ class NodeMonitorConcurrencyUnitTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(st.health_state, "MANUAL_DISABLED")
 
     async def test_unknown_protocol_is_skipped_without_state_mutation(self):
-        """Server with unknown protocol must be SKIPPED without transitioning to PROBLEM or AUTO_DISABLED."""
+        """Server with unknown protocol must be SKIPPED without transitioning to PROBLEM."""
         from services.workers.node_monitor import clear_monitor_states
         clear_monitor_states()
 
@@ -224,7 +220,6 @@ class NodeMonitorConcurrencyUnitTests(unittest.IsolatedAsyncioTestCase):
             consecutive_successes=0,
             problem_started_at=None,
             next_check_at=None,
-            recovery_notice_sent=False,
             last_alert_sent_state=None,
         )
 

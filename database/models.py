@@ -259,9 +259,6 @@ class Server(Base):
     next_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     consecutive_fails: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     consecutive_successes: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
-    recovery_notice_sent: Mapped[bool] = mapped_column(
-        Boolean, default=False, server_default="false"
-    )
     last_alert_sent_state: Mapped[str | None] = mapped_column(String(30), nullable=True)
 
     capabilities: Mapped[list] = mapped_column(

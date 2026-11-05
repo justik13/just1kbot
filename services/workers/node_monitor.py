@@ -1,7 +1,7 @@
 """Periodic health, disk usage (>85%), and availability monitor for VPN nodes.
 
 Unified Server Health Monitor with persistent state machine:
-ONLINE -> WAITING_CONFIRMATION -> PROBLEM -> AUTO_DISABLED -> MANUAL_DISABLED
+ONLINE -> WAITING_CONFIRMATION -> PROBLEM -> ONLINE (or MANUAL_DISABLED)
 """
 import asyncio
 import logging
@@ -29,8 +29,6 @@ from bot.texts.runtime.alerts import (
     ALERT_RELAY_TSPU_PROBLEM,
     ALERT_RELAY_TSPU_PROBLEM_REMINDER,
     ALERT_RELAY_TSPU_RESTORED,
-    ALERT_SERVER_AUTO_DISABLED,
-    ALERT_SERVER_AUTO_DISABLED_RECOVERED,
     ALERT_SERVER_DISK_CRITICAL,
     ALERT_SERVER_OUTAGE_REMINDER,
     ALERT_SERVER_PROBLEM,
@@ -66,8 +64,6 @@ logger = logging.getLogger(__name__)
 
 CHECK_INTERVAL_SECONDS = 60.0  # Частота тиков фонового воркера (1 минута)
 CONFIRMATION_DELAY_SECONDS = 60.0  # Пауза между FAIL #1 и FAIL #2 (неблокирующая)
-PROBLEM_OBSERVATION_TIMEOUT = 15 * 60.0  # 15 минут наблюдения за сервером в статусе PROBLEM
-AUTO_DISABLED_CHECK_INTERVAL = 900.0  # 15 минут между тихими проверками в режиме AUTO_DISABLED
 REQUIRED_STABLE_SUCCESSES = 3  # 3 успешных ответа подряд для подтверждения восстановления
 DISK_ALERT_COOLDOWN_SECONDS = 3600.0  # 1 час между повторными уведомлениями о диске
 REQUIRED_INGRESS_FAILS = 3  # Требуется 3 цикла сбоя подряд (>= 3 мин) перед отправкой алерта
@@ -109,7 +105,6 @@ class ServerMonitorState:
         self.last_check_monotonic: float = 0.0
         self.last_alert_sent_state: str | None = None
         self.disk_alert_last_sent: float | None = None
-        self.recovery_notice_sent: bool = False
         self.last_core_reminder_at: float | None = None
         self.ingress_problem: bool = False
         self.consecutive_ingress_fails: int = 0
@@ -126,16 +121,12 @@ class ServerMonitorState:
     def sync_from_db_server(self, db_server: Server):
         if db_server:
             if not db_server.is_active:
-                if db_server.disabled_reason == "AUTO_UNAVAILABLE":
-                    self.health_state = ServerHealthState.AUTO_DISABLED
-                else:
-                    self.health_state = ServerHealthState.MANUAL_DISABLED
+                self.health_state = ServerHealthState.MANUAL_DISABLED
             else:
                 self.health_state = db_server.health_state or ServerHealthState.ONLINE
 
             self.consecutive_fails = db_server.consecutive_fails or 0
             self.consecutive_successes = db_server.consecutive_successes or 0
-            self.recovery_notice_sent = bool(db_server.recovery_notice_sent)
             self.last_alert_sent_state = db_server.last_alert_sent_state
             if isinstance(getattr(db_server, "extra_data", None), dict):
                 self.ingress_problem = bool(db_server.extra_data.get("ingress_problem", False))
@@ -217,7 +208,6 @@ def reset_server_monitor_state(server_id: int, new_state: str = ServerHealthStat
     st.consecutive_successes = 0
     st.problem_started_at = None
     st.next_check_at = None
-    st.recovery_notice_sent = False
     st.last_alert_sent_state = None
     st.disk_alert_last_sent = None
     st.last_core_reminder_at = None
@@ -306,30 +296,22 @@ async def check_node_resources_and_alerts(bot: Bot):
     async def _check_one(server):
         st = get_server_monitor_state(server.id, server)
 
-        # 1. Проверка ручного/автоматического отключения
+        # 1. Если сервер отключён администратором вручную — фиксируем статус и пропускаем
         if not server.is_active:
-            if server.disabled_reason == "AUTO_UNAVAILABLE":
-                if st.health_state != ServerHealthState.AUTO_DISABLED:
-                    st.health_state = ServerHealthState.AUTO_DISABLED
-            else:
-                st.health_state = ServerHealthState.MANUAL_DISABLED
-        else:
-            if st.health_state in (ServerHealthState.AUTO_DISABLED, ServerHealthState.MANUAL_DISABLED):
-                # Сервер переключен администратором в активный режим
-                st.health_state = ServerHealthState.ONLINE
-                st.consecutive_fails = 0
-                st.consecutive_successes = 0
-                st.problem_started_at = None
-                st.next_check_at = None
-                st.recovery_notice_sent = False
-                st.last_alert_sent_state = None
-
-        # 2. Игнорируем сервера, отключенные вручную
-        if st.health_state == ServerHealthState.MANUAL_DISABLED:
+            st.health_state = ServerHealthState.MANUAL_DISABLED
             return
 
-        # 3. Неблокирующая проверка временных интервалов (WAITING_CONFIRMATION или AUTO_DISABLED)
-        if st.health_state in (ServerHealthState.WAITING_CONFIRMATION, ServerHealthState.AUTO_DISABLED):
+        # Если сервер был отключён, а теперь активен — переводим в ONLINE
+        if st.health_state == ServerHealthState.MANUAL_DISABLED:
+            st.health_state = ServerHealthState.ONLINE
+            st.consecutive_fails = 0
+            st.consecutive_successes = 0
+            st.problem_started_at = None
+            st.next_check_at = None
+            st.last_alert_sent_state = None
+
+        # 2. Неблокирующая проверка временных интервалов (WAITING_CONFIRMATION)
+        if st.health_state == ServerHealthState.WAITING_CONFIRMATION:
             if st.next_check_at and now_m < st.next_check_at:
                 return
 
@@ -951,7 +933,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                 st.next_check_at = None
                 st.problem_started_at = None
 
-                if st.last_alert_sent_state in (ServerHealthState.PROBLEM, ServerHealthState.AUTO_DISABLED):
+                if st.last_alert_sent_state == ServerHealthState.PROBLEM:
                     alerts_to_send.append({
                         "text": ALERT_SERVER_RESTORED.format(
                             server_name=safe(server.name),
@@ -1011,34 +993,18 @@ async def check_node_resources_and_alerts(bot: Bot):
                         "target_alert_state": ServerHealthState.ONLINE,
                     })
 
-            elif st.health_state == ServerHealthState.AUTO_DISABLED:
-                st.consecutive_successes += 1
-                # Запланировать следующую проверку в режиме AUTO_DISABLED через 15 минут
-                st.next_check_at = now_m + AUTO_DISABLED_CHECK_INTERVAL
-
-                if st.consecutive_successes >= REQUIRED_STABLE_SUCCESSES and not st.recovery_notice_sent:
-                    st.last_core_reminder_at = None
-                    alerts_to_send.append({
-                        "text": ALERT_SERVER_AUTO_DISABLED_RECOVERED.format(
-                            server_name=safe(server.name),
-                            server_id=server.id,
-                        ),
-                        "reply_markup": get_node_monitor_alert_keyboard(server.id, include_enable_button=True).as_markup(),
-                        "is_recovery_notice": True,
-                    })
-
         else:
             # Ошибка проверки (FAIL)
             st.consecutive_successes = 0
 
             if st.health_state == ServerHealthState.ONLINE:
-                # Переход в WAITING_CONFIRMATION, планирование проверки через 30 секунд БЕЗ СЛИПА!
+                # Переход в WAITING_CONFIRMATION, планирование проверки через 60 секунд БЕЗ СЛИПА!
                 st.health_state = ServerHealthState.WAITING_CONFIRMATION
                 st.consecutive_fails = 1
                 st.next_check_at = now_m + CONFIRMATION_DELAY_SECONDS
 
             elif st.health_state == ServerHealthState.WAITING_CONFIRMATION:
-                # 30 секунд прошли, FAIL #2 подтвержден -> Переход в PROBLEM!
+                # 60 секунд прошли, FAIL #2 подтвержден -> Переход в PROBLEM!
                 st.health_state = ServerHealthState.PROBLEM
                 st.consecutive_fails = 2
                 st.problem_started_at = now_m
@@ -1055,74 +1021,42 @@ async def check_node_resources_and_alerts(bot: Bot):
 
             elif st.health_state == ServerHealthState.PROBLEM:
                 st.consecutive_fails += 1
+                st.next_check_at = None
 
-                elapsed_problem_sec = 0.0
-                if st.problem_started_at:
-                    elapsed_problem_sec = now_m - st.problem_started_at
-
-                if elapsed_problem_sec >= PROBLEM_OBSERVATION_TIMEOUT:
-                    st.health_state = ServerHealthState.AUTO_DISABLED
-                    st.next_check_at = now_m + AUTO_DISABLED_CHECK_INTERVAL
-                    st.last_core_reminder_at = now_m
-                    alerts_to_send.append({
-                        "text": ALERT_SERVER_AUTO_DISABLED.format(
-                            server_name=safe(server.name),
-                            server_id=server.id,
-                        ),
-                        "reply_markup": get_node_monitor_alert_keyboard(server.id, include_enable_button=True).as_markup(),
-                        "target_alert_state": ServerHealthState.AUTO_DISABLED,
-                    })
-
-            elif st.health_state == ServerHealthState.AUTO_DISABLED:
-                st.next_check_at = now_m + AUTO_DISABLED_CHECK_INTERVAL
-
-        # Повторная попытка отправки не доставленных алертов
+        # Повторная попытка отправки не доставленных алертов или напоминаний о сбое
         if not alerts_to_send:
-            if st.health_state == ServerHealthState.PROBLEM and st.last_alert_sent_state != ServerHealthState.PROBLEM:
-                alerts_to_send.append({
-                    "text": ALERT_SERVER_PROBLEM.format(
-                        server_name=safe(server.name),
-                        server_id=server.id,
-                    ),
-                    "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
-                    "target_alert_state": ServerHealthState.PROBLEM,
-                })
-            elif st.health_state == ServerHealthState.AUTO_DISABLED and st.last_alert_sent_state != ServerHealthState.AUTO_DISABLED:
-                st.last_core_reminder_at = now_m
-                alerts_to_send.append({
-                    "text": ALERT_SERVER_AUTO_DISABLED.format(
-                        server_name=safe(server.name),
-                        server_id=server.id,
-                    ),
-                    "reply_markup": get_node_monitor_alert_keyboard(server.id, include_enable_button=True).as_markup(),
-                    "target_alert_state": ServerHealthState.AUTO_DISABLED,
-                })
-            elif (
-                st.health_state == ServerHealthState.AUTO_DISABLED
-                and st.last_alert_sent_state == ServerHealthState.AUTO_DISABLED
-            ):
-                last_rem = st.last_core_reminder_at
-                if last_rem is None:
-                    st.last_core_reminder_at = now_m
-                elif (now_m - last_rem) >= OUTAGE_REMINDER_INTERVAL_SECONDS:
-                    outage_dur = (now_m - st.problem_started_at) if st.problem_started_at else (now_m - last_rem)
+            if st.health_state == ServerHealthState.PROBLEM:
+                if st.last_alert_sent_state != ServerHealthState.PROBLEM:
                     alerts_to_send.append({
-                        "text": ALERT_SERVER_OUTAGE_REMINDER.format(
+                        "text": ALERT_SERVER_PROBLEM.format(
                             server_name=safe(server.name),
                             server_id=server.id,
-                            hours_text=_format_outage_duration(outage_dur),
                         ),
-                        "reply_markup": get_node_monitor_alert_keyboard(server.id, include_enable_button=True).as_markup(),
-                        "is_reminder": True,
+                        "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
+                        "target_alert_state": ServerHealthState.PROBLEM,
                     })
-                    st.last_core_reminder_at = now_m
+                else:
+                    last_rem = st.last_core_reminder_at
+                    if last_rem is None:
+                        st.last_core_reminder_at = now_m
+                    elif (now_m - last_rem) >= OUTAGE_REMINDER_INTERVAL_SECONDS:
+                        outage_dur = (now_m - st.problem_started_at) if st.problem_started_at else (now_m - last_rem)
+                        alerts_to_send.append({
+                            "text": ALERT_SERVER_OUTAGE_REMINDER.format(
+                                server_name=safe(server.name),
+                                server_id=server.id,
+                                hours_text=_format_outage_duration(outage_dur),
+                            ),
+                            "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
+                            "is_reminder": True,
+                        })
+                        st.last_core_reminder_at = now_m
 
         # 5. ЕДИНСТВЕННОЕ АТОМАРНОЕ ОБНОВЛЕНИЕ БД НА КАЖДУЮ ПРОВЕРКУ (СНАЧАЛА CAS UPDATE)
         update_kwargs = {
             "health_state": st.health_state,
             "consecutive_fails": st.consecutive_fails,
             "consecutive_successes": st.consecutive_successes,
-            "recovery_notice_sent": st.recovery_notice_sent,
             "last_alert_sent_state": st.last_alert_sent_state,
         }
 
@@ -1143,7 +1077,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                 update_kwargs["problem_started_at"] = None
                 update_kwargs["next_check_at"] = None
 
-        if st.health_state in (ServerHealthState.WAITING_CONFIRMATION, ServerHealthState.AUTO_DISABLED) and st.next_check_at:
+        if st.health_state == ServerHealthState.WAITING_CONFIRMATION and st.next_check_at:
             rem = st.next_check_at - now_m
             next_dt = datetime.fromtimestamp(time.time() + max(0.0, rem), tz=timezone.utc)
             update_kwargs["next_check_at"] = next_dt
@@ -1151,11 +1085,6 @@ async def check_node_resources_and_alerts(bot: Bot):
         if st.health_state == ServerHealthState.PROBLEM and st.consecutive_fails == 2:
             update_kwargs["problem_started_at"] = now_utc()
             update_kwargs["next_check_at"] = None
-
-        if st.health_state == ServerHealthState.AUTO_DISABLED and not is_healthy:
-            update_kwargs["is_active"] = False
-            update_kwargs["disabled_reason"] = "AUTO_UNAVAILABLE"
-            update_kwargs["disabled_at"] = now_utc()
 
         async with session_scope() as session:
             # Monotonic CAS update for Xray generation
@@ -1215,7 +1144,6 @@ async def check_node_resources_and_alerts(bot: Bot):
         if applied and alerts_to_send:
             for alert_to_send in alerts_to_send:
                 target_state = alert_to_send.get("target_alert_state")
-                is_rec_notice = alert_to_send.get("is_recovery_notice", False)
                 sent_ok = False
                 try:
                     sent_ok = await _send_admin_alert_msg(
@@ -1230,8 +1158,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                 if sent_ok:
                     if target_state:
                         st.last_alert_sent_state = target_state
-                    if is_rec_notice:
-                        st.recovery_notice_sent = True
 
                     async with session_scope() as session:
                         fresh_server = await get_server_by_id(session, server.id)
@@ -1240,7 +1166,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 session,
                                 fresh_server,
                                 last_alert_sent_state=st.last_alert_sent_state,
-                                recovery_notice_sent=st.recovery_notice_sent,
                             )
 
     # Bounded parallel fan-out: one hung node must not freeze monitoring of

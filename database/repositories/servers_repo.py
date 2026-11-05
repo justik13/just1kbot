@@ -97,7 +97,6 @@ class ServerUpdateFields(TypedDict, total=False):
     next_check_at: datetime | None
     consecutive_fails: int
     consecutive_successes: int
-    recovery_notice_sent: bool
     last_alert_sent_state: str | None
     capabilities: list
     extra_data: dict
@@ -117,7 +116,6 @@ HEALTH_UPDATE_FIELDS = {
     "next_check_at",
     "consecutive_fails",
     "consecutive_successes",
-    "recovery_notice_sent",
     "last_alert_sent_state",
     "extra_data",
 }
@@ -188,7 +186,6 @@ def is_server_allocatable(server: Server | None, protocol: str = VLESS_PROTOCOL)
         return False
     health = getattr(server, "health_state", None)
     if health in (
-        ServerHealthState.AUTO_DISABLED,
         ServerHealthState.MANUAL_DISABLED,
         ServerHealthState.PROBLEM,
     ):
@@ -388,13 +385,7 @@ async def update_server_health_snapshot(
         return None, False
 
     # 1. Admin disable takes absolute precedence: never overwrite an inactive/MANUAL_DISABLED server
-    is_auto_disabled = (
-        not current.is_active
-        and current.health_state == "AUTO_DISABLED"
-        and current.disabled_reason == "AUTO_UNAVAILABLE"
-        and expected_health_state == "AUTO_DISABLED"
-    )
-    if (not current.is_active and not is_auto_disabled) or current.health_state == "MANUAL_DISABLED":
+    if not current.is_active or current.health_state == ServerHealthState.MANUAL_DISABLED:
         return current, False
 
     # 2. Compare-and-Swap (CAS) guard: reject stale monitor snapshot

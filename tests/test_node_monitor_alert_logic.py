@@ -114,7 +114,6 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
         s.consecutive_successes = 0
         s.problem_started_at = None
         s.next_check_at = None
-        s.recovery_notice_sent = False
         s.last_alert_sent_state = None
         for k, v in kwargs.items():
             setattr(s, k, v)
@@ -203,20 +202,19 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             await check_node_resources_and_alerts(self.mock_bot)
             self.assertEqual(self.mock_bot.send_message.call_count, 1)
             text = self.mock_bot.send_message.call_args.kwargs["text"]
-            self.assertIn("VPN-сервер восстановлен", text)
+            self.assertIn("Связь с сервером восстановлена", text)
             self.assertEqual(st_rehydrated.health_state, ServerHealthState.ONLINE)
 
     async def test_manual_enable_resets_db_and_allows_subsequent_recovery_notice(self):
-        """Manual enable by admin resets recovery_notice_sent=False so subsequent failure cycles send recovery notice."""
+        """Manual enable by admin resets state to ONLINE so subsequent failure cycles send recovery notice."""
         server = self._make_server(
             77,
             "Manual-Enable-Node",
             is_active=False,
-            disabled_reason="AUTO_UNAVAILABLE",
-            health_state="AUTO_DISABLED",
+            disabled_reason="MANUAL",
+            health_state="MANUAL_DISABLED",
             consecutive_fails=3,
             consecutive_successes=3,
-            recovery_notice_sent=True,
         )
 
         async def fake_update_server(session, db_srv, **kwargs):
@@ -236,22 +234,19 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             await check_node_resources_and_alerts(self.mock_bot)
             st = get_server_monitor_state(77)
 
-            # DB and RAM must be reset to ONLINE and recovery_notice_sent=False
+            # DB and RAM must be reset to ONLINE
             self.assertEqual(server.health_state, ServerHealthState.ONLINE)
-            self.assertFalse(server.recovery_notice_sent)
-            self.assertFalse(st.recovery_notice_sent)
+            self.assertEqual(st.health_state, ServerHealthState.ONLINE)
 
-            # Server fails again: ONLINE -> WAITING_CONFIRMATION -> PROBLEM -> AUTO_DISABLED
+            # Server fails again: ONLINE -> WAITING_CONFIRMATION -> PROBLEM
             self.mock_xray_client.check_health.return_value = (False, None, None)
             st.next_check_at = time.monotonic() - 1.0
             await check_node_resources_and_alerts(self.mock_bot)  # WAITING_CONFIRMATION
             st.next_check_at = time.monotonic() - 1.0
             await check_node_resources_and_alerts(self.mock_bot)  # PROBLEM
-            st.problem_started_at = time.monotonic() - (16 * 60.0)
-            await check_node_resources_and_alerts(self.mock_bot)  # AUTO_DISABLED
-            self.assertEqual(st.health_state, ServerHealthState.AUTO_DISABLED)
+            self.assertEqual(st.health_state, ServerHealthState.PROBLEM)
 
-            # Server recovers again in AUTO_DISABLED (3x OK)
+            # Server recovers again in PROBLEM (3x OK)
             self.mock_xray_client.check_health.return_value = (True, "epoch-1", {})
             self.mock_bot.send_message.reset_mock()
 
@@ -265,18 +260,17 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             # Verify SECOND recovery notice IS sent!
             self.assertEqual(self.mock_bot.send_message.call_count, 1)
             text = self.mock_bot.send_message.call_args.kwargs["text"]
-            self.assertIn("Сервер восстановлен", text)
-            self.assertTrue(st.recovery_notice_sent)
+            self.assertIn("Связь с сервером восстановлена", text)
+            self.assertEqual(st.health_state, ServerHealthState.ONLINE)
 
-    async def test_auto_disabled_next_check_at_persisted_and_restored_on_restart(self):
-        """AUTO_DISABLED next_check_at is saved in DB and restored on bot restart to respect 15m schedule."""
+    async def test_waiting_confirmation_next_check_at_persisted_and_restored_on_restart(self):
+        """WAITING_CONFIRMATION next_check_at is saved in DB and restored on bot restart to respect confirmation schedule."""
         server = self._make_server(
             88,
             "Auto-Schedule-Node",
-            is_active=False,
-            disabled_reason="AUTO_UNAVAILABLE",
-            health_state="AUTO_DISABLED",
-            consecutive_fails=3,
+            is_active=True,
+            health_state="WAITING_CONFIRMATION",
+            consecutive_fails=1,
             next_check_at=now_utc() + timedelta(minutes=10),
         )
 
@@ -299,7 +293,7 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             self.mock_xray_client.check_health.assert_not_called()
 
     async def test_full_lifecycle_flow(self):
-        """ONLINE -> WAITING_CONFIRMATION -> PROBLEM -> AUTO_DISABLED -> RECOVERY -> ONLINE."""
+        """ONLINE -> WAITING_CONFIRMATION -> PROBLEM -> RECOVERY -> ONLINE."""
         server = self._make_server(99, "Lifecycle-Node")
 
         async def fake_update_server(session, db_srv, **kwargs):
@@ -318,22 +312,22 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(st.health_state, ServerHealthState.WAITING_CONFIRMATION)
             self.mock_bot.send_message.assert_not_called()
 
-            # 2. Fast-forward 30s -> FAIL #2 -> PROBLEM (1 alert)
+            # 2. Fast-forward 60s -> FAIL #2 -> PROBLEM (1 alert)
             st.next_check_at = time.monotonic() - 1.0
             await check_node_resources_and_alerts(self.mock_bot)
             self.assertEqual(st.health_state, ServerHealthState.PROBLEM)
             self.assertEqual(self.mock_bot.send_message.call_count, 1)
-            self.assertIn("Проблема с VPN-сервером", self.mock_bot.send_message.call_args.kwargs["text"])
+            self.assertIn("Проблема со связью", self.mock_bot.send_message.call_args.kwargs["text"])
 
-            # 3. Simulate 16 minutes elapsed in PROBLEM -> AUTO_DISABLED (1 alert)
+            # 3. Simulate continued outage in PROBLEM: server remains is_active=True
             st.problem_started_at = time.monotonic() - (16 * 60.0)
             self.mock_bot.send_message.reset_mock()
             await check_node_resources_and_alerts(self.mock_bot)
-            self.assertEqual(st.health_state, ServerHealthState.AUTO_DISABLED)
-            self.assertEqual(self.mock_bot.send_message.call_count, 1)
-            self.assertIn("Сервер автоматически отключён", self.mock_bot.send_message.call_args.kwargs["text"])
+            self.assertEqual(st.health_state, ServerHealthState.PROBLEM)
+            self.assertTrue(server.is_active)
+            self.mock_bot.send_message.assert_not_called()
 
-            # 4. 3x OK in AUTO_DISABLED -> 1 recovery notice, remains is_active=False
+            # 4. 3x OK in PROBLEM -> 1 recovery notice, transitions to ONLINE
             self.mock_xray_client.check_health.return_value = (True, "epoch-1", {})
             self.mock_bot.send_message.reset_mock()
 
@@ -354,8 +348,9 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             await check_node_resources_and_alerts(self.mock_bot)
             self.assertEqual(st.consecutive_successes, 3)
             self.assertEqual(self.mock_bot.send_message.call_count, 1)
-            self.assertIn("Сервер восстановлен", self.mock_bot.send_message.call_args.kwargs["text"])
-            self.assertTrue(st.recovery_notice_sent)
+            self.assertIn("Связь с сервером восстановлена", self.mock_bot.send_message.call_args.kwargs["text"])
+            self.assertEqual(st.health_state, ServerHealthState.ONLINE)
+            self.assertTrue(server.is_active)
 
     async def test_dismiss_admin_alert_handler_with_server_id(self):
         """Callback admin_dismiss_alert:id deletes the alert message."""
@@ -434,7 +429,6 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
         origin_server.consecutive_successes = 0
         origin_server.problem_started_at = None
         origin_server.next_check_at = None
-        origin_server.recovery_notice_sent = False
         origin_server.last_alert_sent_state = None
 
         relay_server = MagicMock(spec=Server)
@@ -452,7 +446,6 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
         relay_server.consecutive_successes = 0
         relay_server.problem_started_at = None
         relay_server.next_check_at = None
-        relay_server.recovery_notice_sent = False
         relay_server.last_alert_sent_state = None
 
         all_servers = [origin_server, relay_server]
@@ -520,16 +513,15 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             rec_text = rec_args[0][1] if len(rec_args[0]) > 1 else rec_args[1].get("text")
             self.assertIn("42.5", rec_text)
 
-    async def test_auto_disabled_server_hourly_outage_reminder(self):
-        """AUTO_DISABLED server triggers periodic reminder alert every 1 hour (3600s)."""
+    async def test_problem_server_hourly_outage_reminder(self):
+        """Server in PROBLEM triggers periodic reminder alert every 1 hour (3600s)."""
         server = self._make_server(
             201,
             "Disabled-Remind-Node",
-            is_active=False,
-            disabled_reason="AUTO_UNAVAILABLE",
-            health_state="AUTO_DISABLED",
+            is_active=True,
+            health_state="PROBLEM",
             consecutive_fails=5,
-            last_alert_sent_state=ServerHealthState.AUTO_DISABLED,
+            last_alert_sent_state=ServerHealthState.PROBLEM,
         )
 
         async def fake_update_server(session, db_srv, **kwargs):
@@ -544,10 +536,10 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             self.mock_xray_client.check_health.return_value = (False, None, None)
 
             st = get_server_monitor_state(201, server)
-            st.health_state = ServerHealthState.AUTO_DISABLED
-            st.last_alert_sent_state = ServerHealthState.AUTO_DISABLED
+            st.health_state = ServerHealthState.PROBLEM
+            st.last_alert_sent_state = ServerHealthState.PROBLEM
 
-            # 1. First tick in AUTO_DISABLED -> establishes last_core_reminder_at, no duplicate alert
+            # 1. First tick in PROBLEM -> establishes last_core_reminder_at, no duplicate alert
             await check_node_resources_and_alerts(self.mock_bot)
             self.mock_bot.send_message.assert_not_called()
             self.assertIsNotNone(st.last_core_reminder_at)
@@ -564,7 +556,7 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
                 await check_node_resources_and_alerts(self.mock_bot)
                 self.assertEqual(self.mock_bot.send_message.call_count, 1)
                 sent_text = self.mock_bot.send_message.call_args[1]["text"]
-                self.assertIn("Напоминание: Сервер отключён", sent_text)
+                self.assertIn("Напоминание: Связь отсутствует", sent_text)
                 self.assertIn("Disabled-Remind-Node", sent_text)
 
 

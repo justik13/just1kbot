@@ -980,10 +980,10 @@ class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
             api_url="https://s3:8444", api_key="k3", is_active=True,
             health_state=ServerHealthState.MANUAL_DISABLED, xray_instance_epoch="epoch-3",
         )
-        s_auto_disabled = Server(
-            id=4, name="S-AutoDisabled", protocol="xray", capabilities=["xray_origin"],
+        s_problem = Server(
+            id=4, name="S-Problem", protocol="xray", capabilities=["xray_origin"],
             api_url="https://s4:8444", api_key="k4", is_active=True,
-            health_state=ServerHealthState.AUTO_DISABLED, xray_instance_epoch="epoch-4",
+            health_state=ServerHealthState.PROBLEM, xray_instance_epoch="epoch-4",
         )
         s_inactive = Server(
             id=5, name="S-Inactive", protocol="xray", capabilities=["xray_origin"],
@@ -991,7 +991,7 @@ class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
             health_state=ServerHealthState.ONLINE, xray_instance_epoch="epoch-5",
         )
 
-        all_servers = [s_online, s_waiting, s_manual_disabled, s_auto_disabled, s_inactive]
+        all_servers = [s_online, s_waiting, s_manual_disabled, s_problem, s_inactive]
         # Real DB query filters is_active=True and health_state IN (ONLINE, WAITING_CONFIRMATION)
         queried_servers = [
             s for s in all_servers

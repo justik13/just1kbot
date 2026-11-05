@@ -51,14 +51,8 @@ def get_referral_onboarding_keyboard() -> InlineKeyboardMarkup:
 
 def get_node_monitor_alert_keyboard(
     server_id: int,
-    include_enable_button: bool = False,
 ) -> InlineKeyboardBuilder:
     builder = InlineKeyboardBuilder()
-    if include_enable_button:
-        builder.button(
-            text=texts.BTN_ENABLE_SERVER,
-            callback_data=f"admin_server_toggle_apply:{server_id}",
-        )
     builder.button(
         text=texts.BTN_TO_SERVER,
         callback_data=f"admin_server_card:{server_id}",

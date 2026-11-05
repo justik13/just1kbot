@@ -257,7 +257,6 @@ DASHBOARD_INACTIVE_SERVERS_HEADER = "⏸️ <b>Выключенные серве
 DASHBOARD_INACTIVE_SERVER_ROW = "⚪ {flag} <b>{name}</b>: выключен{reason_text} (в БД: {db_used})"
 DASHBOARD_INACTIVE_SERVER_ROW_VLESS = "⚪ {flag} <b>{name}</b>: выключен{reason_text}"
 DASHBOARD_DISABLED_REASON_MANUAL = " (вручную)"
-DASHBOARD_DISABLED_REASON_AUTO = " (автоматически)"
 
 
 AUDIT_DETAIL_CURRENCY_SUFFIX = " ₽"
