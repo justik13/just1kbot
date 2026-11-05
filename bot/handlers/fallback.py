@@ -1,7 +1,7 @@
 import logging
 
 from aiogram import F, Router
-from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
@@ -139,11 +139,22 @@ async def dismiss_notification(
     # If hub_ids was successfully loaded (including empty list) and msg_id is not in hub_ids, delete standalone message
     if msg_id and hub_ids is not None and msg_id not in hub_ids:
         try:
-            if callback.message:
-                await callback.message.delete()
+            await callback.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+            return
+        except TelegramBadRequest as e:
+            err = str(e).lower()
+            if "can't be deleted" in err or "cannot be deleted" in err:
+                try:
+                    await callback.bot.edit_message_reply_markup(
+                        chat_id=chat_id,
+                        message_id=msg_id,
+                        reply_markup=None,
+                    )
+                except Exception:
+                    pass
                 return
-        except (TelegramBadRequest, TelegramAPIError):
-            pass
+            elif "not found" in err:
+                return
         except Exception:
             pass
 
@@ -158,11 +169,24 @@ async def dismiss_broadcast_message(callback: CallbackQuery):
         await callback.answer(show_alert=False)
     except Exception:
         pass
-    if callback.message:
+    if callback.message and callback.message.chat:
+        chat_id = callback.message.chat.id
+        msg_id = callback.message.message_id
         try:
-            await callback.message.delete()
-        except (TelegramBadRequest, TelegramAPIError):
-            pass
+            await callback.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+        except TelegramBadRequest as e:
+            err = str(e).lower()
+            if "can't be deleted" in err or "cannot be deleted" in err:
+                try:
+                    await callback.bot.edit_message_reply_markup(
+                        chat_id=chat_id,
+                        message_id=msg_id,
+                        reply_markup=None,
+                    )
+                except Exception:
+                    pass
+            elif "not found" not in err:
+                logger.debug(f"dismiss_broadcast_message delete failed: {e}")
         except Exception as e:
             logger.debug(f"dismiss_broadcast_message delete failed: {e}")
 

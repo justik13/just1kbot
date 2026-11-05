@@ -980,8 +980,24 @@ async def dismiss_broadcast_result(callback: CallbackQuery):
         )
         return
     await callback.answer(show_alert=False)
-    try:
-        await callback.message.delete()
-    except TelegramBadRequest as e:
-        logger.debug(f"dismiss_broadcast_result delete failed: {e}")
+    if callback.message and callback.message.chat:
+        chat_id = callback.message.chat.id
+        msg_id = callback.message.message_id
+        try:
+            await callback.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+        except TelegramBadRequest as e:
+            err = str(e).lower()
+            if "can't be deleted" in err or "cannot be deleted" in err:
+                try:
+                    await callback.bot.edit_message_reply_markup(
+                        chat_id=chat_id,
+                        message_id=msg_id,
+                        reply_markup=None,
+                    )
+                except Exception:
+                    pass
+            elif "not found" not in err:
+                logger.debug(f"dismiss_broadcast_result delete failed: {e}")
+        except Exception as e:
+            logger.debug(f"dismiss_broadcast_result delete failed: {e}")
 

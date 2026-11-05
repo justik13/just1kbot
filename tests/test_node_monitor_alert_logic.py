@@ -353,17 +353,44 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(server.is_active)
 
     async def test_dismiss_admin_alert_handler_with_server_id(self):
-        """Callback admin_dismiss_alert:id deletes the alert message."""
+        """Callback admin_dismiss_alert:id deletes the alert message via bot.delete_message."""
         callback = AsyncMock(spec=CallbackQuery)
         callback.from_user = MagicMock(id=100)
+        callback.bot = AsyncMock()
         callback.answer = AsyncMock()
-        callback.message = AsyncMock()
+        callback.message = MagicMock(message_id=42, chat=MagicMock(id=100))
 
         with patch("bot.handlers.admin.servers.card_routes.is_admin", return_value=True):
             await dismiss_admin_alert(callback)
 
-            callback.answer.assert_called_once_with("Удалено", show_alert=False)
-            callback.message.delete.assert_called_once()
+            callback.bot.delete_message.assert_called_once_with(chat_id=100, message_id=42)
+            callback.answer.assert_called_once_with(show_alert=False)
+
+    async def test_dismiss_admin_alert_handler_old_message_fallback(self):
+        """When message is >48h old, clears reply markup and shows informative alert."""
+        from aiogram.exceptions import TelegramBadRequest
+        from bot import texts
+
+        callback = AsyncMock(spec=CallbackQuery)
+        callback.from_user = MagicMock(id=100)
+        callback.bot = AsyncMock()
+        callback.bot.delete_message.side_effect = TelegramBadRequest(
+            method=MagicMock(),
+            message="Bad Request: message can't be deleted",
+        )
+        callback.bot.edit_message_reply_markup = AsyncMock()
+        callback.answer = AsyncMock()
+        callback.message = MagicMock(message_id=42, chat=MagicMock(id=100))
+
+        with patch("bot.handlers.admin.servers.card_routes.is_admin", return_value=True):
+            await dismiss_admin_alert(callback)
+
+            callback.bot.edit_message_reply_markup.assert_called_once_with(
+                chat_id=100,
+                message_id=42,
+                reply_markup=None,
+            )
+            callback.answer.assert_called_once_with(texts.ALERT_CANNOT_BE_DELETED_OLD, show_alert=True)
 
 
     async def test_telegram_send_failure_retries_until_delivered(self):
