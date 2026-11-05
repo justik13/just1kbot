@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import time
 
@@ -432,8 +433,18 @@ async def ping_server(
                 )
                 x_ok = False
             else:
-                async with XrayNodeClient(timeout=4.0, max_retries=0) as xclient:
-                    x_ok, _epoch, _detail = await xclient.check_health(xray_url, server.api_key)
+                try:
+                    async with XrayNodeClient(timeout=4.0, max_retries=0) as xclient:
+                        x_ok, _epoch, _detail = await asyncio.wait_for(
+                            xclient.check_health(xray_url, server.api_key, timeout=4.0),
+                            timeout=5.0,
+                        )
+                except (TimeoutError, asyncio.TimeoutError):
+                    logger.warning("Ping health check timed out for server %s (%s)", server.id, server.name)
+                    x_ok = False
+                except Exception as exc:
+                    logger.warning("Ping health check failed for server %s (%s): %s", server.id, server.name, exc)
+                    x_ok = False
             xray_ok = x_ok
 
         is_healthy = xray_ok if (has_xray_or_vless or proto in (XRAY_PROTOCOL, VLESS_PROTOCOL)) else False

@@ -67,7 +67,7 @@ logger = logging.getLogger(__name__)
 CHECK_INTERVAL_SECONDS = 60.0  # Частота тиков фонового воркера (1 минута)
 CONFIRMATION_DELAY_SECONDS = 60.0  # Пауза между FAIL #1 и FAIL #2 (неблокирующая)
 PROBLEM_OBSERVATION_TIMEOUT = 15 * 60.0  # 15 минут наблюдения за сервером в статусе PROBLEM
-AUTO_DISABLED_CHECK_INTERVAL = 900.0  # 15 минут между тихими проверками в режиме AUTO_DISABLED
+AUTO_DISABLED_CHECK_INTERVAL = 60.0  # 1 минута между фоновыми проверками узлов (быстрый Auto-Recovery)
 REQUIRED_STABLE_SUCCESSES = 3  # 3 успешных ответа подряд для подтверждения восстановления
 DISK_ALERT_COOLDOWN_SECONDS = 3600.0  # 1 час между повторными уведомлениями о диске
 REQUIRED_INGRESS_FAILS = 3  # Требуется 3 цикла сбоя подряд (>= 3 мин) перед отправкой алерта
@@ -1012,18 +1012,24 @@ async def check_node_resources_and_alerts(bot: Bot):
                     })
 
             elif st.health_state == ServerHealthState.AUTO_DISABLED:
+                st.consecutive_fails = 0
                 st.consecutive_successes += 1
-                # Запланировать следующую проверку в режиме AUTO_DISABLED через 15 минут
+                # Запланировать следующую проверку в режиме AUTO_DISABLED
                 st.next_check_at = now_m + AUTO_DISABLED_CHECK_INTERVAL
 
                 if st.consecutive_successes >= REQUIRED_STABLE_SUCCESSES and not st.recovery_notice_sent:
+                    st.health_state = ServerHealthState.ONLINE
+                    st.problem_started_at = None
+                    st.next_check_at = None
                     st.last_core_reminder_at = None
+                    st.recovery_notice_sent = True
                     alerts_to_send.append({
                         "text": ALERT_SERVER_AUTO_DISABLED_RECOVERED.format(
                             server_name=safe(server.name),
                             server_id=server.id,
                         ),
-                        "reply_markup": get_node_monitor_alert_keyboard(server.id, include_enable_button=True).as_markup(),
+                        "reply_markup": get_node_monitor_alert_keyboard(server.id, include_enable_button=False).as_markup(),
+                        "target_alert_state": ServerHealthState.ONLINE,
                         "is_recovery_notice": True,
                     })
 
@@ -1069,7 +1075,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                             server_name=safe(server.name),
                             server_id=server.id,
                         ),
-                        "reply_markup": get_node_monitor_alert_keyboard(server.id, include_enable_button=True).as_markup(),
+                        "reply_markup": get_node_monitor_alert_keyboard(server.id, include_enable_button=False).as_markup(),
                         "target_alert_state": ServerHealthState.AUTO_DISABLED,
                     })
 
@@ -1094,7 +1100,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                         server_name=safe(server.name),
                         server_id=server.id,
                     ),
-                    "reply_markup": get_node_monitor_alert_keyboard(server.id, include_enable_button=True).as_markup(),
+                    "reply_markup": get_node_monitor_alert_keyboard(server.id, include_enable_button=False).as_markup(),
                     "target_alert_state": ServerHealthState.AUTO_DISABLED,
                 })
             elif (
@@ -1142,6 +1148,9 @@ async def check_node_resources_and_alerts(bot: Bot):
             if st.health_state == ServerHealthState.ONLINE:
                 update_kwargs["problem_started_at"] = None
                 update_kwargs["next_check_at"] = None
+                update_kwargs["is_active"] = True
+                update_kwargs["disabled_reason"] = None
+                update_kwargs["disabled_at"] = None
 
         if st.health_state in (ServerHealthState.WAITING_CONFIRMATION, ServerHealthState.AUTO_DISABLED) and st.next_check_at:
             rem = st.next_check_at - now_m
