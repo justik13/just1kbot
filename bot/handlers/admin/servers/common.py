@@ -199,7 +199,17 @@ async def _show_server_card(
 
     if server.is_active:
         status_line = texts.COMMON_AKTIVEN
-        extra_status_info = ""
+        from config.constants import ServerHealthState
+        if getattr(server, "health_state", None) in (ServerHealthState.PROBLEM, ServerHealthState.AUTO_DISABLED):
+            last_check_str = format_datetime_msk(server.last_successful_check) if server.last_successful_check else "—"
+            extra_status_info = (
+                texts.COMMON_SERVER_CONNECTIVITY_PROBLEM
+                + texts.COMMON_POSLEDNIY_OTKLIK.format(last_check_str=last_check_str)
+            )
+        elif getattr(server, "health_state", None) == ServerHealthState.WAITING_CONFIRMATION:
+            extra_status_info = texts.COMMON_SERVER_CONNECTIVITY_CHECKING
+        else:
+            extra_status_info = ""
     elif server.disabled_reason == "AUTO_UNAVAILABLE":
         status_line = texts.COMMON_AVTOMATICHESKI_OTKLYUCHEN
         disabled_at_str = format_datetime_msk(server.disabled_at) if server.disabled_at else "—"

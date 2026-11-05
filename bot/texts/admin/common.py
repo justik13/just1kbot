@@ -57,6 +57,12 @@ COMMON_PRYAMOY_PEREKHOD = "Прямой переход"
 COMMON_REASON_API_NEDOSTUPEN_NESTAB = """• Причина: <b>API недоступен / нестабильное соединение</b>
 """
 
+COMMON_SERVER_CONNECTIVITY_PROBLEM = """• Связь: <b>API недоступен</b>
+"""
+
+COMMON_SERVER_CONNECTIVITY_CHECKING = """• Связь: <i>Проверка...</i>
+"""
+
 COMMON_REZULTAT_PROVERKI_SVYAZI = """
 ⚡ <b>Результат проверки связи:</b>
 {ping_result}

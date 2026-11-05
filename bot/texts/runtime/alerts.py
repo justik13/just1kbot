@@ -6,30 +6,7 @@ ALERT_CRITICAL_BOT_ERROR = """🚨 <b>Критическая ошибка бот
 <b>Request ID:</b> <code>{request_id}</code>
 <b>Детали:</b> <code>{error_short}</code>"""
 
-ALERT_SERVER_AUTO_DISABLED = """🔴 <b>Сервер автоматически отключён</b>
-
-🌍 Сервер: <b>{server_name}</b> (ID: {server_id})
-Сервер не восстановил стабильное соединение в течение 15 минут.
-
-Причина: API недоступен / соединение нестабильно.
-Мониторинг продолжает фоновую проверку узла.
-
-🔔 Напоминания будут приходить каждый 1 час. Сервер автоматически вернётся в строй при появлении связи."""
-
-ALERT_SERVER_AUTO_DISABLED_RECOVERED = """✅ <b>Сервер восстановлен</b>
-
-🌍 Сервер: <b>{server_name}</b> (ID: {server_id})
-API стабильно отвечает.
-
-Сервер автоматически возвращён в работу."""
-
-ALERT_SERVER_DISK_CRITICAL = """⚠️ <b>ВНИМАНИЕ: Диск VPN-ноды забит > 85%!</b>
-
-Сервер: <b>{server_name}</b> (ID: {server_id})
-Использование диска: <b>{disk_percent:.1f}%</b>
-Рекомендуется очистить логи или расширить диск."""
-
-ALERT_SERVER_PROBLEM = """⚠️ <b>Проблема с VPN-сервером</b>
+ALERT_SERVER_PROBLEM = """⚠️ <b>Проблема со связью с сервером</b>
 
 🌍 Сервер: <b>{server_name}</b> (ID: {server_id})
 API не отвечает после повторной проверки.
@@ -39,10 +16,20 @@ API не отвечает после повторной проверки.
 🔍 <b>Проверьте сервер.</b>
 Автоматический мониторинг продолжается."""
 
-ALERT_SERVER_RESTORED = """✅ <b>VPN-сервер восстановлен</b>
+ALERT_SERVER_RESTORED = """✅ <b>Связь с сервером восстановлена</b>
 
 🌍 Сервер: <b>{server_name}</b> (ID: {server_id})
 API снова стабильно доступен."""
+
+ALERT_SERVER_DISK_CRITICAL = """⚠️ <b>ВНИМАНИЕ: Диск VPN-ноды забит > 85%!</b>
+
+Сервер: <b>{server_name}</b> (ID: {server_id})
+Использование диска: <b>{disk_percent:.1f}%</b>
+Рекомендуется очистить логи или расширить диск."""
+
+# Алиасы для обратной совместимости со старыми модулями
+ALERT_SERVER_AUTO_DISABLED = ALERT_SERVER_PROBLEM
+ALERT_SERVER_AUTO_DISABLED_RECOVERED = ALERT_SERVER_RESTORED
 
 ALERT_TITLE_CRITICAL_STOP = "Критическая остановка фоновых задач"
 
@@ -111,11 +98,10 @@ ALERT_RELAY_TSPU_RESTORED = """✅ <b>Доступность узла из РФ 
 
 TCP-соединение из Москвы снова успешно устанавливается."""
 
-ALERT_SERVER_OUTAGE_REMINDER = """⚠️ <b>Напоминание: Сервер отключён уже {hours_text}</b>
+ALERT_SERVER_OUTAGE_REMINDER = """⚠️ <b>Напоминание: Связь отсутствует уже {hours_text}</b>
 
 🌍 Сервер: <b>{server_name}</b> (ID: {server_id})
 Причина: API недоступен / соединение нестабильно.
-Сервер по-прежнему исключён из распределения трафика.
 
 🔍 <i>Проверьте доступность узла или запустите диагностику 'just1knode doctor'.</i>"""
 
