@@ -1017,7 +1017,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                 # Запланировать следующую проверку в режиме AUTO_DISABLED
                 st.next_check_at = now_m + AUTO_DISABLED_CHECK_INTERVAL
 
-                if st.consecutive_successes >= REQUIRED_STABLE_SUCCESSES and not st.recovery_notice_sent:
+                if st.consecutive_successes >= REQUIRED_STABLE_SUCCESSES:
                     st.health_state = ServerHealthState.ONLINE
                     st.problem_started_at = None
                     st.next_check_at = None
@@ -1042,6 +1042,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                 st.health_state = ServerHealthState.WAITING_CONFIRMATION
                 st.consecutive_fails = 1
                 st.next_check_at = now_m + CONFIRMATION_DELAY_SECONDS
+                st.recovery_notice_sent = False
 
             elif st.health_state == ServerHealthState.WAITING_CONFIRMATION:
                 # 30 секунд прошли, FAIL #2 подтвержден -> Переход в PROBLEM!
@@ -1070,6 +1071,8 @@ async def check_node_resources_and_alerts(bot: Bot):
                     st.health_state = ServerHealthState.AUTO_DISABLED
                     st.next_check_at = now_m + AUTO_DISABLED_CHECK_INTERVAL
                     st.last_core_reminder_at = now_m
+                    st.consecutive_successes = 0
+                    st.recovery_notice_sent = False
                     alerts_to_send.append({
                         "text": ALERT_SERVER_AUTO_DISABLED.format(
                             server_name=safe(server.name),
