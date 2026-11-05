@@ -1264,56 +1264,6 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                 decoded_announce = base64.b64decode(announce_header.replace("base64:", "")).decode("utf-8")
                 self.assertIn("техническом обслуживании", decoded_announce)
 
-    async def test_active_sub_with_auto_disabled_health_state_receives_maintenance_announce(self):
-        """Verify active subscription gets 200 and maintenance banner when server is in AUTO_DISABLED state."""
-        now = datetime.now(timezone.utc)
-        sub = WhiteInternetSubscription(
-            id=47,
-            user_id=10,
-            origin_node_id=1,
-            token="active-sub-auto-disabled-12345",
-            status=WhiteInternetStatus.ACTIVE,
-            provisioning_status=WhiteInternetProvisioningStatus.ACTIVE,
-            expires_at=now + timedelta(days=15),
-            base_traffic_bytes=50 * 1024 * 1024 * 1024,
-            desired_version=1,
-            actual_version=1,
-            last_reconciled_node_epoch="epoch-xyz",
-            device_limit=1,
-            active_hwids={},
-        )
-        server = Server(
-            id=1,
-            name="Origin-Node",
-            protocol=XRAY_PROTOCOL,
-            api_url="https://cdn.example.com:8444",
-            xray_instance_epoch="epoch-xyz",
-            capabilities=["xray_origin"],
-            is_active=False,
-            health_state=ServerHealthState.AUTO_DISABLED,
-            extra_data={"cdn_domain": "cdn.example.com"},
-        )
-        mock_session = AsyncMock()
-        mock_session.scalar.return_value = server
-        mock_session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
-        mock_session.get.return_value = sub
-
-        @asynccontextmanager
-        async def fake_session_scope():
-            yield mock_session
-
-        with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
-            with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
-                resp = await self.client.get(
-                    "/sub/wl/active-sub-auto-disabled-12345",
-                    headers={"X-Hwid": "test-device-hwid"},
-                )
-                self.assertEqual(resp.status, 200)
-                announce_header = resp.headers.get("Announce", "")
-                self.assertTrue(announce_header.startswith("base64:"))
-                decoded_announce = base64.b64decode(announce_header.replace("base64:", "")).decode("utf-8")
-                self.assertIn("техническом обслуживании", decoded_announce)
-
     async def test_mobile_incy_and_happ_with_hwid_receive_service_notice_on_expired(self):
         now = datetime.now(timezone.utc)
         sub = MagicMock(spec=WhiteInternetSubscription)

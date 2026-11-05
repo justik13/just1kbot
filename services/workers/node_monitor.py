@@ -1,7 +1,7 @@
 """Periodic health, disk usage (>85%), and availability monitor for VPN nodes.
 
 Unified Server Health Monitor with persistent state machine:
-ONLINE -> WAITING_CONFIRMATION -> PROBLEM -> AUTO_DISABLED -> MANUAL_DISABLED
+ONLINE -> WAITING_CONFIRMATION -> PROBLEM -> ONLINE (or MANUAL_DISABLED)
 """
 import asyncio
 import logging
@@ -64,8 +64,6 @@ logger = logging.getLogger(__name__)
 
 CHECK_INTERVAL_SECONDS = 60.0  # Частота тиков фонового воркера (1 минута)
 CONFIRMATION_DELAY_SECONDS = 60.0  # Пауза между FAIL #1 и FAIL #2 (неблокирующая)
-PROBLEM_OBSERVATION_TIMEOUT = 15 * 60.0  # 15 минут наблюдения за сервером в статусе PROBLEM
-AUTO_DISABLED_CHECK_INTERVAL = 60.0  # 1 минута между фоновыми проверками узлов (быстрый Auto-Recovery)
 REQUIRED_STABLE_SUCCESSES = 3  # 3 успешных ответа подряд для подтверждения восстановления
 DISK_ALERT_COOLDOWN_SECONDS = 3600.0  # 1 час между повторными уведомлениями о диске
 REQUIRED_INGRESS_FAILS = 3  # Требуется 3 цикла сбоя подряд (>= 3 мин) перед отправкой алерта
@@ -124,10 +122,7 @@ class ServerMonitorState:
     def sync_from_db_server(self, db_server: Server):
         if db_server:
             if not db_server.is_active:
-                if db_server.disabled_reason == "AUTO_UNAVAILABLE":
-                    self.health_state = ServerHealthState.ONLINE
-                else:
-                    self.health_state = ServerHealthState.MANUAL_DISABLED
+                self.health_state = ServerHealthState.MANUAL_DISABLED
             else:
                 self.health_state = db_server.health_state or ServerHealthState.ONLINE
 
@@ -304,46 +299,22 @@ async def check_node_resources_and_alerts(bot: Bot):
     async def _check_one(server):
         st = get_server_monitor_state(server.id, server)
 
-        # 1. Проверка ручного отключения и авто-исцеление старого легаси AUTO_UNAVAILABLE
+        # 1. Если сервер отключён администратором вручную — фиксируем статус и пропускаем
         if not server.is_active:
-            if server.disabled_reason == "AUTO_UNAVAILABLE":
-                # Легаси-запись от предыдущих версий монитора: возвращаем активность
-                server.is_active = True
-                st.health_state = ServerHealthState.ONLINE
-                st.consecutive_fails = 0
-                st.consecutive_successes = 0
-                st.problem_started_at = None
-                st.next_check_at = None
-                st.last_alert_sent_state = None
-                async with session_scope() as session:
-                    db_srv = await get_server_by_id(session, server.id)
-                    if db_srv:
-                        await update_server(
-                            session,
-                            db_srv,
-                            is_active=True,
-                            disabled_reason=None,
-                            disabled_at=None,
-                            health_state=ServerHealthState.ONLINE,
-                        )
-            else:
-                st.health_state = ServerHealthState.MANUAL_DISABLED
-        else:
-            if st.health_state in (ServerHealthState.AUTO_DISABLED, ServerHealthState.MANUAL_DISABLED):
-                # Сервер активен в БД, сбрасываем состояние отключения
-                st.health_state = ServerHealthState.ONLINE
-                st.consecutive_fails = 0
-                st.consecutive_successes = 0
-                st.problem_started_at = None
-                st.next_check_at = None
-                st.recovery_notice_sent = False
-                st.last_alert_sent_state = None
-
-        # 2. Игнорируем сервера, отключенные вручную
-        if st.health_state == ServerHealthState.MANUAL_DISABLED:
+            st.health_state = ServerHealthState.MANUAL_DISABLED
             return
 
-        # 3. Неблокирующая проверка временных интервалов (WAITING_CONFIRMATION)
+        # Если сервер был отключён, а теперь активен — переводим в ONLINE
+        if st.health_state == ServerHealthState.MANUAL_DISABLED:
+            st.health_state = ServerHealthState.ONLINE
+            st.consecutive_fails = 0
+            st.consecutive_successes = 0
+            st.problem_started_at = None
+            st.next_check_at = None
+            st.recovery_notice_sent = False
+            st.last_alert_sent_state = None
+
+        # 2. Неблокирующая проверка временных интервалов (WAITING_CONFIRMATION)
         if st.health_state == ServerHealthState.WAITING_CONFIRMATION:
             if st.next_check_at and now_m < st.next_check_at:
                 return
@@ -966,7 +937,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                 st.next_check_at = None
                 st.problem_started_at = None
 
-                if st.last_alert_sent_state in (ServerHealthState.PROBLEM, ServerHealthState.AUTO_DISABLED):
+                if st.last_alert_sent_state == ServerHealthState.PROBLEM:
                     alerts_to_send.append({
                         "text": ALERT_SERVER_RESTORED.format(
                             server_name=safe(server.name),
@@ -1007,7 +978,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                     elif disk_percent <= 80.0:
                         st.disk_alert_last_sent = None
 
-            elif st.health_state in (ServerHealthState.PROBLEM, ServerHealthState.AUTO_DISABLED):
+            elif st.health_state == ServerHealthState.PROBLEM:
                 st.consecutive_fails = 0
                 st.consecutive_successes += 1
 
@@ -1053,14 +1024,13 @@ async def check_node_resources_and_alerts(bot: Bot):
                     "target_alert_state": ServerHealthState.PROBLEM,
                 })
 
-            elif st.health_state in (ServerHealthState.PROBLEM, ServerHealthState.AUTO_DISABLED):
-                st.health_state = ServerHealthState.PROBLEM
+            elif st.health_state == ServerHealthState.PROBLEM:
                 st.consecutive_fails += 1
                 st.next_check_at = None
 
         # Повторная попытка отправки не доставленных алертов или напоминаний о сбое
         if not alerts_to_send:
-            if st.health_state in (ServerHealthState.PROBLEM, ServerHealthState.AUTO_DISABLED):
+            if st.health_state == ServerHealthState.PROBLEM:
                 if st.last_alert_sent_state != ServerHealthState.PROBLEM:
                     alerts_to_send.append({
                         "text": ALERT_SERVER_PROBLEM.format(
@@ -1120,7 +1090,7 @@ async def check_node_resources_and_alerts(bot: Bot):
             next_dt = datetime.fromtimestamp(time.time() + max(0.0, rem), tz=timezone.utc)
             update_kwargs["next_check_at"] = next_dt
 
-        if st.health_state in (ServerHealthState.PROBLEM, ServerHealthState.AUTO_DISABLED) and st.consecutive_fails == 2:
+        if st.health_state == ServerHealthState.PROBLEM and st.consecutive_fails == 2:
             update_kwargs["problem_started_at"] = now_utc()
             update_kwargs["next_check_at"] = None
 

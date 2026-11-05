@@ -188,7 +188,6 @@ def is_server_allocatable(server: Server | None, protocol: str = VLESS_PROTOCOL)
         return False
     health = getattr(server, "health_state", None)
     if health in (
-        ServerHealthState.AUTO_DISABLED,
         ServerHealthState.MANUAL_DISABLED,
         ServerHealthState.PROBLEM,
     ):

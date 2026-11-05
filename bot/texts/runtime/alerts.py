@@ -27,10 +27,6 @@ ALERT_SERVER_DISK_CRITICAL = """⚠️ <b>ВНИМАНИЕ: Диск VPN-нод�
 Использование диска: <b>{disk_percent:.1f}%</b>
 Рекомендуется очистить логи или расширить диск."""
 
-# Алиасы для обратной совместимости со старыми модулями
-ALERT_SERVER_AUTO_DISABLED = ALERT_SERVER_PROBLEM
-ALERT_SERVER_AUTO_DISABLED_RECOVERED = ALERT_SERVER_RESTORED
-
 ALERT_TITLE_CRITICAL_STOP = "Критическая остановка фоновых задач"
 
 ALERT_TITLE_WORKER_FAILED = "Фоновый воркер упал"
@@ -142,7 +138,7 @@ ALERT_API_OPERATION_DEAD = """🚨 <b>Сбой операции с ключом 
 ALERT_WHITE_INTERNET_ORIGIN_EXHAUSTED = """🚨 <b>Внимание: Нет доступных Origin-серверов!</b>
 
 Не удалось выделить Origin-узел для подписки ID: <code>{sub_id}</code>.
-Все Origin-серверы либо недоступны (OFFLINE/AUTO_DISABLED), либо исчерпали лимит емкости.
+Все Origin-серверы либо недоступны (сбой связи / отключены), либо исчерпали лимит емкости.
 
 🔍 <i>Проверьте доступность Origin-серверов в админке или увеличьте лимит емкости (max_clients).</i>"""
 

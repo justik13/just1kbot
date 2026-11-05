@@ -125,7 +125,9 @@ class TestGroupCAlembicMigration0017(unittest.TestCase):
     def test_alembic_heads_and_chain(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
         heads = scripts.get_heads()
-        self.assertEqual(heads, ["0043_purge_legacy_awg"])
+        self.assertEqual(heads, ["0044_clean_auto_disabled_servers"])
+        rev = scripts.get_revision("0044_clean_auto_disabled_servers")
+        self.assertEqual(rev.down_revision, "0043_purge_legacy_awg")
         rev = scripts.get_revision("0043_purge_legacy_awg")
         self.assertEqual(rev.down_revision, "0042_servers_proto_vless")
         rev = scripts.get_revision("0042_servers_proto_vless")

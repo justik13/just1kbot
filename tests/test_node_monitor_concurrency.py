@@ -203,7 +203,7 @@ class NodeMonitorConcurrencyUnitTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(st.health_state, "MANUAL_DISABLED")
 
     async def test_unknown_protocol_is_skipped_without_state_mutation(self):
-        """Server with unknown protocol must be SKIPPED without transitioning to PROBLEM or AUTO_DISABLED."""
+        """Server with unknown protocol must be SKIPPED without transitioning to PROBLEM."""
         from services.workers.node_monitor import clear_monitor_states
         clear_monitor_states()
 
