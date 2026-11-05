@@ -662,11 +662,37 @@ async def dismiss_admin_alert(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
-    await callback.answer(texts.ADMIN_SERVER_DELETED_BADGE, show_alert=False)
+
+    chat_id = callback.message.chat.id if callback.message and callback.message.chat else callback.from_user.id
+    message_id = callback.message.message_id if callback.message else None
+
+    if not message_id:
+        await callback.answer(show_alert=False)
+        return
+
     try:
-        await callback.message.delete()
+        await callback.bot.delete_message(chat_id=chat_id, message_id=message_id)
+        await callback.answer(show_alert=False)
+    except TelegramBadRequest as e:
+        err = str(e).lower()
+        if "can't be deleted" in err or "cannot be deleted" in err:
+            try:
+                await callback.bot.edit_message_reply_markup(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    reply_markup=None,
+                )
+            except Exception:
+                pass
+            await callback.answer(texts.ALERT_CANNOT_BE_DELETED_OLD, show_alert=True)
+        elif "not found" in err:
+            await callback.answer(show_alert=False)
+        else:
+            logger.warning("TelegramBadRequest deleting alert message %s in %s: %s", message_id, chat_id, e)
+            await callback.answer(show_alert=False)
     except Exception as e:
-        logger.debug(f"Failed to delete alert message: {e}")
+        logger.warning("Unexpected error deleting alert message %s in %s: %s", message_id, chat_id, e)
+        await callback.answer(show_alert=False)
 
 
 @router.callback_query(F.data.startswith("admin_server_broadcast:"))
