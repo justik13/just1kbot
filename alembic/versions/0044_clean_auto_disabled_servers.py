@@ -7,6 +7,7 @@ Create Date: 2026-11-05 12:00:00.000000
 
 from collections.abc import Sequence
 
+import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
@@ -23,16 +24,25 @@ def upgrade() -> None:
         SET is_active = true,
             disabled_reason = NULL,
             disabled_at = NULL,
-            health_state = 'ONLINE',
-            consecutive_fails = 0,
+            health_state = 'PROBLEM',
+            consecutive_fails = 2,
             consecutive_successes = 0,
-            problem_started_at = NULL,
+            problem_started_at = COALESCE(disabled_at, clock_timestamp()),
             next_check_at = NULL
         WHERE disabled_reason = 'AUTO_UNAVAILABLE'
            OR health_state = 'AUTO_DISABLED';
         """
     )
+    op.drop_column("servers", "recovery_notice_sent")
 
 
 def downgrade() -> None:
-    pass
+    op.add_column(
+        "servers",
+        sa.Column(
+            "recovery_notice_sent",
+            sa.Boolean(),
+            nullable=False,
+            server_default="false",
+        ),
+    )

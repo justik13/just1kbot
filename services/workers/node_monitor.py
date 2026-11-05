@@ -105,7 +105,6 @@ class ServerMonitorState:
         self.last_check_monotonic: float = 0.0
         self.last_alert_sent_state: str | None = None
         self.disk_alert_last_sent: float | None = None
-        self.recovery_notice_sent: bool = False
         self.last_core_reminder_at: float | None = None
         self.ingress_problem: bool = False
         self.consecutive_ingress_fails: int = 0
@@ -128,7 +127,6 @@ class ServerMonitorState:
 
             self.consecutive_fails = db_server.consecutive_fails or 0
             self.consecutive_successes = db_server.consecutive_successes or 0
-            self.recovery_notice_sent = bool(db_server.recovery_notice_sent)
             self.last_alert_sent_state = db_server.last_alert_sent_state
             if isinstance(getattr(db_server, "extra_data", None), dict):
                 self.ingress_problem = bool(db_server.extra_data.get("ingress_problem", False))
@@ -210,7 +208,6 @@ def reset_server_monitor_state(server_id: int, new_state: str = ServerHealthStat
     st.consecutive_successes = 0
     st.problem_started_at = None
     st.next_check_at = None
-    st.recovery_notice_sent = False
     st.last_alert_sent_state = None
     st.disk_alert_last_sent = None
     st.last_core_reminder_at = None
@@ -311,7 +308,6 @@ async def check_node_resources_and_alerts(bot: Bot):
             st.consecutive_successes = 0
             st.problem_started_at = None
             st.next_check_at = None
-            st.recovery_notice_sent = False
             st.last_alert_sent_state = None
 
         # 2. Неблокирующая проверка временных интервалов (WAITING_CONFIRMATION)
@@ -993,7 +989,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                             server_name=safe(server.name),
                             server_id=server.id,
                         ),
-                        "reply_markup": get_node_monitor_alert_keyboard(server.id, include_enable_button=False).as_markup(),
+                        "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
                         "target_alert_state": ServerHealthState.ONLINE,
                     })
 
@@ -1006,7 +1002,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                 st.health_state = ServerHealthState.WAITING_CONFIRMATION
                 st.consecutive_fails = 1
                 st.next_check_at = now_m + CONFIRMATION_DELAY_SECONDS
-                st.recovery_notice_sent = False
 
             elif st.health_state == ServerHealthState.WAITING_CONFIRMATION:
                 # 60 секунд прошли, FAIL #2 подтвержден -> Переход в PROBLEM!
@@ -1020,7 +1015,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                         server_name=safe(server.name),
                         server_id=server.id,
                     ),
-                    "reply_markup": get_node_monitor_alert_keyboard(server.id, include_enable_button=False).as_markup(),
+                    "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
                     "target_alert_state": ServerHealthState.PROBLEM,
                 })
 
@@ -1037,7 +1032,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                             server_name=safe(server.name),
                             server_id=server.id,
                         ),
-                        "reply_markup": get_node_monitor_alert_keyboard(server.id, include_enable_button=False).as_markup(),
+                        "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
                         "target_alert_state": ServerHealthState.PROBLEM,
                     })
                 else:
@@ -1052,7 +1047,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 server_id=server.id,
                                 hours_text=_format_outage_duration(outage_dur),
                             ),
-                            "reply_markup": get_node_monitor_alert_keyboard(server.id, include_enable_button=False).as_markup(),
+                            "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
                             "is_reminder": True,
                         })
                         st.last_core_reminder_at = now_m
@@ -1062,7 +1057,6 @@ async def check_node_resources_and_alerts(bot: Bot):
             "health_state": st.health_state,
             "consecutive_fails": st.consecutive_fails,
             "consecutive_successes": st.consecutive_successes,
-            "recovery_notice_sent": st.recovery_notice_sent,
             "last_alert_sent_state": st.last_alert_sent_state,
         }
 
@@ -1080,10 +1074,8 @@ async def check_node_resources_and_alerts(bot: Bot):
                     update_kwargs["extra_data"] = extra_update
 
             if st.health_state == ServerHealthState.ONLINE:
-                st.recovery_notice_sent = False
                 update_kwargs["problem_started_at"] = None
                 update_kwargs["next_check_at"] = None
-                update_kwargs["recovery_notice_sent"] = False
 
         if st.health_state == ServerHealthState.WAITING_CONFIRMATION and st.next_check_at:
             rem = st.next_check_at - now_m
@@ -1152,7 +1144,6 @@ async def check_node_resources_and_alerts(bot: Bot):
         if applied and alerts_to_send:
             for alert_to_send in alerts_to_send:
                 target_state = alert_to_send.get("target_alert_state")
-                is_rec_notice = alert_to_send.get("is_recovery_notice", False)
                 sent_ok = False
                 try:
                     sent_ok = await _send_admin_alert_msg(
@@ -1167,8 +1158,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                 if sent_ok:
                     if target_state:
                         st.last_alert_sent_state = target_state
-                    if is_rec_notice:
-                        st.recovery_notice_sent = True
 
                     async with session_scope() as session:
                         fresh_server = await get_server_by_id(session, server.id)
@@ -1177,7 +1166,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 session,
                                 fresh_server,
                                 last_alert_sent_state=st.last_alert_sent_state,
-                                recovery_notice_sent=st.recovery_notice_sent,
                             )
 
     # Bounded parallel fan-out: one hung node must not freeze monitoring of

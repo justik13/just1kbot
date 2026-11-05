@@ -114,7 +114,6 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
         s.consecutive_successes = 0
         s.problem_started_at = None
         s.next_check_at = None
-        s.recovery_notice_sent = False
         s.last_alert_sent_state = None
         for k, v in kwargs.items():
             setattr(s, k, v)
@@ -207,7 +206,7 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(st_rehydrated.health_state, ServerHealthState.ONLINE)
 
     async def test_manual_enable_resets_db_and_allows_subsequent_recovery_notice(self):
-        """Manual enable by admin resets recovery_notice_sent=False so subsequent failure cycles send recovery notice."""
+        """Manual enable by admin resets state to ONLINE so subsequent failure cycles send recovery notice."""
         server = self._make_server(
             77,
             "Manual-Enable-Node",
@@ -216,7 +215,6 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             health_state="MANUAL_DISABLED",
             consecutive_fails=3,
             consecutive_successes=3,
-            recovery_notice_sent=True,
         )
 
         async def fake_update_server(session, db_srv, **kwargs):
@@ -236,10 +234,9 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             await check_node_resources_and_alerts(self.mock_bot)
             st = get_server_monitor_state(77)
 
-            # DB and RAM must be reset to ONLINE and recovery_notice_sent=False
+            # DB and RAM must be reset to ONLINE
             self.assertEqual(server.health_state, ServerHealthState.ONLINE)
-            self.assertFalse(server.recovery_notice_sent)
-            self.assertFalse(st.recovery_notice_sent)
+            self.assertEqual(st.health_state, ServerHealthState.ONLINE)
 
             # Server fails again: ONLINE -> WAITING_CONFIRMATION -> PROBLEM
             self.mock_xray_client.check_health.return_value = (False, None, None)
@@ -432,7 +429,6 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
         origin_server.consecutive_successes = 0
         origin_server.problem_started_at = None
         origin_server.next_check_at = None
-        origin_server.recovery_notice_sent = False
         origin_server.last_alert_sent_state = None
 
         relay_server = MagicMock(spec=Server)
@@ -450,7 +446,6 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
         relay_server.consecutive_successes = 0
         relay_server.problem_started_at = None
         relay_server.next_check_at = None
-        relay_server.recovery_notice_sent = False
         relay_server.last_alert_sent_state = None
 
         all_servers = [origin_server, relay_server]

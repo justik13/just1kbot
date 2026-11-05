@@ -88,7 +88,6 @@ class NodeMonitorConcurrencyUnitTests(unittest.IsolatedAsyncioTestCase):
             next_check_at=None,
             consecutive_fails=0,
             consecutive_successes=0,
-            recovery_notice_sent=False,
             last_alert_sent_state=None,
         )
 
@@ -115,7 +114,6 @@ class NodeMonitorConcurrencyUnitTests(unittest.IsolatedAsyncioTestCase):
             next_check_at=None,
             consecutive_fails=0,
             consecutive_successes=0,
-            recovery_notice_sent=False,
             last_alert_sent_state=None,
         )
 
@@ -154,7 +152,6 @@ class NodeMonitorConcurrencyUnitTests(unittest.IsolatedAsyncioTestCase):
             next_check_at=None,
             consecutive_fails=1,
             consecutive_successes=0,
-            recovery_notice_sent=False,
             last_alert_sent_state=None,
         )
 
@@ -180,7 +177,6 @@ class NodeMonitorConcurrencyUnitTests(unittest.IsolatedAsyncioTestCase):
             next_check_at=None,
             consecutive_fails=0,
             consecutive_successes=0,
-            recovery_notice_sent=False,
             last_alert_sent_state=None,
         )
 
@@ -224,7 +220,6 @@ class NodeMonitorConcurrencyUnitTests(unittest.IsolatedAsyncioTestCase):
             consecutive_successes=0,
             problem_started_at=None,
             next_check_at=None,
-            recovery_notice_sent=False,
             last_alert_sent_state=None,
         )
 

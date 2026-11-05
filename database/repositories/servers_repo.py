@@ -97,7 +97,6 @@ class ServerUpdateFields(TypedDict, total=False):
     next_check_at: datetime | None
     consecutive_fails: int
     consecutive_successes: int
-    recovery_notice_sent: bool
     last_alert_sent_state: str | None
     capabilities: list
     extra_data: dict
@@ -117,7 +116,6 @@ HEALTH_UPDATE_FIELDS = {
     "next_check_at",
     "consecutive_fails",
     "consecutive_successes",
-    "recovery_notice_sent",
     "last_alert_sent_state",
     "extra_data",
 }

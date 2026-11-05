@@ -17,8 +17,6 @@ COMMON_ALL_USERS_LABEL = "Все пользователи"
 
 COMMON_ACTIVE_SUBSCRIPTIONS_LABEL = "Активные подписки"
 
-COMMON_AVTOMATICHESKI_OTKLYUCHEN = "🔴 <b>Автоматически отключён</b>"
-
 COMMON_BAN = " [БАН]"
 
 COMMON_BEZ_SUBSCRIPTION = "🔴 Без подписки"
