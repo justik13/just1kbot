@@ -33,6 +33,7 @@ from database.models import Server
 from database.repositories import users_repo, white_internet_repo
 from database.repositories.system_settings_repo import get_system_setting
 from services.white_internet_service import WhiteInternetService
+from bot.handlers.vless_web import load_vless_landing_active_html
 from utils.client_parser import extract_device_metadata, parse_client_from_user_agent
 from utils.datetime_helpers import now_utc
 from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
@@ -42,7 +43,7 @@ from utils.security import normalize_public_domain
 logger = logging.getLogger(__name__)
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
-_LANDING_ACTIVE_HTML = (_TEMPLATES_DIR / "vless_landing_active.html").read_text(encoding="utf-8")
+_LANDING_ACTIVE_HTML = load_vless_landing_active_html()
 _LANDING_INACTIVE_HTML = (_TEMPLATES_DIR / "vless_landing_inactive.html").read_text(encoding="utf-8")
 _LANDING_PENDING_HTML = (_TEMPLATES_DIR / "vless_landing_pending.html").read_text(encoding="utf-8")
 
@@ -140,6 +141,7 @@ def _render_white_internet_landing_html(
     page_title: str | None = None,
     tier: str = "white_internet",
     tariff_badge: str | None = None,
+    device_limit: int | None = None,
 ) -> str:
     """Render universal landing page for INCY 1-click import."""
     clean_bot = (
@@ -167,6 +169,7 @@ def _render_white_internet_landing_html(
         _LANDING_ACTIVE_HTML.replace("{page_title}", html.escape(effective_title))
         .replace("{tier}", html.escape(tier))
         .replace("{tariff_badge_html}", badge_html)
+        .replace("{device_limit}", str(device_limit or 1))
     )
 
 
@@ -525,6 +528,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                     page_title=texts.LANDING_WHITE_INTERNET_PAGE_TITLE,
                     tier="white_internet",
                     tariff_badge=texts.LANDING_SPECIAL_ACCESS_BADGE,
+                    device_limit=1,
                 )
                 return web.Response(status=200, text=html_body, headers=landing_headers)
             headers = dict(common_headers)

@@ -28,7 +28,10 @@
             }
         }
 
+        let activePlatform = "ios";
+
         function switchPlatformTab(platform) {
+            activePlatform = platform;
             const platforms = ["ios", "android", "windows", "macos", "github"];
             platforms.forEach(function(p) {
                 const panel = document.getElementById("tab-" + p);
@@ -168,10 +171,14 @@
                 accordion.classList.add("open");
                 btn.setAttribute("aria-expanded", "true");
                 if (container) container.setAttribute("aria-hidden", "false");
-                setTimeout(function() {
-                    const input = document.getElementById("supportContact");
-                    if (input) input.focus();
-                }, 160);
+                const input = document.getElementById("supportContact");
+                if (input) {
+                    if (window.requestAnimationFrame) {
+                        requestAnimationFrame(function() { input.focus(); });
+                    } else {
+                        input.focus();
+                    }
+                }
             }
         }
 
@@ -268,6 +275,21 @@
             if (platform) switchGuideTab(platform);
             window.location.hash = "guides";
             window.scrollTo({ top: 0, behavior: "smooth" });
+        }
+
+        function openGuidesCurrentTab() {
+            let guideTab = "ios";
+            if (activePlatform === "android") {
+                guideTab = "android";
+            } else if (activePlatform === "windows" || activePlatform === "macos" || activePlatform === "github") {
+                guideTab = "desktop";
+            }
+            openGuidesTab(guideTab);
+            if (activePlatform === "macos") {
+                switchDesktopMethod("mac");
+            } else if (activePlatform === "windows") {
+                switchDesktopMethod("win");
+            }
         }
 
         function closeGuidesTab() {
@@ -494,14 +516,14 @@
 
         window.addEventListener("hashchange", function() {
             if (window.location.hash === "#guides") {
-                openGuidesTab("ios");
+                openGuidesCurrentTab();
             } else if (!window.location.hash) {
                 closeGuidesTab();
             }
         });
 
         if (window.location.hash === "#guides") {
-            openGuidesTab("ios");
+            openGuidesCurrentTab();
         }
 
         // Initialize any cached images that loaded before DOMContentLoaded
