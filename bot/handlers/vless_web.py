@@ -267,6 +267,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         "Cache-Control": "no-store, private, no-cache, must-revalidate",
         "Pragma": "no-cache",
         "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
     }
 
     raw_hwid = (
@@ -333,7 +334,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                 landing_headers = {
                     **common_headers,
                     "Content-Type": "text/html; charset=utf-8",
-                    "Content-Security-Policy": "default-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:;",
+                    "Content-Security-Policy": "default-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self';",
                 }
                 return web.Response(status=200, text=html_body, headers=landing_headers)
 
@@ -405,7 +406,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                 landing_headers = {
                     **common_headers,
                     "Content-Type": "text/html; charset=utf-8",
-                    "Content-Security-Policy": "default-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:;",
+                    "Content-Security-Policy": "default-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self';",
                 }
                 return web.Response(status=200, text=html_body, headers=landing_headers)
 

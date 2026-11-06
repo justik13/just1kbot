@@ -1,7 +1,7 @@
 [project]
 name = "just1kbot"
 version = "2.5.0"
-description = "Telegram bot for selling subscription access based on VLESS TLS and White Internet"
+description = "Modular subscription access platform"
 requires-python = ">=3.12"
 
 [tool.ruff]

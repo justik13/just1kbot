@@ -2099,20 +2099,7 @@
                         <div><strong>Условия смены:</strong> На балансе Apple ID не должно быть остатка (0 ₽), действующих платных подписок Apple (или дождитесь окончания их периода), незавершённых заказов и семейного доступа.</div>
                     </div>
 
-                    <!-- Video Guide Toggle -->
-                    <div style="margin-bottom: 14px;">
-                        <button type="button" class="guide-video-toggle-btn" onclick="toggleGuideVideo()">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                            <span id="videoToggleLabel">Показать видеоинструкцию (запись с экрана iPhone, 2 мин)</span>
-                        </button>
-                        <div id="guideVideoContainer" style="display: none; margin-top: 10px; border-radius: 14px; overflow: hidden; border: 1px solid var(--border-subtle); background: #000; text-align: center;">
-                            <video id="guideVideoPlayer" controls playsinline preload="metadata" style="max-width: 100%; max-height: 480px; display: inline-block; border-radius: 14px;">
-                                <source src="https://happ.info/media/happ-instrukciya-720x1280-web.mp4" type="video/mp4">
-                                Ваш браузер не поддерживает воспроизведение видео.
-                            </video>
-                        </div>
-                    </div>
-
+                    <!-- iOS Guide Steps (Zero-Signature embedded visual cards) -->
                     <div class="guide-step-card">
                         <div class="guide-step-header">
                             <span class="guide-step-num">1</span>
@@ -2120,9 +2107,6 @@
                         </div>
                         <div class="guide-step-desc">
                             Зайдите в <strong>App Store</strong> → нажмите на <strong>иконку своего профиля</strong> в правом верхнем углу → нажмите на первую строчку (своё имя и Apple ID) → выберите <strong>«Страна/регион»</strong> → <strong>«Изменить страну или регион»</strong>.
-                        </div>
-                        <div class="guide-screenshot-wrapper vertical">
-                            <img src="https://happ.info/imgs/apple-region/01-appstore-profile.png" alt="Профиль App Store" class="guide-real-screenshot" loading="lazy" decoding="async" onload="markImgLoaded(this)">
                         </div>
                     </div>
 
@@ -2134,9 +2118,6 @@
                         <div class="guide-step-desc">
                             Найдите в списке <strong>«Казахстан»</strong>, нажмите <strong>«Принять»</strong> в верхнем правом углу.
                         </div>
-                        <div class="guide-screenshot-wrapper vertical">
-                            <img src="https://happ.info/imgs/apple-region/04-kazakhstan.png" alt="Выбор Казахстана" class="guide-real-screenshot" loading="lazy" decoding="async" onload="markImgLoaded(this)">
-                        </div>
                     </div>
 
                     <div class="guide-step-card">
@@ -2146,9 +2127,6 @@
                         </div>
                         <div class="guide-step-desc">
                             В способах оплаты выберите <strong>«Нет»</strong> (банковская карта не требуется). В поля адреса введите данные г. Алматы (нажмите «Копировать» рядом с нужным полем):
-                        </div>
-                        <div class="guide-screenshot-wrapper vertical">
-                            <img src="https://happ.info/imgs/apple-region/07-payment-none.png" alt="Способ оплаты Нет и адрес" class="guide-real-screenshot" loading="lazy" decoding="async" onload="markImgLoaded(this)">
                         </div>
                         <!-- Address Copy Fields -->
                         <div class="guide-data-card">
@@ -2206,9 +2184,6 @@
                         </div>
                         <div class="guide-step-desc">
                             В поиске App Store введите <strong>INCY</strong> (рекомендуется) или <strong>Happ</strong> и нажмите <strong>«Загрузить»</strong>. После установки вы можете вернуть регион App Store на РФ: приложение продолжит работать и обновляться.
-                        </div>
-                        <div class="guide-screenshot-wrapper vertical">
-                            <img src="https://happ.info/imgs/apple-region/08-happ-appstore.png" alt="Happ в App Store" class="guide-real-screenshot" loading="lazy" decoding="async" onload="markImgLoaded(this)">
                         </div>
                     </div>
                 </div>
@@ -2436,7 +2411,7 @@
                                 3. Это стандартное предупреждение Windows для программ, загруженных из интернета.
                             </div>
                             <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(0, 90, 158, 0.2); font-size: 11.5px;">
-                                <a href="https://docs.happ.info/main/faq" target="_blank" rel="noopener" style="color: #6ee7b7; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: rgba(0, 90, 158, 0.2); border: 1px solid rgba(0, 90, 158, 0.35); border-radius: 8px; font-size: 11.5px; font-weight: 500; min-height: 32px;">
+                                <a href="https://docs.happ.info/main/faq" target="_blank" rel="noopener noreferrer" style="color: #6ee7b7; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: rgba(0, 90, 158, 0.2); border: 1px solid rgba(0, 90, 158, 0.35); border-radius: 8px; font-size: 11.5px; font-weight: 500; min-height: 32px;">
                                     <span>Официальная база знаний Happ Desktop ↗</span>
                                 </a>
                             </div>

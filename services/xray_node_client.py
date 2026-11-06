@@ -352,3 +352,24 @@ class XrayNodeClient:
             return True, data, None
         return False, None, err or f"Relays health check failed with HTTP {status_code}"
 
+    async def deploy_certificate(
+        self,
+        api_url: str,
+        api_key: str,
+        domain: str,
+        fullchain_pem: str,
+        privkey_pem: str,
+    ) -> tuple[bool, str | None]:
+        """Deploy or rotate TLS certificates (e.g. DNS-01 wildcard) to the node."""
+        url = f"{api_url.rstrip('/')}/v1/system/certificate"
+        headers = self._get_headers(api_key)
+        payload = {
+            "domain": domain,
+            "fullchain_pem": fullchain_pem,
+            "privkey_pem": privkey_pem,
+        }
+        status_code, data, err = await self._make_request("POST", url, headers, json_data=payload)
+        if status_code in (200, 201):
+            return True, None
+        return False, err or f"Certificate deployment failed with HTTP {status_code}"
+

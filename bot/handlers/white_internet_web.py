@@ -338,6 +338,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         "CDN-Cache-Control": "no-store",
         "Pragma": "no-cache",
         "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
     }
 
     raw_hwid = (
@@ -373,7 +374,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         landing_headers = {
             **common_headers,
             "Content-Type": "text/html; charset=utf-8",
-            "Content-Security-Policy": "default-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:;",
+            "Content-Security-Policy": "default-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self';",
         }
 
         if sub.status == WhiteInternetStatus.PENDING:

@@ -21,7 +21,7 @@ ALERT_SERVER_RESTORED = """✅ <b>Связь с сервером восстан�
 🌍 Сервер: <b>{server_name}</b> (ID: {server_id})
 API снова стабильно доступен."""
 
-ALERT_SERVER_DISK_CRITICAL = """⚠️ <b>ВНИМАНИЕ: Диск VPN-ноды забит > 85%!</b>
+ALERT_SERVER_DISK_CRITICAL = """⚠️ <b>ВНИМАНИЕ: Диск сервера забит > 85%!</b>
 
 Сервер: <b>{server_name}</b> (ID: {server_id})
 Использование диска: <b>{disk_percent:.1f}%</b>
