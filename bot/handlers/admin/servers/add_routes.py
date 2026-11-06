@@ -430,6 +430,12 @@ async def process_add_server(
                 from services.vless_subscription_service import VlessSubscriptionService
                 VlessSubscriptionService.sync_all_active_to_server_background(server.id)
 
+            from config.settings import get_settings
+            _cfg = get_settings()
+            if _cfg.CLOUDFLARE_API_TOKEN and _cfg.WILDCARD_DOMAIN:
+                from services.certificate_service import WildcardCertificateManager
+                WildcardCertificateManager.deploy_to_server_id_background(server.id)
+
             await state.clear()
             return
 
