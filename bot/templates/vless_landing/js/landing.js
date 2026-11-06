@@ -271,8 +271,6 @@
         }
 
         function closeGuidesTab() {
-            const p = document.getElementById("guideVideoPlayer");
-            if (p) p.pause();
             const main = document.getElementById("mainView");
             const guides = document.getElementById("guidesView");
             if (guides) guides.classList.add("view-hidden");
@@ -284,8 +282,6 @@
         }
 
         function switchGuideTab(tab) {
-            const p = document.getElementById("guideVideoPlayer");
-            if (p) p.pause();
             const tabs = ["ios", "android", "desktop", "faq"];
             tabs.forEach(function(t) {
                 const btn = document.getElementById("guideNavBtn" + t.charAt(0).toUpperCase() + t.slice(1));
@@ -300,8 +296,6 @@
         }
 
         function switchIosMethod(method) {
-            const p = document.getElementById("guideVideoPlayer");
-            if (p && method !== "region") p.pause();
             const methods = {
                 "tf": { btn: "tabBtnIosTf", sec: "iosSubGuideTf" },
                 "region": { btn: "tabBtnIosRegion", sec: "iosSubGuideRegion" },
@@ -353,23 +347,6 @@
             }
             if (secWin) secWin.style.display = isWin ? "block" : "none";
             if (secMac) secMac.style.display = !isWin ? "block" : "none";
-        }
-
-        function toggleGuideVideo() {
-            const container = document.getElementById("guideVideoContainer");
-            const label = document.getElementById("videoToggleLabel");
-            const player = document.getElementById("guideVideoPlayer");
-            if (!container) return;
-            const isHidden = container.style.display === "none";
-            if (isHidden) {
-                container.style.display = "block";
-                if (label) label.textContent = "Скрыть видеоинструкцию";
-                if (player) player.play().catch(function() {});
-            } else {
-                container.style.display = "none";
-                if (label) label.textContent = "Показать видеоинструкцию (запись с экрана iPhone, 2 мин)";
-                if (player) player.pause();
-            }
         }
 
         function copyGuideField(text, btn) {
@@ -509,10 +486,9 @@
         });
 
         document.addEventListener("click", function(e) {
-            const wrapper = e.target.closest(".guide-screenshot-wrapper");
-            if (wrapper) {
-                const img = wrapper.querySelector("img");
-                if (img) openImageLightbox(img.src, img.alt);
+            const img = e.target.closest(".guide-real-screenshot") || (e.target.closest(".guide-screenshot-wrapper") ? e.target.closest(".guide-screenshot-wrapper").querySelector("img") : null);
+            if (img && img.src) {
+                openImageLightbox(img.src, img.alt);
             }
         });
 
