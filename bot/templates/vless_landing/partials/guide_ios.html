@@ -1,20 +1,29 @@
             <!-- iOS Guide Content -->
             <div id="guideSectionIos" class="guide-section" role="tabpanel" aria-labelledby="guideNavBtnIos">
-                <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; text-align: left;">Шаг 1. Выберите способ установки:</div>
+                <div class="guide-section-label">Шаг 1. Выберите способ установки:</div>
                 <div class="guide-method-tabs" role="tablist" aria-label="Способ установки iOS">
                     <button type="button" class="guide-method-btn active" id="tabBtnIosTf" onclick="switchIosMethod('tf')" role="tab" aria-selected="true">
                         <span class="guide-method-badge">Быстро</span>
-                        <span class="guide-method-title"><svg class="guide-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>TestFlight</span>
+                        <span class="guide-method-title">
+                            <svg class="guide-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                            <span>TestFlight</span>
+                        </span>
                         <span class="guide-method-sub">Без смены региона</span>
                     </button>
                     <button type="button" class="guide-method-btn" id="tabBtnIosRegion" onclick="switchIosMethod('region')" role="tab" aria-selected="false">
                         <span class="guide-method-badge">Навсегда</span>
-                        <span class="guide-method-title"><svg class="guide-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>Казахстан</span>
+                        <span class="guide-method-title">
+                            <svg class="guide-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                            <span>Казахстан</span>
+                        </span>
                         <span class="guide-method-sub">App Store (без карты)</span>
                     </button>
                     <button type="button" class="guide-method-btn" id="tabBtnIosNewId" onclick="switchIosMethod('newid')" role="tab" aria-selected="false">
                         <span class="guide-method-badge">Запасной</span>
-                        <span class="guide-method-title"><svg class="guide-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>Второй ID</span>
+                        <span class="guide-method-title">
+                            <svg class="guide-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                            <span>Второй ID</span>
+                        </span>
                         <span class="guide-method-sub">Новый Apple ID</span>
                     </button>
                 </div>
@@ -78,12 +87,12 @@
                                 <span class="guide-store-badge">Открыть ↗</span>
                             </a>
                         </div>
-                        <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 12px; margin-top: 10px;">
-                            <div style="font-size: 12px; font-weight: 600; color: #10b981; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+                        <div class="guide-tip-box">
+                            <div class="guide-tip-title">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
                                 <span>Как принять приглашение в TestFlight:</span>
                             </div>
-                            <div style="font-size: 12px; color: var(--text-sub); line-height: 1.6;">
+                            <div class="guide-tip-desc">
                                 1. В открывшемся TestFlight нажмите кнопку <strong>«Принять»</strong> (Accept).<br>
                                 2. Затем нажмите <strong>«Установить»</strong> (Install): приложение появится на домашнем экране.<br>
                                 3. Дополнительных кодов или Apple ID вводить не нужно.
@@ -91,14 +100,14 @@
                             <div class="guide-screenshot-wrapper vertical">
                                 <img src="{{IMG_TESTFLIGHT}}" alt="INCY в Apple TestFlight" class="guide-real-screenshot loaded" loading="lazy" decoding="async" onload="markImgLoaded(this)">
                             </div>
-                            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, 0.05); font-size: 11.5px;">
-                                <a href="https://testflight.apple.com" target="_blank" rel="noopener noreferrer" style="color: var(--tier-accent); text-decoration: none; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; font-size: 11.5px; font-weight: 500; min-height: 32px;">
+                            <div class="guide-tip-link-wrap">
+                                <a href="https://testflight.apple.com" target="_blank" rel="noopener noreferrer" class="guide-sub-link">
                                     <span>Официальное руководство Apple по TestFlight ↗</span>
                                 </a>
                             </div>
                         </div>
-                        <div style="margin-top: 8px; font-size: 11px; color: var(--text-muted); display: flex; align-items: flex-start; gap: 6px;">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px; flex-shrink: 0; margin-top: 1px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                        <div class="guide-step-note">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
                             <span>Если TestFlight пишет «Этот бета-тест заполнен», выберите способ <strong>«Казахстан»</strong> выше: он позволяет установить клиент напрямую из App Store.</span>
                         </div>
                     </div>
@@ -111,7 +120,7 @@
                         <div><strong>Установка через App Store Казахстана:</strong> В магазине Казахстана интерфейс на русском языке, а карта для скачивания не требуется. После установки можно сразу вернуть регион РФ.</div>
                     </div>
 
-                    <div class="guide-callout guide-callout-warning">
+                    <div class="guide-callout guide-callout-muted">
                         <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                         <div><strong>Условия смены:</strong> На балансе Apple ID не должно быть остатка (0 ₽), действующих платных подписок Apple (или дождитесь окончания их периода), незавершённых заказов и семейного доступа.</div>
                     </div>
@@ -195,10 +204,10 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="guide-screenshot-wrapper vertical" style="margin-top: 12px;">
+                        <div class="guide-screenshot-wrapper vertical">
                             <img src="{{IMG_IOS_3}}" alt="Способ оплаты Нет и адрес" class="guide-real-screenshot loaded" loading="lazy" decoding="async" onload="markImgLoaded(this)">
                         </div>
-                        <div style="margin-top: 8px; font-size: 11.5px; color: var(--text-sub);">
+                        <div class="guide-step-note-plain">
                             Нажмите <strong>«Далее»</strong> в правом верхнем углу. Регион изменится сразу.
                         </div>
                     </div>
@@ -246,9 +255,9 @@
                 </div>
 
                 <!-- Step 3 (Common for all iOS): Add Subscription -->
-                <div class="guide-step-card" style="border-color: rgba(16, 185, 129, 0.25); background: rgba(16, 185, 129, 0.03);">
+                <div class="guide-step-card">
                     <div class="guide-step-header">
-                        <span class="guide-step-num" style="background: #10b981;">3</span>
+                        <span class="guide-step-num">3</span>
                         <span class="guide-step-title">Добавьте подписку в приложение</span>
                     </div>
                     <div class="guide-step-desc">
@@ -266,7 +275,7 @@
                     <div class="guide-step-desc">
                         Нажмите круглую кнопку подключения в центре экрана приложения и подтвердите системный запрос iOS (нажмите <strong>«Разрешить»</strong> через Face ID или код-пароль).
                     </div>
-                    <div style="margin-top: 8px; font-size: 11.5px; color: var(--text-sub);">
+                    <div class="guide-step-note-plain">
                         Кнопка станет зелёной: соединение активно.
                     </div>
                 </div>
