@@ -130,8 +130,9 @@ AUDIT_LOG_EMPTY = "<i>Лог действий пуст.</i>"
 DASHBOARD_ACTIVE_PODPISOK_ACTIVE = """• Активных подписок: <b>{stats__active}</b>
 """
 
-DASHBOARD_AWG_TRAFFIC_STATS = """• Трафик туннелей: <b>{total_traffic}</b> (ср. на подписчика: <b>{avg_traffic}</b>)
+DASHBOARD_STANDARD_TRAFFIC_STATS = """• Трафик Standard (VLESS): <b>{total_traffic}</b> (ср. на подписчика: <b>{avg_traffic}</b>)
 """
+DASHBOARD_AWG_TRAFFIC_STATS = DASHBOARD_STANDARD_TRAFFIC_STATS
 
 DASHBOARD_PER_MONTH_SUFFIX = "/мес"
 DASHBOARD_AVG_MONTHLY_TRAFFIC_SUFFIX = " (ср. {avg_traffic}/мес)"

@@ -14,8 +14,6 @@ from typing import Any
 from config.enums import (
     AccountLedgerEntryType,
     AdminAuditAction,
-    ApiOperationStatus,
-    ApiOperationType,
     OrderServiceType,
     OrderStatus,
     PaymentCheckoutStatus,
@@ -34,12 +32,6 @@ from config.enums import (
 
 
 # Protocol
-AMNEZIA_PROTOCOL = "amneziawg2"
-AMNEZIA_PROTOCOLS: tuple[str, ...] = (
-    AMNEZIA_PROTOCOL,
-    "amneziawg3",
-    "amneziawg3.1",
-)
 XRAY_PROTOCOL = "xray"
 VLESS_PROTOCOL = "vless"
 XRAY_ORIGIN_CAPABILITY = "xray_origin"
@@ -270,16 +262,12 @@ CANONICAL_XHTTP_PROFILE: dict[str, Any] = {
 
 
 __all__ = [
-    "AMNEZIA_PROTOCOL",
-    "AMNEZIA_PROTOCOLS",
     "API_CONCURRENCY_LIMIT",
     "API_RETRY_COUNT",
     "API_TIMEOUT",
     "AccountLedgerEntryType",
     "AdminAuditAction",
-    "ApiOperationStatus",
     "CANONICAL_XHTTP_PROFILE",
-    "ApiOperationType",
     "DEFAULT_FALLBACK_BOT_USERNAME",
     "DEFAULT_VLESS_PROFILE_TITLE",
     "DEFAULT_WHITE_INTERNET_CHANNEL_URL",

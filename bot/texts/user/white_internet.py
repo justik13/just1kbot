@@ -242,6 +242,11 @@ WL_FEED_DISABLED_TITLE = "🚫 Доступ отключен"
 WL_FEED_DISABLED_NOTICE = "🚫 Доступ отключен администратором. Обратитесь в поддержку: @{bot_username}"
 WL_FEED_DEVICE_LIMIT_NOTICE = "⚠️ Превышен лимит устройств ({active}/{limit}). Управление в @{bot_username}"
 
+UNIFIED_FEED_NOTICE_WI_LIMIT = "⚠️ Исчерпан лимит устройств Белого Интернета ({active}/{limit}). Управление в @{bot_username}"
+UNIFIED_FEED_NOTICE_WI_EXHAUSTED = "⚠️ Закончился трафик Белого Интернета. Продлите в @{bot_username}"
+UNIFIED_FEED_NOTICE_TOTAL_LIMIT = "⚠️ Исчерпан общий лимит устройств ({active}/{limit}). Управление в @{bot_username}"
+UNIFIED_FEED_NOTICE_EXPIRED = "⚠️ Подписка закончилась. Продлите в @{bot_username}"
+
 
 
 

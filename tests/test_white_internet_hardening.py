@@ -19,14 +19,15 @@ from alembic.script import ScriptDirectory
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.constants import (
-    AMNEZIA_PROTOCOL,
     DEFAULT_WHITE_INTERNET_PADDING_KEY,
     DEFAULT_WHITE_INTERNET_PATH,
+    VLESS_PROTOCOL,
     WHITE_INTERNET_BASE_DURATION_DAYS,
     WHITE_INTERNET_BASE_PRICE_RUB,
     WHITE_INTERNET_BASE_TRAFFIC_BYTES,
     WHITE_INTERNET_MAX_QUOTA_BYTES,
     WHITE_INTERNET_TOPUP_PACKS,
+    XRAY_PROTOCOL,
 )
 from config.enums import (
     ServerHealthState,
@@ -68,7 +69,7 @@ class TestGroupAEnumsAndConstantsSSOT(unittest.TestCase):
         self.assertEqual(len(ServerLifecycleStatus), 4)
 
     def test_service_type_enum_members(self):
-        self.assertEqual(ServiceType.AWG, "awg")
+        self.assertEqual(ServiceType.STANDARD, "standard")
         self.assertEqual(ServiceType.WHITE_INTERNET, "white_internet")
 
     def test_white_internet_status_enum_members(self):
@@ -125,7 +126,9 @@ class TestGroupCAlembicMigration0017(unittest.TestCase):
     def test_alembic_heads_and_chain(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
         heads = scripts.get_heads()
-        self.assertEqual(heads, ["0044_clean_auto_disabled_servers"])
+        self.assertEqual(heads, ["0045_drop_api_operations_table"])
+        rev = scripts.get_revision("0045_drop_api_operations_table")
+        self.assertEqual(rev.down_revision, "0044_clean_auto_disabled_servers")
         rev = scripts.get_revision("0044_clean_auto_disabled_servers")
         self.assertEqual(rev.down_revision, "0043_purge_legacy_awg")
         rev = scripts.get_revision("0043_purge_legacy_awg")
@@ -669,13 +672,15 @@ class TestGroupLReconciliationWorkerConcurrency(unittest.TestCase):
 class TestGroupQProtocolInvariantAndZeroSecrets(unittest.TestCase):
     """Group Q: Protocol Invariant & Secret Zero-Logging Guard."""
 
-    def test_amnezia_protocol_constant_is_awg(self):
-        self.assertEqual(AMNEZIA_PROTOCOL, "amneziawg2")
-        self.assertIn("awg", AMNEZIA_PROTOCOL)
+    def test_protocol_constants(self):
+        self.assertEqual(VLESS_PROTOCOL, "vless")
+        self.assertEqual(XRAY_PROTOCOL, "xray")
 
-    def test_no_wireguard_wg_protocol_assignment(self):
-        srv = Server(protocol=AMNEZIA_PROTOCOL)
-        self.assertEqual(srv.protocol, "amneziawg2")
+    def test_server_protocol_assignment(self):
+        srv = Server(protocol=VLESS_PROTOCOL)
+        self.assertEqual(srv.protocol, "vless")
+        srv_wl = Server(protocol=XRAY_PROTOCOL)
+        self.assertEqual(srv_wl.protocol, "xray")
 
 
 class TestGroupRAtomicTraffic90pEmitsWithoutPrematureFlag(unittest.IsolatedAsyncioTestCase):

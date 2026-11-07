@@ -258,12 +258,12 @@ async def _show_admin_dashboard(
             avg_traffic=format_traffic(avg_m_wi)
         )
 
-    awg_total_str = format_traffic(stats.get("total_traffic_bytes", 0))
+    std_total_str = format_traffic(stats.get("total_traffic_bytes", 0))
     avg_m_std = stats.get("avg_monthly_vless_bytes", 0)
     if avg_m_std > 0:
-        awg_avg_str = f"{format_traffic(avg_m_std)}{texts.DASHBOARD_PER_MONTH_SUFFIX}"
+        std_avg_str = f"{format_traffic(avg_m_std)}{texts.DASHBOARD_PER_MONTH_SUFFIX}"
     else:
-        awg_avg_str = f"{format_traffic(0)}{texts.DASHBOARD_PER_MONTH_SUFFIX}"
+        std_avg_str = f"{format_traffic(0)}{texts.DASHBOARD_PER_MONTH_SUFFIX}"
 
     if free_ips > 0:
         servers_header_text = (
@@ -279,7 +279,7 @@ async def _show_admin_dashboard(
         texts.DASHBOARD_USERS_I_SUBSCRIPTION.format()+
         texts.DASHBOARD_TOTAL_USERS_TOTAL.format(stats__total=stats['total'])+
         texts.DASHBOARD_ACTIVE_PODPISOK_ACTIVE.format(stats__active=stats['active'])+
-        texts.DASHBOARD_AWG_TRAFFIC_STATS.format(total_traffic=awg_total_str, avg_traffic=awg_avg_str)+
+        texts.DASHBOARD_STANDARD_TRAFFIC_STATS.format(total_traffic=std_total_str, avg_traffic=std_avg_str)+
         texts.DASHBOARD_WHITE_INTERNET_STATS.format(active_count=wl_stats['active_count'], traffic=wl_traffic_str)+
         texts.DASHBOARD_NEW_ZA_24_HOURS_NEW_24H.format(stats__new_24h=stats['new_24h'])+
         texts.DASHBOARD_FINANCIAL_METRICS.format()+

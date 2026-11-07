@@ -48,21 +48,6 @@ class AccountLedgerEntryType(StrEnum):
     ADMIN_ADJUSTMENT = "admin_adjustment"
 
 
-class ApiOperationType(StrEnum):
-    CREATE_PEER = "create_peer"
-    UPDATE_PEER = "update_peer"
-    DELETE_PEER = "delete_peer"
-
-
-class ApiOperationStatus(StrEnum):
-    PENDING = "pending"
-    PROCESSING = "processing"
-    RETRY = "retry"
-    SUCCEEDED = "succeeded"
-    DEAD = "dead"
-    CANCELLED = "cancelled"
-
-
 class WebhookInboxStatus(StrEnum):
     PENDING = "pending"
     PROCESSING = "processing"
@@ -174,7 +159,6 @@ class AdminAuditAction(StrEnum):
 class ServiceType(StrEnum):
     STANDARD = "standard"
     WHITE_INTERNET = "white_internet"
-    AWG = "awg"
 
 
 class WhiteInternetStatus(StrEnum):
@@ -210,14 +194,11 @@ class OrderServiceType(StrEnum):
     STANDARD = "standard"
     WHITE_INTERNET = "white_internet"
     TOPUP = "topup"
-    AWG = "awg"
 
 
 __all__ = [
     "AccountLedgerEntryType",
     "AdminAuditAction",
-    "ApiOperationStatus",
-    "ApiOperationType",
     "OrderStatus",
     "OrderServiceType",
     "PaymentCheckoutStatus",

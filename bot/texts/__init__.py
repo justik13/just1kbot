@@ -7,7 +7,6 @@ continue to use ``from bot import texts`` without knowing the domain layout.
 
 from bot.texts.admin import *  # noqa: F403
 from bot.texts.common import *  # noqa: F403
-from bot.texts.connection import *  # noqa: F403
 from bot.texts.payment import *  # noqa: F403
 from bot.texts.runtime import *  # noqa: F403
 from bot.texts.user import *  # noqa: F403
@@ -54,14 +53,10 @@ from bot.texts.admin.users import (
     ADMIN_USER_ID_NO_COLON_FORMAT as ADMIN_USER_ID_NO_COLON_FORMAT,
 )
 from bot.texts.common.status import MAINTENANCE_DEFAULT_MESSAGE as MAINTENANCE_DEFAULT_MESSAGE
-from bot.texts.connection.config import (
-    CONNECTION_CONFIG_DEVICE_VIEW_KEY_BLOCKQUOTE as CONNECTION_CONFIG_DEVICE_VIEW_KEY_BLOCKQUOTE,
-)
 
 
 from bot.texts import admin as _admin
 from bot.texts import common as _common
-from bot.texts import connection as _connection
 from bot.texts import payment as _payment
 from bot.texts import runtime as _runtime
 from bot.texts import user as _user
@@ -73,7 +68,6 @@ def _assert_no_key_collisions() -> None:
     for _mod, _dom in (
         (_admin, "admin"),
         (_common, "common"),
-        (_connection, "connection"),
         (_payment, "payment"),
         (_runtime, "runtime"),
         (_user, "user"),

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from typing import Any
 
 from aiogram import Bot
 from bot.keyboards.notifications import get_traffic_alert_keyboard
@@ -103,10 +104,11 @@ def _check_user_quota_alert(
     user_id: int,
     telegram_id: int,
     current_cycle: str,
-    vless_bytes: int,
-    awg_bytes: int = 0,
+    vless_bytes: int = 0,
+    **kwargs: Any,
 ):
-    total_monthly = max(0, awg_bytes) + max(0, vless_bytes)
+    awg_bytes = kwargs.get("awg_bytes", 0)
+    total_monthly = max(0, vless_bytes) + max(0, awg_bytes)
     if total_monthly > TRAFFIC_QUOTA_BYTES:
         cache_key = f"{user_id}:{current_cycle}"
         if cache_key not in _quota_alerted:
@@ -118,8 +120,8 @@ def _check_user_quota_alert(
                     telegram_id=telegram_id,
                     cycle=current_cycle,
                     total_bytes=total_monthly,
-                    awg_bytes=awg_bytes,
                     vless_bytes=vless_bytes,
+                    awg_bytes=awg_bytes,
                 )
             )
 
@@ -129,9 +131,9 @@ async def _send_quota_alert(
     telegram_id: int,
     cycle: str,
     total_bytes: int,
-    awg_bytes: int,
-    vless_bytes: int,
+    vless_bytes: int = 0,
     user_id: int = 0,
+    **kwargs: Any,
 ):
     try:
         if not bot:

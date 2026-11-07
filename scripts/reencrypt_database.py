@@ -34,7 +34,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from config.settings import get_settings
 from database.connection import session_scope
-from database.models import APIOperation, Server
+from database.models import Server
 from utils.logging_security import install_sensitive_data_filter
 
 logging.basicConfig(
@@ -81,7 +81,6 @@ async def reencrypt_all(*, force: bool = False) -> None:
         )
 
     total_servers = 0
-    total_profiles = 0
 
     # 1. Re-encrypt servers in batches
     last_server_id = 0
@@ -108,34 +107,6 @@ async def reencrypt_all(*, force: bool = False) -> None:
             # session_scope() automatically commits on block exit
             logger.info("Re-encrypted batch of servers up to ID %d (total: %d)", last_server_id, total_servers)
 
-    # 2. Re-encrypt API Operations in batches
-    total_operations = 0
-    last_op_id = 0
-    while True:
-        async with session_scope() as session:
-            ops = (
-                await session.scalars(
-                    select(APIOperation)
-                    .where(
-                        APIOperation.id > last_op_id,
-                        APIOperation.api_key_snapshot.is_not(None),
-                    )
-                    .order_by(APIOperation.id)
-                    .limit(BATCH_SIZE)
-                )
-            ).all()
-            if not ops:
-                break
-
-            for op in ops:
-                if op.api_key_snapshot:
-                    op.api_key_snapshot = str(op.api_key_snapshot)
-                    flag_modified(op, "api_key_snapshot")
-                last_op_id = op.id
-                total_operations += 1
-
-            logger.info("Re-encrypted batch of API Operations up to ID %d (total: %d)", last_op_id, total_operations)
-
     # 4. Verification phase: ensure raw database ciphertext is encrypted strictly with the primary key
     logger.info("Verifying all records in database are encrypted strictly with the NEW primary key...")
     settings = get_settings()
@@ -152,25 +123,9 @@ async def reencrypt_all(*, force: bool = False) -> None:
                         f"Server ID {s_id} is not encrypted with the new primary key: {exc}"
                     ) from exc
 
-        op_rows = (
-            await session.execute(
-                text("SELECT id, api_key_snapshot FROM api_operations WHERE api_key_snapshot IS NOT NULL")
-            )
-        ).all()
-        for o_id, raw_key in op_rows:
-            if raw_key:
-                try:
-                    primary_fernet.decrypt(raw_key.encode("utf-8"))
-                except Exception as exc:
-                    raise RuntimeError(
-                        f"APIOperation ID {o_id} is not encrypted with the new primary key: {exc}"
-                    ) from exc
-
     logger.info(
-        "Successfully finished database re-encryption & primary key verification: %d servers, %d VPN profiles, %d API Operations.",
+        "Successfully finished database re-encryption & primary key verification: %d servers.",
         total_servers,
-        total_profiles,
-        total_operations,
     )
 
 

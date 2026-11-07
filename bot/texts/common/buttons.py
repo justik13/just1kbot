@@ -39,6 +39,8 @@ BTN_BUY_SUBSCRIPTION = "🛒 Купить подписку"
 
 BTN_CANCEL = "Отмена"
 
+BTN_CHANGE_NAME = "✏️ Изменить имя"
+
 BTN_CONFIRM = "✅ Подтвердить"
 
 BTN_CONNECTIONS = "🔌 Подключения"

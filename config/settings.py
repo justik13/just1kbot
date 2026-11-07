@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     SUPPORT_USERNAME: str
     BOT_USERNAME: str = ""
     STATUS_PAGE_URL: str = "https://status.just1k.pro/status/just1kbot"
+    MINIAPP_URL: str = "https://just1k.pro/app"
 
     # ── Database ──
     DATABASE_URL: str = Field(repr=False)

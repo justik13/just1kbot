@@ -5,10 +5,6 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.keyboards import get_back_button, get_tariff_showcase_keyboard
-from database.repositories.tariffs_repo import (
-    get_active_tariffs,
-)
 from utils.datetime_helpers import is_expired
 from bot.formatters import (
     format_days_left,
@@ -71,28 +67,12 @@ async def _check_tariff_change_allowed(
 async def render_tariff_showcase(
     bot, chat_id: int, session: AsyncSession
 ) -> None:
-    tariffs = await get_active_tariffs(session)
-    if not tariffs:
-        await render_hub(
-            bot,
-            chat_id,
-            texts.PAYMENT_NO_TARIFFS,
-            get_back_button("back_to_main_menu"),
-            session=session,
-        )
-        return
-    grouped: dict[int, list] = {}
-    for tariff in tariffs:
-        limit = getattr(tariff, "device_limit", 2)
-        if limit not in grouped:
-            grouped[limit] = []
-        grouped[limit].append(tariff)
-    keyboard = get_tariff_showcase_keyboard(grouped)
+    from bot.keyboards.common import get_hub_keyboard
     await render_hub(
         bot,
         chat_id,
-        texts.PAYMENT_SHOWCASE_HEADER,
-        keyboard,
+        texts.WELCOME_TEXT,
+        get_hub_keyboard(),
         session=session,
     )
 

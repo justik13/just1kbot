@@ -98,8 +98,14 @@ class WhiteInternetReconciliationWorker:
                 return
             from aiogram.utils.keyboard import InlineKeyboardBuilder
             from bot import texts
+            from aiogram.types import WebAppInfo
+            try:
+                from config.settings import get_settings
+                target_miniapp_url = get_settings().MINIAPP_URL or "https://just1k.pro/app"
+            except Exception:
+                target_miniapp_url = "https://just1k.pro/app"
             kb = InlineKeyboardBuilder()
-            kb.button(text=texts.BTN_WL_CONNECT_CLIENT, callback_data="white_internet")
+            kb.button(text=texts.BTN_HUB_CONNECT, web_app=WebAppInfo(url=target_miniapp_url))
             kb.button(text=texts.BTN_DISMISS_NOTIFICATION, callback_data="dismiss_notification")
             kb.adjust(1)
             await self.bot.send_message(

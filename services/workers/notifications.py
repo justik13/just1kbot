@@ -465,7 +465,6 @@ async def _send_white_internet_notifications(
     from utils.formatters import format_tg_time
     from bot.texts.runtime.notifications import (
         BTN_DISMISS_NOTIFICATION,
-        BTN_EXTEND_WHITE_INTERNET,
         NOTIFY_WI_1D,
         NOTIFY_WI_2H,
         NOTIFY_WI_3D,
@@ -613,8 +612,15 @@ async def _send_white_internet_notifications(
                         await session.flush()
                     continue
 
+                from aiogram.types import WebAppInfo
+                from bot import texts
+                try:
+                    from config.settings import get_settings
+                    target_miniapp_url = get_settings().MINIAPP_URL or "https://just1k.pro/app"
+                except Exception:
+                    target_miniapp_url = "https://just1k.pro/app"
                 kb = InlineKeyboardBuilder()
-                kb.button(text=BTN_EXTEND_WHITE_INTERNET, callback_data="wl_renew_preview")
+                kb.button(text=texts.BTN_HUB_CONNECT, web_app=WebAppInfo(url=target_miniapp_url))
                 kb.button(text=BTN_DISMISS_NOTIFICATION, callback_data="dismiss_notification")
                 kb.adjust(1)
 

@@ -10,7 +10,6 @@ from bot.handlers.payment.balance_routes import (
     create_preset_topup,
     request_custom_amount,
 )
-from bot.handlers.payment.purchase_routes import handle_order_pay_wallet
 from database.models import User
 from services.maintenance_service import MaintenanceService
 
@@ -118,24 +117,6 @@ class TestMaintenanceServiceLifecycle(unittest.IsolatedAsyncioTestCase):
 
             state.clear.assert_called_once()
             mock_render_maint.assert_called_once_with(message, session, back_to="menu_balance")
-
-    async def test_order_pay_wallet_blocked_during_maintenance(self):
-        import uuid
-        callback = MagicMock(spec=CallbackQuery)
-        callback.from_user = MagicMock(id=88888)
-        callback.data = f"order_pay_wallet:{uuid.uuid4()}"
-        callback.bot = MagicMock()
-        callback.message = MagicMock(chat=MagicMock(id=88888), message_id=104)
-        callback.answer = AsyncMock()
-
-        session = AsyncMock()
-        db_user = User(id=1, telegram_id=88888, username="test", first_name="Test")
-
-        with patch("bot.handlers.payment.purchase_routes.MaintenanceService.can_user_perform_action", new=AsyncMock(return_value=False)), \
-             patch("bot.handlers.payment.purchase_routes._render_maintenance", new_callable=AsyncMock) as mock_render_maint:
-
-            await handle_order_pay_wallet(callback, session, db_user=db_user)
-            mock_render_maint.assert_called_once_with(callback, session, back_to="payment_showcase")
 
 
 

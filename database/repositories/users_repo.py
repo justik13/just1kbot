@@ -670,7 +670,7 @@ def get_effective_expiring_3d_condition(now=None):
     if now is None:
         now = now_utc()
     limit_3d = now + timedelta(days=3)
-    awg_expiring = and_(
+    std_expiring = and_(
         User.subscription_end > now,
         User.subscription_end <= limit_3d,
     )
@@ -698,7 +698,7 @@ def get_effective_expiring_3d_condition(now=None):
         )
     )
     return and_(
-        or_(awg_expiring, xray_expiring),
+        or_(std_expiring, xray_expiring),
         or_(User.subscription_end.is_(None), User.subscription_end <= limit_3d),
         ~xray_longer,
     )
@@ -726,9 +726,9 @@ def get_effective_expired_condition(now=None):
     if now is None:
         now = now_utc()
     inactive_cond = get_effective_inactive_condition(now)
-    had_awg = User.subscription_end.is_not(None)
+    had_std = User.subscription_end.is_not(None)
     had_xray = User.id.in_(select(WhiteInternetSubscription.user_id))
-    return and_(or_(had_awg, had_xray), inactive_cond)
+    return and_(or_(had_std, had_xray), inactive_cond)
 
 
 def get_effective_never_condition():

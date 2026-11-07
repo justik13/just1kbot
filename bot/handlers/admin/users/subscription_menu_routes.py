@@ -12,8 +12,8 @@ from bot import texts
 from bot.formatters import get_tariff_display_name
 from bot.keyboards import get_back_button
 from bot.keyboards.admin.users import (
-    get_admin_awg_subscription_keyboard,
     get_admin_confirm_action_keyboard,
+    get_admin_vless_subscription_keyboard,
     get_admin_wi_device_limit_keyboard,
     get_admin_wi_devices_keyboard,
     get_admin_wi_extend_days_keyboard,
@@ -53,12 +53,14 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# AmneziaWG Submenu
+# Standard VLESS Submenu
 # ---------------------------------------------------------------------------
 
 
 @router.callback_query(
-    F.data.startswith("admin_sub_awg_menu:") | F.data.startswith("admin_subscription:")
+    F.data.startswith("admin_sub_vless_menu:")
+    | F.data.startswith("admin_sub_awg_menu:")
+    | F.data.startswith("admin_subscription:")
 )
 async def admin_subscription_menu(
     callback: CallbackQuery,
@@ -142,7 +144,7 @@ async def admin_subscription_menu(
     try:
         await callback.message.edit_text(
             text,
-            reply_markup=get_admin_awg_subscription_keyboard(
+            reply_markup=get_admin_vless_subscription_keyboard(
                 telegram_id,
                 has_active,
                 vless_sub_url=vless_sub_url,

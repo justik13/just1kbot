@@ -381,11 +381,14 @@ class WhiteInternetTrafficWorker:
                         if is_sub_trial
                         else texts.WL_TRAFFIC_EXHAUSTED_ALERT
                     )
+                    from aiogram.types import WebAppInfo
+                    try:
+                        from config.settings import get_settings
+                        target_miniapp_url = get_settings().MINIAPP_URL or "https://just1k.pro/app"
+                    except Exception:
+                        target_miniapp_url = "https://just1k.pro/app"
                     kb = InlineKeyboardBuilder()
-                    if is_sub_trial:
-                        kb.button(text=texts.BTN_BUY_ACCESS, callback_data="white_internet")
-                    else:
-                        kb.button(text=texts.BTN_WL_TOPUP, callback_data="wl_topup_menu")
+                    kb.button(text=texts.BTN_HUB_CONNECT, web_app=WebAppInfo(url=target_miniapp_url))
                     kb.button(text=texts.BTN_DISMISS_NOTIFICATION, callback_data="dismiss_notification")
                     kb.adjust(1)
 
@@ -434,11 +437,14 @@ class WhiteInternetTrafficWorker:
                             if is_sub_trial
                             else texts.WL_TRAFFIC_90P_ALERT
                         )
+                        from aiogram.types import WebAppInfo
+                        try:
+                            from config.settings import get_settings
+                            target_miniapp_url = get_settings().MINIAPP_URL or "https://just1k.pro/app"
+                        except Exception:
+                            target_miniapp_url = "https://just1k.pro/app"
                         kb = InlineKeyboardBuilder()
-                        if is_sub_trial:
-                            kb.button(text=texts.BTN_BUY_ACCESS, callback_data="white_internet")
-                        else:
-                            kb.button(text=texts.BTN_WL_TOPUP, callback_data="wl_topup_menu")
+                        kb.button(text=texts.BTN_HUB_CONNECT, web_app=WebAppInfo(url=target_miniapp_url))
                         kb.button(text=texts.BTN_DISMISS_NOTIFICATION, callback_data="dismiss_notification")
                         kb.adjust(1)
 

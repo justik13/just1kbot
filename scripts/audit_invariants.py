@@ -36,7 +36,7 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.constants import AMNEZIA_PROTOCOLS, VLESS_PROTOCOL, XRAY_PROTOCOL
+from config.constants import VLESS_PROTOCOL, XRAY_PROTOCOL
 from config.enums import (
     AccountLedgerEntryType,
     ServerHealthState,
@@ -68,7 +68,7 @@ async def assert_inv_1_tariffs(session: AsyncSession) -> InvariantResult:
         select(Tariff).where(
             or_(
                 ~Tariff.service_type.in_(
-                    [ServiceType.STANDARD, ServiceType.WHITE_INTERNET, ServiceType.AWG]
+                    [ServiceType.STANDARD, ServiceType.WHITE_INTERNET]
                 ),
                 Tariff.duration_days <= 0,
                 Tariff.price_rub <= 0,
@@ -321,10 +321,10 @@ async def assert_inv_11_account_ledger_conservation(session: AsyncSession) -> In
 
 
 async def assert_inv_13_vpn_protocol(session: AsyncSession) -> InvariantResult:
-    """Inv 13: All VPN servers use AWG, Xray, or VLESS protocol (pure WireGuard 'wg' is strictly rejected)."""
+    """Inv 13: All VPN servers use Xray or VLESS protocol (pure WireGuard 'wg' is strictly rejected)."""
     violations = await session.scalars(
         select(Server).where(
-            Server.protocol.notin_(list(AMNEZIA_PROTOCOLS) + [XRAY_PROTOCOL, VLESS_PROTOCOL])
+            Server.protocol.notin_([XRAY_PROTOCOL, VLESS_PROTOCOL])
             | (Server.protocol == "wg")
         )
     )
@@ -332,15 +332,15 @@ async def assert_inv_13_vpn_protocol(session: AsyncSession) -> InvariantResult:
     if v_list:
         return InvariantResult(
             13,
-            "VPN Server Protocol (AWG/Xray)",
+            "VPN Server Protocol (VLESS/Xray)",
             False,
             f"Violations: {len(v_list)} invalid protocol servers",
         )
     return InvariantResult(
         13,
-        "VPN Server Protocol (AWG/Xray)",
+        "VPN Server Protocol (VLESS/Xray)",
         True,
-        "All servers strictly use AmneziaWG (amneziawg2/3/3.1), Xray (xray), or VLESS (vless)",
+        "All servers strictly use Xray (xray) or VLESS (vless)",
     )
 
 

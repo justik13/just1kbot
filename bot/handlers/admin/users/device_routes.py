@@ -256,9 +256,9 @@ async def admin_vless_hwid_reset(
         from .subscription_menu_routes import admin_subscription_menu
 
         try:
-            updated_cb = callback.model_copy(update={"data": f"admin_sub_awg_menu:{telegram_id}"})
+            updated_cb = callback.model_copy(update={"data": f"admin_sub_vless_menu:{telegram_id}"})
         except Exception:
-            callback.data = f"admin_sub_awg_menu:{telegram_id}"
+            callback.data = f"admin_sub_vless_menu:{telegram_id}"
             updated_cb = callback
         await admin_subscription_menu(updated_cb, session)
     else:
@@ -372,9 +372,9 @@ async def admin_vless_token_rotate(
         from .subscription_menu_routes import admin_subscription_menu
 
         try:
-            updated_cb = callback.model_copy(update={"data": f"admin_sub_awg_menu:{telegram_id}"})
+            updated_cb = callback.model_copy(update={"data": f"admin_sub_vless_menu:{telegram_id}"})
         except Exception:
-            callback.data = f"admin_sub_awg_menu:{telegram_id}"
+            callback.data = f"admin_sub_vless_menu:{telegram_id}"
             updated_cb = callback
         await admin_subscription_menu(updated_cb, session)
     else:
