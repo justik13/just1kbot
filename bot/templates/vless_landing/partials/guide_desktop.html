@@ -1,0 +1,196 @@
+            <!-- Desktop (PC/Mac/Linux) Guide Content -->
+            <div id="guideSectionDesktop" class="guide-section" role="tabpanel" aria-labelledby="guideNavBtnDesktop" style="display: none;">
+                <div class="guide-section-label">Выберите операционную систему:</div>
+                <div class="guide-method-tabs" role="tablist" aria-label="Операционная система">
+                    <button type="button" class="guide-method-btn active" id="tabBtnDesktopWin" onclick="switchDesktopMethod('win')" role="tab" aria-selected="true">
+                        <span class="guide-method-badge">ПК</span>
+                        <span class="guide-method-title">
+                            <svg class="guide-tab-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M3 5.45L10.5 4.36V11.27H3V5.45ZM10.5 12.73V19.64L3 18.55V12.73H10.5ZM12 4.14L21 2.85V11.27H12V4.14ZM21 12.73V21.15L12 19.86V12.73H21Z"/></svg>
+                            <span>Windows</span>
+                        </span>
+                        <span class="guide-method-sub">Windows 10 / 11</span>
+                    </button>
+                    <button type="button" class="guide-method-btn" id="tabBtnDesktopMac" onclick="switchDesktopMethod('mac')" role="tab" aria-selected="false">
+                        <span class="guide-method-badge">Mac</span>
+                        <span class="guide-method-title">
+                            <svg class="guide-tab-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.33c.64-.78 1.08-1.86.96-2.94-.93.04-2.06.62-2.72 1.4-.58.68-1.1 1.79-.96 2.84 1.04.08 2.08-.52 2.72-1.3"/></svg>
+                            <span>macOS</span>
+                        </span>
+                        <span class="guide-method-sub">Apple Silicon & Intel</span>
+                    </button>
+                    <button type="button" class="guide-method-btn" id="tabBtnDesktopLinux" onclick="switchDesktopMethod('linux')" role="tab" aria-selected="false">
+                        <span class="guide-method-badge">Linux</span>
+                        <span class="guide-method-title">
+                            <svg class="guide-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                            <span>Linux</span>
+                        </span>
+                        <span class="guide-method-sub">AppImage / deb / rpm</span>
+                    </button>
+                </div>
+
+                <!-- Desktop Sub 1: Windows -->
+                <div id="desktopSubWin">
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">1</span>
+                            <span class="guide-step-title">Скачайте и установите программу</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Скачайте официальный установщик Happ для Windows:
+                        </div>
+                        <div class="guide-store-grid" style="grid-template-columns: 1fr;">
+                            <a href="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe" target="_blank" rel="noopener noreferrer" class="guide-store-card">
+                                <div class="guide-store-left">
+                                    <div class="guide-store-icon"><svg viewBox="0 0 24 24"><path d="M3 5.45L10.5 4.36V11.27H3V5.45ZM10.5 12.73V19.64L3 18.55V12.73H10.5ZM12 4.14L21 2.85V11.27H12V4.14ZM21 12.73V21.15L12 19.86V12.73H21Z"/></svg></div>
+                                    <div class="guide-store-info">
+                                        <span class="guide-store-name">Happ для Windows (.exe)</span>
+                                        <span class="guide-store-sub">Официальный релиз с GitHub</span>
+                                    </div>
+                                </div>
+                                <span class="guide-store-badge">Скачать setup.exe ↗</span>
+                            </a>
+                        </div>
+                        <div class="guide-tip-box">
+                            <div class="guide-tip-title">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                                <span>Если появилось окно защиты Windows (SmartScreen):</span>
+                            </div>
+                            <div class="guide-tip-desc">
+                                1. Нажмите ссылку <strong>«Подробнее» (More info)</strong> в окне предупреждения.<br>
+                                2. Появится кнопка <strong>«Выполнить в любом случае» (Run anyway)</strong>: нажмите её.<br>
+                                3. Это стандартное системное уведомление Windows для программ, загруженных из интернета.
+                            </div>
+                            <div class="guide-tip-link-wrap">
+                                <a href="https://docs.happ.info/main/faq" target="_blank" rel="noopener noreferrer" class="guide-sub-link">
+                                    <span>Официальная база знаний Happ Desktop ↗</span>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">2</span>
+                            <span class="guide-step-title">Добавьте подписку</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Скопируйте ссылку на подписку на этой странице. В программе Happ Desktop нажмите иконку <strong>«+» (Добавить)</strong> в левом верхнем углу и выберите <strong>«Вставить из буфера»</strong>. Появится карточка подписки со списком серверов.
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">3</span>
+                            <span class="guide-step-title">Подключение и выбор режима</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Выберите локацию (например, Россия или Нидерланды) и нажмите переключатель связи. В нижней панели Happ можно выбрать режим:<br>
+                            • <strong>Системный прокси</strong>: перенаправляет трафик браузеров.<br>
+                            • <strong>TUN (Рекомендуется)</strong>: направляет трафик всей системы, браузеров и приложений.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Desktop Sub 2: macOS -->
+                <div id="desktopSubMac" style="display: none;">
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">1</span>
+                            <span class="guide-step-title">Скачайте и установите образ</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Скачайте образ Happ для macOS (подходит для процессоров Apple Silicon M1–M4 и Intel):
+                        </div>
+                        <div class="guide-store-grid" style="grid-template-columns: 1fr;">
+                            <a href="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/Happ.macOS.universal.dmg" target="_blank" rel="noopener noreferrer" class="guide-store-card">
+                                <div class="guide-store-left">
+                                    <div class="guide-store-icon"><svg viewBox="0 0 24 24"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.33c.64-.78 1.08-1.86.96-2.94-.93.04-2.06.62-2.72 1.4-.58.68-1.1 1.79-.96 2.84 1.04.08 2.08-.52 2.72-1.3"/></svg></div>
+                                    <div class="guide-store-info">
+                                        <span class="guide-store-name">Happ для macOS (.dmg)</span>
+                                        <span class="guide-store-sub">Универсальная версия (Apple Silicon / Intel)</span>
+                                    </div>
+                                </div>
+                                <span class="guide-store-badge">Скачать .dmg ↗</span>
+                            </a>
+                        </div>
+                        <div class="guide-tip-desc" style="margin-top: 10px;">
+                            Откройте скачанный <code>.dmg</code> файл и перетащите иконку программы в папку <strong>«Программы»</strong> (Applications). При первом запуске разрешите системное расширение в меню <strong>«Системные настройки → Конфиденциальность и безопасность → Разрешить»</strong>.
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">2</span>
+                            <span class="guide-step-title">Добавьте подписку</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Скопируйте ссылку подписки и добавьте её в Happ через кнопку <strong>«+»</strong>.
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">3</span>
+                            <span class="guide-step-title">Включение связи</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Нажмите кнопку подключения и подтвердите системный запрос macOS на добавление сетевого профиля.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Desktop Sub 3: Linux -->
+                <div id="desktopSubLinux" style="display: none;">
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">1</span>
+                            <span class="guide-step-title">Скачайте релиз программы</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Скачайте универсальный пакет Happ Desktop для вашего дистрибутива:
+                        </div>
+                        <div class="guide-store-grid" style="grid-template-columns: 1fr;">
+                            <a href="https://github.com/Happ-proxy/happ-desktop/releases/latest" target="_blank" rel="noopener noreferrer" class="guide-store-card">
+                                <div class="guide-store-left">
+                                    <div class="guide-store-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div>
+                                    <div class="guide-store-info">
+                                        <span class="guide-store-name">Happ Desktop для Linux</span>
+                                        <span class="guide-store-sub">AppImage, deb, rpm с GitHub</span>
+                                    </div>
+                                </div>
+                                <span class="guide-store-badge">Перейти к релизам ↗</span>
+                            </a>
+                        </div>
+                        <div class="guide-tip-box">
+                            <div class="guide-tip-title">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                                <span>Запуск AppImage в терминале:</span>
+                            </div>
+                            <div class="guide-tip-desc">
+                                Сделайте файл исполняемым и запустите:<br>
+                                <code>chmod +x Happ-*.AppImage && ./Happ-*.AppImage</code>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">2</span>
+                            <span class="guide-step-title">Добавьте подписку</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Скопируйте ссылку на подписку на этой странице. В программе нажмите кнопку <strong>«+» (Добавить)</strong> и выберите <strong>«Вставить из буфера»</strong>.
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">3</span>
+                            <span class="guide-step-title">Подключение</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Выберите локацию и активируйте соединение переключателем.
+                        </div>
+                    </div>
+                </div>
+            </div>

@@ -1,0 +1,127 @@
+            <!-- Android Guide Content -->
+            <div id="guideSectionAndroid" class="guide-section" role="tabpanel" aria-labelledby="guideNavBtnAndroid" style="display: none;">
+                <div class="guide-section-label">Шаг 1. Выберите способ установки:</div>
+                <div class="guide-method-tabs guide-method-tabs-2" role="tablist" aria-label="Способ установки Android">
+                    <button type="button" class="guide-method-btn active" id="tabBtnAndroidPlay" onclick="switchAndroidMethod('play')" role="tab" aria-selected="true">
+                        <span class="guide-method-badge">Рекомендуется</span>
+                        <span class="guide-method-title">
+                            <svg class="guide-tab-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M3.61 1.814L13.793 12 3.61 22.186a1.05 1.05 0 0 1-.61-.959V2.773c0-.419.246-.785.61-.959zm10.89 10.893l2.302 2.302-10.937 6.333 8.635-8.635zm3.199-3.198l2.807 1.626a1 1 0 0 1 0 1.73l-2.808 1.626L15.206 12l2.493-2.491zM5.864 2.658L16.8 8.99l-2.302 2.302-8.634-8.634z"/></svg>
+                            <span>Google Play</span>
+                        </span>
+                        <span class="guide-method-sub">Официальный магазин</span>
+                    </button>
+                    <button type="button" class="guide-method-btn" id="tabBtnAndroidApk" onclick="switchAndroidMethod('apk')" role="tab" aria-selected="false">
+                        <span class="guide-method-badge">Без сервисов</span>
+                        <span class="guide-method-title">
+                            <svg class="guide-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            <span>Прямой APK</span>
+                        </span>
+                        <span class="guide-method-sub">Для Huawei / Honor</span>
+                    </button>
+                </div>
+
+                <!-- Android Sub 1: Google Play -->
+                <div id="androidSubPlay">
+                    <div class="guide-callout">
+                        <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                        <div><strong>Обратите внимание:</strong> Приложение Happ временно недоступно в Google Play РФ. Для быстрой установки из магазина используйте <strong>INCY</strong>, либо скачивайте официальный APK Happ с GitHub.</div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">1</span>
+                            <span class="guide-step-title">Установите приложение из Google Play</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            В Google Play доступно приложение <strong>INCY</strong>:
+                        </div>
+                        <div class="guide-store-grid" style="grid-template-columns: 1fr;">
+                            <a href="https://play.google.com/store/apps/details?id=llc.itdev.incy" target="_blank" rel="noopener noreferrer" class="guide-store-card">
+                                <div class="guide-store-left">
+                                    <div class="guide-store-icon"><svg viewBox="0 0 24 24"><path d="M3.61 1.814L13.793 12 3.61 22.186a1.05 1.05 0 0 1-.61-.959V2.773c0-.419.246-.785.61-.959zm10.89 10.893l2.302 2.302-10.937 6.333 8.635-8.635zm3.199-3.198l2.807 1.626a1 1 0 0 1 0 1.73l-2.808 1.626L15.206 12l2.493-2.491zM5.864 2.658L16.8 8.99l-2.302 2.302-8.634-8.634z"/></svg></div>
+                                    <div class="guide-store-info">
+                                        <span class="guide-store-name">INCY в Google Play</span>
+                                        <span class="guide-store-sub">Официально в магазине • Доступно в РФ</span>
+                                    </div>
+                                </div>
+                                <span class="guide-store-badge">Установить ↗</span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Android Sub 2: Direct APK -->
+                <div id="androidSubApk" style="display: none;">
+                    <div class="guide-callout">
+                        <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+                        <div><strong>Для устройств без Google Play:</strong> Скачайте официальный установочный файл APK Happ напрямую с GitHub разработчика.</div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">1</span>
+                            <span class="guide-step-title">Скачайте установочный APK-файл</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Нажмите кнопку скачивания APK (браузер может показать системный запрос):
+                        </div>
+                        <div class="guide-store-grid" style="grid-template-columns: 1fr;">
+                            <a href="https://github.com/Happ-proxy/happ-android/releases/latest/download/Happ.apk" target="_blank" rel="noopener noreferrer" class="guide-store-card">
+                                <div class="guide-store-left">
+                                    <div class="guide-store-icon"><svg viewBox="0 0 24 24" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div>
+                                    <div class="guide-store-info">
+                                        <span class="guide-store-name">Happ.apk</span>
+                                        <span class="guide-store-sub">Официальный релиз с GitHub</span>
+                                    </div>
+                                </div>
+                                <span class="guide-store-badge">Скачать APK ↗</span>
+                            </a>
+                        </div>
+                        <div class="guide-tip-box">
+                            <div class="guide-tip-title">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                <span>Предупреждение браузера Chrome:</span>
+                            </div>
+                            <div class="guide-tip-desc">
+                                1. При загрузке APK Chrome покажет: <em>«Файл может быть опасным»</em>.<br>
+                                2. Нажмите <strong>«Всё равно скачать»</strong>: файл скачивается напрямую из официального репозитория разработчика на GitHub.<br>
+                                3. После загрузки откройте файл и выберите <strong>«Установить»</strong>.
+                            </div>
+                            <div class="guide-screenshot-wrapper horizontal">
+                                <img src="{{IMG_ANDROID_APK}}" alt="Предупреждение при установке APK" class="guide-real-screenshot loaded" loading="lazy" decoding="async" onload="markImgLoaded(this)">
+                            </div>
+                            <div class="guide-tip-link-wrap">
+                                <a href="https://github.com/Happ-proxy/happ-android/releases" target="_blank" rel="noopener noreferrer" class="guide-sub-link">
+                                    <span>Релизы Happ Android на GitHub ↗</span>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 2: Add Subscription -->
+                <div class="guide-step-card">
+                    <div class="guide-step-header">
+                        <span class="guide-step-num">2</span>
+                        <span class="guide-step-title">Добавьте подписку в приложение</span>
+                    </div>
+                    <div class="guide-step-desc">
+                        Вернитесь на эту страницу и нажмите кнопку <strong>«Подключить в INCY»</strong> или <strong>«Подключить в Happ»</strong> вверху (приложение откроется само со списком всех серверов).<br>
+                        Либо нажмите <strong>«Скопировать адрес»</strong>, откройте приложение, нажмите <strong>«+»</strong> и выберите <strong>«Вставить из буфера»</strong>.
+                    </div>
+                </div>
+
+                <!-- Step 3: First Connect -->
+                <div class="guide-step-card">
+                    <div class="guide-step-header">
+                        <span class="guide-step-num">3</span>
+                        <span class="guide-step-title">Первое подключение и подтверждение</span>
+                    </div>
+                    <div class="guide-step-desc">
+                        Откройте приложение, нажмите кнопку включения и подтвердите стандартный системный <strong>«Запрос на подключение»</strong> Android (нажмите <strong>«ОК»</strong>).
+                    </div>
+                    <div class="guide-step-note-plain">
+                        В строке состояния вверху экрана появится значок ключа: соединение активно.
+                    </div>
+                </div>
+            </div>

@@ -27,7 +27,77 @@ from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
 logger = logging.getLogger(__name__)
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
-_LANDING_ACTIVE_HTML = (_TEMPLATES_DIR / "vless_landing_active.html").read_text(encoding="utf-8")
+
+
+_CACHED_LANDING_ACTIVE_HTML: str | None = None
+
+
+def load_vless_landing_active_html() -> str:
+    """Assemble modular landing template with inline Base64 real screenshots into memory."""
+    global _CACHED_LANDING_ACTIVE_HTML
+    if _CACHED_LANDING_ACTIVE_HTML is not None:
+        return _CACHED_LANDING_ACTIVE_HTML
+
+    landing_dir = _TEMPLATES_DIR / "vless_landing"
+    if not landing_dir.is_dir():
+        raise FileNotFoundError(f"Landing directory not found: {landing_dir}")
+
+    base = (landing_dir / "base.html").read_text(encoding="utf-8")
+    css = (landing_dir / "css" / "landing.css").read_text(encoding="utf-8")
+    js = (landing_dir / "js" / "landing.js").read_text(encoding="utf-8")
+    connect_view = (landing_dir / "views" / "connect_view.html").read_text(encoding="utf-8")
+    guides_view = (landing_dir / "views" / "guides_view.html").read_text(encoding="utf-8")
+
+    guide_ios = (landing_dir / "partials" / "guide_ios.html").read_text(encoding="utf-8")
+    guide_android = (landing_dir / "partials" / "guide_android.html").read_text(encoding="utf-8")
+    guide_desktop = (landing_dir / "partials" / "guide_desktop.html").read_text(encoding="utf-8")
+    guide_faq = (landing_dir / "partials" / "guide_faq.html").read_text(encoding="utf-8")
+
+    assets_dir = landing_dir / "assets"
+    asset_placeholders = {
+        "{{IMG_IOS_1}}": "ios_01_profile.jpg",
+        "{{IMG_IOS_2}}": "ios_02_kazakhstan.jpg",
+        "{{IMG_IOS_3}}": "ios_03_payment.jpg",
+        "{{IMG_IOS_4}}": "ios_04_appstore.jpg",
+        "{{IMG_TESTFLIGHT}}": "ios_testflight.jpg",
+        "{{IMG_ANDROID_APK}}": "android_apk_warning.jpg",
+    }
+    missing_assets = [fn for fn in asset_placeholders.values() if not (assets_dir / fn).is_file()]
+    if missing_assets:
+        raise FileNotFoundError(f"Missing required landing asset files: {missing_assets}")
+
+    for placeholder, filename in asset_placeholders.items():
+        img_path = assets_dir / filename
+        b64_data = base64.b64encode(img_path.read_bytes()).decode("ascii")
+        data_uri = f"data:image/jpeg;base64,{b64_data}"
+        guide_ios = guide_ios.replace(placeholder, data_uri)
+        guide_android = guide_android.replace(placeholder, data_uri)
+
+    guides_view = (
+        guides_view.replace("<!-- {{GUIDE_IOS}} -->", guide_ios)
+        .replace("<!-- {{GUIDE_ANDROID}} -->", guide_android)
+        .replace("<!-- {{GUIDE_DESKTOP}} -->", guide_desktop)
+        .replace("<!-- {{GUIDE_FAQ}} -->", guide_faq)
+    )
+
+    rendered = (
+        base.replace("/* {{LANDING_CSS}} */", css)
+        .replace("<!-- {{CONNECT_VIEW}} -->", connect_view)
+        .replace("<!-- {{GUIDES_VIEW}} -->", guides_view)
+        .replace("// {{LANDING_JS}}", js)
+    )
+
+    if "{{IMG_" in rendered:
+        raise ValueError("Unreplaced image placeholders found in assembled landing HTML")
+    if "<!-- {{GUIDE_" in rendered:
+        raise ValueError("Unreplaced guide slot placeholders found in assembled landing HTML")
+
+    _CACHED_LANDING_ACTIVE_HTML = rendered
+    return rendered
+
+
+_load_landing_active_html = load_vless_landing_active_html
+_LANDING_ACTIVE_HTML = load_vless_landing_active_html()
 _LANDING_INACTIVE_HTML = (_TEMPLATES_DIR / "vless_landing_inactive.html").read_text(encoding="utf-8")
 
 _ip_rate_limiter = HttpRateLimiter(rate_per_minute=60.0, burst=15)
@@ -203,6 +273,7 @@ def _render_vless_landing_html(
     page_title: str | None = None,
     tier: str = "basic",
     tariff_badge: str | None = None,
+    device_limit: int | None = None,
 ) -> str:
     """Render universal landing page for INCY 1-click import and installation guidance."""
     clean_bot = html.escape(bot_username.strip().lstrip("@")) if bot_username else constants.DEFAULT_FALLBACK_BOT_USERNAME
@@ -225,6 +296,7 @@ def _render_vless_landing_html(
         _LANDING_ACTIVE_HTML.replace("{page_title}", html.escape(effective_title))
         .replace("{tier}", html.escape(tier))
         .replace("{tariff_badge_html}", badge_html)
+        .replace("{device_limit}", str(device_limit or 1))
     )
 
 
@@ -402,6 +474,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                     page_title=page_title,
                     tier=tier,
                     tariff_badge=tariff_badge,
+                    device_limit=total_limit,
                 )
                 landing_headers = {
                     **common_headers,

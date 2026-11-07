@@ -1,0 +1,39 @@
+        <!-- Dedicated Guides View -->
+        <div id="guidesView" class="view-hidden">
+            <div class="guides-sticky-bar">
+                <button type="button" class="guides-back-btn" onclick="closeGuidesTab()" aria-label="Назад к экрану подключения">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="15 18 9 12 15 6"/>
+                    </svg>
+                    <span>Назад к подключению</span>
+                </button>
+                <span class="guides-badge-tag">База знаний</span>
+            </div>
+
+            <div class="guides-header-title">
+                <h2>Центр инструкций</h2>
+                <p>Пошаговая настройка приложений на ваших устройствах</p>
+            </div>
+
+            <div class="guide-nav-tabs" role="tablist" aria-label="Платформы">
+                <button type="button" class="guide-nav-btn active" id="guideNavBtnIos" onclick="switchGuideTab('ios')" role="tab" aria-selected="true">iOS</button>
+                <button type="button" class="guide-nav-btn" id="guideNavBtnAndroid" onclick="switchGuideTab('android')" role="tab" aria-selected="false">Android</button>
+                <button type="button" class="guide-nav-btn" id="guideNavBtnDesktop" onclick="switchGuideTab('desktop')" role="tab" aria-selected="false">ПК / Mac</button>
+                <button type="button" class="guide-nav-btn" id="guideNavBtnFaq" onclick="switchGuideTab('faq')" role="tab" aria-selected="false">Вопросы</button>
+            </div>
+
+            <!-- {{GUIDE_IOS}} -->
+            <!-- {{GUIDE_ANDROID}} -->
+            <!-- {{GUIDE_DESKTOP}} -->
+            <!-- {{GUIDE_FAQ}} -->
+
+            <!-- Bottom Return Button -->
+            <div class="guides-bottom-bar">
+                <button type="button" class="guides-return-btn" onclick="closeGuidesTab()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="15 18 9 12 15 6"/>
+                    </svg>
+                    <span>Вернуться к экрану подключения</span>
+                </button>
+            </div>
+        </div><!-- end guidesView -->

@@ -1,0 +1,282 @@
+            <!-- iOS Guide Content -->
+            <div id="guideSectionIos" class="guide-section" role="tabpanel" aria-labelledby="guideNavBtnIos">
+                <div class="guide-section-label">Шаг 1. Выберите способ установки:</div>
+                <div class="guide-method-tabs" role="tablist" aria-label="Способ установки iOS">
+                    <button type="button" class="guide-method-btn active" id="tabBtnIosTf" onclick="switchIosMethod('tf')" role="tab" aria-selected="true">
+                        <span class="guide-method-badge">Быстро</span>
+                        <span class="guide-method-title">
+                            <svg class="guide-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                            <span>TestFlight</span>
+                        </span>
+                        <span class="guide-method-sub">Без смены региона</span>
+                    </button>
+                    <button type="button" class="guide-method-btn" id="tabBtnIosRegion" onclick="switchIosMethod('region')" role="tab" aria-selected="false">
+                        <span class="guide-method-badge">Навсегда</span>
+                        <span class="guide-method-title">
+                            <svg class="guide-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                            <span>Казахстан</span>
+                        </span>
+                        <span class="guide-method-sub">App Store (без карты)</span>
+                    </button>
+                    <button type="button" class="guide-method-btn" id="tabBtnIosNewId" onclick="switchIosMethod('newid')" role="tab" aria-selected="false">
+                        <span class="guide-method-badge">Запасной</span>
+                        <span class="guide-method-title">
+                            <svg class="guide-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                            <span>Второй ID</span>
+                        </span>
+                        <span class="guide-method-sub">Новый Apple ID</span>
+                    </button>
+                </div>
+
+                <!-- Sub-Guide 1: TestFlight (Fastest) -->
+                <div id="iosSubGuideTf">
+                    <div class="guide-callout">
+                        <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                        <div><strong>Установка без смены региона:</strong> TestFlight доступен в App Store РФ (требуется iOS 16+). Тестовая сборка активна до 90 дней с момента релиза разработчика.</div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">1</span>
+                            <span class="guide-step-title">Установите приложение Apple TestFlight</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Откройте официальный российский App Store и скачайте приложение TestFlight:
+                        </div>
+                        <div class="guide-store-grid" style="grid-template-columns: 1fr;">
+                            <a href="https://apps.apple.com/app/testflight/id899247664" target="_blank" rel="noopener noreferrer" class="guide-store-card">
+                                <div class="guide-store-left">
+                                    <div class="guide-store-icon"><svg viewBox="0 0 24 24"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.33c.64-.78 1.08-1.86.96-2.94-.93.04-2.06.62-2.72 1.4-.58.68-1.1 1.79-.96 2.84 1.04.08 2.08-.52 2.72-1.3"/></svg></div>
+                                    <div class="guide-store-info">
+                                        <span class="guide-store-name">Apple TestFlight</span>
+                                        <span class="guide-store-sub">Официально из App Store РФ</span>
+                                    </div>
+                                </div>
+                                <span class="guide-store-badge">Установить ↗</span>
+                            </a>
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">2</span>
+                            <span class="guide-step-title">Откройте ссылку тестирования</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Нажмите на ссылку клиента для перехода в TestFlight:
+                        </div>
+                        <div class="guide-store-grid">
+                            <a href="https://testflight.apple.com/join/dFw66h3a" target="_blank" rel="noopener noreferrer" class="guide-store-card">
+                                <div class="guide-store-left">
+                                    <div class="guide-store-icon"><svg viewBox="0 0 24 24"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z"/></svg></div>
+                                    <div class="guide-store-info">
+                                        <span class="guide-store-name">INCY <span class="guide-tf-badge">Рекомендуется</span></span>
+                                        <span class="guide-store-sub">TestFlight приглашение</span>
+                                    </div>
+                                </div>
+                                <span class="guide-store-badge">Открыть ↗</span>
+                            </a>
+                            <a href="https://testflight.apple.com/join/XMls6Ckd" target="_blank" rel="noopener noreferrer" class="guide-store-card">
+                                <div class="guide-store-left">
+                                    <div class="guide-store-icon"><svg viewBox="0 0 24 24" fill="none"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
+                                    <div class="guide-store-info">
+                                        <span class="guide-store-name">Happ</span>
+                                        <span class="guide-store-sub">TestFlight приглашение</span>
+                                    </div>
+                                </div>
+                                <span class="guide-store-badge">Открыть ↗</span>
+                            </a>
+                        </div>
+                        <div class="guide-tip-box">
+                            <div class="guide-tip-title">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                                <span>Как принять приглашение в TestFlight:</span>
+                            </div>
+                            <div class="guide-tip-desc">
+                                1. В открывшемся TestFlight нажмите кнопку <strong>«Принять»</strong> (Accept).<br>
+                                2. Затем нажмите <strong>«Установить»</strong> (Install): приложение появится на домашнем экране.<br>
+                                3. Дополнительных кодов или Apple ID вводить не нужно.
+                            </div>
+                            <div class="guide-screenshot-wrapper vertical">
+                                <img src="{{IMG_TESTFLIGHT}}" alt="INCY в Apple TestFlight" class="guide-real-screenshot loaded" loading="lazy" decoding="async" onload="markImgLoaded(this)">
+                            </div>
+                            <div class="guide-tip-link-wrap">
+                                <a href="https://testflight.apple.com" target="_blank" rel="noopener noreferrer" class="guide-sub-link">
+                                    <span>Официальное руководство Apple по TestFlight ↗</span>
+                                </a>
+                            </div>
+                        </div>
+                        <div class="guide-step-note">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                            <span>Если TestFlight пишет «Этот бета-тест заполнен», выберите способ <strong>«Казахстан»</strong> выше: он позволяет установить клиент напрямую из App Store.</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sub-Guide 2: Region Change to Kazakhstan -->
+                <div id="iosSubGuideRegion" style="display: none;">
+                    <div class="guide-callout">
+                        <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                        <div><strong>Установка через App Store Казахстана:</strong> В магазине Казахстана интерфейс на русском языке, а карта для скачивания не требуется. После установки можно сразу вернуть регион РФ.</div>
+                    </div>
+
+                    <div class="guide-callout guide-callout-muted">
+                        <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                        <div><strong>Условия смены:</strong> На балансе Apple ID не должно быть остатка (0 ₽), действующих платных подписок Apple (или дождитесь окончания их периода), незавершённых заказов и семейного доступа.</div>
+                    </div>
+
+                    <!-- iOS Guide Steps (Zero-Signature embedded visual cards) -->
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">1</span>
+                            <span class="guide-step-title">Откройте меню смены страны в App Store</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Зайдите в <strong>App Store</strong> → нажмите на <strong>иконку своего профиля</strong> в правом верхнем углу → нажмите на первую строчку (своё имя и Apple ID) → выберите <strong>«Страна/регион»</strong> → <strong>«Изменить страну или регион»</strong>.
+                        </div>
+                        <div class="guide-screenshot-wrapper vertical">
+                            <img src="{{IMG_IOS_1}}" alt="Профиль App Store" class="guide-real-screenshot loaded" loading="lazy" decoding="async" onload="markImgLoaded(this)">
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">2</span>
+                            <span class="guide-step-title">Выберите Казахстан и примите условия</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Найдите в списке <strong>«Казахстан»</strong>, нажмите <strong>«Принять»</strong> в верхнем правом углу.
+                        </div>
+                        <div class="guide-screenshot-wrapper vertical">
+                            <img src="{{IMG_IOS_2}}" alt="Выбор Казахстана" class="guide-real-screenshot loaded" loading="lazy" decoding="async" onload="markImgLoaded(this)">
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">3</span>
+                            <span class="guide-step-title">Способ оплаты «Нет» и адрес для счёта</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            В способах оплаты выберите <strong>«Нет»</strong> (банковская карта не требуется). В поля адреса введите данные г. Алматы (нажмите «Копировать» рядом с нужным полем):
+                        </div>
+                        <!-- Address Copy Fields -->
+                        <div class="guide-data-card">
+                            <div class="guide-data-card-title">Адрес для выставления счёта (Казахстан)</div>
+                            <div class="guide-data-row">
+                                <span class="guide-data-label">Улица</span>
+                                <div class="guide-data-val-group">
+                                    <span class="guide-data-value">ул. Абая, 1</span>
+                                    <button type="button" class="mini-copy-btn" onclick="copyGuideField('ул. Абая, 1', this)" title="Скопировать" aria-label="Скопировать улицу">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                                        <span class="copy-lbl">Копировать</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="guide-data-row">
+                                <span class="guide-data-label">Город</span>
+                                <div class="guide-data-val-group">
+                                    <span class="guide-data-value">Алматы</span>
+                                    <button type="button" class="mini-copy-btn" onclick="copyGuideField('Алматы', this)" title="Скопировать" aria-label="Скопировать город">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                                        <span class="copy-lbl">Копировать</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="guide-data-row">
+                                <span class="guide-data-label">Индекс</span>
+                                <div class="guide-data-val-group">
+                                    <span class="guide-data-value">050000</span>
+                                    <button type="button" class="mini-copy-btn" onclick="copyGuideField('050000', this)" title="Скопировать" aria-label="Скопировать индекс">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                                        <span class="copy-lbl">Копировать</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="guide-data-row">
+                                <span class="guide-data-label">Телефон</span>
+                                <div class="guide-data-val-group">
+                                    <span class="guide-data-value">(701) 123-4567</span>
+                                    <button type="button" class="mini-copy-btn" onclick="copyGuideField('7011234567', this)" title="Скопировать" aria-label="Скопировать телефон">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                                        <span class="copy-lbl">Копировать</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="guide-screenshot-wrapper vertical">
+                            <img src="{{IMG_IOS_3}}" alt="Способ оплаты Нет и адрес" class="guide-real-screenshot loaded" loading="lazy" decoding="async" onload="markImgLoaded(this)">
+                        </div>
+                        <div class="guide-step-note-plain">
+                            Нажмите <strong>«Далее»</strong> в правом верхнем углу. Регион изменится сразу.
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">4</span>
+                            <span class="guide-step-title">Скачайте клиент в App Store</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            В поиске App Store введите <strong>INCY</strong> (рекомендуется) или <strong>Happ</strong> и нажмите <strong>«Загрузить»</strong>. После установки вы можете вернуть регион App Store на РФ: приложение продолжит работать и обновляться.
+                        </div>
+                        <div class="guide-screenshot-wrapper vertical">
+                            <img src="{{IMG_IOS_4}}" alt="Happ в App Store" class="guide-real-screenshot loaded" loading="lazy" decoding="async" onload="markImgLoaded(this)">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sub-Guide 3: New Apple ID (Alternative) -->
+                <div id="iosSubGuideNewId" style="display: none;">
+                    <div class="guide-callout">
+                        <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                        <div><strong>Второй аккаунт Apple ID:</strong> Подходит, если на основном аккаунте оформлены семейный доступ или подписки. Фото, iCloud и контакты не затрагиваются: аккаунт меняется только для App Store.</div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">1</span>
+                            <span class="guide-step-title">Создайте аккаунт на сайте Apple</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            В браузере Safari откройте <strong>account.apple.com</strong> → «Создать Apple ID». Укажите страну <strong>Казахстан</strong> или <strong>США</strong> и свой свободный email. В поле номера телефона укажите свой российский номер (+7): SMS с кодом подтверждения приходит без задержек.
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">2</span>
+                            <span class="guide-step-title">Войдите в App Store и скачайте клиент</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            В App Store нажмите аватарку → пролистайте вниз → <strong>«Выйти»</strong> (только из магазина, из настроек iPhone выходить не нужно). Войдите под новым аккаунтом, скачайте <strong>INCY</strong> или <strong>Happ</strong>, затем вернитесь в свой основной Apple ID. Приложение останется на устройстве навсегда.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 3 (Common for all iOS): Add Subscription -->
+                <div class="guide-step-card">
+                    <div class="guide-step-header">
+                        <span class="guide-step-num" id="iosCommonStep1Num">3</span>
+                        <span class="guide-step-title">Добавьте подписку в приложение</span>
+                    </div>
+                    <div class="guide-step-desc">
+                        После установки вернитесь на эту страницу и нажмите кнопку <strong>«Подключить в INCY»</strong> или <strong>«Подключить в Happ»</strong> вверху (приложение откроется само и загрузит все серверы).<br>
+                        Либо нажмите <strong>«Скопировать адрес»</strong>, откройте приложение, нажмите <strong>«+»</strong> в правом верхнем углу и выберите <strong>«Вставить из буфера»</strong>.
+                    </div>
+                </div>
+
+                <!-- Step 4 (Common for all iOS): First Connect & System Permission -->
+                <div class="guide-step-card">
+                    <div class="guide-step-header">
+                        <span class="guide-step-num" id="iosCommonStep2Num">4</span>
+                        <span class="guide-step-title">Первое подключение и системное разрешение</span>
+                    </div>
+                    <div class="guide-step-desc">
+                        Нажмите круглую кнопку подключения в центре экрана приложения и подтвердите системный запрос iOS (нажмите <strong>«Разрешить»</strong> через Face ID или код-пароль).
+                    </div>
+                    <div class="guide-step-note-plain">
+                        Кнопка станет зелёной: соединение активно.
+                    </div>
+                </div>
+            </div>
