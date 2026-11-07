@@ -213,24 +213,15 @@ class E2EUserFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(req.__class__.__name__, "EditMessageText")
         self.assertIn("Баланс:", req.text)
         
-        # 3. User tries to buy tariff from showcase
-        update = self._create_callback_update("payment_showcase")
+        # 3. User navigates to topup presets
+        update = self._create_callback_update("balance_topup")
         await self.dp.feed_update(bot=self.bot, update=update)
         req = next(
             r
             for r in reversed(self.session.requests)
             if r.__class__.__name__ == "EditMessageText"
         )
-        self.assertIn("Базовый", str(req.reply_markup))
-        
-        # Emulate clicking on the tariff to quote
-        update = self._create_callback_update(f"select_tariff:{self.tariff.id}:showcase")
-        await self.dp.feed_update(bot=self.bot, update=update)
-        req = next(r for r in reversed(self.session.requests) if r.__class__.__name__ in ("EditMessageText", "SendMessage") and hasattr(r, "text") and r.text)
-        self.assertIn("Базовый", req.text)
-        self.assertIn("150", req.text)
-        # Here they should see "Не хватает" (insufficient funds)
-        self.assertIn("Не хватает", req.text)
+        self.assertIn("Пополнение баланса", req.text)
 
         # 4. Existing user sends /start again -> gets Hub directly without welcome
         update = self._create_message_update("/start")

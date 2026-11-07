@@ -108,7 +108,7 @@ class E2ECriticalFlowsFullCoverageTests(unittest.IsolatedAsyncioTestCase):
             order = await OrderService.pay_from_wallet(
                 session,
                 user_id=user.id,
-                service_type="awg",
+                service_type="standard",
                 tariff_id=tariff.id,
             )
             self.assertIsNotNone(order)

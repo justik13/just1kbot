@@ -122,6 +122,11 @@ async def get_active_servers(session: AsyncSession) -> list[Server]:
     return result.scalars().all()
 
 
+async def get_available_servers(session: AsyncSession) -> list[Server]:
+    """Get active servers available for allocation."""
+    return await get_active_servers(session)
+
+
 def capacity_consuming_wl_condition():
     """A White Internet subscription consumes server capacity if it is active,
     exhausted, pending, or in a transitional provisioning lifecycle state."""
