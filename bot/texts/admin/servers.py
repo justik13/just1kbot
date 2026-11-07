@@ -292,6 +292,12 @@ ADMIN_STD_SUB_INCY_CONFIG_CARD = """🛠 Админка › 💎 <b>Станда
 ADMIN_STD_SUB_INCY_STATUS_ON = ADMIN_SERVER_STATE_ENABLED
 ADMIN_STD_SUB_INCY_STATUS_OFF = "⚪️ Выключен"
 ADMIN_STD_SUB_INCY_BTN_DEVICES = "📊 Счётчик устройств: {status}"
+ADMIN_STD_SUB_INCY_ORDER_STD_FIRST = "Стандарт → БИ"
+ADMIN_STD_SUB_INCY_ORDER_WI_FIRST = "БИ → Стандарт"
+ADMIN_STD_SUB_INCY_BTN_ORDER = "↕️ Порядок: {order}"
+ADMIN_STD_SUB_INCY_ROUTING_DIRECT = "Direct РФ"
+ADMIN_STD_SUB_INCY_ROUTING_HUB = "РУ ХАБ"
+ADMIN_STD_SUB_INCY_BTN_ROUTING = "🛣 Маршрутизация: {routing}"
 
 ADMIN_SERVER_INCY_STANDARD_CARD = """🛠 Админка › 🖥 <b>{flag} {name}</b> › 🎨 <b>Оформление INCY</b>
 
