@@ -77,6 +77,11 @@ class Settings(BaseSettings):
     INCY_API_KEY: str | None = None
     AMNEZIA_BRIDGE_HMAC_SECRET: str | None = None
 
+    # ── Cloudflare & Zero-Signature Wildcard TLS ──
+    CLOUDFLARE_API_TOKEN: str | None = Field(default=None, repr=False)
+    WILDCARD_DOMAIN: str | None = None
+    ACME_DIRECTORY_URL: str = "https://acme-v02.api.letsencrypt.org/directory"
+
     # ── Account balance product limits ──
     BALANCE_MIN_TOPUP_RUB: int = 10
     BALANCE_MAX_CUSTOM_TOPUP_RUB: int = 5000
