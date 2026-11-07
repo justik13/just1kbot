@@ -148,7 +148,11 @@ def get_admin_server_relays_keyboard(server_id: int) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def get_admin_std_sub_incy_keyboard(show_devices: bool = False) -> InlineKeyboardMarkup:
+def get_admin_std_sub_incy_keyboard(
+    show_devices: bool = False,
+    order: str = "standard_first",
+    direct_ru: bool = True,
+) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text=texts.ADMIN_SERVER_INCY_BTN_TITLE, callback_data="admin_std_incy_edit:title")
     dev_status = texts.ADMIN_STD_SUB_INCY_STATUS_ON if show_devices else texts.ADMIN_STD_SUB_INCY_STATUS_OFF
@@ -156,11 +160,21 @@ def get_admin_std_sub_incy_keyboard(show_devices: bool = False) -> InlineKeyboar
         text=texts.ADMIN_STD_SUB_INCY_BTN_DEVICES.format(status=dev_status),
         callback_data="admin_std_incy_toggle_devs",
     )
+    order_label = "Стандарт → БИ" if order == "standard_first" else "БИ → Стандарт"
+    builder.button(
+        text=f"Порядок: {order_label}",
+        callback_data="admin_std_incy_toggle_order",
+    )
+    routing_label = "Direct РФ" if direct_ru else "РУ ХАБ"
+    builder.button(
+        text=f"Маршрутизация: {routing_label}",
+        callback_data="admin_std_incy_toggle_routing",
+    )
     builder.button(text=texts.ADMIN_SERVER_INCY_BTN_ANNOUNCE, callback_data="admin_std_incy_edit:announce")
     builder.button(text=texts.ADMIN_SERVER_INCY_BTN_ANNOUNCE_URL, callback_data="admin_std_incy_edit:announce_url")
     builder.button(text=texts.ADMIN_SERVER_INCY_BTN_RESET, callback_data="admin_std_incy_reset")
     builder.button(text=texts.BTN_BACK, callback_data="admin_cat_std_sub")
-    builder.adjust(1, 1, 2, 1, 1)
+    builder.adjust(1, 1, 2, 2, 1, 1)
     return builder.as_markup()
 
 

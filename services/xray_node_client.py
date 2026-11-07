@@ -212,6 +212,20 @@ class XrayNodeClient:
         logger.warning("Node health check failed for %s: %s", _sanitize_url(url), err)
         return False, None, None
 
+    async def fetch_capabilities(
+        self, api_url: str, api_key: str, timeout: float | None = None
+    ) -> dict[str, Any] | None:
+        """Fetch node capabilities from GET /v1/capabilities."""
+        url = f"{api_url.rstrip('/')}/v1/capabilities"
+        headers = self._get_headers(api_key)
+        status_code, data, err = await self._make_request("GET", url, headers, request_timeout=timeout)
+
+        if status_code == 200 and isinstance(data, dict):
+            return data
+
+        logger.warning("Failed to fetch capabilities from %s: %s", _sanitize_url(url), err)
+        return None
+
     async def sync_client(
         self,
         api_url: str,

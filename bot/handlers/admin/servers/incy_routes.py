@@ -114,13 +114,19 @@ async def _build_std_sub_incy_card(session: AsyncSession) -> tuple[str, Any]:
         show_devices = bool(show_devs_raw)
 
     show_devs_status = texts.ADMIN_STD_SUB_INCY_STATUS_ON if show_devices else texts.ADMIN_STD_SUB_INCY_STATUS_OFF
+    order_val = await get_system_setting(session, "sub_nodes_order", "standard_first") or "standard_first"
+    direct_ru_raw = await get_system_setting(session, "sub_routing_direct_ru", "true")
+    direct_ru = str(direct_ru_raw).lower() in ("1", "true", "yes", "on")
+
     card_text = texts.ADMIN_STD_SUB_INCY_CONFIG_CARD.format(
         title=safe(title or constants.DEFAULT_VLESS_PROFILE_TITLE),
         show_devices_status=show_devs_status,
         announce=safe(announce or texts.ADMIN_SERVER_INCY_VALUE_NONE),
         announce_url=safe(announce_url or texts.ADMIN_SERVER_INCY_VALUE_NONE),
     )
-    keyboard = get_admin_std_sub_incy_keyboard(show_devices=show_devices)
+    keyboard = get_admin_std_sub_incy_keyboard(
+        show_devices=show_devices, order=order_val, direct_ru=direct_ru
+    )
     return card_text, keyboard
 
 
@@ -346,6 +352,67 @@ async def toggle_std_sub_incy_devices(
         )
     except TelegramBadRequest as e:
         logger.debug(f"toggle_std_sub_incy_devices edit_text failed: {e}")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_std_incy_toggle_order")
+async def toggle_std_sub_incy_order(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    await state.clear()
+    current_order = await get_system_setting(session, "sub_nodes_order", "standard_first")
+    new_order = "wi_first" if current_order == "standard_first" else "standard_first"
+    await set_system_setting(
+        session, "sub_nodes_order", new_order, updated_by=callback.from_user.id
+    )
+    await session.commit()
+
+    card_text, reply_markup = await _build_std_sub_incy_card(session)
+    try:
+        await callback.message.edit_text(
+            card_text,
+            reply_markup=reply_markup,
+            parse_mode="HTML",
+        )
+    except TelegramBadRequest as e:
+        logger.debug(f"toggle_std_sub_incy_order edit_text failed: {e}")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_std_incy_toggle_routing")
+async def toggle_std_sub_incy_routing(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    await state.clear()
+    current_raw = await get_system_setting(session, "sub_routing_direct_ru", "true")
+    current_bool = str(current_raw).lower() in ("1", "true", "yes", "on")
+    new_val = not current_bool
+    await set_system_setting(
+        session, "sub_routing_direct_ru", str(new_val).lower(), updated_by=callback.from_user.id
+    )
+    await session.commit()
+
+    card_text, reply_markup = await _build_std_sub_incy_card(session)
+    try:
+        await callback.message.edit_text(
+            card_text,
+            reply_markup=reply_markup,
+            parse_mode="HTML",
+        )
+    except TelegramBadRequest as e:
+        logger.debug(f"toggle_std_sub_incy_routing edit_text failed: {e}")
     await callback.answer()
 
 

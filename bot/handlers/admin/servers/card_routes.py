@@ -438,6 +438,23 @@ async def ping_server(
                             xclient.check_health(xray_url, server.api_key, timeout=4.0),
                             timeout=5.0,
                         )
+                        if x_ok:
+                            caps_info = await xclient.fetch_capabilities(xray_url, server.api_key, timeout=3.0)
+                            if caps_info and isinstance(caps_info, dict):
+                                cur_caps = set(server.capabilities or [])
+                                new_caps = caps_info.get("capabilities", [])
+                                if isinstance(new_caps, list):
+                                    cur_caps.update(new_caps)
+                                server.capabilities = sorted(list(cur_caps))
+                                extra_dict = dict(server.extra_data or {})
+                                if "transports" in caps_info:
+                                    extra_dict["transports"] = caps_info["transports"]
+                                if "ports" in caps_info:
+                                    extra_dict["ports"] = caps_info["ports"]
+                                if "xray_version" in caps_info:
+                                    extra_dict["xray_version"] = caps_info["xray_version"]
+                                server.extra_data = extra_dict
+                                await session.commit()
                 except (TimeoutError, asyncio.TimeoutError):
                     logger.warning("Ping health check timed out for server %s (%s)", server.id, server.name)
                     x_ok = False
