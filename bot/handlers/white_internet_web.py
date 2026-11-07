@@ -522,13 +522,14 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         # HWID (Device ID) enforcement: browser gets 1-click landing, app must provide HWID
         if not raw_hwid:
             if _is_browser_request(request):
+                effective_dev_limit = white_internet_repo._effective_device_limit(sub)
                 html_body = _render_white_internet_landing_html(
                     bot_username=bot_user,
                     is_active=True,
                     page_title=texts.LANDING_WHITE_INTERNET_PAGE_TITLE,
                     tier="white_internet",
                     tariff_badge=texts.LANDING_SPECIAL_ACCESS_BADGE,
-                    device_limit=1,
+                    device_limit=effective_dev_limit,
                 )
                 return web.Response(status=200, text=html_body, headers=landing_headers)
             headers = dict(common_headers)

@@ -289,6 +289,8 @@
                 switchDesktopMethod("mac");
             } else if (activePlatform === "windows") {
                 switchDesktopMethod("win");
+            } else if (activePlatform === "github") {
+                switchDesktopMethod("linux");
             }
         }
 
@@ -333,6 +335,17 @@
                 }
                 if (s) s.style.display = isActive ? "block" : "none";
             });
+            const step1Num = document.getElementById("iosCommonStep1Num");
+            const step2Num = document.getElementById("iosCommonStep2Num");
+            if (step1Num && step2Num) {
+                if (method === "region") {
+                    step1Num.textContent = "5";
+                    step2Num.textContent = "6";
+                } else {
+                    step1Num.textContent = "3";
+                    step2Num.textContent = "4";
+                }
+            }
         }
 
         function switchAndroidMethod(method) {
@@ -356,19 +369,28 @@
         function switchDesktopMethod(method) {
             const btnWin = document.getElementById("tabBtnDesktopWin");
             const btnMac = document.getElementById("tabBtnDesktopMac");
+            const btnLinux = document.getElementById("tabBtnDesktopLinux");
             const secWin = document.getElementById("desktopSubWin");
             const secMac = document.getElementById("desktopSubMac");
+            const secLinux = document.getElementById("desktopSubLinux");
             const isWin = (method === "win");
+            const isMac = (method === "mac");
+            const isLinux = (method === "linux");
             if (btnWin) {
                 btnWin.classList.toggle("active", isWin);
                 btnWin.setAttribute("aria-selected", isWin ? "true" : "false");
             }
             if (btnMac) {
-                btnMac.classList.toggle("active", !isWin);
-                btnMac.setAttribute("aria-selected", !isWin ? "true" : "false");
+                btnMac.classList.toggle("active", isMac);
+                btnMac.setAttribute("aria-selected", isMac ? "true" : "false");
+            }
+            if (btnLinux) {
+                btnLinux.classList.toggle("active", isLinux);
+                btnLinux.setAttribute("aria-selected", isLinux ? "true" : "false");
             }
             if (secWin) secWin.style.display = isWin ? "block" : "none";
-            if (secMac) secMac.style.display = !isWin ? "block" : "none";
+            if (secMac) secMac.style.display = isMac ? "block" : "none";
+            if (secLinux) secLinux.style.display = isLinux ? "block" : "none";
         }
 
         function copyGuideField(text, btn) {

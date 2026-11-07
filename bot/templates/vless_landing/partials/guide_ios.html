@@ -32,7 +32,7 @@
                 <div id="iosSubGuideTf">
                     <div class="guide-callout">
                         <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                        <div><strong>Установка без смены региона:</strong> TestFlight доступен в App Store РФ и устанавливается с обычного аккаунта без смены страны.</div>
+                        <div><strong>Установка без смены региона:</strong> TestFlight доступен в App Store РФ (требуется iOS 16+). Тестовая сборка активна до 90 дней с момента релиза разработчика.</div>
                     </div>
 
                     <div class="guide-step-card">
@@ -221,7 +221,7 @@
                             В поиске App Store введите <strong>INCY</strong> (рекомендуется) или <strong>Happ</strong> и нажмите <strong>«Загрузить»</strong>. После установки вы можете вернуть регион App Store на РФ: приложение продолжит работать и обновляться.
                         </div>
                         <div class="guide-screenshot-wrapper vertical">
-                            <img src="{{IMG_IOS_4}}" alt="INCY в App Store" class="guide-real-screenshot loaded" loading="lazy" decoding="async" onload="markImgLoaded(this)">
+                            <img src="{{IMG_IOS_4}}" alt="Happ в App Store" class="guide-real-screenshot loaded" loading="lazy" decoding="async" onload="markImgLoaded(this)">
                         </div>
                     </div>
                 </div>
@@ -257,7 +257,7 @@
                 <!-- Step 3 (Common for all iOS): Add Subscription -->
                 <div class="guide-step-card">
                     <div class="guide-step-header">
-                        <span class="guide-step-num">3</span>
+                        <span class="guide-step-num" id="iosCommonStep1Num">3</span>
                         <span class="guide-step-title">Добавьте подписку в приложение</span>
                     </div>
                     <div class="guide-step-desc">
@@ -269,7 +269,7 @@
                 <!-- Step 4 (Common for all iOS): First Connect & System Permission -->
                 <div class="guide-step-card">
                     <div class="guide-step-header">
-                        <span class="guide-step-num">4</span>
+                        <span class="guide-step-num" id="iosCommonStep2Num">4</span>
                         <span class="guide-step-title">Первое подключение и системное разрешение</span>
                     </div>
                     <div class="guide-step-desc">

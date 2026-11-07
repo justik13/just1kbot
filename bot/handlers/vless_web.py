@@ -29,8 +29,15 @@ logger = logging.getLogger(__name__)
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 
 
+_CACHED_LANDING_ACTIVE_HTML: str | None = None
+
+
 def load_vless_landing_active_html() -> str:
     """Assemble modular landing template with inline Base64 real screenshots into memory."""
+    global _CACHED_LANDING_ACTIVE_HTML
+    if _CACHED_LANDING_ACTIVE_HTML is not None:
+        return _CACHED_LANDING_ACTIVE_HTML
+
     landing_dir = _TEMPLATES_DIR / "vless_landing"
     if not landing_dir.is_dir():
         raise FileNotFoundError(f"Landing directory not found: {landing_dir}")
@@ -55,13 +62,16 @@ def load_vless_landing_active_html() -> str:
         "{{IMG_TESTFLIGHT}}": "ios_testflight.jpg",
         "{{IMG_ANDROID_APK}}": "android_apk_warning.jpg",
     }
+    missing_assets = [fn for fn in asset_placeholders.values() if not (assets_dir / fn).is_file()]
+    if missing_assets:
+        raise FileNotFoundError(f"Missing required landing asset files: {missing_assets}")
+
     for placeholder, filename in asset_placeholders.items():
         img_path = assets_dir / filename
-        if img_path.is_file():
-            b64_data = base64.b64encode(img_path.read_bytes()).decode("ascii")
-            data_uri = f"data:image/jpeg;base64,{b64_data}"
-            guide_ios = guide_ios.replace(placeholder, data_uri)
-            guide_android = guide_android.replace(placeholder, data_uri)
+        b64_data = base64.b64encode(img_path.read_bytes()).decode("ascii")
+        data_uri = f"data:image/jpeg;base64,{b64_data}"
+        guide_ios = guide_ios.replace(placeholder, data_uri)
+        guide_android = guide_android.replace(placeholder, data_uri)
 
     guides_view = (
         guides_view.replace("<!-- {{GUIDE_IOS}} -->", guide_ios)
@@ -70,12 +80,20 @@ def load_vless_landing_active_html() -> str:
         .replace("<!-- {{GUIDE_FAQ}} -->", guide_faq)
     )
 
-    return (
+    rendered = (
         base.replace("/* {{LANDING_CSS}} */", css)
         .replace("<!-- {{CONNECT_VIEW}} -->", connect_view)
         .replace("<!-- {{GUIDES_VIEW}} -->", guides_view)
         .replace("// {{LANDING_JS}}", js)
     )
+
+    if "{{IMG_" in rendered:
+        raise ValueError("Unreplaced image placeholders found in assembled landing HTML")
+    if "<!-- {{GUIDE_" in rendered:
+        raise ValueError("Unreplaced guide slot placeholders found in assembled landing HTML")
+
+    _CACHED_LANDING_ACTIVE_HTML = rendered
+    return rendered
 
 
 _load_landing_active_html = load_vless_landing_active_html

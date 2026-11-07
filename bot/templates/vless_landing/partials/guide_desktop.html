@@ -1,7 +1,7 @@
-            <!-- Desktop (PC/Mac) Guide Content -->
+            <!-- Desktop (PC/Mac/Linux) Guide Content -->
             <div id="guideSectionDesktop" class="guide-section" role="tabpanel" aria-labelledby="guideNavBtnDesktop" style="display: none;">
                 <div class="guide-section-label">Выберите операционную систему:</div>
-                <div class="guide-method-tabs guide-method-tabs-2" role="tablist" aria-label="Операционная система">
+                <div class="guide-method-tabs" role="tablist" aria-label="Операционная система">
                     <button type="button" class="guide-method-btn active" id="tabBtnDesktopWin" onclick="switchDesktopMethod('win')" role="tab" aria-selected="true">
                         <span class="guide-method-badge">ПК</span>
                         <span class="guide-method-title">
@@ -17,6 +17,14 @@
                             <span>macOS</span>
                         </span>
                         <span class="guide-method-sub">Apple Silicon & Intel</span>
+                    </button>
+                    <button type="button" class="guide-method-btn" id="tabBtnDesktopLinux" onclick="switchDesktopMethod('linux')" role="tab" aria-selected="false">
+                        <span class="guide-method-badge">Linux</span>
+                        <span class="guide-method-title">
+                            <svg class="guide-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                            <span>Linux</span>
+                        </span>
+                        <span class="guide-method-sub">AppImage / deb / rpm</span>
                     </button>
                 </div>
 
@@ -127,6 +135,61 @@
                         </div>
                         <div class="guide-step-desc">
                             Нажмите кнопку подключения и подтвердите системный запрос macOS на добавление сетевого профиля.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Desktop Sub 3: Linux -->
+                <div id="desktopSubLinux" style="display: none;">
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">1</span>
+                            <span class="guide-step-title">Скачайте релиз программы</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Скачайте универсальный пакет Happ Desktop для вашего дистрибутива:
+                        </div>
+                        <div class="guide-store-grid" style="grid-template-columns: 1fr;">
+                            <a href="https://github.com/Happ-proxy/happ-desktop/releases/latest" target="_blank" rel="noopener noreferrer" class="guide-store-card">
+                                <div class="guide-store-left">
+                                    <div class="guide-store-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div>
+                                    <div class="guide-store-info">
+                                        <span class="guide-store-name">Happ Desktop для Linux</span>
+                                        <span class="guide-store-sub">AppImage, deb, rpm с GitHub</span>
+                                    </div>
+                                </div>
+                                <span class="guide-store-badge">Перейти к релизам ↗</span>
+                            </a>
+                        </div>
+                        <div class="guide-tip-box">
+                            <div class="guide-tip-title">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                                <span>Запуск AppImage в терминале:</span>
+                            </div>
+                            <div class="guide-tip-desc">
+                                Сделайте файл исполняемым и запустите:<br>
+                                <code>chmod +x Happ-*.AppImage && ./Happ-*.AppImage</code>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">2</span>
+                            <span class="guide-step-title">Добавьте подписку</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Скопируйте ссылку на подписку на этой странице. В программе нажмите кнопку <strong>«+» (Добавить)</strong> и выберите <strong>«Вставить из буфера»</strong>.
+                        </div>
+                    </div>
+
+                    <div class="guide-step-card">
+                        <div class="guide-step-header">
+                            <span class="guide-step-num">3</span>
+                            <span class="guide-step-title">Подключение</span>
+                        </div>
+                        <div class="guide-step-desc">
+                            Выберите локацию и активируйте соединение переключателем.
                         </div>
                     </div>
                 </div>
