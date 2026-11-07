@@ -112,6 +112,14 @@ class TestUnifiedSubscriptionService(AioHTTPTestCase):
         }
         return server
 
+    async def test_ping_endpoints_return_200(self):
+        """Synthetic health ping endpoints return 200 pong."""
+        for path in ("/sub/ping", "/sub/wl/ping", "/sub/access/ping", "/sub/vless/ping"):
+            resp = await self.client.get(path)
+            self.assertEqual(resp.status, 200)
+            text = await resp.text()
+            self.assertEqual(text, "pong")
+
     async def test_invalid_token_returns_404(self):
         """Short or missing token returns 404 Not Found."""
         resp = await self.client.get("/sub/short")

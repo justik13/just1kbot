@@ -28,10 +28,23 @@ async def unified_subscription_feed_handler(request: web.Request) -> web.Respons
         return web.Response(status=status_code, text=body, headers=headers)
 
 
+async def unified_ping_handler(request: web.Request) -> web.Response:
+    """Synthetic health monitor endpoint for subscription gateway."""
+    return web.Response(
+        status=200,
+        text="pong",
+        headers={"Cache-Control": "no-store", "CDN-Cache-Control": "no-store"},
+    )
+
+
 def setup_unified_web_routes(app: web.Application) -> None:
     """Register HTTP routes for unified subscription feed."""
+    app.router.add_get("/sub/ping", unified_ping_handler)
+    app.router.add_get("/sub/wl/ping", unified_ping_handler)
+    app.router.add_get("/sub/access/ping", unified_ping_handler)
+    app.router.add_get("/sub/vless/ping", unified_ping_handler)
     app.router.add_get("/sub/{token}", unified_subscription_feed_handler)
     app.router.add_get("/sub/access/{token}", unified_subscription_feed_handler)
     app.router.add_get("/sub/vless/{token}", unified_subscription_feed_handler)
     app.router.add_get("/sub/wl/{token}", unified_subscription_feed_handler)
-    logger.info("Unified subscription feed route registered: GET /sub/{token}")
+    logger.info("Unified subscription feed route registered: GET /sub/{token} & /sub/wl/ping")

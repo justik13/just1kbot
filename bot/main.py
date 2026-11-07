@@ -287,21 +287,17 @@ async def setup_bot(bot: Bot | None = None, storage: BaseStorage | None = None) 
     dp.message.middleware(ChatActionMiddleware())
 
     from bot.handlers.admin import admin_router
-    from bot.handlers.connection import router as connection_router
     from bot.handlers.fallback import router as fallback_router
     from bot.handlers.payment import router as payment_router
     from bot.handlers.referral import router as referral_router
     from bot.handlers.start import router as start_router
     from bot.handlers.support import router as support_router
-    from bot.handlers.white_internet import router as white_internet_router
 
     # Clean parent router state on all known module-level routers
     # so setup_bot is strictly idempotent across multiple invocations and dynamic state transitions.
     for r in (
         start_router,
         referral_router,
-        connection_router,
-        white_internet_router,
         support_router,
         payment_router,
         admin_router,
@@ -312,8 +308,6 @@ async def setup_bot(bot: Bot | None = None, storage: BaseStorage | None = None) 
     for r in [
         start_router,
         referral_router,
-        connection_router,
-        white_internet_router,
         support_router,
         payment_router,
         admin_router,

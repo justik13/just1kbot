@@ -51,6 +51,25 @@ from utils.security import normalize_public_domain
 
 logger = logging.getLogger(__name__)
 
+
+def build_subscription_url(domain: str, token: str, sub_prefix: str = "/sub") -> str:
+    """Build unified subscription feed URL."""
+    prefix = (sub_prefix or "/sub").strip().rstrip("/")
+    if not prefix.startswith("/"):
+        prefix = f"/{prefix}"
+    return f"https://{domain}{prefix}/{token}"
+
+
+async def resolve_subscription_target(
+    session: AsyncSession,
+    sub: WhiteInternetSubscription | VlessSubscription | None = None,
+) -> tuple[str | None, str]:
+    """Resolve active subscription domain and URL prefix."""
+    from config.settings import get_settings
+    domain = await get_system_setting(session, "domain") or get_settings().DOMAIN
+    return domain, "/sub"
+
+
 HWID_PATTERN = re.compile(r"^[a-zA-Z0-9_\-:]{3,128}$")
 
 _ip_rate_limiter = HttpRateLimiter(rate_per_minute=60.0, burst=15)

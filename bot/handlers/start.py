@@ -243,12 +243,21 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
     )
 
     from database.repositories.system_settings_repo import get_system_setting
+    settings = get_settings()
     mtproto_url = await get_system_setting(session, "mtproto_proxy_url")
+    channel_url = await get_system_setting(session, "tg_channel_url")
+    miniapp_url = await get_system_setting(session, "miniapp_url") or f"https://{settings.DOMAIN}/app"
 
     kb = get_hub_keyboard(
         is_admin=is_admin,
         is_active=is_active,
         mtproto_url=mtproto_url,
+        miniapp_url=miniapp_url,
+        real_balance=int(balance.real_available),
+        bonus_balance=int(balance.bonus_available),
+        channel_url=channel_url,
+        support_username=settings.SUPPORT_USERNAME,
+        telegram_id=db_user.telegram_id,
     )
 
     return text, kb

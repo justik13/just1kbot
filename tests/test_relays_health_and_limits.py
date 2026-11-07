@@ -426,44 +426,6 @@ class TestRelaysHealthAndNodeLimits(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(rows_vless[5]), 1)
         self.assertEqual(rows_vless[5][0].callback_data, "admin_servers:std")
 
-    async def test_white_internet_overview_keyboard_2_column_layout(self):
-        from bot.handlers.white_internet import get_white_internet_overview_keyboard
-        from config.enums import WhiteInternetStatus
-        from database.models import WhiteInternetSubscription
-
-        sub = WhiteInternetSubscription(
-            id=10,
-            user_id=100,
-            token="test-tok-123",
-            status=WhiteInternetStatus.ACTIVE,
-            device_limit=1,
-            is_trial=False,
-            expires_at=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=5),
-        )
-
-        kb = get_white_internet_overview_keyboard(sub, bot_domain="bot.example.com")
-        rows = kb.inline_keyboard
-        self.assertEqual(len(rows), 6, f"Expected 6 rows for active sub with topup & reset, got {len(rows)}")
-        # Row 1: Connect INCY (1)
-        self.assertEqual(len(rows[0]), 1)
-        self.assertTrue(rows[0][0].url.startswith("https://bot.example.com/sub/wl/"))
-        # Row 2: Instructions (1)
-        self.assertEqual(len(rows[1]), 1)
-        self.assertEqual(rows[1][0].callback_data, "wl_show_link")
-        # Row 3: Renew (1)
-        self.assertEqual(len(rows[2]), 1)
-        self.assertEqual(rows[2][0].callback_data, "wl_renew_preview")
-        # Row 4: Topup + Add Device (2 buttons in row)
-        self.assertEqual(len(rows[3]), 2)
-        self.assertEqual(rows[3][0].callback_data, "wl_topup_menu")
-        self.assertEqual(rows[3][1].callback_data, "wl_add_device_menu")
-        # Row 5: Reset Devices (isolated in its own row)
-        self.assertEqual(len(rows[4]), 1)
-        self.assertEqual(rows[4][0].callback_data, "wl_reset_devices")
-        # Row 6: Back (isolated in its own row)
-        self.assertEqual(len(rows[5]), 1)
-        self.assertEqual(rows[5][0].callback_data, "back_to_main_menu")
-
     async def test_show_server_relays_config_error_status_renders_api_error(self):
         server = Server(
             id=42,
