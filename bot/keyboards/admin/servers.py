@@ -160,14 +160,22 @@ def get_admin_std_sub_incy_keyboard(
         text=texts.ADMIN_STD_SUB_INCY_BTN_DEVICES.format(status=dev_status),
         callback_data="admin_std_incy_toggle_devs",
     )
-    order_label = "Стандарт → БИ" if order == "standard_first" else "БИ → Стандарт"
+    order_label = (
+        texts.ADMIN_STD_SUB_INCY_ORDER_STD_FIRST
+        if order == "standard_first"
+        else texts.ADMIN_STD_SUB_INCY_ORDER_WI_FIRST
+    )
     builder.button(
-        text=f"Порядок: {order_label}",
+        text=texts.ADMIN_STD_SUB_INCY_BTN_ORDER.format(order=order_label),
         callback_data="admin_std_incy_toggle_order",
     )
-    routing_label = "Direct РФ" if direct_ru else "РУ ХАБ"
+    routing_label = (
+        texts.ADMIN_STD_SUB_INCY_ROUTING_DIRECT
+        if direct_ru
+        else texts.ADMIN_STD_SUB_INCY_ROUTING_HUB
+    )
     builder.button(
-        text=f"Маршрутизация: {routing_label}",
+        text=texts.ADMIN_STD_SUB_INCY_BTN_ROUTING.format(routing=routing_label),
         callback_data="admin_std_incy_toggle_routing",
     )
     builder.button(text=texts.ADMIN_SERVER_INCY_BTN_ANNOUNCE, callback_data="admin_std_incy_edit:announce")

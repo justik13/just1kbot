@@ -1,19 +1,18 @@
 """Unified Subscription Service for Just1k v2.
 
-Integrates Standard access (Direct VLESS TLS) and White Internet (VLESS XHTTP via CDN)
-into a single subscription URL (/sub/{token}) with:
-- Dynamic dual-protocol profile generation.
+Pure backend subscription engine decoupled from frontend:
+- Integrates Standard access (Direct VLESS TLS) and White Internet (VLESS XHTTP via CDN).
 - Independent countdown timers per service.
 - Priority device slot queue (Section 7.1 of just1kbotv2.md).
 - Notice nodes on BI exhaustion (0 GB) or BI device limit without interrupting Standard access.
 - Strict in-country RU egress via Russian Hub origin.
 - All titles, banners, intervals, and routing rules dynamically loaded from SystemSetting.
+- Strictly decoupled from frontend / Mini App (pure Base64 subscription API).
 """
 
 from __future__ import annotations
 
 import base64
-import html
 import json
 import logging
 import os
@@ -57,25 +56,6 @@ HWID_PATTERN = re.compile(r"^[a-zA-Z0-9_\-:]{3,128}$")
 _ip_rate_limiter = HttpRateLimiter(rate_per_minute=60.0, burst=15)
 _token_rate_limiter = HttpRateLimiter(rate_per_minute=30.0, burst=10)
 
-_CACHED_LANDING_HTML: str | None = None
-_CACHED_LANDING_INACTIVE_HTML: str | None = None
-
-
-def _get_landing_templates() -> tuple[str, str]:
-    global _CACHED_LANDING_HTML, _CACHED_LANDING_INACTIVE_HTML
-    if _CACHED_LANDING_HTML is not None and _CACHED_LANDING_INACTIVE_HTML is not None:
-        return _CACHED_LANDING_HTML, _CACHED_LANDING_INACTIVE_HTML
-
-    from bot.handlers.vless_web import load_vless_landing_active_html
-
-    _CACHED_LANDING_HTML = load_vless_landing_active_html()
-    templates_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "bot", "templates")
-    inactive_path = os.path.join(templates_dir, "vless_landing_inactive.html")
-    with open(inactive_path, "r", encoding="utf-8") as f:
-        _CACHED_LANDING_INACTIVE_HTML = f.read()
-
-    return _CACHED_LANDING_HTML, _CACHED_LANDING_INACTIVE_HTML
-
 
 def _sanitize_header_url(url: str | None, fallback: str = "") -> str:
     """Sanitize URL for safe usage in HTTP headers without forbidden control chars."""
@@ -85,58 +65,6 @@ def _sanitize_header_url(url: str | None, fallback: str = "") -> str:
             if clean and clean.isascii() and all(32 < ord(c) < 127 for c in clean):
                 return clean
     return ""
-
-
-def _is_browser_request(request: web.Request) -> bool:
-    """Check if incoming request is from a browser navigating to the page."""
-    raw_hwid = (
-        request.headers.get("X-Hwid")
-        or request.headers.get("X-Device-Hwid")
-        or request.headers.get("X-Device-Id")
-        or ""
-    ).strip().strip("{}")
-    if raw_hwid:
-        return False
-
-    ua = request.headers.get("User-Agent", "").lower()
-    api_tokens = (
-        "curl/",
-        "wget/",
-        "python-requests",
-        "urllib",
-        "httpx",
-        "xray/",
-        "v2ray",
-        "sing-box",
-        "clash",
-        "happ",
-        "incy",
-        "streisand",
-        "v2box",
-        "shadowrocket",
-        "loon",
-        "surge",
-        "quantumult",
-        "flclash",
-        "husi",
-        "karing",
-        "nekobox",
-        "matsurirunner",
-        "sagernet",
-    )
-    if any(tok in ua for tok in api_tokens):
-        return False
-
-    sec_fetch_mode = request.headers.get("Sec-Fetch-Mode", "").lower()
-    if sec_fetch_mode in ("navigate", "nested-navigate"):
-        return True
-
-    accept = request.headers.get("Accept", "").lower()
-    if "text/html" in accept or "application/xhtml+xml" in accept:
-        return True
-
-    browser_markers = ("mozilla/", "chrome/", "safari/", "applewebkit/", "edge/", "firefox/")
-    return any(marker in ua for marker in browser_markers)
 
 
 def build_service_notice_link(notice_text: str) -> str:
@@ -149,7 +77,7 @@ def build_service_notice_link(notice_text: str) -> str:
 
 
 class UnifiedSubscriptionService:
-    """Central engine for generating unified v2 multi-protocol subscription profiles."""
+    """Central pure backend engine for generating unified v2 subscription profiles."""
 
     @staticmethod
     async def resolve_bot_username(request: web.Request) -> str:
@@ -190,44 +118,6 @@ class UnifiedSubscriptionService:
 
         return user, vless_sub, wi_sub
 
-    @staticmethod
-    def render_landing_html(
-        *,
-        bot_username: str,
-        is_active: bool,
-        page_title: str | None = None,
-        tier: str = "basic",
-        tariff_badge: str | None = None,
-        device_limit: int = 1,
-        status_badge: str | None = None,
-        status_title: str | None = None,
-        status_description: str | None = None,
-    ) -> str:
-        active_tmpl, inactive_tmpl = _get_landing_templates()
-        clean_bot = html.escape(bot_username.strip().lstrip("@")) if bot_username else DEFAULT_FALLBACK_BOT_USERNAME
-        bot_link = f"https://t.me/{clean_bot}"
-
-        if not is_active:
-            badge = status_badge or texts.LANDING_INACTIVE_BADGE_PAUSED
-            title = status_title or texts.LANDING_INACTIVE_TITLE_DEFAULT
-            desc = status_description or texts.LANDING_INACTIVE_DESC_DEFAULT
-            return (
-                inactive_tmpl.replace("{clean_bot}", clean_bot)
-                .replace("{bot_link}", bot_link)
-                .replace("{status_badge}", html.escape(badge))
-                .replace("{status_title}", html.escape(title))
-                .replace("{status_description}", html.escape(desc))
-            )
-
-        badge_html = f'<div class="tier-badge">{html.escape(tariff_badge)}</div>' if tariff_badge else ""
-        eff_title = page_title or texts.LANDING_VLESS_PAGE_TITLE
-        return (
-            active_tmpl.replace("{page_title}", html.escape(eff_title))
-            .replace("{tier}", html.escape(tier))
-            .replace("{tariff_badge_html}", badge_html)
-            .replace("{device_limit}", str(max(1, device_limit)))
-        )
-
     @classmethod
     async def build_subscription_feed(
         cls,
@@ -235,7 +125,7 @@ class UnifiedSubscriptionService:
         request: web.Request,
         token: str,
     ) -> tuple[int, str, dict[str, str]]:
-        """Core subscription generator: handles browser landing, HWID queue, and dual profiles."""
+        """Pure backend subscription feed generator with HWID device accounting."""
         client_ip = get_trusted_client_ip(request)
         allowed_ip, retry_after_ip = _ip_rate_limiter.check(client_ip)
         if not allowed_ip:
@@ -305,23 +195,6 @@ class UnifiedSubscriptionService:
         )
         wi_device_limit = getattr(wi_sub, "device_limit", 1) if wi_sub else 0
 
-        is_browser = _is_browser_request(request)
-        if not raw_hwid and is_browser:
-            any_active = is_std_active_access or (wi_time_active and not wi_is_exhausted)
-            max_devs = max(std_device_limit, wi_device_limit, 1)
-            landing_html = cls.render_landing_html(
-                bot_username=bot_username,
-                is_active=any_active,
-                device_limit=max_devs,
-                page_title="✦ Just1k",
-            )
-            landing_headers = {
-                **common_headers,
-                "Content-Type": "text/html; charset=utf-8",
-                "Content-Security-Policy": "default-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self';",
-            }
-            return 200, landing_html, landing_headers
-
         device_meta = extract_device_metadata(request.headers)
         allowed_std = False
         active_std_count = 0
@@ -379,17 +252,13 @@ class UnifiedSubscriptionService:
         wi_nodes: list[str] = []
         if wi_time_active and wi_sub:
             if not allowed_wi:
-                wi_nodes.append(
-                    build_service_notice_link(
-                        f"✦ Исчерпан лимит устройств Белого Интернета ({active_wi_count}/{max_wi}) — докупите слот в @{clean_bot}"
-                    )
+                notice = texts.UNIFIED_FEED_NOTICE_WI_LIMIT.format(
+                    active=active_wi_count, limit=max_wi, bot_username=clean_bot
                 )
+                wi_nodes.append(build_service_notice_link(notice))
             elif wi_is_exhausted:
-                wi_nodes.append(
-                    build_service_notice_link(
-                        f"✦ Закончился трафик Белого Интернета (0 ГБ) — пополните пакет в @{clean_bot}"
-                    )
-                )
+                notice = texts.UNIFIED_FEED_NOTICE_WI_EXHAUSTED.format(bot_username=clean_bot)
+                wi_nodes.append(build_service_notice_link(notice))
             else:
                 wi_server = None
                 if getattr(wi_sub, "origin_node_id", None):
@@ -487,7 +356,7 @@ class UnifiedSubscriptionService:
         total_quota_bytes = wi_traffic_limit if wi_time_active else 0
 
         title_template = await get_system_setting(
-            session, "sub_profile_title_template", "✦ Just1k [{devices}]"
+            session, "sub_profile_title_template", "Just1k [{devices}]"
         )
         device_suffix = f"{active_std_count}/{max_std}"
         formatted_title = title_template.replace("{devices}", device_suffix).replace(
@@ -563,11 +432,13 @@ class UnifiedSubscriptionService:
 
         if not combined_nodes:
             if is_std_active_access and not allowed_std:
-                notice = f"✦ Превышен лимит устройств ({active_std_count}/{max_std}) — отключите старые в @{clean_bot}"
+                notice = texts.UNIFIED_FEED_NOTICE_TOTAL_LIMIT.format(
+                    active=active_std_count, limit=max_std, bot_username=clean_bot
+                )
                 response_headers["Device-Limit-Exceeded"] = "1"
                 response_headers["x-hwid-max-devices-reached"] = "true"
             else:
-                notice = f"✦ Подписка закончилась — продлите доступ в @{clean_bot}"
+                notice = texts.UNIFIED_FEED_NOTICE_EXPIRED.format(bot_username=clean_bot)
             combined_nodes = [build_service_notice_link(notice)]
 
         payload = "\n".join(combined_nodes)

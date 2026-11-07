@@ -1,4 +1,4 @@
-"""Unit tests for Unified Subscription Service and /sub/{token} endpoint."""
+"""Unit tests for pure backend Unified Subscription Service and /sub/{token} endpoint."""
 
 from __future__ import annotations
 
@@ -27,6 +27,12 @@ class TestUnifiedSubscriptionService(AioHTTPTestCase):
         app = web.Application()
         setup_unified_web_routes(app)
         return app
+
+    def setUp(self):
+        super().setUp()
+        from services import unified_subscription_service
+        unified_subscription_service._ip_rate_limiter.buckets.clear()
+        unified_subscription_service._token_rate_limiter.buckets.clear()
 
     def _create_mock_user(
         self,
@@ -106,11 +112,28 @@ class TestUnifiedSubscriptionService(AioHTTPTestCase):
         }
         return server
 
-    def setUp(self):
-        super().setUp()
-        from services import unified_subscription_service
-        unified_subscription_service._ip_rate_limiter.buckets.clear()
-        unified_subscription_service._token_rate_limiter.buckets.clear()
+    async def test_invalid_token_returns_404(self):
+        """Short or missing token returns 404 Not Found."""
+        resp = await self.client.get("/sub/short")
+        self.assertEqual(resp.status, 404)
+
+    async def test_invalid_hwid_returns_400(self):
+        """Malformed HWID header returns 400 with x-hwid-required header."""
+        @asynccontextmanager
+        async def mock_session_scope():
+            mock_sess = AsyncMock()
+            yield mock_sess
+
+        with patch(
+            "bot.handlers.unified_subscription_web.session_scope",
+            mock_session_scope,
+        ):
+            resp = await self.client.get(
+                "/sub/test-token-valid-length-1234",
+                headers={"X-Hwid": "??invalid!@#$"},
+            )
+            self.assertEqual(resp.status, 400)
+            self.assertEqual(resp.headers.get("x-hwid-required"), "true")
 
     async def test_unified_feed_standard_only(self):
         """User with Standard only receives direct VLESS TLS links."""
@@ -362,46 +385,6 @@ class TestUnifiedSubscriptionService(AioHTTPTestCase):
             # White Internet notice explaining device limit reached for BI
             unquoted = urllib.parse.unquote(decoded)
             self.assertIn("Исчерпан лимит устройств Белого Интернета", unquoted)
-
-    async def test_browser_request_renders_html_landing(self):
-        """Browser request without HWID header returns 200 with HTML landing."""
-        user = self._create_mock_user()
-        vless_sub = self._create_mock_vless_sub()
-
-        @asynccontextmanager
-        async def mock_session_scope():
-            mock_sess = AsyncMock()
-            yield mock_sess
-
-        with (
-            patch(
-                "bot.handlers.unified_subscription_web.session_scope",
-                mock_session_scope,
-            ),
-            patch(
-                "services.unified_subscription_service.UnifiedSubscriptionService.get_user_and_subscriptions",
-                AsyncMock(return_value=(user, vless_sub, None)),
-            ),
-            patch(
-                "services.unified_subscription_service.SubscriptionService.check_vpn_access",
-                return_value=True,
-            ),
-            patch(
-                "services.unified_subscription_service.SubscriptionService.get_effective_device_limit",
-                AsyncMock(return_value=2),
-            ),
-        ):
-            resp = await self.client.get(
-                f"/sub/{vless_sub.token}",
-                headers={
-                    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15",
-                    "Accept": "text/html,application/xhtml+xml",
-                },
-            )
-            self.assertEqual(resp.status, 200)
-            self.assertIn("text/html", resp.headers.get("Content-Type", ""))
-            body_text = await resp.text()
-            self.assertIn("<!DOCTYPE html>", body_text)
 
     async def test_order_setting_wi_first(self):
         """When sub_nodes_order is set to 'wi_first', White Internet nodes appear before Standard nodes."""

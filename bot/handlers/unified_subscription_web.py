@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 async def unified_subscription_feed_handler(request: web.Request) -> web.Response:
-    """Serve Base64 feed or browser onboarding for unified Standard and White Internet access."""
+    """Serve pure Base64 subscription feed for unified Standard and White Internet access."""
     token = request.match_info.get("token", "").strip()
     if not token or len(token) < 16:
         return web.Response(
@@ -29,7 +29,7 @@ async def unified_subscription_feed_handler(request: web.Request) -> web.Respons
 
 
 def setup_unified_web_routes(app: web.Application) -> None:
-    """Register HTTP routes for unified subscription feed and backwards compatibility aliases."""
+    """Register HTTP routes for unified subscription feed."""
     app.router.add_get("/sub/{token}", unified_subscription_feed_handler)
     app.router.add_get("/sub/access/{token}", unified_subscription_feed_handler)
     app.router.add_get("/sub/vless/{token}", unified_subscription_feed_handler)
