@@ -32,3 +32,11 @@ HUB_BONUS_LINE_FORMAT = "\n<b>🎁 Бонусный баланс:</b> {bonus_bal
 PAYMENT_STATUS_PENDING_ICON = "⏳"
 
 USER_HUB_START = "Пользователь"
+
+BTN_HUB_CONNECT = "🚀 Подключить"
+BTN_HUB_REFERRALS = "👥 Рефералы"
+BTN_HUB_BALANCE = "💳 Баланс {real}/{bonus} ₽"
+BTN_HUB_PROXY = "🛡 Прокси TG"
+BTN_HUB_CHANNEL = "📢 TG КАНАЛ"
+BTN_HUB_INFO = "ℹ️ Информация"
+

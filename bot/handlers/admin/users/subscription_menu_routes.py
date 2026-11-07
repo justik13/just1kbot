@@ -214,10 +214,10 @@ async def admin_wi_subscription_menu(
     sub_url: str | None = None
     if wi_sub and getattr(wi_sub, "token", None):
         try:
-            from bot.handlers.white_internet import _build_subscription_url, _resolve_subscription_target
-            sub_domain, sub_prefix = await _resolve_subscription_target(session, wi_sub)
+            from services.unified_subscription_service import build_subscription_url, resolve_subscription_target
+            sub_domain, sub_prefix = await resolve_subscription_target(session, wi_sub)
             if sub_domain:
-                sub_url = _build_subscription_url(sub_domain, wi_sub.token, sub_prefix=sub_prefix)
+                sub_url = build_subscription_url(sub_domain, wi_sub.token, sub_prefix=sub_prefix)
         except Exception as e:
             logger.debug("admin_wi_subscription_menu resolve sub_url failed: %s", e)
 
@@ -761,13 +761,13 @@ async def admin_wi_copy_link(
         await callback.answer(texts.ADMIN_WI_SUB_NOT_FOUND, show_alert=True)
         return
 
-    from bot.handlers.white_internet import _build_subscription_url, _resolve_subscription_target
-    sub_domain, sub_prefix = await _resolve_subscription_target(session, wi_sub)
+    from services.unified_subscription_service import build_subscription_url, resolve_subscription_target
+    sub_domain, sub_prefix = await resolve_subscription_target(session, wi_sub)
     if not sub_domain:
         await callback.answer(texts.WL_DOMAIN_UNCONFIGURED, show_alert=True)
         return
 
-    sub_url = _build_subscription_url(sub_domain, wi_sub.token, sub_prefix=sub_prefix)
+    sub_url = build_subscription_url(sub_domain, wi_sub.token, sub_prefix=sub_prefix)
     await callback.message.answer(
         texts.ADMIN_WI_LINK_INFO.format(telegram_id=telegram_id, link=sub_url),
         parse_mode="HTML",
@@ -1446,10 +1446,10 @@ async def admin_wi_devices_view(
     sub_url: str | None = None
     if wi_sub and getattr(wi_sub, "token", None):
         try:
-            from bot.handlers.white_internet import _build_subscription_url, _resolve_subscription_target
-            sub_domain, sub_prefix = await _resolve_subscription_target(session, wi_sub)
+            from services.unified_subscription_service import build_subscription_url, resolve_subscription_target
+            sub_domain, sub_prefix = await resolve_subscription_target(session, wi_sub)
             if sub_domain:
-                sub_url = _build_subscription_url(sub_domain, wi_sub.token, sub_prefix=sub_prefix)
+                sub_url = build_subscription_url(sub_domain, wi_sub.token, sub_prefix=sub_prefix)
         except Exception as e:
             logger.debug("admin_wi_devices_view resolve sub_url failed: %s", e)
 

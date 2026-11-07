@@ -483,9 +483,9 @@ async def handle_order_cancel(
         (order.metadata_ or {}).get("context") if order and order.metadata_ else None
     )
     if (order_context or {}).get("source") == "white_internet":
-        from bot.handlers.white_internet import show_white_internet_menu
+        from .common import _show_hub
 
-        await show_white_internet_menu(callback, session)
+        await _show_hub(callback, session, db_user)
         return
 
     if order and order.service_type == "topup":
