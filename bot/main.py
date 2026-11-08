@@ -170,18 +170,20 @@ async def global_error_handler(
         if alert_key not in _error_alert_cache:
             _error_alert_cache[alert_key] = True
 
-            for admin_id in settings.ADMIN_IDS:
-                try:
-                    await event.bot.send_message(
-                        admin_id, error_msg, parse_mode="HTML"
-                    )
-                except Exception as exc:
-                    logger.error(
-                        "[%s] Failed to deliver error alert to admin %s: %s",
-                        request_id,
-                        admin_id,
-                        exc,
-                    )
+            bot = kwargs.get("bot") or getattr(event, "bot", None)
+            if bot:
+                for admin_id in settings.ADMIN_IDS:
+                    try:
+                        await bot.send_message(
+                            admin_id, error_msg, parse_mode="HTML"
+                        )
+                    except Exception as exc:
+                        logger.error(
+                            "[%s] Failed to deliver error alert to admin %s: %s",
+                            request_id,
+                            admin_id,
+                            exc,
+                        )
     except Exception as e:
         logger.error("[%s] Failed to send error alert: %s", request_id, e)
 

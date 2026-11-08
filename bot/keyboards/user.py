@@ -12,6 +12,8 @@ from bot import texts
 def get_referral_keyboard(
     invite_url: str,
     share_text: str | None = None,
+    count: int = 0,
+    **kwargs,
 ) -> InlineKeyboardMarkup:
     """Build referral screen keyboard strictly matching just1kbotv2.md:
 
@@ -34,8 +36,9 @@ def get_referral_keyboard(
     )
 
     # Кнопки: Мои рефералы | Топ 5
+    ref_btn_text = f"👥 Мои рефералы ({count})" if count > 0 else "👥 Мои рефералы"
     builder.button(
-        text="👥 Мои рефералы",
+        text=ref_btn_text,
         callback_data="user_referrals_list:0",
     )
     builder.button(
