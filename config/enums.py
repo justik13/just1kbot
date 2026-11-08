@@ -85,9 +85,6 @@ class ServerLifecycleStatus(StrEnum):
     ARCHIVED = "ARCHIVED"
 
 
-# Backward-compatible alias for payment outbox queue status
-
-
 class VPNProvisioningStatus(StrEnum):
     PENDING_CREATE = "pending_create"
     ACTIVE = "active"
@@ -174,7 +171,6 @@ class AdminAuditAction(StrEnum):
 class ServiceType(StrEnum):
     STANDARD = "standard"
     WHITE_INTERNET = "white_internet"
-    AWG = "awg"
 
 
 class WhiteInternetStatus(StrEnum):
@@ -210,7 +206,6 @@ class OrderServiceType(StrEnum):
     STANDARD = "standard"
     WHITE_INTERNET = "white_internet"
     TOPUP = "topup"
-    AWG = "awg"
 
 
 __all__ = [

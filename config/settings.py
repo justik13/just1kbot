@@ -8,7 +8,7 @@ except ImportError:
 from functools import lru_cache
 from typing import Any
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _SERVICE_USER = "just1kbot"
@@ -17,7 +17,6 @@ _SERVICE_RUNTIME_HOME = "/run/just1kbot"
 
 def _configure_database_client_home() -> None:
     """Keep asyncpg/libpq client-file discovery inside the systemd sandbox."""
-
     if pwd is None or not hasattr(os, "geteuid"):
         return
 
@@ -27,10 +26,6 @@ def _configure_database_client_home() -> None:
         return
 
     if username == _SERVICE_USER:
-        # The hardened unit intentionally uses ProtectHome=true. asyncpg still
-        # checks standard PostgreSQL client paths below HOME while parsing a
-        # DSN, even when no client certificate is configured. Point HOME at the
-        # service runtime directory so those checks stay accessible and private.
         os.environ["HOME"] = _SERVICE_RUNTIME_HOME
 
 
@@ -50,6 +45,13 @@ class Settings(BaseSettings):
     SUPPORT_USERNAME: str
     BOT_USERNAME: str = ""
     STATUS_PAGE_URL: str = "https://status.just1k.pro/status/just1kbot"
+    CHANNEL_URL: str = "https://t.me/just1k_news"
+    PROXY_URL: str = ""
+
+    # ── Mini App & Web ──
+    MINIAPP_URL: str = ""
+    DOMAIN: str = "just1k.pro"
+    CDN_DOMAIN: str = "cdn.just1k.pro"
 
     # ── Database ──
     DATABASE_URL: str = Field(repr=False)
@@ -58,31 +60,17 @@ class Settings(BaseSettings):
 
     # ── Redis ──
     REDIS_URL: str = Field(repr=False)
-    REDIS_PASSWORD: str = Field(repr=False)
+    REDIS_PASSWORD: str = Field(default="", repr=False)
 
     # ── YooKassa ──
-    YOOKASSA_SHOP_ID: str
-    YOOKASSA_SECRET_KEY: str = Field(repr=False)
-    YOOKASSA_RETURN_URL: str
-    YOOKASSA_WEBHOOK_PORT: int
-    DOMAIN: str
-    SSL_EMAIL: str
+    YOOKASSA_SHOP_ID: str = ""
+    YOOKASSA_SECRET_KEY: str = Field(default="", repr=False)
+    YOOKASSA_RETURN_URL: str = "https://just1k.pro"
+    YOOKASSA_WEBHOOK_PORT: int = 8080
+    SSL_EMAIL: str = "admin@just1k.pro"
     YOOKASSA_EXTRA_IPS: str = ""
 
-    # Removed legacy and unsupported settings are declared so stale .env files fail fast.
-    AMNEZIA_API_URL: str | None = None
-    AMNEZIA_API_KEY: str | None = None
-    WEBHOOK_URL: str | None = None
-    INCY_HOST: str | None = None
-    INCY_API_KEY: str | None = None
-    AMNEZIA_BRIDGE_HMAC_SECRET: str | None = None
-
-    # ── Cloudflare & Zero-Signature Wildcard TLS ──
-    CLOUDFLARE_API_TOKEN: str | None = Field(default=None, repr=False)
-    WILDCARD_DOMAIN: str | None = None
-    ACME_DIRECTORY_URL: str = "https://acme-v02.api.letsencrypt.org/directory"
-
-    # ── Account balance product limits ──
+    # ── Account balance limits ──
     BALANCE_MIN_TOPUP_RUB: int = 10
     BALANCE_MAX_CUSTOM_TOPUP_RUB: int = 5000
     BALANCE_MAX_PRESET_RUB: int = 1000
@@ -93,7 +81,6 @@ class Settings(BaseSettings):
     ALLOW_LOCAL_HTTP: bool = False
     ALLOW_LOCAL_HTTPS: bool = False
     TRUSTED_PROXIES: str = "127.0.0.1,::1,172.16.0.0/12"
-
     LOG_LEVEL: str = "INFO"
 
     @field_validator("LOG_LEVEL")
@@ -106,22 +93,6 @@ class Settings(BaseSettings):
                 f"LOG_LEVEL must be one of {sorted(allowed)}, got {value!r}"
             )
         return normalized
-
-    @model_validator(mode="after")
-    def reject_removed_settings(self):
-        removed = {
-            "AMNEZIA_API_URL": self.AMNEZIA_API_URL,
-            "AMNEZIA_API_KEY": self.AMNEZIA_API_KEY,
-            "WEBHOOK_URL": self.WEBHOOK_URL,
-            "INCY_HOST": self.INCY_HOST,
-            "INCY_API_KEY": self.INCY_API_KEY,
-            "AMNEZIA_BRIDGE_HMAC_SECRET": self.AMNEZIA_BRIDGE_HMAC_SECRET,
-        }
-        configured = [name for name, value in removed.items() if value]
-        if configured:
-            names = ", ".join(sorted(configured))
-            raise ValueError(f"removed settings are not supported: {names}")
-        return self
 
     @field_validator("BOT_TOKEN", mode="before")
     @classmethod
@@ -137,156 +108,22 @@ class Settings(BaseSettings):
     @classmethod
     def validate_admin_ids(cls, value: Any) -> list[int]:
         if isinstance(value, int):
-            value = [value]
-        elif isinstance(value, str):
+            return [value]
+        if isinstance(value, str):
             value = value.strip().strip("'").strip('"')
             import json
             try:
                 parsed = json.loads(value)
                 if isinstance(parsed, int):
-                    value = [parsed]
-                elif isinstance(parsed, list):
-                    value = parsed
-            except Exception:
-                if value.isdigit():
-                    value = [int(value)]
-        if not isinstance(value, list) or not value or any(not isinstance(item, int) or item <= 0 for item in value):
-            raise ValueError("ADMIN_IDS must contain positive Telegram IDs")
-        return value
-
-    @field_validator("YOOKASSA_RETURN_URL", mode="before")
-    @classmethod
-    def validate_yookassa_return_url(cls, value: str) -> str:
-        if isinstance(value, str):
-            value = value.strip().strip("'").strip('"')
-        if "{bot_username}" not in value:
-            raise ValueError(
-                "YOOKASSA_RETURN_URL must contain '{bot_username}' placeholder"
-            )
-        return value
-
-    @field_validator(
-        "DATABASE_URL",
-        "REDIS_URL",
-        "REDIS_PASSWORD",
-        "YOOKASSA_SHOP_ID",
-        "YOOKASSA_SECRET_KEY",
-        mode="before",
-    )
-    @classmethod
-    def validate_required_value(cls, value: str) -> str:
-        if isinstance(value, str):
-            value = value.strip().strip("'").strip('"')
-        normalized = value.strip()
-        if not normalized or "change_me" in normalized.lower():
-            raise ValueError(
-                "required production setting is empty or placeholder"
-            )
-        return normalized
-
-    @field_validator("DB_ENCRYPTION_KEY", mode="before")
-    @classmethod
-    def validate_db_encryption_key(cls, value: str) -> str:
-        if isinstance(value, str):
-            value = value.strip().strip("'").strip('"')
-        normalized = value.strip()
-        if not normalized or "change_me" in normalized.lower():
-            raise ValueError(
-                "DB_ENCRYPTION_KEY is required and must not be empty or placeholder"
-            )
-        from cryptography.fernet import Fernet
-        try:
-            Fernet(normalized.encode("utf-8"))
-        except Exception as exc:
-            raise ValueError(f"DB_ENCRYPTION_KEY must be a valid 32-byte base64 Fernet key: {exc}") from exc
-        return normalized
-
-    @field_validator("DB_ENCRYPTION_KEYS", mode="before")
-    @classmethod
-    def validate_db_encryption_keys(cls, value: Any) -> str:
-        if not value or not isinstance(value, str):
-            return ""
-        normalized = value.strip().strip("'").strip('"')
-        if not normalized:
-            return ""
-        from cryptography.fernet import Fernet
-        raw_keys = [
-            k.strip().strip("'").strip('"')
-            for k in normalized.split(",")
-            if k.strip().strip("'").strip('"')
-        ]
-        valid_keys: list[str] = []
-        for k in raw_keys:
-            try:
-                Fernet(k.encode("utf-8"))
-                valid_keys.append(k)
-            except Exception as exc:
-                raise ValueError(f"Invalid Fernet key in DB_ENCRYPTION_KEYS: {exc}") from exc
-        return ",".join(valid_keys)
-
-    @field_validator("DOMAIN", mode="before")
-    @classmethod
-    def validate_domain(cls, value: str) -> str:
-        if isinstance(value, str):
-            value = value.strip().strip("'").strip('"')
-        domain = value.strip().lower().rstrip(".")
-        cyrillic_lookalikes = {
-            "а": "a", "с": "c", "е": "e", "о": "o", "р": "p", "х": "x",
-            "у": "y", "і": "i", "ј": "j", "ѕ": "s", "ԁ": "d",
-        }
-        for ch in domain:
-            if ch in cyrillic_lookalikes:
-                raise ValueError(
-                    f"DOMAIN contains Cyrillic lookalike character '{ch}' (intended Latin '{cyrillic_lookalikes[ch]}'). "
-                    "Please switch your keyboard to English."
-                )
-            if ord(ch) > 127:
-                raise ValueError(
-                    f"DOMAIN contains non-ASCII character '{ch}' (U+{ord(ch):04X}). "
-                    "Only ASCII domain names are supported."
-                )
-        labels = domain.split(".")
-        label_pattern = re.compile(
-            r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
-        )
-        if (
-            not domain
-            or len(domain) > 253
-            or len(labels) < 2
-            or any(
-                label_pattern.fullmatch(label) is None
-                for label in labels
-            )
-        ):
-            raise ValueError("DOMAIN must be a valid public hostname")
-        return domain
-
-    @field_validator("SSL_EMAIL", mode="before")
-    @classmethod
-    def validate_ssl_email(cls, value: str) -> str:
-        if isinstance(value, str):
-            value = value.strip().strip("'").strip('"')
-        email = value.strip().lower()
-        if (
-            not email
-            or email in {"admin@example.com", "owner@example.com", "change_me@example.com"}
-            or re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email)
-            is None
-        ):
-            raise ValueError("SSL_EMAIL must be a real certificate email")
-        return email
-
-    @field_validator("YOOKASSA_WEBHOOK_PORT", mode="before")
-    @classmethod
-    def validate_webhook_port(cls, value: Any) -> int:
-        if isinstance(value, str):
-            value = value.strip().strip("'").strip('"')
-        int_val = int(value)
-        if int_val < 1 or int_val > 65535:
-            raise ValueError(
-                "YOOKASSA_WEBHOOK_PORT must be between 1 and 65535"
-            )
-        return int_val
+                    return [parsed]
+                if isinstance(parsed, list):
+                    return [int(x) for x in parsed]
+            except json.JSONDecodeError:
+                pass
+            return [int(x.strip()) for x in value.split(",") if x.strip()]
+        if isinstance(value, list):
+            return [int(x) for x in value]
+        return []
 
     @field_validator("SUPPORT_USERNAME", mode="before")
     @classmethod
@@ -294,55 +131,7 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             value = value.strip().strip("'").strip('"')
         username = value.strip().lstrip("@")
-        if (
-            not username
-            or username.lower() in {"support", "change_me_support_username"}
-            or re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,31}", username) is None
-        ):
-            raise ValueError("SUPPORT_USERNAME must be a real Telegram username")
         return username
-
-    @field_validator("YOOKASSA_EXTRA_IPS", mode="before")
-    @classmethod
-    def validate_yookassa_extra_ips(cls, value: Any) -> str:
-        if not value or not isinstance(value, str):
-            return ""
-        normalized = value.strip().strip("'").strip('"')
-        if not normalized:
-            return ""
-        import ipaddress
-
-        # Caddy remote_ip matches arguments separated strictly by whitespace.
-        # Reject commas/semicolons explicitly so .env doesn't break Caddyfile syntax.
-        if "," in normalized or ";" in normalized:
-            raise ValueError(
-                "YOOKASSA_EXTRA_IPS must be space-separated IP/CIDR ranges without commas or semicolons (e.g. '185.71.76.0/27 77.75.153.0/25')"
-            )
-
-        tokens = [
-            token.strip()
-            for token in normalized.split()
-            if token.strip()
-        ]
-        valid_ranges: list[str] = []
-        for token in tokens:
-            try:
-                net = ipaddress.ip_network(token, strict=False)
-            except ValueError as exc:
-                raise ValueError(
-                    f"YOOKASSA_EXTRA_IPS contains invalid IP or CIDR '{token}': {exc}"
-                ) from exc
-
-            # Strict security: deny wildcard / allow-all subnets
-            if (net.version == 4 and net.prefixlen == 0) or (
-                net.version == 6 and net.prefixlen == 0
-            ):
-                raise ValueError(
-                    f"YOOKASSA_EXTRA_IPS cannot contain wildcard allow-all network '{token}'"
-                )
-            valid_ranges.append(str(net))
-
-        return " ".join(valid_ranges)
 
     @property
     def yookassa_allowed_ip_ranges(self) -> tuple[str, ...]:

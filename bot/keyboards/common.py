@@ -1,3 +1,5 @@
+"""Common inline keyboards for Just1k 2.0 Telegram Bot Hub."""
+
 from __future__ import annotations
 
 from aiogram.types import InlineKeyboardMarkup, WebAppInfo
@@ -17,18 +19,17 @@ def get_hub_keyboard(
     support_username: str | None = None,
     telegram_id: int | None = None,
 ) -> InlineKeyboardMarkup:
-    """Build single rich hub keyboard matching Just1k v2 specification."""
+    """Build single rich hub keyboard strictly matching just1kbotv2.md."""
     builder = InlineKeyboardBuilder()
 
-    # 1. Row: Main Action - WebApp Mini App
+    # Row 1: Главная кнопка - Открытие Mini App
     target_miniapp_url = miniapp_url or "https://just1k.pro/app"
     builder.button(
         text=texts.BTN_HUB_CONNECT,
         web_app=WebAppInfo(url=target_miniapp_url),
-        style="success",
     )
 
-    # 2. Row: Рефералы | Баланс
+    # Row 2: Рефералы | Баланс
     bal_label = texts.BTN_HUB_BALANCE.format(real=real_balance, bonus=bonus_balance)
     builder.button(
         text=texts.BTN_HUB_REFERRALS,
@@ -39,7 +40,7 @@ def get_hub_keyboard(
         callback_data="menu_balance",
     )
 
-    # 3. Row: Прокси TG | TG КАНАЛ
+    # Row 3: Прокси TG | TG КАНАЛ
     has_proxy = bool(mtproto_url)
     has_channel = bool(channel_url)
     if has_proxy:
@@ -53,10 +54,10 @@ def get_hub_keyboard(
             url=channel_url,
         )
 
-    # 4. Row: Информация | Поддержка
+    # Row 4: Информация | Поддержка
     builder.button(
         text=texts.BTN_HUB_INFO,
-        callback_data="menu_support",
+        callback_data="menu_info",
     )
 
     from utils.support import get_support_url
@@ -72,7 +73,7 @@ def get_hub_keyboard(
         url=support_url,
     )
 
-    # 5. Row: Админка
+    # Row 5: Админка (если админ)
     if is_admin:
         builder.button(
             text=texts.BTN_ADMIN,
@@ -95,6 +96,7 @@ def get_back_button(
     callback_data: str = "back_to_main_menu",
     text: str | None = None,
 ) -> InlineKeyboardMarkup:
+    """Standard back button for single-screen hub navigation."""
     builder = InlineKeyboardBuilder()
 
     if text is not None:
@@ -105,5 +107,4 @@ def get_back_button(
         button_text = texts.BTN_BACK
 
     builder.button(text=button_text, callback_data=callback_data)
-
     return builder.as_markup()

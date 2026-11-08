@@ -1,3 +1,7 @@
+"""Support and Information handler for Just1k 2.0 Telegram Bot Hub."""
+
+from __future__ import annotations
+
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
@@ -10,55 +14,52 @@ from utils.telegram import render_hub
 router = Router()
 
 
-def _support_keyboard(username: str, telegram_id: int | None = None):
+def _info_keyboard(username: str, telegram_id: int | None = None):
     builder = InlineKeyboardBuilder()
 
     from utils.support import get_support_url
 
-    text = (
+    greeting = (
         texts.SUPPORT_GREETING_TEMPLATE.format(telegram_id=telegram_id)
         if telegram_id
         else None
     )
-    support_url = get_support_url(text=text, username=username)
+    support_url = get_support_url(text=greeting, username=username)
 
+    # 1. Row: Написать в поддержку
     builder.button(
         text=texts.BTN_CONTACT_SUPPORT,
         url=support_url,
     )
 
+    # 2. Row: Инструкции | Частые вопросы
     builder.button(
         text=texts.BTN_HELP_INSTRUCTIONS,
         callback_data="support_help",
     )
-
     builder.button(
-        text=texts.SUPPORT,
-        callback_data="faq",
+        text="❓ Вопросы и ответы",
+        callback_data="info_faq",
     )
 
+    # 3. Row: Юридические документы
     builder.button(
-        text=texts.BTN_TOS,
-        url=texts.TOS_AGREEMENT_URL,
+        text="📜 Юр. документы",
+        callback_data="info_legal",
     )
 
-    builder.button(
-        text=texts.BTN_PRIVACY_POLICY,
-        url=texts.PRIVACY_POLICY_URL,
-    )
-
+    # 4. Row: Главное меню
     builder.button(
         text=texts.BTN_MAIN_MENU_NAV,
         callback_data="back_to_main_menu",
     )
 
-    builder.adjust(1, 2, 2, 1)
-
+    builder.adjust(1, 2, 1, 1)
     return builder.as_markup()
 
 
-@router.callback_query(F.data == "menu_support")
-async def hub_menu_support(
+@router.callback_query(F.data.in_({"menu_support", "menu_info"}))
+async def hub_menu_info(
     callback: CallbackQuery,
     state: FSMContext,
 ):
@@ -71,8 +72,55 @@ async def hub_menu_support(
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        texts.SUPPORT_TEXT.format(support_username=f"@{username}"),
-        _support_keyboard(username, telegram_id=user_id),
+        texts.SUPPORT_TEXT,
+        _info_keyboard(username, telegram_id=user_id),
+    )
+
+
+@router.callback_query(F.data == "info_faq")
+async def show_faq(callback: CallbackQuery):
+    await callback.answer(show_alert=False)
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=texts.BTN_BACK,
+        callback_data="menu_info",
+    )
+    builder.adjust(1)
+    await render_hub(
+        callback.bot,
+        callback.message.chat.id,
+        texts.FAQ_TEXT,
+        builder.as_markup(),
+    )
+
+
+@router.callback_query(F.data == "info_legal")
+async def show_legal_docs(callback: CallbackQuery):
+    await callback.answer(show_alert=False)
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=texts.BTN_TOS,
+        url=texts.TOS_AGREEMENT_URL,
+    )
+    builder.button(
+        text=texts.BTN_PRIVACY_POLICY,
+        url=texts.PRIVACY_POLICY_URL,
+    )
+    builder.button(
+        text=texts.BTN_BACK,
+        callback_data="menu_info",
+    )
+    builder.adjust(1, 1, 1)
+
+    text = (
+        "<b>Юридическая информация и документы</b>\n\n"
+        "Ознакомьтесь с официальными документами нашего сервиса:"
+    )
+    await render_hub(
+        callback.bot,
+        callback.message.chat.id,
+        text,
+        builder.as_markup(),
     )
 
 
@@ -87,18 +135,10 @@ async def show_support_help(callback: CallbackQuery):
         callback_data="help_incy",
     )
     builder.button(
-        text=texts.BTN_SPLIT_TUNNELING,
-        callback_data="help_split",
-    )
-    builder.button(
         text=texts.BTN_BACK,
-        callback_data="menu_support",
+        callback_data="menu_info",
     )
-    builder.button(
-        text=texts.BTN_MAIN_MENU_NAV,
-        callback_data="back_to_main_menu",
-    )
-    builder.adjust(1, 1, 2)
+    builder.adjust(1, 1)
 
     await render_hub(
         callback.bot,
@@ -115,14 +155,6 @@ async def show_help_incy(callback: CallbackQuery):
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=texts.BTN_CONNECTIONS,
-        callback_data="menu_connections",
-    )
-    builder.button(
-        text=texts.BTN_WHITE_INTERNET,
-        callback_data="white_internet",
-    )
-    builder.button(
         text=texts.BTN_BACK,
         callback_data="support_help",
     )
@@ -130,60 +162,11 @@ async def show_help_incy(callback: CallbackQuery):
         text=texts.BTN_MAIN_MENU_NAV,
         callback_data="back_to_main_menu",
     )
-    builder.adjust(2, 2)
+    builder.adjust(1, 1)
 
     await render_hub(
         callback.bot,
         callback.message.chat.id,
         text,
-        builder.as_markup(),
-    )
-
-
-@router.callback_query(F.data.startswith("help_split"))
-async def show_help_split(callback: CallbackQuery):
-    await callback.answer(show_alert=False)
-    text = texts.SUPPORT_SPLIT_TUNNELING_TEXT
-
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text=texts.BTN_CONNECTIONS,
-        callback_data="menu_connections",
-    )
-    builder.button(
-        text=texts.BTN_WHITE_INTERNET,
-        callback_data="white_internet",
-    )
-    builder.button(
-        text=texts.BTN_BACK,
-        callback_data="support_help",
-    )
-    builder.button(
-        text=texts.BTN_MAIN_MENU_NAV,
-        callback_data="back_to_main_menu",
-    )
-    builder.adjust(2, 2)
-
-    await render_hub(
-        callback.bot,
-        callback.message.chat.id,
-        text,
-        builder.as_markup(),
-    )
-
-
-@router.callback_query(F.data == "faq")
-async def show_faq(callback: CallbackQuery):
-    await callback.answer(show_alert=False)
-
-    builder = InlineKeyboardBuilder()
-    builder.button(text=texts.BTN_BACK, callback_data="menu_support")
-    builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
-    builder.adjust(2)
-
-    await render_hub(
-        callback.bot,
-        callback.message.chat.id,
-        texts.FAQ_TEXT,
         builder.as_markup(),
     )

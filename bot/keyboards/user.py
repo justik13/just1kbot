@@ -1,123 +1,106 @@
-from urllib.parse import quote
+"""Keyboards for referral and user screens in Just1k 2.0."""
 
-from aiogram.types import CopyTextButton, DisabledButton, InlineKeyboardMarkup
+from __future__ import annotations
+
+import urllib.parse
+from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot import texts
 
 
-def get_history_keyboard(back_callback: str = "menu_balance") -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-
-    builder.button(
-        text=texts.BTN_BACK,
-        callback_data=back_callback,
-    )
-    builder.button(
-        text=texts.BTN_MAIN_MENU_NAV,
-        callback_data="back_to_main_menu",
-    )
-
-    builder.adjust(1)
-
-    return builder.as_markup()
-
-
 def get_referral_keyboard(
-    referral_link: str,
-    count: int = 0,
+    invite_url: str,
+    share_text: str | None = None,
 ) -> InlineKeyboardMarkup:
+    """Build referral screen keyboard strictly matching just1kbotv2.md:
+
+    - Share button calling native Telegram share
+    - My referrals | Top 5
+    - Back button
+    """
     builder = InlineKeyboardBuilder()
 
-    has_copy = False
-    if referral_link:
-        if 1 <= len(referral_link) <= 256:
-            builder.button(
-                text=texts.BUTTON_COPY_REFERRAL,
-                copy_text=CopyTextButton(text=referral_link),
-            )
-        else:
-            builder.button(
-                text=texts.BUTTON_COPY_REFERRAL,
-                callback_data="alert:copy_too_long",
-            )
-        has_copy = True
-    share_text = texts.REFERRAL_SHARE_TEXT
-    share_url = f"https://t.me/share/url?url={quote(referral_link, safe='')}&text={quote(share_text, safe='')}"
+    # Кнопка 'Поделиться' через нативный share в Telegram
+    default_text = "Присоединяйся к Just1k!"
+    text_to_share = share_text or default_text
+    encoded_url = urllib.parse.quote(invite_url)
+    encoded_text = urllib.parse.quote(text_to_share)
+    share_url = f"https://t.me/share/url?url={encoded_url}&text={encoded_text}"
+
     builder.button(
-        text=texts.BTN_SHARE_REFERRAL,
+        text=texts.BTN_INVITE_FRIEND,
         url=share_url,
     )
+
+    # Кнопки: Мои рефералы | Топ 5
     builder.button(
-        text=texts.BUTTON_REFERRAL_LIST_COUNT.format(count=count),
-        callback_data="referrals_list",
+        text="👥 Мои рефералы",
+        callback_data="user_referrals_list:0",
     )
     builder.button(
-        text=texts.BTN_REFERRAL_LEADERBOARD,
-        callback_data="referral_leaderboard",
+        text="🏆 Топ 5",
+        callback_data="user_referrals_top",
     )
+
+    # Кнопка: Назад в главное меню
     builder.button(
         text=texts.BTN_MAIN_MENU_NAV,
         callback_data="back_to_main_menu",
     )
 
-    if has_copy:
-        builder.adjust(2, 2, 1)
-    else:
-        builder.adjust(1, 2, 1)
-
+    builder.adjust(1, 2, 1)
     return builder.as_markup()
 
 
-def get_referral_leaderboard_keyboard(is_anonymous: bool = True) -> InlineKeyboardMarkup:
+def get_referral_leaderboard_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    toggle_text = (
-        texts.BTN_LEADERBOARD_ANONYMOUS_ON
-        if is_anonymous
-        else texts.BTN_LEADERBOARD_ANONYMOUS_OFF
-    )
-    builder.button(
-        text=toggle_text,
-        callback_data="referral_toggle_anonymity",
-    )
     builder.button(
         text=texts.BTN_BACK,
-        callback_data="referral",
+        callback_data="menu_referral",
     )
-    builder.button(
-        text=texts.BTN_MAIN_MENU_NAV,
-        callback_data="back_to_main_menu",
-    )
-    builder.adjust(1, 1, 1)
     return builder.as_markup()
 
 
 def get_referrals_list_keyboard(
-    page: int = 1,
-    total_pages: int = 1,
+    page: int,
+    total_pages: int,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
-    if total_pages > 1:
-        if page > 1:
-            builder.button(text=texts.BTN_PAGINATION_PREV, callback_data=f"referrals_list:{page - 1}")
-        else:
-            builder.button(text=texts.BTN_PAGINATION_EMPTY, disabled=DisabledButton())
-
-        builder.button(
-            text=texts.BTN_PAGINATION_PAGE.format(page=page, total_pages=total_pages),
-            disabled=DisabledButton(),
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(
+            ("◀️", f"user_referrals_list:{page - 1}")
+        )
+    if page < total_pages - 1:
+        nav_buttons.append(
+            ("▶️", f"user_referrals_list:{page + 1}")
         )
 
-        if page < total_pages:
-            builder.button(text=texts.BTN_PAGINATION_NEXT, callback_data=f"referrals_list:{page + 1}")
-        else:
-            builder.button(text=texts.BTN_PAGINATION_EMPTY, disabled=DisabledButton())
+    for btn_text, cb in nav_buttons:
+        builder.button(text=btn_text, callback_data=cb)
 
-        builder.button(text=texts.BTN_BACK, callback_data="referral")
-        builder.adjust(3, 1)
+    builder.button(
+        text=texts.BTN_BACK,
+        callback_data="menu_referral",
+    )
+
+    if nav_buttons:
+        builder.adjust(len(nav_buttons), 1)
     else:
-        builder.button(text=texts.BTN_BACK, callback_data="referral")
         builder.adjust(1)
 
+    return builder.as_markup()
+
+
+def get_history_keyboard(
+    page: int = 0,
+    total_pages: int = 1,
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=texts.BTN_BACK,
+        callback_data="menu_balance",
+    )
     return builder.as_markup()

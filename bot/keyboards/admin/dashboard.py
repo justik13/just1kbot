@@ -1,142 +1,89 @@
-from aiogram.types import DisabledButton, InlineKeyboardMarkup
+"""Keyboards for admin dashboard in Just1k 2.0."""
+
+from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot import texts
 
 
-def get_admin_menu(
-    maintenance_enabled: bool = False,
-) -> InlineKeyboardMarkup:
+def get_admin_menu(maintenance_enabled: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
-    builder.button(
-        text=texts.BTN_USERS_AND_BROADCAST,
-        callback_data="admin_cat_users",
-    )
-    builder.button(
-        text=texts.BTN_STD_SUB,
-        callback_data="admin_cat_std_sub",
-    )
-    builder.button(
-        text=texts.BTN_WI_SUB,
-        callback_data="admin_cat_wi_sub",
-    )
-
-    builder.button(
-        text=texts.DASHBOARD_FINANSY_I_OCHEREDI,
-        callback_data="admin_cat_finance",
-    )
+    builder.button(text="📢 Рассылка", callback_data="admin_broadcast")
+    builder.button(text="💳 Платежи", callback_data="admin_payments")
+    builder.button(text="📜 Покупки", callback_data="admin_purchases")
 
     maint_icon = "🔴" if maintenance_enabled else "🟢"
     builder.button(
-        text=texts.DASHBOARD_SISTEMA_I_LOGI.format(maint_icon=maint_icon),
-        callback_data="admin_cat_system",
+        text=f"{maint_icon} Обслуживание",
+        callback_data="admin_maintenance",
     )
-
     builder.button(
         text=texts.BTN_MAIN_MENU_NAV,
         callback_data="back_to_main_menu",
     )
 
-    builder.adjust(1, 2, 2, 1)
+    builder.adjust(2, 2, 1)
     return builder.as_markup()
 
 
-def get_admin_cat_std_sub_keyboard() -> InlineKeyboardMarkup:
+def get_admin_cat_finance_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text=texts.BTN_STD_SERVERS, callback_data="admin_servers:std")
-    builder.button(text=texts.BTN_STD_INCY_CONFIG, callback_data="admin_std_incy")
-    builder.button(text=texts.BTN_STD_TARIFFS, callback_data="admin_tariffs:standard")
-    builder.button(text=texts.BTN_ADMIN_MENU, callback_data="admin_menu")
-    builder.adjust(1)
-    return builder.as_markup()
-
-
-def get_admin_cat_wi_sub_keyboard() -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    builder.button(text=texts.BTN_WI_SERVERS, callback_data="admin_servers:wi")
-    builder.button(text=texts.BTN_WI_TARIFFS, callback_data="admin_tariffs:white_internet")
-    builder.button(text=texts.BTN_ADMIN_MENU, callback_data="admin_menu")
+    builder.button(text="💳 Платежи ЮKassa", callback_data="admin_payments")
+    builder.button(text="📜 Журнал покупок", callback_data="admin_purchases")
+    builder.button(text="◀️ Меню админки", callback_data="admin_menu")
     builder.adjust(1)
     return builder.as_markup()
 
 
 def get_admin_cat_users_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text=texts.BTN_SPISOK_POLZOVATELEJ, callback_data="admin_users")
-    builder.button(text=texts.BTN_MASSOVAYA_RASSYLKA, callback_data="admin_broadcast")
-    builder.button(text=texts.BTN_MASS_BONUS, callback_data="admin_mass_bonus")
-    builder.button(text=texts.BTN_MASS_EXTEND, callback_data="admin_mass_extend")
-    builder.button(text=texts.BTN_ADMIN_MENU, callback_data="admin_menu")
+    builder.button(text="📢 Рассылка", callback_data="admin_broadcast")
+    builder.button(text="◀️ Меню админки", callback_data="admin_menu")
     builder.adjust(1)
     return builder.as_markup()
 
 
 def get_admin_cat_infra_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text=texts.BTN_SERVERS, callback_data="admin_servers")
-    builder.button(text=texts.BTN_TARIFY_PODPISOK, callback_data="admin_tariffs")
-    builder.button(text=texts.BTN_ADMIN_MENU, callback_data="admin_menu")
+    builder.button(text="◀️ Меню админки", callback_data="admin_menu")
     builder.adjust(1)
     return builder.as_markup()
 
 
-def get_admin_cat_finance_keyboard() -> InlineKeyboardMarkup:
+def get_admin_cat_std_sub_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text=texts.BTN_ADMIN_YOOKASSA_PAYMENTS, callback_data="admin_payments")
-    builder.button(text=texts.BTN_ADMIN_PURCHASES_LOGS, callback_data="admin_purchases")
-    builder.button(text=texts.BTN_ADMIN_MENU, callback_data="admin_menu")
+    builder.button(text="◀️ Меню админки", callback_data="admin_menu")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_admin_cat_wi_sub_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="◀️ Меню админки", callback_data="admin_menu")
     builder.adjust(1)
     return builder.as_markup()
 
 
 def get_admin_cat_system_keyboard(maintenance_enabled: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text=texts.BTN_NASTROJKI_MTPROTO_PROXY, callback_data="admin_settings")
-    builder.button(text=texts.BTN_SISTEMNYJ_AUDIT_LOG, callback_data="admin_audit")
-    maint_label = texts.DASHBOARD_TEKHRABOTY_VKLYUCHENY if maintenance_enabled else texts.DASHBOARD_TEKHRABOTY_VYKLYUCHENY
+    maint_label = "🔴 Выключить техобслуживание" if maintenance_enabled else "🟢 Включить техобслуживание"
     builder.button(text=maint_label, callback_data="admin_maintenance")
-    builder.button(text=texts.BTN_ADMIN_MENU, callback_data="admin_menu")
+    builder.button(text="◀️ Меню админки", callback_data="admin_menu")
     builder.adjust(1)
     return builder.as_markup()
 
 
 def get_audit_keyboard(page: int = 1, total_pages: int = 1) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    if total_pages > 1:
-        if page > 1:
-            builder.button(text=texts.BTN_BACK, callback_data=f"admin_audit:{page - 1}")
-        else:
-            builder.button(text=" ⏹ ", disabled=DisabledButton())
-        builder.button(text=texts.PAGE_INDEX_FORMAT.format(page=page, total_pages=total_pages), disabled=DisabledButton())
-        if page < total_pages:
-            builder.button(text=texts.BTN_PAGINATION_NEXT, callback_data=f"admin_audit:{page + 1}")
-        else:
-            builder.button(text=" ⏹ ", disabled=DisabledButton())
-        builder.button(
-            text=texts.BTN_ADMIN_MENU,
-            callback_data="admin_menu",
-        )
-        builder.adjust(3, 1)
-    else:
-        builder.button(
-            text=texts.BTN_ADMIN_MENU,
-            callback_data="admin_menu",
-        )
-        builder.adjust(1)
-
+    builder.button(text="◀️ Меню админки", callback_data="admin_menu")
+    builder.adjust(1)
     return builder.as_markup()
 
 
 def get_maintenance_confirm_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(
-        text=texts.BTN_CONFIRM,
-        callback_data="admin_maintenance_toggle_apply",
-    )
-    builder.button(
-        text=texts.BTN_CANCEL,
-        callback_data="admin_menu",
-    )
+    builder.button(text="✅ Подтвердить", callback_data="admin_maintenance_toggle_apply")
+    builder.button(text="❌ Отмена", callback_data="admin_menu")
     builder.adjust(2)
     return builder.as_markup()

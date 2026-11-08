@@ -1,4 +1,3 @@
-
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,8 +16,6 @@ async def get_active_tariffs(
     session: AsyncSession,
     service_type: str = "standard",
 ) -> list[Tariff]:
-    if service_type == "awg":
-        service_type = "standard"
     stmt = (
         select(Tariff)
         .where(
@@ -32,7 +29,7 @@ async def get_active_tariffs(
         )
     )
     result = await session.execute(stmt)
-    return result.scalars().all()
+    return list(result.scalars().all())
 
 
 async def get_tariff_by_id(
@@ -64,8 +61,6 @@ async def get_tariff_count(
     session: AsyncSession,
     service_type: str | None = None,
 ) -> int:
-    if service_type == "awg":
-        service_type = "standard"
     stmt = select(func.count(Tariff.id))
     if service_type is not None:
         stmt = stmt.where(Tariff.service_type == service_type)
@@ -79,8 +74,6 @@ async def get_tariffs_paginated(
     per_page: int = 10,
     service_type: str | None = None,
 ) -> list[Tariff]:
-    if service_type == "awg":
-        service_type = "standard"
     offset = (page - 1) * per_page
     stmt = select(Tariff)
     if service_type is not None:
@@ -91,4 +84,4 @@ async def get_tariffs_paginated(
         Tariff.duration_days,
     ).offset(offset).limit(per_page)
     result = await session.execute(stmt)
-    return result.scalars().all()
+    return list(result.scalars().all())

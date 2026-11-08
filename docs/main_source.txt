@@ -39,16 +39,6 @@ https://core.telegram.org/bots
 https://core.telegram.org/bots/api
 https://telegram.org/blog
 
-## Архитектура и клиенты AmneziaWG
-https://github.com/Vadim-Khristenko/Any-Tech-ARCHITECT
-https://architect.vai-rice.space/
-https://github.com/orgs/amnezia-vpn/repositories
-https://github.com/amnezia-vpn/amneziawg-windows
-https://github.com/amnezia-vpn/amneziawg-windows-client
-https://github.com/amnezia-vpn/amneziawg-android
-https://github.com/amnezia-vpn/amneziawg-apple
-https://www.reddit.com/r/AmneziaVPN/
-
 ## Сетевая безопасность, ТСПУ и Xray-core
 https://ntc.party/
 https://github.com/net4people/bbs

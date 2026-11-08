@@ -1,4 +1,4 @@
-"""INCY routing profile generator for split-tunneling deep links."""
+"""INCY and Happ routing profile generator."""
 
 from __future__ import annotations
 
@@ -10,8 +10,6 @@ from config.constants import (
     DEFAULT_WHITE_INTERNET_PROFILE_TITLE,
 )
 
-# Fixed version timestamp used to detect routing profile changes in INCY/Happ clients.
-# Bump this timestamp when routing rules or DNS parameters change so clients pull updated rules.
 ROUTING_PROFILE_VERSION_TIMESTAMP = "1793420000"
 
 
@@ -22,60 +20,20 @@ def generate_incy_routing_header(
     last_updated: str | int | None = None,
     scheme: str = "incy",
 ) -> str:
-    """Construct incy:// or happ:// routing deep link header for split tunneling.
-
-    - Supports both "incy" (INCY app) and "happ" (Happ app) schemes.
-    - If direct_ru=True (Standard VLESS): routes geosite:category-ru, geosite:tld-ru, domain:ru, domain:su, domain:xn--p1ai, geoip:ru directly
-      via user's home ISP, while sending foreign destinations through the VLESS tunnel.
-    - If direct_ru=False (White Internet / CDN relay): sends all domain traffic through
-      the Yandex CDN tunnel to the Moscow Origin server (where Origin routes RU directly
-      from datacenter fiber and forwards foreign traffic to Exit), preserving LAN bypass.
-    - Enforces secure DoH resolution (Cloudflare DoH for remote proxy traffic, Yandex DoH for domestic RU/bootstrap) to prevent TSPU DNS hijacking and cellular UDP drops.
-    - Includes LastUpdated Unix timestamp for reliable profile versioning and updates.
-    """
     default_name = DEFAULT_VLESS_PROFILE_TITLE if direct_ru else DEFAULT_WHITE_INTERNET_PROFILE_TITLE
-    if profile_name is None:
-        clean_name = default_name
-    else:
-        raw_name = str(profile_name).strip()
-        clean_name = raw_name[:25] if (raw_name and raw_name.lower() != "none") else default_name
-
-    if last_updated is None:
-        clean_last_updated = ROUTING_PROFILE_VERSION_TIMESTAMP
-    else:
-        raw_updated = str(last_updated).strip()
-        clean_last_updated = (
-            raw_updated
-            if (raw_updated and raw_updated.lower() != "none")
-            else ROUTING_PROFILE_VERSION_TIMESTAMP
-        )
+    clean_name = profile_name or default_name
+    clean_last_updated = str(last_updated or ROUTING_PROFILE_VERSION_TIMESTAMP)
 
     lan_direct_ips = [
-        "10.0.0.0/8",
-        "100.64.0.0/10",
-        "172.16.0.0/12",
-        "192.168.0.0/16",
-        "169.254.0.0/16",
-        "224.0.0.0/4",
-        "255.255.255.255",
-        "::1/128",
-        "fc00::/7",
-        "fe80::/10",
-        "ff00::/8",
+        "10.0.0.0/8", "100.64.0.0/10", "172.16.0.0/12",
+        "192.168.0.0/16", "169.254.0.0/16", "224.0.0.0/4",
+        "255.255.255.255", "::1/128", "fc00::/7", "fe80::/10", "ff00::/8",
     ]
     direct_sites = (
-        [
-            "geosite:category-ru",
-            "geosite:tld-ru",
-            "domain:ru",
-            "domain:su",
-            "domain:xn--p1ai",
-        ]
+        ["geosite:category-ru", "geosite:tld-ru", "domain:ru", "domain:su", "domain:xn--p1ai"]
         if direct_ru
         else []
     )
-    # Retain geoip:ru in DirectIp for standard VLESS to guarantee all Russian banks,
-    # payment gateways (SBP, Mir), Ozon, WB, and domestic APIs stay Direct via user's home ISP.
     direct_ips = (["geoip:ru"] + lan_direct_ips) if direct_ru else lan_direct_ips
 
     profile = {

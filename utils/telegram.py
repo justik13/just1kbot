@@ -29,13 +29,11 @@ from utils.text_limits import split_text_by_lines
 
 logger = logging.getLogger(__name__)
 
-# ==============================================================================
+
 # Telegram Message Effect IDs (Telegram Bot API 7.4+)
-# Verified via live API scan (696 tested against Telegram servers, exactly 6 supported):
-# ==============================================================================
-EFFECT_LIKE = "5107584321108051014"        # 👍 Like / Thumbs Up (system confirmations, rename)
-EFFECT_FIRE = "5104841245755180586"        # 🔥 Fire (VPN device creation, referral rewards)
-EFFECT_CONFETTI = "5046509860389126442"    # 🎉 Confetti (balance topup, plan purchase, renewal)
+EFFECT_LIKE = "5107584321108051014"        # 👍 Like
+EFFECT_FIRE = "5104841245755180586"        # 🔥 Fire 
+EFFECT_CONFETTI = "5046509860389126442"    # 🎉 Confetti
 
 _hub_cache = TTLCache(maxsize=HUB_CACHE_MAX_SIZE, ttl=HUB_CACHE_TTL)
 
