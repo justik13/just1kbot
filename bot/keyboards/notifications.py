@@ -1,15 +1,17 @@
 """Canonical keyboards for runtime notifications and background alerts."""
 from __future__ import annotations
 
-from aiogram.types import InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardMarkup, WebAppInfo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot import texts
+from config.settings import get_settings
 
 
 def get_pre_expiry_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text=texts.BTN_RENEW_ACCESS, callback_data="menu_subscription")
+    app_url = f"https://{get_settings().DOMAIN}/app"
+    builder.button(text=texts.BTN_RENEW_ACCESS, web_app=WebAppInfo(url=app_url))
     builder.button(text=texts.BTN_DISMISS_NOTIFICATION, callback_data="dismiss_notification")
     builder.adjust(1)
     return builder.as_markup()
@@ -17,7 +19,8 @@ def get_pre_expiry_keyboard() -> InlineKeyboardMarkup:
 
 def get_post_expiry_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text=texts.BTN_BUY_ACCESS, callback_data="menu_buy")
+    app_url = f"https://{get_settings().DOMAIN}/app"
+    builder.button(text=texts.BTN_BUY_ACCESS, web_app=WebAppInfo(url=app_url))
     builder.button(text=texts.BTN_SUPPORT, callback_data="menu_support")
     builder.button(text=texts.BTN_DISMISS_NOTIFICATION, callback_data="dismiss_notification")
     builder.adjust(1)
@@ -26,7 +29,8 @@ def get_post_expiry_keyboard() -> InlineKeyboardMarkup:
 
 def get_devices_deleted_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text=texts.BTN_BUY_SUBSCRIPTION, callback_data="menu_buy")
+    app_url = f"https://{get_settings().DOMAIN}/app"
+    builder.button(text=texts.BTN_BUY_SUBSCRIPTION, web_app=WebAppInfo(url=app_url))
     builder.button(text=texts.BTN_DISMISS_NOTIFICATION, callback_data="dismiss_notification")
     builder.adjust(1)
     return builder.as_markup()

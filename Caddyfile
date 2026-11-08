@@ -46,6 +46,17 @@ http:// {
 		}
 	}
 
+	@app_allowed path /app /app/* /api/app/*
+	handle @app_allowed {
+		header {
+			Content-Security-Policy "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org telegram:;"
+			-X-Frame-Options
+		}
+		reverse_proxy bot:8080 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
 	handle {
 		respond "Not Found" 404
 	}

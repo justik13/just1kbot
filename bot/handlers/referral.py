@@ -282,7 +282,7 @@ async def _render_referral_leaderboard(
     )
 
 
-@router.callback_query(F.data == "referral_leaderboard")
+@router.callback_query(F.data.in_({"referral_leaderboard", "user_referrals_top"}))
 async def show_referral_leaderboard(
     callback: CallbackQuery,
     state: FSMContext,
@@ -348,7 +348,7 @@ async def referral_toggle_anonymity(
     await _render_referral_leaderboard(callback, session, db_user)
 
 
-@router.callback_query(F.data.startswith("referrals_list"))
+@router.callback_query(F.data.startswith("referrals_list") | F.data.startswith("user_referrals_list"))
 async def show_referrals_list(
     callback: CallbackQuery,
     state: FSMContext,
@@ -365,25 +365,28 @@ async def show_referrals_list(
             pass
         return
 
-    page = 1
+    raw_page = 0
     if ":" in callback.data:
         try:
-            page = int(callback.data.split(":")[1])
+            raw_page = int(callback.data.split(":")[1])
         except (ValueError, IndexError):
-            page = 1
+            raw_page = 0
 
+    page_1based = max(1, raw_page + 1)
     page_size = 10
-    page_referrals, total_count, page = await get_user_referrals_paginated(
-        session, db_user.telegram_id, page=page, per_page=page_size
+    page_referrals, total_count, normalized_1based = await get_user_referrals_paginated(
+        session, db_user.telegram_id, page=page_1based, per_page=page_size
     )
 
     if total_count == 0:
         rendered = texts.REFERRAL_LIST_EMPTY
         total_pages = 1
+        current_page_0based = 0
     else:
         total_pages = max(1, (total_count + page_size - 1) // page_size)
+        current_page_0based = max(0, normalized_1based - 1)
 
-        start_idx = (page - 1) * page_size
+        start_idx = current_page_0based * page_size
         rendered = texts.REFERRAL_LIST_HEADER
         for idx, referral in enumerate(page_referrals, start=start_idx + 1):
             if referral.username and referral.username.strip():
@@ -406,6 +409,6 @@ async def show_referrals_list(
         callback.bot,
         callback.message.chat.id,
         rendered,
-        get_referrals_list_keyboard(page=page, total_pages=total_pages),
+        get_referrals_list_keyboard(page=current_page_0based, total_pages=total_pages),
         trigger_message_id=callback.message.message_id if callback.message else None,
     )

@@ -1,0 +1,2245 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#050505">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Персональный доступ</title>
+
+    <!-- Native Telegram WebApp SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+    <style>
+        :root {
+            --bg-color: #050505;
+            --card-bg: #0c0c0e;
+            --surface-elevated: #131316;
+            --surface-hover: #1c1c22;
+            --surface-subtle: rgba(255, 255, 255, 0.03);
+            --border-subtle: rgba(255, 255, 255, 0.08);
+            --border-strong: rgba(255, 255, 255, 0.18);
+            --text-main: #f4f4f5;
+            --text-sub: #a1a1aa;
+            --text-muted: #71717a;
+            --cta-bg: #ffffff;
+            --cta-hover: #e4e4e7;
+            --cta-text: #09090b;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --error: #ef4444;
+            --tier-accent: #34d399;
+            --tier-glow-color: rgba(16, 185, 129, 0.08);
+            --tier-highlight-line: rgba(52, 211, 153, 0.32);
+            --tier-badge-glow: rgba(16, 185, 129, 0.14);
+            --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+            --nav-height: 64px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', 'Segoe UI', Roboto, sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            background-image:
+                radial-gradient(ellipse 90% 50% at 50% -10%, var(--tier-glow-color), transparent 70%),
+                radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.025) 0%, transparent 70%);
+            color: var(--text-main);
+            min-height: 100vh;
+            min-height: 100dvh;
+            min-height: var(--tg-viewport-stable-height, 100dvh);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            padding-top: max(12px, env(safe-area-inset-top), var(--tg-safe-area-inset-top, 0px));
+            padding-bottom: calc(var(--nav-height) + max(16px, env(safe-area-inset-bottom), var(--tg-safe-area-inset-bottom, 0px)));
+            padding-left: max(14px, env(safe-area-inset-left), var(--tg-safe-area-inset-left, 0px));
+            padding-right: max(14px, env(safe-area-inset-right), var(--tg-safe-area-inset-right, 0px));
+            overflow-x: hidden;
+        }
+
+        /* Desktop Local Preview Control Bar (Visible only outside Telegram) */
+        .preview-mode-bar {
+            width: 100%;
+            max-width: 440px;
+            margin-bottom: 12px;
+            padding: 8px 12px;
+            background: rgba(24, 24, 27, 0.9);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            font-size: 11.5px;
+            color: var(--text-sub);
+        }
+        .preview-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-weight: 600;
+            color: var(--tier-accent);
+        }
+        .preview-badge-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background-color: var(--tier-accent);
+            box-shadow: 0 0 6px var(--tier-accent);
+        }
+        .preview-actions {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .preview-btn {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid var(--border-subtle);
+            border-radius: 6px;
+            color: var(--text-main);
+            font-size: 11px;
+            font-weight: 500;
+            padding: 4px 8px;
+            cursor: pointer;
+            transition: all 120ms ease;
+        }
+        .preview-btn.active {
+            background: var(--cta-bg);
+            color: var(--cta-text);
+            border-color: #ffffff;
+            font-weight: 600;
+        }
+        .preview-close {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 2px 4px;
+            font-size: 13px;
+        }
+
+        /* Main Container */
+        .app-shell {
+            position: relative;
+            width: 100%;
+            max-width: 440px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            transition: max-width 200ms ease;
+        }
+        body.preview-fluid .app-shell {
+            max-width: 560px;
+        }
+
+        /* Top User Profile Header */
+        .profile-card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-subtle);
+            border-radius: 20px;
+            padding: 16px 18px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 16px 36px -10px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+        }
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #1f2937, #111827);
+            border: 1px solid var(--border-subtle);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 14px;
+            color: var(--text-main);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+        }
+        .user-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            text-align: left;
+        }
+        .user-name {
+            font-size: 14.5px;
+            font-weight: 700;
+            color: var(--text-main);
+            letter-spacing: -0.01em;
+        }
+        .user-status-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11.5px;
+            color: var(--text-sub);
+        }
+        .status-dot-mini {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--success);
+            box-shadow: 0 0 8px rgba(16, 185, 129, 0.8);
+        }
+        .profile-tier-badge {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            padding: 4px 10px;
+            border-radius: 9999px;
+            background: var(--tier-badge-glow);
+            border: 1px solid var(--tier-highlight-line);
+            color: var(--tier-accent);
+        }
+
+        /* Tab Screens */
+        .tab-screen {
+            display: none;
+            width: 100%;
+            animation: fadeInScreen 160ms var(--ease-out);
+        }
+        .tab-screen.active {
+            display: block;
+        }
+        @keyframes fadeInScreen {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Glassmorphic Core Card */
+        .card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-subtle);
+            border-radius: 24px;
+            padding: 20px 18px;
+            box-shadow: 0 20px 40px -12px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+            text-align: center;
+        }
+
+        .header-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+        }
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            background-color: rgba(16, 185, 129, 0.08);
+            border: 1px solid rgba(16, 185, 129, 0.22);
+            color: #6ee7b7;
+            padding: 4px 10px;
+            border-radius: 9999px;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+        }
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background-color: var(--success);
+            box-shadow: 0 0 8px rgba(16, 185, 129, 0.8);
+        }
+        .icon-badge {
+            width: 32px;
+            height: 32px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border-subtle);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-sub);
+        }
+        .icon-badge svg {
+            width: 16px;
+            height: 16px;
+        }
+
+        h1 {
+            font-size: 21px;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            margin-bottom: 4px;
+            color: var(--text-main);
+        }
+        .subtitle {
+            font-size: 12.5px;
+            color: var(--text-sub);
+            line-height: 1.45;
+            margin-bottom: 16px;
+        }
+
+        /* 1-Click Action Buttons */
+        .btn-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            min-height: 46px;
+            padding: 8px 12px;
+            border-radius: 12px;
+            font-size: 13px;
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+            user-select: none;
+            transition: transform 120ms var(--ease-out), background-color 150ms ease;
+            border: 1px solid transparent;
+            touch-action: manipulation;
+        }
+        .btn:active { transform: scale(0.98); }
+        .btn-primary {
+            background-color: var(--cta-bg);
+            color: var(--cta-text);
+        }
+        .btn-primary:hover { background-color: var(--cta-hover); }
+        .btn-secondary {
+            background-color: var(--surface-elevated);
+            border-color: var(--border-subtle);
+            color: var(--text-main);
+        }
+        .btn-secondary:hover {
+            background-color: var(--surface-hover);
+            border-color: var(--border-strong);
+        }
+        .btn svg {
+            width: 16px;
+            height: 16px;
+            flex-shrink: 0;
+        }
+
+        /* Subscription Capsule */
+        .sub-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background-color: #070709;
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: 6px 6px 6px 12px;
+            margin-bottom: 14px;
+            text-align: left;
+        }
+        .sub-bar-text {
+            font-size: 11.5px;
+            color: var(--text-sub);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            padding-right: 8px;
+        }
+        .sub-copy-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            background-color: var(--surface-elevated);
+            border: 1px solid var(--border-subtle);
+            color: var(--text-main);
+            padding: 7px 11px;
+            border-radius: 8px;
+            font-size: 11.5px;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 120ms ease;
+            touch-action: manipulation;
+        }
+        .sub-copy-btn:hover {
+            border-color: var(--border-strong);
+            background-color: var(--surface-hover);
+        }
+        .sub-copy-btn.copied {
+            background-color: rgba(16, 185, 129, 0.15);
+            border-color: var(--success);
+            color: #6ee7b7;
+        }
+        .sub-copy-btn svg {
+            width: 13px;
+            height: 13px;
+        }
+
+        /* App Platform Filter Tabs */
+        .app-tabs {
+            display: flex;
+            gap: 4px;
+            background-color: #070709;
+            border: 1px solid var(--border-subtle);
+            border-radius: 10px;
+            padding: 3px;
+            margin-bottom: 10px;
+        }
+        .app-tab {
+            flex: 1;
+            padding: 6px 2px;
+            border-radius: 7px;
+            border: none;
+            background: transparent;
+            color: var(--text-muted);
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 120ms ease;
+            touch-action: manipulation;
+        }
+        .app-tab.active {
+            background-color: var(--surface-elevated);
+            color: var(--text-main);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+        }
+
+        /* Store Links Grid */
+        .store-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 12px;
+            text-align: left;
+        }
+        .store-card {
+            background-color: var(--surface-subtle);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: 10px 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            text-decoration: none;
+            color: inherit;
+            transition: all 120ms ease;
+        }
+        .store-card:hover {
+            border-color: var(--border-strong);
+            background-color: var(--surface-hover);
+        }
+        .store-card-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            background-color: rgba(255, 255, 255, 0.05);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            color: var(--text-main);
+        }
+        .store-card-icon svg {
+            width: 16px;
+            height: 16px;
+            fill: currentColor;
+        }
+        .store-card-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-main);
+            line-height: 1.25;
+        }
+        .store-card-desc {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-top: 1px;
+        }
+
+        /* Direct Support Link Card */
+        .support-direct-card {
+            background: var(--surface-subtle);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            text-decoration: none;
+            color: inherit;
+            transition: all 120ms ease;
+            text-align: left;
+        }
+        .support-direct-card:hover {
+            border-color: var(--border-strong);
+            background: var(--surface-hover);
+        }
+        .support-direct-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .support-direct-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--tier-accent);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .support-direct-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-main);
+        }
+        .support-direct-sub {
+            font-size: 10.5px;
+            color: var(--text-muted);
+        }
+        .support-direct-arrow {
+            color: var(--text-muted);
+            width: 14px;
+            height: 14px;
+        }
+
+        /* Section Titles inside Screens */
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+            text-align: left;
+        }
+        .section-title {
+            font-size: 14.5px;
+            font-weight: 700;
+            color: var(--text-main);
+        }
+
+        /* ============================================================ */
+        /* SCREEN 2: DEVICES (SSOT: active_hwids & device_limit)        */
+        /* ============================================================ */
+        .device-counter-badge {
+            font-size: 11.5px;
+            font-weight: 700;
+            color: var(--tier-accent);
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid var(--tier-highlight-line);
+            padding: 3px 8px;
+            border-radius: 6px;
+        }
+        .device-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 14px;
+            text-align: left;
+        }
+        .device-card {
+            background: var(--surface-subtle);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: 12px 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+        .device-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .device-icon-box {
+            width: 34px;
+            height: 34px;
+            border-radius: 9px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border-subtle);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--tier-accent);
+            flex-shrink: 0;
+        }
+        .device-icon-box svg {
+            width: 18px;
+            height: 18px;
+        }
+        .device-details {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .device-name-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .device-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-main);
+        }
+        .device-current-tag {
+            font-size: 9.5px;
+            font-weight: 700;
+            color: #6ee7b7;
+            background: rgba(16, 185, 129, 0.15);
+            padding: 1px 5px;
+            border-radius: 4px;
+        }
+        .device-sub-info {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .device-slot-notice {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px dashed var(--border-subtle);
+            border-radius: 12px;
+            padding: 12px;
+            font-size: 11.5px;
+            color: var(--text-sub);
+            text-align: center;
+            line-height: 1.45;
+            margin-bottom: 12px;
+        }
+
+        .btn-reset-all {
+            width: 100%;
+            padding: 11px 14px;
+            background: transparent;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 12px;
+            color: #f87171;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 120ms ease;
+            margin-bottom: 10px;
+            touch-action: manipulation;
+        }
+        .btn-reset-all:hover {
+            background: rgba(239, 68, 68, 0.1);
+        }
+
+        .device-slot-promo {
+            background: rgba(16, 185, 129, 0.05);
+            border: 1px solid var(--tier-highlight-line);
+            border-radius: 14px;
+            padding: 12px 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            text-align: left;
+            transition: all 120ms ease;
+        }
+        .device-slot-promo:hover {
+            background: rgba(16, 185, 129, 0.09);
+        }
+        .slot-promo-title {
+            font-size: 12.5px;
+            font-weight: 700;
+            color: var(--text-main);
+        }
+        .slot-promo-desc {
+            font-size: 11px;
+            color: var(--text-sub);
+            margin-top: 1px;
+        }
+        .slot-promo-btn {
+            background: var(--cta-bg);
+            color: var(--cta-text);
+            border: none;
+            padding: 6px 10px;
+            border-radius: 8px;
+            font-size: 11.5px;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        /* ============================================================ */
+        /* SCREEN 3: PLANS & BILLING (SSOT: DEFAULT_TARIFFS_SEEDS)      */
+        /* ============================================================ */
+        .service-switch-tabs {
+            display: flex;
+            gap: 6px;
+            background: #070709;
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: 4px;
+            margin-bottom: 14px;
+        }
+        .service-switch-tab {
+            flex: 1;
+            padding: 8px 6px;
+            border-radius: 8px;
+            border: none;
+            background: transparent;
+            color: var(--text-muted);
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 120ms ease;
+            touch-action: manipulation;
+        }
+        .service-switch-tab.active {
+            background: var(--surface-elevated);
+            color: var(--text-main);
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+        }
+
+        /* Tariff Group Cards (Базовый, Семейный, Pro) */
+        .tariff-groups {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 6px;
+            margin-bottom: 12px;
+        }
+        .tariff-group-card {
+            background: var(--surface-subtle);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: 10px 6px;
+            cursor: pointer;
+            transition: all 120ms ease;
+            text-align: center;
+            touch-action: manipulation;
+        }
+        .tariff-group-card:hover {
+            border-color: var(--border-strong);
+        }
+        .tariff-group-card.selected {
+            background: rgba(16, 185, 129, 0.08);
+            border-color: var(--tier-accent);
+            box-shadow: 0 0 12px rgba(16, 185, 129, 0.15);
+        }
+        .tg-title {
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--text-main);
+        }
+        .tg-limit {
+            font-size: 10px;
+            color: var(--tier-accent);
+            margin-top: 2px;
+            font-weight: 600;
+        }
+        .tg-minprice {
+            font-size: 10.5px;
+            color: var(--text-sub);
+            margin-top: 4px;
+        }
+
+        /* Duration Selection Pills */
+        .config-block {
+            margin-bottom: 14px;
+            text-align: left;
+        }
+        .config-label {
+            font-size: 11.5px;
+            font-weight: 600;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .duration-pills {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6px;
+        }
+        .duration-pill {
+            background: var(--surface-subtle);
+            border: 1px solid var(--border-subtle);
+            border-radius: 10px;
+            padding: 10px 6px;
+            cursor: pointer;
+            text-align: center;
+            transition: all 120ms ease;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            touch-action: manipulation;
+        }
+        .duration-pill:hover {
+            border-color: var(--border-strong);
+        }
+        .duration-pill.selected {
+            background: rgba(16, 185, 129, 0.1);
+            border-color: var(--tier-accent);
+            color: var(--text-main);
+        }
+        .dur-days {
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--text-main);
+        }
+        .dur-price {
+            font-size: 11px;
+            color: var(--text-sub);
+        }
+
+        /* White Internet Config Card */
+        .wi-config-card {
+            background: rgba(16, 185, 129, 0.05);
+            border: 1px solid var(--tier-highlight-line);
+            border-radius: 14px;
+            padding: 14px;
+            margin-bottom: 14px;
+            text-align: left;
+        }
+        .wi-badge {
+            display: inline-block;
+            font-size: 9.5px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--tier-accent);
+            margin-bottom: 6px;
+        }
+        .wi-title {
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--text-main);
+        }
+        .wi-desc {
+            font-size: 11px;
+            color: var(--text-sub);
+            margin-top: 2px;
+            line-height: 1.4;
+        }
+
+        /* Stepper for White Internet Extra Devices (SSOT: 1 to 3 devices, +200 ₽/mo) */
+        .stepper-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--surface-subtle);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: 10px 12px;
+            margin-top: 10px;
+        }
+        .stepper-info {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .stepper-title {
+            font-size: 12.5px;
+            font-weight: 600;
+            color: var(--text-main);
+        }
+        .stepper-sub {
+            font-size: 10.5px;
+            color: var(--text-muted);
+        }
+        .stepper-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .stepper-btn {
+            width: 34px;
+            height: 34px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid var(--border-subtle);
+            color: var(--text-main);
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            touch-action: manipulation;
+        }
+        .stepper-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+        .stepper-val {
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--text-main);
+            min-width: 18px;
+            text-align: center;
+        }
+
+        /* Order Summary & Payment Button */
+        .order-summary {
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid var(--border-subtle);
+            border-radius: 14px;
+            padding: 12px 14px;
+            margin-bottom: 12px;
+            text-align: left;
+        }
+        .summary-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 12px;
+            color: var(--text-sub);
+            padding: 4px 0;
+        }
+        .summary-row.total {
+            border-top: 1px solid var(--border-subtle);
+            margin-top: 6px;
+            padding-top: 8px;
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--text-main);
+        }
+
+        .btn-pay {
+            width: 100%;
+            min-height: 48px;
+            padding: 12px 16px;
+            border-radius: 14px;
+            background: var(--cta-bg);
+            color: var(--cta-text);
+            border: none;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            box-shadow: 0 4px 20px rgba(255, 255, 255, 0.15);
+            transition: all 120ms ease;
+            touch-action: manipulation;
+        }
+        .btn-pay:hover { background: var(--cta-hover); }
+
+        /* ============================================================ */
+        /* BOTTOM NAVIGATION BAR (Fixed at bottom)                      */
+        /* ============================================================ */
+        .bottom-nav {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 99;
+            background: rgba(12, 12, 14, 0.95);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-top: 1px solid var(--border-subtle);
+            padding-bottom: max(8px, env(safe-area-inset-bottom), var(--tg-safe-area-inset-bottom, 0px));
+            padding-top: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: space-around;
+        }
+        .nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 3px;
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 10.5px;
+            font-weight: 500;
+            padding: 4px 12px;
+            cursor: pointer;
+            transition: all 120ms ease;
+            user-select: none;
+            min-height: 48px;
+            min-width: 48px;
+            touch-action: manipulation;
+        }
+        .nav-item svg {
+            width: 20px;
+            height: 20px;
+            stroke: currentColor;
+            fill: none;
+            stroke-width: 2;
+            transition: transform 120ms ease, stroke 120ms ease;
+        }
+        .nav-item.active {
+            color: var(--text-main);
+            font-weight: 700;
+        }
+        .nav-item.active svg {
+            stroke: var(--tier-accent);
+            transform: scale(1.08);
+        }
+
+        /* Modal Dialog */
+        .app-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+            z-index: 1000;
+        }
+        .app-modal.open { display: flex; }
+        .modal-box {
+            width: 100%;
+            max-width: 360px;
+            background: var(--card-bg);
+            border: 1px solid var(--border-strong);
+            border-radius: 20px;
+            padding: 22px 18px 18px;
+            text-align: center;
+            box-shadow: 0 24px 48px rgba(0,0,0,0.9);
+            animation: modalPop 150ms var(--ease-out);
+        }
+        @keyframes modalPop {
+            from { transform: scale(0.95); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+        .modal-title {
+            font-size: 15px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: var(--text-main);
+        }
+        .modal-desc {
+            font-size: 12px;
+            color: var(--text-sub);
+            line-height: 1.45;
+            margin-bottom: 18px;
+        }
+        .modal-btns {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        /* Toast */
+        .toast {
+            position: fixed;
+            bottom: calc(var(--nav-height) + max(16px, env(safe-area-inset-bottom), var(--tg-safe-area-inset-bottom, 0px)));
+            left: 50%;
+            transform: translateX(-50%) translateY(20px);
+            background: rgba(24, 24, 27, 0.95);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--border-strong);
+            color: var(--text-main);
+            padding: 8px 16px;
+            border-radius: 9999px;
+            font-size: 12px;
+            font-weight: 500;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.8);
+            opacity: 0;
+            pointer-events: none;
+            transition: all 160ms var(--ease-out);
+            z-index: 999;
+            white-space: nowrap;
+        }
+        .toast.visible {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Local Preview Control Bar (Visible outside Telegram) -->
+    <div id="previewToolbar" class="preview-mode-bar" style="display:none;">
+        <div class="preview-badge">
+            <span class="preview-badge-dot"></span>
+            <span>Локальный прототип TMA</span>
+        </div>
+        <div class="preview-actions">
+            <button type="button" class="preview-btn active" id="btnViewMobile" onclick="setPreviewMode('mobile')">📱 390px</button>
+            <button type="button" class="preview-btn" id="btnViewFluid" onclick="setPreviewMode('fluid')">🖥 Широкий</button>
+            <button type="button" class="preview-close" onclick="dismissPreviewBar()" title="Скрыть">✕</button>
+        </div>
+    </div>
+
+    <!-- Main Container -->
+    <div class="app-shell">
+
+        <!-- Top Profile Card -->
+        <div class="profile-card">
+            <div class="user-info">
+                <div class="user-avatar" id="userAvatar">Ю</div>
+                <div class="user-meta">
+                    <span class="user-name" id="userNameLabel">Личный кабинет</span>
+                    <div class="user-status-row">
+                        <span class="status-dot-mini"></span>
+                        <span id="userExpiresLabel">Активен до 05.12.2026 (30 дн)</span>
+                    </div>
+                </div>
+            </div>
+            <div class="profile-tier-badge" id="userTierTag">Базовый (2 устр.)</div>
+        </div>
+
+        <!-- ============================================================ -->
+        <!-- TAB 1: CONNECTION (SSOT: landing_active.html)                -->
+        <!-- ============================================================ -->
+        <div id="screen-connect" class="tab-screen active">
+            <div class="card">
+                <div class="header-top">
+                    <div class="status-pill">
+                        <span class="status-dot"></span>
+                        <span>Активный доступ</span>
+                    </div>
+                    <div class="icon-badge">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                        </svg>
+                    </div>
+                </div>
+
+                <h1>Персональный доступ</h1>
+                <p class="subtitle">Быстрое подключение на всех ваших устройствах.</p>
+
+                <!-- 1-Click Action Buttons -->
+                <div class="btn-row">
+                    <button type="button" id="deepLinkHapp" class="btn btn-primary" onclick="triggerConnect('happ')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                        <span>В Happ</span>
+                    </button>
+                    <button type="button" id="deepLinkIncy" class="btn btn-secondary" onclick="triggerConnect('incy')">
+                        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z"/></svg>
+                        <span>В INCY</span>
+                    </button>
+                </div>
+
+                <!-- Subscription Address Capsule -->
+                <div class="sub-bar">
+                    <span class="sub-bar-text" id="subUrlText">https://just1k.online/sub/access/demo-token-12345</span>
+                    <button type="button" class="sub-copy-btn" id="copyUrlBtn" onclick="copyLink()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                        <span id="copyBtnLabel">Скопировать</span>
+                    </button>
+                </div>
+
+                <!-- 5-Platform Quick Tabs -->
+                <div class="app-tabs">
+                    <button type="button" class="app-tab active" onclick="switchAppTab('ios', this)">iOS</button>
+                    <button type="button" class="app-tab" onclick="switchAppTab('android', this)">Android</button>
+                    <button type="button" class="app-tab" onclick="switchAppTab('win', this)">Win</button>
+                    <button type="button" class="app-tab" onclick="switchAppTab('mac', this)">Mac</button>
+                    <button type="button" class="app-tab" onclick="switchAppTab('github', this)">GitHub</button>
+                </div>
+
+                <div id="appStoreGrid" class="store-grid">
+                    <!-- Dynamic platform cards injected via JS -->
+                </div>
+
+                <!-- Support Direct Telegram Link (SSOT: constants.py & utils/support.py) -->
+                <a href="https://t.me/just1k_support" target="_blank" rel="noopener" class="support-direct-card" onclick="openExternal(event, 'https://t.me/just1k_support')">
+                    <div class="support-direct-left">
+                        <div class="support-direct-icon">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                        </div>
+                        <div>
+                            <div class="support-direct-title">Служба поддержки</div>
+                            <div class="support-direct-sub">Оператор в Telegram @just1k_support</div>
+                        </div>
+                    </div>
+                    <svg class="support-direct-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                </a>
+            </div>
+        </div>
+
+        <!-- ============================================================ -->
+        <!-- TAB 2: DEVICES (SSOT: subscription_repo.py)                  -->
+        <!-- ============================================================ -->
+        <div id="screen-devices" class="tab-screen">
+            <div class="card">
+                <div class="section-header">
+                    <div>
+                        <div class="section-title">Привязанные устройства</div>
+                        <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">Аппаратная привязка по HWID</div>
+                    </div>
+                    <div class="device-counter-badge" id="deviceCounter">1 / 2</div>
+                </div>
+
+                <div class="device-list" id="deviceListContainer">
+                    <!-- Dynamic Device Items -->
+                </div>
+
+                <div class="device-slot-notice" id="deviceSlotNotice">
+                    Свободно слотов: 1 из 2.<br>
+                    Запустите Happ или INCY на втором устройстве для автоматической привязки.
+                </div>
+
+                <!-- SSOT Action: Reset All HWIDs & Rotate UUID (sub_reset) -->
+                <button type="button" class="btn-reset-all" onclick="confirmResetAll()">
+                    Сбросить привязки устройств
+                </button>
+
+                <div class="device-slot-promo" onclick="goToTab('plans')">
+                    <div>
+                        <div class="slot-promo-title">Нужно больше устройств?</div>
+                        <div class="slot-promo-desc">Тариф «Семейный» (до 5) или «Pro» (до 10 гаджетов)</div>
+                    </div>
+                    <button type="button" class="slot-promo-btn">Тарифы</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================================ -->
+        <!-- TAB 3: PLANS & BILLING (SSOT: DEFAULT_TARIFFS_SEEDS)         -->
+        <!-- ============================================================ -->
+        <div id="screen-plans" class="tab-screen">
+            <div class="card">
+                <div class="section-header">
+                    <div>
+                        <div class="section-title">Тарифы и продление</div>
+                        <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">Официальные тарифы сервиса</div>
+                    </div>
+                </div>
+
+                <!-- Service Switcher (Standard vs Special) -->
+                <div class="service-switch-tabs">
+                    <button type="button" class="service-switch-tab active" id="tabServiceStandard" onclick="switchService('standard')">
+                        Стандартный доступ
+                    </button>
+                    <button type="button" class="service-switch-tab" id="tabServiceSpecial" onclick="switchService('special')">
+                        Специальный доступ
+                    </button>
+                </div>
+
+                <!-- 1. STANDARD SERVICE CONTENT (DEFAULT_TARIFFS_SEEDS) -->
+                <div id="standardServiceBlock">
+                    <div class="config-label">
+                        <span>Формат тарифа</span>
+                        <span id="tariffGroupDesc" style="color:var(--text-sub);">Телефон и ноутбук</span>
+                    </div>
+
+                    <!-- Tariff Group Cards: Базовый (2), Семейный (5), Pro (10) -->
+                    <div class="tariff-groups">
+                        <div class="tariff-group-card selected" id="tg-basic" onclick="selectTariffGroup('basic')">
+                            <div class="tg-title">Базовый</div>
+                            <div class="tg-limit">2 устр.</div>
+                            <div class="tg-minprice">от 35 ₽</div>
+                        </div>
+                        <div class="tariff-group-card" id="tg-family" onclick="selectTariffGroup('family')">
+                            <div class="tg-title">Семейный</div>
+                            <div class="tg-limit">5 устр.</div>
+                            <div class="tg-minprice">от 180 ₽</div>
+                        </div>
+                        <div class="tariff-group-card" id="tg-pro" onclick="selectTariffGroup('pro')">
+                            <div class="tg-title">Pro</div>
+                            <div class="tg-limit">10 устр.</div>
+                            <div class="tg-minprice">от 320 ₽</div>
+                        </div>
+                    </div>
+
+                    <!-- Duration Pills (7, 30, 90 days from SSOT) -->
+                    <div class="config-block">
+                        <div class="config-label">
+                            <span>Срок доступа</span>
+                        </div>
+                        <div class="duration-pills" id="durationPillsContainer">
+                            <!-- Injected by JS depending on group -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2. SPECIAL SERVICE CONTENT (SSOT: constants.py - White Internet) -->
+                <div id="specialServiceBlock" style="display:none;">
+                    <div class="wi-config-card">
+                        <span class="wi-badge">Изолированный канал</span>
+                        <div class="wi-title">Специальный доступ (30 дней)</div>
+                        <div class="wi-desc">Выделенный защищённый канал через доверенные CDN-узлы. Включено 50 GB трафика на полной скорости.</div>
+
+                        <!-- Stepper: 1 to 3 devices (+200 ₽/extra device) -->
+                        <div class="stepper-row">
+                            <div class="stepper-info">
+                                <span class="stepper-title">Количество устройств</span>
+                                <span class="stepper-sub">+200 ₽/мес за доп. слот (+50 GB трафика)</span>
+                            </div>
+                            <div class="stepper-controls">
+                                <button type="button" class="stepper-btn" id="btnMinusWi" onclick="changeWiDevices(-1)">−</button>
+                                <span class="stepper-val" id="wiDeviceVal">1</span>
+                                <button type="button" class="stepper-btn" id="btnPlusWi" onclick="changeWiDevices(1)">+</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Payment Method (Strictly YooKassa: Card / SBP) -->
+                <div class="config-block">
+                    <div class="config-label">
+                        <span>Способ оплаты</span>
+                    </div>
+                    <div style="background:var(--surface-subtle); border:1px solid var(--border-subtle); border-radius:10px; padding:10px 12px; display:flex; align-items:center; justify-content:space-between;">
+                        <span style="font-size:12.5px; font-weight:600; color:var(--text-main);">💳 СБП / Банковские карты</span>
+                        <span style="font-size:11px; color:var(--tier-accent); font-weight:600;">ЮKassa</span>
+                    </div>
+                </div>
+
+                <!-- Order Summary -->
+                <div class="order-summary">
+                    <div class="summary-row">
+                        <span id="sumPlanName">Базовый (30 дней)</span>
+                        <span id="sumBasePrice">90 ₽</span>
+                    </div>
+                    <div class="summary-row" id="sumExtraRow" style="display:none;">
+                        <span id="sumExtraLabel">Дополнительные слоты</span>
+                        <span id="sumExtraPrice">+0 ₽</span>
+                    </div>
+                    <div class="summary-row total">
+                        <span>Итого к оплате</span>
+                        <span id="sumTotalPrice" style="color:var(--tier-accent);">90 ₽</span>
+                    </div>
+                </div>
+
+                <!-- Pay CTA Button -->
+                <button type="button" class="btn-pay" onclick="triggerCheckout()">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+                    <span id="payBtnText">Оплатить 90 ₽ (ЮKassa / СБП)</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- ============================================================ -->
+        <!-- TAB 4: GUIDES (SSOT: landing_active.html)                    -->
+        <!-- ============================================================ -->
+        <div id="screen-guides" class="tab-screen">
+            <div class="card" style="text-align:left;">
+                <div class="section-header">
+                    <div>
+                        <div class="section-title">Инструкции по настройке</div>
+                        <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">Официальные руководства для клиентов</div>
+                    </div>
+                </div>
+
+                <!-- Sub-platform Tabs -->
+                <div class="app-tabs">
+                    <button type="button" class="app-tab active" onclick="switchGuidePlatform('ios', this)">iOS</button>
+                    <button type="button" class="app-tab" onclick="switchGuidePlatform('android', this)">Android</button>
+                    <button type="button" class="app-tab" onclick="switchGuidePlatform('pc', this)">ПК / Mac</button>
+                    <button type="button" class="app-tab" onclick="switchGuidePlatform('faq', this)">FAQ</button>
+                </div>
+
+                <!-- Guide Content Area -->
+                <div id="guideContentBox" style="margin-top:12px;"></div>
+            </div>
+        </div>
+
+        <!-- ============================================================ -->
+        <!-- TAB 5: ADMIN / JUST1KNODE MANAGEMENT                         -->
+        <!-- ============================================================ -->
+        <div id="screen-admin" class="tab-screen">
+            <div class="card">
+                <div class="card-header" style="margin-bottom:12px;">
+                    <div class="status-pill">
+                        <span class="status-dot"></span>
+                        <span>Панель управления</span>
+                    </div>
+                    <h1 style="margin-top:8px; font-size:18px;">Серверы just1knode</h1>
+                    <p class="subtitle">Централизованный хаб и мониторинг нод</p>
+                </div>
+
+                <div id="adminServerListContainer" style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
+                    <div style="font-size:12px; color:var(--text-muted); text-align:center; padding:12px;">Загрузка списка серверов...</div>
+                </div>
+
+                <div style="margin-top:20px; padding-top:16px; border-top:1px solid var(--border-subtle);">
+                    <div style="font-weight:600; font-size:13px; color:#fff; margin-bottom:8px;">Добавить сервер just1knode</div>
+                    <div style="display:flex; flex-direction:column; gap:8px;">
+                        <input type="text" id="nodeNameInput" placeholder="Название (например, NL Node 1)" style="background:#111; border:1px solid #333; border-radius:8px; padding:10px 12px; color:#fff; font-size:12px; width:100%; box-sizing:border-box;">
+                        <input type="text" id="nodeUrlInput" placeholder="URL ноды (https://node.domain.com:8443)" style="background:#111; border:1px solid #333; border-radius:8px; padding:10px 12px; color:#fff; font-size:12px; width:100%; box-sizing:border-box;">
+                        <input type="password" id="nodeKeyInput" placeholder="Ключ доступа (API Key)" style="background:#111; border:1px solid #333; border-radius:8px; padding:10px 12px; color:#fff; font-size:12px; width:100%; box-sizing:border-box;">
+                        <button type="button" class="btn btn-primary" onclick="submitAddServer()" id="btnAddServer" style="margin-top:4px;">
+                            <span>Проверить и подключить</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Bottom Navigation Bar -->
+    <nav class="bottom-nav">
+        <button type="button" class="nav-item active" id="nav-connect" onclick="goToTab('connect')">
+            <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            <span>Подключение</span>
+        </button>
+        <button type="button" class="nav-item" id="nav-devices" onclick="goToTab('devices')">
+            <svg viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+            <span>Устройства</span>
+        </button>
+        <button type="button" class="nav-item" id="nav-plans" onclick="goToTab('plans')">
+            <svg viewBox="0 0 24 24"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+            <span>Тарифы</span>
+        </button>
+        <button type="button" class="nav-item" id="nav-guides" onclick="goToTab('guides')">
+            <svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+            <span>Гайды</span>
+        </button>
+        <button type="button" class="nav-item" id="nav-admin" style="display:none;" onclick="goToTab('admin')">
+            <svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            <span>Управление</span>
+        </button>
+    </nav>
+
+    <!-- Confirmation Modal Dialog -->
+    <div id="confirmModal" class="app-modal">
+        <div class="modal-box">
+            <div class="modal-title" id="modalTitle">Сбросить привязки устройств?</div>
+            <div class="modal-desc" id="modalDesc">Ключ обновится. Потребуется заново активировать ссылку на ваших устройствах.</div>
+            <div class="modal-btns">
+                <button type="button" class="btn btn-secondary" onclick="closeModal()">Отмена</button>
+                <button type="button" class="btn btn-primary" id="modalConfirmBtn" style="background:#ef4444; color:#fff;" onclick="executeModalAction()">Сбросить</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="appToast" class="toast">Ссылка скопирована</div>
+
+    <script>
+        // --- Telegram WebApp SDK Initialization ---
+        const tg = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : null;
+        if (tg) {
+            try {
+                tg.ready();
+                tg.expand();
+                tg.setHeaderColor('#050505');
+                tg.setBackgroundColor('#050505');
+                if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
+                    const u = tg.initDataUnsafe.user;
+                    const fullName = [u.first_name, u.last_name].filter(Boolean).join(' ') || (u.username ? '@' + u.username : '');
+                    const nameEl = document.getElementById('userNameLabel');
+                    const avatarEl = document.getElementById('userAvatar');
+                    if (nameEl && fullName) nameEl.textContent = fullName;
+                    if (avatarEl && u.first_name) avatarEl.textContent = u.first_name.charAt(0).toUpperCase();
+                }
+            } catch (e) {}
+        }
+
+        // Show Local Preview Toolbar only if opened in regular desktop browser
+        const isInsideTelegram = !!(tg && tg.initData && tg.initData.length > 0);
+        const previewBar = document.getElementById('previewToolbar');
+        if (!isInsideTelegram && previewBar) {
+            previewBar.style.display = 'flex';
+        }
+
+        function setPreviewMode(mode) {
+            const body = document.body;
+            const btnMob = document.getElementById('btnViewMobile');
+            const btnFluid = document.getElementById('btnViewFluid');
+            if (mode === 'fluid') {
+                body.classList.add('preview-fluid');
+                if (btnFluid) btnFluid.classList.add('active');
+                if (btnMob) btnMob.classList.remove('active');
+            } else {
+                body.classList.remove('preview-fluid');
+                if (btnMob) btnMob.classList.add('active');
+                if (btnFluid) btnFluid.classList.remove('active');
+            }
+            triggerHaptic('light');
+        }
+
+        function dismissPreviewBar() {
+            if (previewBar) previewBar.style.display = 'none';
+        }
+
+        function triggerHaptic(type = 'light') {
+            try {
+                if (tg && tg.HapticFeedback) {
+                    if (type === 'success' || type === 'error' || type === 'warning') {
+                        tg.HapticFeedback.notificationOccurred(type);
+                    } else {
+                        tg.HapticFeedback.impactOccurred(type);
+                    }
+                }
+            } catch (e) {}
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('appToast');
+            if (!toast) return;
+            toast.textContent = msg;
+            toast.classList.add('visible');
+            setTimeout(() => toast.classList.remove('visible'), 2000);
+        }
+
+        // Safe Clipboard Copy Helper (with execCommand fallback for Telegram WebViews)
+        function copyTextSafely(text) {
+            if (navigator.clipboard && window.isSecureContext) {
+                return navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
+            }
+            return fallbackCopy(text);
+        }
+
+        function fallbackCopy(text) {
+            return new Promise((resolve, reject) => {
+                try {
+                    const ta = document.createElement('textarea');
+                    ta.value = text;
+                    ta.style.position = 'fixed';
+                    ta.style.top = '-9999px';
+                    ta.style.left = '-9999px';
+                    ta.style.opacity = '0';
+                    ta.setAttribute('readonly', '');
+                    document.body.appendChild(ta);
+                    ta.focus();
+                    ta.select();
+                    ta.setSelectionRange(0, 99999);
+                    const successful = document.execCommand('copy');
+                    document.body.removeChild(ta);
+                    if (successful) resolve();
+                    else reject(new Error('execCommand failed'));
+                } catch (err) {
+                    reject(err);
+                }
+            });
+        }
+
+        // --- Tab Navigation Logic ---
+        const handleTelegramBack = () => goToTab('connect');
+
+        function goToTab(tabKey) {
+            triggerHaptic('light');
+            const screens = {
+                'connect': document.getElementById('screen-connect'),
+                'devices': document.getElementById('screen-devices'),
+                'plans': document.getElementById('screen-plans'),
+                'guides': document.getElementById('screen-guides'),
+                'admin': document.getElementById('screen-admin')
+            };
+            const navItems = {
+                'connect': document.getElementById('nav-connect'),
+                'devices': document.getElementById('nav-devices'),
+                'plans': document.getElementById('nav-plans'),
+                'guides': document.getElementById('nav-guides'),
+                'admin': document.getElementById('nav-admin')
+            };
+
+            Object.keys(screens).forEach(k => {
+                if (screens[k]) screens[k].classList.toggle('active', k === tabKey);
+                if (navItems[k]) navItems[k].classList.toggle('active', k === tabKey);
+            });
+
+            if (tabKey === 'admin') {
+                loadAdminServers();
+            }
+
+            // Native Telegram BackButton integration
+            if (tg && tg.BackButton) {
+                try {
+                    tg.BackButton.offClick(handleTelegramBack);
+                    if (tabKey === 'connect') {
+                        tg.BackButton.hide();
+                    } else {
+                        tg.BackButton.show();
+                        tg.BackButton.onClick(handleTelegramBack);
+                    }
+                } catch (e) {}
+            }
+
+            if (window.location.hash !== '#' + tabKey) {
+                try { history.replaceState(null, '', '#' + tabKey); } catch (e) {}
+            }
+
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        // --- SCREEN 1: Store Links & Tabs Data (SSOT: landing_active.html) ---
+        const platformApps = {
+            'ios': [
+                { title: 'INCY TestFlight', sub: 'Рекомендуется (без смены региона)', href: 'https://testflight.apple.com/join/dFw66h3a', icon: '<path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.33c.64-.78 1.08-1.86.96-2.94-.93.04-2.06.62-2.72 1.4-.58.68-1.1 1.79-.96 2.84 1.04.08 2.08-.52 2.72-1.3"/>' },
+                { title: 'Happ TestFlight', sub: 'Альтернативный клиент', href: 'https://testflight.apple.com/join/XMls6Ckd', icon: '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>' },
+                { title: 'INCY App Store', sub: 'Зарубежный Apple ID', href: 'https://apps.apple.com/app/incy/id6737525389', icon: '<path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.33c.64-.78 1.08-1.86.96-2.94-.93.04-2.06.62-2.72 1.4-.58.68-1.1 1.79-.96 2.84 1.04.08 2.08-.52 2.72-1.3"/>' },
+                { title: 'Happ App Store', sub: 'Зарубежный Apple ID', href: 'https://apps.apple.com/app/happ-proxy-utility/id6504287215', icon: '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>' }
+            ],
+            'android': [
+                { title: 'Google Play', sub: 'INCY (Официальный магазин)', href: 'https://play.google.com/store/apps/details?id=llc.itdev.incy', icon: '<path d="M3.61 1.814L13.793 12 3.61 22.186a1.05 1.05 0 0 1-.61-.959V2.773c0-.419.246-.785.61-.959zm10.89 10.893l2.302 2.302-10.937 6.333 8.635-8.635zm3.199-3.198l2.807 1.626a1 1 0 0 1 0 1.73l-2.808 1.626L15.206 12l2.493-2.491zM5.864 2.658L16.8 8.99l-2.302 2.302-8.634-8.634z"/>' },
+                { title: 'Скачать APK', sub: 'Happ (Прямой файл с GitHub)', href: 'https://github.com/Happ-proxy/happ-android/releases/latest/download/Happ.apk', icon: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>' }
+            ],
+            'win': [
+                { title: 'Happ Desktop (.exe)', sub: 'Windows 10 / 11 (Рекомендуется)', href: 'https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe', icon: '<path d="M3 5.45L10.5 4.36V11.27H3V5.45ZM10.5 12.73V19.64L3 18.55V12.73H10.5ZM12 4.14L21 2.85V11.27H12V4.14ZM21 12.73V21.15L12 19.86V12.73H21Z"/>' },
+                { title: 'INCY Desktop (.exe)', sub: 'Альтернативный установщик', href: 'https://github.com/INCY-DEV/incy-platforms/releases/download/latest/incy-windows-setup.exe', icon: '<path d="M3 5.45L10.5 4.36V11.27H3V5.45ZM10.5 12.73V19.64L3 18.55V12.73H10.5ZM12 4.14L21 2.85V11.27H12V4.14ZM21 12.73V21.15L12 19.86V12.73H21Z"/>' }
+            ],
+            'mac': [
+                { title: 'Happ для macOS (.dmg)', sub: 'Apple Silicon M1-M4 & Intel', href: 'https://github.com/Happ-proxy/happ-desktop/releases/latest/download/Happ.macOS.universal.dmg', icon: '<path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.33c.64-.78 1.08-1.86.96-2.94-.93.04-2.06.62-2.72 1.4-.58.68-1.1 1.79-.96 2.84 1.04.08 2.08-.52 2.72-1.3"/>' }
+            ],
+            'github': [
+                { title: 'Релизы Happ Android', sub: 'GitHub Releases (.apk)', href: 'https://github.com/Happ-proxy/happ-android/releases', icon: '<path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 4.335 9.688 10.35 10.125.6.11.825-.26.825-.58 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>' },
+                { title: 'Релизы INCY Platforms', sub: 'GitHub Releases', href: 'https://github.com/INCY-DEV/incy-platforms/releases', icon: '<path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 4.335 9.688 10.35 10.125.6.11.825-.26.825-.58 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>' }
+            ]
+        };
+
+        function switchAppTab(platform, btn) {
+            triggerHaptic('light');
+            document.querySelectorAll('.app-tabs .app-tab').forEach(b => b.classList.remove('active'));
+            if (btn) btn.classList.add('active');
+            renderAppGrid(platform);
+        }
+
+        function renderAppGrid(platform) {
+            const grid = document.getElementById('appStoreGrid');
+            if (!grid) return;
+            const items = platformApps[platform] || platformApps['ios'];
+            grid.innerHTML = items.map(item => `
+                <a href="${item.href}" target="_blank" rel="noopener" class="store-card" onclick="openExternal(event, '${item.href}')">
+                    <div class="store-card-icon"><svg viewBox="0 0 24 24">${item.icon}</svg></div>
+                    <div>
+                        <div class="store-card-title">${item.title}</div>
+                        <div class="store-card-desc">${item.sub}</div>
+                    </div>
+                </a>
+            `).join('');
+        }
+        renderAppGrid('ios');
+
+        function triggerConnect(client) {
+            triggerHaptic('medium');
+            const sub = document.getElementById('subUrlText').textContent.trim();
+            const deep = (client === 'happ') ? ('happ://add/' + sub) : ('incy://add/' + sub);
+            showToast('Открытие в ' + (client === 'happ' ? 'Happ' : 'INCY') + '...');
+            if (tg && tg.openLink) {
+                try { tg.openLink(deep); } catch (e) { window.location.href = deep; }
+            } else {
+                window.location.href = deep;
+            }
+        }
+
+        function copyLink() {
+            triggerHaptic('success');
+            const text = document.getElementById('subUrlText').textContent.trim();
+            const btn = document.getElementById('copyUrlBtn');
+            const lbl = document.getElementById('copyBtnLabel');
+            copyTextSafely(text).then(() => {
+                btn.classList.add('copied');
+                if (lbl) lbl.textContent = 'Скопировано';
+                showToast('Ссылка скопирована в буфер');
+                clearTimeout(btn._resetTimer);
+                btn._resetTimer = setTimeout(() => {
+                    btn.classList.remove('copied');
+                    if (lbl) lbl.textContent = 'Скопировать';
+                }, 1800);
+            }).catch(() => {
+                showToast('Не удалось скопировать. Выделите вручную.');
+            });
+        }
+
+        // --- SCREEN 2: DEVICES (SSOT: subscription_repo.py) ---
+        let currentDeviceLimit = 2; // Default for "Базовый" tariff
+        let devicesData = [];
+
+        function renderDevices() {
+            const container = document.getElementById('deviceListContainer');
+            const counter = document.getElementById('deviceCounter');
+            const notice = document.getElementById('deviceSlotNotice');
+            if (counter) counter.textContent = `${devicesData.length} / ${currentDeviceLimit}`;
+            if (!container) return;
+
+            if (devicesData.length === 0) {
+                container.innerHTML = `
+                    <div style="padding:18px 12px; font-size:12.5px; color:var(--text-muted); text-align:center;">
+                        Привязанных устройств нет.<br>При первом подключении в приложении устройство зарегистрируется автоматически.
+                    </div>
+                `;
+                if (notice) notice.innerHTML = `Свободно слотов: ${currentDeviceLimit} из ${currentDeviceLimit}. Запустите клиент для подключения.`;
+                return;
+            }
+
+            container.innerHTML = devicesData.map(dev => `
+                <div class="device-card" id="card-${dev.id}" style="display:flex; justify-content:space-between; align-items:center;">
+                    <div class="device-left">
+                        <div class="device-icon-box">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+                        </div>
+                        <div class="device-details">
+                            <div class="device-name-row">
+                                <span class="device-name">${dev.name}</span>
+                                ${dev.isCurrent ? '<span class="device-current-tag">Текущее</span>' : ''}
+                            </div>
+                            <div class="device-sub-info">
+                                <span>${dev.client}</span> • <span>${dev.lastSeen}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="button" class="btn btn-secondary" style="padding:4px 8px; font-size:11px; margin-left:auto;" onclick="deleteDevice('${dev.id}')" title="Отключить">
+                        ✕
+                    </button>
+                </div>
+            `).join('');
+
+            const freeSlots = Math.max(0, currentDeviceLimit - devicesData.length);
+            if (notice) {
+                if (freeSlots > 0) {
+                    notice.innerHTML = `Свободно слотов: ${freeSlots} из ${currentDeviceLimit}.<br>Запустите клиент на втором устройстве для автоматической привязки.`;
+                } else {
+                    notice.innerHTML = `Все ${currentDeviceLimit} слота заняты.<br>Для добавления нового устройства сбросьте привязки или выберите тариф с бóльшим лимитом.`;
+                }
+            }
+        }
+
+        async function deleteDevice(hwid) {
+            triggerHaptic('warning');
+            try {
+                const initDataStr = tg ? tg.initData : '';
+                const res = await fetch('/api/app/devices/delete', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Telegram-Init-Data': initDataStr
+                    },
+                    body: JSON.stringify({ hwid })
+                });
+                const d = await res.json();
+                if (d.ok) {
+                    devicesData = devicesData.filter(x => x.id !== hwid);
+                    renderDevices();
+                    showToast('Устройство отключено');
+                } else {
+                    showToast(d.error || 'Ошибка удаления');
+                }
+            } catch (e) {
+                showToast('Сетевая ошибка');
+            }
+        }
+
+        let pendingAction = null;
+        function confirmResetAll() {
+            triggerHaptic('warning');
+            document.getElementById('modalTitle').textContent = 'Сбросить привязки устройств?';
+            document.getElementById('modalDesc').textContent = 'Ключ доступа будет обновлен. Все активные подключения прекратятся до повторного сканирования ссылки.';
+            pendingAction = async () => {
+                try {
+                    const initDataStr = tg ? tg.initData : '';
+                    const res = await fetch('/api/app/devices/reset', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Telegram-Init-Data': initDataStr
+                        }
+                    });
+                    const d = await res.json();
+                    if (d.ok) {
+                        if (d.sub_url) {
+                            const subEl = document.getElementById('subUrlText');
+                            if (subEl) subEl.textContent = d.sub_url;
+                        }
+                        devicesData = [];
+                        renderDevices();
+                        showToast('Привязки устройств сброшены');
+                    } else {
+                        showToast(d.error || 'Ошибка сброса');
+                    }
+                } catch (e) {
+                    showToast('Сетевая ошибка при сбросе');
+                }
+            };
+            openModal();
+        }
+
+        function openModal() {
+            document.getElementById('confirmModal').classList.add('open');
+        }
+        function closeModal() {
+            triggerHaptic('light');
+            document.getElementById('confirmModal').classList.remove('open');
+            pendingAction = null;
+        }
+        function executeModalAction() {
+            triggerHaptic('success');
+            if (pendingAction) pendingAction();
+            closeModal();
+        }
+
+        // --- SCREEN 3: PLANS & BILLING (SSOT: DEFAULT_TARIFFS_SEEDS) ---
+        // SSOT Tariffs definition from just1kbot/config/tariffs.py
+        const standardTariffs = {
+            'basic': {
+                name: 'Базовый',
+                limit: 2,
+                desc: 'Телефон и ноутбук',
+                durations: [
+                    { days: 7, price: 35, label: '7 дней' },
+                    { days: 30, price: 99, label: '30 дней' },
+                    { days: 90, price: 240, label: '90 дней' }
+                ]
+            },
+            'family': {
+                name: 'Семейный',
+                limit: 5,
+                desc: 'Подключите всю семью',
+                durations: [
+                    { days: 30, price: 180, label: '30 дней' },
+                    { days: 90, price: 480, label: '90 дней' }
+                ]
+            },
+            'pro': {
+                name: 'Pro',
+                limit: 10,
+                desc: 'Для офиса или большого парка гаджетов',
+                durations: [
+                    { days: 30, price: 320, label: '30 дней' },
+                    { days: 90, price: 850, label: '90 дней' }
+                ]
+            }
+        };
+
+        // SSOT White Internet from just1kbot/config/constants.py
+        const whiteInternetConfig = {
+            basePrice: 250,
+            baseDays: 30,
+            baseTrafficGb: 50,
+            extraDevicePrice: 200,
+            maxDevices: 3
+        };
+
+        let currentService = 'standard';
+        let currentGroupKey = 'basic';
+        let currentDurationIdx = 1; // Default to 30 days
+        let wiDeviceCount = 1; // 1 to 3 devices
+
+        function switchService(serviceKey) {
+            triggerHaptic('light');
+            currentService = serviceKey;
+            const btnStd = document.getElementById('tabServiceStandard');
+            const btnSpc = document.getElementById('tabServiceSpecial');
+            const blockStd = document.getElementById('standardServiceBlock');
+            const blockSpc = document.getElementById('specialServiceBlock');
+
+            if (serviceKey === 'special') {
+                btnSpc.classList.add('active');
+                btnStd.classList.remove('active');
+                blockSpc.style.display = 'block';
+                blockStd.style.display = 'none';
+            } else {
+                btnStd.classList.add('active');
+                btnSpc.classList.remove('active');
+                blockStd.style.display = 'block';
+                blockSpc.style.display = 'none';
+            }
+            recalcBilling();
+        }
+
+        function selectTariffGroup(groupKey) {
+            triggerHaptic('light');
+            currentGroupKey = groupKey;
+            currentDurationIdx = 0; // Reset to first duration of that group
+            document.querySelectorAll('.tariff-group-card').forEach(c => c.classList.remove('selected'));
+            const card = document.getElementById(`tg-${groupKey}`);
+            if (card) card.classList.add('selected');
+            
+            const descEl = document.getElementById('tariffGroupDesc');
+            if (descEl && standardTariffs[groupKey]) {
+                descEl.textContent = standardTariffs[groupKey].desc;
+            }
+
+            renderDurationPills();
+            recalcBilling();
+        }
+
+        function renderDurationPills() {
+            const container = document.getElementById('durationPillsContainer');
+            if (!container) return;
+            const group = standardTariffs[currentGroupKey] || standardTariffs['basic'];
+            container.innerHTML = group.durations.map((d, idx) => `
+                <div class="duration-pill ${idx === currentDurationIdx ? 'selected' : ''}" onclick="selectDuration(${idx})">
+                    <span class="dur-days">${d.label}</span>
+                    <span class="dur-price">${d.price} ₽</span>
+                </div>
+            `).join('');
+        }
+
+        function selectDuration(idx) {
+            triggerHaptic('light');
+            currentDurationIdx = idx;
+            document.querySelectorAll('.duration-pill').forEach((p, i) => {
+                p.classList.toggle('selected', i === idx);
+            });
+            recalcBilling();
+        }
+
+        function changeWiDevices(delta) {
+            triggerHaptic('light');
+            const next = wiDeviceCount + delta;
+            if (next >= 1 && next <= whiteInternetConfig.maxDevices) {
+                wiDeviceCount = next;
+                document.getElementById('wiDeviceVal').textContent = wiDeviceCount;
+                document.getElementById('btnMinusWi').disabled = (wiDeviceCount === 1);
+                document.getElementById('btnPlusWi').disabled = (wiDeviceCount === whiteInternetConfig.maxDevices);
+                recalcBilling();
+            }
+        }
+
+        function recalcBilling() {
+            let title = '';
+            let finalPrice = 0;
+            const extraRow = document.getElementById('sumExtraRow');
+
+            if (currentService === 'standard') {
+                const group = standardTariffs[currentGroupKey] || standardTariffs['basic'];
+                const dur = group.durations[currentDurationIdx] || group.durations[0];
+                title = `Тариф «${group.name}» (${dur.label})`;
+                finalPrice = dur.price;
+                if (extraRow) extraRow.style.display = 'none';
+            } else {
+                // Special access (White Internet)
+                title = `Специальный доступ (${whiteInternetConfig.baseDays} дней)`;
+                const extraDevices = wiDeviceCount - 1;
+                const extraPrice = extraDevices * whiteInternetConfig.extraDevicePrice;
+                finalPrice = whiteInternetConfig.basePrice + extraPrice;
+
+                if (extraRow) {
+                    if (extraDevices > 0) {
+                        extraRow.style.display = 'flex';
+                        document.getElementById('sumExtraLabel').textContent = `Дополнительные устройства (${extraDevices})`;
+                        document.getElementById('sumExtraPrice').textContent = `+${extraPrice} ₽`;
+                    } else {
+                        extraRow.style.display = 'none';
+                    }
+                }
+            }
+
+            document.getElementById('sumPlanName').textContent = title;
+            document.getElementById('sumBasePrice').textContent = `${finalPrice} ₽`;
+            document.getElementById('sumTotalPrice').textContent = `${finalPrice} ₽`;
+            document.getElementById('payBtnText').textContent = `Оплатить ${finalPrice} ₽ (ЮKassa / СБП)`;
+        }
+
+        async function triggerCheckout() {
+            triggerHaptic('medium');
+            const totalText = document.getElementById('sumTotalPrice').textContent;
+            showToast(`Переход к оплате ${totalText}...`);
+
+            try {
+                const initDataStr = tg ? tg.initData : '';
+                const group = standardTariffs[currentGroupKey] || standardTariffs['basic'];
+                const dur = group.durations[currentDurationIdx] || group.durations[0];
+
+                const payload = {
+                    service_type: currentService,
+                    duration_days: currentService === 'standard' ? dur.days : whiteInternetConfig.baseDays,
+                    device_limit: currentService === 'standard' ? group.limit : wiDeviceCount,
+                    traffic_gb: currentService === 'standard' ? 0 : whiteInternetConfig.baseTrafficGb,
+                    amount_rub: currentService === 'standard' ? dur.price : (whiteInternetConfig.basePrice + (wiDeviceCount - 1) * whiteInternetConfig.extraDevicePrice),
+                    payment_method: 'yookassa'
+                };
+
+                const res = await fetch('/api/app/checkout', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Telegram-Init-Data': initDataStr
+                    },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (data.ok && data.payment_url) {
+                    if (tg && tg.openLink) {
+                        tg.openLink(data.payment_url);
+                    } else {
+                        window.location.href = data.payment_url;
+                    }
+                } else {
+                    showToast(data.error || 'Ошибка формирования счета');
+                }
+            } catch (err) {
+                showToast('Сетевая ошибка при переходе к оплате');
+            }
+        }
+
+        // --- SCREEN 4: GUIDES (SSOT: landing_active.html) ---
+        function copyGuideText(text, btn) {
+            triggerHaptic('success');
+            copyTextSafely(text).then(() => {
+                if (!btn.dataset.originalText) {
+                    btn.dataset.originalText = btn.textContent;
+                }
+                btn.textContent = '✓';
+                btn.classList.add('copied');
+                showToast(`Скопировано: ${text}`);
+                clearTimeout(btn._resetTimer);
+                btn._resetTimer = setTimeout(() => {
+                    btn.textContent = btn.dataset.originalText;
+                    btn.classList.remove('copied');
+                }, 1400);
+            }).catch(() => {
+                showToast('Не удалось скопировать');
+            });
+        }
+
+        const guideSections = {
+            'ios': `
+                <div style="font-size:12px; color:var(--text-sub); line-height:1.5; margin-bottom:12px;">
+                    <strong style="color:var(--text-main);">Способ 1: Apple TestFlight (Рекомендуется)</strong><br>
+                    Устанавливается напрямую с российского аккаунта Apple ID без смены региона:
+                </div>
+                <div class="store-grid" style="grid-template-columns:1fr; margin-bottom:12px;">
+                    <a href="https://apps.apple.com/app/testflight/id899247664" target="_blank" rel="noopener" class="store-card" onclick="openExternal(event, 'https://apps.apple.com/app/testflight/id899247664')">
+                        <div class="store-card-icon"><svg viewBox="0 0 24 24"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.33c.64-.78 1.08-1.86.96-2.94-.93.04-2.06.62-2.72 1.4-.58.68-1.1 1.79-.96 2.84 1.04.08 2.08-.52 2.72-1.3"/></svg></div>
+                        <div><div class="store-card-title">1. Скачать Apple TestFlight</div><div class="store-card-desc">Официально из App Store РФ</div></div>
+                    </a>
+                    <a href="https://testflight.apple.com/join/dFw66h3a" target="_blank" rel="noopener" class="store-card" onclick="openExternal(event, 'https://testflight.apple.com/join/dFw66h3a')">
+                        <div class="store-card-icon"><svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
+                        <div><div class="store-card-title">2. Принять приглашение INCY</div><div class="store-card-desc">Нажмите «Принять» и «Установить»</div></div>
+                    </a>
+                </div>
+                <div style="font-size:12px; color:var(--text-sub); line-height:1.5; margin:14px 0 8px;">
+                    <strong style="color:var(--text-main);">Способ 2: App Store Казахстан (Без карты)</strong><br>
+                    Установка навсегда напрямую из App Store:
+                </div>
+                <div style="background:rgba(255,255,255,0.02); border:1px solid var(--border-subtle); border-radius:12px; padding:12px; margin-bottom:12px;">
+                    <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:8px;">Данные адреса (Алматы, Казахстан):</div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.05); font-size:12px;">
+                        <span style="color:var(--text-sub);">Улица:</span>
+                        <span style="color:var(--text-main); font-weight:600; font-family:monospace;">ул. Абая, 1</span>
+                        <button type="button" class="sub-copy-btn" style="padding:3px 8px; font-size:11px;" onclick="copyGuideText('ул. Абая, 1', this)">Копировать</button>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.05); font-size:12px;">
+                        <span style="color:var(--text-sub);">Город:</span>
+                        <span style="color:var(--text-main); font-weight:600; font-family:monospace;">Алматы</span>
+                        <button type="button" class="sub-copy-btn" style="padding:3px 8px; font-size:11px;" onclick="copyGuideText('Алматы', this)">Копировать</button>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.05); font-size:12px;">
+                        <span style="color:var(--text-sub);">Индекс:</span>
+                        <span style="color:var(--text-main); font-weight:600; font-family:monospace;">050000</span>
+                        <button type="button" class="sub-copy-btn" style="padding:3px 8px; font-size:11px;" onclick="copyGuideText('050000', this)">Копировать</button>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; font-size:12px;">
+                        <span style="color:var(--text-sub);">Телефон:</span>
+                        <span style="color:var(--text-main); font-weight:600; font-family:monospace;">(701) 123-4567</span>
+                        <button type="button" class="sub-copy-btn" style="padding:3px 8px; font-size:11px;" onclick="copyGuideText('7011234567', this)">Копировать</button>
+                    </div>
+                </div>
+            `,
+            'android': `
+                <div style="font-size:12px; color:var(--text-sub); line-height:1.5; margin-bottom:12px;">
+                    Установка на Android возможна из Google Play или прямым APK-файлом:
+                </div>
+                <div class="store-grid" style="grid-template-columns:1fr; margin-bottom:12px;">
+                    <a href="https://play.google.com/store/apps/details?id=llc.itdev.incy" target="_blank" rel="noopener" class="store-card" onclick="openExternal(event, 'https://play.google.com/store/apps/details?id=llc.itdev.incy')">
+                        <div class="store-card-icon"><svg viewBox="0 0 24 24"><path d="M3.61 1.814L13.793 12 3.61 22.186a1.05 1.05 0 0 1-.61-.959V2.773c0-.419.246-.785.61-.959zm10.89 10.893l2.302 2.302-10.937 6.333 8.635-8.635zm3.199-3.198l2.807 1.626a1 1 0 0 1 0 1.73l-2.808 1.626L15.206 12l2.493-2.491zM5.864 2.658L16.8 8.99l-2.302 2.302-8.634-8.634z"/></svg></div>
+                        <div><div class="store-card-title">INCY в Google Play</div><div class="store-card-desc">Официальный клиент с автообновлениями</div></div>
+                    </a>
+                    <a href="https://github.com/Happ-proxy/happ-android/releases/latest/download/Happ.apk" target="_blank" rel="noopener" class="store-card" onclick="openExternal(event, 'https://github.com/Happ-proxy/happ-android/releases/latest/download/Happ.apk')">
+                        <div class="store-card-icon"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div>
+                        <div><div class="store-card-title">Happ.apk (GitHub)</div><div class="store-card-desc">Прямой файл для всех Android / Huawei</div></div>
+                    </a>
+                </div>
+            `,
+            'pc': `
+                <div style="font-size:12px; color:var(--text-sub); line-height:1.5; margin-bottom:12px;">
+                    Официальные клиенты для ПК и ноутбуков:
+                </div>
+                <div class="store-grid" style="grid-template-columns:1fr; margin-bottom:12px;">
+                    <a href="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe" target="_blank" rel="noopener" class="store-card" onclick="openExternal(event, 'https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe')">
+                        <div class="store-card-icon"><svg viewBox="0 0 24 24"><path d="M3 5.45L10.5 4.36V11.27H3V5.45ZM10.5 12.73V19.64L3 18.55V12.73H10.5ZM12 4.14L21 2.85V11.27H12V4.14ZM21 12.73V21.15L12 19.86V12.73H21Z"/></svg></div>
+                        <div><div class="store-card-title">Happ для Windows (.exe)</div><div class="store-card-desc">setup-Happ.x64.exe</div></div>
+                    </a>
+                    <a href="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/Happ.macOS.universal.dmg" target="_blank" rel="noopener" class="store-card" onclick="openExternal(event, 'https://github.com/Happ-proxy/happ-desktop/releases/latest/download/Happ.macOS.universal.dmg')">
+                        <div class="store-card-icon"><svg viewBox="0 0 24 24"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.33c.64-.78 1.08-1.86.96-2.94-.93.04-2.06.62-2.72 1.4-.58.68-1.1 1.79-.96 2.84 1.04.08 2.08-.52 2.72-1.3"/></svg></div>
+                        <div><div class="store-card-title">Happ для macOS (.dmg)</div><div class="store-card-desc">Apple Silicon M1-M4 & Intel</div></div>
+                    </a>
+                </div>
+            `,
+            'faq': `
+                <div style="display:flex; flex-direction:column; gap:8px;">
+                    <div style="background:rgba(255,255,255,0.03); border:1px solid var(--border-subtle); border-radius:10px; padding:10px;">
+                        <div style="font-size:12.5px; font-weight:700; color:var(--text-main); margin-bottom:4px;">Нужно ли отключать при входе в банки?</div>
+                        <div style="font-size:11.5px; color:var(--text-sub); line-height:1.4;">Нет. Настроена прямая маршрутизация для РФ ресурсов (банки, Госуслуги, маркетплейсы открываются напрямую).</div>
+                    </div>
+                    <div style="background:rgba(255,255,255,0.03); border:1px solid var(--border-subtle); border-radius:10px; padding:10px;">
+                        <div style="font-size:12.5px; font-weight:700; color:var(--text-main); margin-bottom:4px;">Что делать при смене телефона?</div>
+                        <div style="font-size:11.5px; color:var(--text-sub); line-height:1.4;">Перейдите во вкладку «Устройства» и нажмите «Сбросить привязки устройств», затем активируйте ссылку на новом устройстве.</div>
+                    </div>
+                </div>
+            `
+        };
+
+        function switchGuidePlatform(p, btn) {
+            triggerHaptic('light');
+            document.querySelectorAll('#screen-guides .app-tab').forEach(b => b.classList.remove('active'));
+            if (btn) btn.classList.add('active');
+            const box = document.getElementById('guideContentBox');
+            if (box) box.innerHTML = guideSections[p] || guideSections['ios'];
+        }
+        switchGuidePlatform('ios');
+
+        // Admin Node Management Functions
+        async function loadAdminServers() {
+            const container = document.getElementById('adminServerListContainer');
+            if (!container) return;
+            try {
+                const initDataStr = tg ? tg.initData : '';
+                const res = await fetch('/api/app/admin/servers', {
+                    headers: { 'X-Telegram-Init-Data': initDataStr }
+                });
+                const d = await res.json();
+                if (!d.ok || !d.servers) {
+                    container.innerHTML = '<div style="font-size:12px; color:var(--text-muted); padding:12px; text-align:center;">Не удалось загрузить серверы.</div>';
+                    return;
+                }
+                if (d.servers.length === 0) {
+                    container.innerHTML = '<div style="font-size:12px; color:var(--text-muted); padding:12px; text-align:center;">Подключенных серверов пока нет. Добавьте первый сервер ниже.</div>';
+                    return;
+                }
+                container.innerHTML = d.servers.map(s => `
+                    <div style="background:#111; border:1px solid var(--border-subtle); border-radius:10px; padding:12px; display:flex; justify-content:space-between; align-items:center;">
+                        <div>
+                            <div style="font-weight:600; font-size:13px; color:#fff;">${s.country_flag} ${s.name}</div>
+                            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">${s.api_url} • ${s.protocol}</div>
+                        </div>
+                        <div style="font-size:11px; padding:4px 8px; border-radius:6px; background:${s.health_state === 'online' ? '#052e16' : '#3b0764'}; color:${s.health_state === 'online' ? '#4ade80' : '#d8b4fe'};">
+                            ${s.health_state}
+                        </div>
+                    </div>
+                `).join('');
+            } catch (e) {
+                container.innerHTML = '<div style="font-size:12px; color:var(--text-muted); padding:12px; text-align:center;">Ошибка сети.</div>';
+            }
+        }
+
+        async function submitAddServer() {
+            triggerHaptic('medium');
+            const name = document.getElementById('nodeNameInput').value.trim();
+            const api_url = document.getElementById('nodeUrlInput').value.trim();
+            const api_key = document.getElementById('nodeKeyInput').value.trim();
+            if (!name || !api_url || !api_key) {
+                showToast('Заполните все поля');
+                return;
+            }
+            showToast('Проверка доступности ноды...');
+            try {
+                const initDataStr = tg ? tg.initData : '';
+                const res = await fetch('/api/app/admin/servers/add', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Telegram-Init-Data': initDataStr
+                    },
+                    body: JSON.stringify({ name, api_url, api_key })
+                });
+                const d = await res.json();
+                if (d.ok) {
+                    showToast(d.probe_ok ? 'Сервер успешно проверен и подключен!' : 'Сервер сохранен (нода пока недоступна)');
+                    document.getElementById('nodeNameInput').value = '';
+                    document.getElementById('nodeUrlInput').value = '';
+                    document.getElementById('nodeKeyInput').value = '';
+                    loadAdminServers();
+                } else {
+                    showToast(d.error || 'Ошибка добавления сервера');
+                }
+            } catch (e) {
+                showToast('Сетевая ошибка при добавлении сервера');
+            }
+        }
+
+        // Real Data Loader from API
+        async function loadAppData() {
+            try {
+                const initDataStr = tg ? tg.initData : '';
+                const headers = { 'Content-Type': 'application/json' };
+                if (initDataStr) {
+                    headers['X-Telegram-Init-Data'] = initDataStr;
+                }
+                const res = await fetch('/api/app/me', { headers });
+                if (!res.ok) return;
+                const data = await res.json();
+                if (!data.ok) return;
+
+                // Update Subscription Link
+                if (data.subscription && data.subscription.sub_url) {
+                    const subUrlEl = document.getElementById('subUrlText');
+                    if (subUrlEl) subUrlEl.textContent = data.subscription.sub_url;
+                }
+
+                // Update Status & Expiry
+                const expiresEl = document.getElementById('userExpiresLabel');
+                if (expiresEl && data.subscription) {
+                    const st = data.subscription.is_active ? 'Активен' : 'Не активен';
+                    expiresEl.textContent = `${st} до ${data.subscription.valid_until} (${data.subscription.days_left})`;
+                }
+                const tierEl = document.getElementById('userTierTag');
+                if (tierEl && data.subscription) {
+                    tierEl.textContent = `${data.subscription.tariff_name} (${data.subscription.device_limit} устр.)`;
+                }
+
+                // Update Devices
+                if (data.devices) {
+                    devicesData = data.devices;
+                    currentDeviceLimit = data.subscription.device_limit || 2;
+                    renderDevices();
+                }
+
+                // Show Admin tab if admin
+                if (data.user && data.user.is_admin) {
+                    const adminNav = document.getElementById('nav-admin');
+                    if (adminNav) adminNav.style.display = 'flex';
+                }
+            } catch (err) {
+                console.error('Failed to load app data:', err);
+            }
+        }
+
+        // External Link Helper
+        function openExternal(e, url) {
+            triggerHaptic('light');
+            if (tg && tg.openLink) {
+                e.preventDefault();
+                tg.openLink(url);
+            }
+        }
+
+        // Modal accessibility listeners
+        const modalEl = document.getElementById('confirmModal');
+        if (modalEl) {
+            modalEl.addEventListener('click', (e) => {
+                if (e.target === modalEl) closeModal();
+            });
+        }
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeModal();
+        });
+
+        // Initialize state
+        renderDevices();
+        renderDurationPills();
+        recalcBilling();
+        loadAppData();
+
+        // Handle initial hash routing
+        const initHash = window.location.hash.replace('#', '');
+        if (['connect', 'devices', 'plans', 'guides', 'admin'].includes(initHash)) {
+            goToTab(initHash);
+        }
+        window.addEventListener('hashchange', () => {
+            const h = window.location.hash.replace('#', '');
+            if (['connect', 'devices', 'plans', 'guides', 'admin'].includes(h)) {
+                goToTab(h);
+            }
+        });
+    </script>
+</body>
+</html>

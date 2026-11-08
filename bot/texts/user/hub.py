@@ -10,24 +10,19 @@ BOT_SHORT_DESCRIPTION = "Личный сервис безопасного дос
 
 CURRENCY_RUB_SYMBOL = "₽"
 
-HUB_HEADER = """🏠 <b>Главное меню</b>
+HUB_HEADER = """Привет, <b>{name}</b>!
 
-Привет, <b>{name}</b>!
+<blockquote><b>Статус:</b> {status}
+<b>Срок:</b> {valid_until} ({days_left})
+<b>Тариф:</b> {tariff_name} ({devices_count}/{device_limit} устр.){white_internet_line}</blockquote>
 
-<b>Статус:</b> {status}
-<b>Действует до:</b> {valid_until} ({days_left})
-<b>Устройства:</b> {devices_count} из {device_limit}{white_internet_line}
-
-<b>Баланс:</b> {real_balance} ₽{bonus_line}{inviter_line}
-<i>ID: <code>{telegram_id}</code></i>
-
-Выберите нужный раздел:"""
+💰 <b>Баланс:</b> {real_balance} ₽{bonus_line}
+🆔 <code>{telegram_id}</code>{inviter_line}"""
 
 HUB_WHITE_INTERNET_LINE_FORMAT = (
-    "\n⚪️ <b>Белый Интернет:</b> {status_icon} до {expiry} ({days_left})\n"
-    "   • <i>Трафик: {traffic_used} из {traffic_total} ГБ · {devices_count}/{device_limit} устр.</i>"
+    "\n<b>Белый Интернет:</b> {status_icon} до {expiry} ({days_left}) · {traffic_used}/{traffic_total} ГБ"
 )
-HUB_BONUS_LINE_FORMAT = "\n<b>🎁 Бонусный баланс:</b> {bonus_balance} ₽"
+HUB_BONUS_LINE_FORMAT = "  |  🎁 <b>Бонусы:</b> {bonus_balance} ₽"
 
 PAYMENT_STATUS_PENDING_ICON = "⏳"
 

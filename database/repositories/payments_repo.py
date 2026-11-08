@@ -48,7 +48,10 @@ async def has_successful_topup(
 
 
 async def get_user_payments(
-    session: AsyncSession, user_id: int, limit: int | None = None
+    session: AsyncSession,
+    user_id: int,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list:
     from datetime import datetime, timezone
     from database.models import Order
@@ -63,6 +66,9 @@ async def get_user_payments(
         .where(Payment.user_id == user_id)
         .order_by(Payment.created_at.desc())
     )
+    if offset > 0:
+        order_stmt = order_stmt.offset(offset)
+        payment_stmt = payment_stmt.offset(offset)
     if limit is not None:
         order_stmt = order_stmt.limit(limit)
         payment_stmt = payment_stmt.limit(limit)

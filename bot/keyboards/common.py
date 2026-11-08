@@ -73,20 +73,11 @@ def get_hub_keyboard(
         url=support_url,
     )
 
-    # Row 5: Админка (если админ)
-    if is_admin:
-        builder.button(
-            text=texts.BTN_ADMIN,
-            callback_data="menu_admin",
-        )
-
     sizes = [1, 2]
     row3_count = (1 if has_proxy else 0) + (1 if has_channel else 0)
     if row3_count > 0:
         sizes.append(row3_count)
     sizes.append(2)
-    if is_admin:
-        sizes.append(1)
 
     builder.adjust(*sizes)
     return builder.as_markup()

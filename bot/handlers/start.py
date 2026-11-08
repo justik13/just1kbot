@@ -10,7 +10,6 @@ from aiogram.types import (
     Message,
     ReplyKeyboardRemove,
 )
-from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
@@ -228,12 +227,17 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
         else ""
     )
 
+    tariff_name = "Стандарт" if is_active else "Базовый"
+    if getattr(db_user, "current_tariff", None) and getattr(db_user.current_tariff, "name", None):
+        tariff_name = db_user.current_tariff.name
+
     text = texts.HUB_HEADER.format(
         name=name,
         telegram_id=db_user.telegram_id,
         status=status_str,
         valid_until=valid_until_str,
         days_left=days_left_str,
+        tariff_name=tariff_name,
         devices_count=devices_count,
         device_limit=device_limit,
         white_internet_line=white_internet_line,
@@ -244,8 +248,8 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
 
     from database.repositories.system_settings_repo import get_system_setting
     settings = get_settings()
-    mtproto_url = await get_system_setting(session, "mtproto_proxy_url")
-    channel_url = await get_system_setting(session, "tg_channel_url")
+    mtproto_url = await get_system_setting(session, "mtproto_proxy_url") or (settings.PROXY_URL if settings.PROXY_URL else None)
+    channel_url = await get_system_setting(session, "tg_channel_url") or (settings.CHANNEL_URL if settings.CHANNEL_URL else None)
     miniapp_url = await get_system_setting(session, "miniapp_url") or f"https://{settings.DOMAIN}/app"
 
     kb = get_hub_keyboard(
@@ -336,28 +340,25 @@ async def cmd_start(
 
         queue_post_commit_task(session, _send_onboarding_push)
 
-    if is_new_user:
-        builder = InlineKeyboardBuilder()
-        builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
+    try:
+        from aiogram.types import MenuButtonWebApp, WebAppInfo
+        app_url = f"https://{get_settings().DOMAIN}/app"
+        await message.bot.set_chat_menu_button(
+            chat_id=message.chat.id,
+            menu_button=MenuButtonWebApp(text="🚀 Подключить", web_app=WebAppInfo(url=app_url)),
+        )
+    except Exception as e:
+        logger.debug("Failed to set chat menu button: %s", e)
 
-        await render_hub(
-            message.bot,
-            message.chat.id,
-            texts.WELCOME_TEXT,
-            builder.as_markup(),
-            force_new=True,
-            session=session,
-        )
-    else:
-        text, kb = await _build_hub_text_and_kb(session, user)
-        await render_hub(
-            message.bot,
-            message.chat.id,
-            text,
-            kb,
-            force_new=True,
-            session=session,
-        )
+    text, kb = await _build_hub_text_and_kb(session, user)
+    await render_hub(
+        message.bot,
+        message.chat.id,
+        text,
+        kb,
+        force_new=True,
+        session=session,
+    )
 
 
 @router.message(F.text & F.text.in_(texts.LEGACY_REPLY_BUTTON_TRIGGER_TEXTS))
@@ -397,7 +398,7 @@ async def handle_legacy_reply_keyboard(
     )
 
 
-@router.callback_query(F.data == "back_to_main_menu")
+@router.callback_query(F.data.in_({"back_to_main_menu", "menu_subscription", "menu_buy"}))
 async def back_to_main_menu(
     callback: CallbackQuery,
     state: FSMContext,

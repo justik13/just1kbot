@@ -62,14 +62,15 @@ def get_balance_history_keyboard(
     page: int = 0,
     total_pages: int = 1,
     back_target: str = "menu_balance",
+    prefix: str = "balance_history_page",
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
     nav = []
     if page > 0:
-        nav.append(("◀️", f"balance_history_page:{page - 1}"))
+        nav.append(("◀️", f"{prefix}:{page - 1}"))
     if page < total_pages - 1:
-        nav.append(("▶️", f"balance_history_page:{page + 1}"))
+        nav.append(("▶️", f"{prefix}:{page + 1}"))
 
     for btn_text, cb in nav:
         builder.button(text=btn_text, callback_data=cb)

@@ -440,6 +440,8 @@ async def start_webhook_server(port: int, bot: object | None = None):
     app.middlewares.append(_http_correlation_middleware)
     app.middlewares.append(_http_rate_limit_middleware)
     setup_webhook_routes(app)
+    from bot.handlers.miniapp_api import setup_miniapp_routes
+    setup_miniapp_routes(app)
 
     runner = web.AppRunner(app, access_log_class=HealthcheckAccessLogger)
     await runner.setup()

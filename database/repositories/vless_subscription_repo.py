@@ -360,3 +360,118 @@ async def record_vless_traffic_atomic(
         await session.flush()
 
     return total_delta, delta_down, delta_up
+
+
+async def rename_hwid(
+    session: AsyncSession,
+    user_id: int,
+    hwid: str,
+    new_name: str,
+) -> bool:
+    """Assign friendly name to an HWID device slot."""
+    sub = await session.scalar(
+        select(VlessSubscription)
+        .where(VlessSubscription.user_id == user_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if not sub:
+        return False
+    active = dict(sub.active_hwids or {})
+    if hwid in active:
+        val = active[hwid]
+        if isinstance(val, dict):
+            val["name"] = new_name.strip()[:64]
+        else:
+            active[hwid] = {"name": new_name.strip()[:64], "last_seen": str(val)}
+        sub.active_hwids = active
+        flag_modified(sub, "active_hwids")
+        await session.flush()
+        return True
+    return False
+
+
+async def remove_hwid(
+    session: AsyncSession,
+    user_id: int,
+    hwid: str,
+) -> bool:
+    """Disconnect and release an HWID device slot."""
+    sub = await session.scalar(
+        select(VlessSubscription)
+        .where(VlessSubscription.user_id == user_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if not sub:
+        return False
+    active = dict(sub.active_hwids or {})
+    if hwid in active:
+        del active[hwid]
+        sub.active_hwids = active
+        sub.version = (sub.version or 1) + 1
+        flag_modified(sub, "active_hwids")
+        await session.flush()
+        return True
+    return False
+
+
+async def blacklist_hwid(
+    session: AsyncSession,
+    user_id: int,
+    hwid: str,
+) -> bool:
+    """Mark HWID as blacklisted on this subscription."""
+    sub = await session.scalar(
+        select(VlessSubscription)
+        .where(VlessSubscription.user_id == user_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if not sub:
+        return False
+    active = dict(sub.active_hwids or {})
+    val = active.get(hwid, {})
+    if isinstance(val, dict):
+        val["is_blacklisted"] = True
+    else:
+        val = {"last_seen": str(val), "is_blacklisted": True}
+    active[hwid] = val
+    sub.active_hwids = active
+    sub.version = (sub.version or 1) + 1
+    flag_modified(sub, "active_hwids")
+    await session.flush()
+    return True
+
+
+async def reset_subscription_credentials(
+    session: AsyncSession,
+    user_id: int,
+) -> tuple[str, str]:
+    """Rotate client UUID and token, clearing all device slots."""
+    sub = await session.scalar(
+        select(VlessSubscription)
+        .where(VlessSubscription.user_id == user_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if not sub:
+        sub = await get_or_create_subscription(session, user_id)
+
+    old_uuid = sub.uuid
+    revoked = list(sub.pending_revoked_uuids or [])
+    if old_uuid and old_uuid not in revoked:
+        revoked.append(old_uuid)
+
+    new_uuid = str(uuid.uuid4())
+    new_token = secrets.token_urlsafe(32)
+
+    sub.uuid = new_uuid
+    sub.token = new_token
+    sub.pending_revoked_uuids = revoked
+    sub.active_hwids = {}
+    sub.version = (sub.version or 1) + 1
+    flag_modified(sub, "pending_revoked_uuids")
+    flag_modified(sub, "active_hwids")
+    await session.flush()
+    return new_uuid, new_token
