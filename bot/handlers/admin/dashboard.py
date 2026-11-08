@@ -12,7 +12,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.keyboards import (
+from bot.keyboards import get_back_button
+from bot.keyboards.admin import (
     get_admin_cat_finance_keyboard,
     get_admin_cat_infra_keyboard,
     get_admin_cat_std_sub_keyboard,
@@ -21,7 +22,6 @@ from bot.keyboards import (
     get_admin_cat_wi_sub_keyboard,
     get_admin_menu,
     get_audit_keyboard,
-    get_back_button,
     get_maintenance_confirm_keyboard,
 )
 from bot.states import AdminStates

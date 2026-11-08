@@ -1,15 +1,16 @@
 from datetime import datetime
 from typing import TypedDict
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from config.constants import (
     VLESS_PROTOCOL,
     XRAY_ORIGIN_CAPABILITY,
     XRAY_PROTOCOL,
 )
-from config.enums import ServerLifecycleStatus
+from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.models import Server
 
 CAPACITY_CONSUMING_STATUSES = (
@@ -163,3 +164,120 @@ async def update_server(session: AsyncSession, server: Server, **kwargs) -> Serv
     await session.flush()
     await session.refresh(server)
     return server
+
+
+async def delete_server(session: AsyncSession, server: Server) -> None:
+    await session.delete(server)
+    await session.flush()
+
+
+async def get_server_count(session: AsyncSession) -> int:
+    result = await session.execute(select(func.count(Server.id)))
+    return result.scalar() or 0
+
+
+async def update_server_health_snapshot(
+    session: AsyncSession,
+    server_id: int,
+    *,
+    expected_health_state: str,
+    new_health_state: str,
+    expected_consecutive_fails: int | None = None,
+    expected_consecutive_successes: int | None = None,
+    **health_kwargs: ServerUpdateFields,
+) -> tuple[Server | None, bool]:
+    """Safely update server health state from the node monitor using CAS."""
+    result = await session.execute(
+        select(Server)
+        .where(Server.id == server_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    current = result.scalar_one_or_none()
+    if current is None:
+        return None, False
+
+    if not current.is_active or current.health_state == ServerHealthState.MANUAL_DISABLED:
+        return current, False
+
+    if current.health_state != expected_health_state:
+        return current, False
+
+    if expected_consecutive_fails is not None and current.consecutive_fails != expected_consecutive_fails:
+        return current, False
+
+    if expected_consecutive_successes is not None and current.consecutive_successes != expected_consecutive_successes:
+        return current, False
+
+    kwargs = {"health_state": new_health_state, **health_kwargs}
+    for key, value in kwargs.items():
+        if key in PROTECTED_SERVER_FIELDS or key not in HEALTH_UPDATE_FIELDS:
+            continue
+        if key == "extra_data" and isinstance(value, dict):
+            existing_extra = dict(current.extra_data or {})
+            existing_extra.update(value)
+            setattr(current, key, existing_extra)
+            flag_modified(current, "extra_data")
+        elif hasattr(current, key):
+            setattr(current, key, value)
+
+    await session.flush()
+    await session.refresh(current)
+    return current, True
+
+
+async def update_server_xray_epoch_cas(
+    session: AsyncSession,
+    server_id: int,
+    *,
+    expected_boot_id: str | None,
+    expected_starttime: int | None,
+    new_epoch: str,
+    new_boot_id: str | None,
+    new_starttime: int | None,
+) -> tuple[bool, Server | None]:
+    """Atomically updates Server.xray_instance_epoch using CAS."""
+    stmt = select(Server).where(Server.id == server_id).with_for_update()
+    server = (await session.execute(stmt)).scalar_one_or_none()
+    if server is None:
+        return False, None
+
+    if server.xray_instance_boot_id is None:
+        server.xray_instance_epoch = new_epoch
+        server.xray_instance_boot_id = new_boot_id
+        server.xray_instance_starttime = new_starttime
+        await session.flush()
+        return True, server
+
+    cur_boot = server.xray_instance_boot_id
+    cur_st = server.xray_instance_starttime or 0
+
+    if (cur_boot, cur_st) != (expected_boot_id, expected_starttime or 0):
+        return False, None
+
+    if new_boot_id != cur_boot:
+        server.xray_instance_epoch = new_epoch
+        server.xray_instance_boot_id = new_boot_id
+        server.xray_instance_starttime = new_starttime
+        await session.flush()
+        return True, server
+
+    new_st = new_starttime or 0
+    if new_st > cur_st:
+        server.xray_instance_epoch = new_epoch
+        server.xray_instance_boot_id = new_boot_id
+        server.xray_instance_starttime = new_starttime
+        await session.flush()
+        return True, server
+
+    if new_st == cur_st:
+        if server.xray_instance_epoch == new_epoch:
+            return True, server
+        server.xray_instance_epoch = new_epoch
+        server.xray_instance_boot_id = new_boot_id
+        server.xray_instance_starttime = new_starttime
+        await session.flush()
+        return True, server
+
+    return False, None
+

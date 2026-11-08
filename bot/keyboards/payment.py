@@ -85,3 +85,32 @@ def get_balance_history_keyboard(
         builder.adjust(1)
 
     return builder.as_markup()
+
+
+def get_payment_success_keyboard() -> InlineKeyboardMarkup:
+    """Build payment success dismissal keyboard."""
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=texts.BTN_MAIN_MENU_NAV,
+        callback_data="back_to_main_menu",
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_topup_credit_keyboard(
+    context: dict | None = None,
+) -> InlineKeyboardMarkup:
+    """Build topup credit confirmation keyboard."""
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=texts.BTN_BALANCE,
+        callback_data="menu_balance",
+    )
+    builder.button(
+        text=texts.BTN_DISMISS,
+        callback_data="dismiss_notification",
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+

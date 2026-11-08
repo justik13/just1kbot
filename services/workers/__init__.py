@@ -8,13 +8,13 @@ from dataclasses import asdict, dataclass
 import aiohttp
 from aiogram import Bot
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from bot.texts.common.buttons import BTN_DISMISS_ALERT
-from bot.texts.runtime.alerts import (
+from bot.texts import (
     ALERT_TITLE_CRITICAL_STOP,
     ALERT_TITLE_WORKER_COOLDOWN,
     ALERT_TITLE_WORKER_FAILED,
     ALERT_WORKER_COOLDOWN,
     ALERT_WORKER_CRASH,
+    BTN_DISMISS_ALERT,
 )
 from config.settings import get_settings
 from utils.telegram import safe_send_message
