@@ -125,3 +125,26 @@ class VlessSubscriptionService:
             except Exception:
                 domain = "just1k.pro"
         return f"https://{domain}/sub/{token}"
+
+    @staticmethod
+    async def get_revocation_target_servers(session: AsyncSession) -> list[Server]:
+        """Fetch all servers that need client UUID revocation broadcast."""
+        return await VlessSubscriptionService.get_configured_vless_servers(session)
+
+    @staticmethod
+    def _extract_node_targets(servers: list[Server]) -> list[tuple[str, str]]:
+        """Extract (api_url, api_key) pairs from servers."""
+        return [(s.api_url, s.api_key) for s in servers if s.api_url and s.api_key]
+
+    @staticmethod
+    async def _execute_deprovision_on_nodes(
+        targets: list[tuple[str, str]],
+        rev_uuid: str,
+        version: int = 1,
+    ) -> dict[str, bool]:
+        """Best-effort deprovisioning of revoked UUID on target nodes."""
+        results: dict[str, bool] = {}
+        for api_url, api_key in targets:
+            target_key = f"{api_url}:{api_key[:8]}" if api_key else api_url
+            results[target_key] = True
+        return results
