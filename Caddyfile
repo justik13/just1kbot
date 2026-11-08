@@ -27,13 +27,12 @@ http:// {
 		Cross-Origin-Opener-Policy "same-origin"
 		-Server
 	}
-	@not_app not path /app /app/* /api/app/*
-	header @not_app X-Frame-Options "DENY"
 	@yookassa_allowed {
 		path /webhook/* /yookassa/*
 		remote_ip 185.71.76.0/27 185.71.77.0/27 77.75.153.0/25 77.75.154.128/25 77.75.156.11 77.75.156.35 2a02:5180::/32 {$YOOKASSA_EXTRA_IPS:127.0.0.1/32}
 	}
 	handle @yookassa_allowed {
+		header X-Frame-Options "DENY"
 		reverse_proxy bot:8080 {
 			header_up X-Real-IP {remote_host}
 		}
@@ -41,6 +40,7 @@ http:// {
 
 	@subscription_paths path /sub/* {$WHITE_INTERNET_SUB_PATH_PREFIX:/sub/wl}/* /sub/vless/* /sub/access/*
 	handle @subscription_paths {
+		header X-Frame-Options "DENY"
 		log_skip
 		reverse_proxy bot:8080 {
 			header_up X-Real-IP {remote_host}
@@ -49,10 +49,7 @@ http:// {
 
 	@app_allowed path /app /app/* /api/app/*
 	handle @app_allowed {
-		header {
-			Content-Security-Policy "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org telegram:;"
-			-X-Frame-Options
-		}
+		header Content-Security-Policy "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org telegram:;"
 		reverse_proxy bot:8080 {
 			header_up X-Real-IP {remote_host}
 		}
