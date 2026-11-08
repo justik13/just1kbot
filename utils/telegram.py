@@ -17,6 +17,7 @@ from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     InputFile,
+    InputRichBlockButtons,
     InputRichMessage,
     LinkPreviewOptions,
 )
@@ -581,6 +582,14 @@ async def render_hub(
             except Exception:
                 pass
 
+        has_rich_buttons = False
+        if rich_message is not None and getattr(rich_message, "blocks", None):
+            has_rich_buttons = any(
+                getattr(b, "type", None) == "buttons" or isinstance(b, InputRichBlockButtons)
+                for b in rich_message.blocks
+            )
+        effective_markup = None if has_rich_buttons else reply_markup
+
         if target_edit_id is not None:
             try:
                 if rich_message is not None:
@@ -589,7 +598,7 @@ async def render_hub(
                             chat_id=chat_id,
                             message_id=target_edit_id,
                             rich_message=rich_message,
-                            reply_markup=reply_markup,
+                            reply_markup=effective_markup,
                         )
                     )
                 else:
@@ -695,7 +704,7 @@ async def render_hub(
                 try:
                     if rich_message is not None and index == 0:
                         message = await _send_with_resilience(
-                            lambda m=markup: bot.send_rich_message(
+                            lambda m=effective_markup: bot.send_rich_message(
                                 chat_id=chat_id,
                                 rich_message=rich_message,
                                 reply_markup=m,

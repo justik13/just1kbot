@@ -242,55 +242,32 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
         inviter_line=inviter_line,
     )
 
-    white_internet_md = ""
-    if is_wi_active and wi_sub:
-        white_internet_md = texts.HUB_WHITE_INTERNET_MD_ROW.format(
-            status_icon=status_icon,
-            expiry=expiry_str,
-            days_left=days_str,
-            devices_count=wi_active_cnt,
-            device_limit=wi_device_limit,
-            traffic_used=used_str,
-            traffic_total=tot_str,
-        )
-
-    bonus_md = (
-        texts.HUB_BONUS_MD_LINE.format(bonus_balance=int(balance.bonus_available))
-        if balance.bonus_available > 0
-        else ""
-    )
-
-    inviter_md = ""
-    if db_user.referred_by:
-        referrer = await get_user_by_telegram_id(session, db_user.referred_by)
-        if referrer:
-            ref_name = safe(referrer.first_name) if referrer.first_name else ""
-            ref_username = f" (@{safe(referrer.username)})" if referrer.username else ""
-            target_name = f"{ref_name}{ref_username}".strip() or str(referrer.telegram_id)
-            inviter_md = f"\n🤝 **Вас пригласил:** {target_name} (`{referrer.telegram_id}`)"
-        else:
-            inviter_md = f"\n🤝 **Вас пригласил:** `{db_user.referred_by}`"
-
-    rich_md = texts.HUB_HEADER_MARKDOWN.format(
-        name=name,
-        telegram_id=db_user.telegram_id,
-        status=status_str,
-        valid_until=valid_until_str,
-        days_left=days_left_str,
-        devices_count=devices_count,
-        device_limit=device_limit,
-        white_internet_line=white_internet_md,
-        real_balance=int(balance.real_available),
-        bonus_line=bonus_md,
-        inviter_line=inviter_md,
-    )
-    rich_msg = InputRichMessage(markdown=rich_md)
-
     from database.repositories.system_settings_repo import get_system_setting
     settings = get_settings()
     mtproto_url = await get_system_setting(session, "mtproto_proxy_url") or (settings.PROXY_URL if settings.PROXY_URL else None)
     channel_url = await get_system_setting(session, "tg_channel_url") or (settings.CHANNEL_URL if settings.CHANNEL_URL else None)
     miniapp_url = await get_system_setting(session, "miniapp_url") or f"https://{settings.DOMAIN}/app"
+
+    from bot.keyboards.common import build_rich_hub_message
+
+    rich_msg = build_rich_hub_message(
+        name=name,
+        telegram_id=db_user.telegram_id,
+        status_str=status_str,
+        valid_until_str=valid_until_str,
+        days_left_str=days_left_str,
+        devices_count=devices_count,
+        device_limit=device_limit,
+        real_balance=int(balance.real_available),
+        bonus_balance=int(balance.bonus_available),
+        white_internet_line=white_internet_line,
+        bonus_line=bonus_line,
+        inviter_line=inviter_line,
+        mtproto_url=mtproto_url,
+        miniapp_url=miniapp_url,
+        channel_url=channel_url,
+        support_username=settings.SUPPORT_USERNAME,
+    )
 
     kb = get_hub_keyboard(
         is_admin=is_admin,
