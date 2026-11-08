@@ -227,17 +227,12 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
         else ""
     )
 
-    tariff_name = "Стандарт" if is_active else "Базовый"
-    if getattr(db_user, "current_tariff", None) and getattr(db_user.current_tariff, "name", None):
-        tariff_name = db_user.current_tariff.name
-
     text = texts.HUB_HEADER.format(
         name=name,
         telegram_id=db_user.telegram_id,
         status=status_str,
         valid_until=valid_until_str,
         days_left=days_left_str,
-        tariff_name=tariff_name,
         devices_count=devices_count,
         device_limit=device_limit,
         white_internet_line=white_internet_line,

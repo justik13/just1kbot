@@ -24,7 +24,7 @@ from database.repositories.account_ledger_repo import (
     get_account_history,
 )
 from database.repositories.payments_repo import get_user_payments
-from services.yookassa_service import YooKassaService
+from services.order_service import OrderService
 from utils.formatters import format_datetime
 from utils.telegram import render_hub
 
@@ -151,12 +151,21 @@ async def process_custom_amount_text(
     if not db_user:
         return
 
-    payment_url, payment_id = await YooKassaService.create_topup_payment(
-        session=session,
-        user=db_user,
-        amount_rub=Decimal(amount_rub),
-        description=f"Пополнение Just1k на {amount_rub} ₽",
-    )
+    try:
+        order = await OrderService.create_order(
+            session=session,
+            user_id=db_user.id,
+            service_type="topup",
+            amount_rub=Decimal(amount_rub),
+            payment_method="yookassa",
+            description=f"Пополнение баланса на {amount_rub} ₽",
+        )
+        payment_url = order.payment_url
+        payment_id = str(order.id)[:8]
+    except Exception as exc:
+        logger.error("Failed to create topup order: %s", exc, exc_info=True)
+        payment_url = None
+        payment_id = None
 
     builder = InlineKeyboardBuilder()
     if payment_url:
@@ -164,17 +173,26 @@ async def process_custom_amount_text(
             text=f"💳 Оплатить {amount_rub} ₽",
             url=payment_url,
         )
-    builder.button(
-        text=texts.BTN_BACK,
-        callback_data="menu_balance",
-    )
-    builder.adjust(1)
-
-    text = (
-        f"<b>Счет на пополнение #{payment_id or 'новый'}</b>\n\n"
-        f"<b>Сумма к оплате:</b> {amount_rub} ₽\n\n"
-        "После успешной оплаты баланс обновится автоматически."
-    )
+        builder.button(
+            text=texts.BTN_BACK,
+            callback_data="menu_balance",
+        )
+        builder.adjust(1)
+        text = (
+            f"<b>Счет на пополнение #{payment_id or 'новый'}</b>\n\n"
+            f"<b>Сумма к оплате:</b> {amount_rub} ₽\n\n"
+            "После успешной оплаты баланс обновится автоматически."
+        )
+    else:
+        builder.button(
+            text=texts.BTN_BACK,
+            callback_data="balance_topup",
+        )
+        builder.adjust(1)
+        text = (
+            "⚠️ <b>Ошибка создания счета</b>\n\n"
+            "Не удалось сформировать ссылку на оплату. Пожалуйста, повторите попытку позже."
+        )
 
     await render_hub(
         message.bot,
@@ -204,12 +222,21 @@ async def process_balance_create(
     except (IndexError, ValueError):
         amount_rub = 100
 
-    payment_url, payment_id = await YooKassaService.create_topup_payment(
-        session=session,
-        user=db_user,
-        amount_rub=Decimal(amount_rub),
-        description=f"Пополнение Just1k на {amount_rub} ₽",
-    )
+    try:
+        order = await OrderService.create_order(
+            session=session,
+            user_id=db_user.id,
+            service_type="topup",
+            amount_rub=Decimal(amount_rub),
+            payment_method="yookassa",
+            description=f"Пополнение баланса на {amount_rub} ₽",
+        )
+        payment_url = order.payment_url
+        payment_id = str(order.id)[:8]
+    except Exception as exc:
+        logger.error("Failed to create topup preset order: %s", exc, exc_info=True)
+        payment_url = None
+        payment_id = None
 
     builder = InlineKeyboardBuilder()
     if payment_url:
@@ -217,23 +244,33 @@ async def process_balance_create(
             text=f"💳 Оплатить {amount_rub} ₽",
             url=payment_url,
         )
-    builder.button(
-        text=texts.BTN_BACK,
-        callback_data="menu_balance",
-    )
-    builder.adjust(1)
-
-    text = (
-        f"<b>Счет на пополнение #{payment_id or 'новый'}</b>\n\n"
-        f"<b>Сумма к оплате:</b> {amount_rub} ₽\n\n"
-        "После успешной оплаты баланс обновится автоматически."
-    )
+        builder.button(
+            text=texts.BTN_BACK,
+            callback_data="menu_balance",
+        )
+        builder.adjust(1)
+        text = (
+            f"<b>Счет на пополнение #{payment_id or 'новый'}</b>\n\n"
+            f"<b>Сумма к оплате:</b> {amount_rub} ₽\n\n"
+            "После успешной оплаты баланс обновится автоматически."
+        )
+    else:
+        builder.button(
+            text=texts.BTN_BACK,
+            callback_data="balance_topup",
+        )
+        builder.adjust(1)
+        text = (
+            "⚠️ <b>Ошибка создания счета</b>\n\n"
+            "Не удалось сформировать ссылку на оплату. Пожалуйста, повторите попытку позже."
+        )
 
     await render_hub(
         callback.bot,
         callback.message.chat.id,
         text,
         builder.as_markup(),
+        session=session,
     )
 
 

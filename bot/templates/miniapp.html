@@ -1196,21 +1196,13 @@
                 <button type="button" class="btn-reset-all" onclick="confirmResetAll()">
                     Сбросить привязки устройств
                 </button>
-
-                <div class="device-slot-promo" onclick="goToTab('plans')">
-                    <div>
-                        <div class="slot-promo-title">Нужно больше устройств?</div>
-                        <div class="slot-promo-desc">Тариф «Семейный» (до 5) или «Pro» (до 10 гаджетов)</div>
-                    </div>
-                    <button type="button" class="slot-promo-btn">Тарифы</button>
-                </div>
             </div>
         </div>
 
         <!-- ============================================================ -->
-        <!-- TAB 3: PLANS & BILLING (SSOT: DEFAULT_TARIFFS_SEEDS)         -->
+        <!-- TAB 3: PLANS & BILLING (HIDDEN PENDING TARIFF REDESIGN)       -->
         <!-- ============================================================ -->
-        <div id="screen-plans" class="tab-screen">
+        <div id="screen-plans" class="tab-screen" style="display:none !important;">
             <div class="card">
                 <div class="section-header">
                     <div>
@@ -1392,7 +1384,7 @@
             <svg viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
             <span>Устройства</span>
         </button>
-        <button type="button" class="nav-item" id="nav-plans" onclick="goToTab('plans')">
+        <button type="button" class="nav-item" id="nav-plans" style="display:none !important;" onclick="goToTab('plans')">
             <svg viewBox="0 0 24 24"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
             <span>Тарифы</span>
         </button>
@@ -1524,6 +1516,9 @@
         const handleTelegramBack = () => goToTab('connect');
 
         function goToTab(tabKey) {
+            if (tabKey === 'plans') {
+                tabKey = 'connect';
+            }
             triggerHaptic('light');
             const screens = {
                 'connect': document.getElementById('screen-connect'),
@@ -1696,7 +1691,7 @@
                 if (freeSlots > 0) {
                     notice.innerHTML = `Свободно слотов: ${freeSlots} из ${currentDeviceLimit}.<br>Запустите клиент на втором устройстве для автоматической привязки.`;
                 } else {
-                    notice.innerHTML = `Все ${currentDeviceLimit} слота заняты.<br>Для добавления нового устройства сбросьте привязки или выберите тариф с бóльшим лимитом.`;
+                    notice.innerHTML = `Все ${currentDeviceLimit} слота заняты.<br>Для добавления нового устройства сбросьте привязки или отключите неактивные устройства.`;
                 }
             }
         }
