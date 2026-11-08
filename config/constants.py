@@ -198,7 +198,7 @@ def _validate_xhttp_padding_bytes(val: str | None) -> str:
 
 
 def _validate_xhttp_post_bytes(val: str | None) -> int:
-    default_val = 16384  # 16 KB default: eliminates 4 Mbps upload bottleneck while staying safe for CDN
+    default_val = 3500  # 3.5 KB safe default: avoids TSPU 16-20 KB streaming pattern while staying safe for CDN
     if not val or not isinstance(val, str):
         return default_val
     try:

@@ -166,7 +166,7 @@ class TestWhiteInternetIncyConfig(unittest.TestCase):
             self.assertIn("extra", query)
             extra_data = json.loads(query["extra"][0])
             self.assertNotIn("xmux", extra_data)
-            self.assertEqual(extra_data["scMaxEachPostBytes"], 16384)
+            self.assertEqual(extra_data["scMaxEachPostBytes"], 3500)
             self.assertEqual(extra_data["scMinPostsIntervalMs"], 10)
 
         # 3. generate_full_xray_config must contain mux: {enabled: False} and fast upload params without custom xmux
@@ -178,7 +178,7 @@ class TestWhiteInternetIncyConfig(unittest.TestCase):
         self.assertEqual(outbound["mux"], {"enabled": False})
         xhttp_settings = outbound["streamSettings"]["xhttpSettings"]
         self.assertNotIn("xmux", xhttp_settings)
-        self.assertEqual(xhttp_settings["scMaxEachPostBytes"], 16384)
+        self.assertEqual(xhttp_settings["scMaxEachPostBytes"], 3500)
         self.assertEqual(xhttp_settings["scMinPostsIntervalMs"], 10)
 
 
