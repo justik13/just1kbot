@@ -17,6 +17,7 @@ from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     InputFile,
+    InputRichMessage,
     LinkPreviewOptions,
 )
 from cachetools import TTLCache
@@ -553,6 +554,7 @@ async def render_hub(
     disable_web_page_preview: bool = True,
     message_effect_id: str | None = None,
     session: AsyncSession | None = None,
+    rich_message: InputRichMessage | None = None,
 ) -> int:
     """Render a single navigable hub, editing the target text message first."""
     _maybe_cleanup_cache()
@@ -581,16 +583,26 @@ async def render_hub(
 
         if target_edit_id is not None:
             try:
-                await _retry_flood(
-                    lambda: bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=target_edit_id,
-                        text=text_parts[0],
-                        reply_markup=reply_markup,
-                        parse_mode=parse_mode,
-                        link_preview_options=link_preview_opts,
+                if rich_message is not None:
+                    await _retry_flood(
+                        lambda: bot.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=target_edit_id,
+                            rich_message=rich_message,
+                            reply_markup=reply_markup,
+                        )
                     )
-                )
+                else:
+                    await _retry_flood(
+                        lambda: bot.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=target_edit_id,
+                            text=text_parts[0],
+                            reply_markup=reply_markup,
+                            parse_mode=parse_mode,
+                            link_preview_options=link_preview_opts,
+                        )
+                    )
                 stale_ids = [mid for mid in old_ids if mid != target_edit_id]
                 stale_failed: list[int] = []
                 if stale_ids:
@@ -681,18 +693,29 @@ async def render_hub(
                 markup = reply_markup if is_last else None
                 effect = message_effect_id if index == 0 else None
                 try:
-                    message = await _send_with_resilience(
-                        lambda p=part, m=markup, eff=effect: bot.send_message(
+                    if rich_message is not None and index == 0:
+                        message = await _send_with_resilience(
+                            lambda m=markup: bot.send_rich_message(
+                                chat_id=chat_id,
+                                rich_message=rich_message,
+                                reply_markup=m,
+                            ),
                             chat_id=chat_id,
-                            text=p,
-                            reply_markup=m,
-                            parse_mode=parse_mode,
-                            link_preview_options=link_preview_opts,
-                            message_effect_id=eff,
-                        ),
-                        chat_id=chat_id,
-                        context="render_hub",
-                    )
+                            context="render_hub_rich",
+                        )
+                    else:
+                        message = await _send_with_resilience(
+                            lambda p=part, m=markup, eff=effect: bot.send_message(
+                                chat_id=chat_id,
+                                text=p,
+                                reply_markup=m,
+                                parse_mode=parse_mode,
+                                link_preview_options=link_preview_opts,
+                                message_effect_id=eff,
+                            ),
+                            chat_id=chat_id,
+                            context="render_hub",
+                        )
                 except TelegramBadRequest as exc:
                     error = str(exc).lower()
                     if effect and _is_message_effect_error(exc):

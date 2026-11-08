@@ -7,6 +7,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     CallbackQuery,
     InlineKeyboardMarkup,
+    InputRichMessage,
     Message,
     ReplyKeyboardRemove,
 )
@@ -113,7 +114,7 @@ async def _ensure_bot_unblocked(
     )
 
 
-async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[str, InlineKeyboardMarkup]:
+async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[str, InlineKeyboardMarkup, InputRichMessage]:
     from database.repositories import vless_subscription_repo
     from bot.formatters import format_days_left, format_subscription_date
 
@@ -241,6 +242,50 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
         inviter_line=inviter_line,
     )
 
+    white_internet_md = ""
+    if is_wi_active and wi_sub:
+        white_internet_md = texts.HUB_WHITE_INTERNET_MD_ROW.format(
+            status_icon=status_icon,
+            expiry=expiry_str,
+            days_left=days_str,
+            devices_count=wi_active_cnt,
+            device_limit=wi_device_limit,
+            traffic_used=used_str,
+            traffic_total=tot_str,
+        )
+
+    bonus_md = (
+        texts.HUB_BONUS_MD_LINE.format(bonus_balance=int(balance.bonus_available))
+        if balance.bonus_available > 0
+        else ""
+    )
+
+    inviter_md = ""
+    if db_user.referred_by:
+        referrer = await get_user_by_telegram_id(session, db_user.referred_by)
+        if referrer:
+            ref_name = safe(referrer.first_name) if referrer.first_name else ""
+            ref_username = f" (@{safe(referrer.username)})" if referrer.username else ""
+            target_name = f"{ref_name}{ref_username}".strip() or str(referrer.telegram_id)
+            inviter_md = f"\n🤝 **Вас пригласил:** {target_name} (`{referrer.telegram_id}`)"
+        else:
+            inviter_md = f"\n🤝 **Вас пригласил:** `{db_user.referred_by}`"
+
+    rich_md = texts.HUB_HEADER_MARKDOWN.format(
+        name=name,
+        telegram_id=db_user.telegram_id,
+        status=status_str,
+        valid_until=valid_until_str,
+        days_left=days_left_str,
+        devices_count=devices_count,
+        device_limit=device_limit,
+        white_internet_line=white_internet_md,
+        real_balance=int(balance.real_available),
+        bonus_line=bonus_md,
+        inviter_line=inviter_md,
+    )
+    rich_msg = InputRichMessage(markdown=rich_md)
+
     from database.repositories.system_settings_repo import get_system_setting
     settings = get_settings()
     mtproto_url = await get_system_setting(session, "mtproto_proxy_url") or (settings.PROXY_URL if settings.PROXY_URL else None)
@@ -259,7 +304,7 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
         telegram_id=db_user.telegram_id,
     )
 
-    return text, kb
+    return text, kb, rich_msg
 
 
 @router.message(CommandStart(), StateFilter("*"))
@@ -345,7 +390,7 @@ async def cmd_start(
     except Exception as e:
         logger.debug("Failed to set chat menu button: %s", e)
 
-    text, kb = await _build_hub_text_and_kb(session, user)
+    text, kb, rich_msg = await _build_hub_text_and_kb(session, user)
     await render_hub(
         message.bot,
         message.chat.id,
@@ -353,6 +398,7 @@ async def cmd_start(
         kb,
         force_new=True,
         session=session,
+        rich_message=rich_msg,
     )
 
 
@@ -381,7 +427,7 @@ async def handle_legacy_reply_keyboard(
         await message.answer(texts.ERROR_USER_NOT_FOUND)
         return
 
-    text, kb = await _build_hub_text_and_kb(session, db_user)
+    text, kb, rich_msg = await _build_hub_text_and_kb(session, db_user)
 
     await render_hub(
         message.bot,
@@ -390,6 +436,7 @@ async def handle_legacy_reply_keyboard(
         kb,
         force_new=True,
         session=session,
+        rich_message=rich_msg,
     )
 
 
@@ -443,7 +490,7 @@ async def back_to_main_menu(
         db_user.telegram_id,
     )
 
-    text, kb = await _build_hub_text_and_kb(session, db_user)
+    text, kb, rich_msg = await _build_hub_text_and_kb(session, db_user)
 
     await render_hub(
         callback.bot,
@@ -452,6 +499,7 @@ async def back_to_main_menu(
         kb,
         trigger_message_id=callback.message.message_id,
         session=session,
+        rich_message=rich_msg,
     )
 
 

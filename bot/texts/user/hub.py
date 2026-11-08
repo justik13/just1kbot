@@ -10,6 +10,7 @@ BOT_SHORT_DESCRIPTION = "Личный сервис безопасного дос
 
 CURRENCY_RUB_SYMBOL = "₽"
 
+# Standard Telegram HTML (Fallback)
 HUB_HEADER = """👋 Привет, <b>{name}</b>!
 
 <blockquote expandable>📊 <b>Статус доступа:</b> {status}
@@ -19,10 +20,26 @@ HUB_HEADER = """👋 Привет, <b>{name}</b>!
 💳 <b>Баланс:</b> {real_balance} ₽{bonus_line}
 🆔 <b>Ваш ID:</b> <code>{telegram_id}</code>{inviter_line}"""
 
+# Telegram Bot API 10.1+ (2026) Native Rich Message Markdown
+HUB_HEADER_MARKDOWN = """# 👋 Привет, {name}!
+
+| Параметр | Значение |
+| :--- | :--- |
+| **Подключение** | {status} |
+| **Срок действия** | {valid_until} ({days_left}) |
+| **Устройства** | {devices_count} из {device_limit} |{white_internet_line}
+
+💳 **Баланс:** {real_balance} ₽{bonus_line}
+🆔 **Ваш ID:** `{telegram_id}`{inviter_line}"""
+
 HUB_WHITE_INTERNET_LINE_FORMAT = (
     "\n🛡 <b>Белый Интернет:</b> {status_icon} до {expiry} ({days_left}) · {traffic_used}/{traffic_total} ГБ"
 )
+HUB_WHITE_INTERNET_MD_ROW = (
+    "\n| **Белый Интернет** | {status_icon} до {expiry} ({days_left}) · {traffic_used}/{traffic_total} ГБ |"
+)
 HUB_BONUS_LINE_FORMAT = "  •  🎁 <b>Бонусы:</b> {bonus_balance} ₽"
+HUB_BONUS_MD_LINE = "  •  🎁 **Бонусы:** {bonus_balance} ₽"
 
 PAYMENT_STATUS_PENDING_ICON = "⏳"
 
