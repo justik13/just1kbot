@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     STATUS_PAGE_URL: str = "https://status.just1k.pro/status/just1kbot"
     CHANNEL_URL: str = "https://t.me/just1k_news"
     PROXY_URL: str = ""
+    CLOUDFLARE_API_TOKEN: str = ""
+    WILDCARD_DOMAIN: str = ""
 
     # ── Mini App & Web ──
     MINIAPP_URL: str = ""

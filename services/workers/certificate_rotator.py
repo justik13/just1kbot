@@ -28,11 +28,13 @@ async def certificate_rotator_loop(bot: Bot, shutdown_event: asyncio.Event) -> N
 
     while not shutdown_event.is_set():
         settings = get_settings()
-        if not settings.CLOUDFLARE_API_TOKEN or not settings.WILDCARD_DOMAIN:
+        cf_token = getattr(settings, "CLOUDFLARE_API_TOKEN", "")
+        wc_domain = getattr(settings, "WILDCARD_DOMAIN", "")
+        if not cf_token or not wc_domain:
             logger.debug("Cloudflare Wildcard is not configured in settings, skipping rotation check")
         else:
             try:
-                logger.info("Running scheduled Wildcard TLS certificate check for %s...", settings.WILDCARD_DOMAIN)
+                logger.info("Running scheduled Wildcard TLS certificate check for %s...", wc_domain)
                 async with session_scope() as session:
                     results = await WildcardCertificateManager.deploy_to_all_active_nodes(session)
                     if results:

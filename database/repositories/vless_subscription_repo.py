@@ -200,6 +200,43 @@ async def register_hwid_atomic(
     return True, len(active_hwids), effective_limit
 
 
+async def pop_pending_revoked_uuid(
+    session: AsyncSession,
+    subscription_id: int,
+    uuid_to_remove: str,
+) -> None:
+    """Removes a successfully deprovisioned UUID from pending_revoked_uuids under row lock."""
+    stmt = (
+        select(VlessSubscription)
+        .where(VlessSubscription.id == subscription_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    sub = await session.scalar(stmt)
+    if isinstance(sub, VlessSubscription) and sub.pending_revoked_uuids:
+        sub.pending_revoked_uuids = [u for u in sub.pending_revoked_uuids if u != uuid_to_remove]
+        flag_modified(sub, "pending_revoked_uuids")
+        await session.flush()
+
+
+async def get_subscriptions_with_pending_revocations(
+    session: AsyncSession,
+    limit: int = 50,
+) -> list[VlessSubscription]:
+    """Find subscriptions having pending revoked UUIDs requiring retry."""
+    stmt = (
+        select(VlessSubscription)
+        .where(
+            VlessSubscription.pending_revoked_uuids.is_not(None),
+            func.jsonb_array_length(VlessSubscription.pending_revoked_uuids) > 0,
+        )
+        .order_by(VlessSubscription.updated_at.asc(), VlessSubscription.id.asc())
+        .limit(limit)
+    )
+    res = await session.scalars(stmt)
+    return list(res.all())
+
+
 async def bump_subscription_version(
     session: AsyncSession,
     subscription_id: int,
