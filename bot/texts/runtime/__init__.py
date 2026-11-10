@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from bot.texts.runtime.alerts import (
-    ALERT_API_OPERATION_DEAD,
     ALERT_CDN_INGRESS_PROBLEM,
     ALERT_CDN_INGRESS_PROBLEM_REMINDER,
     ALERT_CDN_INGRESS_RESTORED,
@@ -56,7 +55,6 @@ from bot.texts.runtime.notifications import (
 )
 
 __all__ = [
-    "ALERT_API_OPERATION_DEAD",
     "ALERT_CDN_INGRESS_PROBLEM",
     "ALERT_CDN_INGRESS_PROBLEM_REMINDER",
     "ALERT_CDN_INGRESS_RESTORED",

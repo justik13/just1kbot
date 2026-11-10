@@ -17,17 +17,6 @@ CONNECTION_CONFIG_DEVICE_VIEW_1_SOKHRANITE_PRIKREPLENNYY_FAY = """1. Сохра�
 
 CONNECTION_CONFIG_DEVICE_VIEW_2_OTKROYTE_PRILOZHENIE_I_VYBER = "2. Откройте приложение и выберите <b>«Импорт файла / Добавить туннель»</b>."
 
-CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_NAZHMITE = "📁 <i>Нужен файл конфигурации (.conf)? Нажмите кнопку ниже:</i>"
-
-CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_SKOPIRUY = """<b>1. Скопируйте ключ</b> — нажмите на блок с ключом выше.
-<b>2. Откройте приложение:</b>
-   • Добавьте подключение через «+» (или «Импорт») → «Вставить ключ».
-<b>3. Нажмите «Подключиться».</b>
-
-✅ <b>Как понять, что всё работает:</b>
-• В приложении статус сменится на <b>«Подключено»</b>;
-• На сайте <b>2ip.io</b> страна сменится на локацию сервера."""
-
 CONNECTION_CONFIG_DEVICE_VIEW_CONFIG_DEVICES_OBNO = """
 
 🔄 <b>Конфигурация устройства обновляется...</b>"""
@@ -55,10 +44,6 @@ CONNECTION_CONFIG_DEVICE_VIEW_ESLI_PRYAMAYA_VSTAVKA_KEY = """Если пряма
 CONNECTION_CONFIG_DEVICE_VIEW_IDET_AVTOMATICHESKOE_VOSSTANOV = """
 
 ⚠️ <b>Идёт автоматическое восстановление после сбоя...</b>"""
-
-CONNECTION_CONFIG_DEVICE_VIEW_INSTRUKTSII_I_SPRAVKA_AMNEZIAV = """📖 <b>Инструкции и справка по подключению</b>
-
-"""
 
 CONNECTION_CONFIG_DEVICE_VIEW_KAK_PODKLYUCHITSYA_I_PROVERIT = "🚀 <b>Как подключиться и проверить:</b>"
 
@@ -98,9 +83,6 @@ CONNECTION_CONFIG_DEVICE_VIEW_SELECT_NUZHNUYU_TEMU_BELOW = "Выберите н�
 
 CONNECTION_CONFIG_DEVICE_VIEW_SKACHIVANIYU_KLIENTA_I_NASTROY = """скачиванию клиента и настройке сервиса.
 
-"""
-
-CONNECTION_CONFIG_DEVICE_VIEW_VPN_FOR_PRILOZHENIYA_AMNEZIAV = """   • Файл конфигурации для совместимых приложений
 """
 
 CONNECTION_CONFIG_DEVICE_VIEW_V_ETOM_RAZDELE_VY_NAYDETE_RUKO = "В этом разделе вы найдёте руководства по подключению, "

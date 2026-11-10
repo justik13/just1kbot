@@ -62,12 +62,13 @@ class DomainEnumsSSOTTests(unittest.TestCase):
                 self.assertIsInstance(member.value, str)
                 self.assertTrue(len(member.value) > 0)
 
-    def test_model_tuples_derived_from_enums(self):
-        """The one live database.models tuple constant must match config.enums exactly."""
-        self.assertEqual(
-            models.API_OPERATION_TYPES,
-            tuple(s.value for s in config.enums.ApiOperationType),
-        )
+    def test_legacy_api_operations_removed(self):
+        """APIOperation model, types tuple, and enum must not exist in live domain modules."""
+        self.assertFalse(hasattr(models, "APIOperation"))
+        self.assertFalse(hasattr(models, "API_OPERATION_TYPES"))
+        self.assertFalse(hasattr(config.enums, "ApiOperationType"))
+        self.assertFalse(hasattr(config.enums, "ApiOperationStatus"))
+        self.assertFalse(hasattr(config.enums, "VPNProvisioningStatus"))
 
     def test_database_model_constraints_match_enums(self):
         """Extract CheckConstraint IN (...) definitions on SQLAlchemy models and ensure 0 drift against Enums."""
@@ -95,23 +96,10 @@ class DomainEnumsSSOTTests(unittest.TestCase):
             set(config.enums.AccountLedgerEntryType),
         )
 
-
         # 5. WebhookInbox status
         self.assertEqual(
             _extract_check_constraint_in(models.WebhookInbox.__table__, "ck_webhook_inbox_status"),
             set(config.enums.WebhookInboxStatus),
-        )
-
-
-
-        # 6. APIOperation operation_type & status
-        self.assertEqual(
-            _extract_check_constraint_in(models.APIOperation.__table__, "ck_api_operations_operation_type"),
-            set(config.enums.ApiOperationType),
-        )
-        self.assertEqual(
-            _extract_check_constraint_in(models.APIOperation.__table__, "ck_api_operations_status"),
-            set(config.enums.ApiOperationStatus),
         )
 
         # 7. Order status & service_type
@@ -130,8 +118,8 @@ class DomainEnumsSSOTTests(unittest.TestCase):
         self.assertEqual(config.enums.PaymentProviderStatus.CANCELED, "canceled")
         self.assertEqual(config.enums.PaymentProviderStatus("canceled"), config.enums.PaymentProviderStatus.CANCELED)
 
-        # ApiOperation and PaymentQueue use 'cancelled' (double 'l')
-        self.assertEqual(config.enums.ApiOperationStatus.CANCELLED, "cancelled")
+        # OrderServiceType.AWG preserved as read-only enum item for DB constraint compatibility
+        self.assertEqual(config.enums.OrderServiceType.AWG, "awg")
 
     def test_default_tariffs_seeds_ssot_layering(self):
         """DEFAULT_TARIFFS_SEEDS must live strictly in config.tariffs and NOT in bot.texts."""

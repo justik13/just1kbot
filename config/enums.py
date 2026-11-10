@@ -48,21 +48,6 @@ class AccountLedgerEntryType(StrEnum):
     ADMIN_ADJUSTMENT = "admin_adjustment"
 
 
-class ApiOperationType(StrEnum):
-    CREATE_PEER = "create_peer"
-    UPDATE_PEER = "update_peer"
-    DELETE_PEER = "delete_peer"
-
-
-class ApiOperationStatus(StrEnum):
-    PENDING = "pending"
-    PROCESSING = "processing"
-    RETRY = "retry"
-    SUCCEEDED = "succeeded"
-    DEAD = "dead"
-    CANCELLED = "cancelled"
-
-
 class WebhookInboxStatus(StrEnum):
     PENDING = "pending"
     PROCESSING = "processing"
@@ -83,20 +68,6 @@ class ServerLifecycleStatus(StrEnum):
     DECOMMISSIONING = "DECOMMISSIONING"
     DECOMMISSIONED = "DECOMMISSIONED"
     ARCHIVED = "ARCHIVED"
-
-
-# Backward-compatible alias for payment outbox queue status
-
-
-class VPNProvisioningStatus(StrEnum):
-    PENDING_CREATE = "pending_create"
-    ACTIVE = "active"
-    PENDING_UPDATE = "pending_update"
-    DELETING = "deleting"
-    CREATE_FAILED = "create_failed"
-    CREATE_CLEANUP_PENDING = "create_cleanup_pending"
-    UPDATE_FAILED = "update_failed"
-    DELETE_FAILED = "delete_failed"
 
 
 class AdminAuditAction(StrEnum):
@@ -216,8 +187,6 @@ class OrderServiceType(StrEnum):
 __all__ = [
     "AccountLedgerEntryType",
     "AdminAuditAction",
-    "ApiOperationStatus",
-    "ApiOperationType",
     "OrderStatus",
     "OrderServiceType",
     "PaymentCheckoutStatus",
@@ -227,7 +196,6 @@ __all__ = [
     "ServerHealthState",
     "ServerLifecycleStatus",
     "ServiceType",
-    "VPNProvisioningStatus",
     "WebhookInboxStatus",
     "WhiteInternetGrantType",
     "WhiteInternetProvisioningStatus",

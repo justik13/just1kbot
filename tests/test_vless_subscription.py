@@ -2008,6 +2008,8 @@ class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
         self.assertIn("geoip:ru", std_json.get("DirectIp", []))
         self.assertIn("192.168.0.0/16", std_json.get("DirectIp", []))
         self.assertEqual(std_json.get("ProxySites"), [])
+        self.assertNotIn("Geoipurl", std_json)
+        self.assertNotIn("Geositeurl", std_json)
 
         # 2. White Internet defaults (direct_ru=False)
         wl_header = VlessSubscriptionService.generate_incy_routing_header(direct_ru=False, scheme="happ")
@@ -2023,6 +2025,8 @@ class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("geoip:ru", wl_json.get("DirectIp", []))
         self.assertIn("192.168.0.0/16", wl_json.get("DirectIp", []))
         self.assertEqual(wl_json.get("ProxySites"), [])
+        self.assertNotIn("Geoipurl", wl_json)
+        self.assertNotIn("Geositeurl", wl_json)
 
         # 3. None and edge-case fallbacks
         edge_header = VlessSubscriptionService.generate_incy_routing_header(
@@ -2035,6 +2039,8 @@ class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
         edge_json = json.loads(base64.b64decode(edge_header.removeprefix("incy://routing/onadd/")).decode("utf-8"))
         self.assertEqual(edge_json.get("Name"), "✦ Just1k WL")
         self.assertEqual(edge_json.get("LastUpdated"), "1793420000")
+        self.assertNotIn("Geoipurl", edge_json)
+        self.assertNotIn("Geositeurl", edge_json)
 
     def test_generate_vless_links_forces_client_port_443_when_relay_port_configured(self):
         sub = VlessSubscription(
@@ -2362,16 +2368,16 @@ class TestVlessSubscriptionDomainAndBotResolution(unittest.TestCase):
         self.assertEqual(api_url, "https://nl.just1k.pro:8444")
         self.assertEqual(api_key, "secret-key-123")
 
-    def test_extract_node_targets_uses_xray_api_url_for_mixed_awg_server(self):
+    def test_extract_node_targets_falls_back_to_xray_api_url_when_api_url_empty(self):
         server = Server(
             id=6,
             name="Польша",
             country_flag="🇵🇱",
             is_active=True,
-            protocol="amneziawg3.1",
-            capabilities=["awg", "vless"],
+            protocol="vless",
+            capabilities=["vless"],
             api_key="secret-key-456",
-            api_url="https://pl.just1k.pro:8443",
+            api_url="",
             extra_data={"xray_api_url": "https://pl.just1k.pro:8444"},
         )
         targets = VlessSubscriptionService._extract_node_targets([server])
@@ -2381,16 +2387,16 @@ class TestVlessSubscriptionDomainAndBotResolution(unittest.TestCase):
         self.assertEqual(api_url, "https://pl.just1k.pro:8444")
         self.assertEqual(api_key, "secret-key-456")
 
-    def test_extract_node_targets_skips_mixed_server_without_xray_api_url(self):
+    def test_extract_node_targets_skips_server_without_any_api_url(self):
         server = Server(
             id=6,
             name="Польша",
             country_flag="🇵🇱",
             is_active=True,
-            protocol="amneziawg3.1",
-            capabilities=["awg", "vless"],
+            protocol="vless",
+            capabilities=["vless"],
             api_key="secret-key-456",
-            api_url="https://pl.just1k.pro:8443",
+            api_url="",
             extra_data={},
         )
         targets = VlessSubscriptionService._extract_node_targets([server])

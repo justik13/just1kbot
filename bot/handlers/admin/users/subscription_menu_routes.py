@@ -58,7 +58,9 @@ logger = logging.getLogger(__name__)
 
 
 @router.callback_query(
-    F.data.startswith("admin_sub_awg_menu:") | F.data.startswith("admin_subscription:")
+    F.data.startswith("admin_sub_menu:")
+    | F.data.startswith("admin_sub_awg_menu:")
+    | F.data.startswith("admin_subscription:")
 )
 async def admin_subscription_menu(
     callback: CallbackQuery,

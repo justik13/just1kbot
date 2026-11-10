@@ -124,16 +124,6 @@ ALERT_RELAY_TSPU_PROBLEM_REMINDER = """⚠️ <b>Напоминание: Сбо�
 
 Сетевой узел по-прежнему не отвечает на TCP-подключение со стороны Origin в Москве."""
 
-ALERT_API_OPERATION_DEAD = """🚨 <b>Сбой операции с ключом / пиром</b>
-
-⚙️ <b>Тип:</b> <code>{operation_type}</code> (ID: {operation_id})
-👤 <b>Профиль ID:</b> <code>{profile_id}</code>
-🌍 <b>Сервер:</b> <b>{server_name}</b> (ID: {server_id})
-⚠️ <b>Код ошибки:</b> <code>{error_code}</code>
-📝 <b>Ошибка:</b> <code>{error_message}</code>
-🔁 <b>Попыток:</b> {attempts}
-
-Операция исчерпала лимит попыток и переведена в статус DEAD."""
 
 ALERT_WHITE_INTERNET_ORIGIN_EXHAUSTED = """🚨 <b>Внимание: Нет доступных Origin-серверов!</b>
 

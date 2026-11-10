@@ -124,7 +124,7 @@ def get_admin_user_balance_keyboard(
     return builder.as_markup()
 
 
-def get_admin_awg_subscription_keyboard(
+def get_admin_subscription_keyboard(
     telegram_id: int,
     has_active_sub: bool,
     vless_sub_url: str | None = None,
@@ -175,7 +175,7 @@ def get_admin_awg_subscription_keyboard(
     return builder.as_markup()
 
 
-get_admin_subscription_keyboard = get_admin_awg_subscription_keyboard
+get_admin_awg_subscription_keyboard = get_admin_subscription_keyboard
 
 
 def get_admin_wi_subscription_keyboard(

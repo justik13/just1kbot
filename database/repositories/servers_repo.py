@@ -6,8 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from config.constants import (
-    AMNEZIA_PROTOCOL,
-    AMNEZIA_PROTOCOLS,
     VLESS_PROTOCOL,
     XRAY_ORIGIN_CAPABILITY,
     XRAY_PROTOCOL,
@@ -51,16 +49,9 @@ def is_white_internet_origin_server(server) -> bool:
         caps = []
     raw_proto = getattr(server, "protocol", None)
     proto = raw_proto.strip().lower() if isinstance(raw_proto, str) else ""
-    if proto in AMNEZIA_PROTOCOLS:
-        return False
     if XRAY_ORIGIN_CAPABILITY in caps:
         return True
     return proto == XRAY_PROTOCOL and not is_vless_capable_server(server)
-
-
-def is_awg_capable_server(server) -> bool:
-    """Legacy compatibility stub: AmneziaWG is fully decommissioned."""
-    return False
 
 
 def is_pure_vless_server(server) -> bool:
@@ -70,13 +61,7 @@ def is_pure_vless_server(server) -> bool:
 
 def get_server_xray_api_url(server) -> str | None:
     """Return explicit Xray API URL for the server."""
-    proto = str(getattr(server, "protocol", "") or "").lower()
-    caps = getattr(server, "capabilities", None) or []
     extra = getattr(server, "extra_data", None) if isinstance(getattr(server, "extra_data", None), dict) else {}
-
-    if proto in AMNEZIA_PROTOCOLS or "awg" in caps:
-        return extra.get("xray_api_url")
-
     return getattr(server, "api_url", None) or extra.get("xray_api_url")
 
 
@@ -197,9 +182,6 @@ def is_server_allocatable(server: Server | None, protocol: str = VLESS_PROTOCOL)
         ServerLifecycleStatus.ARCHIVED,
     ):
         return False
-    caps = getattr(server, "capabilities", None) or []
-    if protocol in AMNEZIA_PROTOCOLS and "xray_origin" in caps:
-        return False
     return True
 
 
@@ -208,14 +190,14 @@ async def get_available_servers(session: AsyncSession) -> list[Server]:
     if not servers:
         return []
 
-    # Filter servers for AWG allocation using canonical is_server_allocatable predicate
-    awg_servers = [s for s in servers if is_server_allocatable(s, AMNEZIA_PROTOCOL)]
-    if not awg_servers:
+    # Filter servers for VLESS allocation using canonical is_server_allocatable predicate
+    vless_servers = [s for s in servers if is_server_allocatable(s, VLESS_PROTOCOL)]
+    if not vless_servers:
         return []
 
     db_counts = await get_server_peer_counts(session)
     available: list[Server] = []
-    for server in awg_servers:
+    for server in vless_servers:
         cached_count = get_cached_peer_count(server.id)
         db_count = db_counts.get(server.id, 0)
         effective_count = max(cached_count, db_count) if cached_count is not None else db_count

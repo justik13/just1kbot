@@ -19,7 +19,6 @@ from config.enums import (
     WhiteInternetStatus,
 )
 from database.models import (
-    APIOperation,
     Server,
     WhiteInternetOrphanCleanup,
     WhiteInternetSubscription,
@@ -252,25 +251,11 @@ async def confirm_delete_server(
             pass
         return
 
-    # Phase 1: Deactivate server and cancel pending peer operations under Server lock.
+    # Phase 1: Deactivate server under Server lock.
     # Committing Phase 1 marks the server inactive immediately so create_device / migrate_device
     # cannot allocate it, and releases the Server lock to eliminate lock graph cycles.
     server.is_active = False
     server.lifecycle_status = ServerLifecycleStatus.DECOMMISSIONING
-    await session.execute(
-        update(APIOperation)
-        .where(
-            APIOperation.server_id == server.id,
-            APIOperation.status.in_(("pending", "retry", "processing")),
-        )
-        .values(
-            status="cancelled",
-            completed_at=now_utc(),
-            locked_at=None,
-            locked_by=None,
-            last_error_code="server_deleting",
-        )
-    )
     await session.commit()
 
     # Phase 2: Final server removal and cache invalidation.
