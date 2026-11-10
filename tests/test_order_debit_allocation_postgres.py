@@ -90,7 +90,7 @@ class OrderDebitAllocationPostgresTests(unittest.IsolatedAsyncioTestCase):
         self,
         session,
         *,
-        service_type="awg",
+        service_type="standard",
         amount=Decimal("0"),
         payment_method="wallet",
         status="paid",
@@ -158,7 +158,7 @@ class OrderDebitAllocationPostgresTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions.begin() as session:
             await self._seed_credits(session)
             purchase = await self._make_order(
-                session, service_type="awg", amount=Decimal("120")
+                session, service_type="standard", amount=Decimal("120")
             )
             order_id = purchase.id
             debit, created = await create_order_debit(
@@ -188,7 +188,7 @@ class OrderDebitAllocationPostgresTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions.begin() as session:
             await self._seed_credits(session)
             purchase = await self._make_order(
-                session, service_type="awg", amount=Decimal("120")
+                session, service_type="standard", amount=Decimal("120")
             )
             order_id = purchase.id
             debit, created = await create_order_debit(
@@ -230,7 +230,7 @@ class OrderDebitAllocationPostgresTests(unittest.IsolatedAsyncioTestCase):
                 session, real=Decimal("20"), bonus=Decimal("10")
             )
             purchase = await self._make_order(
-                session, service_type="awg", amount=Decimal("1000")
+                session, service_type="standard", amount=Decimal("1000")
             )
             order_id = purchase.id
 
@@ -298,7 +298,7 @@ class OrderDebitAllocationPostgresTests(unittest.IsolatedAsyncioTestCase):
         # 2. Spend 30 RUB (should consume bonus first)
         async with self.sessions.begin() as session:
             purchase = await self._make_order(
-                session, service_type="awg", amount=Decimal("30")
+                session, service_type="standard", amount=Decimal("30")
             )
             await create_order_debit(
                 session,

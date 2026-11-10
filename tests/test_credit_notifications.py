@@ -179,7 +179,7 @@ class TestCreditNotifySender(unittest.IsolatedAsyncioTestCase):
 
         bot = AsyncMock()
         session = AsyncMock(spec=AsyncSession)
-        order = _topup_order(service_type="awg", device_limit=2)
+        order = _topup_order(service_type="standard", device_limit=2)
         user = _user()
         snapshot = MagicMock(
             real_available=Decimal("100"), bonus_available=Decimal("0")
@@ -264,7 +264,7 @@ class TestCreditNotifyWorker(unittest.IsolatedAsyncioTestCase):
         order = Order(
             id=uuid.uuid4(),
             user_id=10,
-            service_type="awg",
+            service_type="standard",
             duration_days=30,
             amount_rub=Decimal("300.00"),
             status="paid",
@@ -543,7 +543,7 @@ class TestCreditNotifyWorker(unittest.IsolatedAsyncioTestCase):
         ) as mock_send:
             self.assertTrue(
                 await worker._send_late_push(
-                    AsyncMock(), "awg", fields, 123, 100, 0
+                    AsyncMock(), "standard", fields, 123, 100, 0
                 )
             )
             text = mock_send.await_args[0][2]
