@@ -14,7 +14,7 @@ Verifies 13 critical database, domain, cryptographic, and accounting invariants:
   8. Origin Node Capability & Existence Invariant
  10. Account Balance Non-Negativity Invariant
  11. Account Ledger Entry Conservation Invariant
- 13. VPN Profile Protocol Invariant (Exclusively AWG)
+ 13. VPN Server Protocol Invariant (Strictly VLESS/Xray)
  14. Origin Server Capacity Non-Breach Invariant
  15. Alembic Migration Single Head Invariant
 """
@@ -324,7 +324,10 @@ async def assert_inv_13_vpn_protocol(session: AsyncSession) -> InvariantResult:
     """Inv 13: All VPN servers strictly use VLESS or Xray protocol (AWG/wireguard strictly rejected)."""
     violations = await session.scalars(
         select(Server).where(
-            Server.protocol.notin_([VLESS_PROTOCOL, XRAY_PROTOCOL])
+            or_(
+                Server.protocol.is_(None),
+                Server.protocol.notin_([VLESS_PROTOCOL, XRAY_PROTOCOL]),
+            )
         )
     )
     v_list = violations.all()

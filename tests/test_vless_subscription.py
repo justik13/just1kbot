@@ -31,7 +31,6 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
         vless_web._token_rate_limiter.buckets.clear()
         vless_web._report_ip_limiter.buckets.clear()
         vless_web._report_token_limiter.buckets.clear()
-        vless_web._report_token_limiter.buckets.clear()
         from database.repositories import system_settings_repo
         system_settings_repo._SETTINGS_CACHE.clear()
 
@@ -69,7 +68,6 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
         vless_web._ip_rate_limiter.buckets.clear()
         vless_web._token_rate_limiter.buckets.clear()
         vless_web._report_ip_limiter.buckets.clear()
-        vless_web._report_token_limiter.buckets.clear()
         vless_web._report_token_limiter.buckets.clear()
         from database.repositories import system_settings_repo
         system_settings_repo._SETTINGS_CACHE.clear()
@@ -2425,7 +2423,6 @@ class TestVlessFeedDynamicBotUrls(AioHTTPTestCase):
         vless_web._ip_rate_limiter.buckets.clear()
         vless_web._token_rate_limiter.buckets.clear()
         vless_web._report_ip_limiter.buckets.clear()
-        vless_web._report_token_limiter.buckets.clear()
         vless_web._report_token_limiter.buckets.clear()
         from database.repositories import system_settings_repo
         system_settings_repo._SETTINGS_CACHE.clear()

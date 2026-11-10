@@ -252,7 +252,7 @@ async def _resolve_clean_tariff_name(
         if (
             user_tariff
             and getattr(user_tariff, "name", None)
-            and (getattr(user_tariff, "service_type", None) or "standard") in ("standard", "awg")
+            and (getattr(user_tariff, "service_type", None) or "standard") == "standard"
         ):
             tariff_name = user_tariff.name
     if not tariff_name:
@@ -512,7 +512,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             support_url = _resolve_support_url({}, default_bot_url)
             channel_url = _resolve_channel_url({}, default_bot_url)
             total_device_limit = await SubscriptionService.get_effective_device_limit(session, user)
-            total_active_devices, _awg_active, _vless_active = (
+            total_active_devices, _legacy_active, _vless_active = (
                 await VlessSubscriptionService.get_combined_quota(session, user)
             )
             limit_msg = texts.VLESS_FEED_DEVICE_LIMIT_NOTICE.format(
@@ -599,7 +599,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             )
 
         total_device_limit = await SubscriptionService.get_effective_device_limit(session, user)
-        total_active_devices, _awg_active, _vless_active = (
+        total_active_devices, _legacy_active, _vless_active = (
             await VlessSubscriptionService.get_combined_quota(session, user)
         )
 
@@ -814,7 +814,7 @@ async def vless_report_handler(request: web.Request) -> web.Response:
             user_info = f"ID: <code>{user.telegram_id}</code> ({user_tag})"
             dev_limit = await SubscriptionService.get_effective_device_limit(session, user)
             tariff_name = get_tariff_display_name(dev_limit)
-            total_active, _awg_active, _vless_active = await VlessSubscriptionService.get_combined_quota(session, user)
+            total_active, _legacy_active, _vless_active = await VlessSubscriptionService.get_combined_quota(session, user)
             devices_info = f"{total_active} / {dev_limit if dev_limit > 0 else '—'}"
             is_access_active = SubscriptionService.check_vpn_access(user)
             if getattr(user, "is_banned", False):

@@ -28,25 +28,43 @@ def upgrade() -> None:
     if "api_operations" in insp.get_table_names():
         op.drop_table("api_operations")
 
-    if bind.dialect.name == "postgresql":
-        op.execute("UPDATE orders SET service_type = 'standard' WHERE TRIM(service_type) = 'awg'")
-    op.drop_constraint("ck_orders_service_type", "orders", type_="check")
-    op.create_check_constraint(
-        "ck_orders_service_type",
-        "orders",
-        "service_type IN ('standard', 'white_internet', 'topup')",
+    op.execute(
+        "UPDATE orders SET service_type = 'standard' "
+        "WHERE LOWER(TRIM(service_type)) = 'awg'"
     )
+    if bind.dialect.name == "postgresql":
+        op.drop_constraint("ck_orders_service_type", "orders", type_="check")
+        op.create_check_constraint(
+            "ck_orders_service_type",
+            "orders",
+            "service_type IN ('standard', 'white_internet', 'topup')",
+        )
+    else:
+        with op.batch_alter_table("orders") as batch_op:
+            batch_op.drop_constraint("ck_orders_service_type", type_="check")
+            batch_op.create_check_constraint(
+                "ck_orders_service_type",
+                "service_type IN ('standard', 'white_internet', 'topup')",
+            )
 
 
 def downgrade() -> None:
-    op.drop_constraint("ck_orders_service_type", "orders", type_="check")
-    op.create_check_constraint(
-        "ck_orders_service_type",
-        "orders",
-        "service_type IN ('standard', 'white_internet', 'topup', 'awg')",
-    )
-
     bind = op.get_bind()
+    if bind.dialect.name == "postgresql":
+        op.drop_constraint("ck_orders_service_type", "orders", type_="check")
+        op.create_check_constraint(
+            "ck_orders_service_type",
+            "orders",
+            "service_type IN ('standard', 'white_internet', 'topup', 'awg')",
+        )
+    else:
+        with op.batch_alter_table("orders") as batch_op:
+            batch_op.drop_constraint("ck_orders_service_type", type_="check")
+            batch_op.create_check_constraint(
+                "ck_orders_service_type",
+                "service_type IN ('standard', 'white_internet', 'topup', 'awg')",
+            )
+
     insp = sa.inspect(bind)
     if "api_operations" not in insp.get_table_names():
         op.create_table(

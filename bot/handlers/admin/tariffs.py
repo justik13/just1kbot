@@ -76,7 +76,7 @@ async def _build_tariffs_list_text_and_kb(
             callback_data=next_cb,
         )
 
-    if service_type in ("standard", "awg"):
+    if service_type == "standard":
         back_text = texts.BTN_BACK
         back_cb = "admin_cat_std_sub"
     elif service_type == "white_internet":
