@@ -27,6 +27,9 @@ ALERT_SERVER_DISK_CRITICAL = """⚠️ <b>ВНИМАНИЕ: Диск серве�
 Использование диска: <b>{disk_percent:.1f}%</b>
 Рекомендуется очистить логи или расширить диск."""
 
+ALERT_SERVER_HOSTING_TRAFFIC_WARN = "⚠️ Сервер {server_name} израсходовал 80% лимита хостинга ({used_gb} / {limit_gb} ГБ)"
+ALERT_SERVER_HOSTING_TRAFFIC_CRITICAL = "🚨 Сервер {server_name} достиг 90% лимита хостинга ({used_gb} / {limit_gb} ГБ) и автоматически отключён в боте"
+
 ALERT_TITLE_CRITICAL_STOP = "Критическая остановка фоновых задач"
 
 ALERT_TITLE_WORKER_FAILED = "Фоновый воркер упал"

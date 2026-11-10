@@ -260,6 +260,22 @@ async def _show_server_card(
             host_traffic=format_traffic(host_bytes)
         )
 
+    hosting_limit_line = ""
+    hosting_limit_gb = server_extra.get("hosting_limit_gb")
+    if hosting_limit_gb is not None and int(hosting_limit_gb) > 0:
+        limit_gb = int(hosting_limit_gb)
+        limit_bytes = limit_gb * (1024 ** 3)
+        host_gb = host_bytes / (1024 ** 3)
+        pct = (host_bytes / limit_bytes * 100) if limit_bytes > 0 else 0.0
+        reset_day = int(server_extra.get("hosting_reset_day", 1) or 1)
+        hosting_limit_line = texts.ADMIN_SERVER_HOSTING_LIMIT_LINE.format(
+            host_gb=host_gb,
+            limit_gb=limit_gb,
+            pct=pct,
+            reset_day=reset_day,
+        )
+
+
     rendered = (
         f"{header}"
         + texts.COMMON_KARTOCHKA_VPN_SERVER_ID.format(
@@ -270,6 +286,7 @@ async def _show_server_card(
         + texts.COMMON_PROTOKOL.format(safe_server_protocol=safe(server.protocol))
         + texts.COMMON_ZAPOLNENNOST_SLOTOV.format(slots_text=slots_text)
         + texts.ADMIN_SERVER_MONTHLY_TRAFFIC.format(traffic_month=traffic_month)
+        + hosting_limit_line
         + texts.ADMIN_SERVER_API_URL.format(api_url=safe(server.api_url))
     )
 

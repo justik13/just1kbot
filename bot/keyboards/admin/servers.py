@@ -58,6 +58,11 @@ def get_admin_server_card_keyboard(
         text=texts.ADMIN_SERVER_BTN_CHANGE_KEY,
         callback_data=f"admin_server_edit_key:{server_id}",
     )
+    builder.button(
+        text=texts.ADMIN_SERVER_BTN_HOSTING_LIMIT,
+        callback_data=f"admin_server_hosting_limit:{server_id}",
+    )
+
 
     if is_active:
         status_text = texts.BTN_DISABLE_SERVER
@@ -79,9 +84,38 @@ def get_admin_server_card_keyboard(
     )
 
     if is_origin:
-        builder.adjust(1, 2, 2, 2, 2, 1, 2, 1)
+        builder.adjust(1, 2, 2, 2, 2, 2, 2, 1)
     else:
-        builder.adjust(1, 2, 2, 1, 2, 1)
+        builder.adjust(1, 2, 2, 2, 2, 1)
+    return builder.as_markup()
+
+
+def get_admin_server_hosting_limit_keyboard(
+    server_id: int,
+    has_limit: bool = False,
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=texts.ADMIN_SERVER_BTN_SET_HOSTING_LIMIT,
+        callback_data=f"admin_server_set_hosting_limit:{server_id}",
+    )
+    builder.button(
+        text=texts.ADMIN_SERVER_BTN_SET_HOSTING_RESET_DAY,
+        callback_data=f"admin_server_set_hosting_reset_day:{server_id}",
+    )
+    if has_limit:
+        builder.button(
+            text=texts.ADMIN_SERVER_BTN_REMOVE_HOSTING_LIMIT,
+            callback_data=f"admin_server_remove_hosting_limit:{server_id}",
+        )
+    builder.button(
+        text=texts.ADMIN_SERVER_BTN_BACK_TO_SERVER,
+        callback_data=f"admin_server_card:{server_id}",
+    )
+    if has_limit:
+        builder.adjust(1, 1, 1, 1)
+    else:
+        builder.adjust(1, 1, 1)
     return builder.as_markup()
 
 

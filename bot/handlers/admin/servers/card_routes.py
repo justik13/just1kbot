@@ -10,7 +10,7 @@ from config.constants import (
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, Message
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,6 +33,7 @@ from database.repositories.servers_repo import (
 from services.audit_service import AuditService
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
+from utils.datetime_helpers import now_utc
 from utils.telegram import safe
 from bot.formatters import get_server_protocol_badge
 
@@ -923,3 +924,250 @@ async def admin_server_migrate_confirm(
     server = await get_server_by_id(session, source_id)
     if server:
         await _show_server_card(callback, session, server)
+
+
+@router.callback_query(F.data.startswith("admin_server_hosting_limit:"))
+async def on_server_hosting_limit(callback: CallbackQuery, session: AsyncSession) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+    server_id = parse_callback_id(callback.data)
+    if not server_id:
+        await callback.answer(texts.ERROR_SERVER_NOT_FOUND, show_alert=True)
+        return
+    server = await get_server_by_id(session, server_id)
+    if not server:
+        await callback.answer(texts.ERROR_SERVER_NOT_FOUND, show_alert=True)
+        return
+
+    extra = dict(server.extra_data or {})
+    limit_gb = extra.get("hosting_limit_gb")
+    reset_day = extra.get("hosting_reset_day", 1)
+    has_limit = limit_gb is not None and int(limit_gb) > 0
+
+    current_cycle = now_utc().strftime("%Y-%m")
+    host_cycle = extra.get("host_traffic_cycle")
+    host_bytes = int(extra.get("host_monthly_traffic_bytes", 0) or 0) if host_cycle == current_cycle else 0
+    host_gb = host_bytes / (1024 ** 3)
+
+    if has_limit:
+        limit_text = texts.ADMIN_SERVER_HOSTING_GB_FMT.format(limit_gb=int(limit_gb))
+        pct = (host_bytes / (int(limit_gb) * (1024 ** 3)) * 100) if int(limit_gb) > 0 else 0.0
+        usage_text = texts.ADMIN_SERVER_HOSTING_USAGE_FMT.format(host_gb=host_gb, pct=pct)
+    else:
+        limit_text = texts.ADMIN_SERVER_HOSTING_LIMIT_NONE
+        usage_text = texts.ADMIN_SERVER_HOSTING_USAGE_NO_PCT_FMT.format(host_gb=host_gb)
+
+    reset_day_text = texts.ADMIN_SERVER_HOSTING_RESET_DAY_FMT.format(reset_day=reset_day)
+
+    flag = server.country_flag or texts.EMOJI_GLOBE
+
+    text = texts.ADMIN_SERVER_HOSTING_LIMIT_TITLE.format(
+        flag=flag,
+        server_name=safe(server.name),
+        limit_text=limit_text,
+        reset_day_text=reset_day_text,
+        usage_text=usage_text,
+    )
+    from bot.keyboards.admin.servers import get_admin_server_hosting_limit_keyboard
+    kb = get_admin_server_hosting_limit_keyboard(server.id, has_limit=has_limit)
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+
+
+@router.callback_query(F.data.startswith("admin_server_set_hosting_limit:"))
+async def on_set_hosting_limit_start(callback: CallbackQuery, state: FSMContext) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+    server_id = parse_callback_id(callback.data)
+    if not server_id:
+        await callback.answer(texts.ERROR_SERVER_NOT_FOUND, show_alert=True)
+        return
+    await state.update_data(server_id=server_id)
+    await state.set_state(AdminStates.editing_server_hosting_limit)
+    await callback.message.edit_text(
+        texts.ADMIN_SERVER_PROMPT_HOSTING_LIMIT,
+        reply_markup=get_back_button(f"admin_server_hosting_limit:{server_id}").as_markup(),
+        parse_mode="HTML",
+    )
+
+
+@router.message(AdminStates.editing_server_hosting_limit)
+async def on_set_hosting_limit_value(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    if not is_admin(message.from_user.id):
+        return
+    data = await state.get_data()
+    server_id = data.get("server_id")
+    if not server_id:
+        await state.clear()
+        return
+
+    text = (message.text or "").strip()
+    if not text.isdigit() or int(text) <= 0:
+        await message.answer(texts.ADMIN_SERVER_HOSTING_LIMIT_INVALID)
+        return
+
+    new_limit_gb = int(text)
+    server = await get_server_by_id(session, server_id, for_update=True)
+    if not server:
+        await message.answer(texts.ERROR_SERVER_NOT_FOUND)
+        await state.clear()
+        return
+
+    extra = dict(server.extra_data or {})
+    old_limit = extra.get("hosting_limit_gb")
+    extra["hosting_limit_gb"] = new_limit_gb
+    if "hosting_reset_day" not in extra:
+        extra["hosting_reset_day"] = 1
+    extra["hosting_alert_level"] = 0
+    await update_server(session, server, extra_data=extra)
+
+    await AuditService.log_action(
+        session=session,
+        admin_id=message.from_user.id,
+        action=AdminAuditAction.EDIT_SERVER,
+        target_type="server",
+        target_id=server.id,
+        details={"field": "hosting_limit_gb", "old": old_limit, "new": new_limit_gb},
+    )
+    await session.commit()
+    await state.clear()
+    reset_day = extra.get("hosting_reset_day", 1)
+    await message.answer(
+        texts.ADMIN_SERVER_HOSTING_LIMIT_SAVED.format(limit_gb=new_limit_gb, reset_day=reset_day)
+    )
+    from bot.keyboards.admin.servers import get_admin_server_hosting_limit_keyboard
+    kb = get_admin_server_hosting_limit_keyboard(server.id, has_limit=True)
+    flag = server.country_flag or texts.EMOJI_GLOBE
+    card_text = texts.ADMIN_SERVER_HOSTING_LIMIT_TITLE.format(
+        flag=flag,
+        server_name=safe(server.name),
+        limit_text=texts.ADMIN_SERVER_HOSTING_GB_FMT.format(limit_gb=new_limit_gb),
+        reset_day_text=texts.ADMIN_SERVER_HOSTING_RESET_DAY_FMT.format(reset_day=reset_day),
+        usage_text=texts.ADMIN_SERVER_HOSTING_USAGE_EMPTY,
+    )
+
+    await message.answer(card_text, reply_markup=kb, parse_mode="HTML")
+
+
+@router.callback_query(F.data.startswith("admin_server_set_hosting_reset_day:"))
+async def on_set_hosting_reset_day_start(callback: CallbackQuery, state: FSMContext) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+    server_id = parse_callback_id(callback.data)
+    if not server_id:
+        await callback.answer(texts.ERROR_SERVER_NOT_FOUND, show_alert=True)
+        return
+    await state.update_data(server_id=server_id)
+    await state.set_state(AdminStates.editing_server_hosting_reset_day)
+    await callback.message.edit_text(
+        texts.ADMIN_SERVER_PROMPT_HOSTING_RESET_DAY,
+        reply_markup=get_back_button(f"admin_server_hosting_limit:{server_id}").as_markup(),
+        parse_mode="HTML",
+    )
+
+
+@router.message(AdminStates.editing_server_hosting_reset_day)
+async def on_set_hosting_reset_day_value(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    if not is_admin(message.from_user.id):
+        return
+    data = await state.get_data()
+    server_id = data.get("server_id")
+    if not server_id:
+        await state.clear()
+        return
+
+    text = (message.text or "").strip()
+    if not text.isdigit() or not (1 <= int(text) <= 31):
+        await message.answer(texts.ADMIN_SERVER_HOSTING_RESET_DAY_INVALID)
+        return
+
+    new_reset_day = int(text)
+    server = await get_server_by_id(session, server_id, for_update=True)
+    if not server:
+        await message.answer(texts.ERROR_SERVER_NOT_FOUND)
+        await state.clear()
+        return
+
+    extra = dict(server.extra_data or {})
+    old_day = extra.get("hosting_reset_day", 1)
+    extra["hosting_reset_day"] = new_reset_day
+    await update_server(session, server, extra_data=extra)
+
+    await AuditService.log_action(
+        session=session,
+        admin_id=message.from_user.id,
+        action=AdminAuditAction.EDIT_SERVER,
+        target_type="server",
+        target_id=server.id,
+        details={"field": "hosting_reset_day", "old": old_day, "new": new_reset_day},
+    )
+    await session.commit()
+    await state.clear()
+    await message.answer(
+        texts.ADMIN_SERVER_HOSTING_RESET_DAY_SAVED.format(reset_day=new_reset_day)
+    )
+    has_limit = extra.get("hosting_limit_gb") is not None and int(extra.get("hosting_limit_gb") or 0) > 0
+    from bot.keyboards.admin.servers import get_admin_server_hosting_limit_keyboard
+    kb = get_admin_server_hosting_limit_keyboard(server.id, has_limit=has_limit)
+    flag = server.country_flag or texts.EMOJI_GLOBE
+    limit_text = (
+        texts.ADMIN_SERVER_HOSTING_GB_FMT.format(limit_gb=int(extra.get("hosting_limit_gb")))
+        if has_limit
+        else texts.ADMIN_SERVER_HOSTING_LIMIT_NONE
+    )
+    card_text = texts.ADMIN_SERVER_HOSTING_LIMIT_TITLE.format(
+        flag=flag,
+        server_name=safe(server.name),
+        limit_text=limit_text,
+        reset_day_text=texts.ADMIN_SERVER_HOSTING_RESET_DAY_FMT.format(reset_day=new_reset_day),
+        usage_text=texts.ADMIN_SERVER_HOSTING_USAGE_EMPTY,
+    )
+    await message.answer(card_text, reply_markup=kb, parse_mode="HTML")
+
+
+@router.callback_query(F.data.startswith("admin_server_remove_hosting_limit:"))
+async def on_remove_hosting_limit(callback: CallbackQuery, session: AsyncSession) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+    server_id = parse_callback_id(callback.data)
+    if not server_id:
+        await callback.answer(texts.ERROR_SERVER_NOT_FOUND, show_alert=True)
+        return
+    server = await get_server_by_id(session, server_id, for_update=True)
+    if not server:
+        await callback.answer(texts.ERROR_SERVER_NOT_FOUND, show_alert=True)
+        return
+
+    extra = dict(server.extra_data or {})
+    old_limit = extra.pop("hosting_limit_gb", None)
+    extra.pop("hosting_alert_level", None)
+    extra.pop("hosting_alert_cycle", None)
+    await update_server(session, server, extra_data=extra)
+
+    await AuditService.log_action(
+        session=session,
+        admin_id=callback.from_user.id,
+        action=AdminAuditAction.EDIT_SERVER,
+        target_type="server",
+        target_id=server.id,
+        details={"field": "hosting_limit_gb", "old": old_limit, "new": None},
+    )
+    await session.commit()
+    await callback.answer(texts.ADMIN_SERVER_HOSTING_LIMIT_REMOVED, show_alert=True)
+
+    from bot.keyboards.admin.servers import get_admin_server_hosting_limit_keyboard
+    kb = get_admin_server_hosting_limit_keyboard(server.id, has_limit=False)
+    flag = server.country_flag or texts.EMOJI_GLOBE
+    reset_day = extra.get("hosting_reset_day", 1)
+    text = texts.ADMIN_SERVER_HOSTING_LIMIT_TITLE.format(
+        flag=flag,
+        server_name=safe(server.name),
+        limit_text=texts.ADMIN_SERVER_HOSTING_LIMIT_NONE,
+        reset_day_text=texts.ADMIN_SERVER_HOSTING_RESET_DAY_FMT.format(reset_day=reset_day),
+        usage_text=texts.ADMIN_SERVER_HOSTING_USAGE_EMPTY,
+    )
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+

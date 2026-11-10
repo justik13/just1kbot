@@ -418,8 +418,11 @@ class TestRelaysHealthAndNodeLimits(unittest.IsolatedAsyncioTestCase):
         self.assertIn("admin_server_ping:2", rows_vless[1][0].callback_data)
         # Row 3: Flag + URL (2 buttons)
         self.assertEqual(len(rows_vless[2]), 2)
-        # Row 4: Key (1 button)
-        self.assertEqual(len(rows_vless[3]), 1)
+        # Row 4: Key + Hosting Limit (2 buttons)
+        self.assertEqual(len(rows_vless[3]), 2)
+        self.assertIn("admin_server_edit_key:2", rows_vless[3][0].callback_data)
+        self.assertIn("admin_server_hosting_limit:2", rows_vless[3][1].callback_data)
+
         # Row 5: Toggle + Delete (2 buttons)
         self.assertEqual(len(rows_vless[4]), 2)
         # Row 6: Back to servers (1 button)

@@ -586,6 +586,118 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("Напоминание: Связь отсутствует", sent_text)
                 self.assertIn("Disabled-Remind-Node", sent_text)
 
+    async def test_hosting_traffic_warning_alert_at_80_percent(self):
+        """Host monthly traffic reaching 80% sends warning alert without disabling server and deduplicates."""
+        limit_gb = 3000
+        used_bytes = int(2400 * (1024 ** 3))
+        server = self._make_server(
+            301,
+            "Frankfurt-1",
+            extra_data={
+                "hosting_limit_gb": limit_gb,
+                "host_monthly_traffic_bytes": used_bytes,
+                "hosting_reset_day": 1,
+            },
+        )
+
+        async def fake_update_server(session, db_srv, **kwargs):
+            for k, v in kwargs.items():
+                setattr(db_srv, k, v)
+            return db_srv
+
+        with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
+             patch("services.workers.node_monitor.get_server_by_id", return_value=server), \
+             patch("services.workers.node_monitor.update_server", side_effect=fake_update_server):
+
+            self.mock_xray_client.check_health.return_value = (True, "epoch-1", {})
+
+            # 1. First tick -> sends 80% warning
+            await check_node_resources_and_alerts(self.mock_bot)
+            self.assertEqual(self.mock_bot.send_message.call_count, 1)
+            sent_text = self.mock_bot.send_message.call_args[1]["text"]
+            self.assertIn("80%", sent_text)
+            self.assertIn("2400 / 3000 ГБ", sent_text)
+            self.assertTrue(server.is_active)
+            self.assertEqual(server.extra_data.get("hosting_alert_level"), 80)
+
+            # 2. Second tick same month -> deduplicated, no new alert
+            self.mock_bot.send_message.reset_mock()
+            await check_node_resources_and_alerts(self.mock_bot)
+            self.mock_bot.send_message.assert_not_called()
+
+    async def test_hosting_traffic_critical_alert_and_auto_disable_at_90_percent(self):
+        """Host monthly traffic reaching 90% auto-disables server and sends critical alert."""
+        limit_gb = 3000
+        used_bytes = int(2700 * (1024 ** 3))
+        server = self._make_server(
+            302,
+            "Amsterdam-1",
+            extra_data={
+                "hosting_limit_gb": limit_gb,
+                "host_monthly_traffic_bytes": used_bytes,
+                "hosting_reset_day": 1,
+                "hosting_alert_level": 80,  # Previously warned at 80%
+            },
+        )
+
+        async def fake_update_server(session, db_srv, **kwargs):
+            for k, v in kwargs.items():
+                setattr(db_srv, k, v)
+            return db_srv
+
+        with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
+             patch("services.workers.node_monitor.get_server_by_id", return_value=server), \
+             patch("services.workers.node_monitor.update_server", side_effect=fake_update_server):
+
+            self.mock_xray_client.check_health.return_value = (True, "epoch-1", {})
+
+            # First tick -> hits 90% -> auto-disables server & sends critical alert
+            await check_node_resources_and_alerts(self.mock_bot)
+            self.assertEqual(self.mock_bot.send_message.call_count, 1)
+            sent_text = self.mock_bot.send_message.call_args[1]["text"]
+            self.assertIn("90%", sent_text)
+            self.assertIn("2700 / 3000 ГБ", sent_text)
+            self.assertIn("автоматически отключён в боте", sent_text)
+            self.assertFalse(server.is_active)
+            self.assertEqual(server.extra_data.get("hosting_alert_level"), 90)
+
+            # Second tick -> deduplicated, no repeated alert
+            self.mock_bot.send_message.reset_mock()
+            await check_node_resources_and_alerts(self.mock_bot)
+            self.mock_bot.send_message.assert_not_called()
+
+    async def test_hosting_traffic_cycle_rollover_resets_alert_level(self):
+        """New month cycle resets hosting_alert_level, allowing alerts to trigger again."""
+        limit_gb = 1000
+        used_bytes = int(850 * (1024 ** 3))
+        server = self._make_server(
+            303,
+            "Warsaw-1",
+            extra_data={
+                "hosting_limit_gb": limit_gb,
+                "host_monthly_traffic_bytes": used_bytes,
+                "hosting_alert_level": 80,
+                "hosting_alert_cycle": "2026-10",  # Previous month
+            },
+        )
+
+        async def fake_update_server(session, db_srv, **kwargs):
+            for k, v in kwargs.items():
+                setattr(db_srv, k, v)
+            return db_srv
+
+        with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
+             patch("services.workers.node_monitor.get_server_by_id", return_value=server), \
+             patch("services.workers.node_monitor.update_server", side_effect=fake_update_server):
+
+            self.mock_xray_client.check_health.return_value = (True, "epoch-1", {})
+
+            # In current cycle (now_utc() != 2026-10), alert resets and sends alert for the new cycle
+            await check_node_resources_and_alerts(self.mock_bot)
+            self.assertEqual(self.mock_bot.send_message.call_count, 1)
+            self.assertEqual(server.extra_data.get("hosting_alert_level"), 80)
+            self.assertNotEqual(server.extra_data.get("hosting_alert_cycle"), "2026-10")
+
 
 if __name__ == "__main__":
     unittest.main()
