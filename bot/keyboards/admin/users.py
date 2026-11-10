@@ -175,9 +175,6 @@ def get_admin_subscription_keyboard(
     return builder.as_markup()
 
 
-get_admin_awg_subscription_keyboard = get_admin_subscription_keyboard
-
-
 def get_admin_wi_subscription_keyboard(
     telegram_id: int,
     has_wi_sub: bool = False,

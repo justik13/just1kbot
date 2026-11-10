@@ -107,9 +107,6 @@ class DBRepositoriesFullCoverageTests(unittest.IsolatedAsyncioTestCase):
             active = await servers_repo.get_active_servers(session)
             self.assertIn(s.id, [x.id for x in active])
 
-            avail = await servers_repo.get_available_servers(session)
-            self.assertIn(s.id, [x.id for x in avail])
-
             upd = await servers_repo.update_server(session, s, max_clients=20)
             self.assertEqual(upd.max_clients, 20)
 

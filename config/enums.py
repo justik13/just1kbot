@@ -145,7 +145,6 @@ class AdminAuditAction(StrEnum):
 class ServiceType(StrEnum):
     STANDARD = "standard"
     WHITE_INTERNET = "white_internet"
-    AWG = "awg"
 
 
 class WhiteInternetStatus(StrEnum):
@@ -181,7 +180,6 @@ class OrderServiceType(StrEnum):
     STANDARD = "standard"
     WHITE_INTERNET = "white_internet"
     TOPUP = "topup"
-    AWG = "awg"
 
 
 __all__ = [

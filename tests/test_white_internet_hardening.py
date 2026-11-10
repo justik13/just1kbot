@@ -68,8 +68,9 @@ class TestGroupAEnumsAndConstantsSSOT(unittest.TestCase):
         self.assertEqual(len(ServerLifecycleStatus), 4)
 
     def test_service_type_enum_members(self):
-        self.assertEqual(ServiceType.AWG, "awg")
+        self.assertEqual(ServiceType.STANDARD, "standard")
         self.assertEqual(ServiceType.WHITE_INTERNET, "white_internet")
+        self.assertNotIn("awg", [s.value for s in ServiceType])
 
     def test_white_internet_status_enum_members(self):
         expected = {"PENDING", "ACTIVE", "EXHAUSTED", "EXPIRED", "DISABLED"}

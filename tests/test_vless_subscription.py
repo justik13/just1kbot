@@ -58,8 +58,8 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             country_flag="🇳🇱",
             is_active=True,
             health_state=ServerHealthState.ONLINE,
-            protocol="awg",
-            capabilities=["awg", "vless"],
+            protocol="vless",
+            capabilities=["vless"],
             api_url="https://nl.example.com:8443",
             extra_data={"domain": "nl.example.com", "vless_port": 443},
         )
@@ -906,7 +906,7 @@ class TestVlessSubscriptionWebFeed(AioHTTPTestCase):
             routing_json = json.loads(base64.b64decode(b64_routing).decode("utf-8"))
             self.assertEqual(routing_json.get("Name"), "✦ Just1k")
             self.assertIs(routing_json.get("useChunkFiles"), True)
-            self.assertEqual(routing_json.get("LastUpdated"), "1793420000")
+            self.assertEqual(routing_json.get("LastUpdated"), "1793500000")
             self.assertEqual(routing_json.get("DomesticDNSType"), "DoH")
             self.assertEqual(routing_json.get("DomesticDNSDomain"), "https://common.dot.dns.yandex.net/dns-query")
             self.assertEqual(routing_json.get("DomesticDNSIP"), "77.88.8.8")
@@ -1994,7 +1994,7 @@ class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
         std_json = json.loads(base64.b64decode(std_header.removeprefix("incy://routing/onadd/")).decode("utf-8"))
         self.assertEqual(std_json.get("Name"), "✦ Just1k")
         self.assertIs(std_json.get("useChunkFiles"), True)
-        self.assertEqual(std_json.get("LastUpdated"), "1793420000")
+        self.assertEqual(std_json.get("LastUpdated"), "1793500000")
         self.assertEqual(std_json.get("DomesticDNSType"), "DoH")
         self.assertEqual(std_json.get("DomesticDNSDomain"), "https://common.dot.dns.yandex.net/dns-query")
         self.assertEqual(std_json.get("DomesticDNSIP"), "77.88.8.8")
@@ -2017,7 +2017,7 @@ class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
         wl_json = json.loads(base64.b64decode(wl_header.removeprefix("happ://routing/onadd/")).decode("utf-8"))
         self.assertEqual(wl_json.get("Name"), "✦ Just1k WL")
         self.assertIs(wl_json.get("useChunkFiles"), True)
-        self.assertEqual(wl_json.get("LastUpdated"), "1793420000")
+        self.assertEqual(wl_json.get("LastUpdated"), "1793500000")
         self.assertEqual(wl_json.get("DomesticDNSType"), "DoH")
         self.assertEqual(wl_json.get("DomesticDNSDomain"), "https://common.dot.dns.yandex.net/dns-query")
         self.assertEqual(wl_json.get("DomesticDNSIP"), "77.88.8.8")
@@ -2038,7 +2038,7 @@ class TestVlessSubscriptionService(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(edge_header.startswith("incy://routing/onadd/"))
         edge_json = json.loads(base64.b64decode(edge_header.removeprefix("incy://routing/onadd/")).decode("utf-8"))
         self.assertEqual(edge_json.get("Name"), "✦ Just1k WL")
-        self.assertEqual(edge_json.get("LastUpdated"), "1793420000")
+        self.assertEqual(edge_json.get("LastUpdated"), "1793500000")
         self.assertNotIn("Geoipurl", edge_json)
         self.assertNotIn("Geositeurl", edge_json)
 
@@ -2350,25 +2350,7 @@ class TestVlessSubscriptionDomainAndBotResolution(unittest.TestCase):
         self.assertEqual(len(links), 1)
         self.assertIn("@nl.just1k.pro:443", links[0])
 
-    def test_extract_node_targets_prefers_server_api_url_for_vless(self):
-        server = Server(
-            id=12,
-            name="Нидерланды",
-            country_flag="🇳🇱",
-            is_active=True,
-            protocol="vless",
-            api_key="secret-key-123",
-            api_url="https://nl.just1k.pro:8444",
-            extra_data={"xray_api_url": "https://nl.just1k.best:8444"},
-        )
-        targets = VlessSubscriptionService._extract_node_targets([server])
-        self.assertEqual(len(targets), 1)
-        srv_id, api_url, api_key = targets[0]
-        self.assertEqual(srv_id, 12)
-        self.assertEqual(api_url, "https://nl.just1k.pro:8444")
-        self.assertEqual(api_key, "secret-key-123")
-
-    def test_extract_node_targets_falls_back_to_xray_api_url_when_api_url_empty(self):
+    def test_extract_node_targets_prefers_explicit_xray_api_url(self):
         server = Server(
             id=6,
             name="Польша",
@@ -2377,7 +2359,7 @@ class TestVlessSubscriptionDomainAndBotResolution(unittest.TestCase):
             protocol="vless",
             capabilities=["vless"],
             api_key="secret-key-456",
-            api_url="",
+            api_url="https://pl.just1k.pro:8443",
             extra_data={"xray_api_url": "https://pl.just1k.pro:8444"},
         )
         targets = VlessSubscriptionService._extract_node_targets([server])
@@ -2386,6 +2368,24 @@ class TestVlessSubscriptionDomainAndBotResolution(unittest.TestCase):
         self.assertEqual(srv_id, 6)
         self.assertEqual(api_url, "https://pl.just1k.pro:8444")
         self.assertEqual(api_key, "secret-key-456")
+
+    def test_extract_node_targets_falls_back_to_server_api_url_when_xray_api_url_absent(self):
+        server = Server(
+            id=12,
+            name="Нидерланды",
+            country_flag="🇳🇱",
+            is_active=True,
+            protocol="vless",
+            api_key="secret-key-123",
+            api_url="https://nl.just1k.pro:8444",
+            extra_data={"vless_port": 443},
+        )
+        targets = VlessSubscriptionService._extract_node_targets([server])
+        self.assertEqual(len(targets), 1)
+        srv_id, api_url, api_key = targets[0]
+        self.assertEqual(srv_id, 12)
+        self.assertEqual(api_url, "https://nl.just1k.pro:8444")
+        self.assertEqual(api_key, "secret-key-123")
 
     def test_extract_node_targets_skips_server_without_any_api_url(self):
         server = Server(

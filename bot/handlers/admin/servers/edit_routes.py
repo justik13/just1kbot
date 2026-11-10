@@ -549,9 +549,6 @@ async def process_edit_server_url(
             await state.clear()
             return
 
-        profiles_count = 0
-        active_ops_count = 0
-
         wl_subs_count = (
             await session.scalar(
                 select(func.count(WhiteInternetSubscription.id)).where(
@@ -565,13 +562,13 @@ async def process_edit_server_url(
             )
         ) or 0
 
-        if profiles_count > 0 or wl_subs_count > 0:
+        if wl_subs_count > 0:
             await render_hub(
                 message.bot,
                 message.chat.id,
                 texts.ADMIN_SERVER_EDIT_URL_BLOCKED.format(
-                    devices_count=profiles_count + wl_subs_count,
-                    operations_count=active_ops_count,
+                    devices_count=wl_subs_count,
+                    operations_count=0,
                 ),
                 get_back_button(f"admin_server_card:{server_id}"),
                 parse_mode="HTML",
@@ -803,9 +800,6 @@ async def process_edit_server_key(
             )
             await state.clear()
             return
-        profiles_count = 0
-        active_ops_count = 0
-
         wl_subs_count = (
             await session.scalar(
                 select(func.count(WhiteInternetSubscription.id)).where(
@@ -819,13 +813,13 @@ async def process_edit_server_key(
             )
         ) or 0
 
-        if profiles_count > 0 or wl_subs_count > 0:
+        if wl_subs_count > 0:
             await render_hub(
                 message.bot,
                 message.chat.id,
                 texts.ADMIN_SERVER_EDIT_KEY_BLOCKED.format(
-                    devices_count=profiles_count + wl_subs_count,
-                    operations_count=active_ops_count,
+                    devices_count=wl_subs_count,
+                    operations_count=0,
                 ),
                 get_back_button(f"admin_server_card:{server_id}"),
                 parse_mode="HTML",
@@ -971,7 +965,6 @@ async def process_edit_server_max_clients(
         )
         return
 
-    profiles_count = 0
     wl_count = await session.scalar(
         select(func.count(WhiteInternetSubscription.id)).where(
             WhiteInternetSubscription.origin_node_id == server_id,
@@ -982,7 +975,7 @@ async def process_edit_server_max_clients(
             ]),
         )
     ) or 0
-    current_used = max(profiles_count, wl_count)
+    current_used = wl_count
 
     if current_used > new_value:
         warning = texts.ADMIN_SERVER_MAX_CLIENTS_WARNING.format(

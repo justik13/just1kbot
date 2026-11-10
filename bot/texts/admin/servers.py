@@ -94,8 +94,7 @@ ADMIN_SERVER_DELETE_BLOCKED_ACTIVE_WL_TEXT = """❌ <b>Удаление серв
 
 ADMIN_SERVER_DELETE_CONFIRM = """⚠️ <b>Удаление сервера</b>
 
-Вы уверены, что хотите удалить сервер {flag} <b>{name}</b>?
-📱 Активных устройств на сервере: <b>{profiles_count}</b>"""
+Вы уверены, что хотите удалить сервер {flag} <b>{name}</b>?"""
 
 ADMIN_SERVER_DELETE_WL_SUBS_NOTE = "\n\n🌐 <i>К серверу также привязано подписок Белый Интернет: {count}</i>"
 

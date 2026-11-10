@@ -118,8 +118,9 @@ class DomainEnumsSSOTTests(unittest.TestCase):
         self.assertEqual(config.enums.PaymentProviderStatus.CANCELED, "canceled")
         self.assertEqual(config.enums.PaymentProviderStatus("canceled"), config.enums.PaymentProviderStatus.CANCELED)
 
-        # OrderServiceType.AWG preserved as read-only enum item for DB constraint compatibility
-        self.assertEqual(config.enums.OrderServiceType.AWG, "awg")
+        # AWG fully decommissioned from domain enums
+        self.assertNotIn("awg", [s.value for s in config.enums.OrderServiceType])
+        self.assertNotIn("awg", [s.value for s in config.enums.ServiceType])
 
     def test_default_tariffs_seeds_ssot_layering(self):
         """DEFAULT_TARIFFS_SEEDS must live strictly in config.tariffs and NOT in bot.texts."""

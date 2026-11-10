@@ -12,7 +12,6 @@ from config.constants import (
 )
 from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.models import Server
-from services.slots_cache import get_cached_peer_count
 
 CAPACITY_CONSUMING_STATUSES = (
     "pending_create",
@@ -62,7 +61,7 @@ def is_pure_vless_server(server) -> bool:
 def get_server_xray_api_url(server) -> str | None:
     """Return explicit Xray API URL for the server."""
     extra = getattr(server, "extra_data", None) if isinstance(getattr(server, "extra_data", None), dict) else {}
-    return getattr(server, "api_url", None) or extra.get("xray_api_url")
+    return extra.get("xray_api_url") or getattr(server, "api_url", None)
 
 
 class ServerUpdateFields(TypedDict, total=False):
@@ -183,27 +182,6 @@ def is_server_allocatable(server: Server | None, protocol: str = VLESS_PROTOCOL)
     ):
         return False
     return True
-
-
-async def get_available_servers(session: AsyncSession) -> list[Server]:
-    servers = await get_active_servers(session)
-    if not servers:
-        return []
-
-    # Filter servers for VLESS allocation using canonical is_server_allocatable predicate
-    vless_servers = [s for s in servers if is_server_allocatable(s, VLESS_PROTOCOL)]
-    if not vless_servers:
-        return []
-
-    db_counts = await get_server_peer_counts(session)
-    available: list[Server] = []
-    for server in vless_servers:
-        cached_count = get_cached_peer_count(server.id)
-        db_count = db_counts.get(server.id, 0)
-        effective_count = max(cached_count, db_count) if cached_count is not None else db_count
-        if effective_count < server.max_clients:
-            available.append(server)
-    return available
 
 
 async def allocate_origin_server_atomic(session: AsyncSession) -> Server | None:

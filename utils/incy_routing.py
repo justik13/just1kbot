@@ -12,7 +12,7 @@ from config.constants import (
 
 # Fixed version timestamp used to detect routing profile changes in INCY/Happ clients.
 # Bump this timestamp when routing rules or DNS parameters change so clients pull updated rules.
-ROUTING_PROFILE_VERSION_TIMESTAMP = "1793420000"
+ROUTING_PROFILE_VERSION_TIMESTAMP = "1793500000"
 
 
 def generate_incy_routing_header(

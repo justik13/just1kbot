@@ -9,7 +9,6 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.keyboards import get_back_button
 from bot.keyboards.admin.servers import get_server_delete_confirm_keyboard
 from bot.states import AdminStates
 from config.enums import (
@@ -37,22 +36,6 @@ from .common import _show_servers_list
 
 router = Router()
 logger = logging.getLogger(__name__)
-
-def _has_unfinished_create_cleanup(profiles, operations) -> bool:
-    cleanup_profile_ids = {
-        profile.id for profile in profiles
-        if profile.provisioning_status == "create_cleanup_pending"
-    }
-    unsafe_create = any(
-        op.operation_type == "create_peer" and op.status != "succeeded"
-        and (op.profile_id in cleanup_profile_ids or op.peer_id is not None)
-        and not (op.status == "cancelled" and op.profile_id is None
-                 and op.peer_id is None and op.last_error_code not in {
-                    "create_ambiguous_reconcile", "invalid_created_config_cleanup",
-                    "create_compensation_required", "cleanup_peer_identity_mismatch"})
-        for op in operations
-    )
-    return bool(cleanup_profile_ids) or unsafe_create
 
 
 @router.callback_query(F.data.startswith("admin_server_delete:"))
@@ -88,8 +71,6 @@ async def request_delete_server(
         )
         return
 
-    profiles_count = 0
-
     wl_subs_count = await session.scalar(
         select(func.count(WhiteInternetSubscription.id)).where(
             WhiteInternetSubscription.origin_node_id == server.id,
@@ -113,7 +94,6 @@ async def request_delete_server(
     confirm_msg = texts.ADMIN_SERVER_DELETE_CONFIRM.format(
         flag=flag,
         name=server_display_name,
-        profiles_count=profiles_count,
     )
     if wl_subs_count > 0:
         confirm_msg += texts.ADMIN_SERVER_DELETE_WL_SUBS_NOTE.format(count=wl_subs_count)
@@ -179,11 +159,6 @@ async def confirm_delete_server(
 
     server_name = server.name
 
-    profiles = []
-    deleted_profiles = 0
-    operations = []
-    processing_update = False
-
     active_wl_subs = list((await session.execute(
         select(WhiteInternetSubscription).where(
             WhiteInternetSubscription.origin_node_id == server.id,
@@ -235,22 +210,6 @@ async def confirm_delete_server(
             pass
         return
 
-    if _has_unfinished_create_cleanup(profiles, operations) or processing_update:
-        await session.rollback()
-        await callback.answer(
-            texts.ADMIN_SERVER_DELETE_BLOCKED_PENDING_CLIENT,
-            show_alert=True,
-        )
-        try:
-            await callback.message.edit_text(
-                texts.ADMIN_SERVER_DELETE_BLOCKED_PENDING,
-                reply_markup=get_back_button(f"admin_server_card:{server.id}"),
-                parse_mode="HTML",
-            )
-        except TelegramBadRequest:
-            pass
-        return
-
     # Phase 1: Deactivate server under Server lock.
     # Committing Phase 1 marks the server inactive immediately so create_device / migrate_device
     # cannot allocate it, and releases the Server lock to eliminate lock graph cycles.
@@ -289,17 +248,17 @@ async def confirm_delete_server(
         AdminAuditAction.DELETE_SERVER,
         "Server",
         server_id,
-        texts.ADMIN_AUDIT_LOG_DETAILS_DELETE_SERVER.format(server_name=server_name, count=deleted_profiles),
+        texts.ADMIN_AUDIT_LOG_DETAILS_DELETE_SERVER.format(server_name=server_name, count=0),
     )
 
     await callback.answer(
-        texts.ADMIN_SERVER_DELETE_SUCCESS_NOTICE.format(v0=server_name, v1=deleted_profiles),
+        texts.ADMIN_SERVER_DELETE_SUCCESS_NOTICE.format(v0=server_name, v1=0),
         show_alert=True,
     )
 
     logger.info(
         f"Admin {callback.from_user.id} fully deleted server {server_id} "
-        f"({server_name}) with {deleted_profiles} profiles"
+        f"({server_name})"
     )
 
     await _show_servers_list(callback, session, page=1)

@@ -198,11 +198,11 @@ class TestTelegramBotApi103KeyboardAudit(unittest.IsolatedAsyncioTestCase):
         )
         from bot.keyboards.admin.tariffs import get_admin_tariff_card_keyboard
         from bot.keyboards.admin.users import (
-            get_admin_awg_subscription_keyboard,
             get_admin_ban_reasons_keyboard,
             get_admin_confirm_action_keyboard,
             get_admin_extend_days_new_keyboard,
             get_admin_grant_days_keyboard,
+            get_admin_subscription_keyboard,
             get_admin_user_balance_keyboard,
             get_admin_user_card_keyboard,
             get_admin_user_devices_keyboard,
@@ -253,10 +253,10 @@ class TestTelegramBotApi103KeyboardAudit(unittest.IsolatedAsyncioTestCase):
             get_referral_leaderboard_keyboard(),
             get_referrals_list_keyboard(1, 1),
             # Admin user keyboards (testing normal, AWG key, empty sub_urls)
-            get_admin_awg_subscription_keyboard(12345, True, vless_sub_url="https://sub.url"),
-            get_admin_awg_subscription_keyboard(12345, True, vless_sub_url=awg_key),
-            get_admin_awg_subscription_keyboard(12345, True, vless_sub_url=""),
-            get_admin_awg_subscription_keyboard(12345, False),
+            get_admin_subscription_keyboard(12345, True, vless_sub_url="https://sub.url"),
+            get_admin_subscription_keyboard(12345, True, vless_sub_url=awg_key),
+            get_admin_subscription_keyboard(12345, True, vless_sub_url=""),
+            get_admin_subscription_keyboard(12345, False),
             get_admin_wi_subscription_keyboard(12345, True, True, False, sub_url="https://sub.url"),
             get_admin_wi_subscription_keyboard(12345, True, True, False, sub_url=awg_key),
             get_admin_wi_subscription_keyboard(12345, True, True, False, sub_url=""),
