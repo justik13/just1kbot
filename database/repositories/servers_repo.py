@@ -13,17 +13,6 @@ from config.constants import (
 from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.models import Server
 
-CAPACITY_CONSUMING_STATUSES = (
-    "pending_create",
-    "active",
-    "pending_update",
-    "update_failed",
-    "deleting",
-    "delete_failed",
-    "create_cleanup_pending",
-)
-
-
 def is_vless_capable_server(server) -> bool:
     """Whether a server can serve direct VLESS TLS clients.
 
@@ -155,33 +144,6 @@ async def get_server_peer_counts(session: AsyncSession) -> dict[int, int]:
         .group_by(WhiteInternetSubscription.origin_node_id)
     )
     return {row[0]: row[1] for row in wl_result.all()}
-
-
-def is_server_allocatable(server: Server | None, protocol: str = VLESS_PROTOCOL) -> bool:
-    """Return True if server is valid, active, matching protocol, and healthy for allocation/migration."""
-    if not server:
-        return False
-    caps = getattr(server, "capabilities", None) or []
-    server_proto = getattr(server, "protocol", None)
-    if server_proto is not None:
-        if server_proto != protocol and protocol not in caps:
-            return False
-    if getattr(server, "is_active", True) is False:
-        return False
-    health = getattr(server, "health_state", None)
-    if health in (
-        ServerHealthState.MANUAL_DISABLED,
-        ServerHealthState.PROBLEM,
-    ):
-        return False
-    lifecycle = getattr(server, "lifecycle_status", None)
-    if lifecycle in (
-        ServerLifecycleStatus.DECOMMISSIONING,
-        ServerLifecycleStatus.DECOMMISSIONED,
-        ServerLifecycleStatus.ARCHIVED,
-    ):
-        return False
-    return True
 
 
 async def allocate_origin_server_atomic(session: AsyncSession) -> Server | None:

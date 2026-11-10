@@ -84,7 +84,7 @@ async def admin_sub_reduce_start(
         await callback.message.edit_text(
             text,
             reply_markup=get_back_button(
-                f"admin_subscription:{telegram_id}"
+                f"admin_sub_menu:{telegram_id}"
             ),
             parse_mode="HTML",
         )
@@ -133,7 +133,7 @@ async def admin_sub_reduce_process(
             message.bot,
             message.chat.id,
             texts.ERROR_DAYS_OVERFLOW,
-            get_back_button(f"admin_subscription:{telegram_id}"),
+            get_back_button(f"admin_sub_menu:{telegram_id}"),
             parse_mode="HTML",
             trigger_message_id=trigger_msg_id,
         )
@@ -148,7 +148,7 @@ async def admin_sub_reduce_process(
             message.bot,
             message.chat.id,
             texts.ADMIN_SUB_NO_SUBSCRIPTION,
-            get_back_button(f"admin_subscription:{telegram_id}"),
+            get_back_button(f"admin_sub_menu:{telegram_id}"),
             trigger_message_id=trigger_msg_id,
         )
         return
@@ -172,7 +172,7 @@ async def admin_sub_reduce_process(
                 f"admin_sub_apply_reduce:{telegram_id}:{days}"
             ),
             cancel_callback=(
-                f"admin_subscription:{telegram_id}"
+                f"admin_sub_menu:{telegram_id}"
             ),
         ),
         trigger_message_id=trigger_msg_id,

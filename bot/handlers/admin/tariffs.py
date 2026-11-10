@@ -144,7 +144,7 @@ async def _show_tariffs_list(
 
 
 
-@router.callback_query(F.data.in_(["admin_tariffs", "admin_tariffs:standard", "admin_tariffs:awg", "admin_tariffs:white_internet"]))
+@router.callback_query(F.data.in_(["admin_tariffs", "admin_tariffs:standard", "admin_tariffs:white_internet"]))
 async def show_tariffs_list(
     callback: CallbackQuery,
     state: FSMContext,
@@ -159,8 +159,6 @@ async def show_tariffs_list(
 
     await state.clear()
     service_type = callback.data.split(":", 1)[1] if ":" in callback.data else None
-    if service_type == "awg":
-        service_type = "standard"
     await _show_tariffs_list(callback, session, page=1, service_type=service_type)
     await callback.answer(show_alert=False)
 
@@ -188,8 +186,6 @@ async def tariffs_pagination(
             page = 1
     elif len(parts) >= 3:
         service_type = parts[1]
-        if service_type == "awg":
-            service_type = "standard"
         try:
             page = int(parts[2])
         except ValueError:
@@ -250,8 +246,6 @@ async def _show_tariff_card(
         )
 
     stype = getattr(tariff, "service_type", None)
-    if stype == "awg":
-        stype = "standard"
     back_cb = f"admin_tariffs:{stype}" if stype else "admin_tariffs"
     builder.button(
         text=texts.ADMIN_TARIFF_BTN_BACK_TO_LIST,
@@ -582,8 +576,6 @@ async def process_edit_tariff_rub(
     )
 
     stype = getattr(tariff, "service_type", None)
-    if stype == "awg":
-        stype = "standard"
     back_cb = f"admin_tariffs:{stype}" if stype else "admin_tariffs"
     await render_hub(
         message.bot,

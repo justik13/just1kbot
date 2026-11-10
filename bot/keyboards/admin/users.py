@@ -407,7 +407,7 @@ def get_admin_change_tariff_keyboard(
 
     builder.button(
         text=texts.BTN_BACK,
-        callback_data=f"admin_subscription:{telegram_id}",
+        callback_data=f"admin_sub_menu:{telegram_id}",
     )
 
     builder.adjust(1)
@@ -433,7 +433,7 @@ def get_admin_grant_tariff_keyboard(
 
     builder.button(
         text=texts.BTN_BACK,
-        callback_data=f"admin_subscription:{telegram_id}",
+        callback_data=f"admin_sub_menu:{telegram_id}",
     )
 
     builder.adjust(1)
@@ -473,7 +473,7 @@ def get_admin_grant_days_keyboard(
 
     builder.button(
         text=texts.BTN_BACK,
-        callback_data=f"admin_subscription:{telegram_id}",
+        callback_data=f"admin_sub_menu:{telegram_id}",
     )
 
     builder.adjust(2, 2, 1, 1)
@@ -508,7 +508,7 @@ def get_admin_extend_days_new_keyboard(
 
     builder.button(
         text=texts.BTN_BACK,
-        callback_data=f"admin_subscription:{telegram_id}",
+        callback_data=f"admin_sub_menu:{telegram_id}",
     )
 
     builder.adjust(2, 2, 1, 1)
