@@ -1,4 +1,5 @@
 import logging
+from urllib.parse import urlsplit, urlunsplit
 
 from config.constants import (
     AdminAuditAction,
@@ -483,11 +484,32 @@ async def process_edit_server_url(
         from services.xray_node_client import XrayNodeClient
 
         is_healthy = False
+        parsed_new = urlsplit(new_url)
+        new_hostname = parsed_new.hostname
+        current_extra = dict(server.extra_data) if isinstance(server.extra_data, dict) else {}
+        target_check_urls = [new_url]
+        if new_hostname and current_extra.get("xray_api_url"):
+            p_xray = urlsplit(str(current_extra["xray_api_url"]))
+            auth = f"{p_xray.username}:{p_xray.password}@" if p_xray.password else (f"{p_xray.username}@" if p_xray.username else "")
+            h_port = f"{new_hostname}:{p_xray.port}" if p_xray.port is not None else new_hostname
+            cand_url = urlunsplit((
+                p_xray.scheme or "https",
+                f"{auth}{h_port}",
+                p_xray.path,
+                p_xray.query,
+                p_xray.fragment,
+            ))
+            if cand_url not in target_check_urls:
+                target_check_urls.insert(0, cand_url)
+
         try:
             async with XrayNodeClient(timeout=5.0, max_retries=0) as xclient:
-                is_healthy, _node_epoch, _ = await xclient.check_health(new_url, server.api_key)
+                for target_url in target_check_urls:
+                    is_healthy, _node_epoch, _ = await xclient.check_health(target_url, server.api_key)
+                    if is_healthy:
+                        break
         except Exception as e:
-            logger.warning("Xray health check failed for %s: %s", new_url, e)
+            logger.warning("Xray health check failed for %s: %s", target_check_urls, e)
             is_healthy = False
         if not is_healthy:
             await render_hub(
@@ -507,8 +529,6 @@ async def process_edit_server_url(
             get_back_button("admin_servers"),
             parse_mode="HTML",
         )
-        await state.clear()
-        return
         await state.clear()
         return
 
@@ -577,7 +597,6 @@ async def process_edit_server_url(
             return
 
     update_kwargs = {"api_url": new_url}
-    from urllib.parse import urlsplit
     parsed_new = urlsplit(new_url)
     new_hostname = parsed_new.hostname
     if new_hostname:
@@ -591,8 +610,15 @@ async def process_edit_server_url(
             extra_changed = True
         if "xray_api_url" in current_extra and current_extra["xray_api_url"]:
             parsed_xray = urlsplit(str(current_extra["xray_api_url"]))
-            port = parsed_xray.port or 8444
-            new_xray_url = f"{parsed_xray.scheme or 'https'}://{new_hostname}:{port}"
+            auth = f"{parsed_xray.username}:{parsed_xray.password}@" if parsed_xray.password else (f"{parsed_xray.username}@" if parsed_xray.username else "")
+            host_port = f"{new_hostname}:{parsed_xray.port}" if parsed_xray.port is not None else new_hostname
+            new_xray_url = urlunsplit((
+                parsed_xray.scheme or "https",
+                f"{auth}{host_port}",
+                parsed_xray.path,
+                parsed_xray.query,
+                parsed_xray.fragment,
+            ))
             if current_extra["xray_api_url"] != new_xray_url:
                 current_extra["xray_api_url"] = new_xray_url
                 extra_changed = True
