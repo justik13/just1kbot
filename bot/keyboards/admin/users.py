@@ -16,7 +16,7 @@ def get_admin_user_card_keyboard(
 
     builder.button(
         text=texts.ADMIN_BTN_SUB_STANDARD,
-        callback_data=f"admin_sub_awg_menu:{user_id}",
+        callback_data=f"admin_sub_menu:{user_id}",
     )
     builder.button(
         text=texts.ADMIN_BTN_SUB_WI,
@@ -573,7 +573,7 @@ def get_admin_user_devices_keyboard(
 
     builder.button(
         text=texts.ADMIN_BTN_BACK_TO_SUB,
-        callback_data=f"admin_sub_awg_menu:{telegram_id}",
+        callback_data=f"admin_sub_menu:{telegram_id}",
     )
 
     builder.adjust(1)
