@@ -59,6 +59,8 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             servers = await node_get_all_servers(session)
             target = next((s for s in servers if s.id == server_id), None) if servers else None
             if target:
+                if not getattr(target, "is_active", True):
+                    return target, False
                 for k, v in kwargs.items():
                     setattr(target, k, v)
                 target.health_state = new_health_state
@@ -697,6 +699,47 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.mock_bot.send_message.call_count, 1)
             self.assertEqual(server.extra_data.get("hosting_alert_level"), 80)
             self.assertNotEqual(server.extra_data.get("hosting_alert_cycle"), "2026-10")
+
+
+    async def test_hosting_traffic_telegram_send_failure_retries_until_delivered(self):
+        """If Telegram send fails during hosting traffic alert, retry on next tick until delivered."""
+        limit_gb = 3000
+        used_bytes = int(2450 * (1024 ** 3))
+        server = self._make_server(
+            304,
+            "Helsinki-1",
+            extra_data={
+                "hosting_limit_gb": limit_gb,
+                "host_monthly_traffic_bytes": used_bytes,
+                "hosting_reset_day": 1,
+            },
+        )
+
+        async def fake_update_server(session, db_srv, **kwargs):
+            for k, v in kwargs.items():
+                setattr(db_srv, k, v)
+            return db_srv
+
+        with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
+             patch("services.workers.node_monitor.get_server_by_id", return_value=server), \
+             patch("services.workers.node_monitor.update_server", side_effect=fake_update_server):
+
+            self.mock_xray_client.check_health.return_value = (True, "epoch-1", {})
+
+            # Tick 1: Telegram delivery fails (network exception)
+            self.mock_bot.send_message = AsyncMock(side_effect=Exception("Telegram Network Error"))
+            await check_node_resources_and_alerts(self.mock_bot)
+
+            # Alert level was NOT marked as 80 because delivery failed
+            self.assertEqual(server.extra_data.get("hosting_alert_level", 0), 0)
+
+            # Tick 2: Telegram network recovers
+            self.mock_bot.send_message = AsyncMock(return_value=MagicMock(message_id=42))
+            await check_node_resources_and_alerts(self.mock_bot)
+
+            # Alert delivered and alert_level is marked as 80
+            self.assertEqual(self.mock_bot.send_message.call_count, 1)
+            self.assertEqual(server.extra_data.get("hosting_alert_level"), 80)
 
 
 if __name__ == "__main__":

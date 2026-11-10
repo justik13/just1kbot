@@ -57,7 +57,7 @@ from database.repositories.servers_repo import (
     update_server_health_snapshot,
     update_server_xray_epoch_cas,
 )
-from utils.datetime_helpers import now_utc
+from utils.datetime_helpers import get_hosting_billing_cycle, now_utc
 from utils.telegram import safe, safe_send_message
 
 _build_alert_keyboard = get_node_monitor_alert_keyboard
@@ -981,7 +981,8 @@ async def check_node_resources_and_alerts(bot: Bot):
                 hosting_limit_gb = extra.get("hosting_limit_gb")
                 if hosting_limit_gb is not None and int(hosting_limit_gb) > 0:
                     limit_gb = int(hosting_limit_gb)
-                    current_cycle = now_utc().strftime("%Y-%m")
+                    reset_day = int(extra.get("hosting_reset_day", 1) or 1)
+                    current_cycle = get_hosting_billing_cycle(now_utc(), reset_day)
                     host_cycle = extra.get("host_traffic_cycle")
                     host_bytes = int(extra.get("host_monthly_traffic_bytes", 0) or 0) if (host_cycle is None or host_cycle == current_cycle) else 0
                     limit_bytes = limit_gb * (1024 ** 3)
@@ -1023,6 +1024,22 @@ async def check_node_resources_and_alerts(bot: Bot):
                     elif pct < 80.0 and alert_level > 0:
                         new_alert_level = 0
 
+                    # Decoupled immediate alert delivery: critical alerts must not be dropped when server is auto-disabled
+                    if hosting_alert_to_send:
+                        sent_ok = False
+                        try:
+                            sent_ok = await _send_admin_alert_msg(
+                                bot,
+                                hosting_alert_to_send["text"],
+                                reply_markup=hosting_alert_to_send.get("reply_markup"),
+                            )
+                        except Exception as e:
+                            logger.error("Failed to deliver hosting traffic alert for server %d: %s", server.id, e)
+
+                        if not sent_ok:
+                            # Delivery failed; retain current alert_level so next tick retries
+                            new_alert_level = alert_level
+
                     if new_alert_level != alert_level or should_disable or alert_cycle != extra.get("hosting_alert_cycle"):
                         extra["hosting_alert_level"] = new_alert_level
                         extra["hosting_alert_cycle"] = current_cycle
@@ -1041,9 +1058,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                                     await update_server(session, fresh, is_active=False, extra_data=fresh_extra)
                                 else:
                                     await update_server(session, fresh, extra_data=fresh_extra)
-
-                    if hosting_alert_to_send:
-                        alerts_to_send.append(hosting_alert_to_send)
 
             elif st.health_state == ServerHealthState.PROBLEM:
                 st.consecutive_fails = 0

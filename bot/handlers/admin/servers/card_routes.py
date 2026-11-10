@@ -33,8 +33,8 @@ from database.repositories.servers_repo import (
 from services.audit_service import AuditService
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
-from utils.datetime_helpers import now_utc
-from utils.telegram import safe
+from utils.datetime_helpers import get_hosting_billing_cycle, now_utc
+from utils.telegram import render_hub, safe
 from bot.formatters import get_server_protocol_badge
 
 from .common import _show_server_card
@@ -926,6 +926,37 @@ async def admin_server_migrate_confirm(
         await _show_server_card(callback, session, server)
 
 
+def _build_hosting_limit_card_text(server: Server, extra: dict) -> tuple[str, bool]:
+    limit_gb = extra.get("hosting_limit_gb")
+    reset_day = int(extra.get("hosting_reset_day", 1) or 1)
+    has_limit = limit_gb is not None and int(limit_gb) > 0
+
+    host_cycle = extra.get("host_traffic_cycle")
+    current_cycle = get_hosting_billing_cycle(now_utc(), reset_day)
+    host_bytes = int(extra.get("host_monthly_traffic_bytes", 0) or 0) if host_cycle == current_cycle else 0
+    host_gb = host_bytes / (1024 ** 3)
+
+    if has_limit:
+        limit_text = texts.ADMIN_SERVER_HOSTING_GB_FMT.format(limit_gb=int(limit_gb))
+        pct = (host_bytes / (int(limit_gb) * (1024 ** 3)) * 100) if int(limit_gb) > 0 else 0.0
+        usage_text = texts.ADMIN_SERVER_HOSTING_USAGE_FMT.format(host_gb=host_gb, pct=pct)
+    else:
+        limit_text = texts.ADMIN_SERVER_HOSTING_LIMIT_NONE
+        usage_text = texts.ADMIN_SERVER_HOSTING_USAGE_NO_PCT_FMT.format(host_gb=host_gb)
+
+    reset_day_text = texts.ADMIN_SERVER_HOSTING_RESET_DAY_FMT.format(reset_day=reset_day)
+    flag = server.country_flag or texts.EMOJI_GLOBE
+
+    text = texts.ADMIN_SERVER_HOSTING_LIMIT_TITLE.format(
+        flag=flag,
+        server_name=safe(server.name),
+        limit_text=limit_text,
+        reset_day_text=reset_day_text,
+        usage_text=usage_text,
+    )
+    return text, has_limit
+
+
 @router.callback_query(F.data.startswith("admin_server_hosting_limit:"))
 async def on_server_hosting_limit(callback: CallbackQuery, session: AsyncSession) -> None:
     if not is_admin(callback.from_user.id):
@@ -941,34 +972,7 @@ async def on_server_hosting_limit(callback: CallbackQuery, session: AsyncSession
         return
 
     extra = dict(server.extra_data or {})
-    limit_gb = extra.get("hosting_limit_gb")
-    reset_day = extra.get("hosting_reset_day", 1)
-    has_limit = limit_gb is not None and int(limit_gb) > 0
-
-    current_cycle = now_utc().strftime("%Y-%m")
-    host_cycle = extra.get("host_traffic_cycle")
-    host_bytes = int(extra.get("host_monthly_traffic_bytes", 0) or 0) if host_cycle == current_cycle else 0
-    host_gb = host_bytes / (1024 ** 3)
-
-    if has_limit:
-        limit_text = texts.ADMIN_SERVER_HOSTING_GB_FMT.format(limit_gb=int(limit_gb))
-        pct = (host_bytes / (int(limit_gb) * (1024 ** 3)) * 100) if int(limit_gb) > 0 else 0.0
-        usage_text = texts.ADMIN_SERVER_HOSTING_USAGE_FMT.format(host_gb=host_gb, pct=pct)
-    else:
-        limit_text = texts.ADMIN_SERVER_HOSTING_LIMIT_NONE
-        usage_text = texts.ADMIN_SERVER_HOSTING_USAGE_NO_PCT_FMT.format(host_gb=host_gb)
-
-    reset_day_text = texts.ADMIN_SERVER_HOSTING_RESET_DAY_FMT.format(reset_day=reset_day)
-
-    flag = server.country_flag or texts.EMOJI_GLOBE
-
-    text = texts.ADMIN_SERVER_HOSTING_LIMIT_TITLE.format(
-        flag=flag,
-        server_name=safe(server.name),
-        limit_text=limit_text,
-        reset_day_text=reset_day_text,
-        usage_text=usage_text,
-    )
+    text, has_limit = _build_hosting_limit_card_text(server, extra)
     from bot.keyboards.admin.servers import get_admin_server_hosting_limit_keyboard
     kb = get_admin_server_hosting_limit_keyboard(server.id, has_limit=has_limit)
     await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
@@ -994,6 +998,10 @@ async def on_set_hosting_limit_start(callback: CallbackQuery, state: FSMContext)
 
 @router.message(AdminStates.editing_server_hosting_limit)
 async def on_set_hosting_limit_value(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    try:
+        await message.delete()
+    except Exception:
+        pass
     if not is_admin(message.from_user.id):
         return
     data = await state.get_data()
@@ -1004,13 +1012,25 @@ async def on_set_hosting_limit_value(message: Message, state: FSMContext, sessio
 
     text = (message.text or "").strip()
     if not text.isdigit() or int(text) <= 0:
-        await message.answer(texts.ADMIN_SERVER_HOSTING_LIMIT_INVALID)
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            texts.ADMIN_SERVER_HOSTING_LIMIT_INVALID,
+            get_back_button(f"admin_server_hosting_limit:{server_id}"),
+            trigger_message_id=getattr(message, "message_id", None),
+        )
         return
 
     new_limit_gb = int(text)
     server = await get_server_by_id(session, server_id, for_update=True)
     if not server:
-        await message.answer(texts.ERROR_SERVER_NOT_FOUND)
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            texts.ERROR_SERVER_NOT_FOUND,
+            get_back_button("admin_servers"),
+            trigger_message_id=getattr(message, "message_id", None),
+        )
         await state.clear()
         return
 
@@ -1032,22 +1052,17 @@ async def on_set_hosting_limit_value(message: Message, state: FSMContext, sessio
     )
     await session.commit()
     await state.clear()
-    reset_day = extra.get("hosting_reset_day", 1)
-    await message.answer(
-        texts.ADMIN_SERVER_HOSTING_LIMIT_SAVED.format(limit_gb=new_limit_gb, reset_day=reset_day)
-    )
-    from bot.keyboards.admin.servers import get_admin_server_hosting_limit_keyboard
-    kb = get_admin_server_hosting_limit_keyboard(server.id, has_limit=True)
-    flag = server.country_flag or texts.EMOJI_GLOBE
-    card_text = texts.ADMIN_SERVER_HOSTING_LIMIT_TITLE.format(
-        flag=flag,
-        server_name=safe(server.name),
-        limit_text=texts.ADMIN_SERVER_HOSTING_GB_FMT.format(limit_gb=new_limit_gb),
-        reset_day_text=texts.ADMIN_SERVER_HOSTING_RESET_DAY_FMT.format(reset_day=reset_day),
-        usage_text=texts.ADMIN_SERVER_HOSTING_USAGE_EMPTY,
-    )
 
-    await message.answer(card_text, reply_markup=kb, parse_mode="HTML")
+    card_text, has_limit = _build_hosting_limit_card_text(server, extra)
+    from bot.keyboards.admin.servers import get_admin_server_hosting_limit_keyboard
+    kb = get_admin_server_hosting_limit_keyboard(server.id, has_limit=has_limit)
+    await render_hub(
+        message.bot,
+        message.chat.id,
+        card_text,
+        kb,
+        trigger_message_id=getattr(message, "message_id", None),
+    )
 
 
 @router.callback_query(F.data.startswith("admin_server_set_hosting_reset_day:"))
@@ -1070,6 +1085,10 @@ async def on_set_hosting_reset_day_start(callback: CallbackQuery, state: FSMCont
 
 @router.message(AdminStates.editing_server_hosting_reset_day)
 async def on_set_hosting_reset_day_value(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    try:
+        await message.delete()
+    except Exception:
+        pass
     if not is_admin(message.from_user.id):
         return
     data = await state.get_data()
@@ -1080,13 +1099,25 @@ async def on_set_hosting_reset_day_value(message: Message, state: FSMContext, se
 
     text = (message.text or "").strip()
     if not text.isdigit() or not (1 <= int(text) <= 31):
-        await message.answer(texts.ADMIN_SERVER_HOSTING_RESET_DAY_INVALID)
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            texts.ADMIN_SERVER_HOSTING_RESET_DAY_INVALID,
+            get_back_button(f"admin_server_hosting_limit:{server_id}"),
+            trigger_message_id=getattr(message, "message_id", None),
+        )
         return
 
     new_reset_day = int(text)
     server = await get_server_by_id(session, server_id, for_update=True)
     if not server:
-        await message.answer(texts.ERROR_SERVER_NOT_FOUND)
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            texts.ERROR_SERVER_NOT_FOUND,
+            get_back_button("admin_servers"),
+            trigger_message_id=getattr(message, "message_id", None),
+        )
         await state.clear()
         return
 
@@ -1105,26 +1136,17 @@ async def on_set_hosting_reset_day_value(message: Message, state: FSMContext, se
     )
     await session.commit()
     await state.clear()
-    await message.answer(
-        texts.ADMIN_SERVER_HOSTING_RESET_DAY_SAVED.format(reset_day=new_reset_day)
-    )
-    has_limit = extra.get("hosting_limit_gb") is not None and int(extra.get("hosting_limit_gb") or 0) > 0
+
+    card_text, has_limit = _build_hosting_limit_card_text(server, extra)
     from bot.keyboards.admin.servers import get_admin_server_hosting_limit_keyboard
     kb = get_admin_server_hosting_limit_keyboard(server.id, has_limit=has_limit)
-    flag = server.country_flag or texts.EMOJI_GLOBE
-    limit_text = (
-        texts.ADMIN_SERVER_HOSTING_GB_FMT.format(limit_gb=int(extra.get("hosting_limit_gb")))
-        if has_limit
-        else texts.ADMIN_SERVER_HOSTING_LIMIT_NONE
+    await render_hub(
+        message.bot,
+        message.chat.id,
+        card_text,
+        kb,
+        trigger_message_id=getattr(message, "message_id", None),
     )
-    card_text = texts.ADMIN_SERVER_HOSTING_LIMIT_TITLE.format(
-        flag=flag,
-        server_name=safe(server.name),
-        limit_text=limit_text,
-        reset_day_text=texts.ADMIN_SERVER_HOSTING_RESET_DAY_FMT.format(reset_day=new_reset_day),
-        usage_text=texts.ADMIN_SERVER_HOSTING_USAGE_EMPTY,
-    )
-    await message.answer(card_text, reply_markup=kb, parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("admin_server_remove_hosting_limit:"))
@@ -1158,16 +1180,9 @@ async def on_remove_hosting_limit(callback: CallbackQuery, session: AsyncSession
     await session.commit()
     await callback.answer(texts.ADMIN_SERVER_HOSTING_LIMIT_REMOVED, show_alert=True)
 
+    text, has_limit = _build_hosting_limit_card_text(server, extra)
     from bot.keyboards.admin.servers import get_admin_server_hosting_limit_keyboard
-    kb = get_admin_server_hosting_limit_keyboard(server.id, has_limit=False)
-    flag = server.country_flag or texts.EMOJI_GLOBE
-    reset_day = extra.get("hosting_reset_day", 1)
-    text = texts.ADMIN_SERVER_HOSTING_LIMIT_TITLE.format(
-        flag=flag,
-        server_name=safe(server.name),
-        limit_text=texts.ADMIN_SERVER_HOSTING_LIMIT_NONE,
-        reset_day_text=texts.ADMIN_SERVER_HOSTING_RESET_DAY_FMT.format(reset_day=reset_day),
-        usage_text=texts.ADMIN_SERVER_HOSTING_USAGE_EMPTY,
-    )
+    kb = get_admin_server_hosting_limit_keyboard(server.id, has_limit=has_limit)
     await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+
 

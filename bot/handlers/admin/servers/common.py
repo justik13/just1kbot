@@ -252,8 +252,11 @@ async def _show_server_card(
     client_cycle = server_extra.get("traffic_cycle")
     host_cycle = server_extra.get("host_traffic_cycle")
     current_cycle = now_utc().strftime("%Y-%m")
+    reset_day = int(server_extra.get("hosting_reset_day", 1) or 1)
+    from utils.datetime_helpers import get_hosting_billing_cycle
+    host_billing_cycle = get_hosting_billing_cycle(now_utc(), reset_day)
     monthly_bytes = int(server_extra.get("monthly_traffic_bytes", 0) or 0) if client_cycle == current_cycle else 0
-    host_bytes = int(server_extra.get("host_monthly_traffic_bytes", 0) or 0) if host_cycle == current_cycle else 0
+    host_bytes = int(server_extra.get("host_monthly_traffic_bytes", 0) or 0) if host_cycle == host_billing_cycle else 0
     traffic_month = format_traffic(monthly_bytes)
     if host_bytes > 0:
         traffic_month += texts.ADMIN_SERVER_HOST_TRAFFIC_SUFFIX.format(
@@ -267,7 +270,6 @@ async def _show_server_card(
         limit_bytes = limit_gb * (1024 ** 3)
         host_gb = host_bytes / (1024 ** 3)
         pct = (host_bytes / limit_bytes * 100) if limit_bytes > 0 else 0.0
-        reset_day = int(server_extra.get("hosting_reset_day", 1) or 1)
         hosting_limit_line = texts.ADMIN_SERVER_HOSTING_LIMIT_LINE.format(
             host_gb=host_gb,
             limit_gb=limit_gb,
