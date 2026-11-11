@@ -99,3 +99,18 @@ def calculate_extension_end(
     base_time = current_end if (current_end and current_end > current_time) else current_time
     return base_time + timedelta(days=days)
 
+
+def get_hosting_billing_cycle(dt: datetime, reset_day: int = 1) -> str:
+    """Computes the billing cycle identifier (YYYY-MM) given a datetime and reset day (1-31)."""
+    import calendar
+
+    reset_day = max(1, min(31, int(reset_day or 1)))
+    _, max_days_curr = calendar.monthrange(dt.year, dt.month)
+    effective_reset_day = min(reset_day, max_days_curr)
+    if dt.day < effective_reset_day:
+        first_of_month = dt.replace(day=1)
+        prev_month = first_of_month - timedelta(days=1)
+        return f"{prev_month.year:04d}-{prev_month.month:02d}"
+    return f"{dt.year:04d}-{dt.month:02d}"
+
+

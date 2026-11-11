@@ -14,9 +14,9 @@ from config.constants import (
 from config.settings import get_settings
 from database.connection import session_scope
 from database.models import Server, User
-from utils.datetime_helpers import now_utc
+from utils.datetime_helpers import get_hosting_billing_cycle, now_utc
 from utils.telegram import safe, safe_send_message
-from utils.traffic_helpers import accumulate_host_traffic_cycle
+from utils.traffic_helpers import accumulate_host_traffic_cycle, get_server_hosting_reset_day
 
 logger = logging.getLogger(__name__)
 
@@ -293,7 +293,11 @@ async def _vless_traffic_sync_once(bot: Bot | None = None):
                                 extra["monthly_traffic_bytes"] = int(extra.get("monthly_traffic_bytes", 0)) + server_delta
                             changed = True
                         if host_tx > 0 or host_rx > 0:
-                            if accumulate_host_traffic_cycle(extra, host_tx, host_rx, current_cycle):
+                            host_cycle = get_hosting_billing_cycle(
+                                current_time,
+                                get_server_hosting_reset_day(extra),
+                            )
+                            if accumulate_host_traffic_cycle(extra, host_tx, host_rx, host_cycle):
                                 changed = True
                         if changed:
                             server_obj.extra_data = extra

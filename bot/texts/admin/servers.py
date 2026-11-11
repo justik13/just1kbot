@@ -345,3 +345,27 @@ ADMIN_SERVER_INCY_VALUE_NONE = "— (не задан)"
 ADMIN_SERVER_INCY_VALUE_DISABLED = "Отключен"
 ADMIN_SERVER_INCY_NO_RELAYS = "На сервере нет подключенных Relay-узлов."
 ADMIN_SERVER_INCY_RELAY_BTN = "🌐 {name}{badge_part}{status_part}"
+
+ADMIN_SERVER_BTN_HOSTING_LIMIT = "⚙️ Лимит хостинга"
+ADMIN_SERVER_HOSTING_LIMIT_TITLE = """🛠 Админка › ⚙️ <b>Лимит хостинга сервера</b>
+
+Сервер: {flag} <b>{server_name}</b>
+• Текущий лимит: <b>{limit_text}</b>
+• День сброса: <b>{reset_day_text}</b>
+• Использовано: <b>{usage_text}</b>
+"""
+ADMIN_SERVER_BTN_SET_HOSTING_LIMIT = "⚙️ Установить / изменить лимит"
+ADMIN_SERVER_BTN_SET_HOSTING_RESET_DAY = "📅 Изменить день сброса"
+ADMIN_SERVER_BTN_REMOVE_HOSTING_LIMIT = "⚪ Отключить лимит"
+ADMIN_SERVER_PROMPT_HOSTING_LIMIT = "Введите лимит хостинга в ГБ (целое положительное число, например 3000):"
+ADMIN_SERVER_PROMPT_HOSTING_RESET_DAY = "Введите день месяца сброса биллинга (число от 1 до 31):"
+ADMIN_SERVER_HOSTING_LIMIT_REMOVED = "⚪ Лимит хостинга отключен."
+ADMIN_SERVER_HOSTING_LIMIT_INVALID = "❌ Укажите корректное положительное число в ГБ."
+ADMIN_SERVER_HOSTING_RESET_DAY_INVALID = "❌ Укажите корректный день месяца (от 1 до 31)."
+ADMIN_SERVER_HOSTING_LIMIT_LINE = "• Лимит хостинга: <b>{host_gb:.1f} ГБ / {limit_gb:,} ГБ ({pct:.1f}%) | Сброс: {reset_day}-го числа</b>\n"
+ADMIN_SERVER_HOSTING_LIMIT_NONE = "Не установлен (безлимитно)"
+ADMIN_SERVER_HOSTING_RESET_DAY_FMT = "{reset_day}-е число каждого месяца"
+ADMIN_SERVER_HOSTING_GB_FMT = "{limit_gb:,} ГБ"
+ADMIN_SERVER_HOSTING_USAGE_FMT = "{host_gb:.1f} ГБ ({pct:.1f}%)"
+ADMIN_SERVER_HOSTING_USAGE_NO_PCT_FMT = "{host_gb:.1f} ГБ"
+

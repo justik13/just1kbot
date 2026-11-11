@@ -23,6 +23,7 @@ from utils.datetime_helpers import now_utc
 from utils.formatters import format_traffic
 from utils.telegram import safe
 from utils.text_limits import truncate_button_text
+from utils.traffic_helpers import get_server_hosting_usage
 
 logger = logging.getLogger(__name__)
 
@@ -236,16 +237,27 @@ async def _show_server_card(
         )
 
     server_extra = getattr(server, "extra_data", {}) or {}
+    now = now_utc()
     client_cycle = server_extra.get("traffic_cycle")
-    host_cycle = server_extra.get("host_traffic_cycle")
-    current_cycle = now_utc().strftime("%Y-%m")
+    current_cycle = now.strftime("%Y-%m")
+    usage = get_server_hosting_usage(server_extra, now)
     monthly_bytes = int(server_extra.get("monthly_traffic_bytes", 0) or 0) if client_cycle == current_cycle else 0
-    host_bytes = int(server_extra.get("host_monthly_traffic_bytes", 0) or 0) if host_cycle == current_cycle else 0
+    host_bytes = usage.host_bytes
     traffic_month = format_traffic(monthly_bytes)
     if host_bytes > 0:
         traffic_month += texts.ADMIN_SERVER_HOST_TRAFFIC_SUFFIX.format(
             host_traffic=format_traffic(host_bytes)
         )
+
+    hosting_limit_line = ""
+    if usage.limit_gb is not None:
+        hosting_limit_line = texts.ADMIN_SERVER_HOSTING_LIMIT_LINE.format(
+            host_gb=usage.host_gb,
+            limit_gb=usage.limit_gb,
+            pct=usage.pct,
+            reset_day=usage.reset_day,
+        )
+
 
     rendered = (
         f"{header}"
@@ -257,6 +269,7 @@ async def _show_server_card(
         + texts.COMMON_PROTOKOL.format(safe_server_protocol=safe(server.protocol))
         + texts.COMMON_ZAPOLNENNOST_SLOTOV.format(slots_text=slots_text)
         + texts.ADMIN_SERVER_MONTHLY_TRAFFIC.format(traffic_month=traffic_month)
+        + hosting_limit_line
         + texts.ADMIN_SERVER_API_URL.format(api_url=safe(server.api_url))
     )
 

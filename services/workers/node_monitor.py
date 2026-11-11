@@ -30,6 +30,8 @@ from bot.texts.runtime.alerts import (
     ALERT_RELAY_TSPU_PROBLEM_REMINDER,
     ALERT_RELAY_TSPU_RESTORED,
     ALERT_SERVER_DISK_CRITICAL,
+    ALERT_SERVER_HOSTING_TRAFFIC_CRITICAL,
+    ALERT_SERVER_HOSTING_TRAFFIC_WARN,
     ALERT_SERVER_OUTAGE_REMINDER,
     ALERT_SERVER_PROBLEM,
     ALERT_SERVER_RESTORED,
@@ -57,6 +59,7 @@ from database.repositories.servers_repo import (
 )
 from utils.datetime_helpers import now_utc
 from utils.telegram import safe, safe_send_message
+from utils.traffic_helpers import get_server_hosting_usage
 
 _build_alert_keyboard = get_node_monitor_alert_keyboard
 
@@ -973,6 +976,85 @@ async def check_node_resources_and_alerts(bot: Bot):
                             st.disk_alert_last_sent = now_m
                     elif disk_percent <= 80.0:
                         st.disk_alert_last_sent = None
+
+                # Проверка лимита хостинга (hosting_limit_gb)
+                extra = dict(server.extra_data or {})
+                usage = get_server_hosting_usage(extra)
+                if usage.limit_gb is not None:
+                    limit_gb = usage.limit_gb
+                    current_cycle = usage.current_cycle
+                    pct = usage.pct
+                    used_gb = usage.host_gb
+                    used_gb_fmt = f"{int(round(used_gb))}" if abs(used_gb - round(used_gb)) < 0.05 else f"{used_gb:.1f}"
+
+                    alert_cycle = extra.get("hosting_alert_cycle")
+                    alert_level = int(extra.get("hosting_alert_level", 0) or 0)
+                    if alert_cycle != current_cycle:
+                        alert_cycle = current_cycle
+                        alert_level = 0
+
+                    hosting_alert_to_send = None
+                    new_alert_level = alert_level
+                    should_disable = False
+
+                    if pct >= 90.0 and alert_level < 90:
+                        should_disable = True
+                        new_alert_level = 90
+                        hosting_alert_to_send = {
+                            "text": ALERT_SERVER_HOSTING_TRAFFIC_CRITICAL.format(
+                                server_name=safe(server.name),
+                                used_gb=used_gb_fmt,
+                                limit_gb=limit_gb,
+                            ),
+                            "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
+                        }
+                    elif pct >= 80.0 and alert_level < 80:
+                        new_alert_level = 80
+                        hosting_alert_to_send = {
+                            "text": ALERT_SERVER_HOSTING_TRAFFIC_WARN.format(
+                                server_name=safe(server.name),
+                                used_gb=used_gb_fmt,
+                                limit_gb=limit_gb,
+                            ),
+                            "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
+                        }
+                    elif pct < 80.0 and alert_level > 0:
+                        new_alert_level = 0
+
+                    # Decoupled immediate alert delivery: critical alerts must not be dropped when server is auto-disabled
+                    if hosting_alert_to_send:
+                        sent_ok = False
+                        try:
+                            sent_ok = await _send_admin_alert_msg(
+                                bot,
+                                hosting_alert_to_send["text"],
+                                reply_markup=hosting_alert_to_send.get("reply_markup"),
+                            )
+                        except Exception as e:
+                            logger.error("Failed to deliver hosting traffic alert for server %d: %s", server.id, e)
+
+                        if not sent_ok:
+                            # Delivery failed; retain current alert_level so next tick retries
+                            new_alert_level = alert_level
+
+                    if new_alert_level != alert_level or should_disable or alert_cycle != extra.get("hosting_alert_cycle"):
+                        extra["hosting_alert_level"] = new_alert_level
+                        extra["hosting_alert_cycle"] = current_cycle
+                        server.extra_data = extra
+                        if should_disable:
+                            server.is_active = False
+
+                        async with session_scope() as session:
+                            fresh = await get_server_by_id(session, server.id, for_update=True)
+                            if fresh:
+                                fresh_extra = dict(fresh.extra_data or {})
+                                fresh_extra["hosting_alert_level"] = new_alert_level
+                                fresh_extra["hosting_alert_cycle"] = current_cycle
+                                if should_disable:
+                                    fresh.is_active = False
+                                    await update_server(session, fresh, is_active=False, extra_data=fresh_extra)
+                                else:
+                                    await update_server(session, fresh, extra_data=fresh_extra)
 
             elif st.health_state == ServerHealthState.PROBLEM:
                 st.consecutive_fails = 0
