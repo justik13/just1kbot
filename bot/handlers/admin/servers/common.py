@@ -210,7 +210,10 @@ async def _show_server_card(
         else:
             extra_status_info = ""
     else:
-        status_line = texts.COMMON_OTKLYUCHEN_VRUCHNUYU
+        if getattr(server, "disabled_reason", None) == "HOSTING_TRAFFIC_LIMIT":
+            status_line = texts.COMMON_OTKLYUCHEN_PO_LIMITU_TRAFIKA
+        else:
+            status_line = texts.COMMON_OTKLYUCHEN_VRUCHNUYU
         extra_status_info = ""
 
     db_counts = await get_origin_server_subscription_counts(session)

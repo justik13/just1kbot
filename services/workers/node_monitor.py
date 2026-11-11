@@ -31,6 +31,7 @@ from bot.texts.runtime.alerts import (
     ALERT_RELAY_TSPU_RESTORED,
     ALERT_SERVER_DISK_CRITICAL,
     ALERT_SERVER_HOSTING_TRAFFIC_CRITICAL,
+    ALERT_SERVER_HOSTING_TRAFFIC_RESTORED,
     ALERT_SERVER_HOSTING_TRAFFIC_WARN,
     ALERT_SERVER_OUTAGE_REMINDER,
     ALERT_SERVER_PROBLEM,
@@ -299,10 +300,78 @@ async def check_node_resources_and_alerts(bot: Bot):
     async def _check_one(server):
         st = get_server_monitor_state(server.id, server)
 
-        # 1. Если сервер отключён администратором вручную — фиксируем статус и пропускаем
+        # 1. Если сервер отключён — проверяем причину; при HOSTING_TRAFFIC_LIMIT и новом цикле (< 90%) включаем обратно
         if not server.is_active:
-            st.health_state = ServerHealthState.MANUAL_DISABLED
-            return
+            if getattr(server, "disabled_reason", None) == "HOSTING_TRAFFIC_LIMIT":
+                extra = dict(server.extra_data or {})
+                usage = get_server_hosting_usage(extra)
+                alert_cycle = extra.get("hosting_alert_cycle")
+                if (
+                    usage.limit_gb is not None
+                    and alert_cycle
+                    and usage.current_cycle != alert_cycle
+                    and usage.pct < 90.0
+                ):
+                    re_enabled = False
+                    async with session_scope() as session:
+                        fresh = await get_server_by_id(session, server.id, for_update=True)
+                        if (
+                            fresh
+                            and not fresh.is_active
+                            and getattr(fresh, "disabled_reason", None) == "HOSTING_TRAFFIC_LIMIT"
+                        ):
+                            fresh_extra = dict(fresh.extra_data or {})
+                            fresh_usage = get_server_hosting_usage(fresh_extra)
+                            fresh_alert_cycle = fresh_extra.get("hosting_alert_cycle")
+                            if (
+                                fresh_usage.limit_gb is not None
+                                and fresh_alert_cycle
+                                and fresh_usage.current_cycle != fresh_alert_cycle
+                                and fresh_usage.pct < 90.0
+                            ):
+                                fresh_extra["hosting_alert_level"] = 80 if fresh_usage.pct >= 80.0 else 0
+                                fresh_extra["hosting_alert_cycle"] = fresh_usage.current_cycle
+                                await update_server(
+                                    session,
+                                    fresh,
+                                    is_active=True,
+                                    disabled_reason=None,
+                                    disabled_at=None,
+                                    health_state=ServerHealthState.ONLINE,
+                                    consecutive_fails=0,
+                                    consecutive_successes=0,
+                                    problem_started_at=None,
+                                    next_check_at=None,
+                                    last_alert_sent_state=None,
+                                    extra_data=fresh_extra,
+                                )
+                                server.is_active = True
+                                server.disabled_reason = None
+                                server.disabled_at = None
+                                server.health_state = ServerHealthState.ONLINE
+                                server.extra_data = fresh_extra
+                                reset_server_monitor_state(server.id, ServerHealthState.ONLINE)
+                                st = get_server_monitor_state(server.id, server)
+                                re_enabled = True
+                    if re_enabled:
+                        try:
+                            await _send_admin_alert_msg(
+                                bot,
+                                ALERT_SERVER_HOSTING_TRAFFIC_RESTORED.format(
+                                    server_name=safe(server.name),
+                                    cycle=usage.current_cycle,
+                                ),
+                                reply_markup=get_node_monitor_alert_keyboard(server.id).as_markup(),
+                            )
+                        except Exception as exc:
+                            logger.error(
+                                "Failed to deliver hosting traffic recovery alert for server %d: %s",
+                                server.id,
+                                exc,
+                            )
+            if not server.is_active:
+                st.health_state = ServerHealthState.MANUAL_DISABLED
+                return
 
         # Если сервер был отключён, а теперь активен — переводим в ONLINE
         if st.health_state == ServerHealthState.MANUAL_DISABLED:
@@ -1043,6 +1112,13 @@ async def check_node_resources_and_alerts(bot: Bot):
                         server.extra_data = extra
                         if should_disable:
                             server.is_active = False
+                            server.disabled_reason = "HOSTING_TRAFFIC_LIMIT"
+                            st.health_state = ServerHealthState.MANUAL_DISABLED
+                            st.consecutive_fails = 0
+                            st.consecutive_successes = 0
+                            st.problem_started_at = None
+                            st.next_check_at = None
+                            st.last_alert_sent_state = None
 
                         async with session_scope() as session:
                             fresh = await get_server_by_id(session, server.id, for_update=True)
@@ -1052,7 +1128,20 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 fresh_extra["hosting_alert_cycle"] = current_cycle
                                 if should_disable:
                                     fresh.is_active = False
-                                    await update_server(session, fresh, is_active=False, extra_data=fresh_extra)
+                                    await update_server(
+                                        session,
+                                        fresh,
+                                        is_active=False,
+                                        disabled_reason="HOSTING_TRAFFIC_LIMIT",
+                                        disabled_at=now_utc(),
+                                        health_state=ServerHealthState.MANUAL_DISABLED,
+                                        consecutive_fails=0,
+                                        consecutive_successes=0,
+                                        problem_started_at=None,
+                                        next_check_at=None,
+                                        last_alert_sent_state=None,
+                                        extra_data=fresh_extra,
+                                    )
                                 else:
                                     await update_server(session, fresh, extra_data=fresh_extra)
 

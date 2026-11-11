@@ -36,9 +36,9 @@ from database.repositories.servers_repo import (
 from services.audit_service import AuditService
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
-from utils.datetime_helpers import now_utc
+from utils.datetime_helpers import get_hosting_billing_cycle, now_utc
 from utils.telegram import render_hub, safe
-from utils.traffic_helpers import get_server_hosting_usage
+from utils.traffic_helpers import get_server_hosting_reset_day, get_server_hosting_usage
 from bot.formatters import get_server_protocol_badge
 
 from .common import _show_server_card
@@ -895,6 +895,44 @@ async def admin_server_migrate_confirm(
         await _show_server_card(callback, session, server)
 
 
+def _recalculate_hosting_alert_state(
+    extra: dict,
+    *,
+    is_server_active: bool,
+    old_alert_level: int,
+    old_alert_cycle: str | None,
+    old_cycle: str | None = None,
+) -> None:
+    """Recalculates hosting alert hysteresis without wiping cycle tracking."""
+    usage = get_server_hosting_usage(extra)
+    extra["hosting_alert_cycle"] = usage.current_cycle
+
+    if usage.limit_gb is None:
+        extra["hosting_alert_level"] = 0
+        return
+
+    same_cycle = bool(
+        old_alert_cycle
+        and (
+            old_alert_cycle == usage.current_cycle
+            or (old_cycle and old_alert_cycle == old_cycle)
+        )
+    )
+    if usage.pct >= 90.0:
+        if not is_server_active and same_cycle and old_alert_level >= 90:
+            new_level = 90
+        elif same_cycle:
+            new_level = min(old_alert_level, 80)
+        else:
+            new_level = 0
+    elif usage.pct >= 80.0:
+        new_level = 80 if (same_cycle and old_alert_level >= 80) else 0
+    else:
+        new_level = 0
+
+    extra["hosting_alert_level"] = new_level
+
+
 def _build_hosting_limit_card_text(server: Server, extra: dict) -> tuple[str, bool]:
     usage = get_server_hosting_usage(extra)
     has_limit = usage.limit_gb is not None
@@ -997,11 +1035,17 @@ async def on_set_hosting_limit_value(message: Message, state: FSMContext, sessio
 
     extra = dict(server.extra_data or {})
     old_limit = extra.get("hosting_limit_gb")
+    old_alert_level = int(extra.get("hosting_alert_level", 0) or 0)
+    old_alert_cycle = extra.get("hosting_alert_cycle")
     extra["hosting_limit_gb"] = new_limit_gb
     if "hosting_reset_day" not in extra:
         extra["hosting_reset_day"] = 1
-    extra["hosting_alert_level"] = 0
-    extra.pop("hosting_alert_cycle", None)
+    _recalculate_hosting_alert_state(
+        extra,
+        is_server_active=bool(server.is_active),
+        old_alert_level=old_alert_level,
+        old_alert_cycle=old_alert_cycle,
+    )
     await update_server(session, server, extra_data=extra)
 
     await AuditService.log_action(
@@ -1083,10 +1127,24 @@ async def on_set_hosting_reset_day_value(message: Message, state: FSMContext, se
         return
 
     extra = dict(server.extra_data or {})
-    old_day = extra.get("hosting_reset_day", 1)
+    old_day = get_server_hosting_reset_day(extra)
+    old_alert_level = int(extra.get("hosting_alert_level", 0) or 0)
+    old_alert_cycle = extra.get("hosting_alert_cycle")
+    now = now_utc()
+    old_cycle = get_hosting_billing_cycle(now, old_day)
+    new_cycle = get_hosting_billing_cycle(now, new_reset_day)
+
     extra["hosting_reset_day"] = new_reset_day
-    extra["hosting_alert_level"] = 0
-    extra.pop("hosting_alert_cycle", None)
+    if extra.get("host_traffic_cycle") == old_cycle and new_cycle != old_cycle:
+        extra["host_traffic_cycle"] = new_cycle
+
+    _recalculate_hosting_alert_state(
+        extra,
+        is_server_active=bool(server.is_active),
+        old_alert_level=old_alert_level,
+        old_alert_cycle=old_alert_cycle,
+        old_cycle=old_cycle,
+    )
     await update_server(session, server, extra_data=extra)
 
     await AuditService.log_action(

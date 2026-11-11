@@ -42,6 +42,7 @@ COMMON_NOVYE_24H = "🆕 Новые (24ч)"
 COMMON_NOVYE_7D = "🆕 Новые (7д)"
 
 COMMON_OTKLYUCHEN_VRUCHNUYU = "🔴 <b>Отключён вручную</b>"
+COMMON_OTKLYUCHEN_PO_LIMITU_TRAFIKA = "🔴 <b>Отключён (лимит трафика)</b>"
 
 COMMON_POSLEDNIY_OTKLIK = """• Последний отклик: <code>{last_check_str}</code>
 """

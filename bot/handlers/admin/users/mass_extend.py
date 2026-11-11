@@ -8,7 +8,7 @@ from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from sqlalchemy import func, or_, select
+from sqlalchemy import false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
@@ -81,7 +81,8 @@ def _build_mass_extend_audience_filter(target_aud: str, now: datetime):
         )
         return or_(User.subscription_end > now, User.id.in_(wi_subq))
     else:
-        return User.subscription_end > now
+        logger.error("Unknown mass_extend audience %r; returning false predicate", target_aud)
+        return false()
 
 
 @router.callback_query(F.data == "admin_mass_extend")
@@ -939,6 +940,12 @@ async def _run_mass_extend_background(
                                     if res_sub:
                                         extended = True
                                         invalidate_user_cache(tg_id)
+                            else:
+                                logger.error(
+                                    "Unsupported mass_extend target_aud %r for user %s",
+                                    target_aud,
+                                    uid,
+                                )
 
                             if extended:
                                 success_count += 1

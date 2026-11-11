@@ -7,7 +7,7 @@ from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from sqlalchemy import func, select
+from sqlalchemy import false, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
@@ -214,7 +214,9 @@ def _apply_mass_bonus_audience_filter(
         get_effective_wi_active_condition,
     )
 
-    if target_aud == "standard":
+    if target_aud == "all":
+        return stmt
+    elif target_aud == "standard":
         return stmt.where(User.subscription_end > now)
     elif target_aud == "wi":
         return stmt.where(get_effective_wi_active_condition(now))
@@ -222,7 +224,9 @@ def _apply_mass_bonus_audience_filter(
         return stmt.where(get_effective_active_condition(now))
     elif target_aud in ("inactive", "expired"):
         return stmt.where(get_effective_inactive_condition(now))
-    return stmt
+
+    logger.error("Unknown mass_bonus audience %r; returning empty query", target_aud)
+    return stmt.where(false())
 
 
 @router.message(AdminStates.entering_mass_bonus_reason)

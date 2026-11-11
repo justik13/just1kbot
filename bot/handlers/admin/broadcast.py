@@ -15,7 +15,7 @@ from aiogram.exceptions import (
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
-from sqlalchemy import func, select, update
+from sqlalchemy import false, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
@@ -42,6 +42,31 @@ router = Router()
 logger = logging.getLogger(__name__)
 
 TELEGRAM_CAPTION_LIMIT = 1024
+
+_SUPPORTED_BROADCAST_AUDIENCES = frozenset({
+    "all",
+    "active",
+    "active_standard",
+    "active_wi",
+    "active_both",
+    "expiring_3d",
+    "expired",
+    "never",
+    "no_sub",
+    "test",
+})
+
+
+def _is_supported_broadcast_audience(audience: str | None) -> bool:
+    """Return True if broadcast audience selector has an explicit filter implementation."""
+    if not isinstance(audience, str) or not audience:
+        return False
+    if audience in _SUPPORTED_BROADCAST_AUDIENCES:
+        return True
+    if audience.startswith("test_"):
+        suffix = audience.split("_", 1)[1]
+        return suffix.isdigit()
+    return False
 
 # Tracks which admin_id is actively running a broadcast to prevent concurrent UI launches by the same admin
 _broadcast_in_progress: set[int] = set()
@@ -103,6 +128,13 @@ async def select_broadcast_audience(
         return
 
     audience = callback.data.split(":", 1)[1]
+    if not _is_supported_broadcast_audience(audience):
+        await callback.answer(
+            texts.ERROR_VALIDATION.format(error=safe(audience)),
+            show_alert=True,
+        )
+        await state.clear()
+        return
     if audience == "test":
         audience = f"test_{callback.from_user.id}"
     await callback.answer(show_alert=False)
@@ -211,7 +243,17 @@ async def process_broadcast_message(
         return
 
     data = await state.get_data()
-    target_audience = data.get("target_audience", "all")
+    target_audience = data.get("target_audience")
+    if not _is_supported_broadcast_audience(target_audience):
+        await state.clear()
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            texts.ERROR_OPERATION_CANCELLED,
+            get_back_button("admin_broadcast"),
+            trigger_message_id=trigger_msg_id,
+        )
+        return
 
     # Send test preview directly to admin first so admin sees actual Telegram rendering
     try:
@@ -296,6 +338,8 @@ def _apply_audience_filters(stmt, audience: str, *, admin_tg_id: int | None = No
     )
 
     current_time = now_utc()
+    if audience == "all":
+        return stmt
     if audience == "active":
         stmt = stmt.where(get_effective_active_condition(current_time))
     elif audience == "active_standard":
@@ -310,7 +354,7 @@ def _apply_audience_filters(stmt, audience: str, *, admin_tg_id: int | None = No
         stmt = stmt.where(get_effective_expired_condition(current_time))
     elif audience in ("never", "no_sub"):
         stmt = stmt.where(get_effective_never_condition())
-    elif audience == "test" or audience.startswith("test_"):
+    elif audience == "test" or (isinstance(audience, str) and audience.startswith("test_")):
         tg_id = admin_tg_id
         if tg_id is None and audience.startswith("test_"):
             try:
@@ -319,6 +363,11 @@ def _apply_audience_filters(stmt, audience: str, *, admin_tg_id: int | None = No
                 tg_id = None
         if tg_id is not None:
             stmt = stmt.where(User.telegram_id == tg_id)
+        else:
+            stmt = stmt.where(false())
+    else:
+        logger.error("Unsupported broadcast audience %r; returning empty query", audience)
+        stmt = stmt.where(false())
     return stmt
 
 
@@ -643,6 +692,14 @@ async def resume_pending_broadcasts(bot):
             seen_admins: set[int] = set()
 
             for p in pending:
+                if not _is_supported_broadcast_audience(p.target_audience):
+                    logger.warning(
+                        "Stopping pending broadcast ID %s with unsupported audience %r",
+                        p.id,
+                        p.target_audience,
+                    )
+                    stop_ids.append(p.id)
+                    continue
                 if p.admin_id in _broadcast_in_progress:
                     stop_ids.append(p.id)
                     continue
@@ -848,7 +905,14 @@ async def broadcast_confirm_launch(
         )
         return
     data = await state.get_data()
-    audience = data.get("target_audience", "all")
+    audience = data.get("target_audience")
+    if not _is_supported_broadcast_audience(audience):
+        await callback.answer(
+            texts.BROADCAST_NO_RECIPIENTS,
+            show_alert=True,
+        )
+        await state.clear()
+        return
     await _start_broadcast_process(callback, state, session, audience)
 
 

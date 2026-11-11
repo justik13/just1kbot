@@ -29,6 +29,7 @@ ALERT_SERVER_DISK_CRITICAL = """⚠️ <b>ВНИМАНИЕ: Диск серве�
 
 ALERT_SERVER_HOSTING_TRAFFIC_WARN = "⚠️ Сервер {server_name} израсходовал 80% лимита хостинга ({used_gb} / {limit_gb} ГБ)"
 ALERT_SERVER_HOSTING_TRAFFIC_CRITICAL = "🚨 Сервер {server_name} достиг 90% лимита хостинга ({used_gb} / {limit_gb} ГБ) и автоматически отключён в боте"
+ALERT_SERVER_HOSTING_TRAFFIC_RESTORED = "✅ Сервер {server_name} автоматически включён в новом расчётном периоде ({cycle})"
 
 ALERT_TITLE_CRITICAL_STOP = "Критическая остановка фоновых задач"
 
