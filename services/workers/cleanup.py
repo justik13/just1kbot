@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import time
-import uuid
 from datetime import timedelta
 from typing import Any
 
@@ -33,10 +32,6 @@ from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger(__name__)
 
-_unmanaged_peers_log_cache: TTLCache[tuple[int, str], float] = TTLCache(maxsize=5000, ttl=3600.0)
-_unmanaged_peers_summary_last_logged: float | None = None
-
-MAX_PENDING_ATTEMPTS = 10
 PENDING_RETRY_INTERVAL = 3600
 CLEANUP_START_DELAY = 60.0
 CLEANUP_LOOP_INTERVAL = 900.0
@@ -53,12 +48,6 @@ WEBHOOK_INBOX_RETENTION_DAYS = 30
 _last_heavy_cleanup: float = 0.0
 _last_old_cleanup: float = 0.0
 _pending_order_backoff_cache: TTLCache[Any, float] = TTLCache(maxsize=2000, ttl=300.0)
-
-
-def _safe_log_value(value, limit=64):
-    text = str(value or "unknown")
-    sanitized = "".join(character if character.isprintable() else "?" for character in text)
-    return sanitized[:limit]
 
 
 async def cleanup_dangling_peers_loop(
@@ -168,7 +157,7 @@ async def _cleanup_expired_vless_network_grace() -> None:
 
 
 async def _cleanup_expired_vless_retention_grace(bot: Bot | None = None) -> None:
-    """Perform 24h grace retention cleanup for expired VLESS subscriptions (reset HWIDs, rotate UUID, notify user)."""
+    """Perform 24h grace retention cleanup for expired VLESS subscriptions (clear active HWIDs, notify user)."""
     current_time = now_utc()
     threshold = current_time - timedelta(hours=GRACE_PERIOD_HOURS)
 
@@ -224,25 +213,10 @@ async def _cleanup_expired_vless_retention_grace(bot: Bot | None = None) -> None
                 if not vless_sub or not had_vless_devices:
                     continue
 
-                old_uuid, new_uuid = await vless_subscription_repo.reset_hwids(session, vless_sub.id)
-                if not old_uuid:
-                    old_uuid = vless_sub.uuid
-                    new_uuid = str(uuid.uuid4())
-                    vless_sub.uuid = new_uuid
-                    vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1
-                    vless_sub.active_hwids = {}
-                    vless_sub.node_traffic_snapshots = {"_fresh": True}
-                    pending = list(getattr(vless_sub, "pending_revoked_uuids", None) or [])
-                    if old_uuid and old_uuid not in pending:
-                        pending.append(old_uuid)
-                    vless_sub.pending_revoked_uuids = pending
+                cleared = await vless_subscription_repo.clear_active_hwids(session, vless_sub.id)
                 vless_sub.is_active = False
                 await session.flush()
 
-                if old_uuid:
-                    VlessSubscriptionService.deprovision_background(
-                        old_uuid, version=vless_sub.version, sub_id=vless_sub.id, session=session
-                    )
                 VlessSubscriptionService.ensure_synced_background(user.id, is_active=False, session=session)
 
                 notify_tg_id = user.telegram_id
@@ -253,13 +227,13 @@ async def _cleanup_expired_vless_retention_grace(bot: Bot | None = None) -> None
                     target_type="user",
                     target_id=user.id,
                     details={
-                        "profiles_deleted": 0,
-                        "vless_deleted": True,
-                        "reason": "grace_delete",
+                        "hwids_cleared": cleared,
+                        "vless_deactivated": True,
+                        "reason": "grace_expiry",
                     },
                 )
                 logger.info(
-                    "VLESS 24h retention grace cleanup: reset HWIDs and rotated UUID for user_id=%s",
+                    "VLESS 24h retention grace cleanup: cleared HWIDs for user_id=%s without UUID rotation",
                     user_id,
                 )
 

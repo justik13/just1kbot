@@ -7,7 +7,7 @@ from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from sqlalchemy import func, or_, select
+from sqlalchemy import cast, func, or_, select, String
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
@@ -262,8 +262,6 @@ def _build_server_audience_condition(server_or_id, now: datetime):
         server_id = server_or_id
         if server_id <= 0:
             return User.id == -1
-
-        from sqlalchemy import cast, String
 
         server_proto_subq = select(Server.protocol).where(Server.id == server_id).scalar_subquery()
         server_caps_subq = select(cast(Server.capabilities, String)).where(Server.id == server_id).scalar_subquery()

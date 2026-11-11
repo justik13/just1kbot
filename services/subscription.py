@@ -364,21 +364,7 @@ class SubscriptionService:
         user.last_notification_attempt = None
 
         if new_device_limit is not None:
-            old_device_limit = user.device_limit or 0
             user.device_limit = new_device_limit
-
-            if new_device_limit > old_device_limit:
-                # P0-2: НЕ сбрасываем device_creations_today при апгрейде
-                # Сброс происходит только в ночном cleanup-воркере по календарю UTC.
-                # Это предотвращает абюз: юзер не может создать 25 устройств,
-                # апгрейднуться и создать еще 25, обойдя суточный лимит.
-                logger.info(
-                    "extend_subscription: user %s upgraded from %s to %s devices. "
-                    "Daily creations counter NOT reset (abuse prevention).",
-                    telegram_id,
-                    old_device_limit,
-                    new_device_limit,
-                )
 
         if new_tariff_id is not None:
             user.current_tariff_id = new_tariff_id
@@ -389,50 +375,6 @@ class SubscriptionService:
 
         await SubscriptionService._sync_access_state(session, user)
 
-        return user
-
-    @staticmethod
-    async def replace_subscription(
-        session: AsyncSession,
-        user: User,
-        *,
-        subscription_end,
-        device_limit: int,
-        tariff_id: int,
-    ) -> User:
-        """Replace active coverage after an exact paid-value conversion.
-
-        The caller owns the checkout/User lock and the surrounding financial
-        transaction.  Only durable API operations are queued here; no HTTP is
-        performed.
-        """
-        if subscription_end.tzinfo is None or subscription_end.utcoffset() is None:
-            raise ValueError("subscription_end must be timezone-aware")
-        if subscription_end <= now_utc():
-            raise ValueError("converted subscription must remain active")
-        from database.repositories import vless_subscription_repo
-        vless_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
-        total_count = vless_count
-        if total_count > device_limit:
-            raise ValueError(
-                f"Cannot downgrade: {total_count} devices > "
-                f"{device_limit} limit. User must delete devices first."
-            )
-        user.subscription_end = subscription_end
-        user.device_limit = device_limit
-        user.current_tariff_id = tariff_id
-        user.notified_3d = False
-        user.notified_1d = False
-        user.notified_2h = False
-        user.notified_expired = False
-        user.notified_grace_12h = False
-        user.notification_retry_count = 0
-        user.last_notification_attempt = None
-        # P0-2: НЕ сбрасываем device_creations_today при замене тарифа.
-        # Сброс только в ночном cleanup-воркере (защита от амьюза суточного лимита).
-        await session.flush()
-        invalidate_user_cache(user.telegram_id)
-        await SubscriptionService._sync_access_state(session, user)
         return user
 
     @staticmethod

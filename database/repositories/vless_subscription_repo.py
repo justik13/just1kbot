@@ -326,6 +326,32 @@ async def register_hwid_atomic(
     return True, len(active_hwids), effective_limit
 
 
+async def clear_active_hwids(
+    session: AsyncSession,
+    subscription_id: int,
+) -> bool:
+    """Clear registered HWIDs without rotating client UUID (used on subscription expiry).
+
+    Returns:
+        True if active_hwids were cleared, False if already empty or not found.
+    """
+    stmt = (
+        select(VlessSubscription)
+        .where(VlessSubscription.id == subscription_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    sub = await session.scalar(stmt)
+    if isinstance(sub, VlessSubscription):
+        if not sub.active_hwids:
+            return False
+        sub.active_hwids = {}
+        sub.version = (getattr(sub, "version", 1) or 1) + 1
+        await session.flush()
+        return True
+    return False
+
+
 async def reset_hwids(
     session: AsyncSession,
     subscription_id: int,
