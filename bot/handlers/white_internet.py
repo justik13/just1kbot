@@ -19,6 +19,7 @@ from config.constants import (
     WHITE_INTERNET_BASE_PRICE_RUB,
     WHITE_INTERNET_BASE_TRAFFIC_BYTES,
     WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB,
+    WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES,
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
     WHITE_INTERNET_SUB_PATH_PREFIX,
     WHITE_INTERNET_TOPUP_PACKS,
@@ -905,10 +906,17 @@ async def show_add_device_menu(query: CallbackQuery, session: AsyncSession):
         return
 
     next_limit = current_limit + 1
-    _base_price, _base_price_int, _duration_days, base_quota_bytes = await _get_effective_tariff_info(session)
+    _base_price, _base_price_int, duration_days, base_quota_bytes = await _get_effective_tariff_info(session)
     next_price = int(get_white_internet_tier_price(next_limit, base_price=Decimal(_base_price)))
     base_gb = int(base_quota_bytes // (1024**3))
     next_traffic = next_limit * base_gb
+    price = int(WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB)
+    extra_gb = int(WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES // (1024**3))
+    expiry_str = (
+        format_subscription_date(sub.expires_at)
+        if getattr(sub, "expires_at", None)
+        else texts.TIME_FOREVER
+    )
 
     kb = InlineKeyboardBuilder()
     kb.button(
@@ -920,8 +928,13 @@ async def show_add_device_menu(query: CallbackQuery, session: AsyncSession):
     kb.adjust(1, 1)
 
     text = texts.WL_ADD_DEVICE_CONFIRM.format(
-        next_price=next_price,
+        price=price,
+        current_limit=current_limit,
         next_limit=next_limit,
+        gb=extra_gb,
+        expiry=expiry_str,
+        next_price=next_price,
+        duration_days=duration_days,
         next_traffic=next_traffic,
     )
     await query.message.edit_text(text, reply_markup=kb.as_markup(), parse_mode="HTML")
@@ -950,6 +963,7 @@ async def process_add_device_confirm(query: CallbackQuery, session: AsyncSession
         return
 
     price = WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB
+    extra_gb = int(WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES // (1024**3))
     balance_snapshot = await get_account_balance(session, user_id=user.id)
     if balance_snapshot.available < price:
         shortage = price - balance_snapshot.available
@@ -962,7 +976,8 @@ async def process_add_device_confirm(query: CallbackQuery, session: AsyncSession
         kb.button(text=texts.BTN_BACK, callback_data="white_internet")
         kb.adjust(1, 1)
         await query.message.edit_text(
-            texts.WL_INSUFFICIENT_BALANCE_BUY.format(
+            texts.WL_INSUFFICIENT_BALANCE_ADD_DEVICE.format(
+                gb=extra_gb,
                 price=int(price),
                 balance=balance_snapshot.available,
                 shortage=shortage,
