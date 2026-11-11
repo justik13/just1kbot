@@ -14,7 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.keyboards import (
     get_admin_cat_finance_keyboard,
-    get_admin_cat_infra_keyboard,
     get_admin_cat_std_sub_keyboard,
     get_admin_cat_system_keyboard,
     get_admin_cat_users_keyboard,
@@ -30,7 +29,6 @@ from database.repositories.audit_repo import (
     get_all_audit_logs_paginated,
     get_total_audit_logs_count,
 )
-from database.repositories.servers_repo import get_total_free_ips
 from database.repositories.system_settings_repo import (
     get_system_setting,
     set_system_setting,
@@ -116,20 +114,20 @@ async def _get_financial_stats(session: AsyncSession) -> dict:
 
 async def _get_servers_capacity_summary(session: AsyncSession) -> str:
     from bot.formatters import get_server_protocol_badge
+    from config.constants import DEFAULT_XRAY_ORIGIN_MAX_CLIENTS
     from config.enums import ServerLifecycleStatus
     from database.repositories.servers_repo import (
         get_all_servers,
-        get_server_peer_counts,
+        get_origin_server_subscription_counts,
         is_pure_vless_server,
         is_white_internet_origin_server,
     )
-    from services.slots_cache import get_cached_peer_count
 
     servers = await get_all_servers(session)
     if not servers:
         return texts.DASHBOARD_SERVEROV_POKA_NET
 
-    db_counts = await get_server_peer_counts(session)
+    db_counts = await get_origin_server_subscription_counts(session)
 
     vless_users_count: int = 0
     vless_devices_count: int = 0
@@ -172,16 +170,8 @@ async def _get_servers_capacity_summary(session: AsyncSession) -> str:
                     cap_str=cap_str,
                 ))
             else:
-                cached_used = get_cached_peer_count(s.id)
-                effective_used = max(cached_used, db_used) if cached_used is not None else db_used
-                if cached_used is not None and cached_used != db_used:
-                    extra_info = texts.ADMIN_SERVER_SLOTS_BREAKDOWN_NOTE.format(
-                        cached_used=cached_used, db_used=db_used
-                    )
-                else:
-                    extra_info = ""
-
-                total = s.max_clients or 240
+                effective_used = db_used
+                total = s.max_clients or DEFAULT_XRAY_ORIGIN_MAX_CLIENTS
                 pct = int((effective_used / total) * 100) if total > 0 else 0
                 status_icon = "🟢" if pct < 80 else ("🟡" if pct < 90 else "🔴")
 
@@ -192,7 +182,7 @@ async def _get_servers_capacity_summary(session: AsyncSession) -> str:
                     used=effective_used,
                     total=total,
                     pct=pct,
-                    extra_info=extra_info,
+                    extra_info="",
                 )
                 if has_wl:
                     origin_lines.append(formatted_row)
@@ -202,6 +192,8 @@ async def _get_servers_capacity_summary(session: AsyncSession) -> str:
             reason = getattr(s, "disabled_reason", None)
             if reason == "MANUAL":
                 reason_text = texts.DASHBOARD_DISABLED_REASON_MANUAL
+            elif reason == "HOSTING_TRAFFIC_LIMIT":
+                reason_text = texts.DASHBOARD_DISABLED_REASON_HOSTING_LIMIT
             elif reason:
                 reason_text = f" ({safe(reason)})"
             else:
@@ -245,7 +237,6 @@ async def _show_admin_dashboard(
 ) -> None:
     stats = await get_dashboard_stats(session)
     wl_stats = await get_white_internet_dashboard_stats(session)
-    free_ips = await get_total_free_ips(session)
     fin_stats = await _get_financial_stats(session)
     servers_summary = await _get_servers_capacity_summary(session)
     maintenance_enabled = await MaintenanceService.is_enabled(session)
@@ -258,20 +249,14 @@ async def _show_admin_dashboard(
             avg_traffic=format_traffic(avg_m_wi)
         )
 
-    awg_total_str = format_traffic(stats.get("total_traffic_bytes", 0))
+    std_total_str = format_traffic(stats.get("total_traffic_bytes", 0))
     avg_m_std = stats.get("avg_monthly_vless_bytes", 0)
     if avg_m_std > 0:
-        awg_avg_str = f"{format_traffic(avg_m_std)}{texts.DASHBOARD_PER_MONTH_SUFFIX}"
+        std_avg_str = f"{format_traffic(avg_m_std)}{texts.DASHBOARD_PER_MONTH_SUFFIX}"
     else:
-        awg_avg_str = f"{format_traffic(0)}{texts.DASHBOARD_PER_MONTH_SUFFIX}"
+        std_avg_str = f"{format_traffic(0)}{texts.DASHBOARD_PER_MONTH_SUFFIX}"
 
-    if free_ips > 0:
-        servers_header_text = (
-            texts.DASHBOARD_VPN_SERVERS_I_POOL_IP.format()
-            + texts.DASHBOARD_FREE_IP_V_POOL.format(free_ips=free_ips)
-        )
-    else:
-        servers_header_text = texts.ADMIN_DASHBOARD_SERVERS_SECTION
+    servers_header_text = texts.ADMIN_DASHBOARD_SERVERS_SECTION
 
     header = format_admin_breadcrumbs(texts.DASHBOARD_MAIN_DASHBOARD)
     text = (
@@ -279,7 +264,7 @@ async def _show_admin_dashboard(
         texts.DASHBOARD_USERS_I_SUBSCRIPTION.format()+
         texts.DASHBOARD_TOTAL_USERS_TOTAL.format(stats__total=stats['total'])+
         texts.DASHBOARD_ACTIVE_PODPISOK_ACTIVE.format(stats__active=stats['active'])+
-        texts.DASHBOARD_AWG_TRAFFIC_STATS.format(total_traffic=awg_total_str, avg_traffic=awg_avg_str)+
+        texts.DASHBOARD_STD_TRAFFIC_STATS.format(total_traffic=std_total_str, avg_traffic=std_avg_str)+
         texts.DASHBOARD_WHITE_INTERNET_STATS.format(active_count=wl_stats['active_count'], traffic=wl_traffic_str)+
         texts.DASHBOARD_NEW_ZA_24_HOURS_NEW_24H.format(stats__new_24h=stats['new_24h'])+
         texts.DASHBOARD_FINANCIAL_METRICS.format()+
@@ -377,20 +362,6 @@ async def show_admin_cat_wi_sub(callback: CallbackQuery, state: FSMContext):
         pass
     await callback.answer(show_alert=False)
 
-
-@router.callback_query(F.data == "admin_cat_infra")
-async def show_admin_cat_infra(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
-        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
-        return
-    await state.clear()
-    header = format_admin_breadcrumbs(texts.BTN_SERVERS_AND_TARIFFS)
-    text = texts.DASHBOARD_MANAGE_VPN_SERVERAMI_I_TAR.format(header=header)
-    try:
-        await callback.message.edit_text(text, reply_markup=get_admin_cat_infra_keyboard(), parse_mode="HTML")
-    except TelegramBadRequest:
-        pass
-    await callback.answer(show_alert=False)
 
 
 @router.callback_query(F.data == "admin_cat_finance")

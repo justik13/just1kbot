@@ -5,8 +5,8 @@ Runs only with TEST_DATABASE_URL (CI). Skipped on Windows dev machines.
 Active = real-money payment >= REFERRAL_ACTIVE_MIN_TOPUP_RUB (68 RUB):
   A:  paid topup Order 100, payment_method yookassa  -> counts
   A2: paid topup Order 10 (dust)                     -> NOT counted
-  A3: paid awg Order 500, payment_method yookassa    -> counts (external gateway)
-  A4: paid awg Order 500, payment_method wallet      -> NOT counted (gifted balance)
+  A3: paid standard Order 500, payment_method yookassa    -> counts (external gateway)
+  A4: paid standard Order 500, payment_method wallet      -> NOT counted (gifted balance)
   B:  succeeded+fulfilled+credited Payment 100       -> counts (legacy, no Order)
   B2: succeeded+fulfilled+credited Payment 10        -> NOT counted (dust)
   C:  succeeded Payment, credited_at NULL            -> NOT counted
@@ -132,12 +132,12 @@ class ReferralPaidActivityMatrixTests(unittest.IsolatedAsyncioTestCase):
             ))
             # A3: direct tariff purchase via external gateway — counts (real money)
             session.add(Order(
-                user_id=a3.id, service_type="awg", amount_rub=Decimal("500"),
+                user_id=a3.id, service_type="standard", amount_rub=Decimal("500"),
                 status="paid", payment_method="yookassa",
             ))
             # A4: direct tariff purchase paid from wallet — NOT counted (may be gifted balance)
             session.add(Order(
-                user_id=a4.id, service_type="awg", amount_rub=Decimal("500"),
+                user_id=a4.id, service_type="standard", amount_rub=Decimal("500"),
                 status="paid", payment_method="wallet",
             ))
             # B: real legacy topup, no order

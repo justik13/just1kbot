@@ -37,12 +37,12 @@ COMMON_MANAGE_POLZOVATELYAMI_STR = """👥 <b>Управление пользо�
 
 COMMON_NE_AKTIVIROVAN = "Не активирован"
 
+COMMON_NOVYE_24H = "🆕 Новые (24ч)"
+
 COMMON_NOVYE_7D = "🆕 Новые (7д)"
 
-COMMON_OTKLYUCHEN = """• Отключён: <code>{disabled_at_str}</code>
-"""
-
 COMMON_OTKLYUCHEN_VRUCHNUYU = "🔴 <b>Отключён вручную</b>"
+COMMON_OTKLYUCHEN_PO_LIMITU_TRAFIKA = "🔴 <b>Отключён (лимит трафика)</b>"
 
 COMMON_POSLEDNIY_OTKLIK = """• Последний отклик: <code>{last_check_str}</code>
 """
@@ -51,9 +51,6 @@ COMMON_PROTOKOL = """• Протокол: <code>{safe_server_protocol}</code>
 """
 
 COMMON_PRYAMOY_PEREKHOD = "Прямой переход"
-
-COMMON_REASON_API_NEDOSTUPEN_NESTAB = """• Причина: <b>API недоступен / нестабильное соединение</b>
-"""
 
 COMMON_SERVER_CONNECTIVITY_PROBLEM = """• Связь: <b>API недоступен</b>
 """
@@ -71,7 +68,7 @@ COMMON_SEARCH_PO_USERNAME_ID = "🔍 Поиск по @username / ID"
 COMMON_STATUS_V_BOTE = """• Статус в боте: {status_line}
 """
 
-COMMON_USTR = "{status}{ban} {username} | {days} | {profiles_count} устр."
+COMMON_USTR = "{status}{ban} {username} | {days} | {devices_count} устр."
 
 COMMON_VSE = "Все"
 

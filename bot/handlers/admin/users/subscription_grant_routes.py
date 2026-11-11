@@ -385,7 +385,7 @@ async def admin_sub_grant_custom_process(
             message.bot,
             message.chat.id,
             texts.ERROR_TARIFF_NOT_FOUND,
-            get_back_button(f"admin_subscription:{telegram_id}"),
+            get_back_button(f"admin_sub_menu:{telegram_id}"),
             trigger_message_id=trigger_msg_id,
         )
         return

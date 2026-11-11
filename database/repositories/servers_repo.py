@@ -6,26 +6,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from config.constants import (
-    AMNEZIA_PROTOCOL,
-    AMNEZIA_PROTOCOLS,
+    DEFAULT_XRAY_ORIGIN_MAX_CLIENTS,
     VLESS_PROTOCOL,
     XRAY_ORIGIN_CAPABILITY,
     XRAY_PROTOCOL,
 )
 from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.models import Server
-from services.slots_cache import get_cached_peer_count
-
-CAPACITY_CONSUMING_STATUSES = (
-    "pending_create",
-    "active",
-    "pending_update",
-    "update_failed",
-    "deleting",
-    "delete_failed",
-    "create_cleanup_pending",
-)
-
 
 def is_vless_capable_server(server) -> bool:
     """Whether a server can serve direct VLESS TLS clients.
@@ -51,16 +38,9 @@ def is_white_internet_origin_server(server) -> bool:
         caps = []
     raw_proto = getattr(server, "protocol", None)
     proto = raw_proto.strip().lower() if isinstance(raw_proto, str) else ""
-    if proto in AMNEZIA_PROTOCOLS:
-        return False
     if XRAY_ORIGIN_CAPABILITY in caps:
         return True
     return proto == XRAY_PROTOCOL and not is_vless_capable_server(server)
-
-
-def is_awg_capable_server(server) -> bool:
-    """Legacy compatibility stub: AmneziaWG is fully decommissioned."""
-    return False
 
 
 def is_pure_vless_server(server) -> bool:
@@ -70,14 +50,8 @@ def is_pure_vless_server(server) -> bool:
 
 def get_server_xray_api_url(server) -> str | None:
     """Return explicit Xray API URL for the server."""
-    proto = str(getattr(server, "protocol", "") or "").lower()
-    caps = getattr(server, "capabilities", None) or []
     extra = getattr(server, "extra_data", None) if isinstance(getattr(server, "extra_data", None), dict) else {}
-
-    if proto in AMNEZIA_PROTOCOLS or "awg" in caps:
-        return extra.get("xray_api_url")
-
-    return getattr(server, "api_url", None) or extra.get("xray_api_url")
+    return extra.get("xray_api_url") or getattr(server, "api_url", None)
 
 
 class ServerUpdateFields(TypedDict, total=False):
@@ -158,7 +132,7 @@ def capacity_consuming_wl_condition():
     )
 
 
-async def get_server_peer_counts(session: AsyncSession) -> dict[int, int]:
+async def get_origin_server_subscription_counts(session: AsyncSession) -> dict[int, int]:
     # WhiteInternetSubscription counts (Xray Origin)
     from database.models import WhiteInternetSubscription
 
@@ -171,57 +145,6 @@ async def get_server_peer_counts(session: AsyncSession) -> dict[int, int]:
         .group_by(WhiteInternetSubscription.origin_node_id)
     )
     return {row[0]: row[1] for row in wl_result.all()}
-
-
-def is_server_allocatable(server: Server | None, protocol: str = VLESS_PROTOCOL) -> bool:
-    """Return True if server is valid, active, matching protocol, and healthy for allocation/migration."""
-    if not server:
-        return False
-    caps = getattr(server, "capabilities", None) or []
-    server_proto = getattr(server, "protocol", None)
-    if server_proto is not None:
-        if server_proto != protocol and protocol not in caps:
-            return False
-    if getattr(server, "is_active", True) is False:
-        return False
-    health = getattr(server, "health_state", None)
-    if health in (
-        ServerHealthState.MANUAL_DISABLED,
-        ServerHealthState.PROBLEM,
-    ):
-        return False
-    lifecycle = getattr(server, "lifecycle_status", None)
-    if lifecycle in (
-        ServerLifecycleStatus.DECOMMISSIONING,
-        ServerLifecycleStatus.DECOMMISSIONED,
-        ServerLifecycleStatus.ARCHIVED,
-    ):
-        return False
-    caps = getattr(server, "capabilities", None) or []
-    if protocol in AMNEZIA_PROTOCOLS and "xray_origin" in caps:
-        return False
-    return True
-
-
-async def get_available_servers(session: AsyncSession) -> list[Server]:
-    servers = await get_active_servers(session)
-    if not servers:
-        return []
-
-    # Filter servers for AWG allocation using canonical is_server_allocatable predicate
-    awg_servers = [s for s in servers if is_server_allocatable(s, AMNEZIA_PROTOCOL)]
-    if not awg_servers:
-        return []
-
-    db_counts = await get_server_peer_counts(session)
-    available: list[Server] = []
-    for server in awg_servers:
-        cached_count = get_cached_peer_count(server.id)
-        db_count = db_counts.get(server.id, 0)
-        effective_count = max(cached_count, db_count) if cached_count is not None else db_count
-        if effective_count < server.max_clients:
-            available.append(server)
-    return available
 
 
 async def allocate_origin_server_atomic(session: AsyncSession) -> Server | None:
@@ -313,7 +236,7 @@ async def create_server(
     api_key: str,
     country_flag: str = None,
     protocol: str = VLESS_PROTOCOL,
-    max_clients: int = 50,
+    max_clients: int = DEFAULT_XRAY_ORIGIN_MAX_CLIENTS,
     capabilities: list[str] | None = None,
     lifecycle_status: str | ServerLifecycleStatus = ServerLifecycleStatus.ACTIVE,
 ) -> Server:
@@ -421,10 +344,6 @@ async def delete_server(session: AsyncSession, server: Server) -> None:
     await session.flush()
 
 
-async def get_total_free_ips(session: AsyncSession) -> int:
-    return 0
-
-
 async def get_server_count(session: AsyncSession) -> int:
     result = await session.execute(select(func.count(Server.id)))
     return result.scalar_one()
@@ -445,10 +364,6 @@ async def get_servers_paginated(
 async def get_server_by_api_url(session: AsyncSession, api_url: str) -> Server | None:
     result = await session.execute(select(Server).where(Server.api_url == api_url))
     return result.scalar_one_or_none()
-
-
-async def delete_profiles_by_server_id(session: AsyncSession, server_id: int) -> int:
-    return 0
 
 
 async def update_server_xray_epoch_cas(

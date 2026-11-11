@@ -27,6 +27,10 @@ ALERT_SERVER_DISK_CRITICAL = """⚠️ <b>ВНИМАНИЕ: Диск серве�
 Использование диска: <b>{disk_percent:.1f}%</b>
 Рекомендуется очистить логи или расширить диск."""
 
+ALERT_SERVER_HOSTING_TRAFFIC_WARN = "⚠️ Сервер {server_name} израсходовал 80% лимита хостинга ({used_gb} / {limit_gb} ГБ)"
+ALERT_SERVER_HOSTING_TRAFFIC_CRITICAL = "🚨 Сервер {server_name} достиг 90% лимита хостинга ({used_gb} / {limit_gb} ГБ) и автоматически отключён в боте"
+ALERT_SERVER_HOSTING_TRAFFIC_RESTORED = "✅ Сервер {server_name} автоматически включён в новом расчётном периоде ({cycle})"
+
 ALERT_TITLE_CRITICAL_STOP = "Критическая остановка фоновых задач"
 
 ALERT_TITLE_WORKER_FAILED = "Фоновый воркер упал"
@@ -124,23 +128,13 @@ ALERT_RELAY_TSPU_PROBLEM_REMINDER = """⚠️ <b>Напоминание: Сбо�
 
 Сетевой узел по-прежнему не отвечает на TCP-подключение со стороны Origin в Москве."""
 
-ALERT_API_OPERATION_DEAD = """🚨 <b>Сбой операции с ключом / пиром</b>
-
-⚙️ <b>Тип:</b> <code>{operation_type}</code> (ID: {operation_id})
-👤 <b>Профиль ID:</b> <code>{profile_id}</code>
-🌍 <b>Сервер:</b> <b>{server_name}</b> (ID: {server_id})
-⚠️ <b>Код ошибки:</b> <code>{error_code}</code>
-📝 <b>Ошибка:</b> <code>{error_message}</code>
-🔁 <b>Попыток:</b> {attempts}
-
-Операция исчерпала лимит попыток и переведена в статус DEAD."""
 
 ALERT_WHITE_INTERNET_ORIGIN_EXHAUSTED = """🚨 <b>Внимание: Нет доступных Origin-серверов!</b>
 
 Не удалось выделить Origin-узел для подписки ID: <code>{sub_id}</code>.
 Все Origin-серверы либо недоступны (сбой связи / отключены), либо исчерпали лимит емкости.
 
-🔍 <i>Проверьте доступность Origin-серверов в админке или увеличьте лимит емкости (max_clients).</i>"""
+🔍 <i>Проверьте доступность Origin-серверов в админке или увеличьте лимит емкости.</i>"""
 
 ALERT_WHITE_INTERNET_ORIGIN_RESTORED = """✅ <b>Origin-сервер снова доступен для распределения</b>
 

@@ -16,7 +16,7 @@ def get_admin_user_card_keyboard(
 
     builder.button(
         text=texts.ADMIN_BTN_SUB_STANDARD,
-        callback_data=f"admin_sub_awg_menu:{user_id}",
+        callback_data=f"admin_sub_menu:{user_id}",
     )
     builder.button(
         text=texts.ADMIN_BTN_SUB_WI,
@@ -124,11 +124,10 @@ def get_admin_user_balance_keyboard(
     return builder.as_markup()
 
 
-def get_admin_awg_subscription_keyboard(
+def get_admin_subscription_keyboard(
     telegram_id: int,
     has_active_sub: bool,
     vless_sub_url: str | None = None,
-    has_vless_hwids: bool = False,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
@@ -173,9 +172,6 @@ def get_admin_awg_subscription_keyboard(
 
     builder.adjust(1)
     return builder.as_markup()
-
-
-get_admin_subscription_keyboard = get_admin_awg_subscription_keyboard
 
 
 def get_admin_wi_subscription_keyboard(
@@ -410,7 +406,7 @@ def get_admin_change_tariff_keyboard(
 
     builder.button(
         text=texts.BTN_BACK,
-        callback_data=f"admin_subscription:{telegram_id}",
+        callback_data=f"admin_sub_menu:{telegram_id}",
     )
 
     builder.adjust(1)
@@ -436,7 +432,7 @@ def get_admin_grant_tariff_keyboard(
 
     builder.button(
         text=texts.BTN_BACK,
-        callback_data=f"admin_subscription:{telegram_id}",
+        callback_data=f"admin_sub_menu:{telegram_id}",
     )
 
     builder.adjust(1)
@@ -476,7 +472,7 @@ def get_admin_grant_days_keyboard(
 
     builder.button(
         text=texts.BTN_BACK,
-        callback_data=f"admin_subscription:{telegram_id}",
+        callback_data=f"admin_sub_menu:{telegram_id}",
     )
 
     builder.adjust(2, 2, 1, 1)
@@ -511,7 +507,7 @@ def get_admin_extend_days_new_keyboard(
 
     builder.button(
         text=texts.BTN_BACK,
-        callback_data=f"admin_subscription:{telegram_id}",
+        callback_data=f"admin_sub_menu:{telegram_id}",
     )
 
     builder.adjust(2, 2, 1, 1)
@@ -542,7 +538,6 @@ def get_admin_confirm_action_keyboard(
 
 def get_admin_user_devices_keyboard(
     telegram_id: int,
-    profiles: list | None = None,
     vless_sub_url: str | None = None,
     has_vless_hwids: bool = False,
 ) -> InlineKeyboardMarkup:
@@ -573,7 +568,7 @@ def get_admin_user_devices_keyboard(
 
     builder.button(
         text=texts.ADMIN_BTN_BACK_TO_SUB,
-        callback_data=f"admin_sub_awg_menu:{telegram_id}",
+        callback_data=f"admin_sub_menu:{telegram_id}",
     )
 
     builder.adjust(1)

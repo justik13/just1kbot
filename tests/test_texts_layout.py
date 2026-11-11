@@ -15,7 +15,7 @@ TEXTS_DIR = ROOT / "bot" / "texts"
 EXPECTED_FILES = {
     "__init__.py", "common/__init__.py", "common/buttons.py", "common/errors.py", "common/status.py",
     "user/__init__.py", "user/hub.py", "user/onboarding.py", "user/referral.py", "user/support.py", "user/white_internet.py",
-    "connection/__init__.py", "connection/devices.py", "connection/config.py", "connection/actions.py",
+    "connection/__init__.py", "connection/devices.py", "connection/config.py",
     "payment/__init__.py", "payment/balance.py", "payment/topup.py", "payment/tariffs.py",
     "payment/tariff_change.py", "payment/status.py",
     "admin/__init__.py", "admin/dashboard.py", "admin/servers.py", "admin/users.py", "admin/tariffs.py",
@@ -205,7 +205,7 @@ class TestTextsLayout(unittest.TestCase):
     def test_config_constants_has_no_user_facing_text(self):
         """Константы конфига не должны быть UI-текстами.
 
-        Технические идентификаторы (protocol='amneziawg2', таймауты-строки и
+        Технические идентификаторы (protocol='vless', таймауты-строки и
         т.п.) допустимы; запрещены значения с кириллицей и англоязычные фразы.
         """
         path = ROOT / "config" / "constants.py"

@@ -276,8 +276,6 @@ class OrderService:
         bot_username: str | None = None,
     ) -> Order:
         """Create a new commercial order and obtain payment link if external gateway."""
-        if service_type == "awg":
-            service_type = "standard"
         user = await session.get(User, user_id)
         order_meta: dict = dict(metadata) if metadata else {}
         amount_rub, duration_days, device_limit, description = (
@@ -405,8 +403,6 @@ class OrderService:
         description: str | None = None,
         metadata: dict | None = None,
     ) -> Order:
-        if service_type == "awg":
-            service_type = "standard"
         # Acquire advisory lock then row lock to avoid lock inversion deadlock
         bind = session.get_bind()
         if bind and getattr(bind, "dialect", None) and bind.dialect.name == "postgresql":

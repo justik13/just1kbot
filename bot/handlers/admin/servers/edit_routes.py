@@ -1,4 +1,5 @@
 import logging
+from urllib.parse import urlsplit, urlunsplit
 
 from config.constants import (
     AdminAuditAction,
@@ -104,7 +105,6 @@ async def process_edit_server_name(
 
     if message.text.startswith("/"):
         await state.clear()
-
         await render_hub(
             message.bot,
             message.chat.id,
@@ -129,7 +129,6 @@ async def process_edit_server_name(
         )
 
         await state.clear()
-
         return
 
     new_name = message.text.strip()
@@ -259,7 +258,6 @@ async def process_edit_server_flag(
 
     if message.text.startswith("/"):
         await state.clear()
-
         await render_hub(
             message.bot,
             message.chat.id,
@@ -284,7 +282,6 @@ async def process_edit_server_flag(
         )
 
         await state.clear()
-
         return
 
     new_flag = message.text.strip()
@@ -394,7 +391,6 @@ async def process_edit_server_url(
 
     if message.text.startswith("/"):
         await state.clear()
-
         await render_hub(
             message.bot,
             message.chat.id,
@@ -419,7 +415,6 @@ async def process_edit_server_url(
         )
 
         await state.clear()
-
         return
 
     validated_api_url = server.api_url
@@ -472,7 +467,6 @@ async def process_edit_server_url(
         )
 
         await state.clear()
-
         return
 
     if (
@@ -483,11 +477,32 @@ async def process_edit_server_url(
         from services.xray_node_client import XrayNodeClient
 
         is_healthy = False
+        parsed_new = urlsplit(new_url)
+        new_hostname = parsed_new.hostname
+        current_extra = dict(server.extra_data) if isinstance(server.extra_data, dict) else {}
+        target_check_urls = [new_url]
+        if new_hostname and current_extra.get("xray_api_url"):
+            p_xray = urlsplit(str(current_extra["xray_api_url"]))
+            auth = f"{p_xray.username}:{p_xray.password}@" if p_xray.password else (f"{p_xray.username}@" if p_xray.username else "")
+            h_port = f"{new_hostname}:{p_xray.port}" if p_xray.port is not None else new_hostname
+            cand_url = urlunsplit((
+                p_xray.scheme or "https",
+                f"{auth}{h_port}",
+                p_xray.path,
+                p_xray.query,
+                p_xray.fragment,
+            ))
+            if cand_url not in target_check_urls:
+                target_check_urls.insert(0, cand_url)
+
         try:
             async with XrayNodeClient(timeout=5.0, max_retries=0) as xclient:
-                is_healthy, _node_epoch, _ = await xclient.check_health(new_url, server.api_key)
+                for target_url in target_check_urls:
+                    is_healthy, _node_epoch, _ = await xclient.check_health(target_url, server.api_key)
+                    if is_healthy:
+                        break
         except Exception as e:
-            logger.warning("Xray health check failed for %s: %s", new_url, e)
+            logger.warning("Xray health check failed for %s: %s", target_check_urls, e)
             is_healthy = False
         if not is_healthy:
             await render_hub(
@@ -507,8 +522,6 @@ async def process_edit_server_url(
             get_back_button("admin_servers"),
             parse_mode="HTML",
         )
-        await state.clear()
-        return
         await state.clear()
         return
 
@@ -549,9 +562,6 @@ async def process_edit_server_url(
             await state.clear()
             return
 
-        profiles_count = 0
-        active_ops_count = 0
-
         wl_subs_count = (
             await session.scalar(
                 select(func.count(WhiteInternetSubscription.id)).where(
@@ -565,13 +575,12 @@ async def process_edit_server_url(
             )
         ) or 0
 
-        if profiles_count > 0 or wl_subs_count > 0:
+        if wl_subs_count > 0:
             await render_hub(
                 message.bot,
                 message.chat.id,
                 texts.ADMIN_SERVER_EDIT_URL_BLOCKED.format(
-                    devices_count=profiles_count + wl_subs_count,
-                    operations_count=active_ops_count,
+                    subs_count=wl_subs_count,
                 ),
                 get_back_button(f"admin_server_card:{server_id}"),
                 parse_mode="HTML",
@@ -580,7 +589,6 @@ async def process_edit_server_url(
             return
 
     update_kwargs = {"api_url": new_url}
-    from urllib.parse import urlsplit
     parsed_new = urlsplit(new_url)
     new_hostname = parsed_new.hostname
     if new_hostname:
@@ -592,14 +600,17 @@ async def process_edit_server_url(
         if "vless_domain" in current_extra and current_extra["vless_domain"] != new_hostname:
             current_extra["vless_domain"] = new_hostname
             extra_changed = True
-        if server.protocol in (XRAY_PROTOCOL, VLESS_PROTOCOL):
-            if "xray_api_url" in current_extra:
-                current_extra.pop("xray_api_url", None)
-                extra_changed = True
-        elif "xray_api_url" in current_extra and current_extra["xray_api_url"]:
+        if "xray_api_url" in current_extra and current_extra["xray_api_url"]:
             parsed_xray = urlsplit(str(current_extra["xray_api_url"]))
-            port = parsed_xray.port or 8444
-            new_xray_url = f"{parsed_xray.scheme or 'https'}://{new_hostname}:{port}"
+            auth = f"{parsed_xray.username}:{parsed_xray.password}@" if parsed_xray.password else (f"{parsed_xray.username}@" if parsed_xray.username else "")
+            host_port = f"{new_hostname}:{parsed_xray.port}" if parsed_xray.port is not None else new_hostname
+            new_xray_url = urlunsplit((
+                parsed_xray.scheme or "https",
+                f"{auth}{host_port}",
+                parsed_xray.path,
+                parsed_xray.query,
+                parsed_xray.fragment,
+            ))
             if current_extra["xray_api_url"] != new_xray_url:
                 current_extra["xray_api_url"] = new_xray_url
                 extra_changed = True
@@ -608,8 +619,8 @@ async def process_edit_server_url(
 
     await update_server(session, server, **update_kwargs)
 
-    from services.slots_cache import invalidate_server_cache
-    invalidate_server_cache(server_id)
+    from services.vless_subscription_service import VlessSubscriptionService
+    VlessSubscriptionService.sync_all_active_to_server_background(server_id)
 
     await AuditService.log_action(
         session,
@@ -702,7 +713,6 @@ async def process_edit_server_key(
 
     if message.text.startswith("/"):
         await state.clear()
-
         await render_hub(
             message.bot,
             message.chat.id,
@@ -727,7 +737,6 @@ async def process_edit_server_key(
         )
 
         await state.clear()
-
         return
 
     validated_api_url = server.api_url
@@ -803,9 +812,6 @@ async def process_edit_server_key(
             )
             await state.clear()
             return
-        profiles_count = 0
-        active_ops_count = 0
-
         wl_subs_count = (
             await session.scalar(
                 select(func.count(WhiteInternetSubscription.id)).where(
@@ -819,13 +825,12 @@ async def process_edit_server_key(
             )
         ) or 0
 
-        if profiles_count > 0 or wl_subs_count > 0:
+        if wl_subs_count > 0:
             await render_hub(
                 message.bot,
                 message.chat.id,
                 texts.ADMIN_SERVER_EDIT_KEY_BLOCKED.format(
-                    devices_count=profiles_count + wl_subs_count,
-                    operations_count=active_ops_count,
+                    subs_count=wl_subs_count,
                 ),
                 get_back_button(f"admin_server_card:{server_id}"),
                 parse_mode="HTML",
@@ -836,8 +841,8 @@ async def process_edit_server_key(
     update_kwargs = {"api_key": new_key}
     await update_server(session, server, **update_kwargs)
 
-    from services.slots_cache import invalidate_server_cache
-    invalidate_server_cache(server_id)
+    from services.vless_subscription_service import VlessSubscriptionService
+    VlessSubscriptionService.sync_all_active_to_server_background(server_id)
 
     await AuditService.log_action(
         session,
@@ -861,170 +866,6 @@ async def process_edit_server_key(
     logger.info(
         f"Admin {message.from_user.id} updated server {server_id} "
         f"api_key"
-    )
-
-    await state.clear()
-
-
-@router.callback_query(F.data.startswith("admin_server_edit_max_clients:"))
-async def start_edit_server_max_clients(
-    callback: CallbackQuery,
-    state: FSMContext,
-):
-    if not is_admin(callback.from_user.id):
-        await callback.answer(
-            texts.ERROR_ACCESS_DENIED,
-            show_alert=True,
-        )
-        return
-
-    server_id = parse_callback_id(callback.data, 1)
-
-    if server_id is None:
-        await callback.answer(
-            texts.ERROR_INVALID_REQUEST,
-            show_alert=True,
-        )
-        return
-
-    await callback.answer(show_alert=False)
-    await state.clear()
-
-    await state.update_data(server_id=server_id)
-    await state.set_state(AdminStates.editing_server_max_clients)
-
-    await callback.message.edit_text(
-        texts.ADMIN_SERVER_EDIT_MAX_CLIENTS_PROMPT,
-        reply_markup=get_back_button(
-            f"admin_server_card:{server_id}"
-        ),
-    )
-
-
-@router.message(AdminStates.editing_server_max_clients)
-async def process_edit_server_max_clients(
-    message: Message,
-    state: FSMContext,
-    session: AsyncSession,
-):
-    try:
-        await message.delete()
-    except Exception:
-        pass
-
-    if not is_admin(message.from_user.id):
-        await state.clear()
-        return
-
-    if not message.text:
-        await render_hub(
-            message.bot,
-            message.chat.id,
-            texts.ERROR_TEXT_REQUIRED,
-            get_back_button("admin_servers"),
-            trigger_message_id=getattr(message, "message_id", None),
-        )
-        return
-
-    if message.text.startswith("/"):
-        await state.clear()
-
-        await render_hub(
-            message.bot,
-            message.chat.id,
-            texts.ERROR_OPERATION_CANCELLED,
-            get_back_button("admin_servers"),
-            trigger_message_id=getattr(message, "message_id", None),
-        )
-        return
-
-    data = await state.get_data()
-    server_id = data["server_id"]
-
-    server = await get_server_by_id(session, server_id)
-
-    if not server:
-        await render_hub(
-            message.bot,
-            message.chat.id,
-            texts.ERROR_SERVER_NOT_FOUND,
-            get_back_button("admin_servers"),
-            trigger_message_id=getattr(message, "message_id", None),
-        )
-
-        await state.clear()
-
-        return
-
-    try:
-        new_value = int(message.text.strip())
-
-        if new_value < 1:
-            raise ValueError
-    except ValueError:
-        await render_hub(
-            message.bot,
-            message.chat.id,
-            texts.ERROR_NUMBER_GT_ZERO,
-            get_back_button("admin_servers"),
-            trigger_message_id=getattr(message, "message_id", None),
-        )
-        return
-
-    profiles_count = 0
-    wl_count = await session.scalar(
-        select(func.count(WhiteInternetSubscription.id)).where(
-            WhiteInternetSubscription.origin_node_id == server_id,
-            WhiteInternetSubscription.status.in_([
-                WhiteInternetStatus.PENDING,
-                WhiteInternetStatus.ACTIVE,
-                WhiteInternetStatus.EXHAUSTED,
-            ]),
-        )
-    ) or 0
-    current_used = max(profiles_count, wl_count)
-
-    if current_used > new_value:
-        warning = texts.ADMIN_SERVER_MAX_CLIENTS_WARNING.format(
-            current=current_used,
-            new=new_value,
-        )
-
-        await render_hub(
-            message.bot,
-            message.chat.id,
-            warning,
-            get_back_button(
-                f"admin_server_card:{server_id}"
-            ),
-        )
-
-    await update_server(session, server, max_clients=new_value)
-
-    await AuditService.log_action(
-        session,
-        message.from_user.id,
-        AdminAuditAction.EDIT_SERVER,
-        "Server",
-        server_id,
-        texts.ADMIN_AUDIT_LOG_DETAILS_EDIT_SERVER.format(field="max_clients", value=f"{server.max_clients} -> {new_value}"),
-    )
-
-    await render_hub(
-        message.bot,
-        message.chat.id,
-        texts.ADMIN_SERVER_MAX_CLIENTS_UPDATED.format(
-            max_clients=new_value,
-        ),
-        get_back_button(
-            f"admin_server_card:{server_id}"
-        ),
-        trigger_message_id=getattr(message, "message_id", None),
-    )
-
-    logger.info(
-        f"Admin {message.from_user.id} updated server {server_id} "
-        f"max_clients to {new_value}"
     )
 
     await state.clear()

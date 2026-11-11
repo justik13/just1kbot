@@ -234,16 +234,6 @@ class VlessSubscriptionService:
         return task
 
     @staticmethod
-    async def get_combined_quota(
-        session: AsyncSession,
-        user: User,
-    ) -> tuple[int, int, int]:
-        """Returns (total_active, legacy_active_count, vless_hwid_count)."""
-        vless_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
-        total = vless_count
-        return total, 0, vless_count
-
-    @staticmethod
     async def get_eligible_vless_servers(
         session: AsyncSession,
     ) -> list[Server]:

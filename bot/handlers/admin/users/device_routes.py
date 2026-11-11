@@ -21,7 +21,7 @@ from bot.formatters import format_admin_breadcrumbs
 from utils.formatters import format_datetime
 from utils.telegram import safe
 
-from .common import _get_user_with_profiles
+from .common import _get_user_by_telegram_id
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -49,7 +49,7 @@ async def admin_user_devices(
 
     await callback.answer(show_alert=False)
 
-    user = await _get_user_with_profiles(session, telegram_id)
+    user = await _get_user_by_telegram_id(session, telegram_id)
     if not user:
         await callback.message.edit_text(
             texts.ERROR_USER_NOT_FOUND,
@@ -215,7 +215,7 @@ async def admin_vless_hwid_reset(
         await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
-    user = await _get_user_with_profiles(session, telegram_id)
+    user = await _get_user_by_telegram_id(session, telegram_id)
     if not user:
         await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
         return
@@ -256,9 +256,9 @@ async def admin_vless_hwid_reset(
         from .subscription_menu_routes import admin_subscription_menu
 
         try:
-            updated_cb = callback.model_copy(update={"data": f"admin_sub_awg_menu:{telegram_id}"})
+            updated_cb = callback.model_copy(update={"data": f"admin_sub_menu:{telegram_id}"})
         except Exception:
-            callback.data = f"admin_sub_awg_menu:{telegram_id}"
+            callback.data = f"admin_sub_menu:{telegram_id}"
             updated_cb = callback
         await admin_subscription_menu(updated_cb, session)
     else:
@@ -331,7 +331,7 @@ async def admin_vless_token_rotate(
         await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
-    user = await _get_user_with_profiles(session, telegram_id)
+    user = await _get_user_by_telegram_id(session, telegram_id)
     if not user:
         await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
         return
@@ -372,9 +372,9 @@ async def admin_vless_token_rotate(
         from .subscription_menu_routes import admin_subscription_menu
 
         try:
-            updated_cb = callback.model_copy(update={"data": f"admin_sub_awg_menu:{telegram_id}"})
+            updated_cb = callback.model_copy(update={"data": f"admin_sub_menu:{telegram_id}"})
         except Exception:
-            callback.data = f"admin_sub_awg_menu:{telegram_id}"
+            callback.data = f"admin_sub_menu:{telegram_id}"
             updated_cb = callback
         await admin_subscription_menu(updated_cb, session)
     else:

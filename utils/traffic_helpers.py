@@ -2,9 +2,70 @@
 
 from __future__ import annotations
 
-import re
+from datetime import datetime
+from typing import NamedTuple
 
-_SLOT_NUM_RE = re.compile(r"#(\d+)$")
+
+class ServerHostingUsage(NamedTuple):
+    limit_gb: int | None
+    reset_day: int
+    current_cycle: str
+    host_bytes: int
+    host_gb: float
+    pct: float
+
+
+def get_server_hosting_reset_day(extra: dict | None) -> int:
+    """Extracts clamped hosting billing reset day (1..31) from Server.extra_data."""
+    raw = (extra or {}).get("hosting_reset_day", 1)
+    if isinstance(raw, bool):
+        return 1
+    try:
+        day = int(raw or 1)
+    except (TypeError, ValueError):
+        return 1
+    return max(1, min(31, day))
+
+
+def get_server_hosting_usage(
+    extra: dict | None,
+    current_time: datetime | None = None,
+) -> ServerHostingUsage:
+    """Computes current-cycle host traffic usage and hosting limit percentage from Server.extra_data."""
+    from utils.datetime_helpers import get_hosting_billing_cycle, now_utc
+
+    data = extra if isinstance(extra, dict) else {}
+    now = current_time or now_utc()
+    reset_day = get_server_hosting_reset_day(data)
+    current_cycle = get_hosting_billing_cycle(now, reset_day)
+
+    raw_limit = data.get("hosting_limit_gb")
+    limit_gb: int | None = None
+    if raw_limit is not None and not isinstance(raw_limit, bool):
+        try:
+            parsed_limit = int(raw_limit)
+            if parsed_limit > 0:
+                limit_gb = parsed_limit
+        except (TypeError, ValueError):
+            pass
+
+    host_cycle = data.get("host_traffic_cycle")
+    try:
+        raw_bytes = int(data.get("host_monthly_traffic_bytes", 0) or 0)
+    except (TypeError, ValueError):
+        raw_bytes = 0
+    host_bytes = max(0, raw_bytes) if host_cycle == current_cycle else 0
+    host_gb = host_bytes / (1024 ** 3)
+    pct = (host_bytes / (limit_gb * (1024 ** 3)) * 100.0) if limit_gb else 0.0
+
+    return ServerHostingUsage(
+        limit_gb=limit_gb,
+        reset_day=reset_day,
+        current_cycle=current_cycle,
+        host_bytes=host_bytes,
+        host_gb=host_gb,
+        pct=pct,
+    )
 
 
 def accumulate_host_traffic_cycle(
@@ -45,51 +106,6 @@ def accumulate_host_traffic_cycle(
         return True
 
     return False
-
-
-
-def get_device_slot_key(device_name: str | None) -> str:
-    """Extract canonical slot key ('slot_1', 'slot_2', etc.) from device name."""
-    if not device_name:
-        return "slot_1"
-    match = _SLOT_NUM_RE.search(device_name)
-    if match:
-        return f"slot_{match.group(1)}"
-    return f"slot_{device_name.strip().lower()}"
-
-
-def get_archived_traffic_for_device(archived: dict | None, device_name: str | None) -> int:
-    """Safely retrieves accumulated archived traffic for a device slot.
-
-    Supports canonical slot key ('slot_1'), exact name, and case-insensitive match.
-    """
-    if not archived or not device_name:
-        return 0
-    slot_key = get_device_slot_key(device_name)
-    if slot_key in archived:
-        return int(archived[slot_key] or 0)
-    if device_name in archived:
-        return int(archived[device_name] or 0)
-    for k, v in archived.items():
-        if k.lower() == device_name.lower():
-            return int(v or 0)
-    return 0
-
-
-def record_device_traffic_archive(archived: dict, device_name: str | None, cur_bytes: int) -> dict:
-    """Accumulates cur_bytes into archived dictionary using canonical slot key.
-
-    Also migrates any legacy entry for device_name into the canonical slot key.
-    """
-    if cur_bytes <= 0 and not device_name:
-        return archived
-    slot_key = get_device_slot_key(device_name)
-    legacy_bytes = 0
-    if device_name and device_name in archived and device_name != slot_key:
-        legacy_bytes = int(archived.pop(device_name, 0) or 0)
-
-    archived[slot_key] = int(archived.get(slot_key, 0)) + legacy_bytes + max(0, cur_bytes)
-    return archived
 
 
 def get_user_monthly_standard_traffic(user: object | None, current_cycle: str | None = None) -> int:

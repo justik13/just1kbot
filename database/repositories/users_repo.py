@@ -1,7 +1,7 @@
 from datetime import timedelta
 import inspect
 
-from sqlalchemy import and_, case, cast, false, func, or_, select, String, text, update
+from sqlalchemy import and_, case, false, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
@@ -9,11 +9,9 @@ from config.constants import (
     PERMANENT_END_DATE,
     PERMANENT_SUBSCRIPTION_DAYS,
     REFERRAL_ACTIVE_MIN_TOPUP_RUB,
-    VLESS_PROTOCOL,
-    XRAY_PROTOCOL,
 )
 from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
-from database.models import Order, Payment, Server, Tariff, User, VlessSubscription, WhiteInternetSubscription
+from database.models import Order, Payment, Tariff, User, VlessSubscription, WhiteInternetSubscription
 from utils.datetime_helpers import now_utc
 
 ALLOWED_USER_UPDATE_FIELDS = {
@@ -25,14 +23,11 @@ ALLOWED_USER_UPDATE_FIELDS = {
     "is_banned",
     "is_bot_blocked",
     "referred_by",
-    "device_creations_today",
-    "last_creation_date",
     "last_payment_at",
     "notified_3d",
     "notified_1d",
     "notified_2h",
     "notified_expired",
-    "notified_grace_12h",
     "notification_retry_count",
     "last_notification_attempt",
     "last_trial_reset_at",
@@ -223,7 +218,6 @@ async def get_dashboard_stats(session: AsyncSession) -> dict:
         "total_traffic_bytes": int(row.total_traffic_bytes or 0),
         "total_wi_traffic_bytes": int(row.total_wi_traffic_bytes or 0),
         "avg_traffic_bytes_active": int(row.avg_traffic_bytes_active or 0),
-        "avg_monthly_awg_bytes": 0,
         "avg_monthly_vless_bytes": int(row.avg_monthly_vless_bytes or 0),
         "avg_monthly_wi_bytes": int(row.avg_monthly_wi_bytes or 0),
     }
@@ -648,7 +642,8 @@ async def search_user_flexible(session: AsyncSession, query: str) -> User | None
     return None
 
 
-def get_effective_active_condition(now=None):
+def get_effective_wi_active_condition(now=None):
+    """Condition matching users with an active White Internet subscription."""
     if now is None:
         now = now_utc()
     xray_active_subq = select(WhiteInternetSubscription.user_id).where(
@@ -660,9 +655,15 @@ def get_effective_active_condition(now=None):
         WhiteInternetSubscription.expires_at > now,
         WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
     )
+    return User.id.in_(xray_active_subq)
+
+
+def get_effective_active_condition(now=None):
+    if now is None:
+        now = now_utc()
     return or_(
         User.subscription_end > now,
-        User.id.in_(xray_active_subq),
+        get_effective_wi_active_condition(now),
     )
 
 
@@ -670,7 +671,7 @@ def get_effective_expiring_3d_condition(now=None):
     if now is None:
         now = now_utc()
     limit_3d = now + timedelta(days=3)
-    awg_expiring = and_(
+    std_expiring = and_(
         User.subscription_end > now,
         User.subscription_end <= limit_3d,
     )
@@ -698,7 +699,7 @@ def get_effective_expiring_3d_condition(now=None):
         )
     )
     return and_(
-        or_(awg_expiring, xray_expiring),
+        or_(std_expiring, xray_expiring),
         or_(User.subscription_end.is_(None), User.subscription_end <= limit_3d),
         ~xray_longer,
     )
@@ -726,9 +727,9 @@ def get_effective_expired_condition(now=None):
     if now is None:
         now = now_utc()
     inactive_cond = get_effective_inactive_condition(now)
-    had_awg = User.subscription_end.is_not(None)
+    had_std = User.subscription_end.is_not(None)
     had_xray = User.id.in_(select(WhiteInternetSubscription.user_id))
-    return and_(or_(had_awg, had_xray), inactive_cond)
+    return and_(or_(had_std, had_xray), inactive_cond)
 
 
 def get_effective_never_condition():
@@ -758,92 +759,13 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
         stmt = stmt.where(
             (User.is_banned.is_(True)) | (User.is_bot_blocked.is_(True))
         )
-    elif filter_type == "server" and filter_param is not None:
-        try:
-            target_server_id = int(filter_param)
-        except (ValueError, TypeError):
-            return stmt.where(false())
-        if not (1 <= target_server_id <= MAX_INT32):
-            return stmt.where(false())
-
-        server_proto_subq = select(Server.protocol).where(Server.id == target_server_id).scalar_subquery()
-        server_caps_subq = select(cast(Server.capabilities, String)).where(Server.id == target_server_id).scalar_subquery()
-
-        is_vless_capable = (
-            (server_proto_subq == VLESS_PROTOCOL)
-            | server_caps_subq.like('%"vless"%')
-            | server_caps_subq.like('%"xray_vless"%')
-        )
-        vless_cond = and_(
-            is_vless_capable,
-            User.vless_subscription.has(
-                (VlessSubscription.is_active.is_(True))
-                & (VlessSubscription.active_hwids.is_not(None))
-                & (cast(VlessSubscription.active_hwids, String) != "{}")
-            ),
-        )
-
-        xray_cond = and_(
-            (
-                (server_proto_subq == XRAY_PROTOCOL)
-                | server_caps_subq.like('%"xray_origin"%')
-            ),
-            User.id.in_(
-                select(WhiteInternetSubscription.user_id).where(
-                    WhiteInternetSubscription.origin_node_id == target_server_id,
-                    WhiteInternetSubscription.status.in_([
-                        WhiteInternetStatus.ACTIVE,
-                        WhiteInternetStatus.PENDING,
-                        WhiteInternetStatus.EXHAUSTED,
-                    ]),
-                    WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
-                )
-            ),
-        )
-        stmt = stmt.where(or_(vless_cond, xray_cond))
-    elif filter_type == "country" and filter_param:
-        country_str = str(filter_param)
-        vless_country_exists = select(Server.id).where(
-            Server.country_flag == country_str,
-            (
-                (Server.protocol == VLESS_PROTOCOL)
-                | cast(Server.capabilities, String).like('%"vless"%')
-                | cast(Server.capabilities, String).like('%"xray_vless"%')
-            ),
-        ).exists()
-        vless_country_cond = and_(
-            vless_country_exists,
-            User.vless_subscription.has(
-                (VlessSubscription.is_active.is_(True))
-                & (VlessSubscription.active_hwids.is_not(None))
-                & (cast(VlessSubscription.active_hwids, String) != "{}")
-            ),
-        )
-        xray_country_users_subq = select(WhiteInternetSubscription.user_id).where(
-            WhiteInternetSubscription.origin_node.has(Server.country_flag == country_str),
-            WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
-        )
-        stmt = stmt.where(
-            or_(
-                vless_country_cond,
-                User.id.in_(xray_country_users_subq),
-            )
-        )
+    elif filter_type in ("active_standard", "standard_active"):
+        stmt = stmt.where(User.subscription_end > now)
+    elif filter_type in ("active_wi", "wi_active"):
+        stmt = stmt.where(get_effective_wi_active_condition(now))
     elif filter_type == "tariff" and filter_param is not None:
         if filter_param == "white_internet":
-            stmt = stmt.where(
-                User.id.in_(
-                    select(WhiteInternetSubscription.user_id).where(
-                        WhiteInternetSubscription.status.in_([
-                            WhiteInternetStatus.ACTIVE,
-                            WhiteInternetStatus.PENDING,
-                            WhiteInternetStatus.EXHAUSTED,
-                        ]),
-                        WhiteInternetSubscription.expires_at > now,
-                        WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
-                    )
-                )
-            )
+            stmt = stmt.where(get_effective_wi_active_condition(now))
         else:
             try:
                 val = int(filter_param)
@@ -927,11 +849,20 @@ async def get_user_filter_counts(session: AsyncSession) -> dict[str, int]:
             get_effective_active_condition(now),
         ).label("active"),
         func.count(User.id).filter(
+            User.subscription_end > now,
+        ).label("active_standard"),
+        func.count(User.id).filter(
+            get_effective_wi_active_condition(now),
+        ).label("active_wi"),
+        func.count(User.id).filter(
             get_effective_expiring_3d_condition(now),
         ).label("expiring_3d"),
         func.count(User.id).filter(
             get_effective_expired_condition(now),
         ).label("expired"),
+        func.count(User.id).filter(
+            get_effective_never_condition(),
+        ).label("never"),
         func.count(User.id).filter(
             (User.is_banned.is_(True)) | (User.is_bot_blocked.is_(True))
         ).label("banned"),
@@ -941,8 +872,11 @@ async def get_user_filter_counts(session: AsyncSession) -> dict[str, int]:
         "all": int(result.total or 0),
         "new_7d": int(result.new_7d or 0),
         "active": int(result.active or 0),
+        "active_standard": int(result.active_standard or 0),
+        "active_wi": int(result.active_wi or 0),
         "expiring_3d": int(result.expiring_3d or 0),
         "expired": int(result.expired or 0),
+        "never": int(result.never or 0),
         "banned": int(result.banned or 0),
     }
 

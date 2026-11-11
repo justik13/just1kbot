@@ -56,10 +56,10 @@ class TestTelegramBotApi103KeyboardAudit(unittest.IsolatedAsyncioTestCase):
         res = sanitize_reply_markup(kb)
         self.assertIs(res, kb)
 
-    def test_sanitize_reply_markup_neutralizes_awg_key(self):
-        awg_key = "vpn://" + "A" * 1200
+    def test_sanitize_reply_markup_neutralizes_long_key(self):
+        long_key = "vless://" + "A" * 1200
         kb = InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="AWG Key", copy_text=CopyTextButton(text=awg_key))]]
+            inline_keyboard=[[InlineKeyboardButton(text="Long key", copy_text=CopyTextButton(text=long_key))]]
         )
         res = sanitize_reply_markup(kb)
         btn = res.inline_keyboard[0][0]
@@ -182,7 +182,6 @@ class TestTelegramBotApi103KeyboardAudit(unittest.IsolatedAsyncioTestCase):
         )
         from bot.keyboards.admin.dashboard import (
             get_admin_cat_finance_keyboard,
-            get_admin_cat_infra_keyboard,
             get_admin_cat_std_sub_keyboard,
             get_admin_cat_system_keyboard,
             get_admin_cat_users_keyboard,
@@ -198,11 +197,11 @@ class TestTelegramBotApi103KeyboardAudit(unittest.IsolatedAsyncioTestCase):
         )
         from bot.keyboards.admin.tariffs import get_admin_tariff_card_keyboard
         from bot.keyboards.admin.users import (
-            get_admin_awg_subscription_keyboard,
             get_admin_ban_reasons_keyboard,
             get_admin_confirm_action_keyboard,
             get_admin_extend_days_new_keyboard,
             get_admin_grant_days_keyboard,
+            get_admin_subscription_keyboard,
             get_admin_user_balance_keyboard,
             get_admin_user_card_keyboard,
             get_admin_user_devices_keyboard,
@@ -242,29 +241,29 @@ class TestTelegramBotApi103KeyboardAudit(unittest.IsolatedAsyncioTestCase):
             get_referrals_list_keyboard,
         )
 
-        awg_key = "vpn://" + "A" * 1500
+        long_key = "vless://" + "A" * 1500
 
         keyboards = [
             # User keyboards
             get_referral_keyboard("https://t.me/just1kbot?start=ref123", count=5),
-            get_referral_keyboard(awg_key, count=0),
+            get_referral_keyboard(long_key, count=0),
             get_referral_keyboard("", count=0),
             get_history_keyboard(),
             get_referral_leaderboard_keyboard(),
             get_referrals_list_keyboard(1, 1),
-            # Admin user keyboards (testing normal, AWG key, empty sub_urls)
-            get_admin_awg_subscription_keyboard(12345, True, vless_sub_url="https://sub.url"),
-            get_admin_awg_subscription_keyboard(12345, True, vless_sub_url=awg_key),
-            get_admin_awg_subscription_keyboard(12345, True, vless_sub_url=""),
-            get_admin_awg_subscription_keyboard(12345, False),
+            # Admin user keyboards (testing normal, oversized, empty sub_urls)
+            get_admin_subscription_keyboard(12345, True, vless_sub_url="https://sub.url"),
+            get_admin_subscription_keyboard(12345, True, vless_sub_url=long_key),
+            get_admin_subscription_keyboard(12345, True, vless_sub_url=""),
+            get_admin_subscription_keyboard(12345, False),
             get_admin_wi_subscription_keyboard(12345, True, True, False, sub_url="https://sub.url"),
-            get_admin_wi_subscription_keyboard(12345, True, True, False, sub_url=awg_key),
+            get_admin_wi_subscription_keyboard(12345, True, True, False, sub_url=long_key),
             get_admin_wi_subscription_keyboard(12345, True, True, False, sub_url=""),
             get_admin_wi_subscription_keyboard(12345, False),
             get_admin_wi_devices_keyboard(12345, False, sub_url="https://sub.url"),
-            get_admin_wi_devices_keyboard(12345, False, sub_url=awg_key),
-            get_admin_user_devices_keyboard(12345, [], vless_sub_url="https://sub.url"),
-            get_admin_user_devices_keyboard(12345, [], vless_sub_url=awg_key),
+            get_admin_wi_devices_keyboard(12345, False, sub_url=long_key),
+            get_admin_user_devices_keyboard(12345, vless_sub_url="https://sub.url"),
+            get_admin_user_devices_keyboard(12345, vless_sub_url=long_key),
             get_admin_user_card_keyboard(12345, is_banned=False),
             get_admin_user_balance_keyboard(12345),
             get_admin_ban_reasons_keyboard(12345),
@@ -281,7 +280,6 @@ class TestTelegramBotApi103KeyboardAudit(unittest.IsolatedAsyncioTestCase):
             get_maintenance_confirm_keyboard(),
             get_admin_cat_users_keyboard(),
             get_admin_cat_finance_keyboard(),
-            get_admin_cat_infra_keyboard(),
             get_admin_cat_system_keyboard(),
             get_admin_cat_std_sub_keyboard(),
             get_admin_cat_wi_sub_keyboard(),

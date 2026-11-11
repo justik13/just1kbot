@@ -71,7 +71,6 @@ async def _render_maintenance(
 async def _build_connections_screen(
     user: User,
     session: AsyncSession,
-    profiles: list | None = None,
     *,
     read_only: bool = False,
 ) -> tuple[str, InlineKeyboardBuilder]:
@@ -172,10 +171,11 @@ async def _build_connections_screen(
         text=texts.CONNECTION_CONFIG_COMMON_STATUS_SERVEROV,
         url=status_url,
     )
-    builder.button(
-        text=texts.BTN_MAIN_MENU_NAV,
-        callback_data="back_to_main_menu",
-    )
+    if not read_only:
+        builder.button(
+            text=texts.BTN_MAIN_MENU_NAV,
+            callback_data="back_to_main_menu",
+        )
 
     builder.adjust(1)
     return rendered, builder

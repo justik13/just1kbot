@@ -245,23 +245,15 @@ class DatabaseReencryptionScriptTests(unittest.IsolatedAsyncioTestCase):
                 mock_session_scope.return_value.__aenter__.return_value = mock_session
 
                 server1 = MagicMock(id=1, api_key="secret_key_1")
-                profile1 = MagicMock(id=1, raw_config="raw_vpn_config_1")
-                op1 = MagicMock(id=1, api_key_snapshot="raw_snapshot_1")
 
                 # First query returns items, second returns empty list to stop loop
                 mock_session.scalars.side_effect = [
                     MagicMock(all=MagicMock(return_value=[server1])),
                     MagicMock(all=MagicMock(return_value=[])),
-                    MagicMock(all=MagicMock(return_value=[profile1])),
-                    MagicMock(all=MagicMock(return_value=[])),
-                    MagicMock(all=MagicMock(return_value=[op1])),
-                    MagicMock(all=MagicMock(return_value=[])),
                 ]
 
                 # Verification pass executes text queries
                 mock_session.execute.side_effect = [
-                    MagicMock(all=MagicMock(return_value=[(1, valid_ct)])),
-                    MagicMock(all=MagicMock(return_value=[(1, valid_ct)])),
                     MagicMock(all=MagicMock(return_value=[(1, valid_ct)])),
                 ]
 

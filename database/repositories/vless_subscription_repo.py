@@ -192,9 +192,8 @@ async def register_hwid_atomic(
 ) -> tuple[bool, int, int]:
     """Atomically registers an HWID for a VlessSubscription under row-level lock.
 
-    effective_limit is the maximum number of VLESS HWIDs permitted given any
-    existing AWG profiles already consuming quota. If None, it is dynamically
-    computed under User lock.
+    effective_limit is the maximum number of VLESS HWIDs permitted by the
+    user's tariff. If None, it is dynamically computed under User lock.
 
     Returns:
         tuple[allowed: bool, active_count: int, effective_limit: int]
@@ -324,6 +323,32 @@ async def register_hwid_atomic(
     sub.active_hwids = dict(active_hwids)
     await session.flush()
     return True, len(active_hwids), effective_limit
+
+
+async def clear_active_hwids(
+    session: AsyncSession,
+    subscription_id: int,
+) -> bool:
+    """Clear registered HWIDs without rotating client UUID (used on subscription expiry).
+
+    Returns:
+        True if active_hwids were cleared, False if already empty or not found.
+    """
+    stmt = (
+        select(VlessSubscription)
+        .where(VlessSubscription.id == subscription_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    sub = await session.scalar(stmt)
+    if isinstance(sub, VlessSubscription):
+        if not sub.active_hwids:
+            return False
+        sub.active_hwids = {}
+        sub.version = (getattr(sub, "version", 1) or 1) + 1
+        await session.flush()
+        return True
+    return False
 
 
 async def reset_hwids(

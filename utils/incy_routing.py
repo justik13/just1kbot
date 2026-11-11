@@ -12,7 +12,7 @@ from config.constants import (
 
 # Fixed version timestamp used to detect routing profile changes in INCY/Happ clients.
 # Bump this timestamp when routing rules or DNS parameters change so clients pull updated rules.
-ROUTING_PROFILE_VERSION_TIMESTAMP = "1793420000"
+ROUTING_PROFILE_VERSION_TIMESTAMP = "1793500000"
 
 
 def generate_incy_routing_header(
@@ -90,8 +90,6 @@ def generate_incy_routing_header(
         "DomesticDNSType": "DoH",
         "DomesticDNSDomain": "https://common.dot.dns.yandex.net/dns-query",
         "DomesticDNSIP": "77.88.8.8",
-        "Geoipurl": "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat",
-        "Geositeurl": "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat",
         "DnsHosts": {
             "cloudflare-dns.com": "1.1.1.1",
             "common.dot.dns.yandex.net": "77.88.8.8",

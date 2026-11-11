@@ -48,21 +48,6 @@ class AccountLedgerEntryType(StrEnum):
     ADMIN_ADJUSTMENT = "admin_adjustment"
 
 
-class ApiOperationType(StrEnum):
-    CREATE_PEER = "create_peer"
-    UPDATE_PEER = "update_peer"
-    DELETE_PEER = "delete_peer"
-
-
-class ApiOperationStatus(StrEnum):
-    PENDING = "pending"
-    PROCESSING = "processing"
-    RETRY = "retry"
-    SUCCEEDED = "succeeded"
-    DEAD = "dead"
-    CANCELLED = "cancelled"
-
-
 class WebhookInboxStatus(StrEnum):
     PENDING = "pending"
     PROCESSING = "processing"
@@ -85,20 +70,6 @@ class ServerLifecycleStatus(StrEnum):
     ARCHIVED = "ARCHIVED"
 
 
-# Backward-compatible alias for payment outbox queue status
-
-
-class VPNProvisioningStatus(StrEnum):
-    PENDING_CREATE = "pending_create"
-    ACTIVE = "active"
-    PENDING_UPDATE = "pending_update"
-    DELETING = "deleting"
-    CREATE_FAILED = "create_failed"
-    CREATE_CLEANUP_PENDING = "create_cleanup_pending"
-    UPDATE_FAILED = "update_failed"
-    DELETE_FAILED = "delete_failed"
-
-
 class AdminAuditAction(StrEnum):
     ACCOUNT_PURCHASE_SETTLED = "ACCOUNT_PURCHASE_SETTLED"
     ACCOUNT_TARIFF_CHANGE_SETTLED = "ACCOUNT_TARIFF_CHANGE_SETTLED"
@@ -106,30 +77,20 @@ class AdminAuditAction(StrEnum):
     ADD_TARIFF = "ADD_TARIFF"
     ADMIN_BALANCE_DEDUCT = "ADMIN_BALANCE_DEDUCT"
     ADMIN_BALANCE_TOPUP = "ADMIN_BALANCE_TOPUP"
-    ADMIN_DEVICE_DELETE = "ADMIN_DEVICE_DELETE"
-    ADMIN_DIRECT_MESSAGE = "ADMIN_DIRECT_MESSAGE"
     ADMIN_DIRECT_MESSAGE_SENT = "ADMIN_DIRECT_MESSAGE_SENT"
     ADMIN_SUB_CHANGE = "ADMIN_SUB_CHANGE"
     ADMIN_SUB_EXTEND = "ADMIN_SUB_EXTEND"
     ADMIN_SUB_GRANT = "ADMIN_SUB_GRANT"
     ADMIN_SUB_REDUCE = "ADMIN_SUB_REDUCE"
     BALANCE_REFUND_REQUESTED = "BALANCE_REFUND_REQUESTED"
-    BAN = "BAN"
     BAN_USER = "BAN_USER"
     BROADCAST = "BROADCAST"
     BROADCAST_COMPLETED = "BROADCAST_COMPLETED"
     CHANGE_TARIFF = "CHANGE_TARIFF"
     CLEANUP_DEVICE_DELETE = "CLEANUP_DEVICE_DELETE"
     DEDUCT_USER_BALANCE = "DEDUCT_USER_BALANCE"
-    DELETE_DEVICE = "DELETE_DEVICE"
     DELETE_SERVER = "DELETE_SERVER"
     DELETE_TARIFF = "DELETE_TARIFF"
-    DEVICE_CREATE = "DEVICE_CREATE"
-    DEVICE_CREATED = "DEVICE_CREATED"
-    DEVICE_CREATE_BLOCKED = "DEVICE_CREATE_BLOCKED"
-    DEVICE_DELETE = "DEVICE_DELETE"
-    DEVICE_DELETED = "DEVICE_DELETED"
-    DEVICE_RENAME = "DEVICE_RENAME"
     EDIT_SERVER = "EDIT_SERVER"
     EDIT_TARIFF = "EDIT_TARIFF"
     EXTEND = "EXTEND"
@@ -151,7 +112,6 @@ class AdminAuditAction(StrEnum):
     REFERRAL_BONUS_GRANTED = "REFERRAL_BONUS_GRANTED"
     TOGGLE_MAINTENANCE = "TOGGLE_MAINTENANCE"
     TOGGLE_SERVER = "TOGGLE_SERVER"
-    UNBAN = "UNBAN"
     UNBAN_USER = "UNBAN_USER"
     USER_REGISTER = "USER_REGISTER"
     USER_RESTORED = "USER_RESTORED"
@@ -174,7 +134,6 @@ class AdminAuditAction(StrEnum):
 class ServiceType(StrEnum):
     STANDARD = "standard"
     WHITE_INTERNET = "white_internet"
-    AWG = "awg"
 
 
 class WhiteInternetStatus(StrEnum):
@@ -210,14 +169,11 @@ class OrderServiceType(StrEnum):
     STANDARD = "standard"
     WHITE_INTERNET = "white_internet"
     TOPUP = "topup"
-    AWG = "awg"
 
 
 __all__ = [
     "AccountLedgerEntryType",
     "AdminAuditAction",
-    "ApiOperationStatus",
-    "ApiOperationType",
     "OrderStatus",
     "OrderServiceType",
     "PaymentCheckoutStatus",
@@ -227,7 +183,6 @@ __all__ = [
     "ServerHealthState",
     "ServerLifecycleStatus",
     "ServiceType",
-    "VPNProvisioningStatus",
     "WebhookInboxStatus",
     "WhiteInternetGrantType",
     "WhiteInternetProvisioningStatus",

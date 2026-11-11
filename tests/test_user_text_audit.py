@@ -102,7 +102,7 @@ class TestUserTextAudit(unittest.TestCase):
         templates_dir = Path("bot/templates")
         if not templates_dir.exists():
             return
-        for html_file in templates_dir.glob("*.html"):
+        for html_file in sorted(templates_dir.rglob("*.html")):
             content = html_file.read_text(encoding="utf-8")
             clean_text = content.replace(".vpn", "").replace("vpn://", "")
             assert re.search(r"(?<![A-Za-zА-Яа-я])VPN(?![A-Za-zА-Яа-я])", clean_text) is None, f"Forbidden 'VPN' found in {html_file}"

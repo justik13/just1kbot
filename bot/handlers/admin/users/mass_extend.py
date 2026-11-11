@@ -8,11 +8,11 @@ from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from sqlalchemy import cast, func, or_, select, String
+from sqlalchemy import false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.formatters import format_admin_breadcrumbs, get_server_protocol_badge
+from bot.formatters import format_admin_breadcrumbs
 from bot.handlers.admin.users.common import format_subscription_days_text
 from bot.keyboards import get_back_button
 from bot.keyboards.admin.users import (
@@ -24,14 +24,8 @@ from bot.states import AdminStates
 from config.constants import AdminAuditAction
 from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
 from database.connection import session_scope
-from database.models import Server, User, VlessSubscription, WhiteInternetSubscription
+from database.models import User, WhiteInternetSubscription
 from database.repositories import white_internet_repo
-from database.repositories.servers_repo import (
-    get_all_servers,
-    get_server_by_id,
-    is_vless_capable_server,
-    is_white_internet_origin_server,
-)
 from services.audit_service import AuditService
 from services.subscription import SubscriptionService
 from services.user_cache import invalidate_user_cache
@@ -39,7 +33,6 @@ from utils.admin import is_admin
 from utils.datetime_helpers import now_utc
 from utils.rate_limiter import global_send_limiter
 from utils.telegram import render_hub, safe
-from utils.text_limits import truncate_button_text
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -66,7 +59,7 @@ def _start_mass_extend_task(coro) -> asyncio.Task:
     return task
 
 
-def _build_mass_extend_audience_filter(target_aud: str, now: datetime, server: Server | None = None):
+def _build_mass_extend_audience_filter(target_aud: str, now: datetime):
     """Builds SQL condition for target audience of mass extension."""
     if target_aud == "active_standard":
         return User.subscription_end > now
@@ -87,36 +80,9 @@ def _build_mass_extend_audience_filter(target_aud: str, now: datetime, server: S
             WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
         )
         return or_(User.subscription_end > now, User.id.in_(wi_subq))
-    elif target_aud.startswith("server_"):
-        if not server:
-            return User.id == -1
-
-        conds = []
-        if is_vless_capable_server(server):
-            conds.append(
-                (User.subscription_end > now)
-                & User.vless_subscription.has(
-                    (VlessSubscription.is_active.is_(True))
-                    & (VlessSubscription.active_hwids.is_not(None))
-                    & (cast(VlessSubscription.active_hwids, String) != "{}")
-                    & (VlessSubscription.node_traffic_snapshots.has_key(str(server.id)))
-                )
-            )
-        if is_white_internet_origin_server(server):
-            conds.append(
-                User.id.in_(
-                    select(WhiteInternetSubscription.user_id).where(
-                        WhiteInternetSubscription.origin_node_id == server.id,
-                        WhiteInternetSubscription.status == WhiteInternetStatus.ACTIVE,
-                        WhiteInternetSubscription.expires_at > now,
-                        WhiteInternetSubscription.is_trial.is_(False),
-                        WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
-                    )
-                )
-            )
-        return or_(*conds) if conds else (User.id == -1)
     else:
-        return User.subscription_end > now
+        logger.error("Unknown mass_extend audience %r; returning false predicate", target_aud)
+        return false()
 
 
 @router.callback_query(F.data == "admin_mass_extend")
@@ -152,10 +118,6 @@ async def start_mass_extend(
         callback_data="mass_ext_aud:active_all",
     )
     builder.button(
-        text=texts.ADMIN_USERS_MASS_EXTEND_AUD_SERVER,
-        callback_data="mass_ext_servers",
-    )
-    builder.button(
         text=texts.BTN_ADMIN_MENU,
         callback_data="admin_menu",
     )
@@ -181,51 +143,6 @@ async def start_mass_extend(
     await callback.answer(show_alert=False)
 
 
-@router.callback_query(F.data == "mass_ext_servers")
-async def select_mass_extend_server(
-    callback: CallbackQuery,
-    state: FSMContext,
-    session: AsyncSession,
-):
-    if not is_admin(callback.from_user.id):
-        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
-        return
-
-    await state.update_data(active_msg_id=callback.message.message_id)
-    servers = await get_all_servers(session)
-    header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.BROADCAST_BREADCRUMB_SERVER_SELECTION)
-    text = f"{header}\n\n{texts.ADMIN_USERS_MASS_EXTEND_SELECT_SERVER}"
-
-    builder = InlineKeyboardBuilder()
-    for s in servers:
-        flag = s.country_flag or "🌐"
-        proto = get_server_protocol_badge(s)
-        builder.button(
-            text=truncate_button_text(f"{flag} {proto} {s.name}"),
-            callback_data=f"mass_ext_aud:server_{s.id}",
-        )
-    builder.button(text=texts.BTN_BACK, callback_data="admin_mass_extend")
-    builder.adjust(1)
-
-    try:
-        await callback.message.edit_text(
-            text,
-            reply_markup=builder.as_markup(),
-            parse_mode="HTML",
-        )
-    except Exception:
-        new_id = await render_hub(
-            callback.bot,
-            callback.message.chat.id,
-            text,
-            builder.as_markup(),
-            parse_mode="HTML",
-        )
-        if new_id:
-            await state.update_data(active_msg_id=new_id)
-    await callback.answer(show_alert=False)
-
-
 async def _build_mass_extend_confirm_data(
     session: AsyncSession,
     target_aud: str,
@@ -233,26 +150,10 @@ async def _build_mass_extend_confirm_data(
     reason: str,
 ) -> tuple[str, InlineKeyboardMarkup, int]:
     now = now_utc()
-    server = None
-    if target_aud.startswith("server_"):
-        try:
-            server_id = int(target_aud.split("_")[1])
-        except (IndexError, ValueError):
-            server_id = -1
-        server = await get_server_by_id(session, server_id)
-        if server:
-            proto = get_server_protocol_badge(server)
-            server_name = f"{proto} {server.name}" if proto else server.name
-            server_flag = server.country_flag or "🌐"
-        else:
-            server_name = f"ID {server_id}"
-            server_flag = "🌐"
-        aud_label = texts.ADMIN_USERS_MASS_BONUS_SERVER_AUDIENCE_LABEL.format(flag=server_flag, name=safe(server_name))
-    else:
-        aud_label = texts.ADMIN_MASS_EXTEND_AUDIENCE_LABELS.get(target_aud, target_aud)
+    aud_label = texts.ADMIN_MASS_EXTEND_AUDIENCE_LABELS.get(target_aud, target_aud)
 
     base_cond = (User.is_deleted.is_(False)) & (User.is_banned.is_(False))
-    aud_cond = _build_mass_extend_audience_filter(target_aud, now, server=server)
+    aud_cond = _build_mass_extend_audience_filter(target_aud, now)
     stmt = select(func.count(User.id)).where(base_cond, aud_cond)
     user_count = int((await session.scalar(stmt)) or 0)
 
@@ -512,10 +413,6 @@ async def mass_ext_back_to_aud(
     builder.button(
         text=texts.ADMIN_USERS_MASS_EXTEND_AUD_ACTIVE_ALL,
         callback_data="mass_ext_aud:active_all",
-    )
-    builder.button(
-        text=texts.ADMIN_USERS_MASS_EXTEND_AUD_SERVER,
-        callback_data="mass_ext_servers",
     )
     builder.button(
         text=texts.BTN_ADMIN_MENU,
@@ -943,41 +840,9 @@ async def _run_mass_extend_background(
         fail_count = 0
         blocked_count = 0
 
-        server = None
-        if target_aud.startswith("server_"):
-            try:
-                srv_id = int(target_aud.split("_")[1])
-            except (IndexError, ValueError):
-                srv_id = -1
-            async with session_scope() as session:
-                server = await session.get(Server, srv_id)
-
-            if not server:
-                logger.error("Server %s not found. Fail-closed: aborting mass extend.", target_aud)
-                try:
-                    header = format_admin_breadcrumbs(texts.BTN_MASS_EXTEND, texts.ADMIN_USERS_MASS_BONUS_ITOGI)
-                    builder = InlineKeyboardBuilder()
-                    builder.button(text=texts.ADMIN_USERS_MASS_EXTEND_BTN_NEW, callback_data="admin_mass_extend")
-                    builder.button(text=texts.ADMIN_USERS_MASS_BONUS_V_ADMIN_MENYU, callback_data="admin_menu")
-                    builder.adjust(1)
-
-                    await _notify_admin_report(
-                        texts.ADMIN_USERS_MASS_EXTEND_COMPLETED_TEXT.format(
-                            header=header,
-                            success_count=0,
-                            days_text=days_text,
-                            fail_count=0,
-                            blocked_count=0,
-                        ),
-                        builder.as_markup(),
-                    )
-                except Exception as e:
-                    logger.error("Failed to notify admin of missing server: %s", e)
-                return
-
         now = now_utc()
         base_cond = (User.is_deleted.is_(False)) & (User.is_banned.is_(False))
-        aud_cond = _build_mass_extend_audience_filter(target_aud, now, server=server)
+        aud_cond = _build_mass_extend_audience_filter(target_aud, now)
         stmt = (
             select(User.id, User.telegram_id)
             .where(base_cond, aud_cond)
@@ -1075,39 +940,12 @@ async def _run_mass_extend_background(
                                     if res_sub:
                                         extended = True
                                         invalidate_user_cache(tg_id)
-                            elif target_aud.startswith("server_"):
-                                if not server:
-                                    continue
-                                if is_white_internet_origin_server(server):
-                                    sub = await white_internet_repo.get_subscription_by_user_id(session, uid)
-                                    if (
-                                        sub
-                                        and not getattr(sub, "is_trial", False)
-                                        and sub.status == WhiteInternetStatus.ACTIVE
-                                        and sub.expires_at
-                                        and sub.expires_at > current_now
-                                    ):
-                                        res_sub = await white_internet_repo.extend_subscription_atomic(session, sub.id, days)
-                                        if res_sub:
-                                            extended = True
-                                            invalidate_user_cache(tg_id)
-                                elif is_vless_capable_server(server):
-                                    if user.subscription_end and user.subscription_end > current_now:
-                                        res = await SubscriptionService.extend_subscription(
-                                            session,
-                                            tg_id,
-                                            days,
-                                            admin_id=admin_id,
-                                            reason=reason,
-                                        )
-                                        if res:
-                                            extended = True
-                                else:
-                                    logger.error(
-                                        "Server %s has unhandled capabilities. Fail-closed: skipped user %s.",
-                                        server.id,
-                                        uid,
-                                    )
+                            else:
+                                logger.error(
+                                    "Unsupported mass_extend target_aud %r for user %s",
+                                    target_aud,
+                                    uid,
+                                )
 
                             if extended:
                                 success_count += 1

@@ -26,7 +26,7 @@ ADMIN_SERVERS_EMPTY = """<i>Серверов пока нет</i>
 ADMIN_SERVER_API_URL = "• API URL: <code>{api_url}</code>\n"
 ADMIN_SERVER_MONTHLY_TRAFFIC = "• Трафик за месяц: <b>{traffic_month}</b>\n"
 ADMIN_SERVER_HOST_TRAFFIC_SUFFIX = " (хостинг: {host_traffic})"
-ADMIN_AUDIT_LOG_DETAILS_DELETE_SERVER = "{server_name}: {count} profiles deleted"
+ADMIN_AUDIT_LOG_DETAILS_DELETE_SERVER = "{server_name}: server deleted"
 ADMIN_AUDIT_LOG_DETAILS_EDIT_SERVER = "{field} -> {value}"
 ADMIN_AUDIT_LOG_DETAILS_EDIT_SERVER_REDACTED = "{field} -> [REDACTED]"
 
@@ -66,23 +66,13 @@ ADMIN_SERVER_RELAYS_STATUS_OFFLINE = "🔴 Офлайн"
 ADMIN_SERVER_BTN_REFRESH_RELAYS = "🔄 Обновить статус узлов"
 ADMIN_SERVER_BTN_BACK_TO_SERVER = "« Назад к серверу"
 
-ADMIN_SERVER_BTN_CHANGE_LIMIT = "👥 Изменить лимит"
-
 ADMIN_SERVER_BTN_CHANGE_KEY = "🔑 Изменить ключ"
 
 ADMIN_SERVER_CHECKING = "🔄 Проверка сервера..."
 
 ADMIN_SERVER_CONFIRMATION_EXPIRED = "⚠️ Сессия подтверждения истекла"
 
-ADMIN_SERVER_DELETED_BADGE = "Удалено"
-
 ALERT_CANNOT_BE_DELETED_OLD = "Сообщению больше 48 часов. Telegram запрещает ботам удалять старые сообщения — удалите его вручную."
-
-ADMIN_SERVER_DELETE_BLOCKED_PENDING = """⚠️ <b>Удаление сервера отменено:</b>
-
-На сервере присутствуют незавершенные операции создания или фоновые обновления. Дождитесь их завершения."""
-
-ADMIN_SERVER_DELETE_BLOCKED_PENDING_CLIENT = "На сервере есть незавершённое создание клиента. Дождитесь reconciliation и повторите удаление."
 
 ADMIN_SERVER_DELETE_BLOCKED_ACTIVE_WL_ALERT = "Удаление заблокировано: к серверу привязано {count} активных подписок White Internet. Сначала отключите их."
 
@@ -94,30 +84,25 @@ ADMIN_SERVER_DELETE_BLOCKED_ACTIVE_WL_TEXT = """❌ <b>Удаление серв
 
 ADMIN_SERVER_DELETE_CONFIRM = """⚠️ <b>Удаление сервера</b>
 
-Вы уверены, что хотите удалить сервер {flag} <b>{name}</b>?
-📱 Активных устройств на сервере: <b>{profiles_count}</b>"""
+Вы уверены, что хотите удалить сервер {flag} <b>{name}</b>?"""
 
 ADMIN_SERVER_DELETE_WL_SUBS_NOTE = "\n\n🌐 <i>К серверу также привязано подписок Белый Интернет: {count}</i>"
 
-ADMIN_SERVER_DELETE_SUCCESS_NOTICE = "✅ Сервер {v0} удалён ({v1} устр.)"
+ADMIN_SERVER_DELETE_SUCCESS_NOTICE = "✅ Сервер {v0} удалён"
 
-ADMIN_SERVER_EDIT_KEY_BLOCKED = """❌ Нельзя изменить ключ API сервера, пока на нём есть устройства или активные операции.
+ADMIN_SERVER_EDIT_KEY_BLOCKED = """❌ Нельзя изменить ключ API сервера, пока к нему привязаны подписки.
 
-• Связанных устройств: <b>{devices_count}</b>
-• Операций в обработке: <b>{operations_count}</b>
+• Связанных подписок: <b>{subs_count}</b>
 
 Для подключения нового узла добавьте новый сервер в панели управления."""
 
 ADMIN_SERVER_EDIT_KEY_PROMPT = "Введите новый ключ для сервера:"
 
-ADMIN_SERVER_EDIT_MAX_CLIENTS_PROMPT = "Введите максимальное количество клиентов для сервера:"
-
 ADMIN_SERVER_BTN_CONFIRM_DELETE = "✅ Да, удалить полностью"
 
-ADMIN_SERVER_EDIT_URL_BLOCKED = """❌ Нельзя изменить адрес сервера, пока на нём есть устройства или активные операции.
+ADMIN_SERVER_EDIT_URL_BLOCKED = """❌ Нельзя изменить адрес сервера, пока к нему привязаны подписки.
 
-• Связанных устройств: <b>{devices_count}</b>
-• Операций в обработке: <b>{operations_count}</b>
+• Связанных подписок: <b>{subs_count}</b>
 
 Для подключения нового узла добавьте новый сервер в панели управления."""
 
@@ -138,10 +123,6 @@ ADMIN_SERVER_KEY_UPDATED = "✅ Ключ сервера обновлен."
 
 ADMIN_SERVER_LIST_ROW_FORMAT = "{v0} {v1} {v2} · {v3}"
 
-ADMIN_SERVER_MAX_CLIENTS_UPDATED = "✅ Макс. количество клиентов обновлено: <b>{max_clients}</b>."
-
-ADMIN_SERVER_MAX_CLIENTS_WARNING = "⚠️ Внимание: на сервере уже <b>{current}</b> клиентов, что больше нового лимита (<b>{new}</b>)."
-
 ADMIN_SERVER_NAME_PROMPT = "Введите название сервера:"
 
 ADMIN_SERVER_PING_CHECKING = "⚡ Проверка связи..."
@@ -156,54 +137,10 @@ ADMIN_SERVER_RENAMED = "✅ Сервер успешно переименован
 
 ADMIN_SERVER_RENAME_PROMPT = "Введите новое имя сервера:"
 
-ADMIN_SERVER_SLOTS_BREAKDOWN_NOTE = " <i>(на узле: {cached_used}, в БД: {db_used})</i>"
-
 ADMIN_SERVER_SLOTS_VALUE = "<b>{used_clients} / {max_clients}</b>"
 
 ADMIN_SERVER_SLOTS_VLESS = "<b>Без ограничений</b> <i>(подписчиков: {active_users}, устройств: {active_devices})</i>"
 
-ADMIN_SERVER_BTN_PEERS = "👥 Пиры на узле ({used}/{total})"
-ADMIN_SERVER_BTN_PEERS_NO_COUNT = "👥 Пиры на узле"
-ADMIN_SERVER_BTN_SERVER_USERS = "👥 Все пользователи этого сервера"
-ADMIN_SERVER_BTN_BROADCAST = "📢 Рассылка пользователям"
-ADMIN_SERVER_PEERS_HEADER = """{header}👥 <b>Пиры сервера {flag} {server_name}</b>{status_banner}
-• На узле: <b>{live_peers}</b> (Бот: {bot_peers}, Внешние: {external_peers}){deleting_note}{missing_note}{pending_note}
-Стр. {page}/{total_pages}:
-
-"""
-ADMIN_SERVER_PEERS_HEADER_DEGRADED = """{header}👥 <b>Пиры сервера {flag} {server_name}</b>{status_banner}
-• На узле: <b>?</b> (API недоступен)
-• Профилей бота в БД: <b>{db_profiles_count}</b>
-Стр. {page}/{total_pages}:
-
-"""
-ADMIN_SERVER_PEERS_API_ERROR_BANNER = "\n⚠️ <i>API узла недоступен (показаны данные из базы бота)</i>"
-ADMIN_SERVER_PEERS_DELETING_NOTE = " | ⏳ Удаляются: <b>{deleting_count}</b>"
-ADMIN_SERVER_PEERS_MISSING_NOTE = " | ⚠️ Не на узле: <b>{missing_count}</b>"
-ADMIN_SERVER_PEERS_PENDING_NOTE = " | ⏳ В процессе: <b>{pending_count}</b>"
-ADMIN_SERVER_PEERS_EMPTY = "<i>На этом сервере пока нет зарегистрированных пиров.</i>\n"
-ADMIN_SERVER_PEERS_BREADCRUMB = "Пиры"
-ADMIN_SERVER_PEERS_FALLBACK_DEVICE = "Внешнее устройство"
-ADMIN_SERVER_PEER_BOT_ROW = "• 🟢 <b>{username}</b> ({first_name}) — 📱 \"{device_name}\"\n  IP: <code>{ip}</code> | {status_online}\n"
-ADMIN_SERVER_PEER_UNKNOWN_ROW = "• ⚪ <b>{username}</b> ({first_name}) — 📱 \"{device_name}\"\n  IP: <code>{ip}</code> | ⚠️ Состояние на узле неизвестно\n"
-ADMIN_SERVER_PEER_EXTERNAL_ROW = "• 👤 <b>[Внешний пир]</b> \"{device_name}\"\n  IP: <code>{ip}</code> | Key: <code>{key}</code>\n"
-ADMIN_SERVER_PEER_MISSING_ROW = "• ⚠️ <b>[Не на узле]</b> {username} — 📱 \"{device_name}\"\n  IP: <code>{ip}</code>\n"
-ADMIN_SERVER_PEER_PENDING_ROW = "• {badge} {username} — 📱 \"{device_name}\"\n  Статус: <code>{status}</code> | IP: <code>{ip}</code>\n"
-ADMIN_SERVER_PEER_BADGE_PENDING = "⏳ <b>[Создаётся]</b>"
-ADMIN_SERVER_PEER_BADGE_CLEANUP = "🧹 <b>[Очистка сбоя]</b>"
-ADMIN_SERVER_PEER_BADGE_FAILED = "❌ <b>[Сбой создания]</b>"
-ADMIN_SERVER_PEER_BADGE_DEFAULT = "⏳ <b>[{status}]</b>"
-ADMIN_SERVER_PEER_ICON_PENDING = "⏳"
-ADMIN_SERVER_PEER_ICON_CLEANUP = "🧹"
-ADMIN_SERVER_PEER_ICON_FAILED = "❌"
-PEER_ONLINE_THRESHOLD_SECONDS = 180
-ADMIN_SERVER_PEER_BTN_BOT = "🟢 {username} • {device_name}"
-ADMIN_SERVER_PEER_BTN_PENDING = "{icon} {username} • {device_name}"
-ADMIN_SERVER_PEER_BTN_EXTERNAL = "👤 Внешний: {device_name}"
-ADMIN_SERVER_PEER_STATUS_ONLINE = "🟢 В сети"
-ADMIN_SERVER_PEER_STATUS_OFFLINE = "⚪ Офлайн"
-ADMIN_SERVER_PEER_STATUS_DELETING = "⏳ Удаляется"
-ADMIN_SERVER_PEER_INFO_ALERT = "👤 Внешний пир:\nНаходится на узле, но не привязан к профилям Telegram-бота (не отслеживается ботом)."
 ADMIN_SERVER_BTN_BACK_TO_CARD = "« Назад в карточку сервера"
 ADMIN_SERVER_BTN_RESET_FILTER = "❌ Сбросить фильтр"
 
@@ -233,8 +170,6 @@ STATUS_ACTIVE_ICON = "🟢"
 BTN_DISABLE_SERVER = "🔴 Выключить"
 
 BTN_ENABLE_SERVER_CARD = "🟢 Включить"
-
-LABEL_UNKNOWN_LOWER = "неизвестно"
 
 ADMIN_SERVER_BTN_FORCE_PURGE = "💥 Аварийное списание (Force Purge)"
 ADMIN_SERVER_MIGRATE_CONFIRM_PROMPT = """⚠️ <b>Подтверждение миграции</b>
@@ -410,3 +345,27 @@ ADMIN_SERVER_INCY_VALUE_NONE = "— (не задан)"
 ADMIN_SERVER_INCY_VALUE_DISABLED = "Отключен"
 ADMIN_SERVER_INCY_NO_RELAYS = "На сервере нет подключенных Relay-узлов."
 ADMIN_SERVER_INCY_RELAY_BTN = "🌐 {name}{badge_part}{status_part}"
+
+ADMIN_SERVER_BTN_HOSTING_LIMIT = "⚙️ Лимит хостинга"
+ADMIN_SERVER_HOSTING_LIMIT_TITLE = """🛠 Админка › ⚙️ <b>Лимит хостинга сервера</b>
+
+Сервер: {flag} <b>{server_name}</b>
+• Текущий лимит: <b>{limit_text}</b>
+• День сброса: <b>{reset_day_text}</b>
+• Использовано: <b>{usage_text}</b>
+"""
+ADMIN_SERVER_BTN_SET_HOSTING_LIMIT = "⚙️ Установить / изменить лимит"
+ADMIN_SERVER_BTN_SET_HOSTING_RESET_DAY = "📅 Изменить день сброса"
+ADMIN_SERVER_BTN_REMOVE_HOSTING_LIMIT = "⚪ Отключить лимит"
+ADMIN_SERVER_PROMPT_HOSTING_LIMIT = "Введите лимит хостинга в ГБ (целое положительное число, например 3000):"
+ADMIN_SERVER_PROMPT_HOSTING_RESET_DAY = "Введите день месяца сброса биллинга (число от 1 до 31):"
+ADMIN_SERVER_HOSTING_LIMIT_REMOVED = "⚪ Лимит хостинга отключен."
+ADMIN_SERVER_HOSTING_LIMIT_INVALID = "❌ Укажите корректное положительное число в ГБ."
+ADMIN_SERVER_HOSTING_RESET_DAY_INVALID = "❌ Укажите корректный день месяца (от 1 до 31)."
+ADMIN_SERVER_HOSTING_LIMIT_LINE = "• Лимит хостинга: <b>{host_gb:.1f} ГБ / {limit_gb:,} ГБ ({pct:.1f}%) | Сброс: {reset_day}-го числа</b>\n"
+ADMIN_SERVER_HOSTING_LIMIT_NONE = "Не установлен (безлимитно)"
+ADMIN_SERVER_HOSTING_RESET_DAY_FMT = "{reset_day}-е число каждого месяца"
+ADMIN_SERVER_HOSTING_GB_FMT = "{limit_gb:,} ГБ"
+ADMIN_SERVER_HOSTING_USAGE_FMT = "{host_gb:.1f} ГБ ({pct:.1f}%)"
+ADMIN_SERVER_HOSTING_USAGE_NO_PCT_FMT = "{host_gb:.1f} ГБ"
+

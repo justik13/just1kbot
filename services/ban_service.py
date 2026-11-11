@@ -173,8 +173,6 @@ class BanService:
             is_banned=True,
         )
 
-        deleted_profiles = 0
-
         disabled_wl_subs = (
             await WhiteInternetService.deactivate_user_subscriptions(
                 session,
@@ -215,7 +213,6 @@ class BanService:
             target_id=locked_user.id,
             details={
                 "reason": reason or "admin_action",
-                "profiles_deleted": deleted_profiles,
                 "payments_closed": payments_closed,
                 "reconciliations_queued": reconciliations_queued,
                 "white_internet_disabled": len(disabled_wl_subs),
@@ -226,11 +223,10 @@ class BanService:
 
         logger.info(
             "User %s banned by admin %s. "
-            "Deleted profiles: %s, closed top-ups: %s, "
+            "Closed top-ups: %s, "
             "queued reconciliations: %s, white internet disabled: %s",
             telegram_id,
             admin_id,
-            deleted_profiles,
             payments_closed,
             reconciliations_queued,
             len(disabled_wl_subs),

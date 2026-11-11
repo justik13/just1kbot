@@ -18,8 +18,8 @@ from database.connection import session_scope
 from database.models import Server, User, WhiteInternetSubscription
 from database.repositories import servers_repo, white_internet_repo
 from services.xray_node_client import XrayNodeClient
-from utils.datetime_helpers import now_utc
-from utils.traffic_helpers import accumulate_host_traffic_cycle
+from utils.datetime_helpers import get_hosting_billing_cycle, now_utc
+from utils.traffic_helpers import accumulate_host_traffic_cycle, get_server_hosting_reset_day
 
 import enum
 
@@ -359,7 +359,11 @@ class WhiteInternetTrafficWorker:
                                 extra["monthly_traffic_bytes"] = int(extra.get("monthly_traffic_bytes", 0)) + server_consumed
                             changed = True
                         if host_tx > 0 or host_rx > 0:
-                            if accumulate_host_traffic_cycle(extra, host_tx, host_rx, current_cycle):
+                            host_cycle = get_hosting_billing_cycle(
+                                now,
+                                get_server_hosting_reset_day(extra),
+                            )
+                            if accumulate_host_traffic_cycle(extra, host_tx, host_rx, host_cycle):
                                 changed = True
                         if changed:
                             server_obj.extra_data = extra

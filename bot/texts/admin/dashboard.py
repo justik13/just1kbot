@@ -130,7 +130,7 @@ AUDIT_LOG_EMPTY = "<i>Лог действий пуст.</i>"
 DASHBOARD_ACTIVE_PODPISOK_ACTIVE = """• Активных подписок: <b>{stats__active}</b>
 """
 
-DASHBOARD_AWG_TRAFFIC_STATS = """• Трафик туннелей: <b>{total_traffic}</b> (ср. на подписчика: <b>{avg_traffic}</b>)
+DASHBOARD_STD_TRAFFIC_STATS = """• Трафик туннелей: <b>{total_traffic}</b> (ср. на подписчика: <b>{avg_traffic}</b>)
 """
 
 DASHBOARD_PER_MONTH_SUFFIX = "/мес"
@@ -158,8 +158,6 @@ DASHBOARD_FINANSY_OCHEREDI_I_PLATEZHNYE = """{header}💰 <b>Финансы:</b>
 
 Выберите нужный раздел:"""
 
-DASHBOARD_FREE_IP_V_POOL = """• Свободных IP в пуле: <b>{free_ips}</b>
-"""
 
 DASHBOARD_ILI_OTPRAVTE_DEFIS_CHTOBY_UDAL = "Или отправьте <code>-</code> (дефис), чтобы удалить ссылку и скрыть кнопку у пользователей:"
 
@@ -180,10 +178,6 @@ DASHBOARD_MAINTENANCE_ON = """
 """
 
 DASHBOARD_MAIN_DASHBOARD = "Главный Дашборд"
-
-DASHBOARD_MANAGE_VPN_SERVERAMI_I_TAR = """{header}⚙️ <b>Управление серверами и тарифами:</b>
-
-Выберите нужный раздел:"""
 
 DASHBOARD_MTPROTO_PROXY_URL_HEADER = """🚀 <b>MTProto Proxy URL:</b>
 """
@@ -235,8 +229,6 @@ DASHBOARD_TOTAL_USERS_TOTAL = """• Всего пользователей: <b>{
 DASHBOARD_USERS_I_SUBSCRIPTION = """📊 <b>Пользователи и Подписки:</b>
 """
 
-DASHBOARD_VPN_SERVERS_I_POOL_IP = """🖥 <b>Серверы и Пул IP:</b>
-"""
 ADMIN_DASHBOARD_SERVERS_SECTION = """🖥 <b>Серверы:</b>
 """
 
@@ -257,6 +249,7 @@ DASHBOARD_INACTIVE_SERVERS_HEADER = "⏸️ <b>Выключенные серве
 DASHBOARD_INACTIVE_SERVER_ROW = "⚪ {flag} <b>{name}</b>: выключен{reason_text} (в БД: {db_used})"
 DASHBOARD_INACTIVE_SERVER_ROW_VLESS = "⚪ {flag} <b>{name}</b>: выключен{reason_text}"
 DASHBOARD_DISABLED_REASON_MANUAL = " (вручную)"
+DASHBOARD_DISABLED_REASON_HOSTING_LIMIT = " (лимит трафика)"
 
 
 AUDIT_DETAIL_CURRENCY_SUFFIX = " ₽"

@@ -14,8 +14,6 @@ from typing import Any
 from config.enums import (
     AccountLedgerEntryType,
     AdminAuditAction,
-    ApiOperationStatus,
-    ApiOperationType,
     OrderServiceType,
     OrderStatus,
     PaymentCheckoutStatus,
@@ -25,7 +23,6 @@ from config.enums import (
     ServerHealthState,
     ServerLifecycleStatus,
     ServiceType,
-    VPNProvisioningStatus,
     WebhookInboxStatus,
     WhiteInternetGrantType,
     WhiteInternetProvisioningStatus,
@@ -34,18 +31,9 @@ from config.enums import (
 
 
 # Protocol
-AMNEZIA_PROTOCOL = "amneziawg2"
-AMNEZIA_PROTOCOLS: tuple[str, ...] = (
-    AMNEZIA_PROTOCOL,
-    "amneziawg3",
-    "amneziawg3.1",
-)
 XRAY_PROTOCOL = "xray"
 VLESS_PROTOCOL = "vless"
 XRAY_ORIGIN_CAPABILITY = "xray_origin"
-
-# VPN Configuration transport limits
-MAX_RAW_CONFIG_BYTES = 65536  # 64 KiB max raw config payload
 
 # Default HTTP rate limiter settings
 RATE_LIMIT_REQUESTS_PER_MINUTE = 30.0
@@ -67,9 +55,6 @@ YOOKASSA_IP_RANGES = (
     "77.75.156.35/32",
     "2a02:5180::/32",
 )
-
-# Device limits
-DEVICE_DAILY_LIMIT = 25
 
 # Operational & Worker timings
 STALE_PAYMENT_THRESHOLD = 300
@@ -270,29 +255,23 @@ CANONICAL_XHTTP_PROFILE: dict[str, Any] = {
 
 
 __all__ = [
-    "AMNEZIA_PROTOCOL",
-    "AMNEZIA_PROTOCOLS",
     "API_CONCURRENCY_LIMIT",
     "API_RETRY_COUNT",
     "API_TIMEOUT",
     "AccountLedgerEntryType",
     "AdminAuditAction",
-    "ApiOperationStatus",
     "CANONICAL_XHTTP_PROFILE",
-    "ApiOperationType",
     "DEFAULT_FALLBACK_BOT_USERNAME",
     "DEFAULT_VLESS_PROFILE_TITLE",
     "DEFAULT_WHITE_INTERNET_CHANNEL_URL",
     "DEFAULT_WHITE_INTERNET_PROFILE_TITLE",
     "DEFAULT_WHITE_INTERNET_SUPPORT_URL",
     "DEFAULT_XRAY_ORIGIN_MAX_CLIENTS",
-    "DEVICE_DAILY_LIMIT",
     "OrderServiceType",
     "OrderStatus",
     "GRACE_PERIOD_HOURS",
     "HUB_CACHE_MAX_SIZE",
     "HUB_CACHE_TTL",
-    "MAX_RAW_CONFIG_BYTES",
     "NOTIFICATION_INTERVAL",
     "PERMANENT_END_DATE",
     "PERMANENT_SUBSCRIPTION_DAYS",
@@ -317,7 +296,6 @@ __all__ = [
     "USER_CONTEXT_CACHE_TTL",
     "DEFAULT_WHITE_INTERNET_SUB_PATH_PREFIX",
     "VPN_ACCESS_GRACE_HOURS",
-    "VPNProvisioningStatus",
     "WHITE_INTERNET_BASE_DURATION_DAYS",
     "WHITE_INTERNET_BASE_PRICE_RUB",
     "WHITE_INTERNET_BASE_TRAFFIC_BYTES",

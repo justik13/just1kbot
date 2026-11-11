@@ -19,7 +19,7 @@ from bot.texts.runtime.alerts import (
 from config.settings import get_settings
 from utils.telegram import safe_send_message
 
-from .cleanup import cleanup_dangling_peers_loop
+from .cleanup import cleanup_expired_subscriptions_loop
 from .credit_notifications import credit_notifications_loop
 from .heartbeat import heartbeat_loop
 from .node_monitor import node_monitor_loop
@@ -97,7 +97,7 @@ _ALERT_SHUTDOWN_GRACE = 1.0
 
 
 def _traffic(bot): return traffic_sync_loop(bot, shutdown_event)
-def _cleanup(bot): return cleanup_dangling_peers_loop(bot, shutdown_event)
+def _cleanup(bot): return cleanup_expired_subscriptions_loop(bot, shutdown_event)
 def _notifications(bot): return subscription_notifications_loop(bot, shutdown_event)
 def _credit_notifications(bot): return credit_notifications_loop(bot, shutdown_event)
 def _heartbeat(bot): return heartbeat_loop(shutdown_event, heartbeat_allowed)

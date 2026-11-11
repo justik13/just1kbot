@@ -13,16 +13,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.formatters import get_server_protocol_badge
 from bot.keyboards import get_admin_server_card_keyboard
+from config.constants import DEFAULT_XRAY_ORIGIN_MAX_CLIENTS
 from database.repositories.servers_repo import (
-    get_server_peer_counts,
+    get_origin_server_subscription_counts,
     is_pure_vless_server,
-    is_vless_capable_server,
     is_white_internet_origin_server,
 )
 from utils.datetime_helpers import now_utc
 from utils.formatters import format_traffic
 from utils.telegram import safe
 from utils.text_limits import truncate_button_text
+from utils.traffic_helpers import get_server_hosting_usage
 
 logger = logging.getLogger(__name__)
 
@@ -63,8 +64,7 @@ async def _build_servers_list_text_and_kb(
     if not servers:
         rendered += texts.ADMIN_SERVERS_EMPTY
     else:
-        from services.slots_cache import get_cached_peer_count
-        db_counts = await get_server_peer_counts(session) if session is not None else {}
+        db_counts = await get_origin_server_subscription_counts(session) if session is not None else {}
         vless_users_count: int = 0
         vless_devices_count: int = 0
         has_active_pure_vless = any(
@@ -89,9 +89,8 @@ async def _build_servers_list_text_and_kb(
                     )
             else:
                 db_used = db_counts.get(server.id, 0)
-                cached_used = get_cached_peer_count(server.id)
-                total = server.max_clients or 240
-                effective_used = max(cached_used, db_used) if cached_used is not None else db_used
+                total = server.max_clients or DEFAULT_XRAY_ORIGIN_MAX_CLIENTS
+                effective_used = db_used
                 cap_str = f"{effective_used}/{total}"
             server_display_name = f"{proto_badge} {server.name}"
             button_text = truncate_button_text(
@@ -211,18 +210,16 @@ async def _show_server_card(
         else:
             extra_status_info = ""
     else:
-        status_line = texts.COMMON_OTKLYUCHEN_VRUCHNUYU
+        if getattr(server, "disabled_reason", None) == "HOSTING_TRAFFIC_LIMIT":
+            status_line = texts.COMMON_OTKLYUCHEN_PO_LIMITU_TRAFIKA
+        else:
+            status_line = texts.COMMON_OTKLYUCHEN_VRUCHNUYU
         extra_status_info = ""
 
-    from services.slots_cache import get_cached_peer_count
-
-    db_counts = await get_server_peer_counts(session)
+    db_counts = await get_origin_server_subscription_counts(session)
     db_used = db_counts.get(server.id, 0)
-    cached_used = get_cached_peer_count(server.id)
-    effective_capacity = max(cached_used, db_used) if cached_used is not None else db_used
-    actual_peers = cached_used
-    max_clients = server.max_clients or 240
-    has_vless = is_vless_capable_server(server)
+    effective_capacity = db_used
+    max_clients = server.max_clients or DEFAULT_XRAY_ORIGIN_MAX_CLIENTS
     is_origin = is_white_internet_origin_server(server)
     section_crumb = texts.BTN_WI_SERVERS if is_origin else texts.BTN_STD_SERVERS
     proto_badge = get_server_protocol_badge(server)
@@ -237,28 +234,33 @@ async def _show_server_card(
             active_users=vless_users_count,
             active_devices=vless_devices_count,
         )
-    elif cached_used is not None and cached_used != db_used:
-        slots_text = texts.ADMIN_SERVER_SLOTS_VALUE.format(
-            used_clients=effective_capacity, max_clients=max_clients
-        ) + texts.ADMIN_SERVER_SLOTS_BREAKDOWN_NOTE.format(
-            cached_used=cached_used, db_used=db_used
-        )
     else:
         slots_text = texts.ADMIN_SERVER_SLOTS_VALUE.format(
             used_clients=effective_capacity, max_clients=max_clients
         )
 
     server_extra = getattr(server, "extra_data", {}) or {}
+    now = now_utc()
     client_cycle = server_extra.get("traffic_cycle")
-    host_cycle = server_extra.get("host_traffic_cycle")
-    current_cycle = now_utc().strftime("%Y-%m")
+    current_cycle = now.strftime("%Y-%m")
+    usage = get_server_hosting_usage(server_extra, now)
     monthly_bytes = int(server_extra.get("monthly_traffic_bytes", 0) or 0) if client_cycle == current_cycle else 0
-    host_bytes = int(server_extra.get("host_monthly_traffic_bytes", 0) or 0) if host_cycle == current_cycle else 0
+    host_bytes = usage.host_bytes
     traffic_month = format_traffic(monthly_bytes)
     if host_bytes > 0:
         traffic_month += texts.ADMIN_SERVER_HOST_TRAFFIC_SUFFIX.format(
             host_traffic=format_traffic(host_bytes)
         )
+
+    hosting_limit_line = ""
+    if usage.limit_gb is not None:
+        hosting_limit_line = texts.ADMIN_SERVER_HOSTING_LIMIT_LINE.format(
+            host_gb=usage.host_gb,
+            limit_gb=usage.limit_gb,
+            pct=usage.pct,
+            reset_day=usage.reset_day,
+        )
+
 
     rendered = (
         f"{header}"
@@ -270,6 +272,7 @@ async def _show_server_card(
         + texts.COMMON_PROTOKOL.format(safe_server_protocol=safe(server.protocol))
         + texts.COMMON_ZAPOLNENNOST_SLOTOV.format(slots_text=slots_text)
         + texts.ADMIN_SERVER_MONTHLY_TRAFFIC.format(traffic_month=traffic_month)
+        + hosting_limit_line
         + texts.ADMIN_SERVER_API_URL.format(api_url=safe(server.api_url))
     )
 
@@ -281,10 +284,7 @@ async def _show_server_card(
             reply_markup=get_admin_server_card_keyboard(
                 server.id,
                 server.is_active,
-                used_clients=actual_peers,
-                max_clients=max_clients,
                 is_xray=is_origin,
-                has_vless=has_vless,
                 is_origin=is_origin,
             ),
             parse_mode="HTML",

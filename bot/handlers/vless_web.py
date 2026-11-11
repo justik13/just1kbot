@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import functools
 import html
 import logging
 import os
@@ -29,15 +30,9 @@ logger = logging.getLogger(__name__)
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 
 
-_CACHED_LANDING_ACTIVE_HTML: str | None = None
-
-
-def load_vless_landing_active_html() -> str:
+@functools.lru_cache(maxsize=1)
+def get_vless_landing_active_html() -> str:
     """Assemble modular landing template with inline Base64 real screenshots into memory."""
-    global _CACHED_LANDING_ACTIVE_HTML
-    if _CACHED_LANDING_ACTIVE_HTML is not None:
-        return _CACHED_LANDING_ACTIVE_HTML
-
     landing_dir = _TEMPLATES_DIR / "vless_landing"
     if not landing_dir.is_dir():
         raise FileNotFoundError(f"Landing directory not found: {landing_dir}")
@@ -92,13 +87,13 @@ def load_vless_landing_active_html() -> str:
     if "<!-- {{GUIDE_" in rendered:
         raise ValueError("Unreplaced guide slot placeholders found in assembled landing HTML")
 
-    _CACHED_LANDING_ACTIVE_HTML = rendered
     return rendered
 
 
-_load_landing_active_html = load_vless_landing_active_html
-_LANDING_ACTIVE_HTML = load_vless_landing_active_html()
-_LANDING_INACTIVE_HTML = (_TEMPLATES_DIR / "vless_landing_inactive.html").read_text(encoding="utf-8")
+@functools.lru_cache(maxsize=1)
+def get_vless_landing_inactive_html() -> str:
+    return (_TEMPLATES_DIR / "vless_landing_inactive.html").read_text(encoding="utf-8")
+
 
 _ip_rate_limiter = HttpRateLimiter(rate_per_minute=60.0, burst=15)
 _token_rate_limiter = HttpRateLimiter(rate_per_minute=30.0, burst=10)
@@ -254,7 +249,7 @@ async def _resolve_clean_tariff_name(
         if (
             user_tariff
             and getattr(user_tariff, "name", None)
-            and (getattr(user_tariff, "service_type", None) or "standard") in ("standard", "awg")
+            and (getattr(user_tariff, "service_type", None) or "standard") == "standard"
         ):
             tariff_name = user_tariff.name
     if not tariff_name:
@@ -284,7 +279,8 @@ def _render_vless_landing_html(
         title = status_title or texts.LANDING_INACTIVE_TITLE_DEFAULT
         desc = status_description or texts.LANDING_INACTIVE_DESC_DEFAULT
         return (
-            _LANDING_INACTIVE_HTML.replace("{clean_bot}", clean_bot)
+            get_vless_landing_inactive_html()
+            .replace("{clean_bot}", clean_bot)
             .replace("{bot_link}", bot_link)
             .replace("{status_badge}", html.escape(badge))
             .replace("{status_title}", html.escape(title))
@@ -293,7 +289,8 @@ def _render_vless_landing_html(
     badge_html = f'<div class="tier-badge">{html.escape(tariff_badge)}</div>' if tariff_badge else ""
     effective_title = page_title or texts.LANDING_VLESS_PAGE_TITLE
     return (
-        _LANDING_ACTIVE_HTML.replace("{page_title}", html.escape(effective_title))
+        get_vless_landing_active_html()
+        .replace("{page_title}", html.escape(effective_title))
         .replace("{tier}", html.escape(tier))
         .replace("{tariff_badge_html}", badge_html)
         .replace("{device_limit}", str(device_limit or 1))
@@ -512,8 +509,8 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             support_url = _resolve_support_url({}, default_bot_url)
             channel_url = _resolve_channel_url({}, default_bot_url)
             total_device_limit = await SubscriptionService.get_effective_device_limit(session, user)
-            total_active_devices, _awg_active, _vless_active = (
-                await VlessSubscriptionService.get_combined_quota(session, user)
+            total_active_devices = await vless_subscription_repo.get_active_hwid_count(
+                session, user.id
             )
             limit_msg = texts.VLESS_FEED_DEVICE_LIMIT_NOTICE.format(
                 active=total_active_devices,
@@ -599,8 +596,8 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             )
 
         total_device_limit = await SubscriptionService.get_effective_device_limit(session, user)
-        total_active_devices, _awg_active, _vless_active = (
-            await VlessSubscriptionService.get_combined_quota(session, user)
+        total_active_devices = await vless_subscription_repo.get_active_hwid_count(
+            session, user.id
         )
 
         tariff_clean = await _resolve_clean_tariff_name(session, user, total_device_limit)
@@ -814,7 +811,7 @@ async def vless_report_handler(request: web.Request) -> web.Response:
             user_info = f"ID: <code>{user.telegram_id}</code> ({user_tag})"
             dev_limit = await SubscriptionService.get_effective_device_limit(session, user)
             tariff_name = get_tariff_display_name(dev_limit)
-            total_active, _awg_active, _vless_active = await VlessSubscriptionService.get_combined_quota(session, user)
+            total_active = await vless_subscription_repo.get_active_hwid_count(session, user.id)
             devices_info = f"{total_active} / {dev_limit if dev_limit > 0 else '—'}"
             is_access_active = SubscriptionService.check_vpn_access(user)
             if getattr(user, "is_banned", False):

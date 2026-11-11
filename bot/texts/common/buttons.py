@@ -15,11 +15,12 @@ BTN_ADMIN_USER_MESSAGE = "✉️ Написать пользователю"
 
 BTN_BACK = "← Назад"
 
-BTN_BACK_TO_DEVICE = "← Назад в устройство"
-
 BTN_BALANCE = "💰 Баланс"
 
-BTN_BROADCAST_ACTIVE = "🟢 Активным подпискам"
+BTN_BROADCAST_ACTIVE = "🟢 Всем активным"
+BTN_BROADCAST_ACTIVE_STANDARD = "⚡ Стандартная (активным)"
+BTN_BROADCAST_ACTIVE_WI = "🌐 Белый Интернет (активным)"
+BTN_BROADCAST_ACTIVE_BOTH = "🌟 Обе подписки (активным)"
 
 BTN_BROADCAST_ALL = "📢 Всем пользователям"
 
@@ -51,14 +52,6 @@ BTN_DISMISS_ALERT = "Закрыть"
 
 BTN_DISMISS_NOTIFICATION = "✅ Прочитано (убрать)"
 
-BTN_DOWNLOAD_MIRROR = "🌐 Скачать клиент (Зеркало)"
-
-BTN_ENABLE_SERVER = "🔘 Включить сервер"
-
-BTN_FILTER_BY_SERVER = "🖥 По серверам"
-
-BTN_FILTER_BY_SERVER_ACTIVE = "• 🖥 По серверам •"
-
 BTN_FILTER_BY_TARIFF = "💎 По тарифам"
 
 BTN_FILTER_BY_TARIFF_ACTIVE = "• 💎 По тарифам •"
@@ -67,23 +60,15 @@ BTN_HELP_INSTRUCTIONS = "ℹ️ Помощь и Инструкции"
 
 BTN_INSTRUCTION_INCY = "📱 Инструкция (INCY / Happ)"
 
-BTN_INSTRUCTION_IOS = "🍏 Инструкция iOS (для РФ)"
-
-BTN_INSTRUCTION_WINDOWS = "💻 Инструкции Windows"
-
 BTN_INVITE_FRIEND = "🤝 Пригласить друга"
 
 BTN_ISTORIYA_OPERATSIJ = "📊 История операций"
-
-BTN_ISTORIYA_PLATEZHEJ = "💳 История платежей"
 
 BTN_ADMIN_YOOKASSA_PAYMENTS = "💳 Платежи через ЮKassa"
 BTN_ADMIN_PURCHASES_LOGS = "🛒 Журнал покупок услуг"
 BTN_BACK_TO_FINANCES = "← К разделу финансов"
 
 BTN_ISTORIYA_POPOLNENIJ = "🧾 История пополнений"
-
-BTN_LATEST_VERSION_GITHUB = "📦 Последняя версия (GitHub)"
 
 BTN_MAIN_MENU_NAV = "🏠 В главное меню"
 
@@ -101,10 +86,6 @@ BTN_MY_SUBSCRIPTION = "⏳ Моя подписка"
 
 BTN_NASTROJKI_MTPROTO_PROXY = "🚀 Настройки MTProto Proxy"
 
-BTN_OPEN_IOS_INSTRUCTION = "📖 Открыть инструкцию iOS"
-
-BTN_OPEN_SPLIT_TUNNEL_INSTRUCTION = "📖 Инструкция по Раздельному Туннелированию"
-
 BTN_OPEN_USER_CARD = "👤 Открыть карточку"
 
 BTN_PAGINATION_PREV = "◀️ Назад"
@@ -121,8 +102,6 @@ BTN_RENEW_ACCESS = "💎 Продлить Стандартную"
 
 BTN_SERVERS = "🖥 Серверы"
 
-BTN_SERVERS_AND_TARIFFS = "⚙️ Серверы и Тарифы"
-
 BTN_SERVERS_LIST = "📋 Список серверов"
 
 BTN_SHARE_REFERRAL = "↗️ Поделиться"
@@ -135,17 +114,11 @@ BTN_SPLIT_TUNNELING = "🔀 Раздельное Туннелирование"
 
 BTN_SUPPORT = "💬 Поддержка"
 
-BTN_TARIFY_PODPISOK = "💎 Тарифы подписок"
-
 BTN_TO_SERVER = "⚙️ К серверу"
 
 BTN_USERS_AND_BROADCAST = "👥 Пользователи и Рассылки"
 
-BTN_V_GLAVNOE_MENYU_BOTA = "🔙 В главное меню бота"
-
 BTN_WHITE_INTERNET = "⚪️ Белый Интернет"
-
-BTN_ZHURNAL_POKUPOK = "🛒 Журнал покупок"
 
 BUTTON_COPY_REFERRAL = "📋 Скопировать"
 

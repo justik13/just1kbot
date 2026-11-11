@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import functools
 import html
 import json
 import logging
@@ -33,7 +34,10 @@ from database.models import Server
 from database.repositories import users_repo, white_internet_repo
 from database.repositories.system_settings_repo import get_system_setting
 from services.white_internet_service import WhiteInternetService
-from bot.handlers.vless_web import load_vless_landing_active_html
+from bot.handlers.vless_web import (
+    get_vless_landing_active_html,
+    get_vless_landing_inactive_html,
+)
 from utils.client_parser import extract_device_metadata, parse_client_from_user_agent
 from utils.datetime_helpers import now_utc
 from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
@@ -43,9 +47,11 @@ from utils.security import normalize_public_domain
 logger = logging.getLogger(__name__)
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
-_LANDING_ACTIVE_HTML = load_vless_landing_active_html()
-_LANDING_INACTIVE_HTML = (_TEMPLATES_DIR / "vless_landing_inactive.html").read_text(encoding="utf-8")
-_LANDING_PENDING_HTML = (_TEMPLATES_DIR / "vless_landing_pending.html").read_text(encoding="utf-8")
+
+
+@functools.lru_cache(maxsize=1)
+def get_white_internet_pending_html() -> str:
+    return (_TEMPLATES_DIR / "vless_landing_pending.html").read_text(encoding="utf-8")
 
 # Scoped rate limiters: IP bucket prevents unauthenticated DoS / token brute force,
 # token bucket prevents single subscription thrashing across rotating IPs.
@@ -156,7 +162,8 @@ def _render_white_internet_landing_html(
         title = status_title or texts.LANDING_INACTIVE_TITLE_DEFAULT
         desc = status_description or texts.LANDING_INACTIVE_DESC_DEFAULT
         return (
-            _LANDING_INACTIVE_HTML.replace("{clean_bot}", clean_bot)
+            get_vless_landing_inactive_html()
+            .replace("{clean_bot}", clean_bot)
             .replace("{bot_link}", bot_link)
             .replace("{status_badge}", html.escape(badge))
             .replace("{status_title}", html.escape(title))
@@ -166,7 +173,8 @@ def _render_white_internet_landing_html(
     effective_title = page_title or texts.LANDING_WHITE_INTERNET_PAGE_TITLE
     badge_html = f'<div class="tier-badge">{html.escape(effective_badge)}</div>' if effective_badge else ""
     return (
-        _LANDING_ACTIVE_HTML.replace("{page_title}", html.escape(effective_title))
+        get_vless_landing_active_html()
+        .replace("{page_title}", html.escape(effective_title))
         .replace("{tier}", html.escape(tier))
         .replace("{tariff_badge_html}", badge_html)
         .replace("{device_limit}", str(device_limit or 1))
@@ -181,7 +189,7 @@ def _render_white_internet_pending_landing_html(bot_username: str = "") -> str:
         else constants.DEFAULT_FALLBACK_BOT_USERNAME
     )
     bot_link = f"https://t.me/{clean_bot}"
-    return _LANDING_PENDING_HTML.replace("{clean_bot}", clean_bot).replace("{bot_link}", bot_link)
+    return get_white_internet_pending_html().replace("{clean_bot}", clean_bot).replace("{bot_link}", bot_link)
 
 
 async def _resolve_bot_username(request: web.Request) -> str:

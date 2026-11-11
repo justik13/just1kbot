@@ -431,10 +431,8 @@ async def show_user_payments_list(
                         base_service_name = item.tariff.name
                     elif meta.get("tariff_name"):
                         base_service_name = str(meta["tariff_name"])
-                    elif item.service_type in ("standard", "awg"):
-                        base_service_name = texts.ADMIN_PAYMENT_SERVICE_STANDARD if item.service_type == "standard" else "AWG"
-                    elif item.service_type == "vless":
-                        base_service_name = "VLESS"
+                    elif item.service_type == "standard":
+                        base_service_name = texts.ADMIN_PAYMENT_SERVICE_STANDARD
                     else:
                         base_service_name = item.service_type
 

@@ -30,7 +30,7 @@ class FulfillmentService:
             )
             return
 
-        if order.service_type in ("standard", "awg"):
+        if order.service_type == "standard":
             now = now_utc()
             meta = dict(order.metadata_ or {})
             if user.subscription_end:
@@ -56,7 +56,6 @@ class FulfillmentService:
             user.notified_1d = False
             user.notified_2h = False
             user.notified_expired = False
-            user.notified_grace_12h = False
             user.notification_retry_count = 0
             user.last_notification_attempt = None
             await SubscriptionService.sync_access_state(session, user)
@@ -137,7 +136,7 @@ class FulfillmentService:
         if not user:
             return
 
-        if order.service_type in ("standard", "awg"):
+        if order.service_type == "standard":
             meta = dict(order.metadata_ or {})
             is_tariff_change = bool(meta.get("is_tariff_change"))
             prev_end_str = meta.get("previous_subscription_end")

@@ -1,7 +1,7 @@
 """Domain texts for admin/users.py."""
 from __future__ import annotations
 from bot.texts.admin.common import COMMON_ALL_USERS_LABEL
-from bot.texts.admin.common import COMMON_VSE, COMMON_NOVYE_7D, COMMON_3_DAYS, COMMON_BEZ_SUBSCRIPTION, COMMON_ZABANENNYE
+from bot.texts.admin.common import COMMON_VSE, COMMON_NOVYE_24H, COMMON_NOVYE_7D, COMMON_3_DAYS, COMMON_BEZ_SUBSCRIPTION, COMMON_ZABANENNYE
 
 
 ADMIN_BAN_FAILED = """❌ Ошибка при попытке забанить пользователя:
@@ -20,14 +20,6 @@ ADMIN_USER_TRAFFIC_MONTHLY_BREAKDOWN = (
 )
 
 ADMIN_BTN_INPUT_MANUALLY = "⌨️ Ввести вручную"
-
-ADMIN_DELETE_DEVICE_CONFIRM = "Удалить устройство <b>{device_name}</b> ({flag} {server_name}) у пользователя <code>{telegram_id}</code>?"
-
-ADMIN_DELETE_DEVICE_ERROR = "❌ Произошла ошибка при удалении устройства."
-
-ADMIN_DELETE_DEVICE_FAILED = "❌ Не удалось удалить устройство."
-
-ADMIN_DELETE_DEVICE_SUCCESS = "✅ Устройство <b>{device_name}</b> пользователя <code>{telegram_id}</code> успешно удалено."
 
 ADMIN_DIRECT_MESSAGE_BODY_FORMAT = """📨 Сообщение от администрации:
 
@@ -52,13 +44,12 @@ ADMIN_USER_ID_NO_COLON_FORMAT = "ID {telegram_id}"
 ADMIN_MASS_BONUS_AUDIENCE_LABELS = {
     "all": COMMON_ALL_USERS_LABEL,
     "active": "Только активные подписки",
+    "standard": "⚡ Стандартная подписка (активные)",
+    "wi": "🌐 Белый Интернет (активные)",
     "inactive": "Только неактивные подписки",
-    "expired": "Истекшие подписки"
+    "expired": "Истекшие подписки",
 }
 
-ADMIN_USERS_MASS_BONUS_SERVER_AUDIENCE = "🌐 Пользователям сервера"
-ADMIN_USERS_MASS_BONUS_SELECT_SERVER = "Выберите сервер, пользователям которого будут начислены бонусы:"
-ADMIN_USERS_MASS_BONUS_SERVER_AUDIENCE_LABEL = "Пользователям сервера {flag} {name}"
 
 ADMIN_AUDIT_LOG_DETAILS_MASS_BONUS = "Granted +{amount} RUB bonus to {count} users (batch {batch_id}). Reason: {reason}"
 
@@ -149,38 +140,7 @@ ADMIN_USERS_BALANCE_VY_UVERENY_CHTO_KHOTITE_PRIMEN = "Вы уверены, чт�
 
 ADMIN_USERS_BALANCE_V_BALANCE = "💳 В баланс"
 
-ADMIN_USERS_DEVICE_AKTIVNOST = """   Активность: <i>{last_conn}</i>
-"""
-
-ADMIN_USERS_DEVICE_DEVICE = "Устройство #{profile_id}"
-
 ADMIN_USERS_DEVICE_DEVICES = "📱 Устройства"
-
-ADMIN_USERS_DEVICE_DEVICES_POLZOVATELYA_ID = """📱 <b>Устройства пользователя ID {telegram_id}:</b>
-
-"""
-
-ADMIN_USERS_DEVICE_ID_DEVICES = """   🆔 ID устройства: <code>{profile_id}</code>
-"""
-
-ADMIN_USERS_DEVICE_NEIZVESTNYY_SERVER = "Неизвестный сервер"
-
-ADMIN_USERS_DEVICE_NE_BYLO_PODKLYUCHENIYA = "⏱ не было подключения"
-
-ADMIN_USERS_DEVICE_OFLAYN = "🔴 <b>Офлайн</b>"
-
-ADMIN_USERS_DEVICE_SERVER = """   🖥 Сервер: {server_flag} <b>{server_name}</b>
-"""
-
-ADMIN_USERS_DEVICE_SOSTOYANIE = """   Состояние: {status_hs}
-"""
-
-ADMIN_USERS_DEVICE_TRAFIK = """   Трафик: <code>{traffic_total}</code>
-"""
-
-ADMIN_USERS_DEVICE_U_POLZOVATELYA_POKA_NET_SOZDAN = "<i>У пользователя пока нет созданных устройств.</i>"
-
-ADMIN_USERS_DEVICE_V_SETI_AKTIVNOST_3_MIN = "🟢 <b>В сети (активность ≤ 3 мин)</b>"
 
 ADMIN_USERS_LIST_ACTION = "Действие"
 
@@ -200,17 +160,7 @@ ADMIN_USERS_LIST_NEIZVESTNYY_FILTR = "Неизвестный фильтр"
 
 ADMIN_USERS_LIST_NEKORREKTNYY_PARAMETR_FILTRA = "Некорректный параметр фильтра"
 
-ADMIN_USERS_LIST_SELECT_SERVER = "🖥 <b>Выберите сервер:</b>"
-
-ADMIN_USERS_LIST_SELECT_STRANU = "🌐 <b>Выберите страну:</b>"
-
 ADMIN_USERS_LIST_SELECT_TARIFF = "💎 <b>Выберите тариф:</b>"
-
-ADMIN_USERS_LIST_SERVEROV_NET = "Серверов нет"
-
-ADMIN_USERS_LIST_STRAN_NET = "Стран нет"
-
-ADMIN_USERS_LIST_TARIFOV_NET = "Тарифов нет"
 
 ADMIN_USERS_LIST_TOTAL_ZAPISEY = """<i>Всего записей: {total_count}</i>
 """
@@ -321,9 +271,6 @@ ADMIN_USERS_MASS_EXTEND_HEADER_DAYS = "Ввод срока"
 ADMIN_USERS_MASS_EXTEND_AUD_ACTIVE_STANDARD = "⚡ Стандартная (активные)"
 ADMIN_USERS_MASS_EXTEND_AUD_ACTIVE_WI = "🌐 Белый Интернет (активные)"
 ADMIN_USERS_MASS_EXTEND_AUD_ACTIVE_ALL = "🌟 Все активные (любой тип)"
-ADMIN_USERS_MASS_EXTEND_AUD_SERVER = "🖥 Пользователям сервера"
-ADMIN_USERS_MASS_EXTEND_SELECT_SERVER = "Выберите сервер, пользователям которого будут добавлены дни доступа:"
-
 ADMIN_MASS_EXTEND_AUDIENCE_LABELS = {
     "active_standard": "⚡ Стандартная подписка (активные)",
     "active_wi": "🌐 Белый Интернет (активные)",
@@ -344,9 +291,6 @@ ADMIN_USERS_MASS_EXTEND_ENTER_DAYS_PROMPT = """⏳ <b>Количество дн�
 Введите количество дней (целое число от 1 до 365, например <code>3</code>):"""
 ADMIN_USERS_MASS_EXTEND_INVALID_DAYS = "⚠️ Введите корректное количество дней от 1 до 365."
 
-ADMIN_USERS_MASS_EXTEND_ENTER_REASON_PROMPT = """📝 <b>Причина продления (+{days_text}):</b>
-
-Введите сообщение для пользователей и лога аудита (например: <i>Компенсация за сбой на серверах</i>):"""
 ADMIN_USERS_MASS_EXTEND_EDIT_REASON_PROMPT = (
     "📝 <b>Введите причину продления (+{days_text}):</b>\n\nВведите сообщение для пользователей или оставьте по умолчанию: "
 )
@@ -433,14 +377,7 @@ ADMIN_USER_CARD = """🛠 Админка › 👥 Пользователи › �
 <b>Приглашено рефералов:</b> {referrals_count}
 <b>Регистрация:</b> {created_at}"""
 
-ADMIN_DEVICE_NAME_TEMPLATE = "Устройство #{v0}"
-
-ADMIN_DEVICE_DELETE_BUTTON_LABEL = "🗑 {v0}"
-
 ADMIN_USER_DEBIT_REASON_PROMPT = """Введите текстовое примечание (причину списания) для лога аудита:
-"""
-
-ADMIN_USER_DEVICES_HEADER = """{header}📱 <b>Устройства пользователя ID {telegram_id}:</b>
 """
 
 ADMIN_BTN_BACK_TO_USERS_LIST = "← К списку пользователей"
@@ -450,7 +387,25 @@ ADMIN_BTN_BAN = "🚫 Забанить"
 ADMIN_BTN_CHANGE_TARIFF = "💎 Сменить тариф"
 
 
-ADMIN_USER_FILTER_LABELS = {'all': COMMON_VSE, 'new': COMMON_NOVYE_7D, 'new_24h': COMMON_NOVYE_7D, 'new_7d': COMMON_NOVYE_7D, 'expiring_3d': COMMON_3_DAYS, 'active': '⚡ С подпиской', 'expired': COMMON_BEZ_SUBSCRIPTION, 'no_sub': COMMON_BEZ_SUBSCRIPTION, 'banned': COMMON_ZABANENNYE, 'problem': COMMON_ZABANENNYE, 'server': 'Сервер #{filter_param}', 'tariff': 'Тариф #{filter_param}'}
+ADMIN_USERS_FILTER_ACTIVE_STANDARD = "⚡ Стандарт"
+ADMIN_USERS_FILTER_NEVER = "⚪ Не было подписок"
+
+ADMIN_USER_FILTER_LABELS = {
+    'all': COMMON_VSE,
+    'new': COMMON_NOVYE_7D,
+    'new_24h': COMMON_NOVYE_24H,
+    'new_7d': COMMON_NOVYE_7D,
+    'expiring_3d': COMMON_3_DAYS,
+    'active': '⚡ С подпиской',
+    'active_standard': ADMIN_USERS_FILTER_ACTIVE_STANDARD,
+    'active_wi': "🌐 Белый Интернет",
+    'expired': COMMON_BEZ_SUBSCRIPTION,
+    'never': ADMIN_USERS_FILTER_NEVER,
+    'no_sub': COMMON_BEZ_SUBSCRIPTION,
+    'banned': COMMON_ZABANENNYE,
+    'problem': COMMON_ZABANENNYE,
+    'tariff': 'Тариф #{filter_param}',
+}
 
 ADMIN_BTN_USER_DEVICES = "🔧 Устройства"
 
@@ -481,10 +436,7 @@ STATUS_EXPIRED_LABEL = "истекла"
 TIME_DAYS_FULL_FORMAT = "{days} дней"
 
 
-ADMIN_USERS_FILTER_SERVER_BUTTON = "🖥 {flag} {server_name}"
-ADMIN_USERS_FILTER_COUNTRY_BUTTON = "🌐 {country}"
 ADMIN_USERS_FILTER_TARIFF_BUTTON = "💎 {tariff_group}"
-ADMIN_FILTER_FLAG_FALLBACK = "🌐"
 
 ADMIN_USER_FILTER_COUNT = "{f_name} ({count})"
 ADMIN_USER_FILTER_ALL_COUNT = ADMIN_USER_FILTER_COUNT
