@@ -13,7 +13,7 @@ from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
 
 from .common import (
-    _get_user_with_profiles,
+    _get_user_by_telegram_id,
     _render_user_card,
 )
 
@@ -131,7 +131,7 @@ async def admin_ban_apply(
         show_alert=True,
     )
 
-    user = await _get_user_with_profiles(session, telegram_id)
+    user = await _get_user_by_telegram_id(session, telegram_id)
 
     if user:
         await _render_user_card(callback, user, session)
@@ -217,7 +217,7 @@ async def admin_unban_apply(
         show_alert=True,
     )
 
-    user = await _get_user_with_profiles(session, telegram_id)
+    user = await _get_user_by_telegram_id(session, telegram_id)
 
     if user:
         await _render_user_card(callback, user, session)

@@ -95,9 +95,6 @@ def get_vless_landing_inactive_html() -> str:
     return (_TEMPLATES_DIR / "vless_landing_inactive.html").read_text(encoding="utf-8")
 
 
-load_vless_landing_active_html = get_vless_landing_active_html
-_load_landing_active_html = get_vless_landing_active_html
-
 _ip_rate_limiter = HttpRateLimiter(rate_per_minute=60.0, burst=15)
 _token_rate_limiter = HttpRateLimiter(rate_per_minute=30.0, burst=10)
 _report_ip_limiter = HttpRateLimiter(rate_per_minute=5.0, burst=3)
@@ -512,8 +509,8 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             support_url = _resolve_support_url({}, default_bot_url)
             channel_url = _resolve_channel_url({}, default_bot_url)
             total_device_limit = await SubscriptionService.get_effective_device_limit(session, user)
-            total_active_devices, _legacy_active, _vless_active = (
-                await VlessSubscriptionService.get_combined_quota(session, user)
+            total_active_devices = await vless_subscription_repo.get_active_hwid_count(
+                session, user.id
             )
             limit_msg = texts.VLESS_FEED_DEVICE_LIMIT_NOTICE.format(
                 active=total_active_devices,
@@ -599,8 +596,8 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             )
 
         total_device_limit = await SubscriptionService.get_effective_device_limit(session, user)
-        total_active_devices, _legacy_active, _vless_active = (
-            await VlessSubscriptionService.get_combined_quota(session, user)
+        total_active_devices = await vless_subscription_repo.get_active_hwid_count(
+            session, user.id
         )
 
         tariff_clean = await _resolve_clean_tariff_name(session, user, total_device_limit)
@@ -814,7 +811,7 @@ async def vless_report_handler(request: web.Request) -> web.Response:
             user_info = f"ID: <code>{user.telegram_id}</code> ({user_tag})"
             dev_limit = await SubscriptionService.get_effective_device_limit(session, user)
             tariff_name = get_tariff_display_name(dev_limit)
-            total_active, _legacy_active, _vless_active = await VlessSubscriptionService.get_combined_quota(session, user)
+            total_active = await vless_subscription_repo.get_active_hwid_count(session, user.id)
             devices_info = f"{total_active} / {dev_limit if dev_limit > 0 else '—'}"
             is_access_active = SubscriptionService.check_vpn_access(user)
             if getattr(user, "is_banned", False):

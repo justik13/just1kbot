@@ -432,7 +432,7 @@ def sanitize_reply_markup(reply_markup: InlineKeyboardMarkup | None) -> InlineKe
 
     Guarantees:
     - copy_text: Telegram Bot API limits text to 1..256 characters. If text length is outside [1, 256]
-      (e.g., raw AWG configs/keys of 800+ chars, empty strings), copy_text is dropped and safely replaced
+      (e.g., oversized links/keys of 800+ chars, empty strings), copy_text is dropped and safely replaced
       with callback_data="alert:copy_too_long" to inform the user explicitly via popup alert instead of
       failing silently or causing TelegramBadRequest: BUTTON_COPY_TEXT_INVALID.
     - callback_data: Telegram Bot API limits callback_data to 1..64 bytes (UTF-8). If exceeded, truncated

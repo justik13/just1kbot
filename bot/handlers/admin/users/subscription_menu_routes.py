@@ -105,12 +105,9 @@ async def admin_subscription_menu(
 
     vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
     vless_sub_url: str | None = None
-    has_vless_hwids = False
     if vless_sub:
         from services.vless_subscription_service import VlessSubscriptionService
         vless_sub_url = VlessSubscriptionService.build_subscription_url(vless_sub.token)
-        raw_hwids = getattr(vless_sub, "active_hwids", None) or {}
-        has_vless_hwids = bool(raw_hwids)
 
     if has_active:
         status_block = texts.ADMIN_SUB_STATUS_ACTIVE.format(
@@ -147,7 +144,6 @@ async def admin_subscription_menu(
                 telegram_id,
                 has_active,
                 vless_sub_url=vless_sub_url,
-                has_vless_hwids=has_vless_hwids,
             ),
             parse_mode="HTML",
         )

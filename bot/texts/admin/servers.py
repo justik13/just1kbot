@@ -26,7 +26,7 @@ ADMIN_SERVERS_EMPTY = """<i>Серверов пока нет</i>
 ADMIN_SERVER_API_URL = "• API URL: <code>{api_url}</code>\n"
 ADMIN_SERVER_MONTHLY_TRAFFIC = "• Трафик за месяц: <b>{traffic_month}</b>\n"
 ADMIN_SERVER_HOST_TRAFFIC_SUFFIX = " (хостинг: {host_traffic})"
-ADMIN_AUDIT_LOG_DETAILS_DELETE_SERVER = "{server_name}: {count} profiles deleted"
+ADMIN_AUDIT_LOG_DETAILS_DELETE_SERVER = "{server_name}: server deleted"
 ADMIN_AUDIT_LOG_DETAILS_EDIT_SERVER = "{field} -> {value}"
 ADMIN_AUDIT_LOG_DETAILS_EDIT_SERVER_REDACTED = "{field} -> [REDACTED]"
 
@@ -66,23 +66,13 @@ ADMIN_SERVER_RELAYS_STATUS_OFFLINE = "🔴 Офлайн"
 ADMIN_SERVER_BTN_REFRESH_RELAYS = "🔄 Обновить статус узлов"
 ADMIN_SERVER_BTN_BACK_TO_SERVER = "« Назад к серверу"
 
-ADMIN_SERVER_BTN_CHANGE_LIMIT = "👥 Изменить лимит"
-
 ADMIN_SERVER_BTN_CHANGE_KEY = "🔑 Изменить ключ"
 
 ADMIN_SERVER_CHECKING = "🔄 Проверка сервера..."
 
 ADMIN_SERVER_CONFIRMATION_EXPIRED = "⚠️ Сессия подтверждения истекла"
 
-ADMIN_SERVER_DELETED_BADGE = "Удалено"
-
 ALERT_CANNOT_BE_DELETED_OLD = "Сообщению больше 48 часов. Telegram запрещает ботам удалять старые сообщения — удалите его вручную."
-
-ADMIN_SERVER_DELETE_BLOCKED_PENDING = """⚠️ <b>Удаление сервера отменено:</b>
-
-На сервере присутствуют незавершенные операции создания или фоновые обновления. Дождитесь их завершения."""
-
-ADMIN_SERVER_DELETE_BLOCKED_PENDING_CLIENT = "На сервере есть незавершённое создание клиента. Дождитесь reconciliation и повторите удаление."
 
 ADMIN_SERVER_DELETE_BLOCKED_ACTIVE_WL_ALERT = "Удаление заблокировано: к серверу привязано {count} активных подписок White Internet. Сначала отключите их."
 
@@ -98,12 +88,11 @@ ADMIN_SERVER_DELETE_CONFIRM = """⚠️ <b>Удаление сервера</b>
 
 ADMIN_SERVER_DELETE_WL_SUBS_NOTE = "\n\n🌐 <i>К серверу также привязано подписок Белый Интернет: {count}</i>"
 
-ADMIN_SERVER_DELETE_SUCCESS_NOTICE = "✅ Сервер {v0} удалён ({v1} устр.)"
+ADMIN_SERVER_DELETE_SUCCESS_NOTICE = "✅ Сервер {v0} удалён"
 
-ADMIN_SERVER_EDIT_KEY_BLOCKED = """❌ Нельзя изменить ключ API сервера, пока на нём есть устройства или активные операции.
+ADMIN_SERVER_EDIT_KEY_BLOCKED = """❌ Нельзя изменить ключ API сервера, пока к нему привязаны подписки.
 
-• Связанных устройств: <b>{devices_count}</b>
-• Операций в обработке: <b>{operations_count}</b>
+• Связанных подписок: <b>{subs_count}</b>
 
 Для подключения нового узла добавьте новый сервер в панели управления."""
 
@@ -111,10 +100,9 @@ ADMIN_SERVER_EDIT_KEY_PROMPT = "Введите новый ключ для сер
 
 ADMIN_SERVER_BTN_CONFIRM_DELETE = "✅ Да, удалить полностью"
 
-ADMIN_SERVER_EDIT_URL_BLOCKED = """❌ Нельзя изменить адрес сервера, пока на нём есть устройства или активные операции.
+ADMIN_SERVER_EDIT_URL_BLOCKED = """❌ Нельзя изменить адрес сервера, пока к нему привязаны подписки.
 
-• Связанных устройств: <b>{devices_count}</b>
-• Операций в обработке: <b>{operations_count}</b>
+• Связанных подписок: <b>{subs_count}</b>
 
 Для подключения нового узла добавьте новый сервер в панели управления."""
 
@@ -182,8 +170,6 @@ STATUS_ACTIVE_ICON = "🟢"
 BTN_DISABLE_SERVER = "🔴 Выключить"
 
 BTN_ENABLE_SERVER_CARD = "🟢 Включить"
-
-LABEL_UNKNOWN_LOWER = "неизвестно"
 
 ADMIN_SERVER_BTN_FORCE_PURGE = "💥 Аварийное списание (Force Purge)"
 ADMIN_SERVER_MIGRATE_CONFIRM_PROMPT = """⚠️ <b>Подтверждение миграции</b>

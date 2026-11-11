@@ -13,10 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.formatters import get_server_protocol_badge
 from bot.keyboards import get_admin_server_card_keyboard
+from config.constants import DEFAULT_XRAY_ORIGIN_MAX_CLIENTS
 from database.repositories.servers_repo import (
-    get_server_peer_counts,
+    get_origin_server_subscription_counts,
     is_pure_vless_server,
-    is_vless_capable_server,
     is_white_internet_origin_server,
 )
 from utils.datetime_helpers import now_utc
@@ -63,7 +63,7 @@ async def _build_servers_list_text_and_kb(
     if not servers:
         rendered += texts.ADMIN_SERVERS_EMPTY
     else:
-        db_counts = await get_server_peer_counts(session) if session is not None else {}
+        db_counts = await get_origin_server_subscription_counts(session) if session is not None else {}
         vless_users_count: int = 0
         vless_devices_count: int = 0
         has_active_pure_vless = any(
@@ -88,7 +88,7 @@ async def _build_servers_list_text_and_kb(
                     )
             else:
                 db_used = db_counts.get(server.id, 0)
-                total = server.max_clients or 240
+                total = server.max_clients or DEFAULT_XRAY_ORIGIN_MAX_CLIENTS
                 effective_used = db_used
                 cap_str = f"{effective_used}/{total}"
             server_display_name = f"{proto_badge} {server.name}"
@@ -212,11 +212,10 @@ async def _show_server_card(
         status_line = texts.COMMON_OTKLYUCHEN_VRUCHNUYU
         extra_status_info = ""
 
-    db_counts = await get_server_peer_counts(session)
+    db_counts = await get_origin_server_subscription_counts(session)
     db_used = db_counts.get(server.id, 0)
     effective_capacity = db_used
-    max_clients = server.max_clients or 240
-    has_vless = is_vless_capable_server(server)
+    max_clients = server.max_clients or DEFAULT_XRAY_ORIGIN_MAX_CLIENTS
     is_origin = is_white_internet_origin_server(server)
     section_crumb = texts.BTN_WI_SERVERS if is_origin else texts.BTN_STD_SERVERS
     proto_badge = get_server_protocol_badge(server)
@@ -270,7 +269,6 @@ async def _show_server_card(
                 server.id,
                 server.is_active,
                 is_xray=is_origin,
-                has_vless=has_vless,
                 is_origin=is_origin,
             ),
             parse_mode="HTML",

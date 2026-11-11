@@ -115,10 +115,11 @@ async def _get_financial_stats(session: AsyncSession) -> dict:
 
 async def _get_servers_capacity_summary(session: AsyncSession) -> str:
     from bot.formatters import get_server_protocol_badge
+    from config.constants import DEFAULT_XRAY_ORIGIN_MAX_CLIENTS
     from config.enums import ServerLifecycleStatus
     from database.repositories.servers_repo import (
         get_all_servers,
-        get_server_peer_counts,
+        get_origin_server_subscription_counts,
         is_pure_vless_server,
         is_white_internet_origin_server,
     )
@@ -127,7 +128,7 @@ async def _get_servers_capacity_summary(session: AsyncSession) -> str:
     if not servers:
         return texts.DASHBOARD_SERVEROV_POKA_NET
 
-    db_counts = await get_server_peer_counts(session)
+    db_counts = await get_origin_server_subscription_counts(session)
 
     vless_users_count: int = 0
     vless_devices_count: int = 0
@@ -171,7 +172,7 @@ async def _get_servers_capacity_summary(session: AsyncSession) -> str:
                 ))
             else:
                 effective_used = db_used
-                total = s.max_clients or 240
+                total = s.max_clients or DEFAULT_XRAY_ORIGIN_MAX_CLIENTS
                 pct = int((effective_used / total) * 100) if total > 0 else 0
                 status_icon = "🟢" if pct < 80 else ("🟡" if pct < 90 else "🔴")
 

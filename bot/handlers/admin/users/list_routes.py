@@ -25,7 +25,7 @@ from utils.telegram import render_hub, safe
 from .common import (
     USERS_PER_PAGE,
     _build_users_list_text_and_kb,
-    _get_user_with_profiles,
+    _get_user_by_telegram_id,
     _render_user_card,
     _show_user_card_edit,
 )
@@ -295,7 +295,7 @@ async def show_user_card(
     await callback.answer(show_alert=False)
     await state.clear()
 
-    user = await _get_user_with_profiles(session, telegram_id)
+    user = await _get_user_by_telegram_id(session, telegram_id)
     if not user:
         await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
         return
@@ -331,7 +331,7 @@ async def show_user_audit(
         return
 
     await callback.answer(show_alert=False)
-    user = await _get_user_with_profiles(session, telegram_id)
+    user = await _get_user_by_telegram_id(session, telegram_id)
     if not user:
         await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
         return

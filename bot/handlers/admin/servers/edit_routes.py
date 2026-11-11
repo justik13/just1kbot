@@ -580,8 +580,7 @@ async def process_edit_server_url(
                 message.bot,
                 message.chat.id,
                 texts.ADMIN_SERVER_EDIT_URL_BLOCKED.format(
-                    devices_count=wl_subs_count,
-                    operations_count=0,
+                    subs_count=wl_subs_count,
                 ),
                 get_back_button(f"admin_server_card:{server_id}"),
                 parse_mode="HTML",
@@ -620,7 +619,7 @@ async def process_edit_server_url(
 
     await update_server(session, server, **update_kwargs)
 
-    from services.vless_subscription import VlessSubscriptionService
+    from services.vless_subscription_service import VlessSubscriptionService
     VlessSubscriptionService.sync_all_active_to_server_background(server_id)
 
     await AuditService.log_action(
@@ -831,8 +830,7 @@ async def process_edit_server_key(
                 message.bot,
                 message.chat.id,
                 texts.ADMIN_SERVER_EDIT_KEY_BLOCKED.format(
-                    devices_count=wl_subs_count,
-                    operations_count=0,
+                    subs_count=wl_subs_count,
                 ),
                 get_back_button(f"admin_server_card:{server_id}"),
                 parse_mode="HTML",
@@ -843,7 +841,7 @@ async def process_edit_server_key(
     update_kwargs = {"api_key": new_key}
     await update_server(session, server, **update_kwargs)
 
-    from services.vless_subscription import VlessSubscriptionService
+    from services.vless_subscription_service import VlessSubscriptionService
     VlessSubscriptionService.sync_all_active_to_server_background(server_id)
 
     await AuditService.log_action(

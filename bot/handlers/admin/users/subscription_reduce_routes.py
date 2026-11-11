@@ -260,7 +260,6 @@ async def admin_sub_apply_reduce(
         user.notified_1d = False
         user.notified_2h = False
         user.notified_expired = False
-        user.notified_grace_12h = False
         user.notification_retry_count = 0
         user.last_notification_attempt = None
 

@@ -27,12 +27,6 @@ NOUN_USERS = ("пользователь", "пользователя", "поль�
 
 PLACEHOLDER_DASH = "—"
 
-PROVISIONING_CREATE_FAILED = "ошибка создания"
-
-PROVISIONING_DELETE_FAILED = "ошибка удаления"
-
-PROVISIONING_UPDATING = "обновляется"
-
 
 STATUS_ACTIVE_BADGE = "🟢 Активен"
 

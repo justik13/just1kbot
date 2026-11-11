@@ -54,9 +54,6 @@ from bot.texts.admin.users import (
     ADMIN_USER_ID_NO_COLON_FORMAT as ADMIN_USER_ID_NO_COLON_FORMAT,
 )
 from bot.texts.common.status import MAINTENANCE_DEFAULT_MESSAGE as MAINTENANCE_DEFAULT_MESSAGE
-from bot.texts.connection.config import (
-    CONNECTION_CONFIG_DEVICE_VIEW_KEY_BLOCKQUOTE as CONNECTION_CONFIG_DEVICE_VIEW_KEY_BLOCKQUOTE,
-)
 
 
 from bot.texts import admin as _admin

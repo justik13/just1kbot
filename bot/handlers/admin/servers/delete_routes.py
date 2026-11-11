@@ -246,11 +246,11 @@ async def confirm_delete_server(
         AdminAuditAction.DELETE_SERVER,
         "Server",
         server_id,
-        texts.ADMIN_AUDIT_LOG_DETAILS_DELETE_SERVER.format(server_name=server_name, count=0),
+        texts.ADMIN_AUDIT_LOG_DETAILS_DELETE_SERVER.format(server_name=server_name),
     )
 
     await callback.answer(
-        texts.ADMIN_SERVER_DELETE_SUCCESS_NOTICE.format(v0=server_name, v1=0),
+        texts.ADMIN_SERVER_DELETE_SUCCESS_NOTICE.format(v0=server_name),
         show_alert=True,
     )
 

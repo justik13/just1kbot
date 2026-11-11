@@ -31,7 +31,6 @@ logger = logging.getLogger(__name__)
 
 def format_user_card_text(
     user,
-    profiles: list,
     referrals,
     now,
     real_balance: int = 0,
@@ -237,7 +236,7 @@ def _get_representative_tariff(tariffs: list[Tariff]) -> Tariff:
     )
 
 
-async def _get_user_with_profiles(
+async def _get_user_by_telegram_id(
     session: AsyncSession,
     telegram_id: int,
 ):
@@ -402,16 +401,16 @@ async def _build_users_list_text_and_kb(
 
             if has_std:
                 days = format_days_left(user.subscription_end)
-                profiles_count = vless_hwid_count
+                devices_count = vless_hwid_count
             elif has_wi and wi_sub and wi_sub.expires_at:
                 days = format_days_left(wi_sub.expires_at)
-                profiles_count = count_active_hwids(wi_sub.active_hwids, now=current_time)
+                devices_count = count_active_hwids(wi_sub.active_hwids, now=current_time)
             else:
                 days = format_days_left(user.subscription_end)
-                profiles_count = vless_hwid_count
+                devices_count = vless_hwid_count
 
             button_text = truncate_button_text(
-                texts.COMMON_USTR.format(status=status, ban=ban, username=username, days=days, profiles_count=profiles_count)
+                texts.COMMON_USTR.format(status=status, ban=ban, username=username, days=days, devices_count=devices_count)
             )
 
             builder.button(
@@ -628,7 +627,6 @@ async def _render_user_card(
     back_callback: str = "admin_users",
 ):
     from database.repositories.account_ledger_repo import get_account_balance
-    profiles: list = []
 
     referrals_count = await get_user_referrals_count(
         session,
@@ -655,7 +653,6 @@ async def _render_user_card(
 
     rendered = format_user_card_text(
         user,
-        profiles,
         referrals_count,
         current_time,
         real_balance=int(balance.real_available),
@@ -690,7 +687,6 @@ async def _show_user_card_edit(
     notice: str | None = None,
 ):
     from database.repositories.account_ledger_repo import get_account_balance
-    profiles: list = []
 
     referrals_count = await get_user_referrals_count(
         session,
@@ -717,7 +713,6 @@ async def _show_user_card_edit(
 
     rendered = format_user_card_text(
         user,
-        profiles,
         referrals_count,
         current_time,
         real_balance=int(balance.real_available),

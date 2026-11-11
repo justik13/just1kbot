@@ -21,7 +21,7 @@ from bot.formatters import format_admin_breadcrumbs
 from utils.formatters import format_datetime
 from utils.telegram import safe
 
-from .common import _get_user_with_profiles
+from .common import _get_user_by_telegram_id
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -49,7 +49,7 @@ async def admin_user_devices(
 
     await callback.answer(show_alert=False)
 
-    user = await _get_user_with_profiles(session, telegram_id)
+    user = await _get_user_by_telegram_id(session, telegram_id)
     if not user:
         await callback.message.edit_text(
             texts.ERROR_USER_NOT_FOUND,
@@ -215,7 +215,7 @@ async def admin_vless_hwid_reset(
         await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
-    user = await _get_user_with_profiles(session, telegram_id)
+    user = await _get_user_by_telegram_id(session, telegram_id)
     if not user:
         await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
         return
@@ -331,7 +331,7 @@ async def admin_vless_token_rotate(
         await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
-    user = await _get_user_with_profiles(session, telegram_id)
+    user = await _get_user_by_telegram_id(session, telegram_id)
     if not user:
         await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
         return

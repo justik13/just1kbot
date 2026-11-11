@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from config.constants import (
+    DEFAULT_XRAY_ORIGIN_MAX_CLIENTS,
     VLESS_PROTOCOL,
     XRAY_ORIGIN_CAPABILITY,
     XRAY_PROTOCOL,
@@ -131,7 +132,7 @@ def capacity_consuming_wl_condition():
     )
 
 
-async def get_server_peer_counts(session: AsyncSession) -> dict[int, int]:
+async def get_origin_server_subscription_counts(session: AsyncSession) -> dict[int, int]:
     # WhiteInternetSubscription counts (Xray Origin)
     from database.models import WhiteInternetSubscription
 
@@ -235,7 +236,7 @@ async def create_server(
     api_key: str,
     country_flag: str = None,
     protocol: str = VLESS_PROTOCOL,
-    max_clients: int = 50,
+    max_clients: int = DEFAULT_XRAY_ORIGIN_MAX_CLIENTS,
     capabilities: list[str] | None = None,
     lifecycle_status: str | ServerLifecycleStatus = ServerLifecycleStatus.ACTIVE,
 ) -> Server:

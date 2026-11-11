@@ -9,7 +9,6 @@ def get_admin_server_card_keyboard(
     server_id: int,
     is_active: bool,
     is_xray: bool = False,
-    has_vless: bool = False,
     is_origin: bool = False,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()

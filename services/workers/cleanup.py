@@ -50,7 +50,7 @@ _last_old_cleanup: float = 0.0
 _pending_order_backoff_cache: TTLCache[Any, float] = TTLCache(maxsize=2000, ttl=300.0)
 
 
-async def cleanup_dangling_peers_loop(
+async def cleanup_expired_subscriptions_loop(
     bot_or_shutdown: Bot | asyncio.Event | None = None,
     shutdown_event: asyncio.Event | None = None,
 ):

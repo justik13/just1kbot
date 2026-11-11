@@ -192,9 +192,8 @@ async def register_hwid_atomic(
 ) -> tuple[bool, int, int]:
     """Atomically registers an HWID for a VlessSubscription under row-level lock.
 
-    effective_limit is the maximum number of VLESS HWIDs permitted given any
-    existing AWG profiles already consuming quota. If None, it is dynamically
-    computed under User lock.
+    effective_limit is the maximum number of VLESS HWIDs permitted by the
+    user's tariff. If None, it is dynamically computed under User lock.
 
     Returns:
         tuple[allowed: bool, active_count: int, effective_limit: int]

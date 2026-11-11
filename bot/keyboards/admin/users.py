@@ -128,7 +128,6 @@ def get_admin_subscription_keyboard(
     telegram_id: int,
     has_active_sub: bool,
     vless_sub_url: str | None = None,
-    has_vless_hwids: bool = False,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
@@ -539,7 +538,6 @@ def get_admin_confirm_action_keyboard(
 
 def get_admin_user_devices_keyboard(
     telegram_id: int,
-    profiles: list | None = None,
     vless_sub_url: str | None = None,
     has_vless_hwids: bool = False,
 ) -> InlineKeyboardMarkup:
