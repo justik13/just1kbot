@@ -12,6 +12,7 @@ from database.repositories.tariffs_repo import (
 from utils.datetime_helpers import is_expired
 from bot.formatters import (
     format_days_left,
+    format_plural,
     format_subscription_date,
     get_tariff_display_name,
 )
@@ -54,17 +55,19 @@ async def _check_tariff_change_allowed(
         current_tariff_id = getattr(db_user, "current_tariff_id", None)
         if current_tariff_id is None:
             return texts.PAYMENT_COMMON
+        from database.repositories import vless_subscription_repo
+
+        total_devices = await vless_subscription_repo.get_active_hwid_count(
+            session, db_user.id
+        )
+        if total_devices > new_limit:
+            return texts.PAYMENT_DOWNGRADE_BLOCKED_PROFILES.format(
+                profiles_count=format_plural(total_devices, texts.NOUN_DEVICES),
+                new_limit=format_plural(new_limit, texts.NOUN_DEVICES),
+            )
         current_limit = await _get_effective_device_limit(session, db_user)
         if new_limit != current_limit:
             return texts.PAYMENT_CHANGE_TARIFF_TEMPORARILY_UNAVAILABLE
-        from database.repositories import vless_subscription_repo
-        vless_count = await vless_subscription_repo.get_active_hwid_count(session, db_user.id)
-        total_devices = vless_count
-        if total_devices > new_limit:
-            return texts.PAYMENT_DOWNGRADE_BLOCKED_PROFILES.format(
-                profiles_count=total_devices,
-                new_limit=new_limit,
-            )
     return None
 
 

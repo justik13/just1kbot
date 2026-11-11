@@ -72,14 +72,6 @@ def get_admin_cat_users_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def get_admin_cat_infra_keyboard() -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    builder.button(text=texts.BTN_SERVERS, callback_data="admin_servers")
-    builder.button(text=texts.BTN_TARIFY_PODPISOK, callback_data="admin_tariffs")
-    builder.button(text=texts.BTN_ADMIN_MENU, callback_data="admin_menu")
-    builder.adjust(1)
-    return builder.as_markup()
-
 
 def get_admin_cat_finance_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()

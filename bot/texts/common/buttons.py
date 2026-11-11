@@ -102,8 +102,6 @@ BTN_RENEW_ACCESS = "💎 Продлить Стандартную"
 
 BTN_SERVERS = "🖥 Серверы"
 
-BTN_SERVERS_AND_TARIFFS = "⚙️ Серверы и Тарифы"
-
 BTN_SERVERS_LIST = "📋 Список серверов"
 
 BTN_SHARE_REFERRAL = "↗️ Поделиться"
@@ -115,8 +113,6 @@ BTN_SPISOK_POLZOVATELEJ = "👥 Список пользователей"
 BTN_SPLIT_TUNNELING = "🔀 Раздельное Туннелирование"
 
 BTN_SUPPORT = "💬 Поддержка"
-
-BTN_TARIFY_PODPISOK = "💎 Тарифы подписок"
 
 BTN_TO_SERVER = "⚙️ К серверу"
 

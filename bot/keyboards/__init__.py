@@ -4,7 +4,6 @@ from .admin.broadcast import (
 )
 from .admin.dashboard import (
     get_admin_cat_finance_keyboard,
-    get_admin_cat_infra_keyboard,
     get_admin_cat_std_sub_keyboard,
     get_admin_cat_system_keyboard,
     get_admin_cat_users_keyboard,
@@ -91,7 +90,6 @@ __all__ = [
     "get_admin_cat_users_keyboard",
     "get_admin_cat_std_sub_keyboard",
     "get_admin_cat_wi_sub_keyboard",
-    "get_admin_cat_infra_keyboard",
     "get_admin_cat_finance_keyboard",
     "get_admin_cat_system_keyboard",
     "get_audit_keyboard",

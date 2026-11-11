@@ -14,7 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.keyboards import (
     get_admin_cat_finance_keyboard,
-    get_admin_cat_infra_keyboard,
     get_admin_cat_std_sub_keyboard,
     get_admin_cat_system_keyboard,
     get_admin_cat_users_keyboard,
@@ -361,20 +360,6 @@ async def show_admin_cat_wi_sub(callback: CallbackQuery, state: FSMContext):
         pass
     await callback.answer(show_alert=False)
 
-
-@router.callback_query(F.data == "admin_cat_infra")
-async def show_admin_cat_infra(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
-        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
-        return
-    await state.clear()
-    header = format_admin_breadcrumbs(texts.BTN_SERVERS_AND_TARIFFS)
-    text = texts.DASHBOARD_MANAGE_VPN_SERVERAMI_I_TAR.format(header=header)
-    try:
-        await callback.message.edit_text(text, reply_markup=get_admin_cat_infra_keyboard(), parse_mode="HTML")
-    except TelegramBadRequest:
-        pass
-    await callback.answer(show_alert=False)
 
 
 @router.callback_query(F.data == "admin_cat_finance")

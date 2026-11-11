@@ -83,7 +83,7 @@ async def start_mass_bonus(
     )
     builder.button(
         text=texts.ADMIN_USERS_MASS_BONUS_TOLKO_BEZ_SUBSCRIPTION,
-        callback_data="mass_bonus_aud:expired",
+        callback_data="mass_bonus_aud:inactive",
     )
     builder.button(
         text=texts.BTN_ADMIN_MENU,
@@ -220,7 +220,7 @@ def _apply_mass_bonus_audience_filter(
         return stmt.where(get_effective_wi_active_condition(now))
     elif target_aud == "active":
         return stmt.where(get_effective_active_condition(now))
-    elif target_aud == "expired":
+    elif target_aud in ("inactive", "expired"):
         return stmt.where(get_effective_inactive_condition(now))
     return stmt
 

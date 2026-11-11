@@ -179,10 +179,6 @@ DASHBOARD_MAINTENANCE_ON = """
 
 DASHBOARD_MAIN_DASHBOARD = "Главный Дашборд"
 
-DASHBOARD_MANAGE_VPN_SERVERAMI_I_TAR = """{header}⚙️ <b>Управление серверами и тарифами:</b>
-
-Выберите нужный раздел:"""
-
 DASHBOARD_MTPROTO_PROXY_URL_HEADER = """🚀 <b>MTProto Proxy URL:</b>
 """
 
