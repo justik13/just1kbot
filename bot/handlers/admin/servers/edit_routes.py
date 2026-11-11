@@ -105,7 +105,6 @@ async def process_edit_server_name(
 
     if message.text.startswith("/"):
         await state.clear()
-
         await render_hub(
             message.bot,
             message.chat.id,
@@ -130,7 +129,6 @@ async def process_edit_server_name(
         )
 
         await state.clear()
-
         return
 
     new_name = message.text.strip()
@@ -260,7 +258,6 @@ async def process_edit_server_flag(
 
     if message.text.startswith("/"):
         await state.clear()
-
         await render_hub(
             message.bot,
             message.chat.id,
@@ -285,7 +282,6 @@ async def process_edit_server_flag(
         )
 
         await state.clear()
-
         return
 
     new_flag = message.text.strip()
@@ -395,7 +391,6 @@ async def process_edit_server_url(
 
     if message.text.startswith("/"):
         await state.clear()
-
         await render_hub(
             message.bot,
             message.chat.id,
@@ -420,7 +415,6 @@ async def process_edit_server_url(
         )
 
         await state.clear()
-
         return
 
     validated_api_url = server.api_url
@@ -473,7 +467,6 @@ async def process_edit_server_url(
         )
 
         await state.clear()
-
         return
 
     if (
@@ -627,8 +620,8 @@ async def process_edit_server_url(
 
     await update_server(session, server, **update_kwargs)
 
-    from services.slots_cache import invalidate_server_cache
-    invalidate_server_cache(server_id)
+    from services.vless_subscription import VlessSubscriptionService
+    VlessSubscriptionService.sync_all_active_to_server_background(server_id)
 
     await AuditService.log_action(
         session,
@@ -721,7 +714,6 @@ async def process_edit_server_key(
 
     if message.text.startswith("/"):
         await state.clear()
-
         await render_hub(
             message.bot,
             message.chat.id,
@@ -746,7 +738,6 @@ async def process_edit_server_key(
         )
 
         await state.clear()
-
         return
 
     validated_api_url = server.api_url
@@ -852,8 +843,8 @@ async def process_edit_server_key(
     update_kwargs = {"api_key": new_key}
     await update_server(session, server, **update_kwargs)
 
-    from services.slots_cache import invalidate_server_cache
-    invalidate_server_cache(server_id)
+    from services.vless_subscription import VlessSubscriptionService
+    VlessSubscriptionService.sync_all_active_to_server_background(server_id)
 
     await AuditService.log_action(
         session,
@@ -877,169 +868,6 @@ async def process_edit_server_key(
     logger.info(
         f"Admin {message.from_user.id} updated server {server_id} "
         f"api_key"
-    )
-
-    await state.clear()
-
-
-@router.callback_query(F.data.startswith("admin_server_edit_max_clients:"))
-async def start_edit_server_max_clients(
-    callback: CallbackQuery,
-    state: FSMContext,
-):
-    if not is_admin(callback.from_user.id):
-        await callback.answer(
-            texts.ERROR_ACCESS_DENIED,
-            show_alert=True,
-        )
-        return
-
-    server_id = parse_callback_id(callback.data, 1)
-
-    if server_id is None:
-        await callback.answer(
-            texts.ERROR_INVALID_REQUEST,
-            show_alert=True,
-        )
-        return
-
-    await callback.answer(show_alert=False)
-    await state.clear()
-
-    await state.update_data(server_id=server_id)
-    await state.set_state(AdminStates.editing_server_max_clients)
-
-    await callback.message.edit_text(
-        texts.ADMIN_SERVER_EDIT_MAX_CLIENTS_PROMPT,
-        reply_markup=get_back_button(
-            f"admin_server_card:{server_id}"
-        ),
-    )
-
-
-@router.message(AdminStates.editing_server_max_clients)
-async def process_edit_server_max_clients(
-    message: Message,
-    state: FSMContext,
-    session: AsyncSession,
-):
-    try:
-        await message.delete()
-    except Exception:
-        pass
-
-    if not is_admin(message.from_user.id):
-        await state.clear()
-        return
-
-    if not message.text:
-        await render_hub(
-            message.bot,
-            message.chat.id,
-            texts.ERROR_TEXT_REQUIRED,
-            get_back_button("admin_servers"),
-            trigger_message_id=getattr(message, "message_id", None),
-        )
-        return
-
-    if message.text.startswith("/"):
-        await state.clear()
-
-        await render_hub(
-            message.bot,
-            message.chat.id,
-            texts.ERROR_OPERATION_CANCELLED,
-            get_back_button("admin_servers"),
-            trigger_message_id=getattr(message, "message_id", None),
-        )
-        return
-
-    data = await state.get_data()
-    server_id = data["server_id"]
-
-    server = await get_server_by_id(session, server_id)
-
-    if not server:
-        await render_hub(
-            message.bot,
-            message.chat.id,
-            texts.ERROR_SERVER_NOT_FOUND,
-            get_back_button("admin_servers"),
-            trigger_message_id=getattr(message, "message_id", None),
-        )
-
-        await state.clear()
-
-        return
-
-    try:
-        new_value = int(message.text.strip())
-
-        if new_value < 1:
-            raise ValueError
-    except ValueError:
-        await render_hub(
-            message.bot,
-            message.chat.id,
-            texts.ERROR_NUMBER_GT_ZERO,
-            get_back_button("admin_servers"),
-            trigger_message_id=getattr(message, "message_id", None),
-        )
-        return
-
-    wl_count = await session.scalar(
-        select(func.count(WhiteInternetSubscription.id)).where(
-            WhiteInternetSubscription.origin_node_id == server_id,
-            WhiteInternetSubscription.status.in_([
-                WhiteInternetStatus.PENDING,
-                WhiteInternetStatus.ACTIVE,
-                WhiteInternetStatus.EXHAUSTED,
-            ]),
-        )
-    ) or 0
-    current_used = wl_count
-
-    if current_used > new_value:
-        warning = texts.ADMIN_SERVER_MAX_CLIENTS_WARNING.format(
-            current=current_used,
-            new=new_value,
-        )
-
-        await render_hub(
-            message.bot,
-            message.chat.id,
-            warning,
-            get_back_button(
-                f"admin_server_card:{server_id}"
-            ),
-        )
-
-    await update_server(session, server, max_clients=new_value)
-
-    await AuditService.log_action(
-        session,
-        message.from_user.id,
-        AdminAuditAction.EDIT_SERVER,
-        "Server",
-        server_id,
-        texts.ADMIN_AUDIT_LOG_DETAILS_EDIT_SERVER.format(field="max_clients", value=f"{server.max_clients} -> {new_value}"),
-    )
-
-    await render_hub(
-        message.bot,
-        message.chat.id,
-        texts.ADMIN_SERVER_MAX_CLIENTS_UPDATED.format(
-            max_clients=new_value,
-        ),
-        get_back_button(
-            f"admin_server_card:{server_id}"
-        ),
-        trigger_message_id=getattr(message, "message_id", None),
-    )
-
-    logger.info(
-        f"Admin {message.from_user.id} updated server {server_id} "
-        f"max_clients to {new_value}"
     )
 
     await state.clear()

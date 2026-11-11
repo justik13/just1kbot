@@ -7,7 +7,7 @@ from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from sqlalchemy import cast, func, or_, select, String
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
@@ -18,9 +18,8 @@ from database.repositories.account_ledger_repo import create_admin_adjustment
 from services.audit_service import AuditService
 from utils.admin import is_admin
 from utils.datetime_helpers import now_utc
-from bot.formatters import format_admin_breadcrumbs, get_server_protocol_badge
+from bot.formatters import format_admin_breadcrumbs
 from utils.telegram import render_hub, safe
-from utils.text_limits import truncate_button_text
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -75,12 +74,16 @@ async def start_mass_bonus(
         callback_data="mass_bonus_aud:active",
     )
     builder.button(
-        text=texts.ADMIN_USERS_MASS_BONUS_TOLKO_BEZ_SUBSCRIPTION,
-        callback_data="mass_bonus_aud:expired",
+        text=texts.ADMIN_USERS_MASS_EXTEND_AUD_ACTIVE_STANDARD,
+        callback_data="mass_bonus_aud:standard",
     )
     builder.button(
-        text=texts.ADMIN_USERS_MASS_BONUS_SERVER_AUDIENCE,
-        callback_data="mass_bonus_servers",
+        text=texts.ADMIN_USERS_MASS_EXTEND_AUD_ACTIVE_WI,
+        callback_data="mass_bonus_aud:wi",
+    )
+    builder.button(
+        text=texts.ADMIN_USERS_MASS_BONUS_TOLKO_BEZ_SUBSCRIPTION,
+        callback_data="mass_bonus_aud:expired",
     )
     builder.button(
         text=texts.BTN_ADMIN_MENU,
@@ -107,54 +110,6 @@ async def start_mass_bonus(
         if new_id:
             await state.update_data(active_msg_id=new_id)
 
-    await callback.answer(show_alert=False)
-
-
-@router.callback_query(F.data == "mass_bonus_servers")
-async def select_mass_bonus_server(
-    callback: CallbackQuery,
-    state: FSMContext,
-    session: AsyncSession,
-):
-    if not is_admin(callback.from_user.id):
-        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
-        return
-
-    await state.update_data(active_msg_id=callback.message.message_id)
-
-    from database.repositories.servers_repo import get_all_servers
-
-    servers = await get_all_servers(session)
-    header = format_admin_breadcrumbs(texts.BTN_MASS_BONUS, texts.BROADCAST_BREADCRUMB_SERVER_SELECTION)
-    text = f"{header}\n\n{texts.ADMIN_USERS_MASS_BONUS_SELECT_SERVER}"
-
-    builder = InlineKeyboardBuilder()
-    for s in servers:
-        flag = s.country_flag or "🌐"
-        proto = get_server_protocol_badge(s)
-        builder.button(
-            text=truncate_button_text(f"{flag} {proto} {s.name}"),
-            callback_data=f"mass_bonus_aud:server_{s.id}",
-        )
-    builder.button(text=texts.BTN_BACK, callback_data="admin_mass_bonus")
-    builder.adjust(1)
-
-    try:
-        await callback.message.edit_text(
-            text,
-            reply_markup=builder.as_markup(),
-            parse_mode="HTML",
-        )
-    except Exception:
-        new_id = await render_hub(
-            callback.bot,
-            callback.message.chat.id,
-            text,
-            builder.as_markup(),
-            parse_mode="HTML",
-        )
-        if new_id:
-            await state.update_data(active_msg_id=new_id)
     await callback.answer(show_alert=False)
 
 
@@ -245,131 +200,28 @@ async def process_mass_bonus_amount(
         await state.update_data(active_msg_id=new_id)
 
 
-def _build_server_audience_condition(server_or_id, now: datetime):
-    """Build unified SQL filter for users with active profiles or subscriptions on server."""
-    if server_or_id is None:
-        return User.id == -1
-
-    from config.constants import VLESS_PROTOCOL, XRAY_PROTOCOL
-    from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
-    from database.models import Server, VlessSubscription, WhiteInternetSubscription
-    from database.repositories.servers_repo import (
-        is_vless_capable_server,
-        is_white_internet_origin_server,
-    )
-
-    if isinstance(server_or_id, int):
-        server_id = server_or_id
-        if server_id <= 0:
-            return User.id == -1
-
-        server_proto_subq = select(Server.protocol).where(Server.id == server_id).scalar_subquery()
-        server_caps_subq = select(cast(Server.capabilities, String)).where(Server.id == server_id).scalar_subquery()
-
-        is_vless_capable = (
-            (server_proto_subq == VLESS_PROTOCOL)
-            | server_caps_subq.like('%"vless"%')
-            | server_caps_subq.like('%"xray_vless"%')
-        )
-        vless_cond = (
-            is_vless_capable
-            & (User.subscription_end > now)
-            & User.vless_subscription.has(
-                (VlessSubscription.is_active.is_(True))
-                & (VlessSubscription.active_hwids.is_not(None))
-                & (cast(VlessSubscription.active_hwids, String) != "{}")
-                & (VlessSubscription.node_traffic_snapshots.has_key(str(server_id)))
-            )
-        )
-
-        xray_cond = (
-            (
-                (server_proto_subq == XRAY_PROTOCOL)
-                | server_caps_subq.like('%"xray_origin"%')
-            )
-            & User.id.in_(
-                select(WhiteInternetSubscription.user_id).where(
-                    WhiteInternetSubscription.origin_node_id == server_id,
-                    WhiteInternetSubscription.status.in_([
-                        WhiteInternetStatus.ACTIVE,
-                        WhiteInternetStatus.PENDING,
-                        WhiteInternetStatus.EXHAUSTED,
-                    ]),
-                    WhiteInternetSubscription.expires_at > now,
-                    WhiteInternetSubscription.is_trial.is_(False),
-                    WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
-                )
-            )
-        )
-        return or_(vless_cond, xray_cond)
-
-    server = server_or_id
-    conds = []
-    if is_vless_capable_server(server):
-        conds.append(
-            (User.subscription_end > now)
-            & User.vless_subscription.has(
-                (VlessSubscription.is_active.is_(True))
-                & (VlessSubscription.active_hwids.is_not(None))
-                & (cast(VlessSubscription.active_hwids, String) != "{}")
-            )
-        )
-    if is_white_internet_origin_server(server):
-        conds.append(
-            User.id.in_(
-                select(WhiteInternetSubscription.user_id).where(
-                    WhiteInternetSubscription.origin_node_id == server.id,
-                    WhiteInternetSubscription.status.in_([
-                        WhiteInternetStatus.ACTIVE,
-                        WhiteInternetStatus.PENDING,
-                        WhiteInternetStatus.EXHAUSTED,
-                    ]),
-                    WhiteInternetSubscription.expires_at > now,
-                    WhiteInternetSubscription.is_trial.is_(False),
-                    WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
-                )
-            )
-        )
-    return or_(*conds) if conds else (User.id == -1)
-
-
 def _apply_mass_bonus_audience_filter(
     stmt,
     target_aud: str,
     now: datetime | None = None,
-    server=None,
 ):
     """Applies target audience filter for mass bonus preview and background execution."""
     if now is None:
         now = now_utc()
-    from database.repositories.users_repo import get_effective_active_condition
+    from database.repositories.users_repo import (
+        get_effective_active_condition,
+        get_effective_inactive_condition,
+        get_effective_wi_active_condition,
+    )
 
-    if target_aud.startswith("server_"):
-        try:
-            server_id = int(target_aud.split("_")[1])
-        except (IndexError, ValueError):
-            server_id = -1
-        target = server if server is not None else server_id
-        return stmt.where(_build_server_audience_condition(target, now))
+    if target_aud == "standard":
+        return stmt.where(User.subscription_end > now)
+    elif target_aud == "wi":
+        return stmt.where(get_effective_wi_active_condition(now))
     elif target_aud == "active":
         return stmt.where(get_effective_active_condition(now))
     elif target_aud == "expired":
-        from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
-        from database.models import WhiteInternetSubscription
-
-        xray_active_subq = select(WhiteInternetSubscription.user_id).where(
-            WhiteInternetSubscription.status.in_([
-                WhiteInternetStatus.ACTIVE,
-                WhiteInternetStatus.PENDING,
-                WhiteInternetStatus.EXHAUSTED,
-            ]),
-            WhiteInternetSubscription.expires_at > now,
-            WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
-        )
-        return stmt.where(
-            or_(User.subscription_end <= now, User.subscription_end.is_(None)),
-            ~User.id.in_(xray_active_subq),
-        )
+        return stmt.where(get_effective_inactive_condition(now))
     return stmt
 
 
@@ -417,28 +269,10 @@ async def process_mass_bonus_reason(
 
     # Подсчет аудитории
     now = now_utc()
-    server = None
-    if target_aud.startswith("server_"):
-        try:
-            server_id = int(target_aud.split("_")[1])
-        except (IndexError, ValueError):
-            server_id = -1
-        from database.repositories.servers_repo import get_server_by_id
-
-        server = await get_server_by_id(session, server_id)
-        if server:
-            proto = get_server_protocol_badge(server)
-            server_name = f"{proto} {server.name}" if proto else server.name
-            server_flag = server.country_flag or "🌐"
-        else:
-            server_name = f"ID {server_id}"
-            server_flag = "🌐"
-        aud_label = texts.ADMIN_USERS_MASS_BONUS_SERVER_AUDIENCE_LABEL.format(flag=server_flag, name=safe(server_name))
-    else:
-        aud_label = texts.ADMIN_MASS_BONUS_AUDIENCE_LABELS.get(target_aud, target_aud)
+    aud_label = texts.ADMIN_MASS_BONUS_AUDIENCE_LABELS.get(target_aud, target_aud)
 
     stmt = select(func.count(User.id)).where(User.is_deleted.is_(False), User.is_banned.is_(False))
-    stmt = _apply_mass_bonus_audience_filter(stmt, target_aud, now, server=server)
+    stmt = _apply_mass_bonus_audience_filter(stmt, target_aud, now)
 
     user_count = int((await session.scalar(stmt)) or 0)
     total_budget = user_count * amount

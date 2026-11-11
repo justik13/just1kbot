@@ -154,7 +154,6 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("bot.handlers.admin.dashboard.get_dashboard_stats", new=AsyncMock(return_value=stats_mock)), \
              patch("bot.handlers.admin.dashboard.get_white_internet_dashboard_stats", new=AsyncMock(return_value=wl_stats_mock)), \
-             patch("bot.handlers.admin.dashboard.get_total_free_ips", new=AsyncMock(return_value=100)), \
              patch("bot.handlers.admin.dashboard._get_financial_stats", new=AsyncMock(return_value={"rev_24h": 0, "count_24h": 0, "rev_7d": 0, "rev_30d": 0, "avg_check": 0})), \
              patch("bot.handlers.admin.dashboard._get_servers_capacity_summary", new=AsyncMock(return_value="")), \
              patch("bot.handlers.admin.dashboard.MaintenanceService.is_enabled", new=AsyncMock(return_value=False)):
@@ -297,7 +296,6 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
         session = AsyncMock()
 
         with patch("bot.handlers.admin.servers.common.get_server_peer_counts", new=AsyncMock(return_value={1: 0})), \
-             patch("services.slots_cache.get_cached_peer_count", return_value=None), \
              patch("database.repositories.vless_subscription_repo.get_active_vless_counts", new=AsyncMock(return_value=(0, 0))):
             await common._show_server_card(callback, session, server)
 
@@ -995,7 +993,6 @@ class TrafficAccountingAndRetentionTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("bot.handlers.admin.dashboard.get_dashboard_stats", new=AsyncMock(return_value=stats_mock)), \
              patch("bot.handlers.admin.dashboard.get_white_internet_dashboard_stats", new=AsyncMock(return_value=wl_stats_mock)), \
-             patch("bot.handlers.admin.dashboard.get_total_free_ips", new=AsyncMock(return_value=100)), \
              patch("bot.handlers.admin.dashboard._get_financial_stats", new=AsyncMock(return_value={"rev_24h": 0, "count_24h": 0, "rev_7d": 0, "rev_30d": 0, "avg_check": 0})), \
              patch("bot.handlers.admin.dashboard._get_servers_capacity_summary", new=AsyncMock(return_value="")), \
              patch("bot.handlers.admin.dashboard.MaintenanceService.is_enabled", new=AsyncMock(return_value=False)):

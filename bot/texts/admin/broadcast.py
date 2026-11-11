@@ -3,15 +3,37 @@ from __future__ import annotations
 from bot.texts.admin.common import COMMON_ALL_USERS_LABEL, COMMON_ACTIVE_SUBSCRIPTIONS_LABEL
 from bot.texts.common import BTN_BROADCAST_EXPIRING, BTN_BROADCAST_NO_SUB
 
+BROADCAST_AUDIENCE_LABEL_ACTIVE_STANDARD = "Активная стандартная подписка"
+BROADCAST_AUDIENCE_LABEL_ACTIVE_WI = "Активный Белый Интернет"
+BROADCAST_AUDIENCE_LABEL_ACTIVE_BOTH = "Обе активные подписки"
 BROADCAST_AUDIENCE_LABEL_EXPIRING_3D = 'Подписки истекают менее чем за 3 дня'
 BROADCAST_AUDIENCE_LABEL_EXPIRED = 'Истекшие подписки'
 BROADCAST_AUDIENCE_LABEL_NEVER = 'Без подписок'
 BROADCAST_AUDIENCE_LABEL_TEST = 'Тестовая отправка админу'
 BROADCAST_PROGRESS_LABEL_EXPIRED = '🔴 Истекшие подписки'
 
-ADMIN_BROADCAST_AUDIENCE_LABELS = {'all': COMMON_ALL_USERS_LABEL, 'active': COMMON_ACTIVE_SUBSCRIPTIONS_LABEL, 'expiring_3d': BROADCAST_AUDIENCE_LABEL_EXPIRING_3D, 'expired': BROADCAST_AUDIENCE_LABEL_EXPIRED, 'never': BROADCAST_AUDIENCE_LABEL_NEVER, 'test': BROADCAST_AUDIENCE_LABEL_TEST}
+ADMIN_BROADCAST_AUDIENCE_LABELS = {
+    'all': COMMON_ALL_USERS_LABEL,
+    'active': COMMON_ACTIVE_SUBSCRIPTIONS_LABEL,
+    'active_standard': BROADCAST_AUDIENCE_LABEL_ACTIVE_STANDARD,
+    'active_wi': BROADCAST_AUDIENCE_LABEL_ACTIVE_WI,
+    'active_both': BROADCAST_AUDIENCE_LABEL_ACTIVE_BOTH,
+    'expiring_3d': BROADCAST_AUDIENCE_LABEL_EXPIRING_3D,
+    'expired': BROADCAST_AUDIENCE_LABEL_EXPIRED,
+    'never': BROADCAST_AUDIENCE_LABEL_NEVER,
+    'test': BROADCAST_AUDIENCE_LABEL_TEST,
+}
 
-ADMIN_BROADCAST_PROGRESS_AUDIENCE_LABELS = {'all': COMMON_ALL_USERS_LABEL, 'active': COMMON_ACTIVE_SUBSCRIPTIONS_LABEL, 'expiring_3d': BTN_BROADCAST_EXPIRING, 'expired': BROADCAST_PROGRESS_LABEL_EXPIRED, 'never': BTN_BROADCAST_NO_SUB}
+ADMIN_BROADCAST_PROGRESS_AUDIENCE_LABELS = {
+    'all': COMMON_ALL_USERS_LABEL,
+    'active': COMMON_ACTIVE_SUBSCRIPTIONS_LABEL,
+    'active_standard': BROADCAST_AUDIENCE_LABEL_ACTIVE_STANDARD,
+    'active_wi': BROADCAST_AUDIENCE_LABEL_ACTIVE_WI,
+    'active_both': BROADCAST_AUDIENCE_LABEL_ACTIVE_BOTH,
+    'expiring_3d': BTN_BROADCAST_EXPIRING,
+    'expired': BROADCAST_PROGRESS_LABEL_EXPIRED,
+    'never': BTN_BROADCAST_NO_SUB,
+}
 
 BROADCAST_ERR_TEXT_TOO_LONG = "⚠️ Текст рассылки слишком длинный. Максимум {error_summary} символов."
 
@@ -70,13 +92,3 @@ BROADCAST_TEST_SENT_NOTICE = """✅ <b>Тестовое сообщение от�
 """
 
 BROADCAST_BTN_TEST_ME = "🧪 Тест мне (Админу)"
-BROADCAST_AUDIENCE_BTN_SERVER = "🌐 По серверу..."
-BROADCAST_SERVER_STATUS_DISABLED = " (выкл)"
-BROADCAST_SERVERS_NOT_FOUND = "Серверы не найдены"
-BROADCAST_BREADCRUMB_SERVER_SELECTION = "Выбор сервера"
-BROADCAST_SELECT_SERVER_PROMPT = """{header}🌐 <b>Выберите сервер для рассылки:</b>
-
-Сообщение будет отправлено только пользователям, у которых есть активное подключение к выбранному серверу."""
-BROADCAST_AUDIENCE_SERVER_LABEL = "Сервер {flag} {proto} {name}"
-BROADCAST_AUDIENCE_SERVER_ID_LABEL = "Сервер #{server_id}"
-BROADCAST_PROGRESS_SERVER_LABEL = "Сервер {flag} {name}"

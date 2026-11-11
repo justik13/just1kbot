@@ -343,10 +343,6 @@ async def delete_server(session: AsyncSession, server: Server) -> None:
     await session.flush()
 
 
-async def get_total_free_ips(session: AsyncSession) -> int:
-    return 0
-
-
 async def get_server_count(session: AsyncSession) -> int:
     result = await session.execute(select(func.count(Server.id)))
     return result.scalar_one()
@@ -367,10 +363,6 @@ async def get_servers_paginated(
 async def get_server_by_api_url(session: AsyncSession, api_url: str) -> Server | None:
     result = await session.execute(select(Server).where(Server.api_url == api_url))
     return result.scalar_one_or_none()
-
-
-async def delete_profiles_by_server_id(session: AsyncSession, server_id: int) -> int:
-    return 0
 
 
 async def update_server_xray_epoch_cas(

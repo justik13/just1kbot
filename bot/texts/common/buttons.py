@@ -19,7 +19,10 @@ BTN_BACK_TO_DEVICE = "← Назад в устройство"
 
 BTN_BALANCE = "💰 Баланс"
 
-BTN_BROADCAST_ACTIVE = "🟢 Активным подпискам"
+BTN_BROADCAST_ACTIVE = "🟢 Всем активным"
+BTN_BROADCAST_ACTIVE_STANDARD = "⚡ Стандартная (активным)"
+BTN_BROADCAST_ACTIVE_WI = "🌐 Белый Интернет (активным)"
+BTN_BROADCAST_ACTIVE_BOTH = "🌟 Обе подписки (активным)"
 
 BTN_BROADCAST_ALL = "📢 Всем пользователям"
 
@@ -54,10 +57,6 @@ BTN_DISMISS_NOTIFICATION = "✅ Прочитано (убрать)"
 BTN_DOWNLOAD_MIRROR = "🌐 Скачать клиент (Зеркало)"
 
 BTN_ENABLE_SERVER = "🔘 Включить сервер"
-
-BTN_FILTER_BY_SERVER = "🖥 По серверам"
-
-BTN_FILTER_BY_SERVER_ACTIVE = "• 🖥 По серверам •"
 
 BTN_FILTER_BY_TARIFF = "💎 По тарифам"
 

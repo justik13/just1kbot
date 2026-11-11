@@ -12,16 +12,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.keyboards import get_back_button
 from bot.states import AdminStates
-from database.models import Server, Tariff
+from database.models import Tariff
 from database.repositories.users_repo import (
     get_filtered_users_count,
     get_filtered_users_paginated,
 )
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
-from bot.formatters import format_audit_details, get_server_protocol_badge
+from bot.formatters import format_audit_details
 from utils.telegram import render_hub, safe
-from utils.text_limits import truncate_button_text
 
 from .common import (
     USERS_PER_PAGE,
@@ -76,43 +75,7 @@ async def show_extended_filter_menu(
     filter_type = callback.data.split(":", 1)[1]
     builder = InlineKeyboardBuilder()
 
-    if filter_type == "server":
-        rows = (await session.scalars(select(Server).order_by(Server.name))).all()
-        if not rows:
-            await callback.answer(texts.ADMIN_USERS_LIST_SERVEROV_NET, show_alert=True)
-            return
-        for server in rows:
-            flag = server.country_flag or texts.ADMIN_FILTER_FLAG_FALLBACK
-            proto = get_server_protocol_badge(server)
-            builder.button(
-                text=truncate_button_text(
-                    texts.ADMIN_USERS_FILTER_SERVER_BUTTON.format(
-                        flag=flag,
-                        server_name=f"{proto} {server.name}",
-                    )
-                ),
-                callback_data=f"admin_users_filter:server:{server.id}:1",
-            )
-        title = texts.ADMIN_USERS_LIST_SELECT_SERVER
-    elif filter_type == "country":
-        rows = (
-            await session.execute(
-                select(Server.country_flag)
-                .where(Server.country_flag.is_not(None))
-                .distinct()
-                .order_by(Server.country_flag)
-            )
-        ).scalars().all()
-        if not rows:
-            await callback.answer(texts.ADMIN_USERS_LIST_STRAN_NET, show_alert=True)
-            return
-        for country in rows:
-            builder.button(
-                text=texts.ADMIN_USERS_FILTER_COUNTRY_BUTTON.format(country=country),
-                callback_data=f"admin_users_filter:country:{country}:1",
-            )
-        title = texts.ADMIN_USERS_LIST_SELECT_STRANU
-    elif filter_type == "tariff":
+    if filter_type == "tariff":
         rows = (
             await session.scalars(
                 select(Tariff)
@@ -182,9 +145,6 @@ async def users_filter_pagination(
 
     param_val = None if filter_param == "none" else filter_param
     if param_val is not None:
-        if filter_type == "server" and not str(param_val).isdigit():
-            await callback.answer(texts.ADMIN_USERS_LIST_NEKORREKTNYY_PARAMETR_FILTRA, show_alert=True)
-            return
         if filter_type == "tariff" and param_val != "white_internet" and not str(param_val).isdigit():
             await callback.answer(texts.ADMIN_USERS_LIST_NEKORREKTNYY_PARAMETR_FILTRA, show_alert=True)
             return
@@ -345,9 +305,6 @@ async def show_user_card(
     if len(parts) >= 6 and parts[2] == "users":
         f_type, f_param, page_num = parts[3], parts[4], parts[5]
         back_cb = f"admin_users_filter:{f_type}:{f_param}:{page_num}"
-    elif len(parts) >= 5 and parts[2] == "server_peers":
-        srv_id = parts[3]
-        back_cb = f"admin_server_card:{srv_id}"
 
     await _render_user_card(callback, user, session, back_callback=back_cb)
 

@@ -52,13 +52,12 @@ ADMIN_USER_ID_NO_COLON_FORMAT = "ID {telegram_id}"
 ADMIN_MASS_BONUS_AUDIENCE_LABELS = {
     "all": COMMON_ALL_USERS_LABEL,
     "active": "Только активные подписки",
+    "standard": "⚡ Стандартная подписка (активные)",
+    "wi": "🌐 Белый Интернет (активные)",
     "inactive": "Только неактивные подписки",
-    "expired": "Истекшие подписки"
+    "expired": "Истекшие подписки",
 }
 
-ADMIN_USERS_MASS_BONUS_SERVER_AUDIENCE = "🌐 Пользователям сервера"
-ADMIN_USERS_MASS_BONUS_SELECT_SERVER = "Выберите сервер, пользователям которого будут начислены бонусы:"
-ADMIN_USERS_MASS_BONUS_SERVER_AUDIENCE_LABEL = "Пользователям сервера {flag} {name}"
 
 ADMIN_AUDIT_LOG_DETAILS_MASS_BONUS = "Granted +{amount} RUB bonus to {count} users (batch {batch_id}). Reason: {reason}"
 
@@ -200,15 +199,7 @@ ADMIN_USERS_LIST_NEIZVESTNYY_FILTR = "Неизвестный фильтр"
 
 ADMIN_USERS_LIST_NEKORREKTNYY_PARAMETR_FILTRA = "Некорректный параметр фильтра"
 
-ADMIN_USERS_LIST_SELECT_SERVER = "🖥 <b>Выберите сервер:</b>"
-
-ADMIN_USERS_LIST_SELECT_STRANU = "🌐 <b>Выберите страну:</b>"
-
 ADMIN_USERS_LIST_SELECT_TARIFF = "💎 <b>Выберите тариф:</b>"
-
-ADMIN_USERS_LIST_SERVEROV_NET = "Серверов нет"
-
-ADMIN_USERS_LIST_STRAN_NET = "Стран нет"
 
 ADMIN_USERS_LIST_TARIFOV_NET = "Тарифов нет"
 
@@ -321,9 +312,6 @@ ADMIN_USERS_MASS_EXTEND_HEADER_DAYS = "Ввод срока"
 ADMIN_USERS_MASS_EXTEND_AUD_ACTIVE_STANDARD = "⚡ Стандартная (активные)"
 ADMIN_USERS_MASS_EXTEND_AUD_ACTIVE_WI = "🌐 Белый Интернет (активные)"
 ADMIN_USERS_MASS_EXTEND_AUD_ACTIVE_ALL = "🌟 Все активные (любой тип)"
-ADMIN_USERS_MASS_EXTEND_AUD_SERVER = "🖥 Пользователям сервера"
-ADMIN_USERS_MASS_EXTEND_SELECT_SERVER = "Выберите сервер, пользователям которого будут добавлены дни доступа:"
-
 ADMIN_MASS_EXTEND_AUDIENCE_LABELS = {
     "active_standard": "⚡ Стандартная подписка (активные)",
     "active_wi": "🌐 Белый Интернет (активные)",
@@ -450,7 +438,25 @@ ADMIN_BTN_BAN = "🚫 Забанить"
 ADMIN_BTN_CHANGE_TARIFF = "💎 Сменить тариф"
 
 
-ADMIN_USER_FILTER_LABELS = {'all': COMMON_VSE, 'new': COMMON_NOVYE_7D, 'new_24h': COMMON_NOVYE_7D, 'new_7d': COMMON_NOVYE_7D, 'expiring_3d': COMMON_3_DAYS, 'active': '⚡ С подпиской', 'expired': COMMON_BEZ_SUBSCRIPTION, 'no_sub': COMMON_BEZ_SUBSCRIPTION, 'banned': COMMON_ZABANENNYE, 'problem': COMMON_ZABANENNYE, 'server': 'Сервер #{filter_param}', 'tariff': 'Тариф #{filter_param}'}
+ADMIN_USERS_FILTER_ACTIVE_STANDARD = "⚡ Стандарт"
+ADMIN_USERS_FILTER_NEVER = "⚪ Не было подписок"
+
+ADMIN_USER_FILTER_LABELS = {
+    'all': COMMON_VSE,
+    'new': COMMON_NOVYE_7D,
+    'new_24h': COMMON_NOVYE_7D,
+    'new_7d': COMMON_NOVYE_7D,
+    'expiring_3d': COMMON_3_DAYS,
+    'active': '⚡ С подпиской',
+    'active_standard': ADMIN_USERS_FILTER_ACTIVE_STANDARD,
+    'active_wi': "🌐 Белый Интернет",
+    'expired': COMMON_BEZ_SUBSCRIPTION,
+    'never': ADMIN_USERS_FILTER_NEVER,
+    'no_sub': COMMON_BEZ_SUBSCRIPTION,
+    'banned': COMMON_ZABANENNYE,
+    'problem': COMMON_ZABANENNYE,
+    'tariff': 'Тариф #{filter_param}',
+}
 
 ADMIN_BTN_USER_DEVICES = "🔧 Устройства"
 
@@ -481,10 +487,7 @@ STATUS_EXPIRED_LABEL = "истекла"
 TIME_DAYS_FULL_FORMAT = "{days} дней"
 
 
-ADMIN_USERS_FILTER_SERVER_BUTTON = "🖥 {flag} {server_name}"
-ADMIN_USERS_FILTER_COUNTRY_BUTTON = "🌐 {country}"
 ADMIN_USERS_FILTER_TARIFF_BUTTON = "💎 {tariff_group}"
-ADMIN_FILTER_FLAG_FALLBACK = "🌐"
 
 ADMIN_USER_FILTER_COUNT = "{f_name} ({count})"
 ADMIN_USER_FILTER_ALL_COUNT = ADMIN_USER_FILTER_COUNT

@@ -329,7 +329,7 @@ class SubscriptionService:
             if total_count > new_device_limit:
                 raise ValueError(
                     f"Cannot downgrade: {total_count} devices > "
-                    f"{new_device_limit} limit. User must delete devices first."
+                    f"{new_device_limit} limit. User must reset devices first."
                 )
 
         now = now_utc()

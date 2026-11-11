@@ -3,8 +3,6 @@ import html
 import logging
 
 from config.constants import (
-    VLESS_PROTOCOL,
-    XRAY_PROTOCOL,
     AdminAuditAction,
     TELEGRAM_MESSAGE_LIMIT,
 )
@@ -17,28 +15,22 @@ from aiogram.exceptions import (
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
-from sqlalchemy import and_, cast, func, or_, select, String, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
-from bot.formatters import get_server_protocol_badge
 from bot.keyboards import get_back_button
 from bot.keyboards.admin.broadcast import (
     get_broadcast_audience_keyboard,
     get_broadcast_close_keyboard,
     get_broadcast_launch_keyboard,
     get_broadcast_result_keyboard,
-    get_broadcast_server_selection_keyboard,
 )
 from bot.states import AdminStates
 from database.connection import session_scope
 from database.models import (
     BroadcastProgress,
-    Server,
     User,
-    VlessSubscription,
-    WhiteInternetSubscription,
 )
 from services.audit_service import AuditService
 from utils.admin import is_admin
@@ -101,38 +93,6 @@ async def start_broadcast(
         logger.debug(f"start_broadcast edit_text failed: {e}")
 
 
-@router.callback_query(F.data == "broadcast_aud_select_server")
-async def select_broadcast_server(
-    callback: CallbackQuery,
-    state: FSMContext,
-    session: AsyncSession,
-):
-    if not is_admin(callback.from_user.id):
-        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
-        return
-
-    from database.repositories.servers_repo import get_all_servers
-
-    servers = await get_all_servers(session)
-    if not servers:
-        await callback.answer(texts.BROADCAST_SERVERS_NOT_FOUND, show_alert=True)
-        return
-
-    await callback.answer(show_alert=False)
-    from bot.formatters import format_admin_breadcrumbs
-    header = format_admin_breadcrumbs(texts.BROADCAST_BROADCAST, texts.BROADCAST_BREADCRUMB_SERVER_SELECTION)
-
-    prompt = texts.BROADCAST_SELECT_SERVER_PROMPT.format(header=header)
-    try:
-        await callback.message.edit_text(
-            prompt,
-            reply_markup=get_broadcast_server_selection_keyboard(servers),
-            parse_mode="HTML",
-        )
-    except TelegramBadRequest as e:
-        logger.debug(f"select_broadcast_server edit_text failed: {e}")
-
-
 @router.callback_query(F.data.startswith("broadcast_aud:"))
 async def select_broadcast_audience(
     callback: CallbackQuery,
@@ -149,11 +109,10 @@ async def select_broadcast_audience(
     await state.update_data(target_audience=audience)
     await state.set_state(AdminStates.entering_broadcast_message)
 
-    back_cb = "broadcast_aud_select_server" if audience.startswith("server_") else "admin_broadcast"
     try:
         await callback.message.edit_text(
             texts.BROADCAST_PROMPT,
-            reply_markup=get_back_button(back_cb),
+            reply_markup=get_back_button("admin_broadcast"),
         )
     except TelegramBadRequest as e:
         logger.debug(f"select_broadcast_audience edit_text failed: {e}")
@@ -281,27 +240,7 @@ async def process_broadcast_message(
         except Exception as e:
             logger.warning(f"Failed to count recipients in session: {e}")
 
-    if target_audience.startswith("server_"):
-        try:
-            server_id = int(target_audience.split("_", 1)[1])
-            server = None
-            if session:
-                server = await session.get(Server, server_id)
-            if not server:
-                async with session_scope() as s_sess:
-                    server = await s_sess.get(Server, server_id)
-            if server:
-                flag = server.country_flag or "🌐"
-                proto = get_server_protocol_badge(server)
-                aud_label = texts.BROADCAST_AUDIENCE_SERVER_LABEL.format(
-                    flag=flag, proto=proto, name=safe(server.name)
-                )
-            else:
-                aud_label = texts.BROADCAST_AUDIENCE_SERVER_ID_LABEL.format(server_id=server_id)
-        except Exception:
-            aud_label = texts.BROADCAST_AUDIENCE_SERVER_ID_LABEL.format(server_id=target_audience)
-    else:
-        aud_label = texts.ADMIN_BROADCAST_AUDIENCE_LABELS.get(target_audience, target_audience)
+    aud_label = texts.ADMIN_BROADCAST_AUDIENCE_LABELS.get(target_audience, target_audience)
 
     preview_summary = (
         texts.BROADCAST_TEST_SENT_NOTICE.format()+
@@ -353,11 +292,18 @@ def _apply_audience_filters(stmt, audience: str, *, admin_tg_id: int | None = No
         get_effective_expiring_3d_condition,
         get_effective_expired_condition,
         get_effective_never_condition,
+        get_effective_wi_active_condition,
     )
 
     current_time = now_utc()
     if audience == "active":
         stmt = stmt.where(get_effective_active_condition(current_time))
+    elif audience == "active_standard":
+        stmt = stmt.where(User.subscription_end > current_time)
+    elif audience == "active_wi":
+        stmt = stmt.where(get_effective_wi_active_condition(current_time))
+    elif audience == "active_both":
+        stmt = stmt.where(User.subscription_end > current_time, get_effective_wi_active_condition(current_time))
     elif audience == "expiring_3d":
         stmt = stmt.where(get_effective_expiring_3d_condition(current_time))
     elif audience == "expired":
@@ -373,53 +319,6 @@ def _apply_audience_filters(stmt, audience: str, *, admin_tg_id: int | None = No
                 tg_id = None
         if tg_id is not None:
             stmt = stmt.where(User.telegram_id == tg_id)
-    elif audience.startswith("server_"):
-        try:
-            target_server_id = int(audience.split("_", 1)[1])
-        except (IndexError, ValueError):
-            target_server_id = -1
-
-        server_proto_subq = select(Server.protocol).where(Server.id == target_server_id).scalar_subquery()
-        server_caps_subq = select(cast(Server.capabilities, String)).where(Server.id == target_server_id).scalar_subquery()
-
-        is_vless_capable = (
-            (server_proto_subq == VLESS_PROTOCOL)
-            | server_caps_subq.like('%"vless"%')
-            | server_caps_subq.like('%"xray_vless"%')
-        )
-        vless_user_condition = and_(
-            is_vless_capable,
-            User.subscription_end > current_time,
-            User.vless_subscription.has(
-                (VlessSubscription.is_active.is_(True))
-                & (VlessSubscription.active_hwids.is_not(None))
-                & (cast(VlessSubscription.active_hwids, String) != "{}")
-            ),
-        )
-
-        # White Internet (xray) condition:
-        # Target users with active/pending/exhausted subscriptions on this Origin node.
-        # Strict Fail-Closed: excludes deprovisioning subscriptions ('PENDING_DELETE').
-        xray_user_condition = and_(
-            (
-                (server_proto_subq == XRAY_PROTOCOL)
-                | server_caps_subq.like('%"xray_origin"%')
-            ),
-            User.id.in_(
-                select(WhiteInternetSubscription.user_id).where(
-                    WhiteInternetSubscription.origin_node_id == target_server_id,
-                    WhiteInternetSubscription.status.in_([
-                        WhiteInternetStatus.ACTIVE,
-                        WhiteInternetStatus.PENDING,
-                        WhiteInternetStatus.EXHAUSTED,
-                    ]),
-                    WhiteInternetSubscription.expires_at > current_time,
-                    WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
-                )
-            ),
-        )
-
-        stmt = stmt.where(or_(vless_user_condition, xray_user_condition))
     return stmt
 
 
@@ -866,26 +765,9 @@ async def _start_broadcast_process(
             await state.clear()
             return
 
-        if audience.startswith("server_"):
-            try:
-                server_id = int(audience.split("_", 1)[1])
-                server = await session.get(Server, server_id) if session else None
-                if not server:
-                    async with session_scope() as s_sess:
-                        server = await s_sess.get(Server, server_id)
-                if server:
-                    flag = server.country_flag or "🌐"
-                    proto = get_server_protocol_badge(server)
-                    server_name = f"{proto} {safe(server.name)}" if proto else safe(server.name)
-                    label = texts.BROADCAST_PROGRESS_SERVER_LABEL.format(flag=flag, name=server_name)[:50]
-                else:
-                    label = texts.BROADCAST_AUDIENCE_SERVER_ID_LABEL.format(server_id=server_id)[:50]
-            except Exception:
-                label = texts.BROADCAST_AUDIENCE_SERVER_ID_LABEL.format(server_id=audience)[:50]
-        else:
-            label = texts.ADMIN_BROADCAST_PROGRESS_AUDIENCE_LABELS.get(
-                audience, texts.BROADCAST_BTN_TEST_ME if audience.startswith("test_") else audience
-            )
+        label = texts.ADMIN_BROADCAST_PROGRESS_AUDIENCE_LABELS.get(
+            audience, texts.BROADCAST_BTN_TEST_ME if audience.startswith("test_") else audience
+        )
 
         async with session_scope() as sess:
             progress = BroadcastProgress(

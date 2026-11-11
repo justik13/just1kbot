@@ -274,13 +274,6 @@ async def _build_users_list_text_and_kb(
         elif str(filter_param).isdigit():
             from bot.formatters import get_tariff_group_name
             cur_filter_name = get_tariff_group_name(int(filter_param))
-    elif filter_type == "server" and filter_param != "none" and str(filter_param).isdigit() and session is not None:
-        srv = await session.get(Server, int(filter_param))
-        if srv:
-            from bot.formatters import get_server_protocol_badge
-            srv_flag = srv.country_flag or texts.ADMIN_FILTER_FLAG_FALLBACK
-            srv_proto = get_server_protocol_badge(srv)
-            cur_filter_name = f"{srv_flag} {srv_proto} {srv.name}"
     header = format_admin_breadcrumbs(texts.BTN_USERS, texts.COMMON_FILTR.format(f_name=cur_filter_name))
 
     rendered = (
@@ -309,7 +302,10 @@ async def _build_users_list_text_and_kb(
         ("new_7d", _cnt_label(texts.ADMIN_USER_FILTER_NEW_7D_COUNT, texts.COMMON_NOVYE_7D, "new_7d"), "none"),
         ("active", _cnt_label(texts.ADMIN_USER_FILTER_ACTIVE_COUNT, texts.COMMON_AKTIVNYE, "active"), "none"),
         ("expiring_3d", _cnt_label(texts.ADMIN_USER_FILTER_EXPIRING_COUNT, texts.COMMON_3_DAYS, "expiring_3d"), "none"),
+        ("active_standard", _cnt_label(texts.ADMIN_USER_FILTER_COUNT, texts.ADMIN_USERS_FILTER_ACTIVE_STANDARD, "active_standard"), "none"),
+        ("active_wi", _cnt_label(texts.ADMIN_USER_FILTER_COUNT, texts.ADMIN_BTN_SUB_WI, "active_wi"), "none"),
         ("expired", _cnt_label(texts.ADMIN_USER_FILTER_EXPIRED_COUNT, texts.COMMON_BEZ_SUBSCRIPTION, "expired"), "none"),
+        ("never", _cnt_label(texts.ADMIN_USER_FILTER_COUNT, texts.ADMIN_USERS_FILTER_NEVER, "never"), "none"),
         ("banned", _cnt_label(texts.ADMIN_USER_FILTER_BANNED_COUNT, texts.COMMON_ZABANENNYE, "banned"), "none"),
     ]
 
@@ -320,14 +316,22 @@ async def _build_users_list_text_and_kb(
             callback_data=f"admin_users_filter:{f_code}:{f_param}:1",
         )
 
-    server_label = texts.BTN_FILTER_BY_SERVER_ACTIVE if filter_type == "server" else texts.BTN_FILTER_BY_SERVER
     tariff_label = texts.BTN_FILTER_BY_TARIFF_ACTIVE if filter_type == "tariff" else texts.BTN_FILTER_BY_TARIFF
 
-    builder.button(text=server_label, callback_data="admin_users_filter_menu:server")
     builder.button(text=tariff_label, callback_data="admin_users_filter_menu:tariff")
 
     has_reset = False
-    if filter_type not in ("all", "new_7d", "active", "expiring_3d", "expired", "banned"):
+    if filter_type not in (
+        "all",
+        "new_7d",
+        "active",
+        "expiring_3d",
+        "active_standard",
+        "active_wi",
+        "expired",
+        "never",
+        "banned",
+    ):
         builder.button(text=texts.ADMIN_SERVER_BTN_RESET_FILTER, callback_data="admin_users_filter:all:none:1")
         has_reset = True
 
@@ -441,7 +445,7 @@ async def _build_users_list_text_and_kb(
     )
 
     item_count = len(users) if users else 0
-    filter_pattern = [2, 2, 2, 2] if not has_reset else [2, 2, 2, 2, 1]
+    filter_pattern = [2, 2, 2, 2, 2] if not has_reset else [2, 2, 2, 2, 2, 1]
     adjust_pattern = filter_pattern + ([1] * item_count)
     if nav_buttons > 0:
         adjust_pattern.append(nav_buttons)

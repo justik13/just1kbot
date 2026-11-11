@@ -63,7 +63,6 @@ async def _build_servers_list_text_and_kb(
     if not servers:
         rendered += texts.ADMIN_SERVERS_EMPTY
     else:
-        from services.slots_cache import get_cached_peer_count
         db_counts = await get_server_peer_counts(session) if session is not None else {}
         vless_users_count: int = 0
         vless_devices_count: int = 0
@@ -89,9 +88,8 @@ async def _build_servers_list_text_and_kb(
                     )
             else:
                 db_used = db_counts.get(server.id, 0)
-                cached_used = get_cached_peer_count(server.id)
                 total = server.max_clients or 240
-                effective_used = max(cached_used, db_used) if cached_used is not None else db_used
+                effective_used = db_used
                 cap_str = f"{effective_used}/{total}"
             server_display_name = f"{proto_badge} {server.name}"
             button_text = truncate_button_text(
@@ -214,13 +212,9 @@ async def _show_server_card(
         status_line = texts.COMMON_OTKLYUCHEN_VRUCHNUYU
         extra_status_info = ""
 
-    from services.slots_cache import get_cached_peer_count
-
     db_counts = await get_server_peer_counts(session)
     db_used = db_counts.get(server.id, 0)
-    cached_used = get_cached_peer_count(server.id)
-    effective_capacity = max(cached_used, db_used) if cached_used is not None else db_used
-    actual_peers = cached_used
+    effective_capacity = db_used
     max_clients = server.max_clients or 240
     has_vless = is_vless_capable_server(server)
     is_origin = is_white_internet_origin_server(server)
@@ -236,12 +230,6 @@ async def _show_server_card(
         slots_text = texts.ADMIN_SERVER_SLOTS_VLESS.format(
             active_users=vless_users_count,
             active_devices=vless_devices_count,
-        )
-    elif cached_used is not None and cached_used != db_used:
-        slots_text = texts.ADMIN_SERVER_SLOTS_VALUE.format(
-            used_clients=effective_capacity, max_clients=max_clients
-        ) + texts.ADMIN_SERVER_SLOTS_BREAKDOWN_NOTE.format(
-            cached_used=cached_used, db_used=db_used
         )
     else:
         slots_text = texts.ADMIN_SERVER_SLOTS_VALUE.format(
@@ -281,8 +269,6 @@ async def _show_server_card(
             reply_markup=get_admin_server_card_keyboard(
                 server.id,
                 server.is_active,
-                used_clients=actual_peers,
-                max_clients=max_clients,
                 is_xray=is_origin,
                 has_vless=has_vless,
                 is_origin=is_origin,

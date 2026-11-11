@@ -8,8 +8,6 @@ from utils.text_limits import truncate_button_text
 def get_admin_server_card_keyboard(
     server_id: int,
     is_active: bool,
-    used_clients: int | None = None,
-    max_clients: int | None = None,
     is_xray: bool = False,
     has_vless: bool = False,
     is_origin: bool = False,
@@ -28,15 +26,6 @@ def get_admin_server_card_keyboard(
         builder.button(
             text=texts.ADMIN_SERVER_BTN_MIGRATE,
             callback_data=f"admin_server_migrate:{server_id}",
-        )
-    if is_origin:
-        builder.button(
-            text=texts.ADMIN_SERVER_BTN_SERVER_USERS,
-            callback_data=f"admin_users_filter:server:{server_id}:1",
-        )
-        builder.button(
-            text=texts.ADMIN_SERVER_BTN_BROADCAST,
-            callback_data=f"admin_server_broadcast:{server_id}",
         )
     builder.button(
         text=texts.BTN_ADMIN_SERVER_PING,
@@ -78,8 +67,8 @@ def get_admin_server_card_keyboard(
         callback_data=back_cb,
     )
 
-    if is_origin:
-        builder.adjust(1, 2, 2, 2, 2, 1, 2, 1)
+    if is_xray:
+        builder.adjust(1, 2, 2, 2, 1, 2, 1)
     else:
         builder.adjust(1, 2, 2, 1, 2, 1)
     return builder.as_markup()

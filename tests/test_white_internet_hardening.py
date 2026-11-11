@@ -126,7 +126,9 @@ class TestGroupCAlembicMigration0017(unittest.TestCase):
     def test_alembic_heads_and_chain(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
         heads = scripts.get_heads()
-        self.assertEqual(heads, ["0045_drop_api_operations"])
+        self.assertEqual(heads, ["0046_drop_device_creation_limits"])
+        rev = scripts.get_revision("0046_drop_device_creation_limits")
+        self.assertEqual(rev.down_revision, "0045_drop_api_operations")
         rev = scripts.get_revision("0045_drop_api_operations")
         self.assertEqual(rev.down_revision, "0044_clean_auto_disabled_servers")
         rev = scripts.get_revision("0044_clean_auto_disabled_servers")

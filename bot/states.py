@@ -16,7 +16,6 @@ class AdminStates(StatesGroup):
     editing_server_flag = State()
     editing_server_url = State()
     editing_server_key = State()
-    editing_server_max_clients = State()
     editing_tariff_rub = State()
     admin_reducing_days = State()
     admin_extending_custom = State()
