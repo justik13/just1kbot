@@ -469,7 +469,6 @@ class VlessSubscriptionService:
         desired_active = bool(
             sub.is_active
             and user is not None
-            and not getattr(user, "is_banned", False)
             and not getattr(user, "financial_hold", False)
             and not getattr(user, "is_deleted", False)
             and SubscriptionService.check_vpn_access(user)
@@ -583,7 +582,6 @@ class VlessSubscriptionService:
                     .where(
                         VlessSubscription.is_active.is_(True),
                         User.is_deleted.is_(False),
-                        User.is_banned.is_(False),
                         User.financial_hold.is_(False),
                     )
                 )

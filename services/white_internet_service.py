@@ -933,7 +933,7 @@ class WhiteInternetService:
         user = await lock_checkout_user(session, user_id)
         if user is None:
             return False, texts.WL_USER_NOT_FOUND, None
-        if user.is_banned or user.is_deleted:
+        if user.is_deleted:
             return False, texts.ERROR_ACCESS_DENIED, None
 
         has_trial = await white_internet_repo.has_ever_activated_trial(session, user_id)
@@ -1105,7 +1105,7 @@ class WhiteInternetService:
         cls,
         session: AsyncSession,
         user_id: int,
-        reason: str = "user_banned",
+        reason: str = "deactivated",
         *,
         target_subscription_id: int | None = None,
     ) -> list[WhiteInternetSubscription]:

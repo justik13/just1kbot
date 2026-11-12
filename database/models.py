@@ -58,11 +58,6 @@ class User(Base):
             postgresql_where=text("is_deleted = false AND subscription_end IS NOT NULL"),
         ),
         Index(
-            "ix_users_banned",
-            "telegram_id",
-            postgresql_where=text("is_banned = true AND is_deleted = false"),
-        ),
-        Index(
             "ix_users_expiring_subscription",
             "subscription_end",
             "telegram_id",
@@ -70,7 +65,6 @@ class User(Base):
                 """
                 is_deleted = false
                 AND is_bot_blocked = false
-                AND is_banned = false
                 AND subscription_end IS NOT NULL
                 AND (notified_3d = false OR notified_1d = false OR notified_2h = false)
                 """
@@ -133,7 +127,6 @@ class User(Base):
 
     last_payment_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    is_banned: Mapped[bool] = mapped_column(Boolean, default=False)
     is_bot_blocked: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

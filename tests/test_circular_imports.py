@@ -43,7 +43,7 @@ class CircularImportRegressionTests(unittest.TestCase):
         self._assert_isolated_code("import database.repositories.users_repo; import database.repositories.servers_repo")
 
     def test_services_clean_imports(self):
-        self._assert_isolated_code("import services.subscription; import services.vless_subscription_service; import services.ban_service")
+        self._assert_isolated_code("import services.subscription; import services.vless_subscription_service")
 
     def test_order_dependent_import_permutations(self):
         permutations = [

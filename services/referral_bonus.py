@@ -290,8 +290,6 @@ async def grant_referral_bonus_for_topup(
     )
     if (
         referrer is None
-        or not hasattr(referrer, "is_banned")
-        or referrer.is_banned
         or not hasattr(referrer, "id")
     ):
         return ReferralBonusGrantResult(
