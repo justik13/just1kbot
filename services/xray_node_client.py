@@ -139,6 +139,7 @@ class XrayNodeClient:
         json_data: dict[str, Any] | None = None,
         request_timeout: float | None = None,
         max_retries: int | None = None,
+        ssl_override: bool | ssl.SSLContext | None = None,
     ) -> tuple[int, Any, str | None]:
         safe_url = _sanitize_url(url)
         session = await self._get_session()
@@ -146,11 +147,17 @@ class XrayNodeClient:
         effective_timeout = request_timeout if request_timeout is not None else self.timeout
         client_timeout = aiohttp.ClientTimeout(total=effective_timeout) if effective_timeout is not None else None
 
+        req_kwargs: dict[str, Any] = {
+            "headers": headers,
+            "json": json_data,
+            "timeout": client_timeout,
+        }
+        if ssl_override is not None:
+            req_kwargs["ssl"] = ssl_override
+
         for attempt in range(retries_limit + 1):
             try:
-                async with session.request(
-                    method, url, headers=headers, json=json_data, timeout=client_timeout
-                ) as resp:
+                async with session.request(method, url, **req_kwargs) as resp:
                     status_code = resp.status
                     if status_code in (200, 201):
                         try:
@@ -359,8 +366,13 @@ class XrayNodeClient:
         domain: str,
         fullchain_pem: str,
         privkey_pem: str,
+        allow_bootstrap_tls: bool = True,
     ) -> tuple[bool, str | None]:
-        """Deploy or rotate TLS certificates (e.g. DNS-01 wildcard) to the node."""
+        """Deploy or rotate TLS certificates (e.g. DNS-01 wildcard) to the node.
+
+        If allow_bootstrap_tls is True and strict TLS fails (e.g. fresh node on self-signed bootstrap cert),
+        retries with unverified TLS so the node receives its trusted certificate.
+        """
         url = f"{api_url.rstrip('/')}/v1/system/certificate"
         headers = self._get_headers(api_key)
         payload = {
@@ -371,5 +383,20 @@ class XrayNodeClient:
         status_code, data, err = await self._make_request("POST", url, headers, json_data=payload)
         if status_code in (200, 201):
             return True, None
+
+        if allow_bootstrap_tls and err and any(
+            hint in err.lower()
+            for hint in ("certificate", "ssl", "cert", "handshake", "self-signed", "unknown ca")
+        ):
+            logger.info(
+                "Retrying certificate deployment to %s with bootstrap TLS bypass...",
+                _sanitize_url(url),
+            )
+            status_code, data, err = await self._make_request(
+                "POST", url, headers, json_data=payload, ssl_override=False
+            )
+            if status_code in (200, 201):
+                return True, None
+
         return False, err or f"Certificate deployment failed with HTTP {status_code}"
 

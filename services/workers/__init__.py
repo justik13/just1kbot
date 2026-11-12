@@ -20,6 +20,7 @@ from config.settings import get_settings
 from utils.telegram import safe_send_message
 
 from .cleanup import cleanup_dangling_peers_loop
+from .certificate_rotator import certificate_rotator_loop
 from .credit_notifications import credit_notifications_loop
 from .heartbeat import heartbeat_loop
 from .node_monitor import node_monitor_loop
@@ -104,6 +105,7 @@ def _heartbeat(bot): return heartbeat_loop(shutdown_event, heartbeat_allowed)
 def _node_monitor(bot): return node_monitor_loop(bot, shutdown_event)
 def _white_internet_reconciliation(bot): return white_internet_reconciliation_loop(bot, shutdown_event)
 def _white_internet_traffic(bot): return white_internet_traffic_loop(bot, shutdown_event)
+def _certificate_rotator(bot): return certificate_rotator_loop(bot, shutdown_event)
 
 
 WORKERS: tuple[WorkerDefinition, ...] = (
@@ -115,6 +117,7 @@ WORKERS: tuple[WorkerDefinition, ...] = (
     WorkerDefinition("node_monitor", _node_monitor, False),
     WorkerDefinition("white_internet_reconciliation", _white_internet_reconciliation, True),
     WorkerDefinition("white_internet_traffic", _white_internet_traffic, True),
+    WorkerDefinition("certificate_rotator", _certificate_rotator, False),
 )
 
 
