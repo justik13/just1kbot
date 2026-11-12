@@ -26,6 +26,7 @@ from bot.keyboards.notifications import get_devices_deleted_keyboard
 from bot.texts.runtime.notifications import NOTIFY_DEVICES_DELETED
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc
+from utils.telegram import safe_send_message
 
 logger = logging.getLogger(__name__)
 
@@ -236,11 +237,13 @@ async def _cleanup_expired_vless_retention_grace(bot: Bot | None = None) -> None
 
             if notify_tg_id and bot:
                 try:
-                    await bot.send_message(
+                    await safe_send_message(
+                        bot,
                         notify_tg_id,
                         NOTIFY_DEVICES_DELETED,
                         reply_markup=get_devices_deleted_keyboard(),
                         parse_mode="HTML",
+                        raise_forbidden=True,
                     )
                 except TelegramForbiddenError:
                     async with session_scope() as blocked_session:

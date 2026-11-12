@@ -24,10 +24,6 @@ def format_traffic(bytes_value: int) -> str:
         return f"{size:.1f} {units[unit_index]}"
 
 
-def format_datetime(dt: datetime | None) -> str:
-    return format_datetime_msk(dt, "%d.%m.%Y %H:%M")
-
-
 def format_tg_time(
     dt: datetime | date | None,
     format_spec: str = "dt",

@@ -47,14 +47,14 @@ def get_referral_bonus_keyboard() -> InlineKeyboardMarkup:
 
 def get_node_monitor_alert_keyboard(
     server_id: int,
-) -> InlineKeyboardBuilder:
+) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
         text=texts.BTN_DISMISS_ALERT,
         callback_data=f"admin_dismiss_alert:{server_id}",
     )
     builder.adjust(1)
-    return builder
+    return builder.as_markup()
 
 
 def get_traffic_alert_keyboard(telegram_id: int) -> InlineKeyboardMarkup:

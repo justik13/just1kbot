@@ -231,6 +231,7 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
         if admin_alert_info:
             try:
                 from bot import texts
+                from bot.keyboards.notifications import get_dismiss_alert_keyboard
                 from config.settings import get_settings
                 from utils.telegram import safe_send_message
                 admin_ids = get_settings().ADMIN_IDS
@@ -239,12 +240,14 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                     amount_rub=admin_alert_info["amount_rub"],
                     mismatch=admin_alert_info["mismatch"],
                 )
+                dismiss_kb = get_dismiss_alert_keyboard("general")
                 for aid in admin_ids:
                     try:
                         await safe_send_message(
                             bot,
                             aid,
                             alert_text,
+                            reply_markup=dismiss_kb,
                             parse_mode="HTML",
                         )
                     except Exception as exc:

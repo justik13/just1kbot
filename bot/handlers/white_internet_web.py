@@ -201,23 +201,20 @@ async def _resolve_bot_username(request: web.Request) -> str:
     if _cached_bot_username:
         return _cached_bot_username
 
-    bot = request.app.get("bot") if hasattr(request, "app") else None
-    if bot is not None and hasattr(bot, "get_me"):
-        try:
-            me = await bot.get_me()
-            if me and getattr(me, "username", None):
-                username = str(me.username).lstrip("@")
-                _cached_bot_username = username
-                if hasattr(request, "app") and not getattr(request.app, "frozen", False):
-                    try:
-                        request.app["bot_username"] = username
-                    except Exception:
-                        pass
-                return username
-        except Exception:
-            pass
+    from utils.telegram import resolve_bot_username
 
-    return os.getenv("BOT_USERNAME", "").lstrip("@") or constants.DEFAULT_FALLBACK_BOT_USERNAME
+    bot = request.app.get("bot") if hasattr(request, "app") else None
+    username = await resolve_bot_username(bot)
+    if username:
+        _cached_bot_username = username
+        if hasattr(request, "app") and not getattr(request.app, "frozen", False):
+            try:
+                request.app["bot_username"] = username
+            except Exception:
+                pass
+        return username
+
+    return constants.DEFAULT_FALLBACK_BOT_USERNAME
 
 
 async def _resolve_urls_and_bot(request: web.Request, extra: dict | None) -> tuple[str, str, str, str]:
@@ -371,7 +368,6 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         user = await users_repo.get_user_by_id(session, sub.user_id)
         if (
             user is None
-            or getattr(user, "is_banned", False) is True
             or getattr(user, "is_deleted", False) is True
         ):
             return web.Response(status=403, text="Forbidden", headers=common_headers)
@@ -913,13 +909,17 @@ async def white_internet_report_handler(request: web.Request) -> web.Response:
     bot = request.app.get("bot")
     delivered = False
     if bot:
+        from bot.keyboards.notifications import get_dismiss_alert_keyboard
         from config.settings import get_settings
         from utils.telegram import safe_send_message
 
         admin_ids = get_settings().ADMIN_IDS
+        dismiss_kb = get_dismiss_alert_keyboard("general")
         for aid in admin_ids:
             try:
-                msg_id = await safe_send_message(bot, aid, admin_text, parse_mode="HTML")
+                msg_id = await safe_send_message(
+                    bot, aid, admin_text, reply_markup=dismiss_kb, parse_mode="HTML"
+                )
                 if msg_id is not None:
                     delivered = True
             except Exception as exc:
