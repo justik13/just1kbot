@@ -13,6 +13,7 @@ from typing import Any
 import aiohttp
 
 from utils.logging_security import sanitize_short
+from utils.security import SafeResolver, allow_local_networks
 
 logger = logging.getLogger(__name__)
 
@@ -82,10 +83,19 @@ class TrafficSnapshot(tuple):
 class XrayNodeClient:
     """Client for node-level Xray API management (port 8444/tcp)."""
 
-    def __init__(self, timeout: float = 10.0, max_retries: int = 2, ca_file: str | None = None):
+    def __init__(
+        self,
+        timeout: float = 10.0,
+        max_retries: int = 2,
+        ca_file: str | None = None,
+        allow_insecure_tls: bool = False,
+        use_safe_resolver: bool = True,
+    ):
         self.timeout = timeout
         self.max_retries = max_retries
         self.ca_file = ca_file or os.getenv("XRAY_NODE_CA_FILE")
+        self.allow_insecure_tls = allow_insecure_tls
+        self.use_safe_resolver = use_safe_resolver
         self._session: aiohttp.ClientSession | None = None
 
     async def __aenter__(self) -> XrayNodeClient:
@@ -108,16 +118,27 @@ class XrayNodeClient:
         }
 
     def _ssl_context(self) -> ssl.SSLContext:
-        """Create a verified TLS context; custom CA is supported for node certificates."""
+        """Create TLS context: strict CA validation by default, bootstrap self-signed only when opted in."""
+        if self.allow_insecure_tls:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            return ctx
         return ssl.create_default_context(cafile=self.ca_file)
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
+            resolver = (
+                SafeResolver(allow_local=allow_local_networks())
+                if self.use_safe_resolver
+                else None
+            )
             connector = aiohttp.TCPConnector(
                 limit=50,
                 ttl_dns_cache=300,
                 enable_cleanup_closed=True,
                 ssl=self._ssl_context(),
+                resolver=resolver,
             )
             client_timeout = aiohttp.ClientTimeout(total=self.timeout)
             self._session = aiohttp.ClientSession(
@@ -367,4 +388,37 @@ class XrayNodeClient:
         if status_code in (200, 201):
             return True, None
         return False, err or f"Certificate deployment failed with HTTP {status_code}"
+
+    async def get_node_status(
+        self,
+        api_url: str,
+        api_key: str,
+        timeout: float | None = None,
+    ) -> tuple[bool, dict[str, Any] | None, str | None]:
+        """Fetch v2 auto-discovery node metadata (role, modules, links, errors) via /v1/node/status."""
+        url = f"{api_url.rstrip('/')}/v1/node/status"
+        headers = self._get_headers(api_key)
+        status_code, data, err = await self._make_request(
+            "GET", url, headers, request_timeout=timeout
+        )
+        if status_code == 200 and isinstance(data, dict):
+            return True, data, None
+        return False, None, err or f"Node status failed with HTTP {status_code}"
+
+    async def update_node_links(
+        self,
+        api_url: str,
+        api_key: str,
+        links_payload: dict[str, Any],
+        timeout: float | None = None,
+    ) -> tuple[bool, dict[str, Any] | None, str | None]:
+        """Atomically update topology links on a v2 node via PUT /v1/node/links."""
+        url = f"{api_url.rstrip('/')}/v1/node/links"
+        headers = self._get_headers(api_key)
+        status_code, data, err = await self._make_request(
+            "PUT", url, headers, json_data=links_payload, request_timeout=timeout
+        )
+        if status_code in (200, 201) and isinstance(data, dict):
+            return True, data, None
+        return False, None, err or f"Node links update failed with HTTP {status_code}"
 

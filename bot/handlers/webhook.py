@@ -381,3 +381,7 @@ def setup_webhook_routes(app: web.Application):
     # Register standard VLESS subscription feed routes
     from bot.handlers.vless_web import setup_vless_web_routes
     setup_vless_web_routes(app)
+
+    # Register Telegram Mini App frontend and admin API routes
+    from bot.miniapp import setup_miniapp_routes
+    setup_miniapp_routes(app)

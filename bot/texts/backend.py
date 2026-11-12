@@ -184,6 +184,16 @@ WL_PROFILE_NAME = "✦ Just1k WL"
 WL_USERINFO_HEADER_TEMPLATE = "upload={upload}; download={download}; total={total}; expire={expire}"
 
 
+# Onboarding & Mini App entry
+USER_HUB_START = "друг"
+BTN_MINIAPP_CONNECT = "🚀 Подключить"
+START_HUB_MESSAGE = (
+    "👋 Привет, <b>{name}</b>!\n\n"
+    "Нажмите кнопку <b>«Подключить»</b> ниже, чтобы открыть панель сервиса."
+)
+START_TECHNICAL_ERROR = "⚠️ Произошла техническая ошибка. Попробуйте позже."
+
+
 def get_tariff_display_name(device_limit: int) -> str:
     """Map device limit to localized tariff tier display label."""
     if device_limit <= 2:
