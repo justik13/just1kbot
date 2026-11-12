@@ -8,6 +8,10 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from bot import texts
+from config.constants import (
+    WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB,
+    WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES,
+)
 from config.enums import (
     ServerHealthState,
     ServerLifecycleStatus,
@@ -559,11 +563,16 @@ class TestWhiteInternetKeyboardAndDecoupling(unittest.TestCase):
         )
         buttons_user = [btn.text for row in kb_user.inline_keyboard for btn in row]
 
+        expected_add_device_btn = texts.BTN_WL_ADD_DEVICE.format(
+            price=int(WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB),
+            gb=int(WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES // (1024**3)),
+        )
+
         # Must have renewal button for 450 ₽
         self.assertTrue(any("450" in text for text in buttons_user))
         # Paid user HAS topup and add device (self-service up to max 3 devices)
         self.assertTrue(any("Докупить трафик" in text for text in buttons_user))
-        self.assertTrue(any(texts.BTN_WL_ADD_DEVICE in text for text in buttons_user))
+        self.assertTrue(any(expected_add_device_btn in text for text in buttons_user))
         # Refresh button must NEVER be present
         self.assertFalse(any("Обновить расход" in text for text in buttons_user))
 
@@ -581,7 +590,7 @@ class TestWhiteInternetKeyboardAndDecoupling(unittest.TestCase):
         )
         buttons_max = [btn.text for row in kb_max.inline_keyboard for btn in row]
         self.assertTrue(any("Докупить трафик" in text for text in buttons_max))
-        self.assertFalse(any(texts.BTN_WL_ADD_DEVICE in text for text in buttons_max))
+        self.assertFalse(any(expected_add_device_btn in text for text in buttons_max))
 
         # Trial user cannot topup or add device
         sub_trial = WhiteInternetSubscription(
@@ -597,7 +606,7 @@ class TestWhiteInternetKeyboardAndDecoupling(unittest.TestCase):
         )
         buttons_trial = [btn.text for row in kb_trial.inline_keyboard for btn in row]
         self.assertFalse(any("Докупить трафик" in text for text in buttons_trial))
-        self.assertFalse(any(texts.BTN_WL_ADD_DEVICE in text for text in buttons_trial))
+        self.assertFalse(any(expected_add_device_btn in text for text in buttons_trial))
 
         # 2. Sub expiring in 45 days -> Renewal button MUST NOT be present (> 30 days remaining)
         sub_far = WhiteInternetSubscription(
@@ -619,7 +628,7 @@ class TestWhiteInternetKeyboardAndDecoupling(unittest.TestCase):
         )
         buttons_admin = [btn.text for row in kb_admin.inline_keyboard for btn in row]
         self.assertTrue(any("Докупить трафик" in text for text in buttons_admin))
-        self.assertTrue(any(texts.BTN_WL_ADD_DEVICE in text for text in buttons_admin))
+        self.assertTrue(any(expected_add_device_btn in text for text in buttons_admin))
 
         # 4. Admin user on sub with 3 devices -> Has topup, but NOT add-device button
         sub_max = WhiteInternetSubscription(
@@ -634,7 +643,7 @@ class TestWhiteInternetKeyboardAndDecoupling(unittest.TestCase):
         )
         buttons_admin_max = [btn.text for row in kb_admin_max.inline_keyboard for btn in row]
         self.assertTrue(any("Докупить трафик" in text for text in buttons_admin_max))
-        self.assertFalse(any(texts.BTN_WL_ADD_DEVICE in text for text in buttons_admin_max))
+        self.assertFalse(any(expected_add_device_btn in text for text in buttons_admin_max))
         # Renewal for 3 devices must be 650 ₽
         self.assertTrue(any("650" in text for text in buttons_admin_max))
 

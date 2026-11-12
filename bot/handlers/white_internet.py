@@ -19,6 +19,7 @@ from config.constants import (
     WHITE_INTERNET_BASE_PRICE_RUB,
     WHITE_INTERNET_BASE_TRAFFIC_BYTES,
     WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB,
+    WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES,
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
     WHITE_INTERNET_SUB_PATH_PREFIX,
     WHITE_INTERNET_TOPUP_PACKS,
@@ -192,7 +193,13 @@ def get_white_internet_overview_keyboard(
         builder.button(text=texts.BTN_WL_TOPUP, callback_data="wl_topup_menu")
         has_topup = True
         if sub_limit < WHITE_INTERNET_MAX_DEVICE_LIMIT:
-            builder.button(text=texts.BTN_WL_ADD_DEVICE, callback_data="wl_add_device_menu")
+            builder.button(
+                text=texts.BTN_WL_ADD_DEVICE.format(
+                    price=int(WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB),
+                    gb=int(WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES // (1024**3)),
+                ),
+                callback_data="wl_add_device_menu",
+            )
             has_add_device = True
 
     has_reset = False
@@ -878,41 +885,71 @@ async def process_wl_topup_shortage(query: CallbackQuery, session: AsyncSession)
     )
 
 
+async def _render_add_device_insufficient_balance(
+    query: CallbackQuery,
+    *,
+    balance_available: Decimal,
+    price: Decimal,
+    extra_gb: int,
+) -> None:
+    shortage = max(price - balance_available, Decimal(0))
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text=texts.BTN_WL_TOPUP_SHORTAGE.format(shortage=int(shortage)),
+        callback_data=f"wl_topup_shortage:{int(shortage)}:add_device",
+        style="success",
+    )
+    kb.button(text=texts.BTN_BACK, callback_data="white_internet")
+    kb.adjust(1, 1)
+    await query.message.edit_text(
+        texts.WL_INSUFFICIENT_BALANCE_ADD_DEVICE.format(
+            gb=extra_gb,
+            price=int(price),
+            balance=balance_available,
+            shortage=shortage,
+        ),
+        reply_markup=kb.as_markup(),
+        parse_mode="HTML",
+    )
+
+
 @router.callback_query(F.data == "wl_add_device_menu")
 async def show_add_device_menu(query: CallbackQuery, session: AsyncSession):
-    try:
-        await query.answer()
-    except Exception:
-        pass
     if not await MaintenanceService.can_user_perform_action(session, query.from_user.id):
-        try:
-            await query.answer(texts.MAINTENANCE_DEFAULT_MESSAGE, show_alert=True)
-        except Exception:
-            pass
+        await safe_callback_answer(query, texts.MAINTENANCE_DEFAULT_MESSAGE, show_alert=True)
         return
     user = await get_user_by_telegram_id(session, query.from_user.id)
     if user is None:
+        await safe_callback_answer(query)
         return
     sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
     if sub is None:
+        await safe_callback_answer(query)
         return
     if getattr(sub, "is_trial", False):
-        await query.answer(texts.WL_TRIAL_CANNOT_ADD_DEVICE, show_alert=True)
+        await safe_callback_answer(query, texts.WL_TRIAL_CANNOT_ADD_DEVICE, show_alert=True)
         return
     current_limit = max(1, getattr(sub, "device_limit", 1) or 1)
     if current_limit >= WHITE_INTERNET_MAX_DEVICE_LIMIT:
-        await query.answer(texts.WL_DEVICE_LIMIT_MAX_REACHED, show_alert=True)
+        await safe_callback_answer(query, texts.WL_DEVICE_LIMIT_MAX_REACHED, show_alert=True)
         return
 
     next_limit = current_limit + 1
-    _base_price, _base_price_int, _duration_days, base_quota_bytes = await _get_effective_tariff_info(session)
+    _base_price, _base_price_int, duration_days, base_quota_bytes = await _get_effective_tariff_info(session)
     next_price = int(get_white_internet_tier_price(next_limit, base_price=Decimal(_base_price)))
     base_gb = int(base_quota_bytes // (1024**3))
     next_traffic = next_limit * base_gb
+    price = int(WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB)
+    extra_gb = int(WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES // (1024**3))
+    expiry_str = (
+        format_subscription_date(sub.expires_at)
+        if getattr(sub, "expires_at", None)
+        else texts.TIME_FOREVER
+    )
 
     kb = InlineKeyboardBuilder()
     kb.button(
-        text=texts.BTN_WL_ADD_DEVICE_CONFIRM,
+        text=texts.BTN_WL_ADD_DEVICE_CONFIRM.format(price=price),
         callback_data="wl_add_device_confirm",
         style="success",
     )
@@ -920,56 +957,47 @@ async def show_add_device_menu(query: CallbackQuery, session: AsyncSession):
     kb.adjust(1, 1)
 
     text = texts.WL_ADD_DEVICE_CONFIRM.format(
-        next_price=next_price,
+        price=price,
+        current_limit=current_limit,
         next_limit=next_limit,
+        gb=extra_gb,
+        expiry=expiry_str,
+        next_price=next_price,
+        duration_days=duration_days,
         next_traffic=next_traffic,
     )
     await query.message.edit_text(text, reply_markup=kb.as_markup(), parse_mode="HTML")
+    await safe_callback_answer(query)
 
 
 @router.callback_query(F.data == "wl_add_device_confirm")
 async def process_add_device_confirm(query: CallbackQuery, session: AsyncSession):
-    try:
-        await query.answer()
-    except Exception:
-        pass
     if not await MaintenanceService.can_user_perform_action(session, query.from_user.id):
-        try:
-            await query.answer(texts.MAINTENANCE_DEFAULT_MESSAGE, show_alert=True)
-        except Exception:
-            pass
+        await safe_callback_answer(query, texts.MAINTENANCE_DEFAULT_MESSAGE, show_alert=True)
         return
     user = await get_user_by_telegram_id(session, query.from_user.id)
     if user is None:
+        await safe_callback_answer(query)
         return
     sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
     if sub is None:
+        await safe_callback_answer(query)
         return
     if getattr(sub, "is_trial", False):
-        await query.answer(texts.WL_TRIAL_CANNOT_ADD_DEVICE, show_alert=True)
+        await safe_callback_answer(query, texts.WL_TRIAL_CANNOT_ADD_DEVICE, show_alert=True)
         return
 
     price = WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB
+    extra_gb = int(WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES // (1024**3))
     balance_snapshot = await get_account_balance(session, user_id=user.id)
     if balance_snapshot.available < price:
-        shortage = price - balance_snapshot.available
-        kb = InlineKeyboardBuilder()
-        kb.button(
-            text=texts.BTN_WL_TOPUP_SHORTAGE.format(shortage=int(shortage)),
-            callback_data=f"wl_topup_shortage:{int(shortage)}:add_device",
-            style="success",
+        await _render_add_device_insufficient_balance(
+            query,
+            balance_available=balance_snapshot.available,
+            price=price,
+            extra_gb=extra_gb,
         )
-        kb.button(text=texts.BTN_BACK, callback_data="white_internet")
-        kb.adjust(1, 1)
-        await query.message.edit_text(
-            texts.WL_INSUFFICIENT_BALANCE_BUY.format(
-                price=int(price),
-                balance=balance_snapshot.available,
-                shortage=shortage,
-            ),
-            reply_markup=kb.as_markup(),
-            parse_mode="HTML",
-        )
+        await safe_callback_answer(query)
         return
 
     try:
@@ -983,9 +1011,21 @@ async def process_add_device_confirm(query: CallbackQuery, session: AsyncSession
 
     if not success:
         await session.rollback()
+        shortage_prefix = texts.WL_INSUFFICIENT_BALANCE_ADD_DEVICE.split("{", 1)[0]
+        if msg.startswith(shortage_prefix):
+            latest_balance = await get_account_balance(session, user_id=user.id)
+            await _render_add_device_insufficient_balance(
+                query,
+                balance_available=latest_balance.available,
+                price=price,
+                extra_gb=extra_gb,
+            )
+            await safe_callback_answer(query)
+            return
         kb = InlineKeyboardBuilder()
         kb.button(text=texts.BTN_BACK, callback_data="white_internet")
         await query.message.edit_text(html.escape(msg), reply_markup=kb.as_markup())
+        await safe_callback_answer(query)
         return
 
     await session.commit()
