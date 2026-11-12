@@ -127,7 +127,6 @@ class TestTelegramBotApi103KeyboardAudit(unittest.IsolatedAsyncioTestCase):
             get_post_expiry_keyboard,
             get_pre_expiry_keyboard,
             get_referral_bonus_keyboard,
-            get_referral_onboarding_keyboard,
             get_traffic_alert_keyboard,
         )
 
@@ -139,7 +138,6 @@ class TestTelegramBotApi103KeyboardAudit(unittest.IsolatedAsyncioTestCase):
             get_post_expiry_keyboard(),
             get_pre_expiry_keyboard(),
             get_referral_bonus_keyboard(),
-            get_referral_onboarding_keyboard(),
             get_traffic_alert_keyboard(12345),
         ]
 

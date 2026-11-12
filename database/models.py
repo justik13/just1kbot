@@ -1010,22 +1010,6 @@ class WhiteInternetOrphanCleanup(Base):
     server = relationship("Server", foreign_keys=[server_id])
 
 
-class AdminOperationIdempotency(Base):
-    """Stores deterministic idempotency tokens for admin UI mutations with 7-day TTL."""
-
-    __tablename__ = "admin_operation_idempotency"
-
-    op_key: Mapped[str] = mapped_column(String(64), primary_key=True)
-    admin_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    target_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=func.now(),
-        index=True,
-    )
-
-
 class VlessSubscription(Base):
     """VLESS TLS subscription for standard access with INCY HWID device quota tracking."""
 

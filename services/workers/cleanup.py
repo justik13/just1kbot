@@ -16,7 +16,6 @@ from config.constants import (
 )
 from database.connection import session_scope
 from database.models import (
-    AdminOperationIdempotency,
     Order,
     User,
     VlessSubscription,
@@ -431,12 +430,6 @@ async def _cleanup_old_records():
         older_than_days=AUDIT_LOG_RETENTION_DAYS,
     )
 
-    threshold_idempotency = current_time - timedelta(days=7)
-    idempotency_deleted = await _batch_delete_matching(
-        AdminOperationIdempotency,
-        AdminOperationIdempotency.created_at < threshold_idempotency,
-    )
-
     # Prune old settled webhook inbox records in per-batch committed transactions.
     # "dead" is no longer written since the inbox worker was removed in PR #277,
     # but rows written before that purge still exist and must be reclaimed, so the
@@ -448,16 +441,11 @@ async def _cleanup_old_records():
         WebhookInbox.received_at < threshold_webhooks,
     )
 
-    if (
-        deleted_logs > 0
-        or webhooks_deleted > 0
-        or idempotency_deleted > 0
-    ):
+    if deleted_logs > 0 or webhooks_deleted > 0:
         logger.info(
-            "Cleanup: %s old audit logs, %s old webhooks deleted, %s old idempotency records deleted",
+            "Cleanup: %s old audit logs, %s old webhooks deleted",
             deleted_logs,
             webhooks_deleted,
-            idempotency_deleted,
         )
 
 

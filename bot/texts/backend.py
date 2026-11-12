@@ -1,14 +1,6 @@
 """Canonical texts used by backend services, HTTP endpoints, and workers."""
 from __future__ import annotations
 
-# Bot metadata
-BOT_START_DESCRIPTION = "🚀 Запустить бота"
-BOT_DESCRIPTION = (
-    "Личный сервис безопасного доступа в интернет. "
-    "Управление подключениями и устройствами в едином интерфейсе."
-)
-BOT_SHORT_DESCRIPTION = "Личный сервис безопасного доступа в интернет"
-
 # Notification buttons
 BTN_DISMISS_ALERT = "Закрыть"
 BTN_DISMISS_NOTIFICATION = "✅ Прочитано (убрать)"
@@ -20,10 +12,6 @@ ALERT_COPY_TEXT_TOO_LONG = (
 )
 ERROR_ACCESS_DENIED = "⛔️ Нет доступа"
 ERROR_TECHNICAL_ALERT = "⚠️ Ведутся технические работы. Попробуйте через минуту."
-ERROR_TECHNICAL_MESSAGE = """⚠️ <b>Ошибка сервера</b>
-
-Мы уже чиним проблему. Попробуйте позже."""
-MAINTENANCE_DEFAULT_MESSAGE = "🛠 Бот находится на техническом обслуживании. Пожалуйста, попробуйте позже."
 TIME_HOURS_LEFT = "{hours} ч."
 
 # Billing, orders & tariffs
@@ -45,73 +33,7 @@ TARIFF_DISPLAY_BASIC = "📱 Базовый"
 TARIFF_DISPLAY_FAMILY = "👨‍👩‍👧‍👦 Семейный"
 TARIFF_DISPLAY_PRO = "🚀 Pro"
 
-# Audit & admin alerts
-AUDIT_ACTIONS = {
-    "ACCOUNT_PURCHASE_SETTLED": "🛒 Покупка тарифа",
-    "ACCOUNT_TARIFF_CHANGE_SETTLED": "🔄 Смена тарифа",
-    "ADD_SERVER": "➕ Добавил сервер",
-    "ADD_TARIFF": "➕ Добавил тариф",
-    "ADMIN_BALANCE_DEDUCT": "➖ Списание баланса админом",
-    "ADMIN_BALANCE_TOPUP": "➕ Начисление баланса админом",
-    "ADMIN_DEVICE_DELETE": "🗑 Удаление устройства админом",
-    "ADMIN_DIRECT_MESSAGE": "✉️ Сообщение от админа",
-    "ADMIN_DIRECT_MESSAGE_SENT": "✉️ Сообщение от админа",
-    "ADMIN_SUB_CHANGE": "⚙️ Изменение тарифа админом",
-    "ADMIN_SUB_EXTEND": "⏳ Продление подписки админом",
-    "ADMIN_SUB_GRANT": "🎁 Выдача подписки админом",
-    "ADMIN_SUB_REDUCE": "✂️ Сокращение подписки админом",
-    "BALANCE_REFUND_REQUESTED": "↩️ Запрос возврата средств",
-    "BAN": "🚫 Блокировка пользователя",
-    "BAN_USER": "🚫 Блокировка пользователя",
-    "BROADCAST": "📢 Сделал рассылку",
-    "BROADCAST_COMPLETED": "📢 Рассылка завершена",
-    "CHANGE_TARIFF": "⚙️ Изменение тарифа",
-    "CLEANUP_DEVICE_DELETE": "🧹 Автоудаление устройства",
-    "DEDUCT_USER_BALANCE": "➖ Списание баланса админом",
-    "DELETE_DEVICE": "🗑 Удалил устройство",
-    "DELETE_SERVER": "🗑 Удалил сервер",
-    "DELETE_TARIFF": "🗑 Удалил тариф",
-    "DEVICE_CREATE": "📱 Создание устройства",
-    "DEVICE_CREATED": "📱 Создание устройства",
-    "DEVICE_CREATE_BLOCKED": "🚫 Блокировка создания (дневной лимит)",
-    "DEVICE_DELETE": "🗑 Удаление устройства",
-    "DEVICE_DELETED": "🗑 Удаление устройства",
-    "DEVICE_RENAME": "✏️ Переименование устройства",
-    "EDIT_SERVER": "✏️ Изменил сервер",
-    "EDIT_TARIFF": "✏️ Изменил тариф",
-    "EXTEND": "⏳ Продление подписки админом",
-    "GRANT": "🎁 Выдача подписки админом",
-    "MANUAL_GRANT": "🎫 Ручная выдача подписки",
-    "MASS_BONUS_GRANTED": "🎁 Массовый бонус",
-    "PAID_AFTER_CANCEL": "⚠️ Оплата после отмены",
-    "PAYMENT_CANCELLED": "❌ Платёж отменён",
-    "PAYMENT_CANCEL_AFTER_COMPLETED": "🚨 Отмена после завершения",
-    "PAYMENT_CHARGEBACK": "↩️ Возврат/Чарджбэк",
-    "PAYMENT_DISPUTE_MANUAL_REVIEW": "🧪 Спор на проверке",
-    "PAYMENT_DISPUTE_OPENED": "⚠️ Открыт спор по платежу",
-    "PAYMENT_DISPUTE_RESOLVED": "⚖️ Спор по платежу разрешён",
-    "PAYMENT_FAILED": "❌ Ошибка оплаты",
-    "PAYMENT_MANUAL_REVIEW": "🧪 Платёж на ручной проверке",
-    "PAYMENT_SUCCESS": "💳 Пополнение баланса",
-    "REDUCE": "✂️ Сокращение подписки админом",
-    "REFERRAL_ATTACHED": "🤝 Привязка реферала",
-    "REFERRAL_BONUS_GRANTED": "🎁 Реферальный бонус",
-    "REFUND": "↩️ Возврат средств",
-    "SUB_EXPIRED": "⌛ Истечение срока подписки",
-    "TARIFF_EDIT_BLOCKED": "🚫 Блокировка изменения тарифа",
-    "TOGGLE_MAINTENANCE": "🛠 Переключил техработы",
-    "TOGGLE_SERVER": "🔄 Переключил сервер",
-    "TOPUP_USER_BALANCE": "💳 Начисление баланса",
-    "UNBAN": "✅ Разблокировка пользователя",
-    "UNBAN_USER": "✅ Разблокировка пользователя",
-    "USER_REGISTER": "👋 Регистрация",
-    "USER_RESTORED": "♻️ Восстановление аккаунта",
-    "WELCOME_BONUS_GRANTED": "🎁 Приветственный бонус",
-    "WHITE_INTERNET_GRANT_TRIAL": "🎁 Выдача триала Белого Интернета",
-    "WHITE_INTERNET_RESET_TRIAL": "🔄 Сброс триала Белого Интернета",
-    "YOOKASSA_CALLBACK": "📥 Платёжный callback (YooKassa)",
-}
-
+# Admin alerts
 ADMIN_ALERT_ORDER_REQUIRES_MANUAL_REVIEW = (
     "⚠️ <b>Внимание: требуется ручная проверка заказа</b>\n\n"
     "Заказ: <code>{order_id}</code>\n"

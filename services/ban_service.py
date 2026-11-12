@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.enums import AdminAuditAction
 from database.models import Order, Payment, User
-from services.user_cache import invalidate_user_cache
 from database.repositories.users_repo import (
     get_user_by_telegram_id,
     update_user,
@@ -219,8 +218,6 @@ class BanService:
             },
         )
 
-        invalidate_user_cache(telegram_id)
-
         logger.info(
             "User %s banned by admin %s. "
             "Closed top-ups: %s, "
@@ -283,8 +280,6 @@ class BanService:
             target_id=user.id,
             details={"devices_restored": False},
         )
-
-        invalidate_user_cache(telegram_id)
 
         logger.info(
             "User %s unbanned by admin %s. Devices were not restored.",

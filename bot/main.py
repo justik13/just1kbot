@@ -8,8 +8,6 @@ import uuid
 
 import aiofiles.os
 from aiogram import Bot, Dispatcher
-from aiogram.fsm.storage.base import BaseStorage
-from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import ErrorEvent
 from aiohttp import web
 from aiohttp.web_log import AccessLogger
@@ -181,16 +179,13 @@ async def global_error_handler(
 
 async def setup_bot(
     bot: Bot | None = None,
-    storage: BaseStorage | None = None,
 ) -> tuple[Bot, Dispatcher]:
     settings = get_settings()
 
     if bot is None:
         bot = Bot(token=settings.BOT_TOKEN)
-    if storage is None:
-        storage = MemoryStorage()
 
-    dp = Dispatcher(storage=storage)
+    dp = Dispatcher()
 
     dp.message.middleware(CorrelationMiddleware())
     dp.callback_query.middleware(CorrelationMiddleware())

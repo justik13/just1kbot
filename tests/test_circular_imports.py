@@ -27,9 +27,6 @@ class CircularImportRegressionTests(unittest.TestCase):
     def test_config_tariffs_import(self):
         self._assert_isolated_code("import config.tariffs")
 
-    def test_services_user_cache_import(self):
-        self._assert_isolated_code("import services.user_cache")
-
     def test_bot_main_import(self):
         self._assert_isolated_code("import bot.main")
 
@@ -200,7 +197,7 @@ class CircularImportRegressionTests(unittest.TestCase):
         """Negative self-test proving that the AST scanner detects direct, aliased, and dynamic upward imports."""
         bad_code_samples = [
             ("import bot.texts", ("bot",)),
-            ("from bot.middlewares.user_context import invalidate_user_cache", ("bot.middlewares",)),
+            ("from bot.middlewares.correlation import correlation_scope", ("bot.middlewares",)),
             ("from bot import texts", ("bot",)),
             ("import bot", ("bot",)),
             ("importlib.import_module('bot.handlers')", ("bot.handlers",)),

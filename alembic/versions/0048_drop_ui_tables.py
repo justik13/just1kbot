@@ -1,6 +1,6 @@
-"""Drop legacy hub_messages and broadcast_progress UI tables.
+"""Drop legacy hub_messages, broadcast_progress, and admin_operation_idempotency UI tables.
 
-Revision ID: 0048_drop_hub_and_broadcast_tables
+Revision ID: 0048_drop_ui_tables
 Revises: 0047_drop_notified_grace_12h
 Create Date: 2026-11-12 00:00:00.000000
 """
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "0048_drop_hub_and_broadcast_tables"
+revision: str = "0048_drop_ui_tables"
 down_revision: str | None = "0047_drop_notified_grace_12h"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -36,11 +36,39 @@ def upgrade() -> None:
                 op.drop_index(idx_name, table_name="broadcast_progress")
         op.drop_table("broadcast_progress")
 
+    if "admin_operation_idempotency" in table_names:
+        index_names = {idx["name"] for idx in insp.get_indexes("admin_operation_idempotency")}
+        if "ix_admin_operation_idempotency_created_at" in index_names:
+            op.drop_index(
+                "ix_admin_operation_idempotency_created_at",
+                table_name="admin_operation_idempotency",
+            )
+        op.drop_table("admin_operation_idempotency")
+
 
 def downgrade() -> None:
     bind = op.get_bind()
     insp = sa.inspect(bind)
     table_names = set(insp.get_table_names())
+
+    if "admin_operation_idempotency" not in table_names:
+        op.create_table(
+            "admin_operation_idempotency",
+            sa.Column("op_key", sa.String(length=64), primary_key=True, nullable=False),
+            sa.Column("admin_id", sa.BigInteger(), nullable=False),
+            sa.Column("target_id", sa.BigInteger(), nullable=False),
+            sa.Column(
+                "created_at",
+                sa.DateTime(timezone=True),
+                nullable=False,
+                server_default=sa.text("now()"),
+            ),
+        )
+        op.create_index(
+            "ix_admin_operation_idempotency_created_at",
+            "admin_operation_idempotency",
+            ["created_at"],
+        )
 
     if "broadcast_progress" not in table_names:
         op.create_table(

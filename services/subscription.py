@@ -18,7 +18,6 @@ from database.repositories.users_repo import (
     get_user_by_telegram_id,
     get_user_by_telegram_id_any,
 )
-from services.user_cache import invalidate_user_cache
 from utils.datetime_helpers import (
     is_expired,
     is_vpn_access_expired,
@@ -132,7 +131,6 @@ class SubscriptionService:
             user.is_bot_blocked = False
 
             await session.flush()
-            invalidate_user_cache(telegram_id)
 
             from services.audit_service import AuditService
             await AuditService.log_action(
@@ -211,7 +209,6 @@ class SubscriptionService:
 
             if changed:
                 await session.flush()
-                invalidate_user_cache(telegram_id)
 
             return user
 
@@ -290,8 +287,6 @@ class SubscriptionService:
                 },
             )
 
-        invalidate_user_cache(telegram_id)
-
         return user
 
     @staticmethod
@@ -369,8 +364,6 @@ class SubscriptionService:
             user.current_tariff_id = new_tariff_id
 
         await session.flush()
-
-        invalidate_user_cache(telegram_id)
 
         await SubscriptionService._sync_access_state(session, user)
 

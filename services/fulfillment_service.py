@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config.constants import VPN_ACCESS_GRACE_HOURS
 from database.models import Order, User
 from services.subscription import SubscriptionService
-from services.user_cache import invalidate_user_cache
 from services.white_internet_service import WhiteInternetService
 from utils.datetime_helpers import now_utc
 
@@ -59,7 +58,6 @@ class FulfillmentService:
             user.notification_retry_count = 0
             user.last_notification_attempt = None
             await SubscriptionService.sync_access_state(session, user)
-            invalidate_user_cache(user.telegram_id)
             logger.info(
                 "Fulfilled standard order %s for user %s: +%s days (until %s, tariff_change=%s)",
                 order.id,
@@ -121,7 +119,6 @@ class FulfillmentService:
             logger.info("Fulfilled White Internet order %s for user %s", order.id, user.id)
 
         elif order.service_type == "topup":
-            invalidate_user_cache(user.telegram_id)
             logger.info(
                 "Fulfilled topup order %s for user %s (+%s RUB)",
                 order.id,
@@ -164,7 +161,6 @@ class FulfillmentService:
                 else:
                     user.subscription_end = new_end
             await SubscriptionService.sync_access_state(session, user)
-            invalidate_user_cache(user.telegram_id)
             logger.info(
                 "Revoked standard order %s for user %s (subscription_end=%s)",
                 order.id,
@@ -191,7 +187,6 @@ class FulfillmentService:
                     )
                     sub.desired_version = (sub.desired_version or 0) + 1
                     await session.flush()
-                    invalidate_user_cache(user.telegram_id)
                     logger.info(
                         "Revoked White Internet topup order %s for user %s (-%s bytes, extra_traffic_bytes=%s)",
                         order.id,
@@ -227,7 +222,6 @@ class FulfillmentService:
                     )
                     sub.desired_version = (sub.desired_version or 0) + 1
                     await session.flush()
-                    invalidate_user_cache(user.telegram_id)
                     logger.info(
                         "Revoked White Internet device slot order %s for user %s (device_limit=%s, extra_traffic_bytes=%s)",
                         order.id,
