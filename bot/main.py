@@ -16,6 +16,7 @@ from cryptography.fernet import Fernet
 
 from bot import texts
 from bot.handlers.notifications import router as notifications_router
+from bot.handlers.start import router as start_router
 from bot.handlers.webhook import setup_webhook_routes
 from bot.keyboards.notifications import get_dismiss_alert_keyboard
 from bot.middlewares import (
@@ -190,7 +191,9 @@ async def setup_bot(
     dp.message.middleware(CorrelationMiddleware())
     dp.callback_query.middleware(CorrelationMiddleware())
 
+    start_router._parent_router = None
     notifications_router._parent_router = None
+    dp.include_router(start_router)
     dp.include_router(notifications_router)
     dp.errors.register(global_error_handler)
 

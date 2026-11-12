@@ -54,6 +54,130 @@ def get_server_xray_api_url(server) -> str | None:
     return extra.get("xray_api_url") or getattr(server, "api_url", None)
 
 
+V2_NODE_ROLES = ("ru_hub", "eu_hub", "exit_node")
+
+
+def get_server_role(server) -> str | None:
+    """Extract normalized v2 node role from Server.extra_data/capabilities."""
+    extra = getattr(server, "extra_data", None)
+    if isinstance(extra, dict):
+        role = str(extra.get("role") or "").strip().lower()
+        if role in V2_NODE_ROLES:
+            return role
+    caps = getattr(server, "capabilities", None) or []
+    if isinstance(caps, (list, tuple, set)):
+        for role in V2_NODE_ROLES:
+            if role in caps:
+                return role
+        if "bridge_hub" in caps:
+            return "eu_hub"
+    return None
+
+
+def is_v2_node_server(server) -> bool:
+    """Return True if server has an identified v2 modular role."""
+    return get_server_role(server) in V2_NODE_ROLES
+
+
+def derive_v2_capabilities(
+    status_data: dict | None = None,
+    health_data: dict | None = None,
+) -> list[str]:
+    """Derive canonical Server.capabilities list from v2 node /status and /health responses."""
+    caps: list[str] = []
+
+    def _add(cap: str) -> None:
+        if cap and cap not in caps:
+            caps.append(cap)
+
+    status_d = status_data if isinstance(status_data, dict) else {}
+    health_d = health_data if isinstance(health_data, dict) else {}
+    role = str(status_d.get("role") or health_d.get("role") or "").strip().lower()
+    if role in V2_NODE_ROLES:
+        _add(role)
+
+    for raw_cap in (health_d.get("capabilities") or []):
+        if isinstance(raw_cap, str) and raw_cap.strip():
+            _add(raw_cap.strip().lower())
+
+    for svc in (health_d.get("services") or []):
+        if isinstance(svc, str) and svc.strip():
+            s = svc.strip().lower()
+            _add(s)
+            if s == "white_internet":
+                _add(XRAY_ORIGIN_CAPABILITY)
+            elif s == "vless":
+                _add("xray_vless")
+
+    modules = status_d.get("modules") or health_d.get("modules") or {}
+    if isinstance(modules, dict):
+        vless_mod = modules.get("vless_tls")
+        if isinstance(vless_mod, dict) and vless_mod.get("enabled"):
+            _add("vless")
+            _add("xray_vless")
+        xhttp_mod = modules.get("vless_xhttp")
+        if isinstance(xhttp_mod, dict) and xhttp_mod.get("enabled"):
+            _add("white_internet")
+            _add(XRAY_ORIGIN_CAPABILITY)
+
+    if role == "eu_hub":
+        _add("bridge_hub")
+    elif role == "exit_node":
+        _add("exit_node")
+
+    return caps
+
+
+def merge_v2_extra_data(
+    existing_extra: dict | None,
+    status_data: dict | None = None,
+    health_data: dict | None = None,
+    *,
+    links_override: dict | None = None,
+    tls_bootstrap: bool | None = None,
+) -> dict:
+    """Merge v2 auto-discovery metadata into Server.extra_data cleanly without losing monitor state."""
+    merged = dict(existing_extra) if isinstance(existing_extra, dict) else {}
+    status_d = status_data if isinstance(status_data, dict) else {}
+    health_d = health_data if isinstance(health_data, dict) else {}
+
+    def _pick(key: str, default=None):
+        val = status_d.get(key)
+        if val is None:
+            val = health_d.get(key)
+        return default if val is None else val
+
+    role = str(_pick("role", merged.get("role") or "unconfigured")).strip().lower()
+    merged["role"] = role
+    for key in (
+        "domain",
+        "cdn_domain",
+        "sub_path_prefix",
+        "secret_base_path",
+        "bridge_uuid",
+        "modules",
+        "module_errors",
+        "xhttp_locations",
+        "inbounds",
+        "traffic_limit",
+    ):
+        val = _pick(key)
+        if val is not None:
+            merged[key] = val
+
+    if links_override is not None:
+        merged["links"] = links_override
+    else:
+        node_links = _pick("links")
+        if isinstance(node_links, dict):
+            merged["links"] = node_links
+
+    if tls_bootstrap is not None:
+        merged["tls_bootstrap"] = bool(tls_bootstrap)
+
+    return merged
+
+
 class ServerUpdateFields(TypedDict, total=False):
     name: str
     country_flag: str | None
@@ -239,7 +363,14 @@ async def create_server(
     max_clients: int = DEFAULT_XRAY_ORIGIN_MAX_CLIENTS,
     capabilities: list[str] | None = None,
     lifecycle_status: str | ServerLifecycleStatus = ServerLifecycleStatus.ACTIVE,
+    extra_data: dict | None = None,
+    is_active: bool | None = None,
 ) -> Server:
+    effective_is_active = (
+        is_active
+        if is_active is not None
+        else (str(lifecycle_status) == ServerLifecycleStatus.ACTIVE)
+    )
     server = Server(
         name=name,
         api_url=api_url,
@@ -249,7 +380,8 @@ async def create_server(
         max_clients=max_clients,
         capabilities=capabilities or [],
         lifecycle_status=str(lifecycle_status),
-        is_active=(str(lifecycle_status) == ServerLifecycleStatus.ACTIVE),
+        is_active=effective_is_active,
+        extra_data=extra_data if isinstance(extra_data, dict) else {},
     )
     session.add(server)
     await session.flush()

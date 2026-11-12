@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Just1k Control</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <link rel="stylesheet" href="/app/assets/css/tokens.css">
+    <link rel="stylesheet" href="/app/assets/css/components.css">
+</head>
+<body>
+    <div class="app-shell">
+        <header class="topbar">
+            <div class="brand">
+                <span class="brand-dot"></span>
+                <span class="brand-title">Just1k</span>
+                <span id="roleChip" class="chip chip-muted" hidden></span>
+            </div>
+            <div id="userChip" class="user-meta"></div>
+        </header>
+
+        <nav id="adminNav" class="tab-bar" hidden>
+            <button type="button" class="tab-btn active" data-tab="nodes">Ноды</button>
+            <button type="button" class="tab-btn" data-tab="topology">Связи каскада</button>
+        </nav>
+
+        <main id="appRoot" class="app-main">
+            <section class="card card-center">
+                <div class="muted">Проверка доступа...</div>
+            </section>
+        </main>
+    </div>
+
+    <div id="modalRoot" class="modal-backdrop" hidden></div>
+    <div id="toastRoot" class="toast" hidden></div>
+
+    <script type="module" src="/app/assets/js/app.js"></script>
+</body>
+</html>

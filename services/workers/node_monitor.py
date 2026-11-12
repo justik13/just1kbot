@@ -52,6 +52,7 @@ from database.repositories.servers_repo import (
     get_all_servers,
     get_server_by_id,
     get_server_xray_api_url,
+    is_v2_node_server,
     is_vless_capable_server,
     is_white_internet_origin_server,
     update_server,
@@ -389,7 +390,11 @@ async def check_node_resources_and_alerts(bot: Bot):
         if not isinstance(caps, (list, tuple, set)):
             caps = []
 
-        has_xray = is_vless_capable_server(server) or is_white_internet_origin_server(server)
+        has_xray = (
+            is_vless_capable_server(server)
+            or is_white_internet_origin_server(server)
+            or is_v2_node_server(server)
+        )
 
         if not has_xray:
             logger.warning(
@@ -399,6 +404,7 @@ async def check_node_resources_and_alerts(bot: Bot):
             return
 
         is_xray_node = has_xray
+        allow_bootstrap_tls = bool((getattr(server, "extra_data", None) or {}).get("tls_bootstrap"))
 
         # 4a. Исполнение проверки Core Node API с гарантированным отловом любых сетевых ошибок/таймаутов
         is_healthy = False
@@ -420,7 +426,10 @@ async def check_node_resources_and_alerts(bot: Bot):
                     )
                     xray_ok = False
                 else:
-                    async with XrayNodeClient(timeout=10.0) as xray_client:
+                    async with XrayNodeClient(
+                        timeout=10.0,
+                        allow_insecure_tls=allow_bootstrap_tls,
+                    ) as xray_client:
                         xray_ok, xray_epoch, xray_data = await xray_client.check_health(
                             xray_url, server.api_key
                         )
