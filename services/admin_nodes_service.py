@@ -476,6 +476,11 @@ async def push_node_certificate(
             status_code=502,
         )
 
+    extra_new = dict(extra_cur)
+    extra_new["domain"] = clean_domain
+    extra_new["tls_bootstrap"] = False
+    updated = await update_server(session, server, extra_data=extra_new)
+
     await AuditService.log_action(
         session,
         admin_id=admin_id,
@@ -485,6 +490,6 @@ async def push_node_certificate(
         details={"operation": "deploy_certificate", "domain": clean_domain},
     )
     return {
-        "node": serialize_server_node(server),
+        "node": serialize_server_node(updated),
         "domain": clean_domain,
     }

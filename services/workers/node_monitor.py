@@ -435,6 +435,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                         )
                         if (
                             xray_ok
+                            and not is_v2_node_server(server)
                             and ("xray_origin" in caps or bool((getattr(server, "extra_data", None) or {}).get("relays")))
                             and hasattr(xray_client, "get_relays_health")
                         ):

@@ -14,46 +14,6 @@ from config.constants import (
 from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.models import Server
 
-def is_vless_capable_server(server) -> bool:
-    """Whether a server can serve direct VLESS TLS clients.
-
-    True if 'vless' or 'xray_vless' capability is present, or protocol is 'vless'.
-    """
-    if not server:
-        return False
-    caps = getattr(server, "capabilities", None) or []
-    if not isinstance(caps, (list, tuple, set)):
-        caps = []
-    raw_proto = getattr(server, "protocol", None)
-    proto = raw_proto.strip().lower() if isinstance(raw_proto, str) else ""
-    return "vless" in caps or "xray_vless" in caps or proto == VLESS_PROTOCOL
-
-
-def is_white_internet_origin_server(server) -> bool:
-    """Whether a server is an origin server for White Internet contour."""
-    if not server:
-        return False
-    caps = getattr(server, "capabilities", None) or []
-    if not isinstance(caps, (list, tuple, set)):
-        caps = []
-    raw_proto = getattr(server, "protocol", None)
-    proto = raw_proto.strip().lower() if isinstance(raw_proto, str) else ""
-    if XRAY_ORIGIN_CAPABILITY in caps:
-        return True
-    return proto == XRAY_PROTOCOL and not is_vless_capable_server(server)
-
-
-def is_pure_vless_server(server) -> bool:
-    """Whether a server is a pure direct VLESS server (not White Internet Origin)."""
-    return is_vless_capable_server(server) and not is_white_internet_origin_server(server)
-
-
-def get_server_xray_api_url(server) -> str | None:
-    """Return explicit Xray API URL for the server."""
-    extra = getattr(server, "extra_data", None) if isinstance(getattr(server, "extra_data", None), dict) else {}
-    return extra.get("xray_api_url") or getattr(server, "api_url", None)
-
-
 V2_NODE_ROLES = ("ru_hub", "eu_hub", "exit_node")
 
 
@@ -77,6 +37,48 @@ def get_server_role(server) -> str | None:
 def is_v2_node_server(server) -> bool:
     """Return True if server has an identified v2 modular role."""
     return get_server_role(server) in V2_NODE_ROLES
+
+
+def is_vless_capable_server(server) -> bool:
+    """Whether a server can serve direct VLESS TLS clients.
+
+    True if 'vless' or 'xray_vless' capability is present, or protocol is 'vless'.
+    """
+    if not server:
+        return False
+    caps = getattr(server, "capabilities", None) or []
+    if not isinstance(caps, (list, tuple, set)):
+        caps = []
+    raw_proto = getattr(server, "protocol", None)
+    proto = raw_proto.strip().lower() if isinstance(raw_proto, str) else ""
+    return "vless" in caps or "xray_vless" in caps or proto == VLESS_PROTOCOL
+
+
+def is_white_internet_origin_server(server) -> bool:
+    """Whether a server is an origin server for White Internet contour."""
+    if not server:
+        return False
+    if get_server_role(server) in ("eu_hub", "exit_node"):
+        return False
+    caps = getattr(server, "capabilities", None) or []
+    if not isinstance(caps, (list, tuple, set)):
+        caps = []
+    raw_proto = getattr(server, "protocol", None)
+    proto = raw_proto.strip().lower() if isinstance(raw_proto, str) else ""
+    if XRAY_ORIGIN_CAPABILITY in caps:
+        return True
+    return proto == XRAY_PROTOCOL and not is_vless_capable_server(server)
+
+
+def is_pure_vless_server(server) -> bool:
+    """Whether a server is a pure direct VLESS server (not White Internet Origin)."""
+    return is_vless_capable_server(server) and not is_white_internet_origin_server(server)
+
+
+def get_server_xray_api_url(server) -> str | None:
+    """Return explicit Xray API URL for the server."""
+    extra = getattr(server, "extra_data", None) if isinstance(getattr(server, "extra_data", None), dict) else {}
+    return extra.get("xray_api_url") or getattr(server, "api_url", None)
 
 
 def derive_v2_capabilities(

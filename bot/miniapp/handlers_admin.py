@@ -67,6 +67,17 @@ async def api_me_handler(request: web.Request) -> web.Response:
         return err_resp  # type: ignore[return-value]
 
     display_name = " ".join(part for part in (ctx.first_name, ctx.last_name) if part).strip()
+    security_payload = (
+        {
+            "two_factor_required": True,
+            "two_factor_mode": "stub_todo",
+            "two_factor_todo": "TODO: TOTP 2FA (pyotp) pending",
+        }
+        if ctx.is_admin
+        else {
+            "two_factor_required": False,
+        }
+    )
     return web.json_response({
         "ok": True,
         "user": {
@@ -75,11 +86,7 @@ async def api_me_handler(request: web.Request) -> web.Response:
             "username": ctx.username,
             "is_admin": ctx.is_admin,
         },
-        "security": {
-            "two_factor_required": ctx.is_admin,
-            "two_factor_mode": "stub_todo",
-            "two_factor_todo": "TODO: TOTP 2FA (pyotp) pending",
-        },
+        "security": security_payload,
     })
 
 
