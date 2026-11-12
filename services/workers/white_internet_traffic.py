@@ -377,28 +377,21 @@ class WhiteInternetTrafficWorker:
 
                 if telegram_id:
                     from aiogram.exceptions import TelegramForbiddenError
-                    from aiogram.utils.keyboard import InlineKeyboardBuilder
                     from bot import texts
+                    from bot.keyboards.notifications import get_dismiss_notification_keyboard
 
                     alert_text = (
                         texts.WL_TRAFFIC_EXHAUSTED_TRIAL_ALERT
                         if is_sub_trial
                         else texts.WL_TRAFFIC_EXHAUSTED_ALERT
                     )
-                    kb = InlineKeyboardBuilder()
-                    if is_sub_trial:
-                        kb.button(text=texts.BTN_BUY_ACCESS, callback_data="white_internet")
-                    else:
-                        kb.button(text=texts.BTN_WL_TOPUP, callback_data="wl_topup_menu")
-                    kb.button(text=texts.BTN_DISMISS_NOTIFICATION, callback_data="dismiss_notification")
-                    kb.adjust(1)
 
                     for attempt in range(3):
                         try:
                             await self.bot.send_message(
                                 chat_id=telegram_id,
                                 text=alert_text,
-                                reply_markup=kb.as_markup(),
+                                reply_markup=get_dismiss_notification_keyboard(),
                                 parse_mode="HTML",
                             )
                             break
@@ -430,26 +423,19 @@ class WhiteInternetTrafficWorker:
 
                 if telegram_id:
                     try:
-                        from aiogram.utils.keyboard import InlineKeyboardBuilder
                         from bot import texts
+                        from bot.keyboards.notifications import get_dismiss_notification_keyboard
 
                         alert_text = (
                             texts.WL_TRAFFIC_90P_TRIAL_ALERT
                             if is_sub_trial
                             else texts.WL_TRAFFIC_90P_ALERT
                         )
-                        kb = InlineKeyboardBuilder()
-                        if is_sub_trial:
-                            kb.button(text=texts.BTN_BUY_ACCESS, callback_data="white_internet")
-                        else:
-                            kb.button(text=texts.BTN_WL_TOPUP, callback_data="wl_topup_menu")
-                        kb.button(text=texts.BTN_DISMISS_NOTIFICATION, callback_data="dismiss_notification")
-                        kb.adjust(1)
 
                         await self.bot.send_message(
                             chat_id=telegram_id,
                             text=alert_text,
-                            reply_markup=kb.as_markup(),
+                            reply_markup=get_dismiss_notification_keyboard(),
                             parse_mode="HTML",
                         )
                         async with sf() as sess:

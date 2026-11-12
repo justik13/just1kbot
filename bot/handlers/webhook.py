@@ -203,8 +203,8 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
             n_order_id, n_user_id = notify_order_info
             try:
                 from database.models import Order, User
-                from bot.handlers.payment.credit_notify import notify_order_credited
                 from services.order_notifications import mark_notified
+                from services.workers.credit_notifications import notify_order_credited
 
                 async with session_scope() as notify_session:
                     loaded_order = await notify_session.get(Order, n_order_id)

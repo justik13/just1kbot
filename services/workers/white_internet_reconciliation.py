@@ -96,16 +96,12 @@ class WhiteInternetReconciliationWorker:
             user = await session.get(User, user_id)
             if not user or not user.telegram_id:
                 return
-            from aiogram.utils.keyboard import InlineKeyboardBuilder
             from bot import texts
-            kb = InlineKeyboardBuilder()
-            kb.button(text=texts.BTN_WL_CONNECT_CLIENT, callback_data="white_internet")
-            kb.button(text=texts.BTN_DISMISS_NOTIFICATION, callback_data="dismiss_notification")
-            kb.adjust(1)
+            from bot.keyboards.notifications import get_dismiss_notification_keyboard
             await self.bot.send_message(
                 chat_id=user.telegram_id,
                 text=texts.WL_AUTO_PUSH_READY,
-                reply_markup=kb.as_markup(),
+                reply_markup=get_dismiss_notification_keyboard(),
                 parse_mode="HTML",
             )
         except Exception as exc:

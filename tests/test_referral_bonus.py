@@ -70,23 +70,6 @@ class TestReferralTiers(unittest.TestCase):
             assert t.next_rate is None
 
 
-class TestMaskTelegramId(unittest.TestCase):
-    def test_masking_standard_ids(self):
-        from bot.texts.user.referral import mask_telegram_id
-
-        assert mask_telegram_id(8141287721) == "814***21"
-        assert mask_telegram_id("8141287721") == "814***21"
-        assert mask_telegram_id(123456789) == "123***89"
-        assert mask_telegram_id(12345) == "123***45"
-
-    def test_masking_short_ids(self):
-        from bot.texts.user.referral import mask_telegram_id
-
-        assert mask_telegram_id(1234) == "1***4"
-        assert mask_telegram_id(12) == "1***2"
-        assert mask_telegram_id(1) == "***"
-
-
 class TestTariffChangeMath(unittest.TestCase):
     """Pure mathematical validation for OrderService.calculate_tariff_change."""
 

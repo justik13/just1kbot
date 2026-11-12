@@ -7,7 +7,7 @@ from typing import Any
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
 from cachetools import TTLCache
-from sqlalchemy import and_, cast, delete, or_, select, String, update
+from sqlalchemy import and_, cast, delete, or_, select, String
 from sqlalchemy.ext.asyncio import AsyncSession
 from config.constants import (
     AdminAuditAction,
@@ -17,8 +17,6 @@ from config.constants import (
 from database.connection import session_scope
 from database.models import (
     AdminOperationIdempotency,
-    BroadcastProgress,
-    HubMessage,
     Order,
     User,
     VlessSubscription,
@@ -429,32 +427,8 @@ async def _batch_delete_matching(
 async def _cleanup_old_records():
     current_time = now_utc()
 
-    # Mark stuck in_progress broadcasts as stopped (short atomic transaction)
-    threshold_stuck = current_time - timedelta(hours=2)
-    async with session_scope() as session:
-        stmt_stuck = (
-            update(BroadcastProgress)
-            .where(BroadcastProgress.status == "in_progress")
-            .where(BroadcastProgress.updated_at < threshold_stuck)
-            .values(status="stopped")
-        )
-        await session.execute(stmt_stuck)
-
-    threshold_broadcasts = current_time - timedelta(days=7)
-    broadcasts_deleted = await _batch_delete_matching(
-        BroadcastProgress,
-        BroadcastProgress.status.in_(["completed", "stopped"]),
-        BroadcastProgress.updated_at < threshold_broadcasts,
-    )
-
     deleted_logs = await clear_audit_logs(
         older_than_days=AUDIT_LOG_RETENTION_DAYS,
-    )
-
-    threshold_hub = current_time - timedelta(days=1)
-    hub_deleted = await _batch_delete_matching(
-        HubMessage,
-        HubMessage.created_at < threshold_hub,
     )
 
     threshold_idempotency = current_time - timedelta(days=7)
@@ -475,18 +449,13 @@ async def _cleanup_old_records():
     )
 
     if (
-        broadcasts_deleted > 0
-        or deleted_logs > 0
-        or hub_deleted > 0
+        deleted_logs > 0
         or webhooks_deleted > 0
         or idempotency_deleted > 0
     ):
         logger.info(
-            "Cleanup: %s old broadcasts, %s old audit logs, "
-            "%s old hub_messages, %s old webhooks deleted, %s old idempotency records deleted",
-            broadcasts_deleted,
+            "Cleanup: %s old audit logs, %s old webhooks deleted, %s old idempotency records deleted",
             deleted_logs,
-            hub_deleted,
             webhooks_deleted,
             idempotency_deleted,
         )

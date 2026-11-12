@@ -741,43 +741,6 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
-class BroadcastProgress(Base):
-    __tablename__ = "broadcast_progress"
-
-    __table_args__ = (
-        Index(
-            "ix_broadcast_in_progress",
-            "status",
-            "created_at",
-            postgresql_where=text("status = 'in_progress'"),
-        ),
-    )
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-
-    admin_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
-
-    total_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    success_count: Mapped[int] = mapped_column(Integer, default=0)
-    fail_count: Mapped[int] = mapped_column(Integer, default=0)
-    last_processed_id: Mapped[int] = mapped_column(BigInteger, default=0)
-
-    target_audience: Mapped[str] = mapped_column(String(20), default="all")
-
-    broadcast_text: Mapped[str] = mapped_column(Text, nullable=False)
-    media_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    content_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    label: Mapped[str] = mapped_column(String(50), nullable=False)
-
-    status: Mapped[str] = mapped_column(String(20), default="in_progress", index=True)
-
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=now_utc,
-        onupdate=now_utc,
-    )
-
 DEFAULT_MAINTENANCE_MESSAGE = (
     "🛠 Бот находится на техническом обслуживании. Пожалуйста, попробуйте позже."
 )
@@ -797,20 +760,6 @@ class MaintenanceMode(Base):
         default=now_utc,
         onupdate=now_utc,
     )
-
-
-class HubMessage(Base):
-    __tablename__ = "hub_messages"
-
-    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    message_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    # Durable marker for Telegram message-effect screens: lets render_hub
-    # restore the "clean hub on next navigation" invariant after restart.
-    is_effect_message: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("false"), default=False
-    )
-
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
 class SystemSetting(Base):

@@ -17,7 +17,7 @@ from aiogram import Bot
 from sqlalchemy import func, select
 
 from bot.keyboards.notifications import get_node_monitor_alert_keyboard
-from bot.texts.common.status import TIME_HOURS_LEFT
+from bot.texts.backend import TIME_HOURS_LEFT
 from bot.texts.runtime.alerts import (
     ALERT_CDN_INGRESS_PROBLEM,
     ALERT_CDN_INGRESS_PROBLEM_REMINDER,

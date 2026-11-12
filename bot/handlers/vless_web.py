@@ -14,7 +14,7 @@ import urllib.parse
 from aiohttp import web
 
 from bot import texts
-from bot.formatters import format_plural, get_tariff_display_name
+from bot.texts import get_tariff_display_name
 from config import constants
 from database.connection import session_scope
 from database.repositories import tariffs_repo, users_repo, vless_subscription_repo
@@ -23,6 +23,7 @@ from services.subscription import SubscriptionService
 from services.vless_subscription_service import VlessSubscriptionService
 from utils.client_parser import extract_device_metadata, parse_client_from_user_agent
 from utils.datetime_helpers import now_utc
+from utils.formatters import format_plural
 from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
 
 logger = logging.getLogger(__name__)

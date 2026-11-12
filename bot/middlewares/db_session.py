@@ -43,19 +43,12 @@ class DBSessionMiddleware(BaseMiddleware):
                     except Exception:
                         pass
 
-                    from bot.keyboards.common import get_back_button
-                    from utils.telegram import spawn_auto_delete
+                    from bot.keyboards.notifications import get_dismiss_notification_keyboard
 
-                    err_msg = await event.answer(
+                    await event.answer(
                         texts.ERROR_TECHNICAL_MESSAGE,
-                        reply_markup=get_back_button("back_to_main_menu"),
+                        reply_markup=get_dismiss_notification_keyboard(),
                         parse_mode="HTML",
-                    )
-                    spawn_auto_delete(
-                        event.bot,
-                        event.chat.id,
-                        err_msg.message_id,
-                        delay=7.0,
                     )
             except Exception:
                 pass

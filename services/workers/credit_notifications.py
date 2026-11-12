@@ -32,10 +32,11 @@ from cachetools import TTLCache
 from sqlalchemy import func, or_, select
 
 from bot import texts
-from bot.formatters import get_tariff_display_name
-from bot.keyboards import get_payment_success_keyboard
-from bot.keyboards.notifications import get_referral_bonus_keyboard
-from bot.keyboards.payment import get_topup_credit_keyboard
+from bot.keyboards.notifications import (
+    get_dismiss_notification_keyboard,
+    get_referral_bonus_keyboard,
+)
+from bot.texts import get_tariff_display_name
 from config.constants import WORKER_ERROR_SLEEP_INTERVAL
 from database.connection import session_scope
 from database.models import AccountLedgerEntry, Order, User
@@ -147,6 +148,79 @@ async def deliver_pending_credit_notifications(bot: Bot) -> int:
     return delivered
 
 
+def _format_credit_push_text(
+    service_type: str,
+    *,
+    device_limit: int,
+    is_tariff_change: bool,
+    duration_days: int,
+    amount_rub: int | Decimal,
+    real_available: int,
+    bonus_available: int,
+) -> str:
+    """Build push notification text for a credited topup or tariff order."""
+    if service_type == "topup":
+        return (
+            f"{texts.TOPUP_CREDITED_NOTICE}\n\n"
+            + texts.BALANCE_BALANCE.format(
+                int_snapshot_real_available=real_available
+            )
+        )
+    tariff_name = get_tariff_display_name(device_limit or 2)
+    operation = (
+        texts.PAYMENT_OP_TITLE_CHANGE
+        if is_tariff_change
+        else texts.PURCHASE_COMPLETED
+    )
+    return texts.PAYMENT_PURCHASE_SUCCESS_CARD.format(
+        operation_title=operation,
+        tariff_name=tariff_name,
+        duration_days=duration_days,
+        charged=int(amount_rub),
+        real_balance=real_available,
+        bonus_balance=bonus_available,
+    )
+
+
+async def notify_order_credited(
+    bot,
+    session,
+    order: Order,
+    user: User | None,
+) -> bool:
+    """Send immediate credit push notification from payment webhook."""
+    try:
+        if not user or not user.telegram_id:
+            return False
+        balance = await get_account_balance(session, user_id=user.id)
+        meta = order.metadata_ or {}
+        text = _format_credit_push_text(
+            order.service_type,
+            device_limit=order.device_limit or 2,
+            is_tariff_change=bool(meta.get("is_tariff_change")),
+            duration_days=order.duration_days or 0,
+            amount_rub=order.amount_rub or 0,
+            real_available=int(balance.real_available),
+            bonus_available=int(balance.bonus_available),
+        )
+        sent_id = await safe_send_message(
+            bot,
+            user.telegram_id,
+            text,
+            reply_markup=get_dismiss_notification_keyboard(),
+            message_effect_id=EFFECT_CONFETTI,
+        )
+        return sent_id is not None
+    except Exception as exc:
+        logger.warning(
+            "Could not notify user %s of credited order %s: %s",
+            getattr(user, "id", "?"),
+            getattr(order, "id", "?"),
+            exc,
+        )
+        return False
+
+
 async def _send_late_push(
     bot: Bot,
     service_type: str,
@@ -158,46 +232,24 @@ async def _send_late_push(
     """Compact proactive push for a credited order (no DB access).
 
     Uses only the worker-allowed presentation adapters (``bot.texts``,
-    ``bot.keyboards``) plus ``utils.telegram`` delivery — the full hub
-    screens stay on the request path (webhook / order_check).
+    ``bot.keyboards``) plus ``utils.telegram`` delivery.
     Returns True only when Telegram accepted the message.
     """
     try:
-        if service_type == "topup":
-            keyboard = (
-                get_topup_credit_keyboard(fields["context"])
-                if fields["context"]
-                else None
-            )
-            text = (
-                f"{texts.TOPUP_CREDITED_NOTICE}\n\n"
-                + texts.BALANCE_BALANCE.format(
-                    int_snapshot_real_available=real_available
-                )
-            )
-        else:
-            # Same tier label as the request path (credit_notify.py):
-            # two pushes for one order must never name the tariff differently.
-            tariff_name = get_tariff_display_name(fields["device_limit"] or 2)
-            operation = (
-                texts.PAYMENT_OP_TITLE_CHANGE
-                if fields["is_tariff_change"]
-                else texts.PURCHASE_COMPLETED
-            )
-            text = texts.PAYMENT_PURCHASE_SUCCESS_CARD.format(
-                operation_title=operation,
-                tariff_name=tariff_name,
-                duration_days=fields["duration_days"],
-                charged=int(fields["amount_rub"]),
-                real_balance=real_available,
-                bonus_balance=bonus_available,
-            )
-            keyboard = get_payment_success_keyboard()
+        text = _format_credit_push_text(
+            service_type,
+            device_limit=fields["device_limit"] or 2,
+            is_tariff_change=bool(fields["is_tariff_change"]),
+            duration_days=fields["duration_days"],
+            amount_rub=fields["amount_rub"],
+            real_available=real_available,
+            bonus_available=bonus_available,
+        )
         sent_id = await safe_send_message(
             bot,
             telegram_id,
             text,
-            reply_markup=keyboard,
+            reply_markup=get_dismiss_notification_keyboard(),
             message_effect_id=EFFECT_CONFETTI,
             raise_forbidden=True,
         )

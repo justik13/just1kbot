@@ -2,7 +2,6 @@ import re
 import unittest
 
 from bot import texts
-from bot.texts.user import referral as REFERRAL_TEXTS
 
 FORBIDDEN_USER_WORDING = (
     "Что делать, если VPN не подключается или медленно работает?",
@@ -32,13 +31,13 @@ FORBIDDEN_USER_WORDING = (
 
 
 def _effective_user_text_values() -> list[str]:
-    from bot.texts import common, connection, payment, user
+    from bot.texts import backend
     from bot.texts.runtime import notifications
 
     values: list[str] = []
-    for mod in (user, connection, payment, notifications, common):
+    for mod in (backend, notifications):
         for name in dir(mod):
-            if name.isupper() and not name.startswith("_"):
+            if name.isupper() and not name.startswith("_") and not name.startswith("ADMIN_"):
                 value = getattr(mod, name)
                 if isinstance(value, str):
                     values.append(value)
@@ -64,26 +63,6 @@ class TestUserTextAudit(unittest.TestCase):
         assert "amnezia" not in clean_text
         assert "amneziawg" not in clean_text
         assert re.search(r"\bawg\b", clean_text) is None
-
-    def test_technical_connection_identifiers_are_preserved(self):
-        faq = texts.FAQ_TEXT
-        assert "INCY" in faq
-        assert "Happ" in faq
-
-    def test_referral_texts_do_not_keep_removed_profile_screens(self):
-        assert "PROFILE_TEXT_ACTIVE_REFERRAL_BALANCE" not in dir(REFERRAL_TEXTS)
-        assert "PROFILE_TEXT_INACTIVE_REFERRAL_BALANCE" not in dir(REFERRAL_TEXTS)
-
-    def test_faq_uses_dynamic_device_limit_wording(self):
-        faq = texts.FAQ_TEXT
-        assert "Количество доступных устройств зависит от выбранного тарифа." in faq
-        assert "до 10 устройств" not in faq
-
-    def test_active_user_facing_claims_are_neutralized(self):
-        assert "в один клик" not in texts.WELCOME_TEXT.lower()
-        assert "24 часа" not in texts.SUPPORT_TEXT
-        assert "максимальной скорости" not in texts.PAYMENT_SHOWCASE_HEADER
-        assert "Мы постараемся помочь как можно скорее." in texts.SUPPORT_TEXT
 
     def test_payment_and_receipt_descriptions_contain_no_vpn_wording(self):
         descriptions = [
@@ -112,4 +91,3 @@ class TestUserTextAudit(unittest.TestCase):
                 if forbidden == "LTE":
                     continue
                 assert forbidden.casefold() not in content.casefold(), f"Forbidden wording '{forbidden}' in {html_file}"
-

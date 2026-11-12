@@ -2,7 +2,6 @@ import asyncio
 import html
 import logging
 import re
-import time
 from typing import Any
 
 from aiogram.exceptions import (
@@ -16,15 +15,9 @@ from aiogram.types import (
     DisabledButton,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    InputFile,
     LinkPreviewOptions,
 )
-from cachetools import TTLCache
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.constants import HUB_CACHE_MAX_SIZE, HUB_CACHE_TTL
-from database.connection import session_scope
-from database.repositories import hub_repo
 from utils.text_limits import split_text_by_lines
 
 logger = logging.getLogger(__name__)
@@ -34,145 +27,14 @@ logger = logging.getLogger(__name__)
 # Verified via live API scan (696 tested against Telegram servers, exactly 6 supported):
 # ==============================================================================
 EFFECT_LIKE = "5107584321108051014"        # 👍 Like / Thumbs Up (system confirmations, rename)
-EFFECT_FIRE = "5104841245755180586"        # 🔥 Fire (VPN device creation, referral rewards)
+EFFECT_FIRE = "5104841245755180586"        # 🔥 Fire (device creation, referral rewards)
 EFFECT_CONFETTI = "5046509860389126442"    # 🎉 Confetti (balance topup, plan purchase, renewal)
-
-_hub_cache = TTLCache(maxsize=HUB_CACHE_MAX_SIZE, ttl=HUB_CACHE_TTL)
-
-_last_cleanup_time: float = 0.0
-_CLEANUP_INTERVAL = 3600.0
-
-_hub_render_locks: dict[int, tuple[asyncio.Lock, float]] = {}
-_RENDER_LOCK_TTL = 3600.0
-_last_render_lock_cleanup: float = 0.0
-
-
-def _get_hub_render_lock(chat_id: int) -> asyncio.Lock:
-    global _last_render_lock_cleanup
-
-    now = time.monotonic()
-
-    if now - _last_render_lock_cleanup > _CLEANUP_INTERVAL:
-        _cleanup_render_locks(now)
-        _last_render_lock_cleanup = now
-
-    if chat_id not in _hub_render_locks:
-        _hub_render_locks[chat_id] = (asyncio.Lock(), now)
-    else:
-        lock, _ = _hub_render_locks[chat_id]
-        _hub_render_locks[chat_id] = (lock, now)
-
-    return _hub_render_locks[chat_id][0]
-
-
-def _cleanup_render_locks(now: float) -> None:
-    old = [
-        cid
-        for cid, (lock, last_used) in _hub_render_locks.items()
-        if now - last_used > _RENDER_LOCK_TTL and not lock.locked()
-    ]
-
-    for cid in old:
-        del _hub_render_locks[cid]
-
-    if old:
-        logger.debug(
-            "Hub render locks cleanup: removed %s, %s remaining",
-            len(old),
-            len(_hub_render_locks),
-        )
-
-
-async def _safe_delete_batch(
-    bot,
-    chat_id: int,
-    msg_ids: list[int],
-) -> tuple[list[int], list[int]]:
-    deleted_ids: list[int] = []
-    failed_ids: list[int] = []
-
-    if not msg_ids:
-        return deleted_ids, failed_ids
-
-    # Deduplicate while preserving order to prevent API errors from duplicate message IDs
-    unique_ids = list(dict.fromkeys(msg_ids))
-
-    async def _delete_individually(ids_to_delete: list[int]) -> None:
-        for mid in ids_to_delete:
-            try:
-                await _retry_flood(
-                    lambda m=mid: bot.delete_message(chat_id=chat_id, message_id=m)
-                )
-                deleted_ids.append(mid)
-            except TelegramBadRequest as sub_e:
-                sub_err = str(sub_e).lower()
-                if (
-                    "not found" in sub_err
-                    or "not valid" in sub_err
-                    or "chat not found" in sub_err
-                    or "can't be deleted" in sub_err
-                    or "cannot be deleted" in sub_err
-                ):
-                    deleted_ids.append(mid)
-                else:
-                    failed_ids.append(mid)
-                    logger.warning(
-                        "TelegramBadRequest on delete_message %s in %s: %s",
-                        mid,
-                        chat_id,
-                        sub_e,
-                    )
-            except Exception as sub_e:
-                failed_ids.append(mid)
-                logger.error(
-                    "Unexpected error deleting message %s in %s: %s",
-                    mid,
-                    chat_id,
-                    sub_e,
-                )
-
-    # Telegram Bot API deleteMessages accepts up to 100 message identifiers per request
-    chunk_size = 100
-    for i in range(0, len(unique_ids), chunk_size):
-        chunk = unique_ids[i : i + chunk_size]
-        try:
-            await _retry_flood(
-                lambda c=chunk: bot.delete_messages(chat_id=chat_id, message_ids=c)
-            )
-            deleted_ids.extend(chunk)
-        except TelegramBadRequest as e:
-            logger.warning(
-                "TelegramBadRequest on delete_messages %s in %s: %s; falling back to individual deletions",
-                chunk,
-                chat_id,
-                e,
-            )
-            await _delete_individually(chunk)
-        except Exception as e:
-            failed_ids.extend(chunk)
-            logger.error(
-                "Unexpected error deleting messages %s in %s: %s",
-                chunk,
-                chat_id,
-                e,
-            )
-
-    return deleted_ids, failed_ids
 
 
 def safe(value: str | None) -> str:
     if value is None:
         return "—"
     return html.escape(str(value))
-
-
-async def _retry_flood(op):
-    """Retry an operation on Telegram flood-control (always safe to retry)."""
-    try:
-        return await op()
-    except TelegramRetryAfter as e:
-        await asyncio.sleep(float(e.retry_after) + 0.5)
-        return await op()
 
 
 async def _send_with_resilience(op, *, chat_id: int, context: str = "send"):
@@ -184,7 +46,7 @@ async def _send_with_resilience(op, *, chat_id: int, context: str = "send"):
     - TelegramNetworkError / ambiguous timeout: delivery state is UNKNOWN
       (the request may have been processed before the connection broke).
       Automatic resending would risk duplicate messages, so we log a
-      `hub_orphan_suspected` marker and re-raise without resending.
+      marker and re-raise without resending.
     """
     try:
         return await op()
@@ -193,187 +55,19 @@ async def _send_with_resilience(op, *, chat_id: int, context: str = "send"):
         return await op()
     except TelegramNetworkError as exc:
         logger.warning(
-            "hub_orphan_suspected chat=%s context=%s: network error, not resending: %s",
-            chat_id, context, exc,
+            "telegram_send_uncertain chat=%s context=%s: network error, not resending: %s",
+            chat_id,
+            context,
+            exc,
         )
         raise
     except asyncio.TimeoutError:
         logger.warning(
-            "hub_orphan_suspected chat=%s context=%s: ambiguous timeout, not resending",
-            chat_id, context,
-        )
-        raise
-
-
-def _maybe_cleanup_cache() -> None:
-    global _last_cleanup_time
-
-    now = time.monotonic()
-    if now - _last_cleanup_time < _CLEANUP_INTERVAL:
-        return
-
-    _last_cleanup_time = now
-
-    if len(_hub_cache) >= HUB_CACHE_MAX_SIZE * 0.8:
-        expired_keys = []
-
-        for key in list(_hub_cache.keys()):
-            try:
-                _ = _hub_cache[key]
-            except KeyError:
-                expired_keys.append(key)
-
-        for key in expired_keys:
-            try:
-                del _hub_cache[key]
-            except KeyError:
-                pass
-
-        logger.info(
-            "Hub cache cleanup: %s expired entries removed",
-            len(expired_keys),
-        )
-
-
-async def _load_hub_ids_from_db(chat_id: int, session: AsyncSession | None = None) -> list[int]:
-    """Load tracked hub ids for a chat.
-
-    Fail-closed: a DB read failure PROPAGATES. Returning [] here would make
-    render_hub treat an infrastructure outage as "no hub exists", causing
-    duplicate hubs and deletion of live user messages based on fake state.
-    """
-    cached = _hub_cache.get(chat_id)
-    if cached and "ids" in cached:
-        return list(cached["ids"])
-
-    if session is not None:
-        ids = await hub_repo.get_hub_message_ids(session, chat_id)
-        effect_id = await hub_repo.get_latest_effect_message_id(session, chat_id)
-        _hub_cache[chat_id] = {"ids": list(ids), "effect_msg_id": effect_id}
-        return list(ids)
-
-    async with session_scope() as sess:
-        ids = await hub_repo.get_hub_message_ids(sess, chat_id)
-        effect_id = await hub_repo.get_latest_effect_message_id(sess, chat_id)
-    _hub_cache[chat_id] = {"ids": list(ids), "effect_msg_id": effect_id}
-    return list(ids)
-
-
-_auto_delete_tasks: set[asyncio.Task] = set()
-
-
-def spawn_auto_delete(bot, chat_id: int, msg_id: int, delay: float = 7.0) -> None:
-    """Schedule an ephemeral/error message to be auto-deleted after delay, preserving chat cleanliness."""
-    task = asyncio.create_task(
-        _auto_delete_delay(bot, chat_id, msg_id, delay=delay)
-    )
-    _auto_delete_tasks.add(task)
-    task.add_done_callback(_auto_delete_tasks.discard)
-
-
-async def _auto_delete_delay(bot, chat_id: int, msg_id: int, delay: float = 7.0) -> None:
-    await asyncio.sleep(delay)
-    try:
-        active_ids = await _load_hub_ids_from_db(chat_id)
-        if msg_id in active_ids:
-            return
-        await bot.delete_message(chat_id=chat_id, message_id=msg_id)
-    except Exception:
-        pass
-
-
-async def _store_hub_id_in_db(
-    chat_id: int,
-    message_id: int,
-    *,
-    is_effect: bool = False,
-    session: AsyncSession | None = None,
-) -> None:
-    """
-    Persist a delivered hub message id. Raises on DB failure so callers can
-    abort the current render and clean up already-sent messages — otherwise a
-    delivered-but-untracked message becomes an uncleanable orphan.
-    """
-    if session is not None:
-        await hub_repo.add_hub_message_id(
-            session, chat_id, message_id, is_effect=is_effect
-        )
-    else:
-        async with session_scope() as sess:
-            await hub_repo.add_hub_message_id(
-                sess, chat_id, message_id, is_effect=is_effect
-            )
-    cached = _hub_cache.get(chat_id)
-    if cached and "ids" in cached:
-        if message_id not in cached["ids"]:
-            cached["ids"].append(message_id)
-    else:
-        _hub_cache[chat_id] = {
-            "ids": [message_id],
-            "effect_msg_id": message_id if is_effect else None,
-        }
-
-
-async def _remove_hub_ids_from_db(
-    chat_id: int,
-    message_ids: list[int],
-    session: AsyncSession | None = None,
-) -> None:
-    if not message_ids:
-        return
-
-    try:
-        if session is not None:
-            await hub_repo.remove_hub_message_ids(session, chat_id, message_ids)
-        else:
-            async with session_scope() as sess:
-                await hub_repo.remove_hub_message_ids(sess, chat_id, message_ids)
-    except Exception as e:
-        # Telegram-side deletion may have succeeded while the durable cleanup
-        # did not. Invalidate the cache so the next load re-reads DB truth —
-        # otherwise the cache would hide stale rows from retry until TTL expiry.
-        _hub_cache.pop(chat_id, None)
-        logger.warning(
-            "Failed to remove hub ids %s in DB for chat %s: %s",
-            message_ids, chat_id, e,
-        )
-        raise
-
-    cached = _hub_cache.get(chat_id)
-    if cached and "ids" in cached:
-        old_set = set(message_ids)
-        cached["ids"] = [mid for mid in cached["ids"] if mid not in old_set]
-        if cached.get("effect_msg_id") in old_set:
-            cached["effect_msg_id"] = None
-
-
-async def get_hub_ids(chat_id: int, session: AsyncSession | None = None) -> list[int]:
-    return await _load_hub_ids_from_db(chat_id, session=session)
-
-
-async def _delete_hub_messages(
-    bot,
-    chat_id: int,
-    msg_ids: list[int],
-    session: AsyncSession | None = None,
-) -> list[int]:
-    if not msg_ids:
-        return []
-
-    deleted_ids, failed_ids = await _safe_delete_batch(bot, chat_id, msg_ids)
-
-    if deleted_ids:
-        await _remove_hub_ids_from_db(chat_id, deleted_ids, session=session)
-
-    if failed_ids:
-        logger.warning(
-            "Failed to delete %s hub messages in chat %s. "
-            "They will be retried on next hub render.",
-            len(failed_ids),
+            "telegram_send_uncertain chat=%s context=%s: ambiguous timeout, not resending",
             chat_id,
+            context,
         )
-
-    return failed_ids
+        raise
 
 
 def _is_message_effect_error(exc: Exception) -> bool:
@@ -393,40 +87,6 @@ def _is_message_effect_error(exc: Exception) -> bool:
     )
 
 
-async def _dispatch_load_hub_ids_from_db(
-    chat_id: int, session: AsyncSession | None = None
-) -> list[int]:
-    if session is not None:
-        return await _load_hub_ids_from_db(chat_id, session=session)
-    return await _load_hub_ids_from_db(chat_id)
-
-
-async def _dispatch_store_hub_id_in_db(
-    chat_id: int,
-    message_id: int,
-    *,
-    is_effect: bool | None = None,
-    session: AsyncSession | None = None,
-) -> None:
-    kwargs = {}
-    if is_effect is not None:
-        kwargs["is_effect"] = is_effect
-    if session is not None:
-        kwargs["session"] = session
-    await _store_hub_id_in_db(chat_id, message_id, **kwargs)
-
-
-async def _dispatch_delete_hub_messages(
-    bot,
-    chat_id: int,
-    msg_ids: list[int],
-    session: AsyncSession | None = None,
-) -> list[int]:
-    if session is not None:
-        return await _delete_hub_messages(bot, chat_id, msg_ids, session=session)
-    return await _delete_hub_messages(bot, chat_id, msg_ids)
-
-
 def sanitize_reply_markup(reply_markup: InlineKeyboardMarkup | None) -> InlineKeyboardMarkup | None:
     """Validate and sanitize an InlineKeyboardMarkup to strictly satisfy Telegram Bot API constraints.
 
@@ -435,11 +95,11 @@ def sanitize_reply_markup(reply_markup: InlineKeyboardMarkup | None) -> InlineKe
       (e.g., oversized links/keys of 800+ chars, empty strings), copy_text is dropped and safely replaced
       with callback_data="alert:copy_too_long" to inform the user explicitly via popup alert instead of
       failing silently or causing TelegramBadRequest: BUTTON_COPY_TEXT_INVALID.
-    - callback_data: Telegram Bot API limits callback_data to 1..64 bytes (UTF-8). If exceeded, truncated
-      safely to <= 64 bytes to prevent TelegramBadRequest: BUTTON_DATA_INVALID.
+    - callback_data: Telegram Bot API limits callback_data to 1..64 bytes (UTF-8). If exceeded, neutralized
+      to 'ignore' to prevent TelegramBadRequest: BUTTON_DATA_INVALID.
     - text: button label must not be empty (defaults to '—' if whitespace/empty).
     - row width: Telegram Bot API limits each row to max 8 buttons. Rows > 8 buttons are automatically partitioned.
-    - total rows: Telegram Bot API limits keyboards to max 100 rows. Excess rows are capped.
+    - total rows: Telegram Bot API limits keyboards to max 100 buttons. Excess buttons are capped.
     """
     if reply_markup is None or not getattr(reply_markup, "inline_keyboard", None):
         return reply_markup
@@ -509,7 +169,7 @@ def sanitize_reply_markup(reply_markup: InlineKeyboardMarkup | None) -> InlineKe
             else:
                 sanitized_row.append(btn)
 
-        # 4. Check row width: Partition rows exceeding 8 buttons to maintain clean Telegram UI rendering
+        # Check row width: Partition rows exceeding 8 buttons to maintain clean Telegram UI rendering
         if len(sanitized_row) > 8:
             has_changes = True
             for i in range(0, len(sanitized_row), 8):
@@ -517,7 +177,7 @@ def sanitize_reply_markup(reply_markup: InlineKeyboardMarkup | None) -> InlineKe
         else:
             sanitized_rows.append(sanitized_row)
 
-    # 5. Check total buttons: cap at 100 buttons to satisfy Telegram Bot API maximum
+    # Check total buttons: cap at 100 buttons to satisfy Telegram Bot API maximum
     total_buttons = sum(len(row) for row in sanitized_rows)
     if total_buttons > 100:
         has_changes = True
@@ -544,448 +204,8 @@ def sanitize_reply_markup(reply_markup: InlineKeyboardMarkup | None) -> InlineKe
     return InlineKeyboardMarkup(inline_keyboard=sanitized_rows)
 
 
-async def render_hub(
-    bot,
-    chat_id: int,
-    text: str,
-    reply_markup: InlineKeyboardMarkup | None = None,
-    parse_mode: str | None = "HTML",
-    force_new: bool = False,
-    trigger_message_id: int | None = None,
-    disable_web_page_preview: bool = True,
-    message_effect_id: str | None = None,
-    session: AsyncSession | None = None,
-) -> int:
-    """Render a single navigable hub, editing the target text message first."""
-    _maybe_cleanup_cache()
-    reply_markup = sanitize_reply_markup(reply_markup)
-
-    link_preview_opts = LinkPreviewOptions(is_disabled=True) if disable_web_page_preview else None
-
-    lock = _get_hub_render_lock(chat_id)
-    async with lock:
-        old_ids = await _dispatch_load_hub_ids_from_db(chat_id, session=session)
-        text_parts = split_text_by_lines(text, limit=4096) or ["—"]
-        cached_effect_id = _hub_cache.get(chat_id, {}).get("effect_msg_id")
-
-        target_edit_id = None
-        if not force_new and not message_effect_id and len(text_parts) == 1:
-            if trigger_message_id and trigger_message_id in old_ids and trigger_message_id != cached_effect_id:
-                target_edit_id = trigger_message_id
-            elif old_ids and old_ids[-1] != cached_effect_id:
-                target_edit_id = old_ids[-1]
-
-        if trigger_message_id and trigger_message_id != target_edit_id and trigger_message_id not in old_ids:
-            try:
-                await bot.delete_message(chat_id=chat_id, message_id=trigger_message_id)
-            except Exception:
-                pass
-
-        if target_edit_id is not None:
-            try:
-                await _retry_flood(
-                    lambda: bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=target_edit_id,
-                        text=text_parts[0],
-                        reply_markup=reply_markup,
-                        parse_mode=parse_mode,
-                        link_preview_options=link_preview_opts,
-                    )
-                )
-                stale_ids = [mid for mid in old_ids if mid != target_edit_id]
-                stale_failed: list[int] = []
-                if stale_ids:
-                    try:
-                        stale_failed = await _dispatch_delete_hub_messages(bot, chat_id, stale_ids, session=session)
-                    except Exception:
-                        # Durable cleanup of stale ids failed; an ADOPTED trigger
-                        # was never persisted -> remove it before escaping.
-                        if target_edit_id not in old_ids:
-                            try:
-                                await asyncio.shield(
-                                    bot.delete_message(chat_id=chat_id, message_id=target_edit_id)
-                                )
-                            except Exception:
-                                pass
-                        raise
-                try:
-                    await _dispatch_store_hub_id_in_db(chat_id, target_edit_id, session=session)
-                except Exception:
-                    if target_edit_id not in old_ids:
-                        # Adopted an untracked trigger message as the hub; its id
-                        # was never durably stored -> clean it up before escaping.
-                        try:
-                            await asyncio.shield(
-                                bot.delete_message(chat_id=chat_id, message_id=target_edit_id)
-                            )
-                        except Exception:
-                            pass
-                    raise
-                # Cache mirrors DB truth INCLUDING ids whose deletion failed,
-                # otherwise the next render would not retry them until TTL expiry.
-                _hub_cache[chat_id] = {
-                    "ids": [target_edit_id] + stale_failed,
-                    "effect_msg_id": None,
-                }
-                return target_edit_id
-            except TelegramBadRequest as e:
-                err_str = str(e).lower()
-                if "message is not modified" in err_str:
-                    stale_ids = [mid for mid in old_ids if mid != target_edit_id]
-                    stale_failed_nm: list[int] = []
-                    if stale_ids:
-                        try:
-                            stale_failed_nm = await _dispatch_delete_hub_messages(bot, chat_id, stale_ids, session=session)
-                        except Exception:
-                            if target_edit_id not in old_ids:
-                                try:
-                                    await asyncio.shield(
-                                        bot.delete_message(chat_id=chat_id, message_id=target_edit_id)
-                                    )
-                                except Exception:
-                                    pass
-                            raise
-                    try:
-                        await _dispatch_store_hub_id_in_db(chat_id, target_edit_id, session=session)
-                    except Exception:
-                        if target_edit_id not in old_ids:
-                            try:
-                                await asyncio.shield(
-                                    bot.delete_message(chat_id=chat_id, message_id=target_edit_id)
-                                )
-                            except Exception:
-                                pass
-                        raise
-                    _hub_cache[chat_id] = {
-                        "ids": [target_edit_id] + stale_failed_nm,
-                        "effect_msg_id": None,
-                    }
-                    return target_edit_id
-
-                logger.debug(
-                    "edit_message_text failed for %s in chat %s: %s; falling back to send",
-                    target_edit_id,
-                    chat_id,
-                    e,
-                )
-
-        if trigger_message_id and trigger_message_id not in old_ids:
-            try:
-                await bot.delete_message(chat_id=chat_id, message_id=trigger_message_id)
-            except Exception:
-                pass
-
-        sent_ids: list[int] = []
-        try:
-            for index, part in enumerate(text_parts):
-                is_last = index == len(text_parts) - 1
-                markup = reply_markup if is_last else None
-                effect = message_effect_id if index == 0 else None
-                try:
-                    message = await _send_with_resilience(
-                        lambda p=part, m=markup, eff=effect: bot.send_message(
-                            chat_id=chat_id,
-                            text=p,
-                            reply_markup=m,
-                            parse_mode=parse_mode,
-                            link_preview_options=link_preview_opts,
-                            message_effect_id=eff,
-                        ),
-                        chat_id=chat_id,
-                        context="render_hub",
-                    )
-                except TelegramBadRequest as exc:
-                    error = str(exc).lower()
-                    if effect and _is_message_effect_error(exc):
-                        try:
-                            message = await _send_with_resilience(
-                                lambda p=part, m=markup: bot.send_message(
-                                    chat_id=chat_id,
-                                    text=p,
-                                    reply_markup=m,
-                                    parse_mode=parse_mode,
-                                    link_preview_options=link_preview_opts,
-                                ),
-                                chat_id=chat_id,
-                                context="render_hub_no_effect",
-                            )
-                        except TelegramBadRequest as inner_exc:
-                            inner_error = str(inner_exc).lower()
-                            if "parse" in inner_error or "entities" in inner_error:
-                                logger.warning(
-                                    "HTML parse failed in render_hub retry for chat %s; using plain text",
-                                    chat_id,
-                                )
-                                plain = html.unescape(re.sub(r"<[^>]+>", "", part))
-                                message = await _send_with_resilience(
-                                    lambda p=plain, m=markup: bot.send_message(
-                                        chat_id=chat_id,
-                                        text=p,
-                                        reply_markup=m,
-                                        link_preview_options=link_preview_opts,
-                                        parse_mode=None,
-                                    ),
-                                    chat_id=chat_id,
-                                    context="render_hub_plain_retry",
-                                )
-                            else:
-                                raise
-                    elif "parse" in error or "entities" in error:
-                        logger.warning(
-                            "HTML parse failed in render_hub for chat %s; using plain text",
-                            chat_id,
-                        )
-                        plain = html.unescape(re.sub(r"<[^>]+>", "", part))
-                        try:
-                            message = await _send_with_resilience(
-                                lambda p=plain, m=markup, eff=effect: bot.send_message(
-                                    chat_id=chat_id,
-                                    text=p,
-                                    reply_markup=m,
-                                    link_preview_options=link_preview_opts,
-                                    parse_mode=None,
-                                    message_effect_id=eff,
-                                ),
-                                chat_id=chat_id,
-                                context="render_hub_plain",
-                            )
-                        except TelegramBadRequest as effect_exc:
-                            if effect and _is_message_effect_error(effect_exc):
-                                message = await _send_with_resilience(
-                                    lambda p=plain, m=markup: bot.send_message(
-                                        chat_id=chat_id,
-                                        text=p,
-                                        reply_markup=m,
-                                        link_preview_options=link_preview_opts,
-                                        parse_mode=None,
-                                    ),
-                                    chat_id=chat_id,
-                                    context="render_hub_plain_no_effect",
-                                )
-                            else:
-                                raise
-                    else:
-                        raise
-                sent_ids.append(message.message_id)
-                # Append BEFORE storing: if the store raises, the id is already
-                # in sent_ids so the BaseException cleanup deletes the delivered
-                # durable effect marker (if any).
-                await _dispatch_store_hub_id_in_db(
-                    chat_id,
-                    message.message_id,
-                    is_effect=bool(effect),
-                    session=session,
-                )
-        except BaseException:
-            if sent_ids:
-                try:
-                    await asyncio.shield(_dispatch_delete_hub_messages(bot, chat_id, sent_ids, session=session))
-                except Exception:
-                    pass
-            raise
-
-        old_failed: list[int] = []
-        if old_ids:
-            old_failed = await _dispatch_delete_hub_messages(bot, chat_id, old_ids, session=session)
-        _hub_cache[chat_id] = {
-            "ids": sent_ids + old_failed,
-            "effect_msg_id": sent_ids[0] if message_effect_id and sent_ids else None,
-        }
-        return sent_ids[-1]
-
-
-
-async def _append_hub_document_unlocked(
-    bot,
-    chat_id: int,
-    document: InputFile,
-    caption: str | None = None,
-    reply_markup: InlineKeyboardMarkup | None = None,
-    parse_mode: str | None = "HTML",
-    session: AsyncSession | None = None,
-) -> int:
-    reply_markup = sanitize_reply_markup(reply_markup)
-    if caption:
-        caption = caption[:1024]
-
-    try:
-        msg = await _send_with_resilience(
-            lambda: bot.send_document(
-                chat_id=chat_id,
-                document=document,
-                caption=caption,
-                reply_markup=reply_markup,
-                parse_mode=parse_mode,
-            ),
-            chat_id=chat_id,
-            context="append_hub_document",
-        )
-    except TelegramBadRequest as exc:
-        error = str(exc).lower()
-        if "parse" in error or "entities" in error:
-            logger.warning(
-                "HTML parse failed in _append_hub_document_unlocked for chat %s; using plain text",
-                chat_id,
-            )
-            plain = html.unescape(re.sub(r"<[^>]+>", "", caption or ""))[:1024]
-            msg = await _send_with_resilience(
-                lambda: bot.send_document(
-                    chat_id=chat_id,
-                    document=document,
-                    caption=plain,
-                    reply_markup=reply_markup,
-                    parse_mode=None,
-                ),
-                chat_id=chat_id,
-                context="append_hub_document_plain",
-            )
-        else:
-            raise
-
-    try:
-        await _dispatch_store_hub_id_in_db(chat_id, msg.message_id, session=session)
-    except Exception:
-        try:
-            await asyncio.shield(
-                bot.delete_message(chat_id=chat_id, message_id=msg.message_id)
-            )
-        except Exception:
-            pass
-        raise
-
-    return msg.message_id
-
-
-async def _append_hub_message_unlocked(
-    bot,
-    chat_id: int,
-    text: str,
-    reply_markup: InlineKeyboardMarkup | None = None,
-    parse_mode: str | None = "HTML",
-) -> int:
-    reply_markup = sanitize_reply_markup(reply_markup)
-    text_parts = split_text_by_lines(text, limit=4096)
-
-    if not text_parts:
-        text_parts = ["—"]
-
-    sent_ids = []
-    try:
-        for i, part in enumerate(text_parts):
-            is_last = (i == len(text_parts) - 1)
-            kb = reply_markup if is_last else None
-
-            try:
-                msg = await _send_with_resilience(
-                    lambda p=part, k=kb: bot.send_message(
-                        chat_id=chat_id,
-                        text=p,
-                        reply_markup=k,
-                        parse_mode=parse_mode,
-                    ),
-                    chat_id=chat_id,
-                    context="append_hub_message",
-                )
-            except TelegramBadRequest as e:
-                err_str = str(e).lower()
-                if "parse" in err_str or "entities" in err_str:
-                    logger.warning(
-                        "HTML parse failed in append_hub_message for chat %s, fallback to plain text: %s",
-                        chat_id,
-                        e,
-                    )
-                    plain = html.unescape(re.sub(r"<[^>]+>", "", part))
-                    msg = await _send_with_resilience(
-                        lambda p=plain, k=kb: bot.send_message(
-                            chat_id=chat_id,
-                            text=p,
-                            reply_markup=k,
-                            parse_mode=None,
-                        ),
-                        chat_id=chat_id,
-                        context="append_hub_message_plain",
-                    )
-                else:
-                    raise
-
-            sent_ids.append(msg.message_id)
-            # Same ordering contract as render_hub: id must be in sent_ids
-            # before the store attempt, so failure cleanup covers it.
-            await _store_hub_id_in_db(chat_id, msg.message_id)
-    except BaseException:
-        if sent_ids:
-            try:
-                await asyncio.shield(_delete_hub_messages(bot, chat_id, sent_ids))
-            except Exception:
-                pass
-        raise
-
-    return sent_ids[-1]
-
-
-async def append_hub_message(
-    bot,
-    chat_id: int,
-    text: str,
-    reply_markup: InlineKeyboardMarkup | None = None,
-    parse_mode: str | None = "HTML",
-) -> int:
-    _maybe_cleanup_cache()
-    lock = _get_hub_render_lock(chat_id)
-    async with lock:
-        return await _append_hub_message_unlocked(
-            bot,
-            chat_id=chat_id,
-            text=text,
-            reply_markup=reply_markup,
-            parse_mode=parse_mode,
-        )
-
-
-# ==============================================================================
-# Telegram UI Formatting: Braille Pattern Blank (U+2800)
-# Monospace-width invisible spacer to prevent inline button jitter across devices
-# ==============================================================================
-BRAILLE_BLANK = "\u2800"
-
-
-def pad_braille(text: str, target_width: int, align: str = "center") -> str:
-    """Pad string with invisible Braille Pattern Blank (U+2800) for fixed-width Telegram button alignment.
-
-    In Telegram clients on iOS/Android/Desktop, U+2800 renders with fixed monospace advance width
-    without collapsing like standard ASCII whitespace, preventing inline button jitter.
-    """
-    current_len = len(text)
-    if current_len >= target_width:
-        return text
-    pad_len = target_width - current_len
-    if align == "left":
-        return text + (BRAILLE_BLANK * pad_len)
-    elif align == "right":
-        return (BRAILLE_BLANK * pad_len) + text
-    else:  # center
-        left_pad = pad_len // 2
-        right_pad = pad_len - left_pad
-        return (BRAILLE_BLANK * left_pad) + text + (BRAILLE_BLANK * right_pad)
-
-
-def equalize_buttons_braille(*button_texts: str) -> list[str]:
-    """Pad a collection of button texts to equal visual character width using Braille blank spaces."""
-    if not button_texts:
-        return []
-    max_len = max(len(t) for t in button_texts)
-    return [pad_braille(t, max_len, align="center") for t in button_texts]
-
-
 def strip_html_tags(text: str) -> str:
-    """Convert HTML-formatted text to clean plain text for fallback delivery.
-
-    Removes Telegram formatting tags (including <a>, <b>, <code>, <tg-time>, etc.)
-    and unescapes HTML entities.
-    Note: Dynamic user/admin input must be escaped with safe() prior to template
-    formatting so that angle brackets within dynamic values do not trigger parse errors.
-    """
+    """Convert HTML-formatted text to clean plain text for fallback delivery."""
     text = re.sub(
         r'<a\s+[^>]*?href=["\']([^"\']+)["\'][^>]*>(.*?)</a>',
         r"\2 (\1)",
@@ -1020,18 +240,7 @@ async def safe_send_message(
     message_effect_id: str | None = None,
     raise_forbidden: bool = False,
 ) -> int | None:
-    """Send a Telegram message with resilience and automatic plain-text fallback on parse errors.
-
-    Guarantees:
-    - Splits text exceeding 4096 chars if needed.
-    - Retries safely on TelegramRetryAfter.
-    - If TelegramBadRequest occurs due to entities parse errors:
-      for HTML (parse_mode="HTML"), strips HTML formatting tags via strip_html_tags();
-      for other modes, falls back to raw plain text; retries with parse_mode=None.
-    - If message_effect_id is invalid, retries without effect.
-    - Catches TelegramForbiddenError (user blocked bot) and returns None gracefully (or raises if raise_forbidden=True).
-    - Returns the message_id of the sent message (or last part if split), or None on terminal error.
-    """
+    """Send a Telegram message with resilience and automatic plain-text fallback on parse errors."""
     link_preview_opts = LinkPreviewOptions(is_disabled=True) if disable_web_page_preview else None
     reply_markup = sanitize_reply_markup(reply_markup)
     text_parts = split_text_by_lines(text, limit=4096) or ["—"]
@@ -1158,14 +367,7 @@ async def safe_callback_answer(
 
 
 async def resolve_bot_username(bot: Any = None) -> str | None:
-    """Resolve the Telegram bot username without unnecessary network calls.
-
-    Precedence:
-    1. settings.BOT_USERNAME (configured in .env / settings)
-    2. Cached bot._me.username (if bot instance already cached get_me)
-    3. bot.me() (aiogram cached coroutine method) or bot.me.username (if mock/object)
-    4. bot.get_me() (fallback network call if needed)
-    """
+    """Resolve the Telegram bot username without unnecessary network calls."""
     try:
         from config.settings import get_settings
         username = (get_settings().BOT_USERNAME or "").lstrip("@")
@@ -1203,6 +405,3 @@ async def resolve_bot_username(bot: Any = None) -> str | None:
             pass
 
     return None
-
-
-

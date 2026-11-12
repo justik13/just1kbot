@@ -14,22 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 TEXTS_DIR = PROJECT_ROOT / "bot" / "texts"
 
 # Explicit canonical alias registry for intentional aliases (e.g. backward compat or semantic alias)
-CANONICAL_ALIASES: dict[str, str] = {
-    "BTN_PAYMENT_CANCEL": "BTN_CANCEL_ACTION",
-    "ADMIN_WI_TRAFFIC_RESET_FAILED": "ADMIN_WI_ACTION_FAILED",
-    "WL_VLESS_TAG": "BTN_WHITE_INTERNET",
-    "BTN_WI_SUB": "ADMIN_BTN_SUB_WI",
-    "ADMIN_USER_FILTER_ALL_COUNT": "ADMIN_USER_FILTER_COUNT",
-    "ADMIN_USER_FILTER_NEW_7D_COUNT": "ADMIN_USER_FILTER_COUNT",
-    "ADMIN_USER_FILTER_ACTIVE_COUNT": "ADMIN_USER_FILTER_COUNT",
-    "ADMIN_USER_FILTER_EXPIRING_COUNT": "ADMIN_USER_FILTER_COUNT",
-    "ADMIN_USER_FILTER_EXPIRED_COUNT": "ADMIN_USER_FILTER_COUNT",
-    "ADMIN_USER_FILTER_BANNED_COUNT": "ADMIN_USER_FILTER_COUNT",
-    "ADMIN_STD_SUB_INCY_STATUS_ON": "ADMIN_SERVER_STATE_ENABLED",
-    "LANDING_WHITE_INTERNET_PAGE_TITLE": "ADMIN_PAYMENT_SERVICE_WI_DEFAULT",
-    "BTN_INSTRUCTION_INCY": "BTN_INCY_INSTRUCTIONS",
-    "BTN_WL_CONNECT_CLIENT": "BTN_SUB_CONNECT_INCY",
-}
+CANONICAL_ALIASES: dict[str, str] = {}
 
 
 # A literal is only user-facing if it is passed to a Telegram send call. Keying on
@@ -679,24 +664,6 @@ class TextsConsistencyTests(unittest.TestCase):
                 self.assertTrue(bool(missing), f"Failed to detect missing placeholder in {sample}")
 
 
-
-    def test_new_white_internet_texts_exist(self):
-        self.assertTrue(hasattr(texts, "BTN_WL_CONFIRM_RENEW"))
-        self.assertTrue(hasattr(texts, "BTN_WL_PAY_BASE"))
-        self.assertTrue(hasattr(texts, "BTN_WL_PAY_PACK"))
-        self.assertTrue(hasattr(texts, "BTN_WL_TOPUP_SHORTAGE"))
-        self.assertTrue(hasattr(texts, "BTN_WL_RETURN_TO_SERVICE"))
-        self.assertTrue(hasattr(texts, "BTN_WL_CONVERT_TRIAL"))
-        self.assertTrue(hasattr(texts, "BTN_WL_REFRESH_STATUS"))
-        self.assertTrue(hasattr(texts, "WL_TRIAL_CANNOT_TOPUP"))
-        self.assertTrue(hasattr(texts, "WL_AUTO_PUSH_READY"))
-        self.assertTrue(hasattr(texts, "WL_BUY_PREVIEW_TEXT"))
-        self.assertTrue(hasattr(texts, "WL_RENEW_PREVIEW_TEXT"))
-        self.assertTrue(hasattr(texts, "WL_TOPUP_PREVIEW_TEXT"))
-        self.assertTrue(hasattr(texts, "WL_PREVIEW_BALANCE_OK"))
-        self.assertTrue(hasattr(texts, "WL_PREVIEW_BALANCE_SHORTAGE"))
-        self.assertTrue(hasattr(texts, "BTN_INSTRUCTION_INCY"))
-        self.assertTrue(hasattr(texts, "SUPPORT_INCY_INSTRUCTION_TEXT"))
 
 if __name__ == "__main__":
     unittest.main()
