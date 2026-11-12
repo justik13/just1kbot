@@ -3,13 +3,11 @@ import { showToast } from "./ui.js";
 import { renderGuestStub } from "./views/guest_stub.js";
 import { renderSecurity2FAStub } from "./views/security_2fa_stub.js";
 import { renderNodesView } from "./views/nodes.js";
-import { renderTopologyView } from "./views/topology.js";
 
 const appState = {
     user: null,
     security: null,
     twoFactorPassed: false,
-    activeTab: "nodes",
     nodes: [],
 };
 
@@ -26,22 +24,6 @@ function _initTelegramChrome() {
     }
 }
 
-function _renderAdminTab() {
-    const root = document.getElementById("appRoot");
-    const nav = document.getElementById("adminNav");
-    nav.hidden = false;
-
-    nav.querySelectorAll(".tab-btn").forEach((btn) => {
-        btn.classList.toggle("active", btn.dataset.tab === appState.activeTab);
-    });
-
-    if (appState.activeTab === "topology") {
-        renderTopologyView(root, appState, _reloadNodesAndRender);
-    } else {
-        renderNodesView(root, appState, _reloadNodesAndRender);
-    }
-}
-
 async function _reloadNodesAndRender() {
     try {
         const res = await api.listNodes();
@@ -49,7 +31,7 @@ async function _reloadNodesAndRender() {
     } catch (err) {
         showToast(err.message || "Не удалось загрузить ноды");
     }
-    _renderAdminTab();
+    renderNodesView(document.getElementById("appRoot"), appState, _reloadNodesAndRender);
 }
 
 async function bootstrap() {
@@ -58,14 +40,6 @@ async function bootstrap() {
     const root = document.getElementById("appRoot");
     const userChip = document.getElementById("userChip");
     const roleChip = document.getElementById("roleChip");
-    const nav = document.getElementById("adminNav");
-
-    nav.querySelectorAll(".tab-btn").forEach((btn) => {
-        btn.addEventListener("click", () => {
-            appState.activeTab = btn.dataset.tab;
-            _renderAdminTab();
-        });
-    });
 
     try {
         const me = await api.getMe();

@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from config.constants import (
-    DEFAULT_XRAY_ORIGIN_MAX_CLIENTS,
     VLESS_PROTOCOL,
     XRAY_ORIGIN_CAPABILITY,
     XRAY_PROTOCOL,
@@ -186,7 +185,6 @@ class ServerUpdateFields(TypedDict, total=False):
     api_url: str
     api_key: str
     protocol: str
-    max_clients: int
     is_active: bool
     disabled_reason: str | None
     disabled_at: datetime | None
@@ -281,9 +279,8 @@ async def allocate_origin_server_atomic(session: AsyncSession) -> Server | None:
     2. Sequentially acquire row locks (SELECT ... FOR UPDATE) on candidates.
     3. Re-verify is_active, health_state == ONLINE, lifecycle_status == ACTIVE,
        valid api_url / api_key, and 'xray_origin' in capabilities.
-    4. Count capacity-consuming White Internet subscriptions on that origin node.
-    5. Return the locked Server instance if active consumers < max_clients.
-    6. Return None if no origin server has available capacity.
+    4. Return the locked Server instance.
+    5. Return None if no eligible origin server is found.
     """
     candidate_ids = (
         await session.scalars(
@@ -323,19 +320,7 @@ async def allocate_origin_server_atomic(session: AsyncSession) -> Server | None:
         if not relays or len(relays) == 0:
             continue
 
-        from database.models import WhiteInternetSubscription
-
-        active_count = (
-            await session.scalar(
-                select(func.count(WhiteInternetSubscription.id)).where(
-                    WhiteInternetSubscription.origin_node_id == server.id,
-                    capacity_consuming_wl_condition(),
-                )
-            )
-            or 0
-        )
-        if active_count < server.max_clients:
-            return server
+        return server
 
     return None
 
@@ -362,7 +347,6 @@ async def create_server(
     api_key: str,
     country_flag: str = None,
     protocol: str = VLESS_PROTOCOL,
-    max_clients: int = DEFAULT_XRAY_ORIGIN_MAX_CLIENTS,
     capabilities: list[str] | None = None,
     lifecycle_status: str | ServerLifecycleStatus = ServerLifecycleStatus.ACTIVE,
     extra_data: dict | None = None,
@@ -379,7 +363,6 @@ async def create_server(
         api_key=api_key,
         country_flag=country_flag,
         protocol=protocol,
-        max_clients=max_clients,
         capabilities=capabilities or [],
         lifecycle_status=str(lifecycle_status),
         is_active=effective_is_active,
@@ -619,14 +602,6 @@ async def migrate_origin_subscriptions(
     from config.enums import WhiteInternetProvisioningStatus
     from database.models import WhiteInternetOrphanCleanup, WhiteInternetSubscription
 
-    # 2. Check capacity under lock
-    target_active = (await session.scalar(
-        select(func.count(WhiteInternetSubscription.id)).where(
-            WhiteInternetSubscription.origin_node_id == target_id,
-            capacity_consuming_wl_condition(),
-        )
-    )) or 0
-
     to_migrate_subs = list((await session.execute(
         select(WhiteInternetSubscription).where(
             WhiteInternetSubscription.origin_node_id == source_id,
@@ -637,12 +612,6 @@ async def migrate_origin_subscriptions(
     count = len(to_migrate_subs)
     if count == 0:
         return 0
-
-    if target_active + count > target_server.max_clients:
-        free_slots = max(0, target_server.max_clients - target_active)
-        raise ValueError(
-            f"Недостаточно мест на целевом сервере: свободно {free_slots}, требуется {count}."
-        )
 
     # 3. Mark source server as DECOMMISSIONING so it is no longer allocated to new clients
     source_server.lifecycle_status = ServerLifecycleStatus.DECOMMISSIONING

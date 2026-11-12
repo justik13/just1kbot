@@ -52,7 +52,6 @@ from database.models import (
     Tariff,
     WhiteInternetSubscription,
 )
-from database.repositories.servers_repo import capacity_consuming_wl_condition
 
 
 class InvariantResult(NamedTuple):
@@ -347,35 +346,9 @@ async def assert_inv_13_vpn_protocol(session: AsyncSession) -> InvariantResult:
 
 
 async def assert_inv_14_origin_server_capacity(session: AsyncSession) -> InvariantResult:
-    """Inv 14: Origin servers do not exceed max_clients for capacity-consuming subscriptions."""
-    servers = (
-        await session.scalars(
-            select(Server).where(
-                Server.is_active.is_(True),
-                Server.lifecycle_status == ServerLifecycleStatus.ACTIVE,
-            )
-        )
-    ).all()
-    origin_servers = [s for s in servers if "xray_origin" in (s.capabilities or [])]
-
-    breaches = []
-    for srv in origin_servers:
-        active_count = (
-            await session.scalar(
-                select(func.count(WhiteInternetSubscription.id)).where(
-                    WhiteInternetSubscription.origin_node_id == srv.id,
-                    capacity_consuming_wl_condition(),
-                )
-            )
-            or 0
-        )
-        if active_count > srv.max_clients:
-            breaches.append(f"Server {srv.id} ({srv.name}): {active_count}/{srv.max_clients}")
-
-    if breaches:
-        return InvariantResult(14, "Origin Server Capacity", False, "; ".join(breaches))
+    """Inv 14: Origin server capacity (deprecated - legacy max_clients constraint removed)."""
     return InvariantResult(
-        14, "Origin Server Capacity", True, "All origin servers operate within max_clients capacity"
+        14, "Origin Server Capacity", True, "Legacy max_clients constraint removed"
     )
 
 

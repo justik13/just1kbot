@@ -26,7 +26,7 @@ from sqlalchemy.orm import (
     relationship,
 )
 
-from config.constants import DEFAULT_XRAY_ORIGIN_MAX_CLIENTS, VLESS_PROTOCOL
+from config.constants import VLESS_PROTOCOL
 from config.enums import (
     AccountLedgerEntryType,
     OrderStatus,
@@ -216,7 +216,6 @@ class Server(Base):
     protocol: Mapped[str] = mapped_column(
         String(50), nullable=False, default=VLESS_PROTOCOL, server_default=VLESS_PROTOCOL
     )
-    max_clients: Mapped[int] = mapped_column(Integer, default=DEFAULT_XRAY_ORIGIN_MAX_CLIENTS)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
     disabled_reason: Mapped[str | None] = mapped_column(String(50), nullable=True)

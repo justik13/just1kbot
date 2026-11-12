@@ -60,11 +60,6 @@ export const api = {
         requestJson(`/api/app/admin/nodes/${id}`, {
             method: "DELETE",
         }),
-    updateNodeLinks: (id, payload) =>
-        requestJson(`/api/app/admin/nodes/${id}/links`, {
-            method: "PUT",
-            body: JSON.stringify(payload),
-        }),
     deployNodeCert: (id, payload) =>
         requestJson(`/api/app/admin/nodes/${id}/certificate`, {
             method: "POST",

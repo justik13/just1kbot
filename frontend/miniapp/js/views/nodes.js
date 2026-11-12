@@ -37,15 +37,9 @@ function _openEditModal(node, onDone) {
             <label>Название</label>
             <input name="name" class="input" required maxlength="255" value="${escapeHtml(node.name)}">
         </div>
-        <div class="grid-2">
-            <div class="field">
-                <label>Флаг</label>
-                <input name="country_flag" class="input" maxlength="10" value="${escapeHtml(node.country_flag || "")}" placeholder="🇷🇺 / 🇳🇱">
-            </div>
-            <div class="field">
-                <label>Лимит клиентов</label>
-                <input name="max_clients" class="input" type="number" min="1" max="100000" value="${escapeHtml(node.max_clients)}">
-            </div>
+        <div class="field">
+            <label>Флаг</label>
+            <input name="country_flag" class="input" maxlength="10" value="${escapeHtml(node.country_flag || "")}" placeholder="🇷🇺 / 🇳🇱">
         </div>
         <label class="checkbox-row">
             <input name="allow_bootstrap_tls" type="checkbox" ${node.tls_bootstrap ? "checked" : ""}>
@@ -63,7 +57,6 @@ function _openEditModal(node, onDone) {
             await api.patchNode(node.id, {
                 name: String(fd.get("name") || "").trim(),
                 country_flag: String(fd.get("country_flag") || "").trim(),
-                max_clients: Number(fd.get("max_clients")) || node.max_clients,
                 allow_bootstrap_tls: Boolean(fd.get("allow_bootstrap_tls")),
             });
             showToast("Параметры обновлены");
@@ -209,7 +202,7 @@ export function renderNodesView(root, state, onReload) {
             });
             addForm.reset();
             root.querySelector("#addBootstrapTls").checked = true;
-            showToast("Нода добавлена и определена автоматически");
+            showToast("Нода добавлена и выключена. Включите её кнопкой «Включить».");
             await onReload();
         } catch (err) {
             showToast(err.message || "Не удалось добавить ноду");
@@ -230,7 +223,7 @@ export function renderNodesView(root, state, onReload) {
         card.className = "node-card";
         card.innerHTML = `
             <div class="row">
-                <div style="font-weight:600;">${escapeHtml(node.country_flag || "")} ${escapeHtml(node.name)} <span class="muted">#${node.id}</span></div>
+                <div style="font-weight:600;">${escapeHtml(node.country_flag || "🌐")} ${escapeHtml(node.name)} <span class="muted">#${node.id}</span></div>
                 <div class="row" style="gap:5px;">
                     <span class="chip chip-info">${escapeHtml(roleLabel(node.role))}</span>
                     <span class="chip ${health.cls}">${escapeHtml(health.text)}</span>
@@ -241,7 +234,7 @@ export function renderNodesView(root, state, onReload) {
                 ${node.domain ? `<div class="mono">Domain: ${escapeHtml(node.domain)}</div>` : ""}
                 ${node.cdn_domain ? `<div class="mono">CDN: ${escapeHtml(node.cdn_domain)}</div>` : ""}
                 ${node.bridge_uuid ? `<div class="mono">Bridge UUID: ${escapeHtml(node.bridge_uuid)}</div>` : ""}
-                <div>Лимит: ${escapeHtml(node.max_clients)} • Bootstrap TLS: ${node.tls_bootstrap ? "да" : "нет"}</div>
+                <div>Bootstrap TLS: ${node.tls_bootstrap ? "да" : "нет"}</div>
             </div>
             <div class="filter-pills">${_renderModules(node)}</div>
             ${_renderModuleErrors(node)}

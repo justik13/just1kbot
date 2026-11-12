@@ -42,34 +42,6 @@
     white-space: nowrap;
 }
 
-.tab-bar {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 6px;
-    background: var(--bg-surface);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-control);
-    padding: 4px;
-}
-
-.tab-btn {
-    border: 0;
-    border-radius: 9px;
-    padding: 9px 12px;
-    background: transparent;
-    color: var(--text-secondary);
-    font-size: 13px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: background-color 0.15s ease, color 0.15s ease;
-}
-
-.tab-btn.active {
-    background: var(--bg-elevated);
-    color: var(--text-primary);
-    border: 1px solid var(--border-subtle);
-}
-
 .app-main {
     display: flex;
     flex-direction: column;

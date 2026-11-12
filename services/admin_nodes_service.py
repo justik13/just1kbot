@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
+import ipaddress
 import logging
+import socket
 from typing import Any
 from urllib.parse import urlparse
 
+import aiohttp
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.constants import DEFAULT_XRAY_ORIGIN_MAX_CLIENTS, VLESS_PROTOCOL, XRAY_PROTOCOL
+from config.constants import VLESS_PROTOCOL, XRAY_PROTOCOL
 from config.enums import AdminAuditAction, ServerHealthState, ServerLifecycleStatus
 from database.models import Server
 from database.repositories.servers_repo import (
@@ -63,21 +67,110 @@ def _derive_protocol(capabilities: list[str], role: str | None) -> str:
     return VLESS_PROTOCOL
 
 
+def country_code_to_flag(code: str | None) -> str:
+    """Convert 2-letter ISO country code into emoji flag."""
+    if not code:
+        return ""
+    clean = str(code).strip().upper()
+    if clean == "UK":
+        clean = "GB"
+    if len(clean) == 2 and clean.isalpha():
+        return "".join(chr(127397 + ord(c)) for c in clean)
+    return ""
+
+
+async def _fetch_ip_country_code(ip: str) -> str | None:
+    """Query geoip providers with short timeout for country code."""
+    try:
+        timeout = aiohttp.ClientTimeout(total=2.5)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            try:
+                async with session.get(f"http://ip-api.com/json/{ip}?fields=status,countryCode") as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if isinstance(data, dict) and data.get("status") == "success":
+                            code = str(data.get("countryCode") or "").strip().lower()
+                            if len(code) == 2:
+                                return code
+            except Exception:
+                pass
+
+            try:
+                async with session.get(f"https://ipwho.is/{ip}") as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if isinstance(data, dict) and data.get("success"):
+                            code = str(data.get("country_code") or "").strip().lower()
+                            if len(code) == 2:
+                                return code
+            except Exception:
+                pass
+    except Exception as exc:
+        logger.debug("GeoIP lookup failed for %s: %s", ip, exc)
+    return None
+
+
+async def auto_detect_node_country_flag(
+    api_url: str,
+    status_data: dict[str, Any] | None = None,
+    role: str | None = None,
+) -> str:
+    """Auto-detect flag emoji from node status metadata or IP geolocation."""
+    if isinstance(status_data, dict):
+        flag_val = str(status_data.get("country_flag") or "").strip()
+        if flag_val:
+            return flag_val[:10]
+        code_val = str(status_data.get("country_code") or "").strip()
+        flag_from_code = country_code_to_flag(code_val)
+        if flag_from_code:
+            return flag_from_code
+
+    hostname = urlparse(api_url).hostname or ""
+    if hostname:
+        resolved_ip = ""
+        try:
+            ipaddress.ip_address(hostname)
+            resolved_ip = hostname
+        except ValueError:
+            try:
+                loop = asyncio.get_running_loop()
+                addr_info = await loop.getaddrinfo(hostname, None, family=socket.AF_INET)
+                if addr_info and addr_info[0] and addr_info[0][4]:
+                    resolved_ip = addr_info[0][4][0]
+            except Exception as exc:
+                logger.debug("Could not resolve hostname %s to IP: %s", hostname, exc)
+
+        if resolved_ip:
+            code = await _fetch_ip_country_code(resolved_ip)
+            if code:
+                flag = country_code_to_flag(code)
+                if flag:
+                    return flag
+
+    if role == "ru_hub":
+        return "🇷🇺"
+
+    return "🌐"
+
+
 def serialize_server_node(server: Server) -> dict[str, Any]:
     """Serialize Server row into admin-safe v2 node payload (never exposes api_key)."""
     extra = server.extra_data if isinstance(server.extra_data, dict) else {}
     caps = list(server.capabilities or []) if isinstance(server.capabilities, (list, tuple, set)) else []
     role = get_server_role(server) or str(extra.get("role") or "unconfigured")
 
+    flag = server.country_flag
+    if not flag:
+        flag = "🇷🇺" if role == "ru_hub" else "🌐"
+
     return {
         "id": server.id,
         "name": server.name,
-        "country_flag": server.country_flag or "",
+        "country_flag": flag,
         "api_url": server.api_url,
         "has_api_key": bool(server.api_key),
         "protocol": server.protocol,
         "role": role,
-        "max_clients": server.max_clients,
         "is_active": bool(server.is_active),
         "health_state": server.health_state,
         "lifecycle_status": server.lifecycle_status,
@@ -134,7 +227,6 @@ async def discover_and_add_node(
     api_key: str,
     name: str = "",
     country_flag: str | None = None,
-    max_clients: int | None = None,
     allow_bootstrap_tls: bool = True,
 ) -> dict[str, Any]:
     """Validate URL, probe bare v2 node for auto-discovery, persist Server, and write audit log."""
@@ -170,12 +262,11 @@ async def discover_and_add_node(
     )
     role = extra.get("role")
     resolved_name = (name or "").strip()[:255] or _derive_default_name(clean_url, status_data, role)
-    resolved_flag = (country_flag or "").strip()[:10] or None
-    resolved_max_clients = (
-        int(max_clients)
-        if max_clients is not None and int(max_clients) > 0
-        else DEFAULT_XRAY_ORIGIN_MAX_CLIENTS
-    )
+    if country_flag and country_flag.strip():
+        raw_flag = country_flag.strip()[:10]
+        resolved_flag = country_code_to_flag(raw_flag) or raw_flag
+    else:
+        resolved_flag = await auto_detect_node_country_flag(clean_url, status_data, role)
     protocol = _derive_protocol(caps, role)
 
     server = await create_server(
@@ -185,14 +276,17 @@ async def discover_and_add_node(
         api_key=clean_key,
         country_flag=resolved_flag,
         protocol=protocol,
-        max_clients=resolved_max_clients,
         capabilities=caps,
         lifecycle_status=ServerLifecycleStatus.ACTIVE,
         extra_data=extra,
-        is_active=True,
+        is_active=False,
     )
+    # Новая нода добавляется выключенной (как после ручного «Выключить»):
+    # админ включает её сам, когда роль, TLS и связи готовы.
+    server.health_state = ServerHealthState.MANUAL_DISABLED
+    server.disabled_reason = "manual"
+    server.disabled_at = now_utc()
     if isinstance(health_data, dict) and health_data.get("status") == "ok":
-        server.health_state = ServerHealthState.ONLINE
         server.last_successful_check = now_utc()
         if health_data.get("node_epoch"):
             server.xray_instance_epoch = str(health_data.get("node_epoch"))
@@ -200,8 +294,8 @@ async def discover_and_add_node(
             server.xray_instance_boot_id = str(health_data.get("boot_id"))
         if health_data.get("starttime") is not None:
             server.xray_instance_starttime = int(health_data["starttime"])
-        await session.flush()
-        await session.refresh(server)
+    await session.flush()
+    await session.refresh(server)
 
     await AuditService.log_action(
         session,
@@ -272,10 +366,9 @@ async def update_node_settings(
     server_id: int,
     name: str | None = None,
     country_flag: str | None = None,
-    max_clients: int | None = None,
     allow_bootstrap_tls: bool | None = None,
 ) -> dict[str, Any]:
-    """Update admin-editable node metadata (name, flag, capacity, bootstrap TLS flag)."""
+    """Update admin-editable node metadata (name, flag, bootstrap TLS flag)."""
     server = await get_server_by_id(session, server_id, for_update=True)
     if server is None:
         raise AdminNodeServiceError("Node not found", status_code=404)
@@ -287,11 +380,11 @@ async def update_node_settings(
             raise AdminNodeServiceError("name cannot be empty", status_code=400)
         updates["name"] = clean_name
     if country_flag is not None:
-        updates["country_flag"] = country_flag.strip()[:10] or None
-    if max_clients is not None:
-        if max_clients < 1 or max_clients > 100000:
-            raise AdminNodeServiceError("max_clients out of range", status_code=400)
-        updates["max_clients"] = int(max_clients)
+        raw_flag = country_flag.strip()[:10]
+        if raw_flag:
+            updates["country_flag"] = country_code_to_flag(raw_flag) or raw_flag
+        else:
+            updates["country_flag"] = None
     if allow_bootstrap_tls is not None:
         extra = dict(server.extra_data or {})
         extra["tls_bootstrap"] = bool(allow_bootstrap_tls)

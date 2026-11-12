@@ -45,14 +45,12 @@ class AddNodePayload(BaseModel):
     api_key: str = Field(..., min_length=8, max_length=512)
     name: str = Field(default="", max_length=255)
     country_flag: str | None = Field(default=None, max_length=10)
-    max_clients: int | None = Field(default=None, ge=1, le=100000)
     allow_bootstrap_tls: bool = True
 
 
 class UpdateNodePayload(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     country_flag: str | None = Field(default=None, max_length=10)
-    max_clients: int | None = Field(default=None, ge=1, le=100000)
     allow_bootstrap_tls: bool | None = None
 
 

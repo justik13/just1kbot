@@ -132,7 +132,6 @@ async def api_admin_nodes_add_handler(request: web.Request) -> web.Response:
                 api_key=payload.api_key,
                 name=payload.name,
                 country_flag=payload.country_flag,
-                max_clients=payload.max_clients,
                 allow_bootstrap_tls=payload.allow_bootstrap_tls,
             )
             return web.json_response({"ok": True, **result}, status=201)
@@ -182,7 +181,6 @@ async def api_admin_nodes_patch_handler(request: web.Request) -> web.Response:
                 server_id=server_id,
                 name=payload.name,
                 country_flag=payload.country_flag,
-                max_clients=payload.max_clients,
                 allow_bootstrap_tls=payload.allow_bootstrap_tls,
             )
             return web.json_response({"ok": True, "node": node})
