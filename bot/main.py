@@ -286,7 +286,12 @@ _http_limiter = HttpRateLimiter()
 @web.middleware
 async def _http_rate_limit_middleware(request: web.Request, handler):
     """Process-local rate limiting for incoming HTTP webhooks and endpoints."""
-    if request.path in {"/health", "/webhook/yookassa", "/yookassa/webhook"}:
+    path = request.path
+    if (
+        path in {"/health", "/webhook/yookassa", "/yookassa/webhook"}
+        or path == "/app"
+        or path.startswith(("/app/", "/api/app/"))
+    ):
         return await handler(request)
     client_ip = get_trusted_client_ip(request)
     is_allowed, retry_after = _http_limiter.check(client_ip)
