@@ -7,8 +7,7 @@ from dataclasses import asdict, dataclass
 
 import aiohttp
 from aiogram import Bot
-from aiogram.utils.keyboard import InlineKeyboardBuilder
-from bot.texts.common.buttons import BTN_DISMISS_ALERT
+from bot.keyboards.notifications import get_dismiss_alert_keyboard
 from bot.texts.runtime.alerts import (
     ALERT_TITLE_CRITICAL_STOP,
     ALERT_TITLE_WORKER_COOLDOWN,
@@ -160,13 +159,7 @@ async def _send_alert(bot: Bot, title: str, worker: str,
         failure_count=failure_count,
         error_type=error_type,
     )
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text=BTN_DISMISS_ALERT,
-        callback_data="admin_dismiss_alert:general",
-    )
-    builder.adjust(1)
-    reply_markup = builder.as_markup()
+    reply_markup = get_dismiss_alert_keyboard("general")
     try:
         for admin_id in get_settings().ADMIN_IDS:
             try:

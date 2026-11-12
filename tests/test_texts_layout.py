@@ -13,14 +13,11 @@ ROOT = Path(__file__).resolve().parent.parent
 TEXTS_DIR = ROOT / "bot" / "texts"
 
 EXPECTED_FILES = {
-    "__init__.py", "common/__init__.py", "common/buttons.py", "common/errors.py", "common/status.py",
-    "user/__init__.py", "user/hub.py", "user/onboarding.py", "user/referral.py", "user/support.py", "user/white_internet.py",
-    "connection/__init__.py", "connection/devices.py", "connection/config.py",
-    "payment/__init__.py", "payment/balance.py", "payment/topup.py", "payment/tariffs.py",
-    "payment/tariff_change.py", "payment/status.py",
-    "admin/__init__.py", "admin/dashboard.py", "admin/servers.py", "admin/users.py", "admin/tariffs.py",
-    "admin/subscriptions.py", "admin/finances.py", "admin/broadcast.py", "admin/common.py",
-    "runtime/__init__.py", "runtime/alerts.py", "runtime/notifications.py",
+    "__init__.py",
+    "backend.py",
+    "runtime/__init__.py",
+    "runtime/alerts.py",
+    "runtime/notifications.py",
 }
 
 PRODUCTION_DIRS = (ROOT / "bot", ROOT / "services", ROOT / "utils", ROOT / "integrations")

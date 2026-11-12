@@ -29,6 +29,7 @@ from database.connection import session_scope
 from database.models import User
 from utils.datetime_helpers import now_utc
 from utils.rate_limiter import global_send_limiter
+from utils.telegram import safe_send_message
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +169,6 @@ async def _send_pre_expiry_notifications(
             .where(
                 User.subscription_end > current_time,
                 User.subscription_end <= current_time + timedelta(days=3),
-                User.is_banned.is_(False),
                 User.is_bot_blocked.is_(False),
                 User.is_deleted.is_(False),
                 or_(
@@ -199,7 +199,7 @@ async def _send_pre_expiry_notifications(
                 if user is None:
                     continue
 
-                if user.is_banned or user.is_bot_blocked or user.is_deleted:
+                if user.is_bot_blocked or user.is_deleted:
                     continue
 
                 if not user.subscription_end or user.subscription_end <= current_time:
@@ -263,11 +263,13 @@ async def _send_pre_expiry_notifications(
                 try:
                     await global_send_limiter.acquire()
 
-                    await bot.send_message(
+                    await safe_send_message(
+                        bot,
                         user.telegram_id,
                         msg,
                         reply_markup=get_pre_expiry_keyboard(),
                         parse_mode="HTML",
+                        raise_forbidden=True,
                     )
 
                     user.notification_retry_count = 0
@@ -314,7 +316,6 @@ async def _send_post_expiry_notifications(
                 User.subscription_end.is_not(None),
                 User.subscription_end < current_time,
                 User.subscription_end > grace_start,
-                User.is_banned.is_(False),
                 User.is_bot_blocked.is_(False),
                 User.is_deleted.is_(False),
                 User.notified_expired.is_(False),
@@ -344,7 +345,7 @@ async def _send_post_expiry_notifications(
                 if not user.subscription_end or user.subscription_end >= current_time:
                     continue
 
-                if user.is_banned or user.is_bot_blocked or user.is_deleted:
+                if user.is_bot_blocked or user.is_deleted:
                     continue
 
                 deletion_time = user.subscription_end + timedelta(
@@ -397,11 +398,13 @@ async def _send_post_expiry_notifications(
                 try:
                     await global_send_limiter.acquire()
 
-                    await bot.send_message(
+                    await safe_send_message(
+                        bot,
                         user.telegram_id,
                         msg,
                         reply_markup=get_post_expiry_keyboard(),
                         parse_mode="HTML",
+                        raise_forbidden=True,
                     )
 
                     user.notification_retry_count = 0
@@ -432,13 +435,11 @@ async def _send_white_internet_notifications(
     if bot is None:
         return
 
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from bot.keyboards.notifications import get_dismiss_notification_keyboard
     from config.enums import WhiteInternetStatus
     from database.models import User, WhiteInternetSubscription
     from utils.formatters import format_tg_time
     from bot.texts.runtime.notifications import (
-        BTN_DISMISS_NOTIFICATION,
-        BTN_EXTEND_WHITE_INTERNET,
         NOTIFY_WI_1D,
         NOTIFY_WI_2H,
         NOTIFY_WI_3D,
@@ -494,7 +495,6 @@ async def _send_white_internet_notifications(
                     WhiteInternetSubscription.notified_expired.is_(False),
                 ),
                 User.is_bot_blocked.is_(False),
-                User.is_banned.is_(False),
                 User.is_deleted.is_(False),
             )
             .order_by(WhiteInternetSubscription.expires_at.asc())
@@ -534,7 +534,6 @@ async def _send_white_internet_notifications(
                 if (
                     not user
                     or user.is_bot_blocked
-                    or user.is_banned
                     or user.is_deleted
                 ):
                     continue
@@ -586,18 +585,15 @@ async def _send_white_internet_notifications(
                         await session.flush()
                     continue
 
-                kb = InlineKeyboardBuilder()
-                kb.button(text=BTN_EXTEND_WHITE_INTERNET, callback_data="wl_renew_preview")
-                kb.button(text=BTN_DISMISS_NOTIFICATION, callback_data="dismiss_notification")
-                kb.adjust(1)
-
                 try:
                     await global_send_limiter.acquire()
-                    await bot.send_message(
+                    await safe_send_message(
+                        bot,
                         user.telegram_id,
                         msg,
-                        reply_markup=kb.as_markup(),
+                        reply_markup=get_dismiss_notification_keyboard(),
                         parse_mode="HTML",
+                        raise_forbidden=True,
                     )
                     if notify_type == "expired":
                         sub.notified_expired = True

@@ -7,7 +7,7 @@ from typing import Any
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
 from cachetools import TTLCache
-from sqlalchemy import and_, cast, delete, or_, select, String, update
+from sqlalchemy import and_, cast, delete, or_, select, String
 from sqlalchemy.ext.asyncio import AsyncSession
 from config.constants import (
     AdminAuditAction,
@@ -16,9 +16,6 @@ from config.constants import (
 )
 from database.connection import session_scope
 from database.models import (
-    AdminOperationIdempotency,
-    BroadcastProgress,
-    HubMessage,
     Order,
     User,
     VlessSubscription,
@@ -29,6 +26,7 @@ from bot.keyboards.notifications import get_devices_deleted_keyboard
 from bot.texts.runtime.notifications import NOTIFY_DEVICES_DELETED
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc
+from utils.telegram import safe_send_message
 
 logger = logging.getLogger(__name__)
 
@@ -239,11 +237,13 @@ async def _cleanup_expired_vless_retention_grace(bot: Bot | None = None) -> None
 
             if notify_tg_id and bot:
                 try:
-                    await bot.send_message(
+                    await safe_send_message(
+                        bot,
                         notify_tg_id,
                         NOTIFY_DEVICES_DELETED,
                         reply_markup=get_devices_deleted_keyboard(),
                         parse_mode="HTML",
+                        raise_forbidden=True,
                     )
                 except TelegramForbiddenError:
                     async with session_scope() as blocked_session:
@@ -429,38 +429,8 @@ async def _batch_delete_matching(
 async def _cleanup_old_records():
     current_time = now_utc()
 
-    # Mark stuck in_progress broadcasts as stopped (short atomic transaction)
-    threshold_stuck = current_time - timedelta(hours=2)
-    async with session_scope() as session:
-        stmt_stuck = (
-            update(BroadcastProgress)
-            .where(BroadcastProgress.status == "in_progress")
-            .where(BroadcastProgress.updated_at < threshold_stuck)
-            .values(status="stopped")
-        )
-        await session.execute(stmt_stuck)
-
-    threshold_broadcasts = current_time - timedelta(days=7)
-    broadcasts_deleted = await _batch_delete_matching(
-        BroadcastProgress,
-        BroadcastProgress.status.in_(["completed", "stopped"]),
-        BroadcastProgress.updated_at < threshold_broadcasts,
-    )
-
     deleted_logs = await clear_audit_logs(
         older_than_days=AUDIT_LOG_RETENTION_DAYS,
-    )
-
-    threshold_hub = current_time - timedelta(days=1)
-    hub_deleted = await _batch_delete_matching(
-        HubMessage,
-        HubMessage.created_at < threshold_hub,
-    )
-
-    threshold_idempotency = current_time - timedelta(days=7)
-    idempotency_deleted = await _batch_delete_matching(
-        AdminOperationIdempotency,
-        AdminOperationIdempotency.created_at < threshold_idempotency,
     )
 
     # Prune old settled webhook inbox records in per-batch committed transactions.
@@ -474,21 +444,11 @@ async def _cleanup_old_records():
         WebhookInbox.received_at < threshold_webhooks,
     )
 
-    if (
-        broadcasts_deleted > 0
-        or deleted_logs > 0
-        or hub_deleted > 0
-        or webhooks_deleted > 0
-        or idempotency_deleted > 0
-    ):
+    if deleted_logs > 0 or webhooks_deleted > 0:
         logger.info(
-            "Cleanup: %s old broadcasts, %s old audit logs, "
-            "%s old hub_messages, %s old webhooks deleted, %s old idempotency records deleted",
-            broadcasts_deleted,
+            "Cleanup: %s old audit logs, %s old webhooks deleted",
             deleted_logs,
-            hub_deleted,
             webhooks_deleted,
-            idempotency_deleted,
         )
 
 

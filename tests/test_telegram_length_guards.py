@@ -1,50 +1,12 @@
 import unittest
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from aiogram.types import CopyTextButton, DisabledButton, InlineKeyboardButton, InlineKeyboardMarkup
-from utils.telegram import render_hub, sanitize_reply_markup
-
-
-class TestTelegramLengthGuards(unittest.IsolatedAsyncioTestCase):
-    async def test_render_connections_financial_hold_shows_dispute_notice(self):
-        from bot.handlers.connection.common import _render_connections
-        from bot import texts
-
-        target = MagicMock()
-        target.bot = MagicMock()
-        target.chat.id = 12345
-        session = AsyncMock()
-        user = SimpleNamespace(id=10, telegram_id=12345, financial_hold=True, subscription_end=None)
-
-        with patch("services.subscription.SubscriptionService.check_access", new=AsyncMock(return_value=False)), \
-             patch("bot.handlers.connection.common.render_hub", new=AsyncMock()) as mock_render_hub:
-            await _render_connections(target, user, session)
-            mock_render_hub.assert_called_once()
-            args = mock_render_hub.call_args[0]
-            self.assertEqual(args[2], texts.PAYMENT_DISPUTE_BLOCKED_NOTICE)
-
-    async def test_render_connections_expired_shows_read_only(self):
-        from bot.handlers.connection.common import _render_connections
-        from datetime import datetime, timezone, timedelta
-
-        target = MagicMock()
-        target.bot = MagicMock()
-        target.chat.id = 12345
-        session = AsyncMock()
-        expired_date = datetime.now(timezone.utc) - timedelta(days=1)
-        user = SimpleNamespace(id=10, telegram_id=12345, financial_hold=False, subscription_end=expired_date)
-
-        with patch("services.subscription.SubscriptionService.check_access", new=AsyncMock(return_value=False)), \
-             patch("bot.handlers.connection.common._build_connections_screen", new=AsyncMock(return_value=("EXPIRED_TEXT", MagicMock()))) as mock_build, \
-             patch("bot.handlers.connection.common.render_hub", new=AsyncMock()) as mock_render_hub:
-            await _render_connections(target, user, session)
-            mock_build.assert_called_once_with(user, session, read_only=True)
-            mock_render_hub.assert_called_once()
+from utils.telegram import sanitize_reply_markup
 
 
 class TestTelegramBotApi103KeyboardAudit(unittest.IsolatedAsyncioTestCase):
-    """Universal audit of all keyboards and buttons across bot against Telegram Bot API 10.3 constraints."""
+    """Universal audit of remaining notification keyboards against Telegram Bot API 10.3 constraints."""
 
     def test_sanitize_reply_markup_preserves_valid(self):
         kb = InlineKeyboardMarkup(
@@ -126,7 +88,6 @@ class TestTelegramBotApi103KeyboardAudit(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(res.inline_keyboard[0][0].text, "B0_0")
         self.assertEqual(res.inline_keyboard[-1][-1].text, "B12_3")
 
-
     def test_sanitize_reply_markup_does_not_convert_disabled_button_to_alert_copy_too_long(self):
         kb = InlineKeyboardMarkup(
             inline_keyboard=[[InlineKeyboardButton.model_construct(
@@ -142,25 +103,9 @@ class TestTelegramBotApi103KeyboardAudit(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(btn.copy_text)
         self.assertIsNone(btn.callback_data)
 
-    async def test_render_hub_applies_sanitizer_end_to_end(self):
-        bot = MagicMock()
-        bot.edit_message_text = AsyncMock()
-        awg_key = "vpn://" + "A" * 1200
-        kb = InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="Copy Key", copy_text=CopyTextButton(text=awg_key))]]
-        )
-        with patch("utils.telegram._dispatch_load_hub_ids_from_db", new=AsyncMock(return_value=[50])), \
-             patch("utils.telegram._dispatch_store_hub_id_in_db", new=AsyncMock()), \
-             patch("utils.telegram._dispatch_delete_hub_messages", new=AsyncMock(return_value=[])):
-            await render_hub(bot, chat_id=999, text="Test message", reply_markup=kb)
-
-        sent_kb = bot.edit_message_text.call_args[1]["reply_markup"]
-        self.assertIsNone(sent_kb.inline_keyboard[0][0].copy_text)
-        self.assertEqual(sent_kb.inline_keyboard[0][0].callback_data, "alert:copy_too_long")
-
     async def test_alert_copy_too_long_callback_shows_alert(self):
         from bot import texts
-        from bot.handlers.start import alert_copy_too_long_callback
+        from bot.handlers.notifications import alert_copy_too_long_callback
 
         callback = MagicMock()
         callback.answer = AsyncMock()
@@ -172,163 +117,37 @@ class TestTelegramBotApi103KeyboardAudit(unittest.IsolatedAsyncioTestCase):
             show_alert=True,
         )
 
-    def test_universal_keyboards_audit_bot_api_10_3(self):
-        """Universal audit of all keyboards across bot against Telegram Bot API 10.3 constraints."""
-        from bot.keyboards.admin.broadcast import (
-            get_broadcast_audience_keyboard,
-            get_broadcast_close_keyboard,
-            get_broadcast_launch_keyboard,
-            get_broadcast_result_keyboard,
-        )
-        from bot.keyboards.admin.dashboard import (
-            get_admin_cat_finance_keyboard,
-            get_admin_cat_std_sub_keyboard,
-            get_admin_cat_system_keyboard,
-            get_admin_cat_users_keyboard,
-            get_admin_cat_wi_sub_keyboard,
-            get_admin_menu,
-            get_audit_keyboard,
-            get_maintenance_confirm_keyboard,
-        )
-        from bot.keyboards.admin.servers import (
-            get_admin_server_card_keyboard,
-            get_admin_server_relays_keyboard,
-            get_server_delete_confirm_keyboard,
-        )
-        from bot.keyboards.admin.tariffs import get_admin_tariff_card_keyboard
-        from bot.keyboards.admin.users import (
-            get_admin_ban_reasons_keyboard,
-            get_admin_confirm_action_keyboard,
-            get_admin_extend_days_new_keyboard,
-            get_admin_grant_days_keyboard,
-            get_admin_subscription_keyboard,
-            get_admin_user_balance_keyboard,
-            get_admin_user_card_keyboard,
-            get_admin_user_devices_keyboard,
-            get_admin_wi_device_limit_keyboard,
-            get_admin_wi_devices_keyboard,
-            get_admin_wi_extend_days_keyboard,
-            get_admin_wi_quota_keyboard,
-            get_admin_wi_subscription_keyboard,
-            get_admin_wi_traffic_add_keyboard,
-        )
-        from bot.keyboards.common import get_back_button, get_hub_keyboard
+    def test_notification_keyboards_audit_bot_api_10_3(self):
+        """Audit remaining notification keyboards against Telegram Bot API 10.3 constraints."""
         from bot.keyboards.notifications import (
             get_devices_deleted_keyboard,
+            get_dismiss_alert_keyboard,
+            get_dismiss_notification_keyboard,
             get_node_monitor_alert_keyboard,
             get_post_expiry_keyboard,
             get_pre_expiry_keyboard,
             get_referral_bonus_keyboard,
-            get_referral_onboarding_keyboard,
             get_traffic_alert_keyboard,
         )
-        from bot.keyboards.payment import (
-            get_balance_amounts_keyboard,
-            get_balance_history_keyboard,
-            get_balance_keyboard,
-            get_order_checkout_keyboard,
-            get_order_invoice_keyboard,
-            get_payment_success_keyboard,
-            get_renew_keyboard,
-            get_tariff_duration_keyboard,
-            get_tariff_showcase_keyboard,
-            get_topup_credit_keyboard,
-        )
-        from bot.keyboards.user import (
-            get_history_keyboard,
-            get_referral_keyboard,
-            get_referral_leaderboard_keyboard,
-            get_referrals_list_keyboard,
-        )
-
-        long_key = "vless://" + "A" * 1500
 
         keyboards = [
-            # User keyboards
-            get_referral_keyboard("https://t.me/just1kbot?start=ref123", count=5),
-            get_referral_keyboard(long_key, count=0),
-            get_referral_keyboard("", count=0),
-            get_history_keyboard(),
-            get_referral_leaderboard_keyboard(),
-            get_referrals_list_keyboard(1, 1),
-            # Admin user keyboards (testing normal, oversized, empty sub_urls)
-            get_admin_subscription_keyboard(12345, True, vless_sub_url="https://sub.url"),
-            get_admin_subscription_keyboard(12345, True, vless_sub_url=long_key),
-            get_admin_subscription_keyboard(12345, True, vless_sub_url=""),
-            get_admin_subscription_keyboard(12345, False),
-            get_admin_wi_subscription_keyboard(12345, True, True, False, sub_url="https://sub.url"),
-            get_admin_wi_subscription_keyboard(12345, True, True, False, sub_url=long_key),
-            get_admin_wi_subscription_keyboard(12345, True, True, False, sub_url=""),
-            get_admin_wi_subscription_keyboard(12345, False),
-            get_admin_wi_devices_keyboard(12345, False, sub_url="https://sub.url"),
-            get_admin_wi_devices_keyboard(12345, False, sub_url=long_key),
-            get_admin_user_devices_keyboard(12345, vless_sub_url="https://sub.url"),
-            get_admin_user_devices_keyboard(12345, vless_sub_url=long_key),
-            get_admin_user_card_keyboard(12345, is_banned=False),
-            get_admin_user_balance_keyboard(12345),
-            get_admin_ban_reasons_keyboard(12345),
-            get_admin_confirm_action_keyboard("ban:123", "admin_user_card:123"),
-            get_admin_extend_days_new_keyboard(12345),
-            get_admin_grant_days_keyboard(12345, 1),
-            get_admin_wi_device_limit_keyboard(12345),
-            get_admin_wi_extend_days_keyboard(12345),
-            get_admin_wi_quota_keyboard(12345),
-            get_admin_wi_traffic_add_keyboard(12345),
-            # Admin dashboard keyboards
-            get_admin_menu(),
-            get_audit_keyboard(),
-            get_maintenance_confirm_keyboard(),
-            get_admin_cat_users_keyboard(),
-            get_admin_cat_finance_keyboard(),
-            get_admin_cat_system_keyboard(),
-            get_admin_cat_std_sub_keyboard(),
-            get_admin_cat_wi_sub_keyboard(),
-            # Admin broadcast keyboards
-            get_broadcast_audience_keyboard(),
-            get_broadcast_close_keyboard(),
-            get_broadcast_launch_keyboard(100),
-            get_broadcast_result_keyboard(),
-            # Admin servers keyboards
-            get_admin_server_card_keyboard(1, False),
-            get_admin_server_relays_keyboard(1),
-            get_server_delete_confirm_keyboard(1),
-            get_admin_tariff_card_keyboard(1, is_active=True),
-            # Common keyboards
-            get_back_button("back"),
-            get_hub_keyboard(),
-            # Notifications keyboards
+            get_dismiss_notification_keyboard(),
+            get_dismiss_alert_keyboard(),
             get_devices_deleted_keyboard(),
-            get_node_monitor_alert_keyboard(1).as_markup(),
+            get_node_monitor_alert_keyboard(1),
             get_post_expiry_keyboard(),
             get_pre_expiry_keyboard(),
             get_referral_bonus_keyboard(),
-            get_referral_onboarding_keyboard(),
             get_traffic_alert_keyboard(12345),
-            # Payment keyboards
-            get_balance_amounts_keyboard([100, 200, 500]),
-            get_balance_history_keyboard(1, 1),
-            get_balance_keyboard(),
-            get_order_checkout_keyboard(1, 100, True, "back"),
-            get_order_invoice_keyboard("https://pay.url", "ord123", 100, "https://t.me/support"),
-            get_payment_success_keyboard(),
-            get_renew_keyboard([]),
-            get_tariff_duration_keyboard([]),
-            get_tariff_showcase_keyboard({}),
-            get_topup_credit_keyboard(),
         ]
 
         for idx, kb in enumerate(keyboards):
+            self.assertEqual(len(kb.inline_keyboard), 1, f"KB #{idx}: expected single row")
+            self.assertEqual(len(kb.inline_keyboard[0]), 1, f"KB #{idx}: expected single dismiss button")
             for row in kb.inline_keyboard:
                 self.assertLessEqual(len(row), 8, f"KB #{idx}: row has {len(row)} buttons (max 8)")
                 for btn in row:
                     self.assertTrue(btn.text and btn.text.strip(), f"KB #{idx}: empty button text")
-                    if btn.copy_text is not None:
-                        self.assertGreaterEqual(len(btn.copy_text.text), 1, f"KB #{idx}: copy_text empty")
-                        self.assertLessEqual(
-                            len(btn.copy_text.text),
-                            256,
-                            f"KB #{idx}: copy_text length {len(btn.copy_text.text)} exceeds 256",
-                        )
                     if btn.callback_data is not None:
                         cb_bytes = len(btn.callback_data.encode("utf-8"))
                         self.assertLessEqual(cb_bytes, 64, f"KB #{idx}: callback_data {cb_bytes} bytes exceeds 64")
@@ -338,13 +157,9 @@ class TestTelegramBotApi103KeyboardAudit(unittest.IsolatedAsyncioTestCase):
                 self.assertLessEqual(len(row), 8)
                 for btn in row:
                     self.assertTrue(btn.text and btn.text.strip())
-                    if btn.copy_text is not None:
-                        self.assertGreaterEqual(len(btn.copy_text.text), 1)
-                        self.assertLessEqual(len(btn.copy_text.text), 256)
                     if btn.callback_data is not None:
                         self.assertLessEqual(len(btn.callback_data.encode("utf-8")), 64)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()
-

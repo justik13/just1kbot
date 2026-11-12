@@ -108,18 +108,3 @@ def accumulate_host_traffic_cycle(
     return False
 
 
-def get_user_monthly_standard_traffic(user: object | None, current_cycle: str | None = None) -> int:
-    """Returns standard subscription VLESS traffic for the active cycle."""
-    if not user:
-        return 0
-    if current_cycle is None:
-        from utils.datetime_helpers import now_utc
-
-        current_cycle = now_utc().strftime("%Y-%m")
-    user_cycle = getattr(user, "traffic_cycle", None)
-    if user_cycle != current_cycle:
-        return 0
-    vless = getattr(user, "monthly_vless_bytes", 0) or 0
-    return max(0, int(vless))
-
-

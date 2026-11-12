@@ -168,20 +168,6 @@ class DomainEnumsSSOTTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             sql_enum_in("status with spaces", config.enums.PaymentProviderStatus)
 
-    def test_purchases_repo_audit_mapping_ssot(self):
-        """All purchase audit actions map to non-empty Russian labels without empty fallbacks."""
-        from database.repositories.purchases_repo import AUDIT_PURCHASE_ACTIONS, get_audit_op_info
-
-        for action in AUDIT_PURCHASE_ACTIONS:
-            op_type, title = get_audit_op_info(action)
-            self.assertIn(op_type, {"grant", "extend", "change", "reduce"})
-            self.assertTrue(len(title) > 0, f"Empty title for action {action}")
-
-        # Unknown action fallback
-        op_type, title = get_audit_op_info("SOME_UNKNOWN_ACTION")
-        self.assertEqual(op_type, "grant")
-        self.assertEqual(title, "SOME_UNKNOWN_ACTION")
-
     def test_no_active_code_references_to_legacy_incy_or_bridge(self):
         """Active codebase must contain zero operational references to deprecated AMNEZIA_BRIDGE / legacy bridges."""
         root = Path(__file__).parents[1]

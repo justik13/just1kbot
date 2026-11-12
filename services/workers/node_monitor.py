@@ -17,7 +17,7 @@ from aiogram import Bot
 from sqlalchemy import func, select
 
 from bot.keyboards.notifications import get_node_monitor_alert_keyboard
-from bot.texts.common.status import TIME_HOURS_LEFT
+from bot.texts.backend import TIME_HOURS_LEFT
 from bot.texts.runtime.alerts import (
     ALERT_CDN_INGRESS_PROBLEM,
     ALERT_CDN_INGRESS_PROBLEM_REMINDER,
@@ -201,10 +201,6 @@ def get_server_monitor_state(server_id: int, server: Server | None = None) -> Se
     return _monitor_states[server_id]
 
 
-def clear_server_monitor_state(server_id: int) -> None:
-    _monitor_states.pop(server_id, None)
-
-
 def reset_server_monitor_state(server_id: int, new_state: str = ServerHealthState.ONLINE) -> None:
     st = get_server_monitor_state(server_id)
     st.health_state = new_state
@@ -226,10 +222,6 @@ def reset_server_monitor_state(server_id: int, new_state: str = ServerHealthStat
     st.cdn_problem_started_at = None
     st.last_cdn_reminder_at = None
     st.relays_probe_state = {}
-
-
-def clear_monitor_states():
-    _monitor_states.clear()
 
 
 async def _send_admin_alert_msg(bot: Bot, text: str, reply_markup=None) -> bool:
@@ -361,7 +353,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                                     server_name=safe(server.name),
                                     cycle=usage.current_cycle,
                                 ),
-                                reply_markup=get_node_monitor_alert_keyboard(server.id).as_markup(),
+                                reply_markup=get_node_monitor_alert_keyboard(server.id),
                             )
                         except Exception as exc:
                             logger.error(
@@ -625,7 +617,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                                         status_or_err=safe(origin_detail),
                                         endpoint=safe(f"{sub_prefix}/ping"),
                                     ),
-                                    get_node_monitor_alert_keyboard(server.id).as_markup(),
+                                    get_node_monitor_alert_keyboard(server.id),
                                     True,
                                 ))
                             elif has_ingress_problem:
@@ -642,7 +634,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                                             endpoint=safe(f"{sub_prefix}/ping"),
                                             hours_text=_format_outage_duration(outage_dur),
                                         ),
-                                        get_node_monitor_alert_keyboard(server.id).as_markup(),
+                                        get_node_monitor_alert_keyboard(server.id),
                                         True,
                                     ))
                                     st.last_ingress_reminder_at = now_m
@@ -671,7 +663,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                                         domain=safe(active_origin_domain),
                                         endpoint=safe(f"{sub_prefix}/ping"),
                                     ),
-                                    get_node_monitor_alert_keyboard(server.id).as_markup(),
+                                    get_node_monitor_alert_keyboard(server.id),
                                     False,
                                 ))
 
@@ -704,7 +696,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                                                 domain=safe(cdn_domain),
                                                 endpoint=safe(f"{sub_prefix}/ping"),
                                             ),
-                                            get_node_monitor_alert_keyboard(server.id).as_markup(),
+                                            get_node_monitor_alert_keyboard(server.id),
                                             False,
                                         ))
                                 else:
@@ -742,7 +734,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                                                 status_or_err=safe(cdn_detail),
                                                 endpoint=safe(f"{sub_prefix}/ping"),
                                             ),
-                                            get_node_monitor_alert_keyboard(server.id).as_markup(),
+                                            get_node_monitor_alert_keyboard(server.id),
                                             True,
                                         ))
                                     elif has_cdn_problem:
@@ -759,7 +751,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                                                     endpoint=safe(f"{sub_prefix}/ping"),
                                                     hours_text=_format_outage_duration(outage_dur),
                                                 ),
-                                                get_node_monitor_alert_keyboard(server.id).as_markup(),
+                                                get_node_monitor_alert_keyboard(server.id),
                                                 True,
                                             ))
                                             st.last_cdn_reminder_at = now_m
@@ -848,7 +840,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                                                 origin_id=server.id,
                                                 status_or_err=safe(relay_err),
                                             ),
-                                            get_node_monitor_alert_keyboard(target_srv_id).as_markup(),
+                                            get_node_monitor_alert_keyboard(target_srv_id),
                                             True,
                                         ))
                                     elif has_relay_problem:
@@ -868,7 +860,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                                                     origin_id=server.id,
                                                     hours_text=_format_outage_duration(outage_dur),
                                                 ),
-                                                get_node_monitor_alert_keyboard(target_srv_id).as_markup(),
+                                                get_node_monitor_alert_keyboard(target_srv_id),
                                                 True,
                                             ))
                                             r_state["last_reminder_at"] = now_ts
@@ -893,7 +885,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                                                 origin_id=server.id,
                                                 rtt_ms=round(rtt_ms, 1),
                                             ),
-                                            get_node_monitor_alert_keyboard(target_srv_id).as_markup(),
+                                            get_node_monitor_alert_keyboard(target_srv_id),
                                             False,
                                         ))
 
@@ -1011,7 +1003,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                             server_name=safe(server.name),
                             server_id=server.id,
                         ),
-                        "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
+                        "reply_markup": get_node_monitor_alert_keyboard(server.id),
                         "target_alert_state": ServerHealthState.ONLINE,
                     })
 
@@ -1040,7 +1032,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                                     server_id=server.id,
                                     disk_percent=disk_percent,
                                 ),
-                                "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
+                                "reply_markup": get_node_monitor_alert_keyboard(server.id),
                             })
                             st.disk_alert_last_sent = now_m
                     elif disk_percent <= 80.0:
@@ -1075,7 +1067,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 used_gb=used_gb_fmt,
                                 limit_gb=limit_gb,
                             ),
-                            "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
+                            "reply_markup": get_node_monitor_alert_keyboard(server.id),
                         }
                     elif pct >= 80.0 and alert_level < 80:
                         new_alert_level = 80
@@ -1085,7 +1077,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 used_gb=used_gb_fmt,
                                 limit_gb=limit_gb,
                             ),
-                            "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
+                            "reply_markup": get_node_monitor_alert_keyboard(server.id),
                         }
                     elif pct < 80.0 and alert_level > 0:
                         new_alert_level = 0
@@ -1160,7 +1152,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                             server_name=safe(server.name),
                             server_id=server.id,
                         ),
-                        "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
+                        "reply_markup": get_node_monitor_alert_keyboard(server.id),
                         "target_alert_state": ServerHealthState.ONLINE,
                     })
 
@@ -1186,7 +1178,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                         server_name=safe(server.name),
                         server_id=server.id,
                     ),
-                    "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
+                    "reply_markup": get_node_monitor_alert_keyboard(server.id),
                     "target_alert_state": ServerHealthState.PROBLEM,
                 })
 
@@ -1203,7 +1195,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                             server_name=safe(server.name),
                             server_id=server.id,
                         ),
-                        "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
+                        "reply_markup": get_node_monitor_alert_keyboard(server.id),
                         "target_alert_state": ServerHealthState.PROBLEM,
                     })
                 else:
@@ -1218,7 +1210,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 server_id=server.id,
                                 hours_text=_format_outage_duration(outage_dur),
                             ),
-                            "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
+                            "reply_markup": get_node_monitor_alert_keyboard(server.id),
                             "is_reminder": True,
                         })
                         st.last_core_reminder_at = now_m

@@ -155,7 +155,6 @@ async def get_active_vless_counts(
         .where(
             VlessSubscription.is_active.is_(True),
             User.is_deleted.is_(False),
-            User.is_banned.is_(False),
             User.financial_hold.is_(False),
             User.subscription_end.is_not(None),
             User.subscription_end > grace_cutoff,
@@ -234,7 +233,6 @@ async def register_hwid_atomic(
 
     if (
         user is None
-        or getattr(user, "is_banned", False)
         or getattr(user, "financial_hold", False)
         or getattr(user, "is_deleted", False)
         or not getattr(sub, "is_active", True)

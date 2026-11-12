@@ -32,17 +32,11 @@ class TokenBucketRateLimiter:
             await asyncio.sleep(wait_time)
 
 
-# Limiter для массовых рассылок (broadcasts)
-broadcast_send_limiter = TokenBucketRateLimiter(
-    rate=20.0,
-    burst=20,
-)
-
-# Выделенный limiter для транзакционных уведомлений (пополнения, чеки)
+# Limiter for transactional notifications (topups, receipts, expiry alerts)
 transactional_send_limiter = TokenBucketRateLimiter(
     rate=25.0,
     burst=25,
 )
 
-# Совместимость
+# Backwards-compatible alias
 global_send_limiter = transactional_send_limiter

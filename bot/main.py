@@ -2,61 +2,44 @@ import asyncio
 import html
 import logging
 import os
-import uuid
 import signal
 import traceback
-from datetime import timedelta
+import uuid
 
 import aiofiles.os
 from aiogram import Bot, Dispatcher
-from aiogram.fsm.storage.base import BaseStorage
-from aiogram.fsm.storage.redis import RedisStorage
-from aiogram.types import (
-    BotCommand,
-    BotCommandScopeDefault,
-    ErrorEvent,
-    MenuButtonCommands,
-)
-from aiogram.utils.chat_action import ChatActionMiddleware
+from aiogram.types import ErrorEvent
 from aiohttp import web
 from aiohttp.web_log import AccessLogger
 from cachetools import TTLCache
 from cryptography.fernet import Fernet
 
 from bot import texts
-from config.constants import WHITE_INTERNET_SUB_PATH_PREFIX
-from bot.handlers.admin.broadcast import (
-    _background_tasks,
-    resume_pending_broadcasts,
-)
+from bot.handlers.notifications import router as notifications_router
 from bot.handlers.webhook import setup_webhook_routes
+from bot.keyboards.notifications import get_dismiss_alert_keyboard
 from bot.middlewares import (
-    ActionLockMiddleware,
-    CleanChatMiddleware,
     CorrelationFilter,
     CorrelationMiddleware,
-    DBSessionMiddleware,
-    PrivateChatMiddleware,
-    ThrottlingMiddleware,
-    UserContextMiddleware,
     correlation_scope,
 )
-from bot.middlewares.ban_check import BanCheckMiddleware
-from bot.middlewares.clean_chat import stop_clean_chat_worker
+from config.constants import WHITE_INTERNET_SUB_PATH_PREFIX
 from config.settings import get_settings
 from database.connection import close_db, init_db
-from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
 from services.workers import (
     shutdown_event,
     start_background_workers,
     stop_background_workers,
 )
 from services.yookassa_service import close_yookassa_client
+from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
 from utils.logging_security import (
     install_sensitive_data_filter,
     sanitize_short,
     sanitize_text,
 )
+from utils.telegram import safe_callback_answer, safe_send_message
+
 
 def _resolve_log_level() -> str:
     """LOG_LEVEL from env first, then Settings (picks up .env), then INFO.
@@ -145,13 +128,6 @@ async def global_error_handler(
             "[%s] Unhandled exception: %s", request_id, error_type
         )
 
-    state = kwargs.get("state")
-    if state:
-        try:
-            await state.clear()
-        except Exception:
-            pass
-
     try:
         settings = get_settings()
         error_type_safe = html.escape(error_type)
@@ -172,8 +148,11 @@ async def global_error_handler(
 
             for admin_id in settings.ADMIN_IDS:
                 try:
-                    await event.bot.send_message(
-                        admin_id, error_msg, parse_mode="HTML"
+                    await safe_send_message(
+                        event.bot,
+                        admin_id,
+                        error_msg,
+                        reply_markup=get_dismiss_alert_keyboard("general"),
                     )
                 except Exception as exc:
                     logger.error(
@@ -187,29 +166,10 @@ async def global_error_handler(
 
     try:
         if event.update.callback_query:
-            await event.update.callback_query.answer(
-                texts.ERROR_TECHNICAL_ALERT, show_alert=True
-            )
-        elif event.update.message:
-            msg = event.update.message
-            try:
-                await msg.delete()
-            except Exception:
-                pass
-
-            from bot.keyboards.common import get_back_button
-            from utils.telegram import spawn_auto_delete
-
-            err_msg = await msg.answer(
-                texts.ERROR_TECHNICAL_MESSAGE,
-                reply_markup=get_back_button("back_to_main_menu"),
-                parse_mode="HTML",
-            )
-            spawn_auto_delete(
-                msg.bot,
-                msg.chat.id,
-                err_msg.message_id,
-                delay=7.0,
+            await safe_callback_answer(
+                event.update.callback_query,
+                texts.ERROR_TECHNICAL_ALERT,
+                show_alert=True,
             )
     except Exception:
         pass
@@ -217,114 +177,22 @@ async def global_error_handler(
     return True
 
 
-async def setup_bot_commands(bot: Bot):
-    if _is_ci_test_mode():
-        logger.info(
-            "CI_TEST_MODE enabled; skipping Telegram API command registration"
-        )
-        return
-
-    commands = [
-        BotCommand(command="start", description=texts.BOT_START_DESCRIPTION),
-    ]
-    await bot.set_my_commands(
-        commands, scope=BotCommandScopeDefault()
-    )
-    await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
-    try:
-        await bot.set_my_description(description=texts.BOT_DESCRIPTION)
-    except Exception as e:
-        logger.warning("Failed to register bot description on startup: %s", e)
-    try:
-        await bot.set_my_short_description(short_description=texts.BOT_SHORT_DESCRIPTION)
-    except Exception as e:
-        logger.warning("Failed to register bot short description on startup: %s", e)
-
-
-async def setup_bot(bot: Bot | None = None, storage: BaseStorage | None = None) -> tuple[Bot, Dispatcher]:
+async def setup_bot(
+    bot: Bot | None = None,
+) -> tuple[Bot, Dispatcher]:
     settings = get_settings()
 
     if bot is None:
         bot = Bot(token=settings.BOT_TOKEN)
-    if storage is None:
-        # Bounded FSM lifetime + bounded I/O: without state_ttl/data_ttl Redis
-        # keys live forever (OOM under noeviction), and without socket
-        # timeouts a hung Redis stalls every FSM operation indefinitely.
-        storage = RedisStorage.from_url(
-            settings.REDIS_URL,
-            state_ttl=timedelta(hours=24),
-            data_ttl=timedelta(hours=24),
-            connection_kwargs={
-                "socket_timeout": 5.0,
-                "socket_connect_timeout": 5.0,
-                "health_check_interval": 30,
-            },
-        )
-    dp = Dispatcher(storage=storage)
+
+    dp = Dispatcher()
 
     dp.message.middleware(CorrelationMiddleware())
     dp.callback_query.middleware(CorrelationMiddleware())
 
-    dp.message.middleware(PrivateChatMiddleware())
-    dp.callback_query.middleware(PrivateChatMiddleware())
-
-    dp.message.middleware(ThrottlingMiddleware())
-    dp.callback_query.middleware(ThrottlingMiddleware())
-
-    dp.message.middleware(DBSessionMiddleware())
-    dp.callback_query.middleware(DBSessionMiddleware())
-
-    dp.message.middleware(CleanChatMiddleware())
-
-    dp.message.middleware(UserContextMiddleware())
-    dp.callback_query.middleware(UserContextMiddleware())
-
-    dp.message.middleware(BanCheckMiddleware())
-    dp.callback_query.middleware(BanCheckMiddleware())
-
-    dp.callback_query.middleware(ActionLockMiddleware())
-
-    dp.message.middleware(ChatActionMiddleware())
-
-    from bot.handlers.admin import admin_router
-    from bot.handlers.connection import router as connection_router
-    from bot.handlers.fallback import router as fallback_router
-    from bot.handlers.payment import router as payment_router
-    from bot.handlers.referral import router as referral_router
-    from bot.handlers.start import router as start_router
-    from bot.handlers.support import router as support_router
-    from bot.handlers.white_internet import router as white_internet_router
-
-    # Clean parent router state on all known module-level routers
-    # so setup_bot is strictly idempotent across multiple invocations and dynamic state transitions.
-    for r in (
-        start_router,
-        referral_router,
-        connection_router,
-        white_internet_router,
-        support_router,
-        payment_router,
-        admin_router,
-        fallback_router,
-    ):
-        r._parent_router = None
-
-    for r in [
-        start_router,
-        referral_router,
-        connection_router,
-        white_internet_router,
-        support_router,
-        payment_router,
-        admin_router,
-        fallback_router,
-    ]:
-        dp.include_router(r)
-
-
+    notifications_router._parent_router = None
+    dp.include_router(notifications_router)
     dp.errors.register(global_error_handler)
-
-    await setup_bot_commands(bot)
 
     return bot, dp
 
@@ -414,13 +282,7 @@ _http_limiter = HttpRateLimiter()
 
 @web.middleware
 async def _http_rate_limit_middleware(request: web.Request, handler):
-    """Process-local rate limiting for incoming HTTP webhooks and endpoints.
-
-    Exempt /health and YooKassa webhooks from strict rate limiting:
-    - /health receives frequent container health probes
-    - YooKassa webhooks receive legitimate burst batches and retries and are
-      already strictly guarded by official IP allowlisting
-    """
+    """Process-local rate limiting for incoming HTTP webhooks and endpoints."""
     if request.path in {"/health", "/webhook/yookassa", "/yookassa/webhook"}:
         return await handler(request)
     client_ip = get_trusted_client_ip(request)
@@ -435,8 +297,6 @@ async def _http_rate_limit_middleware(request: web.Request, handler):
 
 
 async def start_webhook_server(port: int, bot: object | None = None):
-    # YooKassa payloads are small. Reject unexpectedly large request bodies
-    # before JSON parsing to limit memory use on the public endpoint.
     app = web.Application(client_max_size=64 * 1024)
     app["trusted_proxies"] = get_settings().TRUSTED_PROXIES
     if bot is not None:
@@ -456,17 +316,6 @@ async def start_webhook_server(port: int, bot: object | None = None):
     return runner
 
 
-async def _stop_broadcast_tasks():
-    tasks = list(_background_tasks)
-    for task in tasks:
-        task.cancel()
-
-    if tasks:
-        await asyncio.wait(tasks, timeout=10)
-
-    logger.info("Broadcast tasks stopped (%s tasks)", len(tasks))
-
-
 async def main():
     settings = None
     bot = None
@@ -478,7 +327,6 @@ async def main():
         ci_test_mode = _is_ci_test_mode()
         shutdown_event.clear()
 
-        # P3-2: Защита от потери backup.agekey
         config_dir = os.getenv("JUST1KBOT_CONFIG_DIR", "/etc/just1kbot")
         from pathlib import Path
         backup_key_path = Path(config_dir) / "backup.agekey"
@@ -489,8 +337,8 @@ async def main():
             str(backup_key_path)
         ):
             logger.critical(
-                "CRITICAL WARNING: DB_ENCRYPTION_KEY is present but "
-                f"{backup_key_path} is missing!"
+                "CRITICAL WARNING: DB_ENCRYPTION_KEY is present but %s is missing!",
+                backup_key_path,
             )
             raise RuntimeError(f"Startup aborted: {backup_key_path} is missing. Backups would be irrecoverable.")
 
@@ -504,11 +352,6 @@ async def main():
         logger.info("Инициализация БД...")
         await init_db()
 
-        logger.info(
-            "🔄 Bot started — all in-memory operation locks "
-            "cleared (restart)."
-        )
-
         bot, dp = await setup_bot()
 
         webhook_runner = await start_webhook_server(
@@ -518,12 +361,8 @@ async def main():
 
         if ci_test_mode:
             logger.info(
-                "CI_TEST_MODE enabled; skipping Telegram polling, "
-                "pending broadcast resume and background workers"
+                "CI_TEST_MODE enabled; skipping Telegram polling and background workers"
             )
-        else:
-            await resume_pending_broadcasts(bot)
-            logger.info("Pending broadcasts resumed (if any)")
 
         loop = asyncio.get_running_loop()
 
@@ -586,16 +425,6 @@ async def main():
             await stop_background_workers()
         except Exception as e:
             logger.error("Error stopping workers: %s", e)
-
-        try:
-            await _stop_broadcast_tasks()
-        except Exception as e:
-            logger.error("Error stopping broadcast tasks: %s", e)
-
-        try:
-            await stop_clean_chat_worker()
-        except Exception as e:
-            logger.error("Error stopping CleanChat worker: %s", e)
 
         logger.info("Cleaning up resources...")
 

@@ -1,81 +1,27 @@
-"""Unified text catalogue facade.
+"""Canonical texts facade for backend services, notifications, and HTTP endpoints."""
+from __future__ import annotations
 
-Canonical user-facing text ownership lives exclusively in the domain modules below.
-This module is intentionally a thin backwards-compatible facade: application code may
-continue to use ``from bot import texts`` without knowing the domain layout.
-"""
-
-from bot.texts.admin import *  # noqa: F403
-from bot.texts.common import *  # noqa: F403
-from bot.texts.connection import *  # noqa: F403
-from bot.texts.payment import *  # noqa: F403
-from bot.texts.runtime import *  # noqa: F403
-from bot.texts.user import *  # noqa: F403
-
-from bot.texts.admin.broadcast import (
-    ADMIN_AUDIT_LOG_DETAILS_BROADCAST as ADMIN_AUDIT_LOG_DETAILS_BROADCAST,
-)
-from bot.texts.admin.dashboard import (
-    ADMIN_DASHBOARD_PROXY_TAB_LABEL as ADMIN_DASHBOARD_PROXY_TAB_LABEL,
-    ADMIN_DASHBOARD_SECTION_ORIGIN as ADMIN_DASHBOARD_SECTION_ORIGIN,
-    ADMIN_DASHBOARD_SECTION_STD_SUB as ADMIN_DASHBOARD_SECTION_STD_SUB,
-    ADMIN_DASHBOARD_SECTION_VLESS as ADMIN_DASHBOARD_SECTION_VLESS,
-    ADMIN_DASHBOARD_SECTION_WI_SUB as ADMIN_DASHBOARD_SECTION_WI_SUB,
-    ADMIN_DASHBOARD_SERVER_ROW_FORMAT as ADMIN_DASHBOARD_SERVER_ROW_FORMAT,
-    ADMIN_DASHBOARD_VLESS_ROW_FORMAT as ADMIN_DASHBOARD_VLESS_ROW_FORMAT,
-    BTN_STD_INCY_CONFIG as BTN_STD_INCY_CONFIG,
-    BTN_STD_SERVERS as BTN_STD_SERVERS,
-    BTN_STD_SUB as BTN_STD_SUB,
-    BTN_STD_TARIFFS as BTN_STD_TARIFFS,
-    BTN_WI_SERVERS as BTN_WI_SERVERS,
-    BTN_WI_SUB as BTN_WI_SUB,
-    BTN_WI_TARIFFS as BTN_WI_TARIFFS,
-    DASHBOARD_INACTIVE_SERVER_ROW_VLESS as DASHBOARD_INACTIVE_SERVER_ROW_VLESS,
-)
-from bot.texts.admin.finances import (
-    ADMIN_ALERT_ORDER_REQUIRES_MANUAL_REVIEW as ADMIN_ALERT_ORDER_REQUIRES_MANUAL_REVIEW,
-    ADMIN_PURCHASES_ROW_FORMAT as ADMIN_PURCHASES_ROW_FORMAT,
-)
-from bot.texts.admin.servers import (
-    ADMIN_AUDIT_LOG_DETAILS_DELETE_SERVER as ADMIN_AUDIT_LOG_DETAILS_DELETE_SERVER,
-    ADMIN_AUDIT_LOG_DETAILS_EDIT_SERVER as ADMIN_AUDIT_LOG_DETAILS_EDIT_SERVER,
-    ADMIN_AUDIT_LOG_DETAILS_EDIT_SERVER_REDACTED as ADMIN_AUDIT_LOG_DETAILS_EDIT_SERVER_REDACTED,
-    ADMIN_SERVER_API_URL as ADMIN_SERVER_API_URL,
-    PROTOCOL_XRAY_ORIGIN as PROTOCOL_XRAY_ORIGIN,
-    PROTOCOL_VLESS as PROTOCOL_VLESS,
-)
-from bot.texts.admin.tariffs import (
-    ADMIN_AUDIT_LOG_DETAILS_TARIFF_EDIT_RUB as ADMIN_AUDIT_LOG_DETAILS_TARIFF_EDIT_RUB,
-    ADMIN_AUDIT_LOG_DETAILS_TARIFF_TOGGLED as ADMIN_AUDIT_LOG_DETAILS_TARIFF_TOGGLED,
-)
-from bot.texts.admin.users import (
-    ADMIN_AUDIT_LOG_DETAILS_MASS_BONUS as ADMIN_AUDIT_LOG_DETAILS_MASS_BONUS,
-    ADMIN_USER_ID_FORMAT as ADMIN_USER_ID_FORMAT,
-    ADMIN_USER_ID_NO_COLON_FORMAT as ADMIN_USER_ID_NO_COLON_FORMAT,
-)
-from bot.texts.common.status import MAINTENANCE_DEFAULT_MESSAGE as MAINTENANCE_DEFAULT_MESSAGE
-
-
-from bot.texts import admin as _admin
-from bot.texts import common as _common
-from bot.texts import connection as _connection
-from bot.texts import payment as _payment
+from bot.texts import backend as _backend
 from bot.texts import runtime as _runtime
-from bot.texts import user as _user
+from bot.texts.backend import *  # noqa: F403
+from bot.texts.runtime import *  # noqa: F403
+
+
+def _collect_public_names(module) -> tuple[str, ...]:
+    explicit = getattr(module, "__all__", None)
+    if explicit is not None:
+        return tuple(explicit)
+    return tuple(name for name in vars(module) if name.isupper() and not name.startswith("_"))
 
 
 def _assert_no_key_collisions() -> None:
     """Fail fast if any text key is defined in two domain modules."""
     seen: dict[str, str] = {}
     for _mod, _dom in (
-        (_admin, "admin"),
-        (_common, "common"),
-        (_connection, "connection"),
-        (_payment, "payment"),
+        (_backend, "backend"),
         (_runtime, "runtime"),
-        (_user, "user"),
     ):
-        for _name in getattr(_mod, "__all__", ()):
+        for _name in _collect_public_names(_mod):
             if _name in seen:
                 raise ImportError(
                     f"texts key collision: {_name!r} defined in both "

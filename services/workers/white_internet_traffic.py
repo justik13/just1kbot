@@ -19,6 +19,8 @@ from database.models import Server, User, WhiteInternetSubscription
 from database.repositories import servers_repo, white_internet_repo
 from services.xray_node_client import XrayNodeClient
 from utils.datetime_helpers import get_hosting_billing_cycle, now_utc
+from utils.rate_limiter import global_send_limiter
+from utils.telegram import safe_send_message
 from utils.traffic_helpers import accumulate_host_traffic_cycle, get_server_hosting_reset_day
 
 import enum
@@ -373,33 +375,29 @@ class WhiteInternetTrafficWorker:
             for uid, is_sub_trial in set(exhausted_users_to_notify):
                 async with sf() as sess:
                     user = await sess.scalar(select(User).where(User.id == uid))
-                    telegram_id = user.telegram_id if user else None
+                    telegram_id = user.telegram_id if (user and not user.is_bot_blocked) else None
 
                 if telegram_id:
                     from aiogram.exceptions import TelegramForbiddenError
-                    from aiogram.utils.keyboard import InlineKeyboardBuilder
                     from bot import texts
+                    from bot.keyboards.notifications import get_dismiss_notification_keyboard
 
                     alert_text = (
                         texts.WL_TRAFFIC_EXHAUSTED_TRIAL_ALERT
                         if is_sub_trial
                         else texts.WL_TRAFFIC_EXHAUSTED_ALERT
                     )
-                    kb = InlineKeyboardBuilder()
-                    if is_sub_trial:
-                        kb.button(text=texts.BTN_BUY_ACCESS, callback_data="white_internet")
-                    else:
-                        kb.button(text=texts.BTN_WL_TOPUP, callback_data="wl_topup_menu")
-                    kb.button(text=texts.BTN_DISMISS_NOTIFICATION, callback_data="dismiss_notification")
-                    kb.adjust(1)
 
                     for attempt in range(3):
                         try:
-                            await self.bot.send_message(
+                            await global_send_limiter.acquire()
+                            await safe_send_message(
+                                self.bot,
                                 chat_id=telegram_id,
                                 text=alert_text,
-                                reply_markup=kb.as_markup(),
+                                reply_markup=get_dismiss_notification_keyboard(),
                                 parse_mode="HTML",
+                                raise_forbidden=True,
                             )
                             break
                         except TelegramForbiddenError:
@@ -426,31 +424,27 @@ class WhiteInternetTrafficWorker:
             for sub_id, uid, is_sub_trial, expected_version in set(warn_90p_users_to_notify):
                 async with sf() as sess:
                     user = await sess.scalar(select(User).where(User.id == uid))
-                    telegram_id = user.telegram_id if user else None
+                    telegram_id = user.telegram_id if (user and not user.is_bot_blocked) else None
 
                 if telegram_id:
                     try:
-                        from aiogram.utils.keyboard import InlineKeyboardBuilder
                         from bot import texts
+                        from bot.keyboards.notifications import get_dismiss_notification_keyboard
 
                         alert_text = (
                             texts.WL_TRAFFIC_90P_TRIAL_ALERT
                             if is_sub_trial
                             else texts.WL_TRAFFIC_90P_ALERT
                         )
-                        kb = InlineKeyboardBuilder()
-                        if is_sub_trial:
-                            kb.button(text=texts.BTN_BUY_ACCESS, callback_data="white_internet")
-                        else:
-                            kb.button(text=texts.BTN_WL_TOPUP, callback_data="wl_topup_menu")
-                        kb.button(text=texts.BTN_DISMISS_NOTIFICATION, callback_data="dismiss_notification")
-                        kb.adjust(1)
 
-                        await self.bot.send_message(
+                        await global_send_limiter.acquire()
+                        await safe_send_message(
+                            self.bot,
                             chat_id=telegram_id,
                             text=alert_text,
-                            reply_markup=kb.as_markup(),
+                            reply_markup=get_dismiss_notification_keyboard(),
                             parse_mode="HTML",
+                            raise_forbidden=True,
                         )
                         async with sf() as sess:
                             await sess.execute(

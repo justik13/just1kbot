@@ -20,7 +20,6 @@ ALLOWED_USER_UPDATE_FIELDS = {
     "subscription_end",
     "device_limit",
     "current_tariff_id",
-    "is_banned",
     "is_bot_blocked",
     "referred_by",
     "last_payment_at",
@@ -757,7 +756,7 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
         stmt = stmt.where(get_effective_never_condition())
     elif filter_type in ("banned", "problem"):
         stmt = stmt.where(
-            (User.is_banned.is_(True)) | (User.is_bot_blocked.is_(True))
+            User.is_bot_blocked.is_(True)
         )
     elif filter_type in ("active_standard", "standard_active"):
         stmt = stmt.where(User.subscription_end > now)
@@ -864,7 +863,7 @@ async def get_user_filter_counts(session: AsyncSession) -> dict[str, int]:
             get_effective_never_condition(),
         ).label("never"),
         func.count(User.id).filter(
-            (User.is_banned.is_(True)) | (User.is_bot_blocked.is_(True))
+            User.is_bot_blocked.is_(True)
         ).label("banned"),
     ).where(User.is_deleted.is_(False))
     result = (await session.execute(stmt)).one()

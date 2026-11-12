@@ -49,7 +49,6 @@ class Settings(BaseSettings):
     ADMIN_IDS: list[int]
     SUPPORT_USERNAME: str
     BOT_USERNAME: str = ""
-    STATUS_PAGE_URL: str = "https://status.just1k.pro/status/just1kbot"
 
     # ── Database ──
     DATABASE_URL: str = Field(repr=False)
@@ -76,13 +75,6 @@ class Settings(BaseSettings):
     INCY_HOST: str | None = None
     INCY_API_KEY: str | None = None
     AMNEZIA_BRIDGE_HMAC_SECRET: str | None = None
-
-    # ── Account balance product limits ──
-    BALANCE_MIN_TOPUP_RUB: int = 10
-    BALANCE_MAX_CUSTOM_TOPUP_RUB: int = 5000
-    BALANCE_MAX_PRESET_RUB: int = 1000
-    BALANCE_MAX_UNFINISHED_TOPUPS: int = 3
-    BALANCE_MAX_PRESET_OPTIONS: int = 6
 
     # ── Security ──
     ALLOW_LOCAL_HTTP: bool = False

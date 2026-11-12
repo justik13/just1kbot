@@ -18,7 +18,6 @@ from database.repositories.users_repo import (
     get_user_by_telegram_id,
     get_user_by_telegram_id_any,
 )
-from services.user_cache import invalidate_user_cache
 from utils.datetime_helpers import (
     is_expired,
     is_vpn_access_expired,
@@ -54,7 +53,7 @@ class SubscriptionService:
 
     @staticmethod
     def check_vpn_access(user: User | None) -> bool:
-        if not user or user.is_deleted or user.is_banned or user.financial_hold or not user.subscription_end:
+        if not user or user.is_deleted or user.financial_hold or not user.subscription_end:
             return False
         return not is_vpn_access_expired(user.subscription_end, grace_hours=VPN_ACCESS_GRACE_HOURS)
 
@@ -62,7 +61,7 @@ class SubscriptionService:
     async def check_access(session: AsyncSession, telegram_id: int) -> bool:
         user = await get_user_by_telegram_id(session, telegram_id)
 
-        if not user or user.is_deleted or user.is_banned or user.financial_hold or not user.subscription_end:
+        if not user or user.is_deleted or user.financial_hold or not user.subscription_end:
             return False
 
         return not is_expired(user.subscription_end)
@@ -132,7 +131,6 @@ class SubscriptionService:
             user.is_bot_blocked = False
 
             await session.flush()
-            invalidate_user_cache(telegram_id)
 
             from services.audit_service import AuditService
             await AuditService.log_action(
@@ -211,7 +209,6 @@ class SubscriptionService:
 
             if changed:
                 await session.flush()
-                invalidate_user_cache(telegram_id)
 
             return user
 
@@ -290,8 +287,6 @@ class SubscriptionService:
                 },
             )
 
-        invalidate_user_cache(telegram_id)
-
         return user
 
     @staticmethod
@@ -369,8 +364,6 @@ class SubscriptionService:
             user.current_tariff_id = new_tariff_id
 
         await session.flush()
-
-        invalidate_user_cache(telegram_id)
 
         await SubscriptionService._sync_access_state(session, user)
 

@@ -62,20 +62,28 @@ class WhiteInternetReconciliationWorker:
     async def _send_origin_exhausted_alert(self, sub_id: int) -> None:
         if not self.bot:
             return
+        from bot.keyboards.notifications import get_dismiss_alert_keyboard
         text = ALERT_WHITE_INTERNET_ORIGIN_EXHAUSTED.format(sub_id=sub_id)
+        dismiss_kb = get_dismiss_alert_keyboard("general")
         for aid in get_settings().ADMIN_IDS:
             try:
-                await safe_send_message(self.bot, chat_id=aid, text=text, parse_mode="HTML")
+                await safe_send_message(
+                    self.bot, chat_id=aid, text=text, reply_markup=dismiss_kb, parse_mode="HTML"
+                )
             except Exception as e:
                 logger.warning("Failed to send origin exhausted alert to admin %s: %s", aid, e)
 
     async def _send_origin_restored_alert(self) -> None:
         if not self.bot:
             return
+        from bot.keyboards.notifications import get_dismiss_alert_keyboard
         text = ALERT_WHITE_INTERNET_ORIGIN_RESTORED
+        dismiss_kb = get_dismiss_alert_keyboard("general")
         for aid in get_settings().ADMIN_IDS:
             try:
-                await safe_send_message(self.bot, chat_id=aid, text=text, parse_mode="HTML")
+                await safe_send_message(
+                    self.bot, chat_id=aid, text=text, reply_markup=dismiss_kb, parse_mode="HTML"
+                )
             except Exception as e:
                 logger.warning("Failed to send origin restored alert to admin %s: %s", aid, e)
 
@@ -94,19 +102,17 @@ class WhiteInternetReconciliationWorker:
         try:
             from database.models import User
             user = await session.get(User, user_id)
-            if not user or not user.telegram_id:
+            if not user or not user.telegram_id or user.is_bot_blocked:
                 return
-            from aiogram.utils.keyboard import InlineKeyboardBuilder
             from bot import texts
-            kb = InlineKeyboardBuilder()
-            kb.button(text=texts.BTN_WL_CONNECT_CLIENT, callback_data="white_internet")
-            kb.button(text=texts.BTN_DISMISS_NOTIFICATION, callback_data="dismiss_notification")
-            kb.adjust(1)
-            await self.bot.send_message(
+            from bot.keyboards.notifications import get_dismiss_notification_keyboard
+            await safe_send_message(
+                self.bot,
                 chat_id=user.telegram_id,
                 text=texts.WL_AUTO_PUSH_READY,
-                reply_markup=kb.as_markup(),
+                reply_markup=get_dismiss_notification_keyboard(),
                 parse_mode="HTML",
+                raise_forbidden=False,
             )
         except Exception as exc:
             logger.warning("Failed to send auto-push for user_id=%d: %s", user_id, exc)

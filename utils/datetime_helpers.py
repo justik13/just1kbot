@@ -11,10 +11,6 @@ def now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def now_msk() -> datetime:
-    return datetime.now(MSK_TZ)
-
-
 def to_msk(dt: datetime | date | None) -> datetime | None:
     if dt is None:
         return None

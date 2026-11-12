@@ -79,11 +79,6 @@ class TrafficSnapshot(tuple):
         return obj
 
 
-class XrayNodeClientError(RuntimeError):
-    """Base exception for Xray Node API errors."""
-    pass
-
-
 class XrayNodeClient:
     """Client for node-level Xray API management (port 8444/tcp)."""
 
