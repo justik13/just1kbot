@@ -39,7 +39,7 @@ function _openEditModal(node, onDone) {
         </div>
         <div class="field">
             <label>Флаг</label>
-            <input name="country_flag" class="input" maxlength="10" value="${escapeHtml(node.country_flag || "")}" placeholder="🇷🇺 / 🇳🇱">
+            <input name="country_flag" class="input" maxlength="10" value="${escapeHtml(node.country_flag || "")}">
         </div>
         <label class="checkbox-row">
             <input name="allow_bootstrap_tls" type="checkbox" ${node.tls_bootstrap ? "checked" : ""}>
@@ -146,11 +146,11 @@ export function renderNodesView(root, state, onReload) {
                 <div class="grid-2">
                     <div class="field">
                         <label>Название (опционально)</label>
-                        <input id="addName" class="input" type="text" maxlength="255" placeholder="Авто по домену">
+                        <input id="addName" class="input" type="text" maxlength="255">
                     </div>
                     <div class="field">
                         <label>Флаг (опционально)</label>
-                        <input id="addFlag" class="input" type="text" maxlength="10" placeholder="🇷🇺 / 🇳🇱">
+                        <input id="addFlag" class="input" type="text" maxlength="10">
                     </div>
                 </div>
                 <label class="checkbox-row">

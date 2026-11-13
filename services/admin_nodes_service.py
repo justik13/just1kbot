@@ -79,51 +79,58 @@ def country_code_to_flag(code: str | None) -> str:
     return ""
 
 
-async def _fetch_ip_country_code(ip: str) -> str | None:
-    """Query geoip providers with short timeout for country code."""
+async def _fetch_ip_geo_info(ip: str) -> dict[str, str]:
+    """Query geoip providers with lang=ru for localized country name, code and flag."""
     try:
-        timeout = aiohttp.ClientTimeout(total=2.5)
+        timeout = aiohttp.ClientTimeout(total=3.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
+            # 1. Try ipwho.is with lang=ru
             try:
-                async with session.get(f"http://ip-api.com/json/{ip}?fields=status,countryCode") as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        if isinstance(data, dict) and data.get("status") == "success":
-                            code = str(data.get("countryCode") or "").strip().lower()
-                            if len(code) == 2:
-                                return code
-            except Exception:
-                pass
-
-            try:
-                async with session.get(f"https://ipwho.is/{ip}") as resp:
+                async with session.get(f"https://ipwho.is/{ip}?lang=ru") as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         if isinstance(data, dict) and data.get("success"):
+                            country = str(data.get("country") or "").strip()
                             code = str(data.get("country_code") or "").strip().lower()
-                            if len(code) == 2:
-                                return code
+                            flag = str(data.get("flag", {}).get("emoji") or "").strip()
+                            if not flag and code:
+                                flag = country_code_to_flag(code)
+                            return {"country": country, "code": code, "flag": flag}
+            except Exception:
+                pass
+
+            # 2. Fallback to ip-api.com with lang=ru
+            try:
+                async with session.get(f"http://ip-api.com/json/{ip}?lang=ru") as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if isinstance(data, dict) and data.get("status") == "success":
+                            country = str(data.get("country") or "").strip()
+                            code = str(data.get("countryCode") or "").strip().lower()
+                            flag = country_code_to_flag(code) if code else ""
+                            return {"country": country, "code": code, "flag": flag}
             except Exception:
                 pass
     except Exception as exc:
         logger.debug("GeoIP lookup failed for %s: %s", ip, exc)
-    return None
+    return {}
 
 
-async def auto_detect_node_country_flag(
+async def auto_detect_node_geo(
     api_url: str,
     status_data: dict[str, Any] | None = None,
     role: str | None = None,
-) -> str:
-    """Auto-detect flag emoji from node status metadata or IP geolocation."""
+) -> tuple[str, str]:
+    """Auto-detect localized country name and flag emoji from node metadata or IP geolocation."""
+    detected_flag = ""
     if isinstance(status_data, dict):
         flag_val = str(status_data.get("country_flag") or "").strip()
         if flag_val:
-            return flag_val[:10]
-        code_val = str(status_data.get("country_code") or "").strip()
-        flag_from_code = country_code_to_flag(code_val)
-        if flag_from_code:
-            return flag_from_code
+            detected_flag = flag_val[:10]
+        else:
+            code_val = str(status_data.get("country_code") or "").strip()
+            if code_val:
+                detected_flag = country_code_to_flag(code_val)
 
     hostname = urlparse(api_url).hostname or ""
     if hostname:
@@ -141,16 +148,17 @@ async def auto_detect_node_country_flag(
                 logger.debug("Could not resolve hostname %s to IP: %s", hostname, exc)
 
         if resolved_ip:
-            code = await _fetch_ip_country_code(resolved_ip)
-            if code:
-                flag = country_code_to_flag(code)
-                if flag:
-                    return flag
+            geo = await _fetch_ip_geo_info(resolved_ip)
+            country = geo.get("country") or ""
+            flag = geo.get("flag") or (country_code_to_flag(geo.get("code")) if geo.get("code") else "")
+            if country or flag:
+                final_flag = detected_flag or flag or (
+                    "🇷🇺" if role == "ru_hub" else "🌐"
+                )
+                return country, final_flag
 
-    if role == "ru_hub":
-        return "🇷🇺"
-
-    return "🌐"
+    final_flag = detected_flag or ("🇷🇺" if role == "ru_hub" else "🌐")
+    return "", final_flag
 
 
 def serialize_server_node(server: Server) -> dict[str, Any]:
@@ -261,12 +269,16 @@ async def discover_and_add_node(
         tls_bootstrap=allow_bootstrap_tls,
     )
     role = extra.get("role")
-    resolved_name = (name or "").strip()[:255] or _derive_default_name(clean_url, status_data, role)
+    detected_name, detected_flag = await auto_detect_node_geo(clean_url, status_data, role)
+
+    clean_name = (name or "").strip()[:255]
+    resolved_name = clean_name or detected_name or _derive_default_name(clean_url, status_data, role)
+
     if country_flag and country_flag.strip():
         raw_flag = country_flag.strip()[:10]
         resolved_flag = country_code_to_flag(raw_flag) or raw_flag
     else:
-        resolved_flag = await auto_detect_node_country_flag(clean_url, status_data, role)
+        resolved_flag = detected_flag
     protocol = _derive_protocol(caps, role)
 
     server = await create_server(
