@@ -3,13 +3,17 @@ import { showToast } from "./ui.js";
 import { renderGuestStub } from "./views/guest_stub.js";
 import { renderSecurity2FAStub } from "./views/security_2fa_stub.js";
 import { renderNodesView } from "./views/nodes.js";
+import { renderNodeDetailView } from "./views/node_detail.js";
 
 const appState = {
     user: null,
     security: null,
     twoFactorPassed: false,
     nodes: [],
+    selectedNodeId: null,
 };
+
+let _tgBackListener = null;
 
 function _initTelegramChrome() {
     const tg = window.Telegram && window.Telegram.WebApp;
@@ -24,6 +28,52 @@ function _initTelegramChrome() {
     }
 }
 
+function _updateTelegramBackButton(onBack) {
+    const tg = window.Telegram && window.Telegram.WebApp;
+    if (!tg || !tg.BackButton) return;
+    try {
+        if (_tgBackListener) {
+            tg.BackButton.offClick(_tgBackListener);
+            _tgBackListener = null;
+        }
+        if (onBack) {
+            _tgBackListener = onBack;
+            tg.BackButton.onClick(_tgBackListener);
+            tg.BackButton.show();
+        } else {
+            tg.BackButton.hide();
+        }
+    } catch {
+        // Non-critical
+    }
+}
+
+function _renderView() {
+    const root = document.getElementById("appRoot");
+    if (!root) return;
+
+    if (appState.selectedNodeId != null) {
+        const node = appState.nodes.find((n) => n.id === appState.selectedNodeId);
+        if (node) {
+            const onBack = () => {
+                appState.selectedNodeId = null;
+                _updateTelegramBackButton(null);
+                _renderView();
+            };
+            _updateTelegramBackButton(onBack);
+            renderNodeDetailView(root, node, onBack, _reloadNodesAndRender);
+            return;
+        }
+        appState.selectedNodeId = null;
+    }
+
+    _updateTelegramBackButton(null);
+    renderNodesView(root, appState, _reloadNodesAndRender, (id) => {
+        appState.selectedNodeId = id;
+        _renderView();
+    });
+}
+
 async function _reloadNodesAndRender() {
     try {
         const res = await api.listNodes();
@@ -31,7 +81,7 @@ async function _reloadNodesAndRender() {
     } catch (err) {
         showToast(err.message || "Не удалось загрузить ноды");
     }
-    renderNodesView(document.getElementById("appRoot"), appState, _reloadNodesAndRender);
+    _renderView();
 }
 
 async function bootstrap() {
