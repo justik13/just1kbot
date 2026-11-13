@@ -295,10 +295,10 @@ class VlessSubscriptionService:
         return [srv for srv in servers if is_vless_capable_server(srv)]
 
     @staticmethod
-    def _extract_node_targets(servers: list[Server]) -> list[tuple[int, str, str]]:
+    def _extract_node_targets(servers: list[Server]) -> list[tuple[int, str, str, bool]]:
         from database.repositories.servers_repo import get_server_xray_api_url
 
-        targets: list[tuple[int, str, str]] = []
+        targets: list[tuple[int, str, str, bool]] = []
         for srv in servers:
             api_url = get_server_xray_api_url(srv)
             api_key = srv.api_key
@@ -316,12 +316,13 @@ class VlessSubscriptionService:
                     srv.name,
                 )
                 continue
-            targets.append((srv.id, api_url, api_key))
+            allow_bootstrap = bool((getattr(srv, "extra_data", None) or {}).get("tls_bootstrap"))
+            targets.append((srv.id, api_url, api_key, allow_bootstrap))
         return targets
 
     @staticmethod
     async def _execute_sync_to_nodes(
-        targets: list[tuple[int, str, str]],
+        targets: list[tuple[int, str, str] | tuple[int, str, str, bool]],
         client_uuid: str,
         desired_active: bool,
         version: int | None = None,
@@ -335,7 +336,7 @@ class VlessSubscriptionService:
 
     @staticmethod
     async def _execute_sync_to_nodes_with_status(
-        targets: list[tuple[int, str, str]],
+        targets: list[tuple[int, str, str] | tuple[int, str, str, bool]],
         client_uuid: str,
         desired_active: bool,
         version: int | None = None,
@@ -345,10 +346,12 @@ class VlessSubscriptionService:
         if not targets:
             return {}, False
 
-        async def _sync_one(srv_id: int, api_url: str, api_key: str) -> tuple[int, bool, bool]:
+        async def _sync_one(
+            srv_id: int, api_url: str, api_key: str, allow_bootstrap: bool = False
+        ) -> tuple[int, bool, bool]:
             needs_bump = False
             try:
-                async with XrayNodeClient(timeout=5.0) as client:
+                async with XrayNodeClient(timeout=5.0, allow_insecure_tls=allow_bootstrap) as client:
                     resp = await client.sync_client(
                         api_url=api_url,
                         api_key=api_key,
@@ -389,7 +392,10 @@ class VlessSubscriptionService:
                 )
                 return srv_id, False, False
 
-        tasks = [_sync_one(srv_id, api_url, api_key) for srv_id, api_url, api_key in targets]
+        tasks = [
+            _sync_one(t[0], t[1], t[2], t[3] if len(t) > 3 else False)
+            for t in targets
+        ]
         res_list = await asyncio.gather(*tasks)
 
         results: dict[int, bool] = {}
@@ -403,16 +409,18 @@ class VlessSubscriptionService:
 
     @staticmethod
     async def _execute_deprovision_on_nodes(
-        targets: list[tuple[int, str, str]],
+        targets: list[tuple[int, str, str] | tuple[int, str, str, bool]],
         client_uuid: str,
         version: int | None = None,
     ) -> dict[int, bool]:
         if not targets:
             return {}
 
-        async def _deprov_one(srv_id: int, api_url: str, api_key: str) -> tuple[int, bool]:
+        async def _deprov_one(
+            srv_id: int, api_url: str, api_key: str, allow_bootstrap: bool = False
+        ) -> tuple[int, bool]:
             try:
-                async with XrayNodeClient(timeout=5.0) as client:
+                async with XrayNodeClient(timeout=5.0, allow_insecure_tls=allow_bootstrap) as client:
                     resp = await client.sync_client(
                         api_url=api_url,
                         api_key=api_key,
@@ -447,7 +455,10 @@ class VlessSubscriptionService:
                 )
                 return srv_id, False
 
-        tasks = [_deprov_one(srv_id, api_url, api_key) for srv_id, api_url, api_key in targets]
+        tasks = [
+            _deprov_one(t[0], t[1], t[2], t[3] if len(t) > 3 else False)
+            for t in targets
+        ]
         res_list = await asyncio.gather(*tasks)
         return dict(res_list)
 
@@ -558,7 +569,9 @@ class VlessSubscriptionService:
             srv_tuple = target[0]
             try:
                 from services.xray_node_client import XrayNodeClient
-                async with XrayNodeClient(timeout=3.0, max_retries=1) as client:
+
+                allow_bootstrap = srv_tuple[3] if len(srv_tuple) > 3 else False
+                async with XrayNodeClient(timeout=3.0, max_retries=1, allow_insecure_tls=allow_bootstrap) as client:
                     is_healthy, err, _ = await client.check_health(srv_tuple[1], srv_tuple[2])
                     if not is_healthy:
                         logger.warning(
