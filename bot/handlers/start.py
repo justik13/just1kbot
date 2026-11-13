@@ -6,12 +6,11 @@ import logging
 import re
 
 from aiogram import Router
-from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import CommandStart
 from aiogram.types import MenuButtonWebApp, Message, WebAppInfo
 
 from bot import texts
-from bot.keyboards.start import build_start_inline_keyboard, build_start_rich_message
+from bot.keyboards.start import build_start_inline_keyboard
 from config.settings import get_settings
 from database.connection import session_scope
 from services.subscription import SubscriptionService
@@ -83,20 +82,12 @@ async def cmd_start(message: Message) -> None:
         logger.debug("Failed to update chat menu button for %s: %s", tg_user.id, exc)
 
     safe_name = safe(db_user.first_name or tg_user.first_name or texts.USER_HUB_START)
-    rich_msg = build_start_rich_message(safe_name, app_url)
-    fallback_kb = build_start_inline_keyboard(app_url)
-    fallback_text = texts.START_HUB_MESSAGE.format(name=safe_name)
+    kb = build_start_inline_keyboard(app_url)
+    msg_text = texts.START_HUB_MESSAGE.format(name=safe_name)
 
-    try:
-        await message.bot.send_rich_message(
-            chat_id=message.chat.id,
-            rich_message=rich_msg,
-        )
-    except TelegramBadRequest as exc:
-        logger.warning("send_rich_message fallback to standard message for chat %s: %s", message.chat.id, exc)
-        await safe_send_message(
-            message.bot,
-            message.chat.id,
-            fallback_text,
-            reply_markup=fallback_kb,
-        )
+    await safe_send_message(
+        message.bot,
+        message.chat.id,
+        msg_text,
+        reply_markup=kb,
+    )
