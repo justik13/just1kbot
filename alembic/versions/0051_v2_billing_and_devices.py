@@ -1,7 +1,7 @@
 """Add v2 billing fields (Standard downgrade cooldown, WI pending downgrade, auto_renew stub) and user_devices table.
 
-Revision ID: 0050_v2_billing_and_devices
-Revises: 0049_drop_user_ban
+Revision ID: 0051_v2_billing_and_devices
+Revises: 0050_drop_server_max_clients
 Create Date: 2026-11-14 00:00:00.000000
 """
 
@@ -11,8 +11,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "0050_v2_billing_and_devices"
-down_revision: str | None = "0049_drop_user_ban"
+revision: str = "0051_v2_billing_and_devices"
+down_revision: str | None = "0050_drop_server_max_clients"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
