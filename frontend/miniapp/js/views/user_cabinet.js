@@ -542,6 +542,139 @@ function _openWiPurchaseModal(d, onReload) {
     renderModal();
 }
 
+function _openWiManageModal(d, onReload) {
+    const wi = d.wi || {};
+    const bal = d.balance || { total: 0 };
+    const pricing = d.pricing || {};
+    const wiCurLimit = Number(wi.device_limit || 1);
+    const wiMaxDevices = pricing.wi_max_devices || 3;
+    const wiPacks = pricing.wi_topup_packs || [];
+    const wiUsedGb = formatBytesGb(wi.traffic_used_bytes);
+    const wiTotalGb = formatBytesGb(wi.traffic_limit_bytes);
+
+    const wrap = document.createElement("div");
+    wrap.className = "field";
+    wrap.style.gap = "12px";
+
+    const close = openModal("Слоты и трафик · Белый интернет", wrap);
+
+    wrap.innerHTML = `
+        <div class="quote-box">
+            <div class="quote-line"><span>Трафик</span><strong>${wiUsedGb} / ${wiTotalGb} ГБ</strong></div>
+            <div class="quote-line"><span>Слотов устройств</span><strong>${wiCurLimit} из ${wiMaxDevices}</strong></div>
+            <div class="quote-line"><span>Баланс аккаунта</span><strong>${bal.total} ₽</strong></div>
+        </div>
+        ${wiCurLimit < wiMaxDevices && wi.add_slot_price_rub != null ? `
+            <button id="modalWiAddSlotBtn" type="button" class="btn btn-primary btn-lg">
+                Добавить +1 слот (+50 ГБ) · ${wi.add_slot_price_rub} ₽
+            </button>
+        ` : ""}
+        ${wiPacks.length ? `
+            <div class="field">
+                <label>Дополнительный трафик</label>
+                <div class="price-tile-grid">
+                    ${wiPacks.map((p) => `
+                        <button type="button" class="price-tile" data-modal-wi-pack="${p.gb}">
+                            <span class="price-tile-top">+${p.gb} ГБ</span>
+                            <span class="price-tile-price">${p.price_rub} ₽</span>
+                        </button>
+                    `).join("")}
+                </div>
+            </div>
+        ` : ""}
+        ${wi.pending_device_limit ? `
+            <div class="notice-box notice-warn">
+                <span>Снижение до ${wi.pending_device_limit} устр. с ${formatDate(wi.pending_from)}</span>
+                <button id="modalWiCancelDgBtn" type="button" class="btn btn-sm btn-danger">Отменить</button>
+            </div>
+        ` : (wiCurLimit > 1 ? `
+            <details class="guide-details">
+                <summary class="guide-summary">
+                    <span>Снизить число слотов со следующего периода</span>
+                    <span class="muted">▾</span>
+                </summary>
+                <div class="guide-body">
+                    <div class="actions-row">
+                        ${Array.from({ length: wiCurLimit - 1 }, (_, i) => i + 1).map((target) => `
+                            <button type="button" class="btn btn-sm" data-modal-wi-dg="${target}">
+                                Снизить до ${target} устр.
+                            </button>
+                        `).join("")}
+                    </div>
+                </div>
+            </details>
+        ` : "")}
+    `;
+
+    const addSlotBtn = wrap.querySelector("#modalWiAddSlotBtn");
+    if (addSlotBtn) {
+        addSlotBtn.addEventListener("click", async () => {
+            addSlotBtn.disabled = true;
+            try {
+                const res = await api.checkoutWi({ action: "add_slot", use_balance: true });
+                close();
+                _handlePaymentResponse(res, "Слот добавлен", onReload);
+            } catch (err) {
+                showToast(err.message || "Ошибка добавления слота");
+            } finally {
+                addSlotBtn.disabled = false;
+            }
+        });
+    }
+
+    wrap.querySelectorAll("[data-modal-wi-pack]").forEach((b) => {
+        b.addEventListener("click", async () => {
+            b.disabled = true;
+            try {
+                const res = await api.checkoutWi({
+                    action: "topup",
+                    gb: Number(b.dataset.modalWiPack),
+                    use_balance: true,
+                });
+                close();
+                _handlePaymentResponse(res, "Пакет трафика добавлен", onReload);
+            } catch (err) {
+                showToast(err.message || "Ошибка покупки пакета");
+            } finally {
+                b.disabled = false;
+            }
+        });
+    });
+
+    wrap.querySelectorAll("[data-modal-wi-dg]").forEach((b) => {
+        b.addEventListener("click", async () => {
+            b.disabled = true;
+            try {
+                await api.scheduleWiDowngrade(Number(b.dataset.modalWiDg));
+                close();
+                showToast("Снижение запланировано на следующий период");
+                onReload();
+            } catch (err) {
+                showToast(err.message || "Ошибка");
+            } finally {
+                b.disabled = false;
+            }
+        });
+    });
+
+    const cancelDgBtn = wrap.querySelector("#modalWiCancelDgBtn");
+    if (cancelDgBtn) {
+        cancelDgBtn.addEventListener("click", async () => {
+            cancelDgBtn.disabled = true;
+            try {
+                await api.cancelWiDowngrade();
+                close();
+                showToast("Отложенное снижение отменено");
+                onReload();
+            } catch (err) {
+                showToast(err.message || "Ошибка отмены");
+            } finally {
+                cancelDgBtn.disabled = false;
+            }
+        });
+    }
+}
+
 export async function loadAndRenderUserCabinet(root) {
     try {
         const data = await api.getUserDashboard();
@@ -571,23 +704,22 @@ function _render(root) {
     const stdActive = Boolean(d.standard && d.standard.active);
     const wiActive = Boolean(d.wi && d.wi.active);
     const hasAny = stdActive || wiActive;
-    const devCount = (d.devices || []).length;
 
     const tabs = hasAny
         ? [
             { id: "connect", label: "Подключение" },
             { id: "tariffs", label: "Тарифы" },
-            { id: "devices", label: `Устройства (${devCount})` },
-            { id: "referrals", label: "Бонусы" },
-            { id: "history", label: "История" },
+            { id: "profile", label: "Профиль" },
         ]
         : [
             { id: "tariffs", label: "Тарифы" },
             { id: "connect", label: "Подключение" },
-            { id: "devices", label: `Устройства (${devCount})` },
-            { id: "referrals", label: "Бонусы" },
-            { id: "history", label: "История" },
+            { id: "profile", label: "Профиль" },
         ];
+
+    if (!tabs.some((t) => t.id === _state.tab)) {
+        _state.tab = hasAny ? "connect" : "tariffs";
+    }
 
     root.innerHTML = `
         <nav class="tabs-bar">
@@ -610,9 +742,7 @@ function _render(root) {
 
     if (_state.tab === "connect") _renderConnectTab(body, d, reload, root);
     else if (_state.tab === "tariffs") _renderTariffsTab(body, d, reload);
-    else if (_state.tab === "devices") _renderDevicesTab(body, d, reload);
-    else if (_state.tab === "referrals") _renderReferralsTab(body, d);
-    else _renderHistoryTab(body, d);
+    else _renderProfileTab(body, d, reload);
 }
 
 function _buildGuideHtml(subUrl, isActive) {
@@ -673,8 +803,6 @@ function _bindGuideEvents(container, root) {
 function _renderConnectTab(body, d, reload, root) {
     const std = d.standard || {};
     const wi = d.wi || {};
-    const bal = d.balance || { real: 0, bonus: 0, total: 0 };
-    const minTopup = (d.pricing && d.pricing.min_topup_rub) || 20;
     const isAnyActive = Boolean(std.active || wi.active);
     const subUrl = d.subscription_url || "";
     const desktopFirst = _state.platform === "windows" || _state.platform === "macos";
@@ -693,12 +821,14 @@ function _renderConnectTab(body, d, reload, root) {
                 <button id="goTariffsBtn" type="button" class="btn btn-primary btn-lg">Перейти к тарифам</button>
                 ${_buildGuideHtml(subUrl, false)}
             </section>
+            ${(d.devices || []).length ? _buildDevicesSectionHtml(d) : ""}
         `;
         body.querySelector("#goTariffsBtn").addEventListener("click", () => {
             _state.tab = "tariffs";
             _render(root);
         });
         _bindGuideEvents(body, root);
+        _bindDevicesEvents(body, reload);
         return;
     }
 
@@ -716,15 +846,6 @@ function _renderConnectTab(body, d, reload, root) {
     const happHref = `happ://add/${subUrl}`;
 
     body.innerHTML = `
-        <section class="balance-card">
-            <div>
-                <div class="muted" style="font-size:12px;">Баланс аккаунта</div>
-                <div class="balance-value">${bal.total} ₽</div>
-                <div class="balance-sub">Основной: ${bal.real} ₽ · Бонусы: ${bal.bonus} ₽</div>
-            </div>
-            <button id="topupBtn" type="button" class="btn btn-primary btn-sm">${_ICONS.plus} Пополнить</button>
-        </section>
-
         <section class="hero-card is-active">
             <div class="row">
                 <div style="display:flex; align-items:center; gap:9px;">
@@ -752,24 +873,12 @@ function _renderConnectTab(body, d, reload, root) {
             ${_buildGuideHtml(subUrl, true)}
         </section>
 
-        <section class="card">
-            <div class="row">
-                <div>
-                    <div style="font-weight:600;">Продление и опции</div>
-                    <div class="muted" style="font-size:12px;">Изменить число устройств, докупить ГБ или вторую подписку</div>
-                </div>
-                <button id="openTariffsFromConnect" type="button" class="btn btn-sm">Тарифы</button>
-            </div>
-        </section>
+        ${_buildDevicesSectionHtml(d)}
     `;
 
-    body.querySelector("#topupBtn").addEventListener("click", () => _openTopupModal(minTopup, reload));
     body.querySelector("#copySubBtn").addEventListener("click", () => copyText(subUrl, "Ключ скопирован"));
-    body.querySelector("#openTariffsFromConnect").addEventListener("click", () => {
-        _state.tab = "tariffs";
-        _render(root);
-    });
     _bindGuideEvents(body, root);
+    _bindDevicesEvents(body, reload);
 }
 
 function _renderTariffsTab(body, d, reload) {
@@ -791,7 +900,6 @@ function _renderTariffsTab(body, d, reload) {
         : 0;
     const wiCurLimit = Number(wi.device_limit || 1);
     const wiMaxDevices = pricing.wi_max_devices || 3;
-    const wiPacks = pricing.wi_topup_packs || [];
 
     body.innerHTML = `
         <section class="balance-card">
@@ -870,44 +978,10 @@ function _renderTariffsTab(body, d, reload) {
                         <span class="switch-track"></span>
                     </span>
                 </label>
-                <div class="actions-row">
-                    <button id="wiRenewBtn" type="button" class="btn btn-primary" style="flex:1;">Продлить +30 дн.</button>
-                    ${wiCurLimit < wiMaxDevices && wi.add_slot_price_rub != null ? `
-                        <button id="wiAddSlotBtn" type="button" class="btn">+1 слот · ${wi.add_slot_price_rub} ₽</button>
-                    ` : ""}
+                <div class="connect-pair">
+                    <button id="wiRenewBtn" type="button" class="btn btn-primary">Продлить +30 дн.</button>
+                    <button id="wiManageBtn" type="button" class="btn">Слоты и трафик</button>
                 </div>
-                ${wiPacks.length ? `
-                    <div class="field">
-                        <label>Докупить трафик</label>
-                        <div class="filter-pills">
-                            ${wiPacks.map((p) => `
-                                <button type="button" class="pill-btn" data-wi-pack="${p.gb}">+${p.gb} ГБ · ${p.price_rub} ₽</button>
-                            `).join("")}
-                        </div>
-                    </div>
-                ` : ""}
-                ${wi.pending_device_limit ? `
-                    <div class="notice-box notice-warn">
-                        <span>Снижение до ${wi.pending_device_limit} устр. с ${formatDate(wi.pending_from)}</span>
-                        <button id="wiCancelDgBtn" type="button" class="btn btn-sm btn-danger">Отменить</button>
-                    </div>
-                ` : (wiCurLimit > 1 ? `
-                    <details class="guide-details">
-                        <summary class="guide-summary">
-                            <span>Снизить число слотов со следующего периода</span>
-                            <span class="muted">▾</span>
-                        </summary>
-                        <div class="guide-body">
-                            <div class="actions-row">
-                                ${Array.from({ length: wiCurLimit - 1 }, (_, i) => i + 1).map((target) => `
-                                    <button type="button" class="btn btn-sm" data-wi-dg="${target}">
-                                        Снизить до ${target} устр.
-                                    </button>
-                                `).join("")}
-                            </div>
-                        </div>
-                    </details>
-                ` : "")}
             ` : `
                 <div class="plan-meta-row">
                     <span class="plan-price-tag">от ${wiBase} ₽ / 30 дн.</span>
@@ -976,137 +1050,72 @@ function _renderTariffsTab(body, d, reload) {
         });
     }
 
-    const addSlotBtn = body.querySelector("#wiAddSlotBtn");
-    if (addSlotBtn) {
-        addSlotBtn.addEventListener("click", async () => {
-            addSlotBtn.disabled = true;
-            try {
-                const res = await api.checkoutWi({
-                    action: "add_slot",
-                    use_balance: true,
-                });
-                _handlePaymentResponse(res, "Слот добавлен", reload);
-            } catch (err) {
-                showToast(err.message || "Ошибка добавления слота");
-            } finally {
-                addSlotBtn.disabled = false;
-            }
-        });
-    }
-
-    body.querySelectorAll("[data-wi-pack]").forEach((b) => {
-        b.addEventListener("click", async () => {
-            b.disabled = true;
-            try {
-                const res = await api.checkoutWi({
-                    action: "topup",
-                    gb: Number(b.dataset.wiPack),
-                    use_balance: true,
-                });
-                _handlePaymentResponse(res, "Пакет трафика добавлен", reload);
-            } catch (err) {
-                showToast(err.message || "Ошибка покупки пакета");
-            } finally {
-                b.disabled = false;
-            }
-        });
-    });
-
-    body.querySelectorAll("[data-wi-dg]").forEach((b) => {
-        b.addEventListener("click", async () => {
-            b.disabled = true;
-            try {
-                await api.scheduleWiDowngrade(Number(b.dataset.wiDg));
-                showToast("Снижение запланировано на следующий период");
-                reload();
-            } catch (err) {
-                showToast(err.message || "Ошибка");
-            } finally {
-                b.disabled = false;
-            }
-        });
-    });
-
-    const cancelDgBtn = body.querySelector("#wiCancelDgBtn");
-    if (cancelDgBtn) {
-        cancelDgBtn.addEventListener("click", async () => {
-            cancelDgBtn.disabled = true;
-            try {
-                await api.cancelWiDowngrade();
-                showToast("Отложенное снижение отменено");
-                reload();
-            } catch (err) {
-                showToast(err.message || "Ошибка отмены");
-            } finally {
-                cancelDgBtn.disabled = false;
-            }
-        });
+    const wiManageBtn = body.querySelector("#wiManageBtn");
+    if (wiManageBtn) {
+        wiManageBtn.addEventListener("click", () => _openWiManageModal(d, reload));
     }
 }
 
-function _renderDevicesTab(body, d, reload) {
+function _buildDevicesSectionHtml(d) {
     const devices = d.devices || [];
     const wiActive = Boolean(d.wi && d.wi.active);
 
-    body.innerHTML = `
+    const rowsHtml = !devices.length
+        ? `
+            <div class="card card-center" style="background:var(--bg-elevated); padding:20px 14px;">
+                <div style="color:var(--text-secondary);">${_ICONS.phone}</div>
+                <div style="font-weight:600; font-size:14px;">Устройств пока нет</div>
+                <p class="muted" style="font-size:12px;">
+                    Нажмите «Подключить в INCY» или «Открыть в Happ» выше — устройство привяжется автоматически.
+                </p>
+            </div>
+        `
+        : devices.map((dev) => {
+            const label = dev.device_name || dev.platform || "Устройство";
+            const meta = [dev.platform, dev.os_version, dev.app_version].filter(Boolean).join(" · ");
+            return `
+                <div class="item-row">
+                    <div class="row">
+                        <div>
+                            <div style="font-weight:600;">${escapeHtml(label)}</div>
+                            <div class="muted" style="font-size:11px;">${escapeHtml(meta || dev.hwid)}</div>
+                        </div>
+                        ${dev.is_bi_assigned ? `<span class="chip chip-info">Слот БИ</span>` : ""}
+                    </div>
+                    <div class="row muted" style="font-size:11px;">
+                        <span>Активность: ${formatDate(dev.last_seen_at)}</span>
+                        <span class="tabular">Приоритет: ${dev.bi_priority || 0}</span>
+                    </div>
+                    <div class="actions-row">
+                        ${wiActive ? `
+                            <button type="button" class="btn btn-sm" data-prio="${escapeHtml(dev.hwid)}" data-cur="${dev.bi_priority || 0}">
+                                ${(dev.bi_priority || 0) > 0 ? "Сбросить приоритет" : "Повысить приоритет"}
+                            </button>
+                        ` : ""}
+                        <button type="button" class="btn btn-sm btn-danger" data-del="${escapeHtml(dev.hwid)}">Удалить</button>
+                    </div>
+                </div>
+            `;
+        }).join("");
+
+    return `
         <section class="card">
             <div class="row">
                 <div class="card-title">Привязанные устройства</div>
                 <span class="chip chip-muted">${devices.length} шт.</span>
             </div>
-            <p class="muted">
+            <p class="muted" style="font-size:12px;">
                 ${wiActive
                     ? "Слоты «Белого интернета» выдаются по приоритету (или в порядке первого подключения)."
-                    : "Устройства добавляются автоматически после импорта ключа в Happ или INCY."}
+                    : "Устройства добавляются автоматически при обновлении ключа в INCY или Happ."}
             </p>
-            <div id="devicesList" style="display:flex; flex-direction:column; gap:8px;"></div>
+            <div style="display:flex; flex-direction:column; gap:8px;">${rowsHtml}</div>
         </section>
     `;
+}
 
-    const list = body.querySelector("#devicesList");
-    if (!devices.length) {
-        list.innerHTML = `
-            <div class="card card-center" style="background:var(--bg-elevated); padding:22px 16px;">
-                <div style="color:var(--text-secondary);">${_ICONS.phone}</div>
-                <div style="font-weight:600; font-size:14px;">Устройств пока нет</div>
-                <p class="muted" style="font-size:12px;">
-                    Откройте вкладку «Подключение» и нажмите «Подключить в INCY» или «Открыть в Happ» — устройство появится здесь автоматически.
-                </p>
-            </div>
-        `;
-        return;
-    }
-
-    devices.forEach((dev) => {
-        const row = document.createElement("div");
-        row.className = "item-row";
-        const label = dev.device_name || dev.platform || "Устройство";
-        const meta = [dev.platform, dev.os_version, dev.app_version].filter(Boolean).join(" · ");
-        row.innerHTML = `
-            <div class="row">
-                <div>
-                    <div style="font-weight:600;">${escapeHtml(label)}</div>
-                    <div class="muted" style="font-size:11px;">${escapeHtml(meta || dev.hwid)}</div>
-                </div>
-                ${dev.is_bi_assigned ? `<span class="chip chip-info">Слот БИ</span>` : ""}
-            </div>
-            <div class="row muted" style="font-size:11px;">
-                <span>Активность: ${formatDate(dev.last_seen_at)}</span>
-                <span class="tabular">Приоритет: ${dev.bi_priority || 0}</span>
-            </div>
-            <div class="actions-row">
-                ${wiActive ? `
-                    <button type="button" class="btn btn-sm" data-prio="${escapeHtml(dev.hwid)}" data-cur="${dev.bi_priority || 0}">
-                        ${(dev.bi_priority || 0) > 0 ? "Сбросить приоритет" : "Повысить приоритет"}
-                    </button>
-                ` : ""}
-                <button type="button" class="btn btn-sm btn-danger" data-del="${escapeHtml(dev.hwid)}">Удалить</button>
-            </div>
-        `;
-        list.appendChild(row);
-    });
-
-    list.querySelectorAll("[data-del]").forEach((btn) => {
+function _bindDevicesEvents(container, reload) {
+    container.querySelectorAll("[data-del]").forEach((btn) => {
         btn.addEventListener("click", async () => {
             btn.disabled = true;
             try {
@@ -1121,7 +1130,7 @@ function _renderDevicesTab(body, d, reload) {
         });
     });
 
-    list.querySelectorAll("[data-prio]").forEach((btn) => {
+    container.querySelectorAll("[data-prio]").forEach((btn) => {
         btn.addEventListener("click", async () => {
             btn.disabled = true;
             const nextPrio = Number(btn.dataset.cur) > 0 ? 0 : 10;
@@ -1138,14 +1147,25 @@ function _renderDevicesTab(body, d, reload) {
     });
 }
 
-function _renderReferralsTab(body, d) {
+function _renderProfileTab(body, d, reload) {
     const ref = d.referrals || {};
-    const bal = d.balance || {};
+    const bal = d.balance || { real: 0, bonus: 0, total: 0 };
+    const minTopup = (d.pricing && d.pricing.min_topup_rub) || 20;
     const minActive = ref.active_min_topup_rub || 67;
     const shareText = `Держи приглашение — скидка ${ref.welcome_discount_pct ?? 25}% на первый заказ`;
     const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(ref.link || "")}&text=${encodeURIComponent(shareText)}`;
+    const items = d.history || [];
 
     body.innerHTML = `
+        <section class="balance-card">
+            <div>
+                <div class="muted" style="font-size:12px;">Баланс аккаунта</div>
+                <div class="balance-value">${bal.total} ₽</div>
+                <div class="balance-sub">Основной: ${bal.real} ₽ · Бонусы: ${bal.bonus} ₽</div>
+            </div>
+            <button id="profileTopupBtn" type="button" class="btn btn-primary btn-sm">${_ICONS.plus} Пополнить</button>
+        </section>
+
         <section class="stats-strip">
             <div class="stat-box"><div class="stat-val">${ref.invited_count ?? 0}</div><div class="stat-lbl">Приглашено</div></div>
             <div class="stat-box"><div class="stat-val">${ref.active_count ?? 0}</div><div class="stat-lbl">Активных</div></div>
@@ -1174,20 +1194,17 @@ function _renderReferralsTab(body, d) {
                 <button id="copyRefBtn" type="button" class="btn">${_ICONS.copy} Копировать</button>
             </div>
         </section>
-    `;
 
-    body.querySelector("#shareRefBtn").addEventListener("click", () => openExternalLink(shareUrl));
-    body.querySelector("#copyRefBtn").addEventListener("click", () => copyText(ref.link, "Ссылка скопирована"));
-}
-
-function _renderHistoryTab(body, d) {
-    const items = d.history || [];
-    body.innerHTML = `
         <section class="card">
             <div class="card-title">История операций</div>
             <div id="historyList" style="display:flex; flex-direction:column; gap:8px;"></div>
         </section>
     `;
+
+    body.querySelector("#profileTopupBtn").addEventListener("click", () => _openTopupModal(minTopup, reload));
+    body.querySelector("#shareRefBtn").addEventListener("click", () => openExternalLink(shareUrl));
+    body.querySelector("#copyRefBtn").addEventListener("click", () => copyText(ref.link, "Ссылка скопирована"));
+
     const list = body.querySelector("#historyList");
     if (!items.length) {
         list.innerHTML = `<div class="muted" style="text-align:center; padding:18px;">Операций пока нет</div>`;
