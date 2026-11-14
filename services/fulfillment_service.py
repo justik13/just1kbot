@@ -47,6 +47,8 @@ class FulfillmentService:
                     user.device_limit = order.device_limit
                 if order.tariff_id:
                     user.current_tariff_id = order.tariff_id
+                elif order.device_limit:
+                    user.current_tariff_id = None
                 user.standard_downgrade_cooldown_until = now + timedelta(
                     days=STANDARD_DOWNGRADE_COOLDOWN_DAYS
                 )
@@ -56,6 +58,8 @@ class FulfillmentService:
                     user.device_limit = order.device_limit
                 if order.tariff_id:
                     user.current_tariff_id = order.tariff_id
+                elif order.device_limit:
+                    user.current_tariff_id = None
             else:
                 base = max(user.subscription_end, now) if user.subscription_end else now
                 if order.duration_days > 0:
@@ -64,6 +68,8 @@ class FulfillmentService:
                     user.device_limit = order.device_limit
                 if order.tariff_id:
                     user.current_tariff_id = order.tariff_id
+                elif order.device_limit:
+                    user.current_tariff_id = None
                 if (order.device_limit or 0) > 2:
                     user.standard_downgrade_cooldown_until = now + timedelta(
                         days=STANDARD_DOWNGRADE_COOLDOWN_DAYS

@@ -130,6 +130,9 @@ function _renderAdminView() {
 
     root.querySelectorAll("[data-atab]").forEach((btn) => {
         btn.addEventListener("click", async () => {
+            if (appState.adminTab === "broadcasts" && btn.dataset.atab !== "broadcasts") {
+                clearBroadcastPollTimer();
+            }
             appState.adminTab = btn.dataset.atab;
             appState.selectedNodeId = null;
             if (appState.adminTab === "users" && !appState.usersData) {
@@ -147,8 +150,9 @@ function _renderAdminView() {
                 }
             } else if (appState.adminTab === "finances" && !appState.financesData) {
                 try {
+                    const validTabs = ["orders", "subscriptions", "topups"];
                     appState.financesData = await api.listFinances(
-                        appState.finSubTab === "payments" ? "payments" : "orders",
+                        validTabs.includes(appState.finSubTab) ? appState.finSubTab : "orders",
                         appState.finStatus || "",
                         appState.finQuery || "",
                         0,

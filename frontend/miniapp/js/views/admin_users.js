@@ -117,9 +117,9 @@ function _openAdjustUserModal(user, onUpdated) {
                 devLbl.textContent = "Устройств (2..10)";
             } else if (action === "grant_wi") {
                 devInput.min = "1";
-                devInput.max = "5";
-                devInput.value = String(Math.min(5, Math.max(1, user.wi_device_limit || 1)));
-                devLbl.textContent = "Слотов (1..5)";
+                devInput.max = "3";
+                devInput.value = String(Math.min(3, Math.max(1, user.wi_device_limit || 1)));
+                devLbl.textContent = "Слотов (1..3)";
             }
         });
     });

@@ -237,8 +237,8 @@ class AdminUserAdjustPayload(BaseModel):
         elif self.action == "grant_wi":
             if self.days is None:
                 raise ValueError("days is required for grant_wi")
-            if self.device_limit is not None and not (1 <= self.device_limit <= 5):
-                raise ValueError("device_limit must be between 1 and 5 for wi")
+            if self.device_limit is not None and not (1 <= self.device_limit <= 3):
+                raise ValueError("device_limit must be between 1 and 3 for wi")
         return self
 
 

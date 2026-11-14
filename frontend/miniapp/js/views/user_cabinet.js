@@ -273,10 +273,11 @@ function _openStandardPlanModal(d, mode, onReload) {
 
         const basePrice = _calcStdPrice(pricing, devices, duration);
         const price = quote ? Number(quote.due_rub ?? basePrice) : basePrice;
+        const originalPrice = quote ? Number(quote.original_price_rub ?? price) : basePrice;
         const discount = quote ? Number(quote.discount_rub || 0) : 0;
         const split = _calcBalanceSplit(price, bal, useBalance);
 
-        const lines = [`<div class="quote-line"><span>Тариф (${devices} устр. · ${duration} дн.)</span><strong>${price} ₽</strong></div>`];
+        const lines = [`<div class="quote-line"><span>Тариф (${devices} устр. · ${duration} дн.)</span><strong>${originalPrice} ₽</strong></div>`];
         if (discount > 0) {
             lines.push(`<div class="quote-line"><span>Приветственная скидка</span><strong style="color:var(--accent-emerald);">-${discount} ₽</strong></div>`);
         }

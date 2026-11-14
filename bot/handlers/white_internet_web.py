@@ -142,7 +142,13 @@ async def white_internet_report_handler(request: web.Request) -> web.Response:
 
     try:
         async with session_scope() as session:
+            from database.repositories import user_devices_repo, vless_subscription_repo
+
             sub = await white_internet_repo.get_subscription_by_token(session, token)
+            if not sub:
+                vless_sub = await vless_subscription_repo.get_subscription_by_token(session, token)
+                if vless_sub:
+                    sub = await white_internet_repo.get_subscription_by_user_id(session, vless_sub.user_id)
             if not sub:
                 return web.json_response(
                     {"ok": False, "error": texts.LANDING_REPORT_INVALID_LINK},
@@ -157,7 +163,7 @@ async def white_internet_report_handler(request: web.Request) -> web.Response:
                     headers={"Cache-Control": "no-store"},
                 )
             sub_status = sub.status.value if hasattr(sub.status, "value") else str(sub.status)
-            active_count = white_internet_repo.count_active_hwids(sub.active_hwids)
+            active_count = await user_devices_repo.count_active_user_devices(session, user.id)
             max_devs = white_internet_repo._effective_device_limit(sub)
             devices_info = f"{active_count} / {max_devs}"
             user_tag = f"@{html.escape(user.username)}" if user.username else "—"

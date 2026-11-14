@@ -177,6 +177,14 @@ async def _cleanup_expired_vless_retention_grace(bot: Bot | None = None) -> None
     threshold = current_time - timedelta(hours=GRACE_PERIOD_HOURS)
 
     async with session_scope() as session:
+        from database.models import UserDevice
+
+        has_user_devices = (
+            select(UserDevice.id)
+            .where(UserDevice.user_id == User.id)
+            .correlate(User)
+            .exists()
+        )
         stmt = (
             select(User.id)
             .join(VlessSubscription, VlessSubscription.user_id == User.id)
@@ -190,6 +198,7 @@ async def _cleanup_expired_vless_retention_grace(bot: Bot | None = None) -> None
                         VlessSubscription.active_hwids.is_not(None),
                         cast(VlessSubscription.active_hwids, String) != "{}",
                     ),
+                    has_user_devices,
                 ),
             )
             .order_by(User.subscription_end.asc())
@@ -201,7 +210,7 @@ async def _cleanup_expired_vless_retention_grace(bot: Bot | None = None) -> None
     if not user_ids:
         return
 
-    from database.repositories import vless_subscription_repo
+    from database.repositories import user_devices_repo, vless_subscription_repo
     from services.audit_service import AuditService
     from services.vless_subscription_service import VlessSubscriptionService
 
@@ -221,14 +230,22 @@ async def _cleanup_expired_vless_retention_grace(bot: Bot | None = None) -> None
                     continue
 
                 vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
-                had_vless_devices = bool(vless_sub and (vless_sub.active_hwids or vless_sub.is_active))
+                active_dev_count = await user_devices_repo.count_active_user_devices(session, user.id)
+                had_vless_devices = bool(
+                    vless_sub and (vless_sub.active_hwids or vless_sub.is_active or active_dev_count > 0)
+                )
 
                 await SubscriptionService.sync_access_state(session, user)
 
                 if not vless_sub or not had_vless_devices:
                     continue
 
-                cleared = await vless_subscription_repo.clear_active_hwids(session, vless_sub.id)
+                cleared_legacy = await vless_subscription_repo.clear_active_hwids(session, vless_sub.id)
+                from database.models import UserDevice
+                from sqlalchemy import delete as sa_delete
+
+                del_res = await session.execute(sa_delete(UserDevice).where(UserDevice.user_id == user.id))
+                cleared = max(cleared_legacy, int(del_res.rowcount or 0))
                 vless_sub.is_active = False
                 await session.flush()
 

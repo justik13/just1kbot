@@ -661,12 +661,13 @@
 }
 
 .seg-group {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    display: flex;
     gap: 6px;
 }
 
 .seg-btn {
+    flex: 1;
+    min-width: 0;
     border: 1px solid var(--border-subtle);
     background: var(--bg-elevated);
     color: var(--text-secondary);
@@ -678,6 +679,24 @@
     cursor: pointer;
     text-align: center;
     transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.btn-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.nodes-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.btn-secondary {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+    border: 1px solid var(--border-subtle);
 }
 
 .seg-btn.active {

@@ -432,7 +432,10 @@ class WhiteInternetService:
             or not origin_node.is_active
             or origin_node.health_state != ServerHealthState.ONLINE
             or origin_node.lifecycle_status != ServerLifecycleStatus.ACTIVE
-            or not (origin_node.extra_data or {}).get("relays")
+            or not (
+                (origin_node.extra_data or {}).get("xhttp_locations")
+                or (origin_node.extra_data or {}).get("relays")
+            )
         )
         new_origin_server: Server | None = None
         if (
@@ -588,7 +591,10 @@ class WhiteInternetService:
             or not origin_node.is_active
             or origin_node.health_state != ServerHealthState.ONLINE
             or origin_node.lifecycle_status != ServerLifecycleStatus.ACTIVE
-            or not (origin_node.extra_data or {}).get("relays")
+            or not (
+                (origin_node.extra_data or {}).get("xhttp_locations")
+                or (origin_node.extra_data or {}).get("relays")
+            )
         )
         new_origin_server: Server | None = None
         if needs_migration:
@@ -711,7 +717,10 @@ class WhiteInternetService:
             or not origin_node.is_active
             or origin_node.health_state != ServerHealthState.ONLINE
             or origin_node.lifecycle_status != ServerLifecycleStatus.ACTIVE
-            or not (origin_node.extra_data or {}).get("relays")
+            or not (
+                (origin_node.extra_data or {}).get("xhttp_locations")
+                or (origin_node.extra_data or {}).get("relays")
+            )
         )
         new_origin_server: Server | None = None
         if needs_migration:
@@ -870,11 +879,13 @@ class WhiteInternetService:
         PENDING_CREATE for the background worker to converge.
         """
         expected_inbound_tags: set[str] = {"just1k-wl-default"}
-        for relay in (origin_node.extra_data or {}).get("relays", []) or []:
-            if isinstance(relay, dict):
-                code = relay.get("code")
-            elif isinstance(relay, str):
-                code = relay
+        extra_data = origin_node.extra_data or {}
+        endpoint_entries = extra_data.get("xhttp_locations") or extra_data.get("relays") or []
+        for entry in endpoint_entries:
+            if isinstance(entry, dict):
+                code = entry.get("code")
+            elif isinstance(entry, str):
+                code = entry
             else:
                 code = None
             if code:
@@ -1196,113 +1207,3 @@ class WhiteInternetService:
                 links.append(link)
 
         return links
-
-    @staticmethod
-    def generate_full_xray_config(
-        subscription: WhiteInternetSubscription,
-        cdn_domain: str,
-        port: int = 443,
-        path: str = DEFAULT_WHITE_INTERNET_PATH,
-    ) -> dict:
-        """Generate complete Xray client JSON config for INCY."""
-        base = _normalize_base_path(path)
-        return {
-            "log": {"loglevel": "warning"},
-            "inbounds": [
-                {
-                    "tag": "socks-in",
-                    "port": 10808,
-                    "listen": "127.0.0.1",
-                    "protocol": "socks",
-                    "settings": {"auth": "noauth", "udp": True},
-                    "sniffing": {"enabled": True, "destOverride": ["http", "tls", "fakedns"]},
-                }
-            ],
-            "outbounds": [
-                {
-                    "tag": "proxy-white-internet",
-                    "protocol": "vless",
-                    "settings": {
-                        "vnext": [
-                            {
-                                "address": cdn_domain,
-                                "port": port,
-                                "users": [
-                                    {
-                                        "id": subscription.uuid,
-                                        "encryption": "none",
-                                    }
-                                ],
-                            }
-                        ]
-                    },
-                    "streamSettings": {
-                        "network": "xhttp",
-                        "security": CANONICAL_XHTTP_PROFILE["security"],
-                        "tlsSettings": {
-                            "serverName": cdn_domain,
-                            "alpn": CANONICAL_XHTTP_PROFILE["alpn"],
-                            "fingerprint": CANONICAL_XHTTP_PROFILE.get(
-                                "fp", WHITE_INTERNET_TLS_FINGERPRINT
-                            ),
-                        },
-                        "xhttpSettings": {
-                            "path": f"{base}/default",
-                            "mode": CANONICAL_XHTTP_PROFILE["mode"],
-                            "uplinkHTTPMethod": CANONICAL_XHTTP_PROFILE["uplinkHTTPMethod"],
-                            "uplinkDataPlacement": CANONICAL_XHTTP_PROFILE["uplinkDataPlacement"],
-                            "uplinkDataKey": CANONICAL_XHTTP_PROFILE["uplinkDataKey"],
-                            "scMaxEachPostBytes": CANONICAL_XHTTP_PROFILE["scMaxEachPostBytes"],
-                            "scMaxConcurrentPosts": CANONICAL_XHTTP_PROFILE["scMaxConcurrentPosts"],
-                            "scMinPostsIntervalMs": CANONICAL_XHTTP_PROFILE["scMinPostsIntervalMs"],
-                            "xPaddingObfsMode": CANONICAL_XHTTP_PROFILE["xPaddingObfsMode"],
-                            "xPaddingKey": CANONICAL_XHTTP_PROFILE["xPaddingKey"],
-                            "xPaddingHeader": CANONICAL_XHTTP_PROFILE["xPaddingHeader"],
-                            "xPaddingMethod": CANONICAL_XHTTP_PROFILE["xPaddingMethod"],
-                            "xPaddingPlacement": CANONICAL_XHTTP_PROFILE["xPaddingPlacement"],
-                            "xPaddingBytes": CANONICAL_XHTTP_PROFILE.get("xPaddingBytes", "100-1000"),
-                        },
-                    },
-                    "mux": {"enabled": False},
-                },
-                {"tag": "direct", "protocol": "freedom"},
-                {"tag": "block", "protocol": "blackhole"},
-            ],
-            "dns": {
-                "hosts": {
-                    "cloudflare-dns.com": "1.1.1.1",
-                    "dns.google": "8.8.8.8",
-                },
-                "servers": [
-                    "fakedns",
-                    "https://1.1.1.1/dns-query",
-                    "https://dns.google/dns-query",
-                ],
-            },
-            "fakedns": [
-                {
-                    "ipPool": "198.18.0.0/15",
-                    "poolSize": 32768,
-                }
-            ],
-            "routing": {
-                "domainStrategy": "IPIfNonMatch",
-                "rules": [
-                    {
-                        "type": "field",
-                        "ip": ["1.1.1.1", "8.8.8.8"],
-                        "outboundTag": "proxy-white-internet",
-                    },
-                    {
-                        "type": "field",
-                        "ip": ["geoip:private"],
-                        "outboundTag": "direct",
-                    },
-                    {
-                        "type": "field",
-                        "port": "0-65535",
-                        "outboundTag": "proxy-white-internet",
-                    },
-                ],
-            },
-        }

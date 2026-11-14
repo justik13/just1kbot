@@ -33,19 +33,22 @@ MAX_REFERRAL_CHAIN_DEPTH = 50
 class SubscriptionService:
     @staticmethod
     async def get_effective_device_limit(session: AsyncSession, user: User | None) -> int:
-        """Canonical device-limit resolution: current tariff first, then user override, else 0.
+        """Canonical device-limit resolution: user.device_limit first (dynamic slider), then legacy current_tariff_id, else 0.
 
         Single source of truth used by both the payment and connection UI layers
         (and safe to reuse by domain services).
         """
         if user is None:
             return 0
+        direct_limit = getattr(user, "device_limit", 0) or 0
+        if direct_limit > 0:
+            return int(direct_limit)
         current_tariff_id = getattr(user, "current_tariff_id", None)
         if current_tariff_id:
             tariff = await get_tariff_by_id(session, current_tariff_id)
             if tariff and getattr(tariff, "service_type", "standard") == "standard":
                 return getattr(tariff, "device_limit", 0) or 0
-        return getattr(user, "device_limit", 0) or 0
+        return 0
 
     @staticmethod
     async def sync_access_state(session: AsyncSession, user: User) -> None:
@@ -317,9 +320,8 @@ class SubscriptionService:
             return None
 
         if new_device_limit is not None:
-            from database.repositories import vless_subscription_repo
-            vless_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
-            total_count = vless_count
+            from database.repositories import user_devices_repo
+            total_count = await user_devices_repo.count_active_user_devices(session, user.id)
 
             if total_count > new_device_limit:
                 raise ValueError(

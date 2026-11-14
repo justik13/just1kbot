@@ -812,6 +812,7 @@ class OrderService:
 
         now = now_utc()
         user.device_limit = target_device_limit
+        user.current_tariff_id = None
         user.standard_downgrade_cooldown_until = now + timedelta(
             days=STANDARD_DOWNGRADE_COOLDOWN_DAYS
         )
@@ -821,10 +822,9 @@ class OrderService:
             await create_admin_adjustment(
                 session,
                 user_id=user_id,
-                amount_rub=bonus_rub,
+                signed_amount=bonus_rub,
                 idempotency_key=f"std_downgrade:{user_id}:{uuid.uuid4()}",
                 metadata={"source": "standard_downgrade_cashback", "target_devices": target_device_limit},
-                locked_user=user,
             )
 
         await session.flush()
@@ -1188,13 +1188,13 @@ class OrderService:
                         order_id=order.id,
                         refund_id=refund_ref,
                     )
-                    balance_after = await get_account_balance(session, order.user_id)
-                    if balance_after < 0:
+                    balance_after = await get_account_balance(session, user_id=order.user_id)
+                    if balance_after.accounting_position < 0:
                         order_meta = dict(order.metadata_ or {})
                         order_meta["requires_manual_review"] = True
-                        order_meta["negative_balance_rub"] = str(balance_after)
+                        order_meta["negative_balance_rub"] = str(balance_after.accounting_position)
                         order_meta["refund_amount_mismatch"] = (
-                            f"Negative balance detected: {balance_after} RUB"
+                            f"Negative balance detected: {balance_after.accounting_position} RUB"
                         )
                         order.metadata_ = order_meta
                         await session.flush()
@@ -1213,6 +1213,19 @@ class OrderService:
                         session,
                         order_id=order.id,
                         refund_id=refund_ref,
+                    )
+                wallet_debit_rub = (order.metadata_ or {}).get("wallet_debit_rub")
+                if wallet_debit_rub and Decimal(str(wallet_debit_rub)) > 0:
+                    await create_admin_adjustment(
+                        session,
+                        user_id=order.user_id,
+                        signed_amount=Decimal(str(wallet_debit_rub)),
+                        idempotency_key=f"mixed_refund_wallet_restore:{order.id}:{refund_ref}",
+                        metadata={
+                            "source": "mixed_order_refund_restore",
+                            "order_id": str(order.id),
+                            "refund_id": refund_ref,
+                        },
                     )
                 if not (order.metadata_ or {}).get("settlement_held"):
                     await FulfillmentService.revoke_order(session, order)

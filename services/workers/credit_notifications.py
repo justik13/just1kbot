@@ -166,16 +166,19 @@ def _format_credit_push_text(
                 int_snapshot_real_available=real_available
             )
         )
-    tariff_name = get_tariff_display_name(device_limit or 2)
+    if service_type == "white_internet":
+        tariff_name = f"Белый интернет ({device_limit or 1} устр.)"
+    else:
+        tariff_name = get_tariff_display_name(device_limit or 2)
     operation = (
         texts.PAYMENT_OP_TITLE_CHANGE
-        if is_tariff_change
+        if is_tariff_change or duration_days <= 0
         else texts.PURCHASE_COMPLETED
     )
     return texts.PAYMENT_PURCHASE_SUCCESS_CARD.format(
         operation_title=operation,
         tariff_name=tariff_name,
-        duration_days=duration_days,
+        duration_days=duration_days if duration_days > 0 else 30,
         charged=int(amount_rub),
         real_balance=real_available,
         bonus_balance=bonus_available,

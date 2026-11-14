@@ -395,7 +395,9 @@ async def api_admin_users_handler(request: web.Request) -> web.Response:
         active_wi = int(
             await session.scalar(
                 select(func.count(WhiteInternetSubscription.id)).where(
-                    WhiteInternetSubscription.status == "active",
+                    WhiteInternetSubscription.status.in_(
+                        ("active", "pending", "exhausted")
+                    ),
                     WhiteInternetSubscription.expires_at.is_not(None),
                     WhiteInternetSubscription.expires_at > now,
                 )
@@ -444,7 +446,12 @@ async def api_admin_users_handler(request: web.Request) -> web.Response:
             bal = await get_account_balance(session, user_id=u.id)
             wi = wi_map.get(u.id)
             std_active = bool(u.subscription_end and u.subscription_end > now)
-            wi_active = bool(wi and wi.status == "active" and wi.expires_at and wi.expires_at > now)
+            wi_active = bool(
+                wi
+                and wi.status in ("active", "pending", "exhausted")
+                and wi.expires_at
+                and wi.expires_at > now
+            )
             items.append({
                 "id": u.id,
                 "telegram_id": u.telegram_id,
@@ -591,6 +598,11 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                 "wi_end": end_iso,
                 "message": "Подписка «Белый интернет» активирована",
             })
+
+        if payload.device_limit is not None and payload.device_limit != wi_sub.device_limit:
+            wi_sub.device_limit = payload.device_limit
+            wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
+            await session.flush()
 
         ok, msg, updated = await WhiteInternetService.extend_subscription(
             session, user.id, payload.days

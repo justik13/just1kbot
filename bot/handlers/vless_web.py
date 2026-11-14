@@ -1006,14 +1006,20 @@ async def vless_report_handler(request: web.Request) -> web.Response:
 
     try:
         async with session_scope() as session:
+            from database.repositories import user_devices_repo, white_internet_repo
+
             vless_sub = await vless_subscription_repo.get_subscription_by_token(session, token)
+            wi_sub = None
             if not vless_sub:
+                wi_sub = await white_internet_repo.get_subscription_by_token(session, token)
+            target_sub = vless_sub or wi_sub
+            if not target_sub:
                 return web.json_response(
                     {"ok": False, "error": texts.LANDING_REPORT_INVALID_LINK},
                     status=404,
                     headers={"Cache-Control": "no-store"},
                 )
-            user = await users_repo.get_user_by_id(session, vless_sub.user_id)
+            user = await users_repo.get_user_by_id(session, target_sub.user_id)
             if not user or getattr(user, "is_deleted", False):
                 return web.json_response(
                     {"ok": False, "error": texts.LANDING_REPORT_INVALID_LINK},
@@ -1025,12 +1031,12 @@ async def vless_report_handler(request: web.Request) -> web.Response:
             user_info = f"ID: <code>{user.telegram_id}</code> ({user_tag})"
             dev_limit = await SubscriptionService.get_effective_device_limit(session, user)
             tariff_name = get_tariff_display_name(dev_limit)
-            total_active = await vless_subscription_repo.get_active_hwid_count(session, user.id)
+            total_active = await user_devices_repo.count_active_user_devices(session, user.id)
             devices_info = f"{total_active} / {dev_limit if dev_limit > 0 else '—'}"
             is_access_active = SubscriptionService.check_vpn_access(user)
             if getattr(user, "financial_hold", False):
                 sub_status = "HOLD"
-            elif not getattr(vless_sub, "is_active", True) or not is_access_active:
+            elif (vless_sub and not getattr(vless_sub, "is_active", True)) or not is_access_active:
                 sub_status = "EXPIRED"
             else:
                 sub_status = "ACTIVE"

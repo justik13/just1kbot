@@ -515,16 +515,14 @@ async def reverse_referral_bonus_for_topup(
         reversal_amount = -abs(reversal_val)
         meta_payment_id = payment_id or (credit.metadata_ or {}).get("topup_payment_id")
         meta_order_id = order_str or (credit.metadata_ or {}).get("topup_order_id")
-        reversal_entry = AccountLedgerEntry(
+        from database.repositories.account_ledger_repo import create_admin_adjustment
+
+        await create_admin_adjustment(
+            session,
             user_id=credit.user_id,
-            entry_type="admin_adjustment",
-            amount=reversal_amount,
-            currency="RUB",
-            payment_id=None,
-            quote_id=None,
-            reversal_of_id=None,
+            signed_amount=reversal_amount,
             idempotency_key=idempotency_key,
-            metadata_={
+            metadata={
                 "source_type": REFERRAL_BONUS_SOURCE,
                 "reason": "topup_refund_reversal",
                 "topup_payment_id": meta_payment_id,
@@ -533,7 +531,6 @@ async def reverse_referral_bonus_for_topup(
                 "refund_id": refund_id,
             },
         )
-        session.add(reversal_entry)
         _logger.debug(
             "Referral bonus reversal created for credit_id=%s, user_id=%s, op_id=%s, amount=%s",
             credit.id,

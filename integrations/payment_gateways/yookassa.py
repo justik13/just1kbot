@@ -40,18 +40,6 @@ class YooKassaGateway(BasePaymentGateway):
             resolved_bot_user = bot_username or os.getenv("BOT_USERNAME")
             if not resolved_bot_user:
                 try:
-                    from aiogram import Bot
-                    current_bot = Bot.get_current()
-                    if current_bot:
-                        me = getattr(current_bot, "_me", None)
-                        if not me:
-                            me = await current_bot.get_me()
-                        if me and me.username:
-                            resolved_bot_user = me.username
-                except Exception:
-                    pass
-            if not resolved_bot_user:
-                try:
                     settings = get_settings()
                     resolved_bot_user = getattr(settings, "BOT_USERNAME", None)
                 except Exception:

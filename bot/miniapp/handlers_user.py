@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
-import inspect
 import logging
-import math
 from typing import Any, TypeVar
 from urllib.parse import unquote
 import uuid
@@ -35,19 +33,24 @@ from config.constants import (
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
     WHITE_INTERNET_TOPUP_PACKS,
 )
+from config.enums import WhiteInternetStatus
 from config.settings import get_settings
 from database.connection import session_scope
 from database.models import Order, User
+from database.repositories import user_devices_repo
 from database.repositories.account_ledger_repo import (
     get_account_balance,
     get_account_history,
 )
-from database.repositories.users_repo import create_user, get_user_by_telegram_id
+from database.repositories.users_repo import get_user_active_referrals_count
 from database.repositories.vless_subscription_repo import get_or_create_subscription
 from database.repositories.white_internet_repo import get_subscription_by_user_id
 from integrations.payment_gateways.factory import get_payment_gateway
-from services import order_service, white_internet_service
+from services import order_service
+from services.order_service import OrderService
 from services.referral_bonus import get_referral_tier
+from services.subscription import SubscriptionService
+from services.white_internet_service import WhiteInternetService
 from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger(__name__)
@@ -77,14 +80,13 @@ async def _parse_json_model(
 
 
 async def _ensure_user(session, ctx) -> User:
-    user = await get_user_by_telegram_id(session, ctx.telegram_id)
-    if user is None:
-        user = await create_user(
-            session,
-            telegram_id=ctx.telegram_id,
-            username=ctx.username or None,
-            first_name=ctx.first_name or None,
-        )
+    user = await SubscriptionService.process_onboarding(
+        session,
+        telegram_id=ctx.telegram_id,
+        username=ctx.username or None,
+        first_name=ctx.first_name or None,
+    )
+    assert user is not None
     return user
 
 
@@ -129,16 +131,7 @@ async def _get_referral_summary(
         )
         or 0
     )
-    active_count = int(
-        await session.scalar(
-            select(func.count(User.id)).where(
-                User.referred_by == user.telegram_id,
-                User.is_deleted.is_(False),
-                User.last_payment_at.is_not(None),
-            )
-        )
-        or 0
-    )
+    active_count = await get_user_active_referrals_count(session, user.telegram_id)
     tier = get_referral_tier(active_count)
     return {
         "link": f"https://t.me/{resolved_bot}?start=ref_{user.telegram_id}",
@@ -152,34 +145,6 @@ async def _get_referral_summary(
         "active_min_topup_rub": int(REFERRAL_ACTIVE_MIN_TOPUP_RUB),
         "welcome_discount_pct": int(REFERRAL_WELCOME_DISCOUNT_PERCENT * 100),
     }
-
-
-async def _list_devices_safe(session, user_id: int, wi_device_limit: int, vless_sub) -> list[dict[str, Any]]:
-    try:
-        from database.repositories import user_devices_repo  # type: ignore[attr-defined]
-
-        fn = getattr(user_devices_repo, "list_user_devices", None)
-        if callable(fn):
-            res = fn(session, user_id, wi_device_limit=wi_device_limit)
-            return await res if inspect.isawaitable(res) else res
-    except ImportError:
-        pass
-
-    hwids = vless_sub.active_hwids if vless_sub and isinstance(vless_sub.active_hwids, dict) else {}
-    items: list[dict[str, Any]] = []
-    for hwid, meta in hwids.items():
-        info = meta if isinstance(meta, dict) else {"last_seen": meta}
-        items.append({
-            "hwid": hwid,
-            "device_name": info.get("device_model") or info.get("device_name") or "Устройство",
-            "platform": info.get("platform") or "",
-            "os_version": info.get("os_version") or "",
-            "app_version": info.get("app_version") or "",
-            "last_seen_at": info.get("last_seen"),
-            "bi_priority": 0,
-            "is_bi_assigned": len(items) < wi_device_limit,
-        })
-    return items
 
 
 def _resolve_bot_username(request: web.Request) -> str:
@@ -231,32 +196,38 @@ async def api_user_dashboard_handler(request: web.Request) -> web.Response:
         vless_sub = await get_or_create_subscription(session, user.id)
         wi_sub = await get_subscription_by_user_id(session, user.id)
 
-        std_active = bool(user.subscription_end and user.subscription_end > now)
+        std_active = SubscriptionService.check_vpn_access(user)
+        std_limit = await SubscriptionService.get_effective_device_limit(session, user)
         wi_active = bool(
-            wi_sub and wi_sub.status == "active" and wi_sub.expires_at and wi_sub.expires_at > now
+            wi_sub
+            and wi_sub.status
+            in (
+                WhiteInternetStatus.ACTIVE,
+                WhiteInternetStatus.PENDING,
+                WhiteInternetStatus.EXHAUSTED,
+            )
+            and wi_sub.expires_at
+            and wi_sub.expires_at > now
         )
         wi_limit = int(wi_sub.device_limit or 1) if wi_active and wi_sub else 0
 
         add_slot_price = None
         if wi_active and wi_sub and wi_sub.device_limit < WHITE_INTERNET_MAX_DEVICE_LIMIT:
-            calc_slot = getattr(white_internet_service, "calculate_wi_add_slot_price", None)
-            if callable(calc_slot):
-                add_slot_price = int(calc_slot(wi_sub.expires_at, now=now))
-            else:
-                rem_days = max(1, math.ceil((wi_sub.expires_at - now).total_seconds() / 86400.0))
-                add_slot_price = int(
-                    math.ceil(float(WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB) * min(30, rem_days) / 30.0)
-                )
+            add_slot_price = int(
+                WhiteInternetService.calculate_wi_add_slot_price(wi_sub.expires_at, now=now)
+            )
 
-        devices = await _list_devices_safe(session, user.id, wi_limit, vless_sub)
+        devices = await user_devices_repo.list_user_devices(
+            session, user.id, wi_device_limit=wi_limit
+        )
         referrals = await _get_referral_summary(
             session, user, bot_username=_resolve_bot_username(request)
         )
         history_rows = await get_account_history(session, user_id=user.id, limit=30)
 
-        cooldown_until = getattr(user, "standard_downgrade_cooldown_until", None)
-        pending_limit = getattr(wi_sub, "pending_device_limit", None) if wi_sub else None
-        pending_from = getattr(wi_sub, "pending_from", None) if wi_sub else None
+        cooldown_until = user.standard_downgrade_cooldown_until
+        pending_limit = wi_sub.pending_device_limit if wi_sub else None
+        pending_from = wi_sub.pending_from if wi_sub else None
 
         return web.json_response({
             "ok": True,
@@ -269,8 +240,8 @@ async def api_user_dashboard_handler(request: web.Request) -> web.Response:
             "standard": {
                 "active": std_active,
                 "expires_at": user.subscription_end.isoformat() if user.subscription_end else None,
-                "device_limit": int(user.device_limit or 0),
-                "auto_renew_enabled": bool(getattr(user, "auto_renew_enabled", False)),
+                "device_limit": int(std_limit),
+                "auto_renew_enabled": bool(user.auto_renew_enabled),
                 "downgrade_cooldown_until": cooldown_until.isoformat() if cooldown_until else None,
             },
             "wi": {
@@ -321,33 +292,12 @@ async def api_user_standard_quote_handler(request: web.Request) -> web.Response:
     async with session_scope() as session:
         user = await _ensure_user(session, ctx)
         bal = await get_account_balance(session, user_id=user.id)
-
-        quote_fn = getattr(order_service.OrderService, "quote_standard_change", None)
-        if callable(quote_fn):
-            quote = await quote_fn(session, user.id, payload.device_limit, payload.duration_days)
-            amount_rub = int(quote.get("due_rub") or 0)
-            split = _calc_payment_split(amount_rub, int(bal.real_available), int(bal.bonus_available), True)
-            return web.json_response({"ok": True, "price_rub": amount_rub, "amount_rub": amount_rub, **quote, **split})
-
-        calc_fn = getattr(order_service, "calculate_standard_price", None)
-        if callable(calc_fn):
-            price_rub = int(calc_fn(payload.device_limit, payload.duration_days))
-        else:
-            # Linear fallback until billing-core branch is merged
-            base_30 = 90 + max(0, payload.device_limit - 2) * 30
-            factor = {7: 0.38, 30: 1.0, 90: 2.7}[payload.duration_days]
-            price_rub = int(round(base_30 * factor))
-
-        split = _calc_payment_split(price_rub, int(bal.real_available), int(bal.bonus_available), True)
-        return web.json_response({
-            "ok": True,
-            "device_limit": payload.device_limit,
-            "duration_days": payload.duration_days,
-            "price_rub": price_rub,
-            "amount_rub": price_rub,
-            "is_downgrade": bool(user.device_limit and payload.device_limit < user.device_limit),
-            **split,
-        })
+        quote = await OrderService.quote_standard_change(
+            session, user.id, payload.device_limit, payload.duration_days
+        )
+        amount_rub = int(quote.get("due_rub") or 0)
+        split = _calc_payment_split(amount_rub, int(bal.real_available), int(bal.bonus_available), True)
+        return web.json_response({"ok": True, "price_rub": amount_rub, "amount_rub": amount_rub, **quote, **split})
 
 
 async def api_user_standard_checkout_handler(request: web.Request) -> web.Response:
@@ -360,17 +310,10 @@ async def api_user_standard_checkout_handler(request: web.Request) -> web.Respon
     if parse_err is not None or payload is None:
         return parse_err  # type: ignore[return-value]
 
-    checkout_fn = getattr(order_service.OrderService, "checkout_order", None)
-    if not callable(checkout_fn):
-        return web.json_response(
-            {"ok": False, "error": "Модуль оплаты обновляется, попробуйте позже"},
-            status=503,
-        )
-
     try:
         async with session_scope() as session:
             user = await _ensure_user(session, ctx)
-            res = await checkout_fn(
+            res = await OrderService.checkout_order(
                 session,
                 user_id=user.id,
                 service_type="standard",
@@ -398,14 +341,12 @@ async def api_user_standard_downgrade_handler(request: web.Request) -> web.Respo
     if parse_err is not None or payload is None:
         return parse_err  # type: ignore[return-value]
 
-    dg_fn = getattr(order_service.OrderService, "downgrade_standard_devices", None)
-    if not callable(dg_fn):
-        return web.json_response({"ok": False, "error": "Операция временно недоступна"}, status=503)
-
     try:
         async with session_scope() as session:
             user = await _ensure_user(session, ctx)
-            res = await dg_fn(session, user.id, payload.target_device_limit)
+            res = await OrderService.downgrade_standard_devices(
+                session, user.id, payload.target_device_limit
+            )
             return web.json_response({"ok": True, **res})
     except Exception as exc:
         return web.json_response({"ok": False, "error": str(exc)}, status=400)
@@ -421,13 +362,6 @@ async def api_user_wi_checkout_handler(request: web.Request) -> web.Response:
     if parse_err is not None or payload is None:
         return parse_err  # type: ignore[return-value]
 
-    checkout_fn = getattr(order_service.OrderService, "checkout_order", None)
-    if not callable(checkout_fn):
-        return web.json_response(
-            {"ok": False, "error": "Модуль оплаты обновляется, попробуйте позже"},
-            status=503,
-        )
-
     op_map = {
         "buy": "purchase",
         "renew": "renew",
@@ -437,7 +371,7 @@ async def api_user_wi_checkout_handler(request: web.Request) -> web.Response:
     try:
         async with session_scope() as session:
             user = await _ensure_user(session, ctx)
-            res = await checkout_fn(
+            res = await OrderService.checkout_order(
                 session,
                 user_id=user.id,
                 service_type="white_internet",
@@ -466,13 +400,11 @@ async def api_user_wi_downgrade_handler(request: web.Request) -> web.Response:
     if parse_err is not None or payload is None:
         return parse_err  # type: ignore[return-value]
 
-    sched_fn = getattr(white_internet_service, "schedule_wi_downgrade", None)
-    if not callable(sched_fn):
-        return web.json_response({"ok": False, "error": "Операция временно недоступна"}, status=503)
-
     async with session_scope() as session:
         user = await _ensure_user(session, ctx)
-        ok, msg, _sub = await sched_fn(session, user.id, payload.target_device_limit)
+        ok, msg, _sub = await WhiteInternetService.schedule_wi_downgrade(
+            session, user.id, payload.target_device_limit
+        )
         if not ok:
             return web.json_response({"ok": False, "error": msg}, status=400)
         return web.json_response({"ok": True, "message": msg})
@@ -484,13 +416,9 @@ async def api_user_wi_downgrade_cancel_handler(request: web.Request) -> web.Resp
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
-    cancel_fn = getattr(white_internet_service, "cancel_wi_downgrade", None)
-    if not callable(cancel_fn):
-        return web.json_response({"ok": False, "error": "Операция временно недоступна"}, status=503)
-
     async with session_scope() as session:
         user = await _ensure_user(session, ctx)
-        ok, msg, _sub = await cancel_fn(session, user.id)
+        ok, msg, _sub = await WhiteInternetService.cancel_wi_downgrade(session, user.id)
         if not ok:
             return web.json_response({"ok": False, "error": msg}, status=400)
         return web.json_response({"ok": True, "message": msg})
@@ -509,29 +437,15 @@ async def api_user_topup_handler(request: web.Request) -> web.Response:
     try:
         async with session_scope() as session:
             user = await _ensure_user(session, ctx)
-            checkout_fn = getattr(order_service.OrderService, "checkout_order", None)
-            if callable(checkout_fn):
-                res = await checkout_fn(
-                    session,
-                    user_id=user.id,
-                    service_type="topup",
-                    amount_rub=Decimal(payload.amount_rub),
-                    use_balance=False,
-                    bot_username=_resolve_bot_username(request),
-                )
-                return web.json_response({"ok": True, **res})
-
-            order, pay_url = await order_service.OrderService.create_topup_order(
-                session=session,
+            res = await OrderService.checkout_order(
+                session,
                 user_id=user.id,
+                service_type="topup",
                 amount_rub=Decimal(payload.amount_rub),
+                use_balance=False,
+                bot_username=_resolve_bot_username(request),
             )
-            return web.json_response({
-                "ok": True,
-                "order_id": str(order.id),
-                "status": order.status,
-                "confirmation_url": pay_url,
-            })
+            return web.json_response({"ok": True, **res})
     except Exception as exc:
         logger.warning("Topup error for %s: %s", ctx.telegram_id, exc)
         return web.json_response({"ok": False, "error": str(exc)}, status=400)
@@ -626,7 +540,7 @@ async def api_user_order_check_handler(request: web.Request) -> web.Response:
 
 
 async def api_user_auto_renew_handler(request: web.Request) -> web.Response:
-    """Toggle balance auto-renewal flag (TODO worker hook) for Standard or WI."""
+    """Toggle balance auto-renewal flag for Standard or WI."""
     ctx, err_resp = require_authenticated_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
@@ -637,21 +551,17 @@ async def api_user_auto_renew_handler(request: web.Request) -> web.Response:
 
     async with session_scope() as session:
         user = await _ensure_user(session, ctx)
-        if payload.scope == "standard":
-            if not hasattr(user, "auto_renew_enabled"):
-                return web.json_response({"ok": False, "error": "Поле автопродления ещё не мигрировано"}, status=503)
-            user.auto_renew_enabled = payload.enabled
-            await session.flush()
-            return web.json_response({"ok": True, "scope": "standard", "enabled": payload.enabled})
+        if payload.scope == "wi":
+            wi_sub = await get_subscription_by_user_id(session, user.id)
+            if wi_sub is None:
+                return web.json_response({"ok": False, "error": "Подписка не найдена"}, status=404)
+            await OrderService.set_auto_renew(
+                session, user.id, white_internet=payload.enabled
+            )
+            return web.json_response({"ok": True, "scope": "wi", "enabled": payload.enabled})
 
-        wi_sub = await get_subscription_by_user_id(session, user.id)
-        if wi_sub is None:
-            return web.json_response({"ok": False, "error": "Подписка не найдена"}, status=404)
-        if not hasattr(wi_sub, "auto_renew_enabled"):
-            return web.json_response({"ok": False, "error": "Поле автопродления ещё не мигрировано"}, status=503)
-        wi_sub.auto_renew_enabled = payload.enabled
-        await session.flush()
-        return web.json_response({"ok": True, "scope": "wi", "enabled": payload.enabled})
+        await OrderService.set_auto_renew(session, user.id, standard=payload.enabled)
+        return web.json_response({"ok": True, "scope": "standard", "enabled": payload.enabled})
 
 
 async def api_user_device_delete_handler(request: web.Request) -> web.Response:
@@ -666,25 +576,9 @@ async def api_user_device_delete_handler(request: web.Request) -> web.Response:
 
     async with session_scope() as session:
         user = await _ensure_user(session, ctx)
-        try:
-            from database.repositories import user_devices_repo  # type: ignore[attr-defined]
-
-            del_fn = getattr(user_devices_repo, "delete_user_device", None)
-            if callable(del_fn):
-                deleted = await del_fn(session, user.id, hwid)
-                if not deleted:
-                    return web.json_response({"ok": False, "error": "Устройство не найдено"}, status=404)
-                return web.json_response({"ok": True})
-        except ImportError:
-            pass
-
-        vless_sub = await get_or_create_subscription(session, user.id)
-        hwids = dict(vless_sub.active_hwids or {})
-        if hwid not in hwids:
+        deleted = await user_devices_repo.delete_user_device(session, user.id, hwid)
+        if not deleted:
             return web.json_response({"ok": False, "error": "Устройство не найдено"}, status=404)
-        hwids.pop(hwid, None)
-        vless_sub.active_hwids = hwids
-        await session.flush()
         return web.json_response({"ok": True})
 
 
@@ -704,19 +598,9 @@ async def api_user_device_priority_handler(request: web.Request) -> web.Response
 
     async with session_scope() as session:
         user = await _ensure_user(session, ctx)
-        try:
-            from database.repositories import user_devices_repo  # type: ignore[attr-defined]
-
-            prio_fn = getattr(user_devices_repo, "set_device_bi_priority", None)
-            if callable(prio_fn):
-                updated = await prio_fn(session, user.id, hwid, payload.priority)
-                if not updated:
-                    return web.json_response({"ok": False, "error": "Устройство не найдено"}, status=404)
-                return web.json_response({"ok": True, "priority": payload.priority})
-        except ImportError:
-            pass
-
-        return web.json_response(
-            {"ok": False, "error": "Управление приоритетом станет доступно после обновления БД"},
-            status=503,
+        updated = await user_devices_repo.set_device_bi_priority(
+            session, user.id, hwid, payload.priority
         )
+        if not updated:
+            return web.json_response({"ok": False, "error": "Устройство не найдено"}, status=404)
+        return web.json_response({"ok": True, "priority": payload.priority})
