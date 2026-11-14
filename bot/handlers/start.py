@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 
@@ -10,14 +11,16 @@ from aiogram.filters import CommandStart
 from aiogram.types import MenuButtonWebApp, Message, WebAppInfo
 
 from bot import texts
+from bot.keyboards.notifications import get_referral_onboarding_keyboard
 from bot.keyboards.start import build_start_inline_keyboard
 from config.settings import get_settings
 from database.connection import session_scope
 from services.subscription import SubscriptionService
-from utils.telegram import safe, safe_send_message
+from utils.telegram import EFFECT_LIKE, safe, safe_send_message
 
 router = Router()
 logger = logging.getLogger(__name__)
+_background_tasks: set[asyncio.Task] = set()
 
 
 def parse_referral_id(command_args: str) -> int | None:
@@ -67,6 +70,30 @@ async def cmd_start(message: Message) -> None:
         await safe_send_message(message.bot, message.chat.id, texts.START_TECHNICAL_ERROR)
         return
 
+    if getattr(db_user, "is_newly_referred", False) and db_user.referred_by:
+        bot_inst = message.bot
+        ref_tg_id = db_user.referred_by
+
+        async def _send_onboarding_push() -> None:
+            try:
+                await safe_send_message(
+                    bot_inst,
+                    ref_tg_id,
+                    texts.REFERRAL_ONBOARDING_NOTIFICATION,
+                    reply_markup=get_referral_onboarding_keyboard(),
+                    message_effect_id=EFFECT_LIKE,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to send referral onboarding push to %s: %s",
+                    ref_tg_id,
+                    exc,
+                )
+
+        task = asyncio.create_task(_send_onboarding_push())
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
+
     settings = get_settings()
     app_url = f"https://{settings.DOMAIN}/app"
 
@@ -82,8 +109,13 @@ async def cmd_start(message: Message) -> None:
         logger.debug("Failed to update chat menu button for %s: %s", tg_user.id, exc)
 
     safe_name = safe(db_user.first_name or tg_user.first_name or texts.USER_HUB_START)
+    discount_line = (
+        texts.START_REFERRAL_DISCOUNT_LINE
+        if db_user.referred_by is not None and not getattr(db_user, "welcome_discount_used", False)
+        else ""
+    )
     kb = build_start_inline_keyboard(app_url)
-    msg_text = texts.START_HUB_MESSAGE.format(name=safe_name)
+    msg_text = texts.START_HUB_MESSAGE.format(name=safe_name, discount_line=discount_line)
 
     await safe_send_message(
         message.bot,

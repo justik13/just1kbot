@@ -4,6 +4,8 @@ import { renderSecurity2FA } from "./views/security_2fa.js";
 import { renderNodesView } from "./views/nodes.js";
 import { renderNodeDetailView } from "./views/node_detail.js";
 import { renderAdminUsersView } from "./views/admin_users.js";
+import { clearBroadcastPollTimer, renderAdminBroadcastsView } from "./views/admin_broadcasts.js";
+import { renderAdminFinancesView } from "./views/admin_finances.js";
 import { loadAndRenderUserCabinet } from "./views/user_cabinet.js";
 
 const appState = {
@@ -16,6 +18,15 @@ const appState = {
     selectedNodeId: null,
     usersData: null,
     usersQuery: "",
+    broadcastsData: null,
+    massTab: "bonus",
+    finSubTab: "orders",
+    financesData: null,
+    finQuery: "",
+    finStatus: "",
+    auditLogsData: null,
+    auditAction: "",
+    auditQuery: "",
 };
 
 let _tgBackListener = null;
@@ -80,10 +91,15 @@ function _renderAdminView() {
     _syncModeSwitch();
 
     if (appState.mode === "cabinet") {
+        clearBroadcastPollTimer();
         appState.selectedNodeId = null;
         _updateTelegramBackButton(null);
         loadAndRenderUserCabinet(root);
         return;
+    }
+
+    if (appState.adminTab !== "broadcasts") {
+        clearBroadcastPollTimer();
     }
 
     if (appState.adminTab === "nodes" && appState.selectedNodeId != null) {
@@ -106,6 +122,8 @@ function _renderAdminView() {
         <nav class="tabs-bar">
             <button type="button" class="tab-btn ${appState.adminTab === "nodes" ? "active" : ""}" data-atab="nodes">Ноды</button>
             <button type="button" class="tab-btn ${appState.adminTab === "users" ? "active" : ""}" data-atab="users">Пользователи</button>
+            <button type="button" class="tab-btn ${appState.adminTab === "broadcasts" ? "active" : ""}" data-atab="broadcasts">Рассылки</button>
+            <button type="button" class="tab-btn ${appState.adminTab === "finances" ? "active" : ""}" data-atab="finances">Финансы</button>
         </nav>
         <div id="adminTabBody" class="app-main"></div>
     `;
@@ -120,6 +138,25 @@ function _renderAdminView() {
                 } catch (err) {
                     showToast(err.message || "Не удалось загрузить пользователей");
                 }
+            } else if (appState.adminTab === "broadcasts" && !appState.broadcastsData) {
+                try {
+                    const res = await api.listBroadcasts();
+                    appState.broadcastsData = res.broadcasts || [];
+                } catch (err) {
+                    showToast(err.message || "Не удалось загрузить рассылки");
+                }
+            } else if (appState.adminTab === "finances" && !appState.financesData) {
+                try {
+                    appState.financesData = await api.listFinances(
+                        appState.finSubTab === "payments" ? "payments" : "orders",
+                        appState.finStatus || "",
+                        appState.finQuery || "",
+                        0,
+                        25
+                    );
+                } catch (err) {
+                    showToast(err.message || "Не удалось загрузить финансы");
+                }
             }
             _renderAdminView();
         });
@@ -131,8 +168,12 @@ function _renderAdminView() {
             appState.selectedNodeId = id;
             _renderAdminView();
         });
-    } else {
+    } else if (appState.adminTab === "users") {
         renderAdminUsersView(body, appState);
+    } else if (appState.adminTab === "broadcasts") {
+        renderAdminBroadcastsView(body, appState);
+    } else {
+        renderAdminFinancesView(body, appState);
     }
 }
 

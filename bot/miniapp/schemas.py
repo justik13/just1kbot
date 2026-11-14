@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -39,10 +40,6 @@ def _validate_uuid(value: str) -> str:
 class Verify2FAPayload(BaseModel):
     code: str = Field(..., min_length=1, max_length=32)
     setup_token: str | None = Field(default=None, max_length=512)
-
-
-class SetupPinPayload(BaseModel):
-    pin: str = Field(..., min_length=4, max_length=32)
 
 
 class TopupPayload(BaseModel):
@@ -201,6 +198,26 @@ class NodeLinksUpdatePayload(BaseModel):
         return self
 
 
+_ALLOWED_BROADCAST_AUDIENCES = frozenset({
+    "all",
+    "active",
+    "active_standard",
+    "active_wi",
+    "expiring_3d",
+    "expired",
+    "no_sub",
+    "never",
+    "test",
+})
+
+
+def _validate_audience(value: str) -> str:
+    clean = value.strip()
+    if clean in _ALLOWED_BROADCAST_AUDIENCES or re.fullmatch(r"server_\d+", clean):
+        return clean
+    raise ValueError("Недопустимая аудитория")
+
+
 class AdminUserAdjustPayload(BaseModel):
     action: Literal["balance", "grant_standard", "grant_wi"]
     amount_rub: int | None = Field(default=None, ge=-100000, le=100000)
@@ -224,3 +241,64 @@ class AdminUserAdjustPayload(BaseModel):
             if self.device_limit is not None and not (1 <= self.device_limit <= 5):
                 raise ValueError("device_limit must be between 1 and 5 for wi")
         return self
+
+
+class AdminDirectMessagePayload(BaseModel):
+    text: str = Field(..., min_length=1, max_length=4096)
+
+
+class BroadcastPreviewPayload(BaseModel):
+    target_audience: str = Field(..., min_length=1, max_length=64)
+
+    @field_validator("target_audience")
+    @classmethod
+    def check_audience(cls, value: str) -> str:
+        return _validate_audience(value)
+
+
+class BroadcastStartPayload(BaseModel):
+    target_audience: str = Field(..., min_length=1, max_length=64)
+    text: str = Field(..., min_length=1, max_length=4096)
+    media_url: str | None = Field(default=None, max_length=500)
+
+    @field_validator("target_audience")
+    @classmethod
+    def check_audience(cls, value: str) -> str:
+        return _validate_audience(value)
+
+    @field_validator("media_url")
+    @classmethod
+    def check_media_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        clean = value.strip()
+        if not clean:
+            return None
+        if clean.lower().startswith("http://"):
+            raise ValueError("URL изображения должен использовать HTTPS")
+        return clean
+
+
+class MassBonusPayload(BaseModel):
+    target_audience: str = Field(..., min_length=1, max_length=64)
+    amount_rub: int = Field(..., ge=1, le=50000)
+    reason: str = Field(default="", max_length=200)
+    notify_users: bool = True
+
+    @field_validator("target_audience")
+    @classmethod
+    def check_audience(cls, value: str) -> str:
+        return _validate_audience(value)
+
+
+class MassExtendPayload(BaseModel):
+    service_scope: Literal["standard", "white_internet"]
+    target_audience: str = Field(..., min_length=1, max_length=64)
+    days: int = Field(..., ge=1, le=365)
+    reason: str = Field(default="", max_length=200)
+    notify_users: bool = True
+
+    @field_validator("target_audience")
+    @classmethod
+    def check_audience(cls, value: str) -> str:
+        return _validate_audience(value)

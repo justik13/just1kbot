@@ -185,11 +185,22 @@ WL_USERINFO_HEADER_TEMPLATE = "upload={upload}; download={download}; total={tota
 
 
 # Onboarding & Mini App entry
+TOS_AGREEMENT_URL = "https://telegra.ph/Polzovatelskoe-soglashenie-07-23-48"
+PRIVACY_POLICY_URL = "https://telegra.ph/Politika-konfidencialnosti-07-23-84"
 USER_HUB_START = "друг"
 BTN_MINIAPP_CONNECT = "🚀 Подключить"
+START_REFERRAL_DISCOUNT_LINE = (
+    "\n🎁 <b>Приветственная скидка 25%</b> по приглашению активна для вашего первого заказа!\n"
+)
 START_HUB_MESSAGE = (
-    "👋 Привет, <b>{name}</b>!\n\n"
-    "Нажмите кнопку <b>«Подключить»</b> ниже, чтобы открыть панель сервиса."
+    "👋 Привет, <b>{name}</b>!\n"
+    "{discount_line}\n"
+    "🤝 <b>Партнёрская программа:</b> приглашайте друзей по своей ссылке и получайте "
+    "<b>15%–30%</b> бонусами с их оплат на свой баланс.\n\n"
+    "Нажмите кнопку <b>«🚀 Подключить»</b> ниже, чтобы открыть панель управления, тарифы и реферальную ссылку.\n\n"
+    "ℹ️ <i>Используя сервис, вы соглашаетесь с "
+    f'<a href="{TOS_AGREEMENT_URL}">Условиями использования</a> и '
+    f'<a href="{PRIVACY_POLICY_URL}">Политикой конфиденциальности</a>.</i>'
 )
 START_TECHNICAL_ERROR = "⚠️ Произошла техническая ошибка. Попробуйте позже."
 

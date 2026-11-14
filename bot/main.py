@@ -27,6 +27,8 @@ from bot.middlewares import (
 from config.constants import WHITE_INTERNET_SUB_PATH_PREFIX
 from config.settings import get_settings
 from database.connection import close_db, init_db
+from services.admin_tools_service import stop_admin_bulk_tasks
+from services.broadcast_service import resume_pending_broadcasts, stop_broadcast_tasks
 from services.workers import (
     shutdown_event,
     start_background_workers,
@@ -393,6 +395,7 @@ async def main():
             return
 
         await start_background_workers(bot)
+        await resume_pending_broadcasts(bot)
 
         logger.info("Запуск polling...")
         polling_task = asyncio.create_task(dp.start_polling(bot, handle_signals=False))
@@ -429,6 +432,12 @@ async def main():
 
     finally:
         logger.info("Stopping background workers...")
+        try:
+            await stop_broadcast_tasks()
+            await stop_admin_bulk_tasks()
+        except Exception as e:
+            logger.error("Error stopping admin/broadcast tasks: %s", e)
+
         try:
             await stop_background_workers()
         except Exception as e:

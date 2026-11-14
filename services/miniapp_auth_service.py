@@ -1,4 +1,4 @@
-"""Authentication, TOTP/PIN 2FA, and signed admin session helpers for Telegram Mini App."""
+"""Authentication, TOTP 2FA, and signed admin session helpers for Telegram Mini App."""
 
 from __future__ import annotations
 
@@ -27,6 +27,12 @@ DEFAULT_INIT_DATA_MAX_AGE_SECONDS = 86400
 MAX_FUTURE_SKEW_SECONDS = 300
 ADMIN_SESSION_TTL_SECONDS = 12 * 3600
 SETUP_TOKEN_TTL_SECONDS = 600
+MAX_2FA_ATTEMPTS = 5
+ATTEMPT_WINDOW_SECONDS = 300
+LOCKOUT_SECONDS = 300
+
+# In-memory per-admin TOTP brute-force tracker: admin_id -> (fail_count, window_start, locked_until)
+_2fa_failures: dict[int, tuple[int, float, float]] = {}
 
 
 @dataclass(frozen=True)
@@ -249,34 +255,52 @@ def verify_totp_setup_token(token: str | None, telegram_id: int) -> str | None:
         return None
 
 
-def _hash_pin(pin: str, telegram_id: int) -> str:
-    return hmac.new(
-        _derive_signing_key(b"MiniAppAdminPin"),
-        f"{telegram_id}:{pin}".encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
+def _check_2fa_lockout(telegram_id: int) -> int:
+    """Return remaining lockout seconds for admin, or 0 if not locked out."""
+    entry = _2fa_failures.get(telegram_id)
+    if not entry:
+        return 0
+    _count, window_start, locked_until = entry
+    now = time.monotonic()
+    if locked_until > now:
+        return max(1, int(locked_until - now))
+    if now - window_start > ATTEMPT_WINDOW_SECONDS:
+        _2fa_failures.pop(telegram_id, None)
+    return 0
+
+
+def _record_2fa_failure(telegram_id: int) -> int:
+    """Record a failed 2FA attempt; return lockout seconds if now locked, else 0."""
+    now = time.monotonic()
+    entry = _2fa_failures.get(telegram_id)
+    if not entry or (now - entry[1] > ATTEMPT_WINDOW_SECONDS and entry[2] <= now):
+        count, window_start = 1, now
+    else:
+        count = entry[0] + 1
+        window_start = entry[1]
+
+    if count >= MAX_2FA_ATTEMPTS:
+        locked_until = now + LOCKOUT_SECONDS
+        _2fa_failures[telegram_id] = (count, window_start, locked_until)
+        logger.warning("Admin %s temporarily locked out after %d failed 2FA attempts", telegram_id, count)
+        return LOCKOUT_SECONDS
+
+    _2fa_failures[telegram_id] = (count, window_start, 0.0)
+    return 0
 
 
 async def get_admin_2fa_config(
     session: AsyncSession,
     telegram_id: int,
 ) -> dict[str, Any]:
-    """Resolve active 2FA mode for an admin (env overrides DB settings)."""
+    """Resolve active TOTP 2FA configuration for an admin (env overrides DB settings)."""
     env_totp = os.getenv("MINIAPP_ADMIN_TOTP_SECRET", "").strip()
     if env_totp:
         return {"configured": True, "mode": "totp", "secret": env_totp, "source": "env"}
 
-    env_pin = os.getenv("MINIAPP_ADMIN_PIN", "").strip()
-    if env_pin:
-        return {"configured": True, "mode": "pin", "pin_plain": env_pin, "source": "env"}
-
     db_totp = await get_system_setting(session, f"miniapp_admin_totp_{telegram_id}")
     if db_totp:
         return {"configured": True, "mode": "totp", "secret": db_totp.strip(), "source": "db"}
-
-    db_pin_hash = await get_system_setting(session, f"miniapp_admin_pin_{telegram_id}")
-    if db_pin_hash:
-        return {"configured": True, "mode": "pin", "pin_hash": db_pin_hash.strip(), "source": "db"}
 
     return {"configured": False, "mode": "setup_required", "source": "none"}
 
@@ -288,16 +312,37 @@ async def verify_admin_2fa(
     *,
     setup_token: str | None = None,
 ) -> dict[str, Any]:
-    """Verify admin 2FA code (TOTP or PIN) or finalize initial TOTP setup."""
+    """Verify admin TOTP 2FA code or finalize initial TOTP setup."""
     if not is_admin(telegram_id):
         return {"verified": False, "error": "Access denied"}
 
-    clean_code = (code or "").strip()
+    retry_after = _check_2fa_lockout(telegram_id)
+    if retry_after > 0:
+        return {
+            "verified": False,
+            "locked": True,
+            "retry_after": retry_after,
+            "error": f"Слишком много неверных попыток. Повторите через {retry_after} сек.",
+        }
+
+    clean_code = (code or "").strip().replace(" ", "")
+    cfg = await get_admin_2fa_config(session, telegram_id)
+
     if setup_token:
+        if cfg["configured"]:
+            return {"verified": False, "error": "2FA уже настроена"}
         pending_secret = verify_totp_setup_token(setup_token, telegram_id)
         if not pending_secret:
             return {"verified": False, "error": "Срок настройки истёк, сгенерируйте ключ заново"}
         if not verify_totp_code(pending_secret, clean_code):
+            lockout = _record_2fa_failure(telegram_id)
+            if lockout > 0:
+                return {
+                    "verified": False,
+                    "locked": True,
+                    "retry_after": lockout,
+                    "error": f"Слишком много неверных попыток. Повторите через {lockout} сек.",
+                }
             return {"verified": False, "error": "Неверный 6-значный код подтверждения"}
         await set_system_setting(
             session,
@@ -305,6 +350,7 @@ async def verify_admin_2fa(
             pending_secret,
             updated_by=telegram_id,
         )
+        _2fa_failures.pop(telegram_id, None)
         token, exp_ts = issue_admin_session_token(telegram_id)
         return {
             "verified": True,
@@ -313,59 +359,25 @@ async def verify_admin_2fa(
             "expires_at": exp_ts,
         }
 
-    cfg = await get_admin_2fa_config(session, telegram_id)
-    mode = cfg["mode"]
-    if mode == "setup_required":
-        return {"verified": False, "error": "2FA не настроена. Настройте TOTP или PIN."}
+    if cfg["mode"] != "totp":
+        return {"verified": False, "error": "2FA не настроена. Настройте TOTP."}
 
-    ok = False
-    if mode == "totp":
-        ok = verify_totp_code(cfg["secret"], clean_code)
-    elif mode == "pin":
-        if "pin_plain" in cfg:
-            ok = hmac.compare_digest(clean_code, cfg["pin_plain"])
-        elif "pin_hash" in cfg:
-            ok = hmac.compare_digest(_hash_pin(clean_code, telegram_id), cfg["pin_hash"])
-
-    if not ok:
+    if not verify_totp_code(cfg["secret"], clean_code):
+        lockout = _record_2fa_failure(telegram_id)
+        if lockout > 0:
+            return {
+                "verified": False,
+                "locked": True,
+                "retry_after": lockout,
+                "error": f"Слишком много неверных попыток. Повторите через {lockout} сек.",
+            }
         return {"verified": False, "error": "Неверный код подтверждения"}
 
+    _2fa_failures.pop(telegram_id, None)
     token, exp_ts = issue_admin_session_token(telegram_id)
     return {
         "verified": True,
-        "mode": mode,
-        "session_token": token,
-        "expires_at": exp_ts,
-    }
-
-
-async def setup_admin_pin(
-    session: AsyncSession,
-    telegram_id: int,
-    pin: str,
-) -> dict[str, Any]:
-    """Set initial admin PIN when 2FA is not yet configured and issue session token."""
-    if not is_admin(telegram_id):
-        return {"verified": False, "error": "Access denied"}
-
-    cfg = await get_admin_2fa_config(session, telegram_id)
-    if cfg["configured"]:
-        return {"verified": False, "error": "2FA уже настроена"}
-
-    clean_pin = (pin or "").strip()
-    if len(clean_pin) < 4 or len(clean_pin) > 32:
-        return {"verified": False, "error": "PIN должен быть от 4 до 32 символов"}
-
-    await set_system_setting(
-        session,
-        f"miniapp_admin_pin_{telegram_id}",
-        _hash_pin(clean_pin, telegram_id),
-        updated_by=telegram_id,
-    )
-    token, exp_ts = issue_admin_session_token(telegram_id)
-    return {
-        "verified": True,
-        "mode": "pin",
+        "mode": "totp",
         "session_token": token,
         "expires_at": exp_ts,
     }

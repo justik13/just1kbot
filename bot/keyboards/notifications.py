@@ -45,6 +45,10 @@ def get_referral_bonus_keyboard() -> InlineKeyboardMarkup:
     return get_dismiss_notification_keyboard()
 
 
+def get_referral_onboarding_keyboard() -> InlineKeyboardMarkup:
+    return get_dismiss_notification_keyboard()
+
+
 def get_node_monitor_alert_keyboard(
     server_id: int,
 ) -> InlineKeyboardMarkup:

@@ -16,6 +16,7 @@ from bot.texts.runtime.notifications import (
     NOTIFY_2H,
     NOTIFY_3D,
     NOTIFY_EXPIRED,
+    NOTIFY_GRACE_12H,
     TIME_DAYS_HOURS_FORMAT,
     TIME_HOURS_MINUTES_FORMAT,
     TIME_SOON_LABEL,
@@ -81,6 +82,8 @@ def _maybe_reset_retry_on_type_change(
 
 
 def _infer_last_notification_type(user: User) -> str | None:
+    if user.notified_grace_12h:
+        return "grace_12h"
     if user.notified_expired:
         return "expired"
     if user.notified_2h:
@@ -319,7 +322,10 @@ async def _send_post_expiry_notifications(
                 User.subscription_end > grace_start,
                 User.is_bot_blocked.is_(False),
                 User.is_deleted.is_(False),
-                User.notified_expired.is_(False),
+                or_(
+                    User.notified_expired.is_(False),
+                    User.notified_grace_12h.is_(False),
+                ),
             )
             .order_by(User.subscription_end.asc())
             .limit(500)
@@ -381,13 +387,24 @@ async def _send_post_expiry_notifications(
                     if time_since_last < backoff_delay:
                         continue
 
-                if user.notified_expired:
-                    continue
-
                 time_until_delete = deletion_time - current_time
-                countdown = _format_countdown(time_until_delete)
-                msg = NOTIFY_EXPIRED.format(countdown=countdown)
-                notification_type = "expired"
+
+                msg = None
+                notification_type = None
+
+                if (
+                    not user.notified_grace_12h
+                    and current_time >= deletion_time - timedelta(hours=12)
+                ):
+                    msg = NOTIFY_GRACE_12H
+                    notification_type = "grace_12h"
+                elif not user.notified_expired:
+                    countdown = _format_countdown(time_until_delete)
+                    msg = NOTIFY_EXPIRED.format(countdown=countdown)
+                    notification_type = "expired"
+
+                if not msg:
+                    continue
 
                 _maybe_reset_retry_on_type_change(
                     user,
@@ -410,9 +427,12 @@ async def _send_post_expiry_notifications(
 
                     user.notification_retry_count = 0
                     user.last_notification_attempt = current_time
+                    if notification_type == "grace_12h":
+                        user.notified_grace_12h = True
+                        user.notified_expired = True
+                    elif notification_type == "expired":
+                        user.notified_expired = True
                     await session.flush()
-
-                    user.notified_expired = True
 
                 except TelegramForbiddenError:
                     user.is_bot_blocked = True

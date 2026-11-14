@@ -13,10 +13,14 @@ from sqlalchemy import func, or_, select
 from bot.miniapp.auth import require_admin_user, require_authenticated_user
 from bot.miniapp.schemas import (
     AddNodePayload,
+    AdminDirectMessagePayload,
     AdminUserAdjustPayload,
+    BroadcastPreviewPayload,
+    BroadcastStartPayload,
     DeployCertPayload,
+    MassBonusPayload,
+    MassExtendPayload,
     NodeLinksUpdatePayload,
-    SetupPinPayload,
     ToggleNodePayload,
     UpdateNodePayload,
     Verify2FAPayload,
@@ -29,14 +33,13 @@ from database.repositories.account_ledger_repo import (
 )
 from database.repositories.vless_subscription_repo import get_or_create_subscription
 from database.repositories.white_internet_repo import get_subscription_by_user_id
-from services import admin_nodes_service
+from services import admin_nodes_service, admin_tools_service, broadcast_service
 from services.admin_nodes_service import AdminNodeServiceError
 from services.miniapp_auth_service import (
     build_totp_uri,
     generate_totp_secret,
     get_admin_2fa_config,
     issue_totp_setup_token,
-    setup_admin_pin,
     verify_admin_2fa,
     verify_admin_session_token,
 )
@@ -144,26 +147,8 @@ async def api_admin_2fa_setup_handler(request: web.Request) -> web.Response:
     })
 
 
-async def api_admin_2fa_setup_pin_handler(request: web.Request) -> web.Response:
-    """Set initial admin PIN when 2FA is not yet configured."""
-    ctx, err_resp = require_admin_user(request, require_2fa=False)
-    if err_resp is not None or ctx is None:
-        return err_resp  # type: ignore[return-value]
-
-    payload, parse_err = await _parse_json_model(request, SetupPinPayload)
-    if parse_err is not None or payload is None:
-        return parse_err  # type: ignore[return-value]
-
-    async with session_scope() as session:
-        result = await setup_admin_pin(session, ctx.telegram_id, payload.pin)
-
-    if not result.get("verified"):
-        return web.json_response({"ok": False, "error": result.get("error", "Ошибка")}, status=400)
-    return web.json_response({"ok": True, **result})
-
-
 async def api_admin_2fa_verify_handler(request: web.Request) -> web.Response:
-    """Verify TOTP or PIN code and issue signed X-Admin-Session token."""
+    """Verify TOTP code and issue signed X-Admin-Session token."""
     ctx, err_resp = require_admin_user(request, require_2fa=False)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
@@ -181,7 +166,8 @@ async def api_admin_2fa_verify_handler(request: web.Request) -> web.Response:
         )
 
     if not result.get("verified"):
-        return web.json_response({"ok": False, "error": result.get("error", "Неверный код")}, status=403)
+        status = 429 if result.get("locked") else 403
+        return web.json_response({"ok": False, "error": result.get("error", "Неверный код")}, status=status)
     return web.json_response({"ok": True, **result})
 
 
@@ -618,3 +604,228 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
             "wi_end": end_iso,
             "message": f"Подписка «Белый интернет» продлена на {payload.days} дн.",
         })
+
+
+def _parse_positive_int(request: web.Request, name: str) -> tuple[int | None, web.Response | None]:
+    raw = request.match_info.get(name, "")
+    if not raw.isdigit() or int(raw) <= 0:
+        return None, web.json_response({"ok": False, "error": f"Invalid {name}"}, status=400)
+    return int(raw), None
+
+
+async def api_admin_user_message_handler(request: web.Request) -> web.Response:
+    ctx, err_resp = require_admin_user(request)
+    if err_resp is not None or ctx is None:
+        return err_resp  # type: ignore[return-value]
+
+    user_id, id_err = _parse_positive_int(request, "user_id")
+    if id_err is not None or user_id is None:
+        return id_err  # type: ignore[return-value]
+
+    payload, parse_err = await _parse_json_model(request, AdminDirectMessagePayload)
+    if parse_err is not None or payload is None:
+        return parse_err  # type: ignore[return-value]
+
+    try:
+        res = await admin_tools_service.send_direct_message(
+            request.app.get("bot"),
+            admin_id=ctx.telegram_id,
+            user_id=user_id,
+            text=payload.text,
+        )
+    except LookupError as exc:
+        return web.json_response({"ok": False, "error": str(exc)}, status=404)
+    except ValueError as exc:
+        return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+    return web.json_response({"ok": True, **res, "message": "Сообщение отправлено"})
+
+
+async def api_admin_broadcasts_list_handler(request: web.Request) -> web.Response:
+    ctx, err_resp = require_admin_user(request)
+    if err_resp is not None or ctx is None:
+        return err_resp  # type: ignore[return-value]
+
+    async with session_scope() as session:
+        items = await broadcast_service.list_broadcasts(session, limit=25)
+    return web.json_response({"ok": True, "broadcasts": items})
+
+
+async def api_admin_broadcast_preview_handler(request: web.Request) -> web.Response:
+    ctx, err_resp = require_admin_user(request)
+    if err_resp is not None or ctx is None:
+        return err_resp  # type: ignore[return-value]
+
+    payload, parse_err = await _parse_json_model(request, BroadcastPreviewPayload)
+    if parse_err is not None or payload is None:
+        return parse_err  # type: ignore[return-value]
+
+    try:
+        async with session_scope() as session:
+            reach = await broadcast_service.count_broadcast_audience(
+                session,
+                payload.target_audience,
+                admin_id=ctx.telegram_id,
+                include_bot_blocked=False,
+            )
+            total_with_blocked = await broadcast_service.count_broadcast_audience(
+                session,
+                payload.target_audience,
+                admin_id=ctx.telegram_id,
+                include_bot_blocked=True,
+            )
+            label = await broadcast_service.resolve_audience_label(
+                session, payload.target_audience
+            )
+    except ValueError as exc:
+        return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+    return web.json_response({
+        "ok": True,
+        "target_audience": payload.target_audience,
+        "label": label,
+        "reachable_count": reach,
+        "total_count": total_with_blocked,
+    })
+
+
+async def api_admin_broadcast_start_handler(request: web.Request) -> web.Response:
+    ctx, err_resp = require_admin_user(request)
+    if err_resp is not None or ctx is None:
+        return err_resp  # type: ignore[return-value]
+
+    payload, parse_err = await _parse_json_model(request, BroadcastStartPayload)
+    if parse_err is not None or payload is None:
+        return parse_err  # type: ignore[return-value]
+
+    try:
+        item = await broadcast_service.create_and_start_broadcast(
+            request.app.get("bot"),
+            admin_id=ctx.telegram_id,
+            target_audience=payload.target_audience,
+            text=payload.text,
+            media_url=payload.media_url,
+        )
+    except ValueError as exc:
+        return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+    return web.json_response({"ok": True, "broadcast": item, "message": "Рассылка запущена"})
+
+
+async def api_admin_broadcast_cancel_handler(request: web.Request) -> web.Response:
+    ctx, err_resp = require_admin_user(request)
+    if err_resp is not None or ctx is None:
+        return err_resp  # type: ignore[return-value]
+
+    broadcast_id, id_err = _parse_positive_int(request, "broadcast_id")
+    if id_err is not None or broadcast_id is None:
+        return id_err  # type: ignore[return-value]
+
+    async with session_scope() as session:
+        item = await broadcast_service.cancel_broadcast(session, broadcast_id, ctx.telegram_id)
+    if item is None:
+        return web.json_response({"ok": False, "error": "Рассылка не найдена"}, status=404)
+    return web.json_response({"ok": True, "broadcast": item, "message": "Рассылка остановлена"})
+
+
+async def api_admin_mass_bonus_handler(request: web.Request) -> web.Response:
+    ctx, err_resp = require_admin_user(request)
+    if err_resp is not None or ctx is None:
+        return err_resp  # type: ignore[return-value]
+
+    payload, parse_err = await _parse_json_model(request, MassBonusPayload)
+    if parse_err is not None or payload is None:
+        return parse_err  # type: ignore[return-value]
+
+    try:
+        res = await admin_tools_service.start_mass_bonus(
+            request.app.get("bot"),
+            admin_id=ctx.telegram_id,
+            target_audience=payload.target_audience,
+            amount_rub=payload.amount_rub,
+            reason=payload.reason,
+            notify_users=payload.notify_users,
+        )
+    except ValueError as exc:
+        return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+    return web.json_response({
+        "ok": True,
+        **res,
+        "message": f"Начисление +{payload.amount_rub} ₽ запущено для {res['target_count']} польз.",
+    })
+
+
+async def api_admin_mass_extend_handler(request: web.Request) -> web.Response:
+    ctx, err_resp = require_admin_user(request)
+    if err_resp is not None or ctx is None:
+        return err_resp  # type: ignore[return-value]
+
+    payload, parse_err = await _parse_json_model(request, MassExtendPayload)
+    if parse_err is not None or payload is None:
+        return parse_err  # type: ignore[return-value]
+
+    try:
+        res = await admin_tools_service.start_mass_extend(
+            request.app.get("bot"),
+            admin_id=ctx.telegram_id,
+            service_scope=payload.service_scope,
+            target_audience=payload.target_audience,
+            days=payload.days,
+            reason=payload.reason,
+            notify_users=payload.notify_users,
+        )
+    except ValueError as exc:
+        return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+    return web.json_response({
+        "ok": True,
+        **res,
+        "message": f"Продление +{payload.days} дн. запущено для {res['target_count']} польз.",
+    })
+
+
+async def api_admin_finances_handler(request: web.Request) -> web.Response:
+    ctx, err_resp = require_admin_user(request)
+    if err_resp is not None or ctx is None:
+        return err_resp  # type: ignore[return-value]
+
+    kind = request.query.get("kind", "orders").strip()
+    if kind not in ("orders", "payments"):
+        kind = "orders"
+    status = request.query.get("status", "").strip()
+    query_str = request.query.get("q", "").strip()
+    offset = int(request.query.get("offset", "0") or 0) if request.query.get("offset", "0").isdigit() else 0
+    limit = int(request.query.get("limit", "25") or 25) if request.query.get("limit", "25").isdigit() else 25
+
+    async with session_scope() as session:
+        data = await admin_tools_service.list_finances(
+            session,
+            kind=kind,
+            status=status,
+            q=query_str,
+            offset=offset,
+            limit=limit,
+        )
+    return web.json_response({"ok": True, **data})
+
+
+async def api_admin_audit_logs_handler(request: web.Request) -> web.Response:
+    ctx, err_resp = require_admin_user(request)
+    if err_resp is not None or ctx is None:
+        return err_resp  # type: ignore[return-value]
+
+    action = request.query.get("action", "").strip()
+    query_str = request.query.get("q", "").strip()
+    offset = int(request.query.get("offset", "0") or 0) if request.query.get("offset", "0").isdigit() else 0
+    limit = int(request.query.get("limit", "40") or 40) if request.query.get("limit", "40").isdigit() else 40
+
+    async with session_scope() as session:
+        data = await admin_tools_service.list_audit_logs(
+            session,
+            action=action,
+            q=query_str,
+            offset=offset,
+            limit=limit,
+        )
+    return web.json_response({"ok": True, **data})

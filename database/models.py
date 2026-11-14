@@ -79,7 +79,7 @@ class User(Base):
                 is_deleted = false
                 AND is_bot_blocked = false
                 AND subscription_end IS NOT NULL
-                AND notified_expired = false
+                AND (notified_expired = false OR notified_grace_12h = false)
                 """
             ),
         ),
@@ -156,6 +156,9 @@ class User(Base):
     notified_1d: Mapped[bool] = mapped_column(Boolean, default=False)
     notified_2h: Mapped[bool] = mapped_column(Boolean, default=False)
     notified_expired: Mapped[bool] = mapped_column(Boolean, default=False)
+    notified_grace_12h: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default=text("false")
+    )
 
     total_traffic_bytes: Mapped[int] = mapped_column(
         BigInteger, default=0, server_default=text("0")
@@ -1116,3 +1119,48 @@ class UserDevice(Base):
     )
 
     user = relationship("User", foreign_keys=[user_id])
+
+
+class BroadcastProgress(Base):
+    __tablename__ = "broadcast_progress"
+
+    __table_args__ = (
+        Index(
+            "ix_broadcast_in_progress",
+            "status",
+            "created_at",
+            postgresql_where=text("status = 'in_progress'"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    admin_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+
+    total_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    success_count: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    fail_count: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    last_processed_id: Mapped[int] = mapped_column(BigInteger, default=0, server_default=text("0"))
+
+    target_audience: Mapped[str] = mapped_column(
+        String(64), default="all", server_default=text("'all'")
+    )
+
+    broadcast_text: Mapped[str] = mapped_column(Text, nullable=False)
+    media_id: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    content_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    label: Mapped[str] = mapped_column(String(50), nullable=False)
+
+    status: Mapped[str] = mapped_column(
+        String(20), default="in_progress", server_default=text("'in_progress'"), index=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now_utc, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=now_utc,
+        onupdate=now_utc,
+        server_default=text("now()"),
+    )

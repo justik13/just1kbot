@@ -62,11 +62,6 @@ export const api = {
 
     // Admin 2FA
     setup2FA: () => requestJson("/api/app/admin/2fa/setup", { method: "POST" }),
-    setup2FAPin: (pin) =>
-        requestJson("/api/app/admin/2fa/setup-pin", {
-            method: "POST",
-            body: JSON.stringify({ pin }),
-        }),
     verify2FA: (code, setupToken = null) =>
         requestJson("/api/app/admin/2fa/verify", {
             method: "POST",
@@ -115,6 +110,48 @@ export const api = {
             method: "POST",
             body: JSON.stringify(payload),
         }),
+    sendUserMessage: (userId, text) =>
+        requestJson(`/api/app/admin/users/${userId}/message`, {
+            method: "POST",
+            body: JSON.stringify({ text }),
+        }),
+    listBroadcasts: () => requestJson("/api/app/admin/broadcasts"),
+    previewBroadcast: (targetAudience) =>
+        requestJson("/api/app/admin/broadcasts/preview", {
+            method: "POST",
+            body: JSON.stringify({ target_audience: targetAudience }),
+        }),
+    startBroadcast: (payload) =>
+        requestJson("/api/app/admin/broadcasts", {
+            method: "POST",
+            body: JSON.stringify(payload),
+        }),
+    cancelBroadcast: (broadcastId) =>
+        requestJson(`/api/app/admin/broadcasts/${broadcastId}/cancel`, {
+            method: "POST",
+        }),
+    massBonus: (payload) =>
+        requestJson("/api/app/admin/mass/bonus", {
+            method: "POST",
+            body: JSON.stringify(payload),
+        }),
+    massExtend: (payload) =>
+        requestJson("/api/app/admin/mass/extend", {
+            method: "POST",
+            body: JSON.stringify(payload),
+        }),
+    listFinances: (kind = "orders", status = "", q = "", offset = 0, limit = 25) =>
+        requestJson(
+            `/api/app/admin/finances?kind=${encodeURIComponent(kind)}&status=${encodeURIComponent(
+                status
+            )}&q=${encodeURIComponent(q)}&offset=${offset}&limit=${limit}`
+        ),
+    listAuditLogs: (action = "", q = "", offset = 0, limit = 40) =>
+        requestJson(
+            `/api/app/admin/audit-logs?action=${encodeURIComponent(action)}&q=${encodeURIComponent(
+                q
+            )}&offset=${offset}&limit=${limit}`
+        ),
 
     // User cabinet
     getUserDashboard: () => requestJson("/api/app/user/dashboard"),

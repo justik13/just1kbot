@@ -1,6 +1,46 @@
 import { api } from "../api.js";
 import { escapeHtml, formatDate, openModal, showToast } from "../ui.js";
 
+function _openDirectMessageModal(user) {
+    const uname = user.username ? `@${user.username}` : (user.first_name || `ID ${user.telegram_id}`);
+    const form = document.createElement("form");
+    form.className = "field";
+    form.style.gap = "12px";
+
+    form.innerHTML = `
+        <div class="muted" style="font-size:12px;">
+            Получатель: <b>${escapeHtml(uname)}</b> (${user.telegram_id})
+        </div>
+        <div class="field">
+            <label for="dmTextArea">Текст сообщения (поддерживается HTML)</label>
+            <textarea id="dmTextArea" class="textarea" rows="5" maxlength="4096" required
+                placeholder="Введите сообщение пользователю..."></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary btn-lg">Отправить в бот</button>
+    `;
+
+    const close = openModal(`Сообщение · ${uname}`, form);
+    form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const text = form.querySelector("#dmTextArea").value.trim();
+        if (!text) {
+            showToast("Введите текст сообщения");
+            return;
+        }
+        const btn = form.querySelector("button[type='submit']");
+        btn.disabled = true;
+        try {
+            const res = await api.sendUserMessage(user.id, text);
+            close();
+            showToast(res.message || "Сообщение отправлено");
+        } catch (err) {
+            showToast(err.message || "Ошибка отправки сообщения");
+        } finally {
+            btn.disabled = false;
+        }
+    });
+}
+
 function _openAdjustUserModal(user, onUpdated) {
     const uname = user.username ? `@${user.username}` : (user.first_name || `ID ${user.telegram_id}`);
     const form = document.createElement("form");
@@ -212,9 +252,15 @@ export function renderAdminUsersView(root, state) {
                     ${stdBadge}
                     ${wiBadge}
                 </div>
-                <button type="button" class="btn btn-sm" data-manage-uid="${u.id}">Управление</button>
+                <div class="btn-group">
+                    <button type="button" class="btn btn-sm" data-msg-uid="${u.id}">Написать</button>
+                    <button type="button" class="btn btn-sm" data-manage-uid="${u.id}">Управление</button>
+                </div>
             </div>
         `;
+        card.querySelector("[data-msg-uid]").addEventListener("click", () => {
+            _openDirectMessageModal(u);
+        });
         card.querySelector("[data-manage-uid]").addEventListener("click", () => {
             _openAdjustUserModal(u, () => reload(state.usersQuery || ""));
         });

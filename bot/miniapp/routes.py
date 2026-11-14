@@ -10,8 +10,15 @@ from aiohttp import web
 from bot.miniapp.auth import check_miniapp_rate_limit
 from bot.miniapp.handlers_admin import (
     api_admin_2fa_setup_handler,
-    api_admin_2fa_setup_pin_handler,
     api_admin_2fa_verify_handler,
+    api_admin_audit_logs_handler,
+    api_admin_broadcast_cancel_handler,
+    api_admin_broadcast_preview_handler,
+    api_admin_broadcast_start_handler,
+    api_admin_broadcasts_list_handler,
+    api_admin_finances_handler,
+    api_admin_mass_bonus_handler,
+    api_admin_mass_extend_handler,
     api_admin_nodes_add_handler,
     api_admin_nodes_cert_post_handler,
     api_admin_nodes_delete_handler,
@@ -21,6 +28,7 @@ from bot.miniapp.handlers_admin import (
     api_admin_nodes_refresh_handler,
     api_admin_nodes_toggle_handler,
     api_admin_user_adjust_handler,
+    api_admin_user_message_handler,
     api_admin_users_handler,
     api_me_handler,
 )
@@ -114,7 +122,6 @@ def setup_miniapp_routes(app: web.Application) -> None:
 
     # Admin 2FA & session
     app.router.add_post("/api/app/admin/2fa/setup", api_admin_2fa_setup_handler)
-    app.router.add_post("/api/app/admin/2fa/setup-pin", api_admin_2fa_setup_pin_handler)
     app.router.add_post("/api/app/admin/2fa/verify", api_admin_2fa_verify_handler)
 
     # Admin nodes & users
@@ -128,6 +135,20 @@ def setup_miniapp_routes(app: web.Application) -> None:
     app.router.add_post("/api/app/admin/nodes/{server_id}/certificate", api_admin_nodes_cert_post_handler)
     app.router.add_get("/api/app/admin/users", api_admin_users_handler)
     app.router.add_post("/api/app/admin/users/{user_id}/adjust", api_admin_user_adjust_handler)
+    app.router.add_post("/api/app/admin/users/{user_id}/message", api_admin_user_message_handler)
+
+    # Admin broadcasts, mass operations, finances, audit logs
+    app.router.add_get("/api/app/admin/broadcasts", api_admin_broadcasts_list_handler)
+    app.router.add_post("/api/app/admin/broadcasts/preview", api_admin_broadcast_preview_handler)
+    app.router.add_post("/api/app/admin/broadcasts", api_admin_broadcast_start_handler)
+    app.router.add_post(
+        "/api/app/admin/broadcasts/{broadcast_id}/cancel",
+        api_admin_broadcast_cancel_handler,
+    )
+    app.router.add_post("/api/app/admin/mass/bonus", api_admin_mass_bonus_handler)
+    app.router.add_post("/api/app/admin/mass/extend", api_admin_mass_extend_handler)
+    app.router.add_get("/api/app/admin/finances", api_admin_finances_handler)
+    app.router.add_get("/api/app/admin/audit-logs", api_admin_audit_logs_handler)
 
     # User cabinet APIs
     app.router.add_get("/api/app/user/dashboard", api_user_dashboard_handler)

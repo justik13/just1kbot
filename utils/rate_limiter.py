@@ -38,5 +38,11 @@ transactional_send_limiter = TokenBucketRateLimiter(
     burst=25,
 )
 
+# Limiter for mass broadcasts and bulk notifications (keeps headroom for transactional traffic)
+broadcast_send_limiter = TokenBucketRateLimiter(
+    rate=18.0,
+    burst=18,
+)
+
 # Backwards-compatible alias
 global_send_limiter = transactional_send_limiter
