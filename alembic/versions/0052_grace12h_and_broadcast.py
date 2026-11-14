@@ -1,6 +1,6 @@
 """Restore users.notified_grace_12h, grace notify index, and broadcast_progress table.
 
-Revision ID: 0052_restore_grace_12h_and_broadcast
+Revision ID: 0052_grace12h_and_broadcast
 Revises: 0051_v2_billing_and_devices
 Create Date: 2026-11-14 12:00:00.000000
 """
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "0052_restore_grace_12h_and_broadcast"
+revision: str = "0052_grace12h_and_broadcast"
 down_revision: str | None = "0051_v2_billing_and_devices"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
