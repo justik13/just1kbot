@@ -12,22 +12,37 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from config.constants import REFERRAL_WELCOME_DISCOUNT_PERCENT
+from config.constants import (
+    MIN_TOPUP_RUB,
+    REFERRAL_WELCOME_DISCOUNT_PERCENT,
+    STANDARD_DOWNGRADE_COOLDOWN_DAYS,
+    STANDARD_MAX_DEVICES,
+    STANDARD_MIN_DEVICES,
+    STANDARD_PLANS,
+    WHITE_INTERNET_BASE_DURATION_DAYS,
+    WHITE_INTERNET_MAX_DEVICE_LIMIT,
+    WHITE_INTERNET_TOPUP_PACKS,
+)
+from config.tariffs import calculate_standard_price
 from database.models import AccountLedgerEntry, Order, Tariff, User
 from database.repositories.users_repo import (
     is_eligible_for_referral_first_discount,
 )
+from database.repositories.user_devices_repo import count_active_user_devices
 from database.repositories.account_ledger_repo import (
+    create_admin_adjustment,
     create_order_credit,
     create_order_debit,
     create_order_refund_debit,
     get_account_balance,
 )
+from database.repositories.white_internet_repo import get_subscription_by_user_id as get_wi_sub_by_user_id
 from integrations.payment_gateways.base import PaymentCreationAmbiguousError
 from integrations.payment_gateways.factory import get_payment_gateway
 from services.fulfillment_service import FulfillmentService
 from services.order_notifications import mark_notify_pending
 from services.referral_bonus import reverse_referral_bonus_for_topup
+from services.white_internet_service import WhiteInternetService, get_white_internet_tier_price
 from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger(__name__)
@@ -114,8 +129,36 @@ class OrderService:
                     "new_rate_pct": grant_result.new_rate_pct,
                 }
                 order.metadata_ = referrer_meta
+        # Mixed payment: debit pre-agreed wallet portion first via FIFO (bonuses first)
+        mixed_fallback = False
+        wallet_debit_raw = (order.metadata_ or {}).get("wallet_debit_rub")
+        if wallet_debit_raw and order.payment_method != "wallet" and order.service_type != "topup":
+            wallet_debit = Decimal(str(wallet_debit_raw))
+            if wallet_debit > 0:
+                bal = await get_account_balance(session, user_id=order.user_id, for_update=True)
+                if bal.debt == 0 and bal.available >= wallet_debit:
+                    await create_order_debit(
+                        session,
+                        user_id=order.user_id,
+                        amount_rub=wallet_debit,
+                        order_id=order.id,
+                        metadata={"description": f"Смешанная оплата: {order.description}"},
+                    )
+                else:
+                    mixed_fallback = True
+                    await create_order_credit(
+                        session,
+                        user_id=order.user_id,
+                        amount_rub=order.amount_rub,
+                        order_id=order.id,
+                        metadata={"source": "mixed_fallback_topup"},
+                    )
+                    fb_meta = dict(order.metadata_ or {})
+                    fb_meta["mixed_fallback_credited"] = True
+                    order.metadata_ = fb_meta
+
         # Fulfill benefits linearly
-        if order.status != "refunded":
+        if order.status != "refunded" and not mixed_fallback:
             await FulfillmentService.fulfill_order(session, order)
         await session.flush()
 
@@ -618,6 +661,343 @@ class OrderService:
         await OrderService._settle_benefits(session, order, was_canceled=was_canceled)
         logger.info("Order %s marked paid and fulfilled successfully", order.id)
         return order
+
+    @staticmethod
+    async def _is_standard_paid_subscription(session: AsyncSession, user_id: int) -> bool:
+        """Check whether user has at least one paid non-free Standard order."""
+        paid_id = await session.scalar(
+            select(Order.id)
+            .where(
+                Order.user_id == user_id,
+                Order.service_type == "standard",
+                Order.status == "paid",
+                Order.amount_rub > 0,
+            )
+            .limit(1)
+        )
+        return paid_id is not None
+
+    @staticmethod
+    async def quote_standard_change(
+        session: AsyncSession,
+        user_id: int,
+        target_device_limit: int,
+        target_duration_days: int = 30,
+    ) -> dict:
+        """Calculate quote for Standard purchase, renewal, mid-term upgrade, or downgrade."""
+        if target_device_limit < STANDARD_MIN_DEVICES or target_device_limit > STANDARD_MAX_DEVICES:
+            raise ValueError(f"device_limit must be {STANDARD_MIN_DEVICES}..{STANDARD_MAX_DEVICES}")
+        if target_duration_days not in STANDARD_PLANS:
+            raise ValueError(f"duration_days must be one of {sorted(STANDARD_PLANS)}")
+
+        user = await session.get(User, user_id)
+        now = now_utc()
+        sub_end = getattr(user, "subscription_end", None) if user else None
+        current_limit = (getattr(user, "device_limit", 0) or 0) if user else 0
+        cooldown_until = getattr(user, "standard_downgrade_cooldown_until", None) if user else None
+        active_hwid_count = await count_active_user_devices(session, user_id)
+
+        is_active = bool(sub_end and sub_end > now and current_limit > 0)
+        if not is_active:
+            base_price = Decimal(calculate_standard_price(target_device_limit, target_duration_days))
+            discount = Decimal(0)
+            if await is_eligible_for_referral_first_discount(session, user_id):
+                discount = (base_price * REFERRAL_WELCOME_DISCOUNT_PERCENT).quantize(
+                    Decimal(1), rounding=ROUND_DOWN
+                )
+            due = max(Decimal(1), base_price - discount)
+            return {
+                "operation": "purchase",
+                "due_rub": int(due),
+                "original_price_rub": int(base_price),
+                "discount_rub": int(discount),
+                "bonus_credit_rub": 0,
+                "days_left": 0,
+                "can_downgrade": False,
+                "blocked_reason": None,
+                "cooldown_until": cooldown_until.isoformat() if cooldown_until else None,
+                "active_hwid_count": active_hwid_count,
+            }
+
+        if target_device_limit == current_limit:
+            due = Decimal(calculate_standard_price(target_device_limit, target_duration_days))
+            return {
+                "operation": "renew",
+                "due_rub": int(due),
+                "original_price_rub": int(due),
+                "discount_rub": 0,
+                "bonus_credit_rub": 0,
+                "days_left": max(0, math.ceil((sub_end - now).total_seconds() / 86400.0)),
+                "can_downgrade": False,
+                "blocked_reason": None,
+                "cooldown_until": cooldown_until.isoformat() if cooldown_until else None,
+                "active_hwid_count": active_hwid_count,
+            }
+
+        if target_device_limit > current_limit:
+            days_left = max(1, math.ceil((sub_end - now).total_seconds() / 86400.0))
+            diff_30 = calculate_standard_price(target_device_limit, 30) - calculate_standard_price(
+                max(STANDARD_MIN_DEVICES, current_limit), 30
+            )
+            due_rub = max(1, math.ceil(days_left * (diff_30 / 30.0)))
+            return {
+                "operation": "upgrade",
+                "due_rub": int(due_rub),
+                "original_price_rub": int(due_rub),
+                "discount_rub": 0,
+                "bonus_credit_rub": 0,
+                "days_left": days_left,
+                "can_downgrade": False,
+                "blocked_reason": None,
+                "cooldown_until": cooldown_until.isoformat() if cooldown_until else None,
+                "active_hwid_count": active_hwid_count,
+            }
+
+        # Downgrade: target_device_limit < current_limit
+        full_days_left = max(0, int((sub_end - now).total_seconds() // 86400))
+        blocked_reason: str | None = None
+        if cooldown_until and cooldown_until > now:
+            blocked_reason = f"Снижение лимита доступно после {cooldown_until.strftime('%d.%m.%Y %H:%M')}"
+        elif active_hwid_count > target_device_limit:
+            blocked_reason = (
+                f"Активных устройств ({active_hwid_count}) больше нового лимита ({target_device_limit}). "
+                "Удалите лишние устройства."
+            )
+
+        is_paid = await OrderService._is_standard_paid_subscription(session, user_id)
+        if is_paid and full_days_left > 0:
+            diff_30 = calculate_standard_price(current_limit, 30) - calculate_standard_price(
+                target_device_limit, 30
+            )
+            bonus_credit = max(0, math.floor(full_days_left * (diff_30 / 30.0)))
+        else:
+            bonus_credit = 0
+
+        return {
+            "operation": "downgrade",
+            "due_rub": 0,
+            "original_price_rub": 0,
+            "discount_rub": 0,
+            "bonus_credit_rub": int(bonus_credit),
+            "days_left": full_days_left,
+            "can_downgrade": blocked_reason is None,
+            "blocked_reason": blocked_reason,
+            "cooldown_until": cooldown_until.isoformat() if cooldown_until else None,
+            "active_hwid_count": active_hwid_count,
+        }
+
+    @staticmethod
+    async def downgrade_standard_devices(
+        session: AsyncSession,
+        user_id: int,
+        target_device_limit: int,
+    ) -> dict:
+        """Downgrade Standard device limit with 7-day cooldown and floor bonus cashback."""
+        user = await OrderService._load_settlement_user(session, user_id)
+        if user is None:
+            raise ValueError("User not found")
+
+        quote = await OrderService.quote_standard_change(
+            session, user_id, target_device_limit, target_duration_days=30
+        )
+        if quote["operation"] != "downgrade":
+            raise ValueError("Target device limit must be lower than current limit")
+        if not quote["can_downgrade"]:
+            raise ValueError(quote["blocked_reason"] or "Downgrade not allowed")
+
+        now = now_utc()
+        user.device_limit = target_device_limit
+        user.standard_downgrade_cooldown_until = now + timedelta(
+            days=STANDARD_DOWNGRADE_COOLDOWN_DAYS
+        )
+
+        bonus_rub = Decimal(quote["bonus_credit_rub"])
+        if bonus_rub > 0:
+            await create_admin_adjustment(
+                session,
+                user_id=user_id,
+                amount_rub=bonus_rub,
+                idempotency_key=f"std_downgrade:{user_id}:{uuid.uuid4()}",
+                metadata={"source": "standard_downgrade_cashback", "target_devices": target_device_limit},
+                locked_user=user,
+            )
+
+        await session.flush()
+        return {
+            "ok": True,
+            "device_limit": user.device_limit,
+            "bonus_credited_rub": int(bonus_rub),
+            "cooldown_until": user.standard_downgrade_cooldown_until.isoformat(),
+        }
+
+    @staticmethod
+    async def checkout_order(
+        session: AsyncSession,
+        *,
+        user_id: int,
+        service_type: str,
+        device_limit: int | None = None,
+        duration_days: int | None = None,
+        amount_rub: Decimal | int | None = None,
+        gb: int | None = None,
+        operation: str | None = None,
+        use_balance: bool = True,
+        return_url: str | None = None,
+        bot_username: str | None = None,
+    ) -> dict:
+        """Unified server-side checkout supporting 100% wallet (bonuses first), mixed payment, or YooKassa."""
+        user = await OrderService._load_settlement_user(session, user_id)
+        if user is None:
+            raise ValueError("User not found")
+        if getattr(user, "financial_hold", False):
+            raise FinancialHoldBlockedError("Financial hold active on user")
+
+        order_meta: dict = {}
+        traffic_bytes = 0
+        final_duration = 0
+        final_devices = device_limit
+        description = texts.CHECKOUT_DESCRIPTION_DEFAULT
+
+        if service_type == "topup":
+            if amount_rub is None:
+                raise ValueError("amount_rub is required for topup")
+            total_cost = Decimal(int(amount_rub))
+            if total_cost < MIN_TOPUP_RUB:
+                raise ValueError(f"Минимальная сумма пополнения: {int(MIN_TOPUP_RUB)} ₽")
+            use_balance = False
+            order_meta["operation"] = "topup"
+            description = f"Пополнение баланса на {int(total_cost)} ₽"
+        elif service_type == "standard":
+            d_limit = int(device_limit or STANDARD_MIN_DEVICES)
+            d_days = int(duration_days or 30)
+            quote = await OrderService.quote_standard_change(session, user_id, d_limit, d_days)
+            if quote["operation"] == "downgrade":
+                raise ValueError("Use downgrade_standard_devices for device downgrade")
+            total_cost = Decimal(quote["due_rub"])
+            final_devices = d_limit
+            final_duration = 0 if quote["operation"] == "upgrade" else d_days
+            order_meta["operation"] = quote["operation"]
+            if quote.get("discount_rub"):
+                order_meta["is_referral_discount"] = True
+                order_meta["discount_rub"] = quote["discount_rub"]
+                order_meta["original_price_rub"] = quote["original_price_rub"]
+            if quote["operation"] == "upgrade":
+                description = f"Увеличение устройств до {d_limit}"
+            else:
+                description = f"Доступ на {d_days} дн. ({d_limit} устр.)"
+        elif service_type == "white_internet":
+            wi_sub = await get_wi_sub_by_user_id(session, user_id)
+            op = operation or ("renew" if wi_sub else "purchase")
+            order_meta["operation"] = op
+            if op == "add_device_slot":
+                if wi_sub is None:
+                    raise ValueError("No active White Internet subscription")
+                total_cost, gb_added = WhiteInternetService.calculate_wi_add_slot_quote(
+                    wi_sub.expires_at
+                )
+                final_devices = min(WHITE_INTERNET_MAX_DEVICE_LIMIT, (wi_sub.device_limit or 1) + 1)
+                traffic_bytes = gb_added * (1024**3)
+                description = "Доп. устройство высокой устойчивости"
+            elif op == "topup":
+                if gb is None or int(gb) not in WHITE_INTERNET_TOPUP_PACKS:
+                    raise ValueError(f"Unsupported traffic pack: {gb}")
+                pack_gb = int(gb)
+                total_cost = WHITE_INTERNET_TOPUP_PACKS[pack_gb]
+                traffic_bytes = pack_gb * (1024**3)
+                description = f"Доп. пакет трафика {pack_gb} ГБ"
+            else:
+                if op == "renew" and wi_sub and wi_sub.pending_device_limit is not None:
+                    d_limit = wi_sub.pending_device_limit
+                else:
+                    d_limit = max(1, min(WHITE_INTERNET_MAX_DEVICE_LIMIT, int(device_limit or 1)))
+                total_cost = get_white_internet_tier_price(d_limit)
+                final_devices = d_limit
+                final_duration = WHITE_INTERNET_BASE_DURATION_DAYS
+                description = f"Доп. опция высокой устойчивости ({d_limit} устр., 30 дн.)"
+        else:
+            raise ValueError(f"Unsupported service_type: {service_type}")
+
+        bal = await get_account_balance(session, user_id=user_id, for_update=True, locked_user=user)
+        if use_balance and bal.debt > 0:
+            raise AccountDebtBlockedError("Account debt prevents wallet purchases")
+
+        if use_balance and bal.available >= total_cost:
+            order = await OrderService.pay_from_wallet(
+                session,
+                user_id=user_id,
+                service_type=service_type,
+                amount_rub=total_cost,
+                duration_days=final_duration,
+                traffic_bytes=traffic_bytes,
+                device_limit=final_devices,
+                description=description,
+                metadata=order_meta,
+            )
+            charged_bonus = min(bal.bonus_available, total_cost)
+            return {
+                "order_id": str(order.id),
+                "status": order.status,
+                "confirmation_url": None,
+                "charged_balance": int(total_cost),
+                "charged_bonus": int(charged_bonus),
+                "to_pay_rub": 0,
+                "total_cost_rub": int(total_cost),
+            }
+
+        wallet_debit = bal.available if (use_balance and bal.available > 0) else Decimal(0)
+        to_pay = total_cost - wallet_debit
+        if wallet_debit > 0:
+            order_meta["wallet_debit_rub"] = int(wallet_debit)
+            order_meta["total_cost_rub"] = int(total_cost)
+            order_meta["is_mixed_payment"] = True
+
+        order = await OrderService.create_order(
+            session,
+            user_id=user_id,
+            service_type=service_type,
+            amount_rub=to_pay,
+            duration_days=final_duration,
+            traffic_bytes=traffic_bytes,
+            device_limit=final_devices,
+            payment_method="yookassa",
+            description=description,
+            return_url=return_url,
+            metadata=order_meta,
+            bot_username=bot_username,
+        )
+        charged_bonus = min(bal.bonus_available, wallet_debit) if wallet_debit > 0 else Decimal(0)
+        return {
+            "order_id": str(order.id),
+            "status": order.status,
+            "confirmation_url": order.payment_url,
+            "charged_balance": int(wallet_debit),
+            "charged_bonus": int(charged_bonus),
+            "to_pay_rub": int(to_pay),
+            "total_cost_rub": int(total_cost),
+        }
+
+    @staticmethod
+    async def set_auto_renew(
+        session: AsyncSession,
+        user_id: int,
+        *,
+        standard: bool | None = None,
+        white_internet: bool | None = None,
+    ) -> dict:
+        """TODO stub: persist auto-renew preferences for future wallet-balance renewal worker."""
+        user = await OrderService._load_settlement_user(session, user_id)
+        if user is None:
+            raise ValueError("User not found")
+        if standard is not None:
+            user.auto_renew_enabled = bool(standard)
+        wi_sub = await get_wi_sub_by_user_id(session, user_id)
+        if white_internet is not None and wi_sub is not None:
+            wi_sub.auto_renew_enabled = bool(white_internet)
+        await session.flush()
+        return {
+            "standard": bool(user.auto_renew_enabled),
+            "white_internet": bool(wi_sub.auto_renew_enabled) if wi_sub else False,
+        }
 
     @staticmethod
     async def process_webhook_event(

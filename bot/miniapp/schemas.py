@@ -36,8 +36,57 @@ def _validate_uuid(value: str) -> str:
         raise ValueError(f"Invalid UUID: {value!r}") from exc
 
 
-class Verify2FAStubPayload(BaseModel):
-    code: str = Field(default="", max_length=32)
+class Verify2FAPayload(BaseModel):
+    code: str = Field(..., min_length=1, max_length=32)
+    setup_token: str | None = Field(default=None, max_length=512)
+
+
+class SetupPinPayload(BaseModel):
+    pin: str = Field(..., min_length=4, max_length=32)
+
+
+class TopupPayload(BaseModel):
+    amount_rub: int = Field(..., ge=20, le=50000)
+
+
+class StandardQuotePayload(BaseModel):
+    device_limit: int = Field(..., ge=2, le=10)
+    duration_days: int = Field(..., ge=7, le=90)
+
+    @field_validator("duration_days")
+    @classmethod
+    def check_duration(cls, value: int) -> int:
+        if value not in {7, 30, 90}:
+            raise ValueError("duration_days must be 7, 30, or 90")
+        return value
+
+
+class StandardCheckoutPayload(StandardQuotePayload):
+    use_balance: bool = True
+
+
+class StandardDowngradePayload(BaseModel):
+    target_device_limit: int = Field(..., ge=2, le=10)
+
+
+class WiCheckoutPayload(BaseModel):
+    action: str = Field(..., pattern=r"^(buy|renew|add_slot|topup)$")
+    device_limit: int = Field(default=1, ge=1, le=3)
+    gb: int | None = Field(default=None, ge=10, le=50)
+    use_balance: bool = True
+
+
+class WiDowngradePayload(BaseModel):
+    target_device_limit: int = Field(..., ge=1, le=2)
+
+
+class AutoRenewPayload(BaseModel):
+    scope: str = Field(..., pattern=r"^(standard|wi)$")
+    enabled: bool
+
+
+class DevicePriorityPayload(BaseModel):
+    priority: int = Field(..., ge=0, le=100)
 
 
 class AddNodePayload(BaseModel):

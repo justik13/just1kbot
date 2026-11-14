@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 PENDING_RETRY_INTERVAL = 3600
 CLEANUP_START_DELAY = 60.0
-CLEANUP_LOOP_INTERVAL = 900.0
+CLEANUP_LOOP_INTERVAL = 3600.0
 RECONCILE_LOOP_INTERVAL = 60.0
 OLD_RECORDS_INTERVAL = 86400.0
 # Auto-expire throughput: each daily pass drains the pending-expiry backlog
@@ -74,6 +74,7 @@ async def cleanup_expired_subscriptions_loop(
         try:
             now = time.monotonic()
             if now - _last_heavy_cleanup >= CLEANUP_LOOP_INTERVAL:
+                await _apply_due_white_internet_downgrades()
                 await _cleanup_expired_vless_network_grace()
                 await _cleanup_expired_vless_retention_grace(bot)
                 await _sweep_vless_pending_revocations()
@@ -108,6 +109,22 @@ async def cleanup_expired_subscriptions_loop(
 
 
 
+
+
+async def _apply_due_white_internet_downgrades() -> None:
+    """Apply scheduled White Internet device limit downgrades when pending_from is reached."""
+    from services.white_internet_service import WhiteInternetService
+
+    apply_fn = getattr(WhiteInternetService, "apply_due_wi_downgrades", None)
+    if apply_fn is None:
+        return
+    try:
+        async with session_scope() as session:
+            applied = await apply_fn(session, now=now_utc())
+            if applied:
+                logger.info("Applied %d scheduled White Internet device downgrades", applied)
+    except Exception as exc:
+        logger.warning("Failed to apply scheduled White Internet downgrades: %s", exc)
 
 
 async def _cleanup_expired_vless_network_grace() -> None:

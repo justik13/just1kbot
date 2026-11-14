@@ -131,7 +131,13 @@ class WhiteInternetReconciliationWorker:
         desired_active = task["desired_active"]
         target_version = task["target_version"]
         expected_relays = task.get("expected_relays") or []
-        expected_inbound_tags = {"just1k-wl-default"}
+        expected_xhttp = task.get("expected_xhttp_locations") or []
+        expected_inbound_tags = set()
+        for loc in expected_xhttp:
+            if isinstance(loc, dict) and loc.get("inbound_tag"):
+                expected_inbound_tags.add(str(loc["inbound_tag"]))
+        if not expected_inbound_tags:
+            expected_inbound_tags.add("just1k-wl-default")
         for r in expected_relays:
             code = r.get("code") if isinstance(r, dict) else r
             if code:
@@ -388,6 +394,17 @@ class WhiteInternetReconciliationWorker:
             )
             res_servers = await sess.execute(stmt_servers)
             servers = res_servers.scalars().all()
+            from services.white_internet_service import WhiteInternetService
+
+            apply_fn = getattr(WhiteInternetService, "apply_due_wi_downgrades", None)
+            if apply_fn is not None:
+                try:
+                    await apply_fn(sess, now=now)
+                    await sess.commit()
+                except Exception as exc:
+                    logger.warning("Failed to apply due WI downgrades in reconciliation cycle: %s", exc)
+                    await sess.rollback()
+
             server_list = [
                 (
                     s.id,
@@ -398,6 +415,7 @@ class WhiteInternetReconciliationWorker:
                     s.xray_instance_boot_id,
                     s.xray_instance_starttime,
                     (s.extra_data or {}).get("relays", []),
+                    (s.extra_data or {}).get("xhttp_locations", []),
                     bool((s.extra_data or {}).get("origin_hidden", False)),
                 )
                 for s in servers
@@ -411,8 +429,8 @@ class WhiteInternetReconciliationWorker:
             ]
 
         # Check health outside DB transaction
-        active_server_targets: list[tuple[int, str, str, str, list, bool]] = []  # (id, api_url, api_key, epoch, relays, origin_hidden)
-        for server_id, _name, api_url, api_key, cur_epoch, cur_boot_id, cur_starttime, relays, origin_hidden in server_list:
+        active_server_targets: list[tuple[int, str, str, str, list, list, bool]] = []
+        for server_id, _name, api_url, api_key, cur_epoch, cur_boot_id, cur_starttime, relays, xhttp_locs, origin_hidden in server_list:
             is_healthy, node_epoch, health_data = await self.client.check_health(api_url, api_key)
             if is_healthy and node_epoch and health_data:
                 boot_id = health_data.get("boot_id")
@@ -442,10 +460,10 @@ class WhiteInternetReconciliationWorker:
 
                 node_relays = health_data.get("relays")
                 target_relays = node_relays if isinstance(node_relays, list) and not health_data.get("relays_error") else relays
-                active_server_targets.append((server_id, api_url, api_key, target_node_epoch or node_epoch, target_relays, origin_hidden))
+                active_server_targets.append((server_id, api_url, api_key, target_node_epoch or node_epoch, target_relays, xhttp_locs, origin_hidden))
 
         synced_count = 0
-        for server_id, api_url, api_key, target_epoch, relays, origin_hidden in active_server_targets:
+        for server_id, api_url, api_key, target_epoch, relays, xhttp_locs, origin_hidden in active_server_targets:
             if not target_epoch:
                 continue
 
@@ -504,6 +522,7 @@ class WhiteInternetReconciliationWorker:
                         "desired_active": desired_active,
                         "target_version": sub.desired_version,
                         "expected_relays": relays,
+                        "expected_xhttp_locations": xhttp_locs,
                         "origin_hidden": origin_hidden,
                     })
 

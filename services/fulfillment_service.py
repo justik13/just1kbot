@@ -7,7 +7,7 @@ import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.constants import VPN_ACCESS_GRACE_HOURS
+from config.constants import STANDARD_DOWNGRADE_COOLDOWN_DAYS, VPN_ACCESS_GRACE_HOURS
 from database.models import Order, User
 from services.subscription import SubscriptionService
 from services.white_internet_service import WhiteInternetService
@@ -41,16 +41,33 @@ class FulfillmentService:
             order.metadata_ = meta
 
             is_tariff_change = bool(meta.get("is_tariff_change"))
-            if is_tariff_change and order.duration_days > 0:
+            op = meta.get("operation")
+            if op == "upgrade":
+                if order.device_limit:
+                    user.device_limit = order.device_limit
+                if order.tariff_id:
+                    user.current_tariff_id = order.tariff_id
+                user.standard_downgrade_cooldown_until = now + timedelta(
+                    days=STANDARD_DOWNGRADE_COOLDOWN_DAYS
+                )
+            elif is_tariff_change and order.duration_days > 0:
                 user.subscription_end = now + timedelta(days=order.duration_days)
+                if order.device_limit:
+                    user.device_limit = order.device_limit
+                if order.tariff_id:
+                    user.current_tariff_id = order.tariff_id
             else:
                 base = max(user.subscription_end, now) if user.subscription_end else now
                 if order.duration_days > 0:
                     user.subscription_end = base + timedelta(days=order.duration_days)
-            if order.device_limit:
-                user.device_limit = order.device_limit
-            if order.tariff_id:
-                user.current_tariff_id = order.tariff_id
+                if order.device_limit:
+                    user.device_limit = order.device_limit
+                if order.tariff_id:
+                    user.current_tariff_id = order.tariff_id
+                if (order.device_limit or 0) > 2:
+                    user.standard_downgrade_cooldown_until = now + timedelta(
+                        days=STANDARD_DOWNGRADE_COOLDOWN_DAYS
+                    )
             user.notified_3d = False
             user.notified_1d = False
             user.notified_2h = False
@@ -84,6 +101,7 @@ class FulfillmentService:
                     user.id,
                     actor_telegram_id=user.telegram_id,
                     debit_balance=False,
+                    extra_bytes=order.traffic_bytes if order.traffic_bytes else None,
                 )
                 if not ok:
                     raise RuntimeError(f"White Internet device slot purchase failed: {msg}")
@@ -107,7 +125,10 @@ class FulfillmentService:
                     )
                 else:
                     ok, msg, created_sub = await WhiteInternetService.purchase_subscription(
-                        session, user.id, debit_balance=False
+                        session,
+                        user.id,
+                        debit_balance=False,
+                        device_limit=order.device_limit or 1,
                     )
                 if not ok:
                     raise RuntimeError(f"White Internet subscription fulfillment failed: {msg}")
@@ -137,7 +158,17 @@ class FulfillmentService:
             meta = dict(order.metadata_ or {})
             is_tariff_change = bool(meta.get("is_tariff_change"))
             prev_end_str = meta.get("previous_subscription_end")
-            if is_tariff_change and prev_end_str:
+            op = meta.get("operation")
+            if op == "upgrade":
+                if "previous_device_limit" in meta:
+                    try:
+                        user.device_limit = int(meta["previous_device_limit"])
+                    except (ValueError, TypeError):
+                        pass
+                prev_tariff = meta.get("previous_tariff_id")
+                if prev_tariff:
+                    user.current_tariff_id = prev_tariff
+            elif is_tariff_change and prev_end_str:
                 try:
                     from datetime import datetime
                     prev_end = datetime.fromisoformat(prev_end_str)
@@ -173,6 +204,41 @@ class FulfillmentService:
             meta_op = meta.get("operation")
             target_sub_id = meta.get("subscription_id")
 
+            if meta_op == "add_device_slot" or (
+                order.device_limit
+                and (order.duration_days or 0) == 0
+                and meta_op != "topup"
+            ):
+                from config.constants import (
+                    WHITE_INTERNET_DEFAULT_DEVICE_LIMIT,
+                    WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES,
+                )
+                from database.repositories.white_internet_repo import (
+                    get_subscription_by_user_id,
+                )
+
+                sub = await get_subscription_by_user_id(session, user.id)
+                if sub:
+                    sub.device_limit = max(
+                        WHITE_INTERNET_DEFAULT_DEVICE_LIMIT,
+                        (sub.device_limit or 1) - 1,
+                    )
+                    revoked_bytes = order.traffic_bytes or WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES
+                    sub.base_traffic_bytes = max(
+                        0,
+                        (sub.base_traffic_bytes or 0) - revoked_bytes,
+                    )
+                    sub.desired_version = (sub.desired_version or 0) + 1
+                    await session.flush()
+                    logger.info(
+                        "Revoked White Internet device slot order %s for user %s (device_limit=%s, base_traffic_bytes=%s)",
+                        order.id,
+                        user.id,
+                        sub.device_limit,
+                        sub.base_traffic_bytes,
+                    )
+                return
+
             if meta_op == "topup" or (
                 (order.traffic_bytes or 0) > 0 and (order.duration_days or 0) == 0
             ):
@@ -192,41 +258,6 @@ class FulfillmentService:
                         order.id,
                         user.id,
                         order.traffic_bytes,
-                        sub.extra_traffic_bytes,
-                    )
-                return
-
-            if meta_op == "add_device_slot" or (
-                order.device_limit
-                and not (order.traffic_bytes or 0)
-                and (order.duration_days or 0) == 0
-            ):
-                from config.constants import (
-                    WHITE_INTERNET_DEFAULT_DEVICE_LIMIT,
-                    WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES,
-                )
-                from database.repositories.white_internet_repo import (
-                    get_subscription_by_user_id,
-                )
-
-                sub = await get_subscription_by_user_id(session, user.id)
-                if sub:
-                    sub.device_limit = max(
-                        WHITE_INTERNET_DEFAULT_DEVICE_LIMIT,
-                        (sub.device_limit or 1) - 1,
-                    )
-                    sub.extra_traffic_bytes = max(
-                        0,
-                        (sub.extra_traffic_bytes or 0)
-                        - WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES,
-                    )
-                    sub.desired_version = (sub.desired_version or 0) + 1
-                    await session.flush()
-                    logger.info(
-                        "Revoked White Internet device slot order %s for user %s (device_limit=%s, extra_traffic_bytes=%s)",
-                        order.id,
-                        user.id,
-                        sub.device_limit,
                         sub.extra_traffic_bytes,
                     )
                 return

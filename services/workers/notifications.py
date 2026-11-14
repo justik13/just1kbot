@@ -34,7 +34,8 @@ from utils.telegram import safe_send_message
 logger = logging.getLogger(__name__)
 
 MAX_RETRY_COUNT = 4
-BACKOFF_BASE_INTERVAL = NOTIFICATION_INTERVAL
+NOTIFICATION_CHECK_INTERVAL = max(NOTIFICATION_INTERVAL, 3600)
+BACKOFF_BASE_INTERVAL = NOTIFICATION_CHECK_INTERVAL
 NOTIFICATION_BATCH_SIZE = 20
 NOTIFICATION_START_DELAY = 60.0
 
@@ -148,7 +149,7 @@ async def subscription_notifications_loop(
         try:
             await asyncio.wait_for(
                 shutdown_event.wait(),
-                timeout=NOTIFICATION_INTERVAL,
+                timeout=NOTIFICATION_CHECK_INTERVAL,
             )
 
             break

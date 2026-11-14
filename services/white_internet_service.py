@@ -23,7 +23,6 @@ from config.constants import (
     WHITE_INTERNET_BASE_PRICE_RUB,
     WHITE_INTERNET_BASE_TRAFFIC_BYTES,
     WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB,
-    WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES,
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
     WHITE_INTERNET_MAX_EXPIRY_DAYS,
     WHITE_INTERNET_MAX_QUOTA_BYTES,
@@ -32,8 +31,6 @@ from config.constants import (
     WHITE_INTERNET_SERVICE_TYPE,
     WHITE_INTERNET_TLS_FINGERPRINT,
     WHITE_INTERNET_TOPUP_PACKS,
-    WHITE_INTERNET_TRIAL_DURATION_DAYS,
-    WHITE_INTERNET_TRIAL_TRAFFIC_BYTES,
     XRAY_PROTOCOL,
 )
 from config.enums import (
@@ -284,9 +281,38 @@ class WhiteInternetService:
         await session.flush()
         return order, None
 
+    @staticmethod
+    def calculate_wi_add_slot_quote(
+        expires_at: datetime | None, now: datetime | None = None
+    ) -> tuple[Decimal, int]:
+        """Calculate mid-term device slot add-on (price_rub, gb_added)."""
+        if not expires_at:
+            return WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB, 50
+        now = now or now_utc()
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        exp = expires_at if expires_at.tzinfo is not None else expires_at.replace(tzinfo=timezone.utc)
+        days_left = max(0.0, (exp - now).total_seconds() / 86400.0)
+        gb_added = max(0, round(50 * days_left / 30.0))
+        if days_left > 0 and gb_added == 0:
+            gb_added = 1
+        return Decimal(50 + gb_added * 4), gb_added
+
+    @staticmethod
+    def calculate_wi_add_slot_price(
+        expires_at: datetime | None, now: datetime | None = None
+    ) -> Decimal:
+        """Calculate mid-term device slot add-on price: 50 + round(50 * days_left / 30) * 4."""
+        price, _ = WhiteInternetService.calculate_wi_add_slot_quote(expires_at, now=now)
+        return price
+
     @classmethod
     async def purchase_subscription(
-        cls, session: AsyncSession, user_id: int, debit_balance: bool = True
+        cls,
+        session: AsyncSession,
+        user_id: int,
+        debit_balance: bool = True,
+        device_limit: int = 1,
     ):
         user = await lock_checkout_user(session, user_id)
         if user is None:
@@ -294,10 +320,6 @@ class WhiteInternetService:
         existing = await white_internet_repo.get_subscription_by_user_id(session, user_id)
         now = now_utc()
         if existing is not None:
-            if getattr(existing, "is_trial", False):
-                return await cls.convert_trial_to_paid(
-                    session, user_id, debit_balance=debit_balance
-                )
             if existing.status == WhiteInternetStatus.DISABLED:
                 return False, texts.WL_SUB_DISABLED, existing
             if (
@@ -312,7 +334,7 @@ class WhiteInternetService:
                 WhiteInternetStatus.EXHAUSTED,
             ) and existing.expires_at and existing.expires_at > now:
                 return False, texts.WL_ALREADY_ACTIVE, existing
-            # Existing paid subscription routes to renew_subscription to preserve UUID and token
+            # Existing subscription routes to renew_subscription to preserve UUID and token
             return await cls.renew_subscription(
                 session, user_id, debit_balance=debit_balance
             )
@@ -331,15 +353,21 @@ class WhiteInternetService:
             logger.warning("No available origin node for white internet purchase: %s", exc)
             return False, texts.WL_NO_SERVERS_AVAILABLE, None
 
+        clamped_devices = max(1, min(WHITE_INTERNET_MAX_DEVICE_LIMIT, int(device_limit)))
+        tier_price = get_white_internet_tier_price(
+            clamped_devices, base_price=Decimal(tariff.price_rub)
+        )
+        base_bytes = clamped_devices * WHITE_INTERNET_BASE_TRAFFIC_BYTES
+
         if debit_balance:
             _, checkout_failure = await cls._checkout_wallet_order(
                 session,
                 user=user,
                 service_type=WHITE_INTERNET_SERVICE_TYPE,
                 tariff_id=tariff.id,
-                amount_due=Decimal(tariff.price_rub),
+                amount_due=tier_price,
                 duration_days=tariff.duration_days,
-                device_limit=tariff.device_limit,
+                device_limit=clamped_devices,
                 operation="purchase",
                 insufficient_text=texts.WL_INSUFFICIENT_BALANCE_BUY,
             )
@@ -352,9 +380,10 @@ class WhiteInternetService:
             origin_node_id=origin_node.id,
             token=secrets.token_hex(32),
             uuid=str(uuid.uuid4()),
-            price_rub=Decimal(tariff.price_rub),
+            price_rub=tier_price,
             duration_days=tariff.duration_days,
-            base_bytes=WHITE_INTERNET_BASE_TRAFFIC_BYTES,
+            base_bytes=base_bytes,
+            device_limit=clamped_devices,
         )
         # Commit DB state before executing external network sync.
         # This durably persists user debit, order, and subscription in PostgreSQL
@@ -367,156 +396,14 @@ class WhiteInternetService:
             session, sub, origin_node, idempotency_key=f"purchase:{sub.id}:1:True"
         )
         logger.info(
-            "White Internet subscription purchased: user_id=%s, sub_id=%s, days=%s, node_id=%s",
+            "White Internet subscription purchased: user_id=%s, sub_id=%s, days=%s, devices=%s, node_id=%s",
             user.id,
             sub.id,
             tariff.duration_days,
+            clamped_devices,
             origin_node.id,
         )
         return True, texts.WL_BUY_SUCCESS, sub
-
-    @classmethod
-    async def convert_trial_to_paid(
-        cls, session: AsyncSession, user_id: int, debit_balance: bool = True
-    ):
-        """Convert an existing trial subscription to a full paid subscription."""
-        user = await lock_checkout_user(session, user_id)
-        if user is None:
-            return False, texts.WL_USER_NOT_FOUND, None
-        sub = await white_internet_repo.get_subscription_by_user_id(session, user_id)
-        if sub is None:
-            return False, texts.WL_SUB_NOT_FOUND, None
-        if not getattr(sub, "is_trial", False):
-            return False, texts.WL_ALREADY_ACTIVE, sub
-        if sub.status == WhiteInternetStatus.DISABLED:
-            return False, texts.WL_SUB_DISABLED, None
-        if (
-            getattr(sub, "pending_hard_delete", False)
-            or getattr(sub, "provisioning_status", None)
-            == WhiteInternetProvisioningStatus.PENDING_DELETE
-        ):
-            return False, texts.WL_DEACTIVATION_PENDING, None
-
-        # Validate origin node health & availability before debiting funds
-        origin_node = await session.scalar(
-            select(Server).where(
-                Server.id == sub.origin_node_id,
-                Server.protocol == XRAY_PROTOCOL,
-            )
-        )
-        needs_migration = (
-            not origin_node
-            or not origin_node.is_active
-            or origin_node.health_state != ServerHealthState.ONLINE
-            or origin_node.lifecycle_status != ServerLifecycleStatus.ACTIVE
-            or not (origin_node.extra_data or {}).get("relays")
-        )
-        new_origin_server: Server | None = None
-        if needs_migration:
-            try:
-                new_origin_server = await cls.select_origin_node(session)
-            except RuntimeError as exc:
-                logger.warning("No healthy origin node available for trial conversion migration: %s", exc)
-                return False, texts.WL_NO_SERVERS_AVAILABLE, None
-
-        tariff = await cls.get_or_create_white_internet_tariff(session)
-
-        # Pre-Debit Validation: verify mandatory tariff quota BEFORE touching ledger
-        if not WHITE_INTERNET_BASE_TRAFFIC_BYTES or WHITE_INTERNET_BASE_TRAFFIC_BYTES <= 0:
-            raise ValueError(
-                "White Internet tariff missing mandatory base_quota_bytes"
-            )
-
-        now = now_utc()
-        sub_device_limit = max(1, getattr(sub, "device_limit", 1) or 1)
-        tier_price = get_white_internet_tier_price(sub_device_limit, base_price=Decimal(tariff.price_rub))
-        tier_base_bytes = sub_device_limit * WHITE_INTERNET_BASE_TRAFFIC_BYTES
-
-        if debit_balance:
-            _, checkout_failure = await cls._checkout_wallet_order(
-                session,
-                user=user,
-                service_type=WHITE_INTERNET_SERVICE_TYPE,
-                tariff_id=tariff.id,
-                amount_due=tier_price,
-                duration_days=tariff.duration_days,
-                device_limit=sub_device_limit,
-                operation="purchase",
-                insufficient_text=texts.WL_INSUFFICIENT_BALANCE_BUY,
-            )
-            if checkout_failure is not None:
-                return checkout_failure
-
-        old_origin_for_cleanup: Server | None = None
-        if needs_migration and new_origin_server is not None:
-            old_origin_for_cleanup = origin_node
-            sub.origin_node_id = new_origin_server.id
-            sub.actual_version = 0
-            sub.last_reconciled_node_epoch = None
-            sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_CREATE
-            await session.flush()
-            await white_internet_repo.cancel_pending_orphan_cleanups_for_client(
-                session, new_origin_server.id, sub.uuid
-            )
-
-        sub_locked = await white_internet_repo.get_subscription_with_lock(session, sub.id)
-        if sub_locked is None:
-            return False, texts.WL_SUB_NOT_FOUND, None
-
-        base_time = sub_locked.expires_at if sub_locked.expires_at and sub_locked.expires_at > now else now
-        sub_locked.is_trial = False
-        sub_locked.base_traffic_bytes = tier_base_bytes
-        sub_locked.extra_traffic_bytes = 0
-        sub_locked.traffic_used_bytes = 0
-        sub_locked.traffic_uplink_bytes = 0
-        sub_locked.traffic_downlink_bytes = 0
-        sub_locked.traffic_overage_bytes = 0
-        sub_locked.expires_at = base_time + timedelta(days=tariff.duration_days)
-        sub_locked.status = WhiteInternetStatus.ACTIVE
-        sub_locked.status_reason = None
-        sub_locked.desired_version += 1
-        sub_locked.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
-        sub_locked.notified_3d = False
-        sub_locked.notified_1d = False
-        sub_locked.notified_2h = False
-        sub_locked.notified_expired = False
-        sub_locked.notified_90p = False
-        await session.flush()
-        await session.refresh(sub_locked)
-
-        if old_origin_for_cleanup is not None and old_origin_for_cleanup.id != sub_locked.origin_node_id:
-            await white_internet_repo.enqueue_orphan_cleanup(
-                session,
-                server_id=old_origin_for_cleanup.id,
-                client_uuid=sub_locked.uuid,
-                desired_version=sub_locked.desired_version,
-            )
-
-        await session.commit()
-
-        active_origin = new_origin_server or origin_node
-        if active_origin is not None:
-            await cls._try_inline_sync(
-                session, sub_locked, active_origin, idempotency_key=f"convert:{sub_locked.id}:{sub_locked.desired_version}:True"
-            )
-
-        if old_origin_for_cleanup is not None and old_origin_for_cleanup.id != sub_locked.origin_node_id:
-            _dispatch_deprovision(
-                old_origin_for_cleanup,
-                client_uuid=sub_locked.uuid,
-                version=sub_locked.desired_version,
-                context=f"trial_convert migration sub {sub_locked.id}",
-                session=session,
-            )
-
-        logger.info(
-            "White Internet trial converted to paid: user_id=%s, sub_id=%s, days=%s, node_id=%s",
-            user.id,
-            sub_locked.id,
-            tariff.duration_days,
-            sub_locked.origin_node_id,
-        )
-        return True, texts.WL_BUY_SUCCESS, sub_locked
 
     @classmethod
     async def renew_subscription(
@@ -528,10 +415,6 @@ class WhiteInternetService:
         sub = await white_internet_repo.get_subscription_by_user_id(session, user_id)
         if sub is None:
             return False, texts.WL_SUB_NOT_FOUND, None
-        if getattr(sub, "is_trial", False):
-            return await cls.convert_trial_to_paid(
-                session, user_id, debit_balance=debit_balance
-            )
         if sub.status == WhiteInternetStatus.DISABLED:
             return False, texts.WL_SUB_DISABLED, None
         if sub.status == WhiteInternetStatus.PENDING:
@@ -581,7 +464,11 @@ class WhiteInternetService:
         ):
             return False, texts.WL_RENEWAL_HORIZON_EXCEEDED, None
 
-        sub_device_limit = max(1, getattr(sub, "device_limit", 1) or 1)
+        sub_device_limit = (
+            sub.pending_device_limit
+            if sub.pending_device_limit is not None
+            else max(1, getattr(sub, "device_limit", 1) or 1)
+        )
         tier_price = get_white_internet_tier_price(sub_device_limit, base_price=Decimal(tariff.price_rub))
         tier_base_bytes = sub_device_limit * WHITE_INTERNET_BASE_TRAFFIC_BYTES
 
@@ -661,6 +548,7 @@ class WhiteInternetService:
         user_id: int,
         actor_telegram_id: int | None = None,
         debit_balance: bool = True,
+        extra_bytes: int | None = None,
     ) -> tuple[bool, str, WhiteInternetSubscription | None]:
         user = await lock_checkout_user(session, user_id)
         if user is None:
@@ -676,8 +564,6 @@ class WhiteInternetService:
             return False, texts.WL_NO_SUB, None
         if sub.user_id != user.id:
             return False, texts.ERROR_ACCESS_DENIED, None
-        if getattr(sub, "is_trial", False):
-            return False, texts.WL_TRIAL_CANNOT_ADD_DEVICE, None
         now = now_utc()
         if sub.status in (WhiteInternetStatus.PENDING, WhiteInternetStatus.DISABLED):
             return False, texts.WL_SUB_NOT_READY, None
@@ -689,19 +575,6 @@ class WhiteInternetService:
             return False, texts.WL_DEVICE_LIMIT_MAX_REACHED, None
 
         new_device_limit = current_limit + 1
-        max_extra_allowed = new_device_limit * WHITE_INTERNET_MAX_QUOTA_BYTES
-        if (sub.extra_traffic_bytes or 0) + WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES > max_extra_allowed:
-            current_available = await white_internet_repo.get_available_quota_bytes(
-                session, sub.id, now
-            )
-            return (
-                False,
-                texts.WL_CAP_EXCEEDED.format(
-                    gb=int(WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES / (1024**3)),
-                    available=current_available // (1024**3),
-                ),
-                None,
-            )
 
         # Pre-Debit Validation: validate origin node health & availability before debiting funds
         origin_node = await session.scalar(
@@ -725,7 +598,8 @@ class WhiteInternetService:
                 logger.warning("No healthy origin node available for device slot migration: %s", exc)
                 return False, texts.WL_NO_SERVERS_AVAILABLE, None
 
-        price = WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB
+        price, gb_added = cls.calculate_wi_add_slot_quote(sub.expires_at, now=now)
+        added_bytes = extra_bytes if extra_bytes is not None else gb_added * (1024**3)
         tariff = await cls.get_or_create_white_internet_tariff(session)
 
         if debit_balance:
@@ -736,7 +610,7 @@ class WhiteInternetService:
                 tariff_id=tariff.id,
                 amount_due=price,
                 duration_days=0,
-                traffic_bytes=WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES,
+                traffic_bytes=added_bytes,
                 device_limit=new_device_limit,
                 operation="add_device_slot",
                 insufficient_text=texts.WL_INSUFFICIENT_BALANCE_BUY,
@@ -760,7 +634,7 @@ class WhiteInternetService:
         updated_sub = await white_internet_repo.add_device_slot_atomic(
             session,
             subscription_id=sub.id,
-            extra_bytes=WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES,
+            extra_bytes=added_bytes,
         )
 
         if old_origin_for_cleanup:
@@ -928,89 +802,57 @@ class WhiteInternetService:
         return True, texts.WL_TOPUP_SUCCESS.format(gb=pack_gb), grant
 
     @classmethod
-    async def create_trial_subscription(cls, session: AsyncSession, user_id: int):
-        """Provision a free trial White Internet subscription (3 days / 5 GiB / 0 RUB)."""
-        user = await lock_checkout_user(session, user_id)
-        if user is None:
-            return False, texts.WL_USER_NOT_FOUND, None
-        if user.is_deleted:
-            return False, texts.ERROR_ACCESS_DENIED, None
-
-        has_trial = await white_internet_repo.has_ever_activated_trial(session, user_id)
-        if has_trial:
-            existing = await white_internet_repo.get_subscription_by_user_id(session, user_id)
-            return False, texts.WL_TRIAL_ALREADY_USED, existing
-
-        existing = await white_internet_repo.get_subscription_by_user_id(session, user_id)
-        if existing:
-            if existing.status in (
-                WhiteInternetStatus.ACTIVE,
-                WhiteInternetStatus.PENDING,
-                WhiteInternetStatus.EXHAUSTED,
-            ):
-                return True, texts.WL_ALREADY_ACTIVE, existing
-            if (
-                getattr(existing, "pending_hard_delete", False)
-                or getattr(existing, "provisioning_status", None)
-                == WhiteInternetProvisioningStatus.PENDING_DELETE
-            ):
-                return False, texts.WL_DEACTIVATION_PENDING, existing
-            return False, texts.WL_TRIAL_ALREADY_USED, existing
-
+    async def schedule_wi_downgrade(
+        cls,
+        session: AsyncSession,
+        user_id: int,
+        target_device_limit: int,
+    ) -> tuple[bool, str, WhiteInternetSubscription | None]:
+        """Schedule a deferred device limit downgrade for the end of the current billing period."""
+        sub = await white_internet_repo.get_subscription_by_user_id(session, user_id)
+        if sub is None:
+            return False, texts.WL_NO_SUB, None
         try:
-            origin_node = await cls.select_origin_node(session)
-        except RuntimeError as exc:
-            logger.warning("No available origin node for white internet trial: %s", exc)
-            return False, texts.WL_NO_SERVERS_AVAILABLE, None
+            updated = await white_internet_repo.schedule_downgrade_atomic(
+                session,
+                subscription_id=sub.id,
+                target_device_limit=target_device_limit,
+            )
+            await session.flush()
+            date_str = updated.pending_from.strftime("%d.%m.%Y") if updated.pending_from else ""
+            return (
+                True,
+                f"Лимит устройств будет снижен до {updated.pending_device_limit} с {date_str}.",
+                updated,
+            )
+        except white_internet_repo.WhiteInternetError as exc:
+            return False, str(exc), None
 
-        tariff = await cls.get_or_create_white_internet_tariff(session)
-
-        _, _ = await cls._checkout_wallet_order(
+    @classmethod
+    async def cancel_wi_downgrade(
+        cls,
+        session: AsyncSession,
+        user_id: int,
+    ) -> tuple[bool, str, WhiteInternetSubscription | None]:
+        """Cancel a scheduled deferred device limit downgrade."""
+        sub = await white_internet_repo.get_subscription_by_user_id(session, user_id)
+        if sub is None:
+            return False, texts.WL_NO_SUB, None
+        updated = await white_internet_repo.cancel_downgrade_atomic(
             session,
-            user=user,
-            service_type=WHITE_INTERNET_SERVICE_TYPE,
-            tariff_id=tariff.id,
-            amount_due=Decimal("0.00"),
-            duration_days=WHITE_INTERNET_TRIAL_DURATION_DAYS,
-            device_limit=1,
-            operation="trial",
-            order_metadata={"is_trial": True},
+            subscription_id=sub.id,
         )
+        await session.flush()
+        return True, "Отложенное снижение лимита отменено.", updated
 
-        sub_token = secrets.token_hex(32)
-        sub_uuid = str(uuid.uuid4())
-
-        sub = await white_internet_repo.create_white_internet_subscription(
-            session,
-            user_id=user.id,
-            origin_node_id=origin_node.id,
-            token=sub_token,
-            uuid=sub_uuid,
-            price_rub=Decimal("0.00"),
-            duration_days=WHITE_INTERNET_TRIAL_DURATION_DAYS,
-            base_bytes=WHITE_INTERNET_TRIAL_TRAFFIC_BYTES,
-            is_trial=True,
-        )
-
-        # Commit DB state before executing external network sync.
-        # This durably persists order and trial subscription in PostgreSQL
-        # and releases all SELECT FOR UPDATE row locks (Server, User) so concurrent
-        # operations are not blocked during external network I/O.
-        # If commit fails, we fail-closed immediately WITHOUT mutating Xray.
-        await session.commit()
-
-        # Zero-Wait UX: Synchronous provisioning on Xray node.
-        await cls._try_inline_sync(
-            session, sub, origin_node, idempotency_key=f"trial:{sub.id}:1:True"
-        )
-
-        logger.info(
-            "White Internet trial activated: user_id=%s, sub_id=%s, node_id=%s",
-            user.id,
-            sub.id,
-            origin_node.id,
-        )
-        return True, texts.WL_TRIAL_ACTIVATED_SUCCESS, sub
+    @classmethod
+    async def apply_due_wi_downgrades(
+        cls,
+        session: AsyncSession,
+        now: datetime | None = None,
+    ) -> int:
+        """Apply all deferred White Internet downgrades whose pending_from has arrived."""
+        return await white_internet_repo.apply_due_downgrades(session, now=now)
 
     @classmethod
     async def _try_inline_sync(
@@ -1151,74 +993,6 @@ class WhiteInternetService:
             reason,
         )
         return deactivated
-
-    @classmethod
-    async def reset_user_trial(
-        cls,
-        session: AsyncSession,
-        user_id: int,
-    ) -> tuple[bool, str]:
-        """Reset trial history for a user, allowing a new trial to be issued."""
-        user = await lock_checkout_user(session, user_id)
-        if user is None:
-            return False, texts.WL_USER_NOT_FOUND
-
-        now = now_utc()
-        last_reset = getattr(user, "last_trial_reset_at", None)
-        if isinstance(last_reset, datetime):
-            if last_reset.tzinfo is None:
-                last_reset = last_reset.replace(tzinfo=timezone.utc)
-            elapsed = (now - last_reset).total_seconds()
-            if elapsed < 60:
-                remaining = int(60 - elapsed)
-                return False, texts.ADMIN_WL_RESET_COOLDOWN.format(seconds=remaining)
-
-        stmt = (
-            select(WhiteInternetSubscription)
-            .where(WhiteInternetSubscription.user_id == user_id)
-            .with_for_update()
-        )
-        res = await session.execute(stmt)
-        subs = list(res.scalars().all())
-
-        if not subs:
-            return False, texts.WL_SUB_NOT_FOUND
-
-        user.last_trial_reset_at = now
-
-        trial_subs = [s for s in subs if getattr(s, "is_trial", False)]
-        if not trial_subs:
-            await session.flush()
-            return True, texts.ADMIN_WL_RESET_SUCCESS
-
-        # Two-phase reset (durable-by-default): mark DISABLED+PENDING_DELETE only for trial subs.
-        # Paid subscriptions (is_trial=False) are left completely untouched.
-        for sub in trial_subs:
-            sub.status = WhiteInternetStatus.DISABLED
-            sub.status_reason = "trial_reset"
-            sub.desired_version += 1
-            sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_DELETE
-            sub.pending_hard_delete = True
-
-        await session.flush()
-
-        for sub in trial_subs:
-            if sub.origin_node_id:
-                origin_server = await session.get(Server, sub.origin_node_id)
-                _dispatch_deprovision(
-                    origin_server,
-                    client_uuid=sub.uuid,
-                    version=sub.desired_version,
-                    context=f"reset sub {sub.id}",
-                    session=session,
-                )
-
-        logger.info(
-            "White Internet trial reset: user_id=%s, deactivated_count=%s",
-            user_id,
-            len(trial_subs),
-        )
-        return True, texts.ADMIN_WL_RESET_SUCCESS
 
     @classmethod
     async def extend_subscription(

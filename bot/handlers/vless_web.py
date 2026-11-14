@@ -12,17 +12,30 @@ import re
 import urllib.parse
 
 from aiohttp import web
+from sqlalchemy import select
 
 from bot import texts
 from bot.texts import get_tariff_display_name
 from config import constants
+from config.enums import (
+    ServerHealthState,
+    WhiteInternetProvisioningStatus,
+    WhiteInternetStatus,
+)
 from database.connection import session_scope
-from database.repositories import tariffs_repo, users_repo, vless_subscription_repo
+from database.models import Server
+from database.repositories import (
+    tariffs_repo,
+    user_devices_repo,
+    users_repo,
+    vless_subscription_repo,
+    white_internet_repo,
+)
 from database.repositories.system_settings_repo import get_system_setting
 from services.subscription import SubscriptionService
 from services.vless_subscription_service import VlessSubscriptionService
 from utils.client_parser import extract_device_metadata, parse_client_from_user_agent
-from utils.datetime_helpers import now_utc
+from utils.datetime_helpers import is_permanent_subscription, now_utc
 from utils.formatters import format_plural
 from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
 
@@ -297,8 +310,118 @@ def _render_vless_landing_html(
 
 
 
-async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
-    """Serve Base64 subscription feed for standard VLESS access with HWID device accounting."""
+def _format_announce_summary(
+    *,
+    std_active: bool,
+    std_end,
+    wi_active: bool,
+    wi_end,
+    wi_available_bytes: int,
+) -> str:
+    """Build concise stop-word-free Announce summary of active options, dates, and remaining GB."""
+    parts: list[str] = []
+    if std_active:
+        if std_end and is_permanent_subscription(std_end):
+            parts.append("Стандарт (без срока)")
+        elif std_end and hasattr(std_end, "strftime"):
+            parts.append(f"Стандарт до {std_end.strftime('%d.%m.%Y')}")
+        else:
+            parts.append("Стандарт (активен)")
+
+    if wi_active:
+        rem_gb = max(0, wi_available_bytes) / (1024**3)
+        gb_str = f"{int(round(rem_gb))}" if abs(rem_gb - round(rem_gb)) < 0.05 else f"{rem_gb:.1f}"
+        if wi_end and hasattr(wi_end, "strftime"):
+            parts.append(f"Белый интернет до {wi_end.strftime('%d.%m.%Y')} (остаток {gb_str} ГБ)")
+        else:
+            parts.append(f"Белый интернет (остаток {gb_str} ГБ)")
+
+    return " | ".join(parts)[:200]
+
+
+def _build_unified_notice_response(
+    *,
+    title_text: str,
+    notice_text: str,
+    common_headers: dict[str, str],
+    bot_username: str,
+    support_url: str,
+    channel_url: str,
+    announce_url: str,
+    upload_bytes: int,
+    download_bytes: int,
+    expire_ts: int,
+    is_happ: bool,
+    extra_headers: dict[str, str] | None = None,
+) -> web.Response:
+    quoted_notice = urllib.parse.quote(notice_text)
+    notice_link = (
+        f"vless://00000000-0000-0000-0000-000000000000@127.0.0.1:443"
+        f"?encryption=none&security=none#{quoted_notice}"
+    )
+    b64_payload = base64.b64encode(notice_link.encode("utf-8")).decode("utf-8")
+    b64_title = base64.b64encode(title_text.encode("utf-8")).decode("utf-8")
+
+    headers = {
+        **common_headers,
+        "Content-Type": "text/plain; charset=utf-8",
+        "Profile-Update-Interval": _get_vless_update_interval(),
+        "Subscription-Userinfo": f"upload={upload_bytes}; download={download_bytes}; total=0; expire={expire_ts}",
+        "Profile-Title": f"base64:{b64_title}",
+        "Hide-Url": "1",
+        "No-Limit-Enabled": "1",
+    }
+    if is_happ:
+        clean_bot = str(bot_username).strip().lstrip("@") or constants.DEFAULT_FALLBACK_BOT_USERNAME
+        if expire_ts > 0:
+            headers["sub-expire"] = "1"
+        headers["sub-expire-button-link"] = f"https://t.me/{clean_bot}"
+
+    sanitized_support = _sanitize_header_url(support_url)
+    sanitized_channel = _sanitize_header_url(channel_url)
+    sanitized_announce = _sanitize_header_url(announce_url, fallback=sanitized_channel)
+    if sanitized_support:
+        headers["Support-Url"] = sanitized_support
+    if sanitized_channel:
+        headers["Profile-Web-Page-Url"] = sanitized_channel
+        headers["Channel-Url"] = sanitized_channel
+    if sanitized_announce:
+        headers["Announce-Url"] = sanitized_announce
+    if extra_headers:
+        headers.update(extra_headers)
+    return web.Response(status=200, text=b64_payload, headers=headers)
+
+
+def _compute_wi_traffic_stats(wi_sub) -> tuple[int, int]:
+    """Return (total_quota_bytes, available_bytes) for a WhiteInternetSubscription."""
+    traffic_limit = getattr(wi_sub, "traffic_limit_bytes", None)
+    base_bytes = getattr(wi_sub, "base_traffic_bytes", None)
+    extra_bytes = getattr(wi_sub, "extra_traffic_bytes", None)
+    if isinstance(traffic_limit, (int, float)):
+        total_quota = int(traffic_limit)
+    elif isinstance(base_bytes, (int, float)) or isinstance(extra_bytes, (int, float)):
+        total_quota = (int(base_bytes) if isinstance(base_bytes, (int, float)) else 0) + (
+            int(extra_bytes) if isinstance(extra_bytes, (int, float)) else 0
+        )
+    else:
+        total_quota = constants.WHITE_INTERNET_BASE_TRAFFIC_BYTES
+
+    raw_used = getattr(wi_sub, "traffic_used_bytes", None)
+    raw_over = getattr(wi_sub, "traffic_overage_bytes", None)
+    used_val = max(
+        0,
+        (int(raw_used) if isinstance(raw_used, (int, float)) else 0)
+        - (int(raw_over) if isinstance(raw_over, (int, float)) else 0),
+    )
+    return total_quota, max(0, total_quota - used_val)
+
+
+async def serve_unified_subscription_feed(
+    request: web.Request,
+    *,
+    token_source: str = "vless",
+) -> web.Response:
+    """Serve unified Base64 subscription feed (Standard + White Internet) with HWID accounting."""
     client_ip = get_trusted_client_ip(request)
     allowed_ip, retry_after_ip = _ip_rate_limiter.check(client_ip)
     if not allowed_ip:
@@ -308,6 +431,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             headers={
                 "Retry-After": str(retry_after_ip),
                 "Cache-Control": "no-store",
+                "CDN-Cache-Control": "no-store",
             },
         )
 
@@ -316,7 +440,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         return web.Response(
             status=404,
             text="Not Found",
-            headers={"Cache-Control": "no-store"},
+            headers={"Cache-Control": "no-store", "CDN-Cache-Control": "no-store"},
         )
 
     allowed_tok, retry_after_tok = _token_rate_limiter.check(token)
@@ -327,11 +451,13 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             headers={
                 "Retry-After": str(retry_after_tok),
                 "Cache-Control": "no-store",
+                "CDN-Cache-Control": "no-store",
             },
         )
 
     common_headers = {
         "Cache-Control": "no-store, private, no-cache, must-revalidate",
+        "CDN-Cache-Control": "no-store",
         "Pragma": "no-cache",
         "X-Content-Type-Options": "nosniff",
         "Referrer-Policy": "no-referrer",
@@ -348,41 +474,120 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         headers["x-hwid-required"] = "true"
         return web.Response(status=400, text="Invalid HWID format", headers=headers)
 
+    now = now_utc()
+    user_agent = request.headers.get("User-Agent", "")
+    client_name = parse_client_from_user_agent(user_agent)
+    is_happ = bool((client_name and "happ" in client_name.lower()) or ("happ" in user_agent.lower()))
+
     async with session_scope() as session:
-        sub = await vless_subscription_repo.get_subscription_by_token(session, token)
-        if sub is None:
+        vless_sub = None
+        wi_sub = None
+        if token_source == "white_internet":
+            wi_sub = await white_internet_repo.get_subscription_by_token(session, token)
+            if wi_sub is None:
+                vless_sub = await vless_subscription_repo.get_subscription_by_token(session, token)
+        else:
+            vless_sub = await vless_subscription_repo.get_subscription_by_token(session, token)
+            if vless_sub is None:
+                wi_sub = await white_internet_repo.get_subscription_by_token(session, token)
+
+        matched_sub = vless_sub or wi_sub
+        if matched_sub is None:
             return web.Response(status=404, text="Not Found", headers=common_headers)
 
-        user = await users_repo.get_user_by_id(session, sub.user_id)
+        user = await users_repo.get_user_by_id(session, matched_sub.user_id)
         if user is None or getattr(user, "is_deleted", False) is True:
             return web.Response(status=404, text="Not Found", headers=common_headers)
 
-        is_active_access = SubscriptionService.check_vpn_access(user)
+        if vless_sub is None:
+            vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+        if wi_sub is None:
+            wi_sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
 
-        if (
-            not sub.is_active
-            or getattr(user, "financial_hold", False) is True
-            or not is_active_access
-        ):
-            if sub.is_active:
-                sub.is_active = False
-                sub.version = (getattr(sub, "version", 1) or 1) + 1
-                session.add(sub)
-                VlessSubscriptionService.ensure_synced_background(user.id, session=session)
+        is_financial_hold = bool(getattr(user, "financial_hold", False))
+        is_std_access = SubscriptionService.check_vpn_access(user)
+        if vless_sub and vless_sub.is_active and (is_financial_hold or not is_std_access):
+            vless_sub.is_active = False
+            vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1
+            session.add(vless_sub)
+            VlessSubscriptionService.ensure_synced_background(user.id, session=session)
 
-            bot_username = await _resolve_bot_username(request)
-            default_bot_url = f"https://t.me/{bot_username}"
-            support_url = _resolve_support_url({}, default_bot_url)
-            channel_url = _resolve_channel_url({}, default_bot_url)
+        std_active = bool(vless_sub and vless_sub.is_active and not is_financial_hold and is_std_access)
+        std_end = getattr(user, "subscription_end", None) if std_active else None
+
+        wi_available_bytes = 0
+        wi_is_pending = False
+        wi_is_expired = False
+        wi_is_exhausted = False
+        wi_is_disabled = False
+        if wi_sub is not None:
+            _, wi_available_bytes = _compute_wi_traffic_stats(wi_sub)
+            wi_is_pending = wi_sub.status == WhiteInternetStatus.PENDING and not is_financial_hold
+            wi_is_disabled = wi_sub.status == WhiteInternetStatus.DISABLED
+            wi_is_expired = bool(
+                wi_sub.status == WhiteInternetStatus.EXPIRED
+                or (wi_sub.expires_at and wi_sub.expires_at <= now)
+            )
+            wi_is_exhausted = bool(
+                wi_sub.status == WhiteInternetStatus.EXHAUSTED or wi_available_bytes <= 0
+            )
+
+        wi_active = bool(
+            wi_sub is not None
+            and not is_financial_hold
+            and wi_sub.status == WhiteInternetStatus.ACTIVE
+            and not wi_is_expired
+            and not wi_is_exhausted
+        )
+        wi_end = getattr(wi_sub, "expires_at", None) if wi_active else None
+
+        std_up = max(0, int(getattr(vless_sub, "traffic_up", 0) or 0)) if vless_sub else 0
+        std_down = max(0, int(getattr(vless_sub, "traffic_down", 0) or 0)) if vless_sub else 0
+        wi_up = max(0, int(getattr(wi_sub, "traffic_uplink_bytes", 0) or 0)) if wi_sub else 0
+        wi_down = max(0, int(getattr(wi_sub, "traffic_downlink_bytes", 0) or 0)) if wi_sub else 0
+        upload_bytes = std_up + wi_up
+        download_bytes = std_down + wi_down
+
+        std_ts = int(std_end.timestamp()) if std_end and hasattr(std_end, "timestamp") else 0
+        wi_ts = int(wi_end.timestamp()) if wi_end and hasattr(wi_end, "timestamp") else 0
+        expire_ts = max(std_ts, wi_ts)
+
+        bot_username = await _resolve_bot_username(request)
+        default_bot_url = f"https://t.me/{bot_username}"
+        support_url = _resolve_support_url({}, default_bot_url)
+        channel_url = _resolve_channel_url({}, default_bot_url)
+
+        # 1. Neither option is active -> return pending or expired/inactive stub
+        if not std_active and not wi_active:
+            if wi_is_pending:
+                if not raw_hwid and _is_browser_request(request):
+                    from bot.handlers.white_internet_web import _render_white_internet_pending_landing_html
+                    html_body = _render_white_internet_pending_landing_html(bot_username=bot_username)
+                    landing_headers = {
+                        **common_headers,
+                        "Content-Type": "text/html; charset=utf-8",
+                        "Content-Security-Policy": "default-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self';",
+                    }
+                    return web.Response(status=200, text=html_body, headers=landing_headers)
+                return web.Response(
+                    status=503,
+                    text=texts.WL_WEB_PENDING,
+                    headers={**common_headers, "Retry-After": "5"},
+                )
+
             if not raw_hwid and _is_browser_request(request):
-                sub_end = getattr(user, "subscription_end", None)
-                now = now_utc()
-                is_time_expired = sub_end is None or sub_end <= now
-
-                if getattr(user, "financial_hold", False) or not is_time_expired:
+                if is_financial_hold:
                     badge = texts.LANDING_INACTIVE_BADGE_PAUSED
                     title = texts.LANDING_INACTIVE_TITLE_DEFAULT
                     desc = texts.LANDING_INACTIVE_DESC_DEFAULT
+                elif wi_sub is not None and wi_is_exhausted and not wi_is_expired and vless_sub is None:
+                    badge = texts.LANDING_INACTIVE_BADGE_EXHAUSTED
+                    title = texts.LANDING_INACTIVE_TITLE_EXHAUSTED
+                    desc = texts.LANDING_INACTIVE_DESC_EXHAUSTED
+                elif wi_sub is not None and wi_is_disabled and vless_sub is None:
+                    badge = texts.LANDING_INACTIVE_BADGE_DISABLED
+                    title = texts.LANDING_INACTIVE_TITLE_DISABLED
+                    desc = texts.LANDING_INACTIVE_DESC_DISABLED
                 else:
                     badge = texts.LANDING_INACTIVE_BADGE_EXPIRED
                     title = texts.LANDING_INACTIVE_TITLE_EXPIRED
@@ -402,63 +607,59 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                 }
                 return web.Response(status=200, text=html_body, headers=landing_headers)
 
-            notice_text = texts.VLESS_FEED_EXPIRED_NOTICE.format(bot_username=bot_username)
-            quoted_notice = urllib.parse.quote(notice_text)
-            notice_link = (
-                f"vless://00000000-0000-0000-0000-000000000000@127.0.0.1:443"
-                f"?encryption=none&security=none#{quoted_notice}"
+            fallback_exp_ts = 0
+            if getattr(user, "subscription_end", None):
+                fallback_exp_ts = max(fallback_exp_ts, int(user.subscription_end.timestamp()))
+            if wi_sub and getattr(wi_sub, "expires_at", None):
+                fallback_exp_ts = max(fallback_exp_ts, int(wi_sub.expires_at.timestamp()))
+
+            if wi_sub is not None and wi_is_exhausted and not wi_is_expired and not std_active and vless_sub is None:
+                stub_title = texts.WL_FEED_EXHAUSTED_TITLE
+                stub_notice = texts.WL_FEED_EXHAUSTED_NOTICE.format(bot_username=bot_username)
+            elif wi_sub is not None and wi_is_disabled and not std_active and vless_sub is None:
+                stub_title = texts.WL_FEED_DISABLED_TITLE
+                stub_notice = texts.WL_FEED_DISABLED_NOTICE.format(bot_username=bot_username)
+            else:
+                stub_title = texts.VLESS_FEED_EXPIRED_TITLE
+                stub_notice = texts.VLESS_FEED_EXPIRED_NOTICE.format(bot_username=bot_username)
+
+            return _build_unified_notice_response(
+                title_text=stub_title,
+                notice_text=stub_notice,
+                common_headers=common_headers,
+                bot_username=bot_username,
+                support_url=support_url,
+                channel_url=channel_url,
+                announce_url=channel_url,
+                upload_bytes=upload_bytes,
+                download_bytes=download_bytes,
+                expire_ts=fallback_exp_ts,
+                is_happ=is_happ,
             )
-            b64_payload = base64.b64encode(notice_link.encode("utf-8")).decode("utf-8")
-            b64_title = base64.b64encode(texts.VLESS_FEED_EXPIRED_TITLE.encode("utf-8")).decode("utf-8")
-            expire_ts = int(user.subscription_end.timestamp()) if getattr(user, "subscription_end", None) else 0
-            sub_up = max(0, int(getattr(sub, "traffic_up", 0) or 0))
-            sub_down = max(0, int(getattr(sub, "traffic_down", 0) or 0))
-            sanitized_support = _sanitize_header_url(support_url)
-            sanitized_channel = _sanitize_header_url(channel_url)
 
-            user_agent = request.headers.get("User-Agent", "")
-            client_name = parse_client_from_user_agent(user_agent)
-            is_happ = bool((client_name and "happ" in client_name.lower()) or ("happ" in user_agent.lower()))
+        # 2. Active subscription(s), but no HWID provided -> landing page for browser or 403 for app
+        std_limit = await SubscriptionService.get_effective_device_limit(session, user) if std_active else 0
+        wi_limit = max(1, getattr(wi_sub, "device_limit", 1) or 1) if wi_active else 0
+        max_devices = max(std_limit, wi_limit, 1)
 
-            response_headers = {
-                **common_headers,
-                "Content-Type": "text/plain; charset=utf-8",
-                "Profile-Update-Interval": _get_vless_update_interval(),
-                "Subscription-Userinfo": f"upload={sub_up}; download={sub_down}; total=0; expire={expire_ts}",
-                "Profile-Title": f"base64:{b64_title}",
-                "Hide-Url": "1",
-                "No-Limit-Enabled": "1",
-            }
-            if is_happ:
-                clean_bot = str(bot_username).strip().lstrip("@") or constants.DEFAULT_FALLBACK_BOT_USERNAME
-                if expire_ts > 0:
-                    response_headers["sub-expire"] = "1"
-                response_headers["sub-expire-button-link"] = f"https://t.me/{clean_bot}"
-            if sanitized_support:
-                response_headers["Support-Url"] = sanitized_support
-            if sanitized_channel:
-                response_headers["Announce-Url"] = sanitized_channel
-                response_headers["Profile-Web-Page-Url"] = sanitized_channel
-                response_headers["Channel-Url"] = sanitized_channel
-            return web.Response(status=200, text=b64_payload, headers=response_headers)
-
-        # Strict HWID validation for active/emergency subscription requests
         if not raw_hwid:
-            bot_username = await _resolve_bot_username(request)
             if _is_browser_request(request):
-                total_limit = await SubscriptionService.get_effective_device_limit(session, user)
-                tariff_clean = await _resolve_clean_tariff_name(session, user, total_limit)
-                page_title = texts.LANDING_VLESS_PAGE_TITLE
-                if total_limit > 5:
-                    tier = "pro"
-                elif total_limit > 2:
-                    tier = "family"
+                tariff_clean = await _resolve_clean_tariff_name(session, user, max_devices) if std_active else ""
+                if std_active:
+                    if max_devices > 5:
+                        tier = "pro"
+                    elif max_devices > 2:
+                        tier = "family"
+                    else:
+                        tier = "basic"
+                    prefix = tariff_clean.upper() if tariff_clean else tier.upper()
+                    device_str = format_plural(max_devices, texts.LANDING_DEVICE_FORMS_LABELS)
+                    tariff_badge = f"{prefix} • {device_str}"
+                    page_title = texts.LANDING_VLESS_PAGE_TITLE
                 else:
-                    tier = "basic"
-
-                prefix = tariff_clean.upper() if tariff_clean else tier.upper()
-                device_str = format_plural(total_limit, texts.LANDING_DEVICE_FORMS_LABELS)
-                tariff_badge = f"{prefix} • {device_str}"
+                    tier = "white_internet"
+                    tariff_badge = texts.LANDING_SPECIAL_ACCESS_BADGE
+                    page_title = texts.LANDING_WHITE_INTERNET_PAGE_TITLE
 
                 html_body = _render_vless_landing_html(
                     bot_username=bot_username,
@@ -466,7 +667,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                     page_title=page_title,
                     tier=tier,
                     tariff_badge=tariff_badge,
-                    device_limit=total_limit,
+                    device_limit=max_devices,
                 )
                 landing_headers = {
                     **common_headers,
@@ -479,104 +680,132 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             headers["x-hwid-required"] = "true"
             return web.Response(status=403, text="HWID required", headers=headers)
 
-        # Pre-flight check: ensure eligible VLESS servers exist and valid links can be generated
-        servers = await VlessSubscriptionService.get_eligible_vless_servers(session)
-        if not servers:
-            retry_headers = {**common_headers, "Retry-After": "60"}
-            return web.Response(status=503, text="No servers available", headers=retry_headers)
-
-        links = VlessSubscriptionService.generate_vless_links(sub, servers)
-        if not links:
-            retry_headers = {**common_headers, "Retry-After": "60"}
-            return web.Response(status=503, text="No servers available", headers=retry_headers)
-
-        # Atomic HWID registration and state refresh under row locks (populate_existing=True)
+        # 3. Unified HWID registration + priority-based BI slot assignment
         device_meta = extract_device_metadata(request.headers)
-        allowed_hwid, active_hwid_count, effective_vless_limit = (
-            await vless_subscription_repo.register_hwid_atomic(
-                session, sub.id, raw_hwid, device_info=device_meta
-            )
+        allowed_hwid, active_hwid_count, effective_limit = await user_devices_repo.register_user_device(
+            session, user.id, raw_hwid, max_devices, device_info=device_meta
         )
-
         if not allowed_hwid:
-            bot_username = await _resolve_bot_username(request)
-            default_bot_url = f"https://t.me/{bot_username}"
-            support_url = _resolve_support_url({}, default_bot_url)
-            channel_url = _resolve_channel_url({}, default_bot_url)
-            total_device_limit = await SubscriptionService.get_effective_device_limit(session, user)
-            total_active_devices = await vless_subscription_repo.get_active_hwid_count(
-                session, user.id
-            )
             limit_msg = texts.VLESS_FEED_DEVICE_LIMIT_NOTICE.format(
-                active=total_active_devices,
-                limit=total_device_limit,
+                active=active_hwid_count,
+                limit=effective_limit,
                 bot_username=bot_username,
             )
-            quoted_limit = urllib.parse.quote(limit_msg)
-            notice_link = (
-                f"vless://00000000-0000-0000-0000-000000000000@127.0.0.1:443"
-                f"?encryption=none&security=none#{quoted_limit}"
+            return _build_unified_notice_response(
+                title_text=texts.VLESS_FEED_DEVICE_LIMIT_TITLE,
+                notice_text=limit_msg,
+                common_headers=common_headers,
+                bot_username=bot_username,
+                support_url=support_url,
+                channel_url=channel_url,
+                announce_url=channel_url,
+                upload_bytes=upload_bytes,
+                download_bytes=download_bytes,
+                expire_ts=expire_ts,
+                is_happ=is_happ,
+                extra_headers={
+                    "Device-Limit-Exceeded": "1",
+                    "Device-Limit": str(effective_limit),
+                    "Device-Active-Count": str(active_hwid_count),
+                    "x-hwid-max-devices-reached": "true",
+                    "x-hwid-limit": "true",
+                    "x-hwid-active": str(active_hwid_count),
+                },
             )
-            b64_payload = base64.b64encode(notice_link.encode("utf-8")).decode("utf-8")
-            b64_title = base64.b64encode(texts.VLESS_FEED_DEVICE_LIMIT_TITLE.encode("utf-8")).decode("utf-8")
-            expire_ts = int(user.subscription_end.timestamp()) if getattr(user, "subscription_end", None) else 0
-            sub_up = max(0, int(getattr(sub, "traffic_up", 0) or 0))
-            sub_down = max(0, int(getattr(sub, "traffic_down", 0) or 0))
-            headers = dict(common_headers)
-            headers.update({
-                "Content-Type": "text/plain; charset=utf-8",
-                "Profile-Update-Interval": _get_vless_update_interval(),
-                "Subscription-Userinfo": f"upload={sub_up}; download={sub_down}; total=0; expire={expire_ts}",
-                "Profile-Title": f"base64:{b64_title}",
-                "Device-Limit-Exceeded": "1",
-                "Device-Limit": str(total_device_limit),
-                "Device-Active-Count": str(total_active_devices),
-                "x-hwid-max-devices-reached": "true",
-                "x-hwid-limit": "true",
-                "x-hwid-active": str(total_active_devices),
-                "Hide-Url": "1",
-                "No-Limit-Enabled": "1",
-            })
-            user_agent = request.headers.get("User-Agent", "")
-            client_name = parse_client_from_user_agent(user_agent)
-            is_happ = bool((client_name and "happ" in client_name.lower()) or ("happ" in user_agent.lower()))
-            if is_happ:
-                clean_bot = str(bot_username).strip().lstrip("@") or constants.DEFAULT_FALLBACK_BOT_USERNAME
-                if expire_ts > 0:
-                    headers["sub-expire"] = "1"
-                headers["sub-expire-button-link"] = f"https://t.me/{clean_bot}"
-            sanitized_support = _sanitize_header_url(support_url)
-            sanitized_channel = _sanitize_header_url(channel_url)
-            if sanitized_support:
-                headers["Support-Url"] = sanitized_support
-            if sanitized_channel:
-                headers["Announce-Url"] = sanitized_channel
-                headers["Profile-Web-Page-Url"] = sanitized_channel
-                headers["Channel-Url"] = sanitized_channel
-            return web.Response(status=200, text=b64_payload, headers=headers)
 
-        await session.refresh(sub)
-        links = VlessSubscriptionService.generate_vless_links(sub, servers)
+        is_bi_assigned = False
+        if wi_active:
+            devices_list = await user_devices_repo.list_user_devices(
+                session, user.id, wi_device_limit=wi_limit
+            )
+            is_bi_assigned = any(
+                d.get("hwid") == raw_hwid and bool(d.get("is_bi_assigned"))
+                for d in devices_list
+            )
+            if not std_active and not is_bi_assigned:
+                limit_msg = texts.WL_FEED_DEVICE_LIMIT_NOTICE.format(
+                    active=active_hwid_count,
+                    limit=wi_limit,
+                    bot_username=bot_username,
+                )
+                return _build_unified_notice_response(
+                    title_text=texts.VLESS_FEED_DEVICE_LIMIT_TITLE,
+                    notice_text=limit_msg,
+                    common_headers=common_headers,
+                    bot_username=bot_username,
+                    support_url=support_url,
+                    channel_url=channel_url,
+                    announce_url=channel_url,
+                    upload_bytes=upload_bytes,
+                    download_bytes=download_bytes,
+                    expire_ts=expire_ts,
+                    is_happ=is_happ,
+                    extra_headers={
+                        "Device-Limit-Exceeded": "1",
+                        "Device-Limit": str(wi_limit),
+                        "Device-Active-Count": str(active_hwid_count),
+                        "x-hwid-max-devices-reached": "true",
+                        "x-hwid-limit": "true",
+                        "x-hwid-active": str(active_hwid_count),
+                    },
+                )
 
-        # Trigger background sync with debouncing (300s) unless version is out of sync or pending revocations exist
-        now = now_utc()
-        last_synced_version = getattr(sub, "last_synced_version", None)
-        current_version = getattr(sub, "version", 1) or 1
-        needs_sync = (
-            sub.last_synced_at is None
-            or (now - sub.last_synced_at).total_seconds() > 300
-            or bool(getattr(sub, "pending_revoked_uuids", None))
-            or (last_synced_version is not None and last_synced_version < current_version)
-        )
-        if needs_sync:
-            VlessSubscriptionService.ensure_synced_background(user.id, session=session)
+        # 4. Generate links for active options
+        all_links: list[str] = []
+        std_servers: list[Server] = []
+        if std_active and vless_sub is not None:
+            std_servers = await VlessSubscriptionService.get_eligible_vless_servers(session)
+            std_links = VlessSubscriptionService.generate_vless_links(vless_sub, std_servers)
+            all_links.extend(std_links)
 
-        payload = "\n".join(links)
+            last_synced_version = getattr(vless_sub, "last_synced_version", None)
+            current_version = getattr(vless_sub, "version", 1) or 1
+            needs_sync = (
+                vless_sub.last_synced_at is None
+                or (now - vless_sub.last_synced_at).total_seconds() > 300
+                or bool(getattr(vless_sub, "pending_revoked_uuids", None))
+                or (last_synced_version is not None and last_synced_version < current_version)
+            )
+            if needs_sync:
+                VlessSubscriptionService.ensure_synced_background(user.id, session=session)
+
+        wi_server: Server | None = None
+        if wi_active and is_bi_assigned and wi_sub is not None:
+            if getattr(wi_sub, "origin_node_id", None):
+                wi_server = await session.scalar(select(Server).where(Server.id == wi_sub.origin_node_id))
+            is_wi_node_ready = bool(
+                wi_server is not None
+                and "xray_origin" in (wi_server.capabilities or [])
+                and wi_sub.actual_version == wi_sub.desired_version
+                and wi_sub.last_reconciled_node_epoch == wi_server.xray_instance_epoch
+                and (
+                    (wi_server.is_active and wi_server.health_state == ServerHealthState.ONLINE)
+                    or (
+                        getattr(wi_sub, "provisioning_status", None) == WhiteInternetProvisioningStatus.ACTIVE
+                        and (getattr(wi_sub, "actual_version", 0) or 0) > 0
+                    )
+                )
+            )
+            if is_wi_node_ready and wi_server is not None:
+                wi_links = VlessSubscriptionService.generate_bi_xhttp_links(wi_sub, wi_server)
+                all_links.extend(wi_links)
+            elif not std_active:
+                return web.Response(
+                    status=503,
+                    text=texts.WL_WEB_UNSYNCED,
+                    headers={**common_headers, "Retry-After": "5"},
+                )
+
+        if not all_links:
+            retry_after = "5" if (wi_active and not std_active) else "60"
+            return web.Response(
+                status=503,
+                text="No servers available",
+                headers={**common_headers, "Retry-After": retry_after},
+            )
+
+        payload = "\n".join(all_links)
         b64_payload = base64.b64encode(payload.encode("utf-8")).decode("utf-8")
-
-        expire_ts = int(user.subscription_end.timestamp()) if user.subscription_end else 0
-        bot_username = await _resolve_bot_username(request)
-        default_bot_url = f"https://t.me/{bot_username}"
 
         profile_title = await get_system_setting(
             session,
@@ -590,25 +819,14 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
                 or constants.DEFAULT_VLESS_PROFILE_TITLE
             )
 
-        total_device_limit = await SubscriptionService.get_effective_device_limit(session, user)
-        total_active_devices = await vless_subscription_repo.get_active_hwid_count(
-            session, user.id
-        )
-
-        tariff_clean = await _resolve_clean_tariff_name(session, user, total_device_limit)
-
-        announce = await get_system_setting(session, "vless_announce", None)
-        if not isinstance(announce, str) or not announce.strip():
-            announce = None
-
         raw_announce_url = await get_system_setting(session, "vless_announce_url", None)
         clean_announce_url = _sanitize_header_url(raw_announce_url)
 
         first_extra = {}
-        if servers:
-            first_srv = servers[0]
-            if isinstance(first_srv.extra_data, dict):
-                first_extra = first_srv.extra_data
+        if std_servers and isinstance(std_servers[0].extra_data, dict):
+            first_extra = std_servers[0].extra_data
+        elif wi_server and isinstance(wi_server.extra_data, dict):
+            first_extra = wi_server.extra_data
 
         support_url = _resolve_support_url(first_extra, default_bot_url)
         channel_url = _resolve_channel_url(first_extra, default_bot_url)
@@ -633,15 +851,13 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
 
         profile_title_base = str(profile_title).strip().replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
         if show_devices:
-            suffix = f" [{total_active_devices}/{total_device_limit}]"
+            suffix = f" [{active_hwid_count}/{effective_limit}]"
             max_base_len = max(0, 25 - len(suffix))
             clean_base = profile_title_base[:max_base_len].rstrip()
             full_title = f"{clean_base}{suffix}"[:25]
         else:
             full_title = profile_title_base[:25]
 
-        upload_bytes = max(0, int(getattr(sub, "traffic_up", 0) or 0))
-        download_bytes = max(0, int(getattr(sub, "traffic_down", 0) or 0))
         b64_title = base64.b64encode(full_title.encode("utf-8")).decode("ascii")
         response_headers = {
             **common_headers,
@@ -649,7 +865,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             "Content-Disposition": 'inline; filename="Just1k.txt"; filename*=UTF-8\'\'Just1k.txt',
             "Profile-Update-Interval": _get_vless_update_interval(),
             "Subscription-Userinfo": f"upload={upload_bytes}; download={download_bytes}; total=0; expire={expire_ts}",
-            "Device-Limit": str(effective_vless_limit),
+            "Device-Limit": str(effective_limit),
             "Device-Active-Count": str(active_hwid_count),
             "Profile-Title": f"base64:{b64_title}",
             "Sort-Order": "none",
@@ -657,9 +873,6 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             "Hide-Url": "1",
             "No-Limit-Enabled": "1",
         }
-        user_agent = request.headers.get("User-Agent", "")
-        client_name = parse_client_from_user_agent(user_agent)
-        is_happ = bool((client_name and "happ" in client_name.lower()) or ("happ" in user_agent.lower()))
         routing_scheme = "happ" if is_happ else "incy"
 
         if fragmentation_enabled:
@@ -671,7 +884,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
         if routing_enabled:
             response_headers["Routing"] = VlessSubscriptionService.generate_incy_routing_header(
                 profile_name=constants.DEFAULT_VLESS_PROFILE_TITLE,
-                direct_ru=True,
+                direct_ru=bool(std_active),
                 scheme=routing_scheme,
             )
             response_headers["routing-geo-update-interval"] = "168"
@@ -698,19 +911,25 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
             response_headers["Profile-Web-Page-Url"] = sanitized_channel
             response_headers["Channel-Url"] = sanitized_channel
 
-        if announce:
-            formatted_ann = _safe_format_vless_template(
-                str(announce).strip(),
-                tariff=tariff_clean,
-                devices=total_device_limit,
-                active=total_active_devices,
-            )[:200]
-            b64_ann = base64.b64encode(formatted_ann.encode("utf-8")).decode("ascii")
+        announce_summary = _format_announce_summary(
+            std_active=std_active,
+            std_end=std_end,
+            wi_active=wi_active,
+            wi_end=wi_end,
+            wi_available_bytes=wi_available_bytes,
+        )
+        if announce_summary:
+            b64_ann = base64.b64encode(announce_summary.encode("utf-8")).decode("ascii")
             response_headers["Announce"] = f"base64:{b64_ann}"
 
         if sanitized_announce:
             response_headers["Announce-Url"] = sanitized_announce
         return web.Response(status=200, text=b64_payload, headers=response_headers)
+
+
+async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
+    """Serve unified Base64 subscription feed for /sub/{token}, /sub/access/{token}, /sub/vless/{token}."""
+    return await serve_unified_subscription_feed(request, token_source="vless")
 
 
 async def vless_report_handler(request: web.Request) -> web.Response:
@@ -866,8 +1085,10 @@ async def vless_report_handler(request: web.Request) -> web.Response:
 
 
 def setup_vless_web_routes(app: web.Application) -> None:
-    """Register HTTP subscription feed route for VLESS access."""
+    """Register HTTP subscription feed route for unified and legacy VLESS access."""
     app.router.add_get("/sub/access/{token}", vless_subscription_feed_handler)
     app.router.add_get("/sub/vless/{token}", vless_subscription_feed_handler)
+    app.router.add_get("/sub/{token}", vless_subscription_feed_handler)
     app.router.add_post("/sub/access/{token}/report", vless_report_handler)
     app.router.add_post("/sub/vless/{token}/report", vless_report_handler)
+    app.router.add_post("/sub/{token}/report", vless_report_handler)

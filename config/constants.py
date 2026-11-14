@@ -44,6 +44,15 @@ PERMANENT_SUBSCRIPTION_DAYS = 36500
 PERMANENT_END_DATE = datetime(2100, 1, 1, tzinfo=timezone.utc)
 GRACE_PERIOD_HOURS = 24
 VPN_ACCESS_GRACE_HOURS = 4
+MIN_TOPUP_RUB: Decimal = Decimal("20")
+STANDARD_DOWNGRADE_COOLDOWN_DAYS = 7
+STANDARD_MIN_DEVICES = 2
+STANDARD_MAX_DEVICES = 10
+STANDARD_PLANS: dict[int, tuple[int, int]] = {
+    7: (39, 12),
+    30: (99, 30),
+    90: (255, 78),
+}
 
 # YooKassa Official Webhook IP Ranges
 YOOKASSA_IP_RANGES = (
@@ -81,10 +90,6 @@ WHITE_INTERNET_BASE_DURATION_DAYS = int(os.getenv("WHITE_INTERNET_BASE_DURATION_
 WHITE_INTERNET_BASE_TRAFFIC_BYTES = int(
     os.getenv("WHITE_INTERNET_BASE_TRAFFIC_BYTES", str(53_687_091_200))
 )  # 50 GiB
-WHITE_INTERNET_TRIAL_DURATION_DAYS = int(os.getenv("WHITE_INTERNET_TRIAL_DURATION_DAYS", "3"))
-WHITE_INTERNET_TRIAL_TRAFFIC_BYTES = int(
-    os.getenv("WHITE_INTERNET_TRIAL_TRAFFIC_BYTES", str(5 * 1024 * 1024 * 1024))
-)  # 5 GiB
 WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB = Decimal(
     os.getenv("WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB", "200.00")
 )
@@ -213,12 +218,9 @@ REFERRAL_WELCOME_DISCOUNT_PERCENT: Decimal = Decimal("0.25")
 # Minimum qualifying top-up for a referral to become "active".
 # Dust top-ups below this threshold neither activate the referral
 # (leaderboard/tier counting) nor consume the inviter's tier step.
-# 68 RUB = discounted first Base-30 tariff (90 - 25%): the smallest *real*
-# purchase. A referred test-week buyer pays 27 (35 - 25%) and intentionally
-# does NOT activate; White Internet buyers (188+ discounted) always qualify.
-# Independent business constant, NOT auto-derived from tariffs: if tariff
-# prices or the welcome rate change, adjust it manually in one place.
-REFERRAL_ACTIVE_MIN_TOPUP_RUB: Decimal = Decimal("68")
+# 67 RUB: discounted first Base-30 tariff (99 - 25% = 75 RUB) qualifies,
+# while 7-day plan (39 - 25% = 30 RUB) intentionally does NOT activate.
+REFERRAL_ACTIVE_MIN_TOPUP_RUB: Decimal = Decimal("67")
 
 
 CANONICAL_XHTTP_PROFILE: dict[str, Any] = {
@@ -262,6 +264,7 @@ __all__ = [
     "OrderServiceType",
     "OrderStatus",
     "GRACE_PERIOD_HOURS",
+    "MIN_TOPUP_RUB",
     "NOTIFICATION_INTERVAL",
     "PERMANENT_END_DATE",
     "PERMANENT_SUBSCRIPTION_DAYS",
@@ -276,6 +279,10 @@ __all__ = [
     "REFERRAL_ACTIVE_MIN_TOPUP_RUB",
     "REFERRAL_WELCOME_DISCOUNT_PERCENT",
     "SELF_HEALING_MAX_PER_CYCLE",
+    "STANDARD_DOWNGRADE_COOLDOWN_DAYS",
+    "STANDARD_MAX_DEVICES",
+    "STANDARD_MIN_DEVICES",
+    "STANDARD_PLANS",
     "ServerHealthState",
     "ServerLifecycleStatus",
     "ServiceType",
@@ -302,8 +309,6 @@ __all__ = [
     "WHITE_INTERNET_SUB_PATH_PREFIX",
     "WHITE_INTERNET_SUPPORT_URL",
     "WHITE_INTERNET_TOPUP_PACKS",
-    "WHITE_INTERNET_TRIAL_DURATION_DAYS",
-    "WHITE_INTERNET_TRIAL_TRAFFIC_BYTES",
     "DEFAULT_VLESS_TLS_FINGERPRINT",
     "VALID_VLESS_TLS_FINGERPRINTS",
     "VLESS_PROTOCOL",
