@@ -20,15 +20,12 @@ from config.constants import (
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
     WHITE_INTERNET_MAX_EXPIRY_DAYS,
     WHITE_INTERNET_MAX_QUOTA_BYTES,
-    WHITE_INTERNET_SERVICE_TYPE,
 )
 from config.enums import (
     WhiteInternetProvisioningStatus,
     WhiteInternetStatus,
 )
 from database.models import (
-    Order,
-    User,
     WhiteInternetOrphanCleanup,
     WhiteInternetSubscription,
 )
@@ -146,7 +143,7 @@ async def get_subscription_by_user_id(
 async def has_user_any_subscription(
     session: AsyncSession, user_id: int
 ) -> bool:
-    """Check if user has ever had any White Internet subscription (trial or regular)."""
+    """Check if user has ever had any White Internet subscription."""
     if not isinstance(user_id, int) or user_id < 1 or user_id > 2_147_483_647:
         return False
     stmt = (
@@ -155,33 +152,6 @@ async def has_user_any_subscription(
         .limit(1)
     )
     return await session.scalar(stmt) is not None
-
-
-async def has_ever_activated_trial(session: AsyncSession, user_id: int) -> bool:
-    """Check if user has ever activated a White Internet trial (with last_trial_reset_at guard).
-
-    Trial activations are zero-amount wallet orders carrying is_trial metadata.
-    Candidates are filtered in Python (portable across PostgreSQL and SQLite).
-    """
-    if not isinstance(user_id, int) or user_id < 1 or user_id > 2_147_483_647:
-        return False
-    user = await session.get(User, user_id)
-    stmt = (
-        select(Order.id, Order.metadata_, Order.created_at)
-        .where(
-            Order.user_id == user_id,
-            Order.service_type == WHITE_INTERNET_SERVICE_TYPE,
-            Order.status == "paid",
-        )
-        .order_by(Order.created_at.desc())
-    )
-    if user and user.last_trial_reset_at is not None:
-        stmt = stmt.where(Order.created_at > user.last_trial_reset_at)
-    rows = (await session.execute(stmt)).all()
-    return any(
-        isinstance(meta, dict) and meta.get("is_trial") is True
-        for _, meta, _ in rows
-    )
 
 
 async def get_subscription_by_id(
@@ -247,11 +217,17 @@ async def create_white_internet_subscription(
     uuid: str,
     price_rub: Decimal = WHITE_INTERNET_BASE_PRICE_RUB,
     duration_days: int = WHITE_INTERNET_BASE_DURATION_DAYS,
-    base_bytes: int = WHITE_INTERNET_BASE_TRAFFIC_BYTES,
-    is_trial: bool = False,
+    base_bytes: int | None = None,
+    device_limit: int = 1,
 ) -> WhiteInternetSubscription:
     now = now_utc()
     expires_at = now + timedelta(days=duration_days)
+    clamped_devices = max(1, min(WHITE_INTERNET_MAX_DEVICE_LIMIT, int(device_limit)))
+    effective_base_bytes = (
+        base_bytes
+        if base_bytes is not None
+        else clamped_devices * WHITE_INTERNET_BASE_TRAFFIC_BYTES
+    )
     subscription = WhiteInternetSubscription(
         user_id=user_id,
         origin_node_id=origin_node_id,
@@ -261,10 +237,11 @@ async def create_white_internet_subscription(
         status_reason=None,
         started_at=now,
         expires_at=expires_at,
-        base_traffic_bytes=base_bytes,
+        base_traffic_bytes=effective_base_bytes,
         extra_traffic_bytes=0,
-        is_trial=is_trial,
-        notified_3d=is_trial,
+        device_limit=clamped_devices,
+        is_trial=False,
+        notified_3d=False,
         traffic_used_bytes=0,
         traffic_uplink_bytes=0,
         traffic_downlink_bytes=0,
@@ -313,7 +290,13 @@ async def renew_subscription_atomic(
             f"Renewal exceeds maximum horizon of {max_expiry_days} days"
         )
 
-    effective_devices = _effective_device_limit(sub)
+    if sub.pending_device_limit is not None:
+        effective_devices = max(1, min(WHITE_INTERNET_MAX_DEVICE_LIMIT, int(sub.pending_device_limit)))
+        sub.device_limit = effective_devices
+        sub.pending_device_limit = None
+        sub.pending_from = None
+    else:
+        effective_devices = _effective_device_limit(sub)
     new_base_bytes = (
         base_bytes
         if base_bytes is not None
@@ -387,14 +370,11 @@ async def add_device_slot_atomic(
         )
 
     new_device_limit = current_limit + 1
-    max_extra_allowed = new_device_limit * max_quota_bytes
-    if (sub.extra_traffic_bytes or 0) + extra_bytes > max_extra_allowed:
-        raise WhiteInternetQuotaCapExceededError(
-            f"Adding device slot would exceed maximum quota cap of {max_extra_allowed} bytes."
-        )
-
     sub.device_limit = new_device_limit
-    sub.extra_traffic_bytes = (sub.extra_traffic_bytes or 0) + extra_bytes
+    sub.base_traffic_bytes = (sub.base_traffic_bytes or 0) + extra_bytes
+    if sub.pending_device_limit is not None and sub.pending_device_limit >= new_device_limit:
+        sub.pending_device_limit = None
+        sub.pending_from = None
 
     if sub.status == WhiteInternetStatus.EXHAUSTED:
         sub.status = WhiteInternetStatus.ACTIVE
@@ -405,6 +385,80 @@ async def add_device_slot_atomic(
     await session.flush()
     await session.refresh(sub)
     return sub
+
+
+async def schedule_downgrade_atomic(
+    session: AsyncSession,
+    *,
+    subscription_id: int,
+    target_device_limit: int,
+) -> WhiteInternetSubscription:
+    """Schedule a deferred device-limit downgrade for the end of the current period."""
+    sub = await get_subscription_with_lock(session, subscription_id)
+    if sub is None:
+        raise WhiteInternetSubscriptionNotFoundError(f"Subscription {subscription_id} not found")
+    if sub.status in (WhiteInternetStatus.DISABLED, WhiteInternetStatus.PENDING, WhiteInternetStatus.EXPIRED):
+        raise WhiteInternetInactiveSubscriptionError("Subscription is not active")
+    current_limit = _effective_device_limit(sub)
+    target = int(target_device_limit)
+    if target < 1 or target >= current_limit:
+        raise WhiteInternetError(
+            f"Target device limit must be between 1 and {current_limit - 1}"
+        )
+    sub.pending_device_limit = target
+    sub.pending_from = sub.expires_at
+    await session.flush()
+    await session.refresh(sub)
+    return sub
+
+
+async def cancel_downgrade_atomic(
+    session: AsyncSession,
+    *,
+    subscription_id: int,
+) -> WhiteInternetSubscription:
+    """Cancel a previously scheduled deferred device-limit downgrade."""
+    sub = await get_subscription_with_lock(session, subscription_id)
+    if sub is None:
+        raise WhiteInternetSubscriptionNotFoundError(f"Subscription {subscription_id} not found")
+    sub.pending_device_limit = None
+    sub.pending_from = None
+    await session.flush()
+    await session.refresh(sub)
+    return sub
+
+
+async def apply_due_downgrades(
+    session: AsyncSession,
+    *,
+    now: datetime | None = None,
+) -> int:
+    """Apply deferred White Internet downgrades whose pending_from timestamp has arrived."""
+    now = now or now_utc()
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    stmt = (
+        select(WhiteInternetSubscription)
+        .where(
+            WhiteInternetSubscription.pending_device_limit.is_not(None),
+            WhiteInternetSubscription.pending_from.is_not(None),
+            WhiteInternetSubscription.pending_from <= now,
+        )
+        .with_for_update(skip_locked=True)
+    )
+    rows = (await session.scalars(stmt)).all()
+    applied = 0
+    for sub in rows:
+        target = int(sub.pending_device_limit)
+        sub.device_limit = max(1, min(WHITE_INTERNET_MAX_DEVICE_LIMIT, target))
+        sub.base_traffic_bytes = sub.device_limit * WHITE_INTERNET_BASE_TRAFFIC_BYTES
+        sub.pending_device_limit = None
+        sub.pending_from = None
+        sub.desired_version += 1
+        applied += 1
+    if applied:
+        await session.flush()
+    return applied
 
 
 async def topup_quota_atomic(

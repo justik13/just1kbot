@@ -116,6 +116,12 @@ class User(Base):
         DateTime(timezone=True), nullable=True
     )
     device_limit: Mapped[int] = mapped_column(Integer, default=0)
+    standard_downgrade_cooldown_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    auto_renew_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
 
     current_tariff_id: Mapped[int | None] = mapped_column(
         Integer,
@@ -790,6 +796,10 @@ class WhiteInternetSubscription(Base):
             "device_limit >= 1 AND device_limit <= 3",
             name="ck_white_internet_subscriptions_device_limit",
         ),
+        CheckConstraint(
+            "pending_device_limit IS NULL OR (pending_device_limit >= 1 AND pending_device_limit <= 3)",
+            name="ck_wi_subs_pending_device_limit",
+        ),
         Index(
             "uq_white_internet_live_user",
             "user_id",
@@ -887,6 +897,13 @@ class WhiteInternetSubscription(Base):
     )
     device_limit: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default=text("1")
+    )
+    pending_device_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pending_from: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    auto_renew_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
     )
     last_device_reset_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -1061,3 +1078,41 @@ class VlessSubscription(Base):
     )
 
     user = relationship("User", back_populates="vless_subscription")
+
+
+class UserDevice(Base):
+    """Unified HWID device registry for Standard and White Internet subscriptions."""
+
+    __tablename__ = "user_devices"
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "hwid", name="uq_user_devices_user_hwid"),
+        Index("ix_user_devices_user_priority", "user_id", "bi_priority", "first_seen_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    hwid: Mapped[str] = mapped_column(String(128), nullable=False)
+    device_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    platform: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    os_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    app_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    bi_priority: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()")
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()")
+    )
+
+    user = relationship("User", foreign_keys=[user_id])
