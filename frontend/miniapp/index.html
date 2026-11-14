@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Just1k Control</title>
+    <title>Just1k</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="stylesheet" href="/app/assets/css/tokens.css">
     <link rel="stylesheet" href="/app/assets/css/components.css">
@@ -16,7 +16,13 @@
                 <span class="brand-title">Just1k</span>
                 <span id="roleChip" class="chip chip-muted" hidden></span>
             </div>
-            <div id="userChip" class="user-meta"></div>
+            <div class="topbar-right">
+                <div id="modeSwitch" class="mode-switch" hidden>
+                    <button type="button" class="mode-btn" data-mode="cabinet">Кабинет</button>
+                    <button type="button" class="mode-btn active" data-mode="admin">Админка</button>
+                </div>
+                <div id="userChip" class="user-meta"></div>
+            </div>
         </header>
 
         <main id="appRoot" class="app-main">

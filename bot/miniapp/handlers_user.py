@@ -109,9 +109,14 @@ def _calc_payment_split(amount_rub: int, real_avail: int, bonus_avail: int, use_
     }
 
 
-async def _get_referral_summary(session, user: User) -> dict[str, Any]:
-    settings = get_settings()
-    bot_username = (settings.BOT_USERNAME or DEFAULT_FALLBACK_BOT_USERNAME).lstrip("@")
+async def _get_referral_summary(
+    session, user: User, *, bot_username: str | None = None
+) -> dict[str, Any]:
+    resolved_bot = (
+        bot_username
+        or get_settings().BOT_USERNAME
+        or DEFAULT_FALLBACK_BOT_USERNAME
+    ).lstrip("@")
     invited_count = int(
         await session.scalar(
             select(func.count(User.id)).where(
@@ -133,7 +138,7 @@ async def _get_referral_summary(session, user: User) -> dict[str, Any]:
     )
     tier = get_referral_tier(active_count)
     return {
-        "link": f"https://t.me/{bot_username}?start=ref_{user.telegram_id}",
+        "link": f"https://t.me/{resolved_bot}?start=ref_{user.telegram_id}",
         "invited_count": invited_count,
         "active_count": active_count,
         "tier_name": tier.name,
@@ -174,13 +179,38 @@ async def _list_devices_safe(session, user_id: int, wi_device_limit: int, vless_
     return items
 
 
+def _resolve_bot_username(request: web.Request) -> str:
+    app_name = request.app.get("bot_username") if hasattr(request, "app") else None
+    raw = app_name or get_settings().BOT_USERNAME or DEFAULT_FALLBACK_BOT_USERNAME
+    return str(raw).lstrip("@")
+
+
+_LEDGER_ENTRY_LABELS: dict[str, str] = {
+    "payment_credit": "Пополнение счёта",
+    "purchase_debit": "Оплата доступа",
+    "purchase_reversal": "Возврат оплаты",
+    "admin_adjustment": "Начисление на счёт",
+    "refund_debit": "Возврат средств",
+}
+
+
 def _serialize_ledger_entry(entry) -> dict[str, Any]:
     meta = entry.metadata_ if isinstance(entry.metadata_, dict) else {}
+    raw_desc = str(meta.get("description") or "").strip()
+    source = str(meta.get("source") or "").strip()
+    if raw_desc:
+        description = raw_desc
+    elif source == "referral_bonus":
+        description = "Реферальный бонус"
+    elif entry.entry_type == "admin_adjustment":
+        description = "Бонусное начисление" if Decimal(entry.amount) > 0 else "Коррекция баланса"
+    else:
+        description = _LEDGER_ENTRY_LABELS.get(entry.entry_type, "Операция по счёту")
     return {
         "id": entry.id,
         "type": entry.entry_type,
         "amount_rub": int(entry.amount),
-        "description": meta.get("description") or meta.get("source") or entry.entry_type,
+        "description": description,
         "created_at": entry.created_at.isoformat() if entry.created_at else None,
     }
 
@@ -216,7 +246,9 @@ async def api_user_dashboard_handler(request: web.Request) -> web.Response:
                 )
 
         devices = await _list_devices_safe(session, user.id, wi_limit, vless_sub)
-        referrals = await _get_referral_summary(session, user)
+        referrals = await _get_referral_summary(
+            session, user, bot_username=_resolve_bot_username(request)
+        )
         history_rows = await get_account_history(session, user_id=user.id, limit=30)
 
         cooldown_until = getattr(user, "standard_downgrade_cooldown_until", None)
@@ -338,6 +370,7 @@ async def api_user_standard_checkout_handler(request: web.Request) -> web.Respon
                 device_limit=payload.device_limit,
                 duration_days=payload.duration_days,
                 use_balance=payload.use_balance,
+                bot_username=_resolve_bot_username(request),
             )
             return web.json_response({"ok": True, **res})
     except Exception as exc:
@@ -402,6 +435,7 @@ async def api_user_wi_checkout_handler(request: web.Request) -> web.Response:
                 device_limit=payload.device_limit,
                 gb=payload.gb,
                 use_balance=payload.use_balance,
+                bot_username=_resolve_bot_username(request),
             )
             return web.json_response({"ok": True, **res})
     except Exception as exc:
@@ -470,6 +504,7 @@ async def api_user_topup_handler(request: web.Request) -> web.Response:
                     service_type="topup",
                     amount_rub=Decimal(payload.amount_rub),
                     use_balance=False,
+                    bot_username=_resolve_bot_username(request),
                 )
                 return web.json_response({"ok": True, **res})
 

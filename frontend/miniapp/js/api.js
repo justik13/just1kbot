@@ -110,6 +110,11 @@ export const api = {
         }),
     listUsers: (q = "", offset = 0, limit = 25) =>
         requestJson(`/api/app/admin/users?q=${encodeURIComponent(q)}&offset=${offset}&limit=${limit}`),
+    adjustUser: (userId, payload) =>
+        requestJson(`/api/app/admin/users/${userId}/adjust`, {
+            method: "POST",
+            body: JSON.stringify(payload),
+        }),
 
     // User cabinet
     getUserDashboard: () => requestJson("/api/app/user/dashboard"),

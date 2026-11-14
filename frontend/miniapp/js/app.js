@@ -10,6 +10,7 @@ const appState = {
     user: null,
     security: null,
     twoFactorPassed: false,
+    mode: "admin",
     adminTab: "nodes",
     nodes: [],
     selectedNodeId: null,
@@ -62,9 +63,28 @@ function _renderErrorCard(root, title, desc) {
     `;
 }
 
+function _syncModeSwitch() {
+    const modeSwitch = document.getElementById("modeSwitch");
+    if (!modeSwitch) return;
+    const isAdmin = Boolean(appState.user && appState.user.is_admin && appState.twoFactorPassed);
+    modeSwitch.hidden = !isAdmin;
+    if (!isAdmin) return;
+    modeSwitch.querySelectorAll("[data-mode]").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.mode === appState.mode);
+    });
+}
+
 function _renderAdminView() {
     const root = document.getElementById("appRoot");
     if (!root) return;
+    _syncModeSwitch();
+
+    if (appState.mode === "cabinet") {
+        appState.selectedNodeId = null;
+        _updateTelegramBackButton(null);
+        loadAndRenderUserCabinet(root);
+        return;
+    }
 
     if (appState.adminTab === "nodes" && appState.selectedNodeId != null) {
         const node = appState.nodes.find((n) => n.id === appState.selectedNodeId);
@@ -86,7 +106,6 @@ function _renderAdminView() {
         <nav class="tabs-bar">
             <button type="button" class="tab-btn ${appState.adminTab === "nodes" ? "active" : ""}" data-atab="nodes">Ноды</button>
             <button type="button" class="tab-btn ${appState.adminTab === "users" ? "active" : ""}" data-atab="users">Пользователи</button>
-            <button type="button" class="tab-btn ${appState.adminTab === "cabinet" ? "active" : ""}" data-atab="cabinet">Мой кабинет</button>
         </nav>
         <div id="adminTabBody" class="app-main"></div>
     `;
@@ -112,10 +131,8 @@ function _renderAdminView() {
             appState.selectedNodeId = id;
             _renderAdminView();
         });
-    } else if (appState.adminTab === "users") {
-        renderAdminUsersView(body, appState);
     } else {
-        loadAndRenderUserCabinet(body);
+        renderAdminUsersView(body, appState);
     }
 }
 
@@ -140,6 +157,23 @@ async function bootstrap() {
     const root = document.getElementById("appRoot");
     const userChip = document.getElementById("userChip");
     const roleChip = document.getElementById("roleChip");
+    const modeSwitch = document.getElementById("modeSwitch");
+
+    if (modeSwitch && !modeSwitch.dataset.bound) {
+        modeSwitch.dataset.bound = "1";
+        modeSwitch.querySelectorAll("[data-mode]").forEach((btn) => {
+            btn.addEventListener("click", async () => {
+                const nextMode = btn.dataset.mode;
+                if (nextMode === appState.mode) return;
+                appState.mode = nextMode;
+                if (nextMode === "admin" && !appState.nodes.length) {
+                    await _reloadNodesAndRender();
+                    return;
+                }
+                _renderAdminView();
+            });
+        });
+    }
 
     try {
         const me = await api.getMe();
@@ -148,26 +182,26 @@ async function bootstrap() {
         userChip.textContent = me.user.name || "";
 
         if (!me.user.is_admin) {
-            roleChip.textContent = "Кабинет";
-            roleChip.className = "chip chip-info";
-            roleChip.hidden = false;
+            roleChip.hidden = true;
+            if (modeSwitch) modeSwitch.hidden = true;
             await loadAndRenderUserCabinet(root);
             return;
         }
 
-        roleChip.textContent = "Admin";
-        roleChip.className = "chip chip-ok";
-        roleChip.hidden = false;
+        roleChip.hidden = true;
 
         appState.twoFactorPassed = Boolean(me.security && me.security.two_factor_verified);
         if (!appState.twoFactorPassed) {
+            if (modeSwitch) modeSwitch.hidden = true;
             renderSecurity2FA(root, me.security, async () => {
                 appState.twoFactorPassed = true;
+                appState.mode = "admin";
                 await _reloadNodesAndRender();
             });
             return;
         }
 
+        _syncModeSwitch();
         await _reloadNodesAndRender();
     } catch (err) {
         _renderErrorCard(

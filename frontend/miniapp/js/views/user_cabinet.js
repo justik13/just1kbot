@@ -17,12 +17,54 @@ const _state = {
     stdQuote: null,
     wiDevices: 1,
     wiUseBalance: true,
+    platform: _detectPlatform(),
     data: null,
 };
 
+let _quoteTimer = null;
+
+const _ICONS = {
+    copy: `<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`,
+    bolt: `<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`,
+    share: `<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>`,
+    plus: `<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
+    phone: `<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>`,
+};
+
+const _CLIENT_LINKS = {
+    ios: [
+        { name: "INCY", sub: "App Store · Рекомендуем", url: "https://apps.apple.com/app/incy/id6756943388" },
+        { name: "Happ", sub: "App Store", url: "https://apps.apple.com/app/happ-proxy-utility/id6504287215" },
+    ],
+    android: [
+        { name: "INCY (Google Play)", sub: "Официальный магазин", url: "https://play.google.com/store/apps/details?id=llc.itdev.incy" },
+        { name: "INCY (APK)", sub: "Прямая загрузка", url: "https://github.com/INCY-DEV/incy-platforms/releases/download/latest/Incy.apk" },
+        { name: "Happ (APK)", sub: "Прямая загрузка", url: "https://github.com/Happ-proxy/happ-android/releases/latest/download/Happ.apk" },
+    ],
+    windows: [
+        { name: "Happ Desktop", sub: "Windows x64 · Рекомендуем", url: "https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe" },
+        { name: "INCY Desktop", sub: "Windows", url: "https://github.com/INCY-DEV/incy-platforms/releases/download/latest/incy-windows-setup.exe" },
+    ],
+    macos: [
+        { name: "Happ Desktop", sub: "macOS Universal (.dmg)", url: "https://github.com/Happ-proxy/happ-desktop/releases/latest/download/Happ.macOS.universal.dmg" },
+        { name: "INCY", sub: "App Store", url: "https://apps.apple.com/app/incy/id6756943388" },
+    ],
+};
+
+function _detectPlatform() {
+    const ua = navigator.userAgent || "";
+    const isMac = /(Macintosh)|(MacIntel)/i.test(ua);
+    const isTouch = ("ontouchend" in document) || (navigator.maxTouchPoints > 0);
+    if (/(iPad|iPhone|iPod)/i.test(ua) || (isMac && isTouch)) return "ios";
+    if (/Android/i.test(ua)) return "android";
+    if (/Windows/i.test(ua)) return "windows";
+    if (isMac) return "macos";
+    return "ios";
+}
+
 function _handlePaymentResponse(res, successMsg, onReload) {
     if (res && res.confirmation_url) {
-        showToast("Переход к оплате...");
+        showToast("Открываем страницу оплаты...");
         openExternalLink(res.confirmation_url);
         return;
     }
@@ -33,11 +75,11 @@ function _handlePaymentResponse(res, successMsg, onReload) {
 function _openTopupModal(minTopup, onReload) {
     const form = document.createElement("form");
     form.className = "field";
-    form.style.gap = "10px";
+    form.style.gap = "12px";
     form.innerHTML = `
         <div class="field">
             <label>Сумма пополнения (от ${minTopup} ₽)</label>
-            <input name="amount" class="input" type="number" min="${minTopup}" max="50000" step="1" value="250" required>
+            <input name="amount" class="input tabular" type="number" min="${minTopup}" max="50000" step="1" value="250" required>
         </div>
         <div class="filter-pills">
             <button type="button" class="pill-btn" data-amt="100">100 ₽</button>
@@ -45,7 +87,7 @@ function _openTopupModal(minTopup, onReload) {
             <button type="button" class="pill-btn" data-amt="500">500 ₽</button>
             <button type="button" class="pill-btn" data-amt="1000">1000 ₽</button>
         </div>
-        <button type="submit" class="btn btn-primary">Перейти к оплате</button>
+        <button type="submit" class="btn btn-primary btn-lg">Перейти к оплате</button>
     `;
     const close = openModal("Пополнение баланса", form);
     form.querySelectorAll("[data-amt]").forEach((b) => {
@@ -90,7 +132,7 @@ export async function loadAndRenderUserCabinet(root) {
         root.innerHTML = `
             <section class="card card-center">
                 <div class="card-title">Не удалось загрузить кабинет</div>
-                <p class="muted">${escapeHtml(err.message || "Попробуйте позже")}</p>
+                <p class="muted">${escapeHtml(err.message || "Попробуйте обновить экран")}</p>
                 <button id="retryDashBtn" type="button" class="btn btn-primary btn-sm">Повторить</button>
             </section>
         `;
@@ -99,51 +141,95 @@ export async function loadAndRenderUserCabinet(root) {
     }
 }
 
+function _scheduleQuoteRefresh(root) {
+    if (_quoteTimer) clearTimeout(_quoteTimer);
+    const quoteBox = root.querySelector("#stdQuoteSummary");
+    if (quoteBox) {
+        quoteBox.innerHTML = `<div class="quote-line"><span>Пересчёт стоимости...</span></div>`;
+    }
+    _quoteTimer = setTimeout(() => {
+        _refreshQuote(root);
+    }, 240);
+}
+
 async function _refreshQuote(root) {
     if (_state.tab !== "access") return;
+    const reqDevices = _state.stdDevices;
+    const reqDuration = _state.stdDuration;
     try {
-        _state.stdQuote = await api.quoteStandard(_state.stdDevices, _state.stdDuration);
-        const quoteBox = root.querySelector("#stdQuoteSummary");
-        if (quoteBox) {
-            quoteBox.innerHTML = _buildQuoteSummaryHtml(_state.stdQuote, _state.stdUseBalance);
-        }
+        const quote = await api.quoteStandard(reqDevices, reqDuration);
+        if (reqDevices !== _state.stdDevices || reqDuration !== _state.stdDuration) return;
+        _state.stdQuote = quote;
+        _updateQuoteUi(root);
     } catch {
         // Non-critical
     }
 }
 
-function _buildQuoteSummaryHtml(q, useBalance) {
-    if (!q) return `<span class="muted">Расчёт стоимости...</span>`;
-    if (q.blocked_reason) {
-        return `<span style="color:var(--accent-amber);">${escapeHtml(q.blocked_reason)}</span>`;
-    }
+function _computeQuoteBreakdown(q, useBalance) {
+    if (!q) return null;
     const price = Number(q.due_rub ?? q.price_rub ?? q.amount_rub ?? 0);
     const bonus = useBalance ? Number(q.bonus_used || 0) : 0;
     const real = useBalance ? Number(q.real_used || 0) : 0;
-    const card = useBalance ? Number(q.card_to_pay ?? Math.max(0, price - bonus - real)) : price;
-    const parts = [`Стоимость: <b>${price} ₽</b>`];
-    if (q.discount_rub > 0) {
-        parts.push(`Скидка: <b>-${q.discount_rub} ₽</b>`);
+    const balUsed = Math.min(price, bonus + real);
+    const card = useBalance ? Number(q.card_to_pay ?? Math.max(0, price - balUsed)) : price;
+    return { price, bonus, real, balUsed, card, discount: Number(q.discount_rub || 0) };
+}
+
+function _buildQuoteSummaryHtml(q, useBalance) {
+    if (!q) return `<div class="quote-line"><span>Расчёт стоимости...</span></div>`;
+    if (q.blocked_reason) {
+        return `<div class="quote-line" style="color:var(--accent-amber);">${escapeHtml(q.blocked_reason)}</div>`;
     }
-    if (useBalance && (bonus > 0 || real > 0)) {
-        parts.push(`Спишется с баланса: <b>${bonus + real} ₽</b> (бонусы: ${bonus} ₽, осн.: ${real} ₽)`);
+    if (q.operation === "downgrade") {
+        return `<div class="quote-line"><span>Выбрано меньше устройств (${_state.stdDevices}). Можно снизить лимит бесплатно.</span></div>`;
     }
-    if (card > 0) {
-        parts.push(`К доплате картой/СБП: <b>${card} ₽</b>`);
-    } else if (price > 0) {
-        parts.push(`К доплате картой/СБП: <b>0 ₽</b> (полностью с баланса)`);
+    const b = _computeQuoteBreakdown(q, useBalance);
+    const rows = [`<div class="quote-line"><span>Стоимость тарифа</span><strong>${b.price} ₽</strong></div>`];
+    if (b.discount > 0) {
+        rows.push(`<div class="quote-line"><span>Приветственная скидка</span><strong style="color:var(--accent-emerald);">-${b.discount} ₽</strong></div>`);
     }
-    return parts.join("<br>");
+    if (b.balUsed > 0) {
+        rows.push(`<div class="quote-line"><span>Спишется с баланса</span><strong>-${b.balUsed} ₽</strong></div>`);
+    }
+    rows.push(
+        b.card > 0
+            ? `<div class="quote-line"><span>К оплате картой / СБП</span><strong>${b.card} ₽</strong></div>`
+            : `<div class="quote-line"><span>К оплате картой / СБП</span><strong style="color:var(--accent-emerald);">0 ₽ (с баланса)</strong></div>`
+    );
+    return rows.join("");
+}
+
+function _getStdButtonLabel(std, q, useBalance) {
+    const baseVerb = std.active ? "Продлить" : "Подключить";
+    const b = _computeQuoteBreakdown(q, useBalance);
+    if (!b || q.operation === "downgrade") return baseVerb;
+    if (b.card === 0 && b.price > 0) return `Оплатить с баланса (${b.price} ₽)`;
+    if (b.balUsed > 0 && b.card > 0) return `${baseVerb} · доплата ${b.card} ₽`;
+    return `${baseVerb} за ${b.card} ₽`;
+}
+
+function _updateQuoteUi(root) {
+    const std = (_state.data && _state.data.standard) || {};
+    const quoteBox = root.querySelector("#stdQuoteSummary");
+    if (quoteBox) {
+        quoteBox.innerHTML = _buildQuoteSummaryHtml(_state.stdQuote, _state.stdUseBalance);
+    }
+    const btn = root.querySelector("#stdCheckoutBtn");
+    if (btn) {
+        btn.textContent = _getStdButtonLabel(std, _state.stdQuote, _state.stdUseBalance);
+    }
 }
 
 function _render(root) {
     const d = _state.data;
     if (!d) return;
+    const devCount = (d.devices || []).length;
 
     root.innerHTML = `
         <nav class="tabs-bar">
             <button type="button" class="tab-btn ${_state.tab === "access" ? "active" : ""}" data-utab="access">Доступ</button>
-            <button type="button" class="tab-btn ${_state.tab === "devices" ? "active" : ""}" data-utab="devices">Устройства (${(d.devices || []).length})</button>
+            <button type="button" class="tab-btn ${_state.tab === "devices" ? "active" : ""}" data-utab="devices">Устройства (${devCount})</button>
             <button type="button" class="tab-btn ${_state.tab === "referrals" ? "active" : ""}" data-utab="referrals">Бонусы</button>
             <button type="button" class="tab-btn ${_state.tab === "history" ? "active" : ""}" data-utab="history">История</button>
         </nav>
@@ -167,6 +253,106 @@ function _render(root) {
     else _renderHistoryTab(body, d);
 }
 
+function _buildGuideHtml(subUrl, isActive) {
+    const platformLabels = { ios: "iOS", android: "Android", windows: "Windows", macos: "macOS" };
+    const clients = _CLIENT_LINKS[_state.platform] || _CLIENT_LINKS.ios;
+
+    return `
+        <details class="guide-details" id="connectGuide">
+            <summary class="guide-summary">
+                <span>${isActive ? "Как подключить на этом устройстве" : "Установить приложение заранее"}</span>
+                <span class="muted" style="font-size:11px;">${platformLabels[_state.platform] || "iOS"} ▾</span>
+            </summary>
+            <div class="guide-body">
+                <div class="filter-pills">
+                    ${Object.entries(platformLabels).map(([key, label]) => `
+                        <button type="button" class="pill-btn ${_state.platform === key ? "active" : ""}" data-platform="${key}">${label}</button>
+                    `).join("")}
+                </div>
+                <div class="field" style="gap:6px;">
+                    ${clients.map((c) => `
+                        <div class="client-row">
+                            <div>
+                                <div style="font-weight:600; font-size:13px;">${escapeHtml(c.name)}</div>
+                                <div class="muted" style="font-size:11px;">${escapeHtml(c.sub)}</div>
+                            </div>
+                            <button type="button" class="btn btn-sm" data-download="${escapeHtml(c.url)}">Скачать</button>
+                        </div>
+                    `).join("")}
+                </div>
+                ${isActive && subUrl ? `
+                    <div class="field">
+                        <label>Ключ подключения (для ручного ввода)</label>
+                        <div class="sub-url-box">${escapeHtml(subUrl)}</div>
+                    </div>
+                ` : ""}
+            </div>
+        </details>
+    `;
+}
+
+function _buildHeroHtml(d, std, wi) {
+    const isAnyActive = Boolean(std.active || wi.active);
+    const subUrl = d.subscription_url || "";
+    const desktopFirst = _state.platform === "windows" || _state.platform === "macos";
+
+    if (!isAnyActive) {
+        return `
+            <section class="hero-card">
+                <div class="row">
+                    <div style="display:flex; align-items:center; gap:9px;">
+                        <span class="status-dot"></span>
+                        <span class="hero-headline">Доступ не подключён</span>
+                    </div>
+                    <span class="chip chip-muted">Не активен</span>
+                </div>
+                <p class="muted">Выберите подходящий тариф ниже — ключ подключения активируется сразу после оплаты.</p>
+                ${_buildGuideHtml(subUrl, false)}
+            </section>
+        `;
+    }
+
+    const pills = [];
+    if (std.active) {
+        pills.push(`<span class="chip chip-ok">Базовый · ${Number(std.device_limit || 2)} устр. · до ${formatDate(std.expires_at)}</span>`);
+    }
+    if (wi.active) {
+        pills.push(`<span class="chip chip-info">Устойчивость · ${Number(wi.device_limit || 1)} устр. · до ${formatDate(wi.expires_at)}</span>`);
+    }
+
+    const incyHref = `incy://add/${subUrl}`;
+    const happHref = `happ://add/${subUrl}`;
+
+    return `
+        <section class="hero-card is-active">
+            <div class="row">
+                <div style="display:flex; align-items:center; gap:9px;">
+                    <span class="status-dot active"></span>
+                    <span class="hero-headline">Доступ активен</span>
+                </div>
+                <span class="chip chip-ok">Готов к работе</span>
+            </div>
+            <div class="option-pills">${pills.join("")}</div>
+            <div class="connect-actions">
+                ${desktopFirst ? `
+                    <a href="${escapeHtml(happHref)}" class="btn btn-primary btn-lg">${_ICONS.bolt} Подключить в Happ</a>
+                ` : `
+                    <a href="${escapeHtml(incyHref)}" class="btn btn-primary btn-lg">${_ICONS.bolt} Подключить в INCY</a>
+                `}
+                <div class="connect-pair">
+                    ${desktopFirst ? `
+                        <a href="${escapeHtml(incyHref)}" class="btn btn-sm">Открыть в INCY</a>
+                    ` : `
+                        <a href="${escapeHtml(happHref)}" class="btn btn-sm">Открыть в Happ</a>
+                    `}
+                    <button id="copySubBtn" type="button" class="btn btn-sm">${_ICONS.copy} Копировать ключ</button>
+                </div>
+            </div>
+            ${_buildGuideHtml(subUrl, true)}
+        </section>
+    `;
+}
+
 function _renderAccessTab(body, d, reload, root) {
     const bal = d.balance || { real: 0, bonus: 0, total: 0 };
     const std = d.standard || {};
@@ -175,101 +361,126 @@ function _renderAccessTab(body, d, reload, root) {
     const minTopup = pricing.min_topup_rub || 20;
 
     const stdLimit = Number(std.device_limit || 0);
-    const isStdDowngrade = std.active && _state.stdDevices < stdLimit;
+    const isStdDowngrade = Boolean(std.active && _state.stdDevices < stdLimit);
+    const durations = pricing.standard_durations || [7, 30, 90];
 
     body.innerHTML = `
+        <section class="balance-card">
+            <div>
+                <div class="muted" style="font-size:12px;">Баланс аккаунта</div>
+                <div class="balance-value">${bal.total} ₽</div>
+                <div class="balance-sub">Основной: ${bal.real} ₽ · Бонусы: ${bal.bonus} ₽</div>
+            </div>
+            <button id="topupBtn" type="button" class="btn btn-primary btn-sm">${_ICONS.plus} Пополнить</button>
+        </section>
+
+        ${_buildHeroHtml(d, std, wi)}
+
         <section class="card">
             <div class="row">
                 <div>
-                    <div class="muted">Доступный баланс</div>
-                    <div style="font-size:22px; font-weight:700;">${bal.total} ₽</div>
-                    <div class="muted" style="font-size:12px;">Основной: ${bal.real} ₽ · Бонусы: ${bal.bonus} ₽</div>
+                    <div class="card-title">Базовый доступ</div>
+                    <div class="muted" style="font-size:12px;">Высокая скорость и стабильное подключение на каждый день</div>
                 </div>
-                <button id="topupBtn" type="button" class="btn btn-primary btn-sm">Пополнить от ${minTopup} ₽</button>
-            </div>
-        </section>
-
-        <section class="card">
-            <div class="row">
-                <div class="card-title">Ссылка подключения</div>
-                <span class="chip ${std.active || wi.active ? "chip-ok" : "chip-muted"}">
-                    ${std.active || wi.active ? "Единый ключ" : "Не активна"}
-                </span>
-            </div>
-            <div class="sub-url-box">${escapeHtml(d.subscription_url || "")}</div>
-            <div class="actions-row">
-                <button id="copySubBtn" type="button" class="btn btn-primary btn-sm">Копировать ссылку</button>
-                <button id="openSubBtn" type="button" class="btn btn-sm">Открыть</button>
-            </div>
-        </section>
-
-        <section class="card">
-            <div class="row">
-                <div class="card-title">Базовый доступ</div>
                 <span class="chip ${std.active ? "chip-ok" : "chip-muted"}">
-                    ${std.active ? `Активен до ${formatDate(std.expires_at)}` : "Не активен"}
+                    ${std.active ? `${stdLimit} устр.` : "Не активен"}
                 </span>
             </div>
+
             ${std.active ? `
-                <div class="row muted" style="font-size:12px;">
-                    <span>Текущий лимит: <b>${stdLimit}</b> устр.</span>
-                    <label class="checkbox-row">
+                <label class="toggle-row">
+                    <span class="toggle-label">Автопродление с баланса</span>
+                    <span class="switch">
                         <input id="stdAutoRenewChk" type="checkbox" ${std.auto_renew_enabled ? "checked" : ""}>
-                        <span>Автопродление с баланса</span>
-                    </label>
-                </div>
+                        <span class="switch-track"></span>
+                    </span>
+                </label>
             ` : ""}
-            <div class="field">
+
+            <div class="range-wrap">
                 <div class="row">
-                    <label>Количество устройств</label>
-                    <span style="font-weight:600;">${_state.stdDevices} устр.</span>
+                    <span class="muted" style="font-size:12px;">Количество устройств</span>
+                    <span id="stdDevicesValue" class="tabular" style="font-weight:600;">${_state.stdDevices} устр.</span>
                 </div>
                 <input id="stdDevicesRange" class="range-input" type="range" min="2" max="10" step="1" value="${_state.stdDevices}">
             </div>
-            <div class="field">
-                <label>Срок действия</label>
-                <div class="filter-pills">
-                    ${(pricing.standard_durations || [7, 30, 90]).map((days) => `
-                        <button type="button" class="pill-btn ${_state.stdDuration === days ? "active" : ""}" data-std-days="${days}">
-                            ${days} дн.
-                        </button>
-                    `).join("")}
+
+            ${isStdDowngrade ? "" : `
+                <div class="field">
+                    <label>Срок действия</label>
+                    <div class="seg-group">
+                        ${durations.map((days) => `
+                            <button type="button" class="seg-btn ${_state.stdDuration === days ? "active" : ""}" data-std-days="${days}">
+                                ${days} дн.
+                            </button>
+                        `).join("")}
+                    </div>
                 </div>
-            </div>
-            <label class="checkbox-row">
-                <input id="stdUseBalChk" type="checkbox" ${_state.stdUseBalance ? "checked" : ""}>
-                <span>Списать с баланса (сначала бонусы до 100%)</span>
-            </label>
-            <div id="stdQuoteSummary" class="meta-list">${_buildQuoteSummaryHtml(_state.stdQuote, _state.stdUseBalance)}</div>
-            <div class="actions-row">
-                <button id="stdCheckoutBtn" type="button" class="btn btn-primary">
-                    ${std.active ? "Продлить / Изменить" : "Подключить"}
+
+                <label class="toggle-row">
+                    <span class="toggle-label">Оплатить с баланса (бонусы сначала)</span>
+                    <span class="switch">
+                        <input id="stdUseBalChk" type="checkbox" ${_state.stdUseBalance ? "checked" : ""}>
+                        <span class="switch-track"></span>
+                    </span>
+                </label>
+            `}
+
+            <div id="stdQuoteSummary" class="quote-box">${_buildQuoteSummaryHtml(_state.stdQuote, _state.stdUseBalance)}</div>
+
+            ${isStdDowngrade ? `
+                <button id="stdDowngradeBtn" type="button" class="btn btn-primary btn-lg">
+                    Понизить лимит до ${_state.stdDevices} устр.
                 </button>
-                ${isStdDowngrade ? `
-                    <button id="stdDowngradeBtn" type="button" class="btn btn-sm">
-                        Понизить до ${_state.stdDevices} устр.
-                    </button>
-                ` : ""}
-            </div>
+            ` : `
+                <button id="stdCheckoutBtn" type="button" class="btn btn-primary btn-lg">
+                    ${_getStdButtonLabel(std, _state.stdQuote, _state.stdUseBalance)}
+                </button>
+            `}
+
             ${std.downgrade_cooldown_until ? `
-                <div class="muted" style="font-size:11px;">Снижение лимита доступно после ${formatDate(std.downgrade_cooldown_until)}</div>
+                <div class="notice-box notice-warn">
+                    <span>Снижение лимита доступно после ${formatDate(std.downgrade_cooldown_until)}</span>
+                </div>
             ` : ""}
         </section>
 
         <section class="card">
             <div class="row">
-                <div class="card-title">Высокая устойчивость (доп. опция)</div>
+                <div>
+                    <div class="card-title">Повышенная устойчивость</div>
+                    <div class="muted" style="font-size:12px;">Резервный канал для сложных сетей и ограничений</div>
+                </div>
                 <span class="chip ${wi.active ? "chip-info" : "chip-muted"}">
-                    ${wi.active ? `Активна до ${formatDate(wi.expires_at)}` : "Не подключена"}
+                    ${wi.active ? `до ${formatDate(wi.expires_at)}` : "Доп. опция"}
                 </span>
             </div>
-            ${wi.active ? _wiActiveHtml(wi, pricing) : _wiInactiveHtml(pricing)}
+            ${wi.active ? _wiActiveHtml(wi, pricing) : _wiInactiveHtml(d, pricing)}
         </section>
     `;
 
     body.querySelector("#topupBtn").addEventListener("click", () => _openTopupModal(minTopup, reload));
-    body.querySelector("#copySubBtn").addEventListener("click", () => copyText(d.subscription_url, "Ссылка скопирована"));
-    body.querySelector("#openSubBtn").addEventListener("click", () => openExternalLink(d.subscription_url));
+
+    const copyBtn = body.querySelector("#copySubBtn");
+    if (copyBtn) {
+        copyBtn.addEventListener("click", () => copyText(d.subscription_url, "Ключ скопирован"));
+    }
+
+    body.querySelectorAll("[data-platform]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            _state.platform = btn.dataset.platform;
+            const guideWasOpen = Boolean(body.querySelector("#connectGuide")?.open);
+            _render(root);
+            if (guideWasOpen) {
+                const nextGuide = root.querySelector("#connectGuide");
+                if (nextGuide) nextGuide.open = true;
+            }
+        });
+    });
+
+    body.querySelectorAll("[data-download]").forEach((btn) => {
+        btn.addEventListener("click", () => openExternalLink(btn.dataset.download));
+    });
 
     const stdAuto = body.querySelector("#stdAutoRenewChk");
     if (stdAuto) {
@@ -285,10 +496,19 @@ function _renderAccessTab(body, d, reload, root) {
     }
 
     const range = body.querySelector("#stdDevicesRange");
+    const devLabel = body.querySelector("#stdDevicesValue");
     range.addEventListener("input", () => {
-        _state.stdDevices = Number(range.value);
-        _render(root);
-        _refreshQuote(root);
+        const nextVal = Number(range.value);
+        const wasDowngrade = Boolean(std.active && _state.stdDevices < stdLimit);
+        const willBeDowngrade = Boolean(std.active && nextVal < stdLimit);
+        _state.stdDevices = nextVal;
+        if (devLabel) devLabel.textContent = `${nextVal} устр.`;
+        if (wasDowngrade !== willBeDowngrade) {
+            _render(root);
+            _refreshQuote(root);
+            return;
+        }
+        _scheduleQuoteRefresh(root);
     });
 
     body.querySelectorAll("[data-std-days]").forEach((b) => {
@@ -300,24 +520,27 @@ function _renderAccessTab(body, d, reload, root) {
     });
 
     const useBalChk = body.querySelector("#stdUseBalChk");
-    useBalChk.addEventListener("change", () => {
-        _state.stdUseBalance = useBalChk.checked;
-        const quoteBox = body.querySelector("#stdQuoteSummary");
-        if (quoteBox) quoteBox.innerHTML = _buildQuoteSummaryHtml(_state.stdQuote, _state.stdUseBalance);
-    });
+    if (useBalChk) {
+        useBalChk.addEventListener("change", () => {
+            _state.stdUseBalance = useBalChk.checked;
+            _updateQuoteUi(root);
+        });
+    }
 
-    body.querySelector("#stdCheckoutBtn").addEventListener("click", async (e) => {
-        const btn = e.currentTarget;
-        btn.disabled = true;
-        try {
-            const res = await api.checkoutStandard(_state.stdDevices, _state.stdDuration, _state.stdUseBalance);
-            _handlePaymentResponse(res, "Базовый доступ оформлен", reload);
-        } catch (err) {
-            showToast(err.message || "Ошибка оформления");
-        } finally {
-            btn.disabled = false;
-        }
-    });
+    const checkoutBtn = body.querySelector("#stdCheckoutBtn");
+    if (checkoutBtn) {
+        checkoutBtn.addEventListener("click", async () => {
+            checkoutBtn.disabled = true;
+            try {
+                const res = await api.checkoutStandard(_state.stdDevices, _state.stdDuration, _state.stdUseBalance);
+                _handlePaymentResponse(res, "Базовый доступ оформлен", reload);
+            } catch (err) {
+                showToast(err.message || "Ошибка оформления");
+            } finally {
+                checkoutBtn.disabled = false;
+            }
+        });
+    }
 
     const dgBtn = body.querySelector("#stdDowngradeBtn");
     if (dgBtn) {
@@ -346,45 +569,36 @@ function _wiActiveHtml(wi, pricing) {
         : 0;
     const packs = pricing.wi_topup_packs || [];
     const curLimit = Number(wi.device_limit || 1);
+    const maxDevices = pricing.wi_max_devices || 3;
 
     return `
         <div class="field">
             <div class="row muted" style="font-size:12px;">
-                <span>Трафик: <b>${usedGb} / ${totalGb} ГБ</b></span>
-                <span>Слотов: <b>${curLimit} из ${pricing.wi_max_devices || 3}</b></span>
+                <span class="tabular">Трафик: <strong style="color:var(--text-primary);">${usedGb} / ${totalGb} ГБ</strong></span>
+                <span class="tabular">Слотов: <strong style="color:var(--text-primary);">${curLimit} из ${maxDevices}</strong></span>
             </div>
             <div class="progress-track"><div class="progress-fill" style="width:${pct}%;"></div></div>
         </div>
-        <label class="checkbox-row">
-            <input id="wiAutoRenewChk" type="checkbox" ${wi.auto_renew_enabled ? "checked" : ""}>
-            <span>Автопродление с баланса</span>
+        <label class="toggle-row">
+            <span class="toggle-label">Автопродление с баланса</span>
+            <span class="switch">
+                <input id="wiAutoRenewChk" type="checkbox" ${wi.auto_renew_enabled ? "checked" : ""}>
+                <span class="switch-track"></span>
+            </span>
         </label>
-        <label class="checkbox-row">
-            <input id="wiUseBalChk" type="checkbox" ${_state.wiUseBalance ? "checked" : ""}>
-            <span>Использовать баланс (бонусы в приоритете)</span>
+        <label class="toggle-row">
+            <span class="toggle-label">Оплатить с баланса (бонусы сначала)</span>
+            <span class="switch">
+                <input id="wiUseBalChk" type="checkbox" ${_state.wiUseBalance ? "checked" : ""}>
+                <span class="switch-track"></span>
+            </span>
         </label>
         <div class="actions-row">
-            <button id="wiRenewBtn" type="button" class="btn btn-primary btn-sm">Продлить (+30 дн.)</button>
-            ${curLimit < (pricing.wi_max_devices || 3) && wi.add_slot_price_rub != null ? `
-                <button id="wiAddSlotBtn" type="button" class="btn btn-sm">+1 слот (${wi.add_slot_price_rub} ₽)</button>
+            <button id="wiRenewBtn" type="button" class="btn btn-primary" style="flex:1;">Продлить +30 дн.</button>
+            ${curLimit < maxDevices && wi.add_slot_price_rub != null ? `
+                <button id="wiAddSlotBtn" type="button" class="btn">+1 слот · ${wi.add_slot_price_rub} ₽</button>
             ` : ""}
         </div>
-        ${wi.pending_device_limit ? `
-            <div class="item-row">
-                <div class="row">
-                    <span class="muted" style="font-size:12px;">Запланировано снижение до ${wi.pending_device_limit} устр. с ${formatDate(wi.pending_from)}</span>
-                    <button id="wiCancelDgBtn" type="button" class="btn btn-sm btn-danger">Отменить</button>
-                </div>
-            </div>
-        ` : (curLimit > 1 ? `
-            <div class="actions-row">
-                ${Array.from({ length: curLimit - 1 }, (_, i) => i + 1).map((target) => `
-                    <button type="button" class="btn btn-sm" data-wi-dg="${target}">
-                        Снизить до ${target} устр. со след. периода
-                    </button>
-                `).join("")}
-            </div>
-        ` : "")}
         ${packs.length ? `
             <div class="field">
                 <label>Дополнительный трафик</label>
@@ -395,30 +609,66 @@ function _wiActiveHtml(wi, pricing) {
                 </div>
             </div>
         ` : ""}
+        ${wi.pending_device_limit ? `
+            <div class="notice-box notice-warn">
+                <span>Снижение до ${wi.pending_device_limit} устр. с ${formatDate(wi.pending_from)}</span>
+                <button id="wiCancelDgBtn" type="button" class="btn btn-sm btn-danger">Отменить</button>
+            </div>
+        ` : (curLimit > 1 ? `
+            <details class="guide-details">
+                <summary class="guide-summary">
+                    <span>Изменить число слотов со следующего периода</span>
+                    <span class="muted">▾</span>
+                </summary>
+                <div class="guide-body">
+                    <div class="actions-row">
+                        ${Array.from({ length: curLimit - 1 }, (_, i) => i + 1).map((target) => `
+                            <button type="button" class="btn btn-sm" data-wi-dg="${target}">
+                                Снизить до ${target} устр.
+                            </button>
+                        `).join("")}
+                    </div>
+                </div>
+            </details>
+        ` : "")}
     `;
 }
 
-function _wiInactiveHtml(pricing) {
+function _wiInactiveHtml(d, pricing) {
     const base = Number(pricing.wi_base_price_rub || 250);
     const extra = Number(pricing.wi_extra_device_price_rub || 200);
     const total = base + Math.max(0, _state.wiDevices - 1) * extra;
+    const balTotal = Number((d.balance && d.balance.total) || 0);
+    const balUsed = _state.wiUseBalance ? Math.min(total, balTotal) : 0;
+    const cardDue = Math.max(0, total - balUsed);
+
+    const ctaText = cardDue === 0
+        ? `Оплатить с баланса (${total} ₽)`
+        : (balUsed > 0 ? `Подключить · доплата ${cardDue} ₽` : `Подключить за ${total} ₽`);
+
     return `
-        <p class="muted">Независимая опция высокой устойчивости (50 ГБ за каждый слот, 30 дней).</p>
+        <div class="quote-box">
+            <div class="quote-line"><span>Трафик на слот</span><strong>50 ГБ / 30 дней</strong></div>
+            <div class="quote-line"><span>Стоимость опции</span><strong>${total} ₽</strong></div>
+        </div>
         <div class="field">
             <label>Выберите количество устройств</label>
-            <div class="filter-pills">
+            <div class="seg-group">
                 ${[1, 2, 3].map((n) => `
-                    <button type="button" class="pill-btn ${_state.wiDevices === n ? "active" : ""}" data-wi-dev="${n}">
-                        ${n} устр. (${base + (n - 1) * extra} ₽)
+                    <button type="button" class="seg-btn ${_state.wiDevices === n ? "active" : ""}" data-wi-dev="${n}">
+                        ${n} устр. · ${base + (n - 1) * extra} ₽
                     </button>
                 `).join("")}
             </div>
         </div>
-        <label class="checkbox-row">
-            <input id="wiUseBalChk" type="checkbox" ${_state.wiUseBalance ? "checked" : ""}>
-            <span>Списать с баланса (бонусы в приоритете)</span>
+        <label class="toggle-row">
+            <span class="toggle-label">Оплатить с баланса (бонусы сначала)</span>
+            <span class="switch">
+                <input id="wiUseBalChk" type="checkbox" ${_state.wiUseBalance ? "checked" : ""}>
+                <span class="switch-track"></span>
+            </span>
         </label>
-        <button id="wiBuyBtn" type="button" class="btn btn-primary">Подключить за ${total} ₽</button>
+        <button id="wiBuyBtn" type="button" class="btn btn-primary btn-lg">${ctaText}</button>
     `;
 }
 
@@ -427,6 +677,7 @@ function _bindWiEvents(body, d, reload, root) {
     if (wiUseBal) {
         wiUseBal.addEventListener("change", () => {
             _state.wiUseBalance = wiUseBal.checked;
+            if (!d.wi || !d.wi.active) _render(root);
         });
     }
 
@@ -438,7 +689,7 @@ function _bindWiEvents(body, d, reload, root) {
                 showToast(wiAuto.checked ? "Автопродление включено" : "Автопродление выключено");
             } catch (err) {
                 wiAuto.checked = !wiAuto.checked;
-                showToast(err.message || "Ошибка");
+                showToast(err.message || "Ошибка настройки автопродления");
             }
         });
     }
@@ -568,8 +819,8 @@ function _renderDevicesTab(body, d, reload) {
             </div>
             <p class="muted">
                 ${wiActive
-                    ? "Слоты высокой устойчивости выдаются по приоритету (или в порядке первого подключения)."
-                    : "Устройства привязываются автоматически при обновлении ссылки в приложении."}
+                    ? "Слоты повышенной устойчивости выдаются по приоритету (или в порядке первого подключения)."
+                    : "Устройства добавляются автоматически после импорта ключа в Happ или INCY."}
             </p>
             <div id="devicesList" style="display:flex; flex-direction:column; gap:8px;"></div>
         </section>
@@ -577,7 +828,15 @@ function _renderDevicesTab(body, d, reload) {
 
     const list = body.querySelector("#devicesList");
     if (!devices.length) {
-        list.innerHTML = `<div class="muted" style="text-align:center; padding:14px;">Нет привязанных устройств</div>`;
+        list.innerHTML = `
+            <div class="card card-center" style="background:var(--bg-elevated); padding:22px 16px;">
+                <div style="color:var(--text-secondary);">${_ICONS.phone}</div>
+                <div style="font-weight:600; font-size:14px;">Устройств пока нет</div>
+                <p class="muted" style="font-size:12px;">
+                    Откройте вкладку «Доступ» и нажмите «Подключить в INCY» или «Открыть в Happ» — телефон или компьютер появятся здесь автоматически.
+                </p>
+            </div>
+        `;
         return;
     }
 
@@ -596,7 +855,7 @@ function _renderDevicesTab(body, d, reload) {
             </div>
             <div class="row muted" style="font-size:11px;">
                 <span>Активность: ${formatDate(dev.last_seen_at)}</span>
-                <span>Приоритет: ${dev.bi_priority || 0}</span>
+                <span class="tabular">Приоритет: ${dev.bi_priority || 0}</span>
             </div>
             <div class="actions-row">
                 ${wiActive ? `
@@ -631,7 +890,7 @@ function _renderDevicesTab(body, d, reload) {
             const nextPrio = Number(btn.dataset.cur) > 0 ? 0 : 10;
             try {
                 await api.setDevicePriority(btn.dataset.prio, nextPrio);
-                showToast(nextPrio > 0 ? "Приоритет повышен" : "Приоритет сброшен (FIFO)");
+                showToast(nextPrio > 0 ? "Приоритет повышен" : "Приоритет сброшен");
                 reload();
             } catch (err) {
                 showToast(err.message || "Не удалось изменить приоритет");
@@ -645,6 +904,10 @@ function _renderDevicesTab(body, d, reload) {
 function _renderReferralsTab(body, d) {
     const ref = d.referrals || {};
     const bal = d.balance || {};
+    const minActive = ref.active_min_topup_rub || 67;
+    const shareText = `Держи приглашение — скидка ${ref.welcome_discount_pct ?? 25}% на первый заказ`;
+    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(ref.link || "")}&text=${encodeURIComponent(shareText)}`;
+
     body.innerHTML = `
         <section class="stats-strip">
             <div class="stat-box"><div class="stat-val">${ref.invited_count ?? 0}</div><div class="stat-lbl">Приглашено</div></div>
@@ -659,20 +922,24 @@ function _renderReferralsTab(body, d) {
                 <span class="chip chip-ok">${escapeHtml(ref.tier_name || "Standard")}</span>
             </div>
             <p class="muted">
-                Друг получает приветственную скидку <b>${ref.welcome_discount_pct ?? 25}%</b> на первый заказ.
-                Реферал засчитывается активным после пополнения или заказа от <b>67 ₽</b>.
+                Друг получает скидку <b>${ref.welcome_discount_pct ?? 25}%</b> на первый заказ.
+                Реферал считается активным после оплаты или пополнения от <b>${minActive} ₽</b>.
                 Бонусами можно оплатить до 100% любого заказа.
             </p>
             ${ref.needed_for_next ? `
-                <div class="muted" style="font-size:12px;">
-                    До уровня <b>${escapeHtml(ref.next_tier_name)}</b> (${ref.next_rate_pct}%): ещё ${ref.needed_for_next} активных.
+                <div class="notice-box">
+                    <span>До уровня <b>${escapeHtml(ref.next_tier_name)}</b> (${ref.next_rate_pct}%): осталось ${ref.needed_for_next} активных</span>
                 </div>
             ` : ""}
             <div class="sub-url-box">${escapeHtml(ref.link || "")}</div>
-            <button id="copyRefBtn" type="button" class="btn btn-primary btn-sm">Копировать ссылку</button>
+            <div class="connect-pair">
+                <button id="shareRefBtn" type="button" class="btn btn-primary">${_ICONS.share} Пригласить</button>
+                <button id="copyRefBtn" type="button" class="btn">${_ICONS.copy} Копировать</button>
+            </div>
         </section>
     `;
 
+    body.querySelector("#shareRefBtn").addEventListener("click", () => openExternalLink(shareUrl));
     body.querySelector("#copyRefBtn").addEventListener("click", () => copyText(ref.link, "Ссылка скопирована"));
 }
 
@@ -686,7 +953,7 @@ function _renderHistoryTab(body, d) {
     `;
     const list = body.querySelector("#historyList");
     if (!items.length) {
-        list.innerHTML = `<div class="muted" style="text-align:center; padding:14px;">Операций пока нет</div>`;
+        list.innerHTML = `<div class="muted" style="text-align:center; padding:18px;">Операций пока нет</div>`;
         return;
     }
     items.forEach((op) => {

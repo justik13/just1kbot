@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from typing import TypeVar
+from uuid import uuid4
 
 from aiohttp import web
 from pydantic import BaseModel, ValidationError
@@ -12,6 +13,7 @@ from sqlalchemy import func, or_, select
 from bot.miniapp.auth import require_admin_user, require_authenticated_user
 from bot.miniapp.schemas import (
     AddNodePayload,
+    AdminUserAdjustPayload,
     DeployCertPayload,
     NodeLinksUpdatePayload,
     SetupPinPayload,
@@ -21,7 +23,12 @@ from bot.miniapp.schemas import (
 )
 from database.connection import session_scope
 from database.models import AccountLedgerEntry, User, WhiteInternetSubscription
-from database.repositories.account_ledger_repo import get_account_balance
+from database.repositories.account_ledger_repo import (
+    create_admin_adjustment,
+    get_account_balance,
+)
+from database.repositories.vless_subscription_repo import get_or_create_subscription
+from database.repositories.white_internet_repo import get_subscription_by_user_id
 from services import admin_nodes_service
 from services.admin_nodes_service import AdminNodeServiceError
 from services.miniapp_auth_service import (
@@ -33,6 +40,8 @@ from services.miniapp_auth_service import (
     verify_admin_2fa,
     verify_admin_session_token,
 )
+from services.subscription import SubscriptionService
+from services.white_internet_service import WhiteInternetService
 from utils.datetime_helpers import now_utc
 
 SchemaT = TypeVar("SchemaT", bound=BaseModel)
@@ -476,4 +485,136 @@ async def api_admin_users_handler(request: web.Request) -> web.Response:
                 "total_balance_rub": int(max(Decimal(0), total_balance_rub)),
             },
             "users": items,
+        })
+
+
+def _parse_user_id(request: web.Request) -> tuple[int | None, web.Response | None]:
+    raw_id = request.match_info.get("user_id", "")
+    if not raw_id.isdigit():
+        return None, web.json_response({"ok": False, "error": "Invalid user id"}, status=400)
+    user_id = int(raw_id)
+    if user_id < 1 or user_id > 2_147_483_647:
+        return None, web.json_response({"ok": False, "error": "Invalid user id"}, status=400)
+    return user_id, None
+
+
+async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
+    """Admin action: adjust user balance or grant/extend Standard or White Internet access."""
+    ctx, err_resp = require_admin_user(request)
+    if err_resp is not None:
+        return err_resp
+    if ctx is None:
+        return web.json_response({"ok": False, "error": "Unauthorized"}, status=401)
+
+    target_user_id, id_err = _parse_user_id(request)
+    if id_err is not None or target_user_id is None:
+        return id_err  # type: ignore[return-value]
+
+    payload, parse_err = await _parse_json_model(request, AdminUserAdjustPayload)
+    if parse_err is not None or payload is None:
+        return parse_err  # type: ignore[return-value]
+
+    note = (payload.note or "").strip()
+
+    async with session_scope() as session:
+        user = await session.get(User, target_user_id)
+        if user is None or getattr(user, "is_deleted", False):
+            return web.json_response({"ok": False, "error": "Пользователь не найден"}, status=404)
+
+        if payload.action == "balance":
+            assert payload.amount_rub is not None
+            if payload.amount_rub < 0:
+                bal_before = await get_account_balance(session, user_id=user.id)
+                if abs(payload.amount_rub) > bal_before.available:
+                    return web.json_response(
+                        {"ok": False, "error": "Недостаточно средств на балансе пользователя"},
+                        status=400,
+                    )
+            default_desc = "Бонусное пополнение (админ)" if payload.amount_rub > 0 else "Списание администратором"
+            await create_admin_adjustment(
+                session,
+                user_id=user.id,
+                signed_amount=payload.amount_rub,
+                idempotency_key=f"miniapp:admin:{ctx.telegram_id}:{user.id}:{uuid4().hex}",
+                metadata={
+                    "source": "miniapp_admin",
+                    "admin_telegram_id": ctx.telegram_id,
+                    "description": note or default_desc,
+                },
+            )
+            bal_after = await get_account_balance(session, user_id=user.id)
+            return web.json_response({
+                "ok": True,
+                "action": "balance",
+                "real_balance": int(bal_after.real_available),
+                "bonus_balance": int(bal_after.bonus_available),
+                "total_balance": int(bal_after.available),
+                "message": f"Баланс обновлён ({payload.amount_rub:+d} ₽)",
+            })
+
+        if payload.action == "grant_standard":
+            assert payload.days is not None
+            await get_or_create_subscription(session, user.id)
+            target_limit = payload.device_limit or (
+                user.device_limit if (user.device_limit or 0) >= 2 else 2
+            )
+            try:
+                updated_user = await SubscriptionService.extend_subscription(
+                    session,
+                    user.telegram_id,
+                    days=payload.days,
+                    new_device_limit=target_limit,
+                    admin_id=ctx.telegram_id,
+                    reason=note or "miniapp_admin_grant",
+                )
+            except ValueError as exc:
+                return web.json_response({"ok": False, "error": str(exc)}, status=400)
+            if updated_user is None:
+                return web.json_response({"ok": False, "error": "Пользователь не найден"}, status=404)
+            return web.json_response({
+                "ok": True,
+                "action": "grant_standard",
+                "standard_end": updated_user.subscription_end.isoformat() if updated_user.subscription_end else None,
+                "standard_device_limit": int(updated_user.device_limit or 0),
+                "message": f"Базовый доступ выдан/продлён на {payload.days} дн.",
+            })
+
+        # grant_wi
+        assert payload.days is not None
+        wi_sub = await get_subscription_by_user_id(session, user.id)
+        if wi_sub is None:
+            ok, msg, created = await WhiteInternetService.purchase_subscription(
+                session,
+                user.id,
+                debit_balance=False,
+                device_limit=payload.device_limit or 1,
+            )
+            if not ok:
+                return web.json_response({"ok": False, "error": msg}, status=400)
+            if payload.days > 30 and created is not None:
+                ok_ext, msg_ext, created_ext = await WhiteInternetService.extend_subscription(
+                    session, user.id, payload.days - 30
+                )
+                if not ok_ext:
+                    return web.json_response({"ok": False, "error": msg_ext}, status=400)
+                created = created_ext
+            end_iso = created.expires_at.isoformat() if created and created.expires_at else None
+            return web.json_response({
+                "ok": True,
+                "action": "grant_wi",
+                "wi_end": end_iso,
+                "message": "Опция «Повышенная устойчивость» активирована",
+            })
+
+        ok, msg, updated = await WhiteInternetService.extend_subscription(
+            session, user.id, payload.days
+        )
+        if not ok:
+            return web.json_response({"ok": False, "error": msg}, status=400)
+        end_iso = updated.expires_at.isoformat() if updated and updated.expires_at else None
+        return web.json_response({
+            "ok": True,
+            "action": "grant_wi",
+            "wi_end": end_iso,
+            "message": f"Повышенная устойчивость продлена на {payload.days} дн.",
         })

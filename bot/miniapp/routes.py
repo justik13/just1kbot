@@ -20,6 +20,7 @@ from bot.miniapp.handlers_admin import (
     api_admin_nodes_patch_handler,
     api_admin_nodes_refresh_handler,
     api_admin_nodes_toggle_handler,
+    api_admin_user_adjust_handler,
     api_admin_users_handler,
     api_me_handler,
 )
@@ -125,6 +126,7 @@ def setup_miniapp_routes(app: web.Application) -> None:
     app.router.add_put("/api/app/admin/nodes/{server_id}/links", api_admin_nodes_links_put_handler)
     app.router.add_post("/api/app/admin/nodes/{server_id}/certificate", api_admin_nodes_cert_post_handler)
     app.router.add_get("/api/app/admin/users", api_admin_users_handler)
+    app.router.add_post("/api/app/admin/users/{user_id}/adjust", api_admin_user_adjust_handler)
 
     # User cabinet APIs
     app.router.add_get("/api/app/user/dashboard", api_user_dashboard_handler)

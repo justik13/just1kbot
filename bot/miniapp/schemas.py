@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -198,4 +198,29 @@ class NodeLinksUpdatePayload(BaseModel):
             self.allowed_ru_ips = [_validate_ipv4(x) for x in self.allowed_ru_ips]
         if self.allowed_hub_ips is not None:
             self.allowed_hub_ips = [_validate_ipv4(x) for x in self.allowed_hub_ips]
+        return self
+
+
+class AdminUserAdjustPayload(BaseModel):
+    action: Literal["balance", "grant_standard", "grant_wi"]
+    amount_rub: int | None = Field(default=None, ge=-100000, le=100000)
+    days: int | None = Field(default=None, ge=1, le=3650)
+    device_limit: int | None = Field(default=None, ge=1, le=20)
+    note: str | None = Field(default=None, max_length=120)
+
+    @model_validator(mode="after")
+    def check_action_fields(self) -> "AdminUserAdjustPayload":
+        if self.action == "balance":
+            if self.amount_rub is None or self.amount_rub == 0:
+                raise ValueError("amount_rub must be non-zero for balance adjustment")
+        elif self.action == "grant_standard":
+            if self.days is None:
+                raise ValueError("days is required for grant_standard")
+            if self.device_limit is not None and not (2 <= self.device_limit <= 10):
+                raise ValueError("device_limit must be between 2 and 10 for standard")
+        elif self.action == "grant_wi":
+            if self.days is None:
+                raise ValueError("days is required for grant_wi")
+            if self.device_limit is not None and not (1 <= self.device_limit <= 5):
+                raise ValueError("device_limit must be between 1 and 5 for wi")
         return self
