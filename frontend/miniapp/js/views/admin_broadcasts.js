@@ -10,7 +10,7 @@ export function clearBroadcastPollTimer() {
     }
 }
 
-function _buildAudienceOptions(nodes, { includeTest = true } = {}) {
+function _buildAudienceOptions({ includeTest = true } = {}) {
     const base = [
         { value: "all", label: "Все пользователи" },
         { value: "active", label: "С активной подпиской" },
@@ -24,9 +24,6 @@ function _buildAudienceOptions(nodes, { includeTest = true } = {}) {
     if (includeTest) {
         base.push({ value: "test", label: "Тест (только мне)" });
     }
-    (nodes || []).forEach((n) => {
-        base.push({ value: `server_${n.id}`, label: `Узел: ${n.name} (#${n.id})` });
-    });
     return base
         .map((opt) => `<option value="${escapeHtml(opt.value)}">${escapeHtml(opt.label)}</option>`)
         .join("");
@@ -68,9 +65,8 @@ export function renderAdminBroadcastsView(root, state) {
     clearBroadcastPollTimer();
     const broadcasts = state.broadcastsData || [];
     const massTab = state.massTab || "bonus";
-    const nodes = state.nodes || [];
-    const audienceHtml = _buildAudienceOptions(nodes, { includeTest: true });
-    const massAudienceHtml = _buildAudienceOptions(nodes, { includeTest: false });
+    const audienceHtml = _buildAudienceOptions({ includeTest: true });
+    const massAudienceHtml = _buildAudienceOptions({ includeTest: false });
 
     root.innerHTML = `
         <section class="card">
@@ -200,7 +196,9 @@ export function renderAdminBroadcastsView(root, state) {
 
     root.querySelector("#broadcastForm").addEventListener("submit", async (e) => {
         e.preventDefault();
-        const audience = root.querySelector("#bcAudienceSelect").value;
+        const audienceSelect = root.querySelector("#bcAudienceSelect");
+        const audience = audienceSelect.value;
+        const audienceLabel = audienceSelect.selectedOptions[0]?.textContent || audience;
         const text = root.querySelector("#bcTextInput").value.trim();
         const mediaUrl = root.querySelector("#bcMediaInput").value.trim() || null;
         if (!text) {
@@ -233,7 +231,7 @@ export function renderAdminBroadcastsView(root, state) {
         }
         _confirmModal(
             "Подтвердите рассылку",
-            `Запустить рассылку на сегмент «${audience}»? Отменить можно в списке ниже.`,
+            `Запустить рассылку на сегмент «${audienceLabel}»? Отменить можно в списке ниже.`,
             runLaunch
         );
     });
@@ -247,7 +245,9 @@ export function renderAdminBroadcastsView(root, state) {
 
     root.querySelector("#massOpForm").addEventListener("submit", (e) => {
         e.preventDefault();
-        const audience = root.querySelector("#massAudienceSelect").value;
+        const massSelect = root.querySelector("#massAudienceSelect");
+        const audience = massSelect.value;
+        const audienceLabel = massSelect.selectedOptions[0]?.textContent || audience;
         const reason = root.querySelector("#massReasonInput").value.trim();
         const notifyUsers = root.querySelector("#massNotifyCheckbox").checked;
 
@@ -259,7 +259,7 @@ export function renderAdminBroadcastsView(root, state) {
             }
             _confirmModal(
                 "Массовое начисление бонуса",
-                `Начислить +${amount} ₽ сегменту «${audience}»? Действие необратимо.`,
+                `Начислить +${amount} ₽ сегменту «${audienceLabel}»? Действие необратимо.`,
                 async () => {
                     try {
                         const res = await api.massBonus({
@@ -284,7 +284,7 @@ export function renderAdminBroadcastsView(root, state) {
             const scopeLabel = scope === "white_internet" ? "Белый интернет" : "Стандарт";
             _confirmModal(
                 "Массовое продление подписки",
-                `Продлить «${scopeLabel}» на +${days} дн. для сегмента «${audience}»?`,
+                `Продлить «${scopeLabel}» на +${days} дн. для сегмента «${audienceLabel}»?`,
                 async () => {
                     try {
                         const res = await api.massExtend({

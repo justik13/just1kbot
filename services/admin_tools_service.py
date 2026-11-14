@@ -8,24 +8,24 @@ from decimal import Decimal
 import html
 import logging
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
-from sqlalchemy import desc, func, or_, select, update
+from sqlalchemy import String, cast, desc, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.keyboards.notifications import get_dismiss_notification_keyboard
-from config.enums import AdminAuditAction, OrderStatus, PaymentProviderStatus
+from config.enums import AdminAuditAction, OrderServiceType, OrderStatus
 from database.connection import session_scope
 from database.models import (
     AuditLog,
     Order,
-    Payment,
     User,
     WhiteInternetSubscription,
 )
 from database.repositories.account_ledger_repo import create_admin_adjustment
+from database.repositories.vless_subscription_repo import get_or_create_subscription
 from services.audit_service import AuditService
 from services.broadcast_service import get_audience_targets
 from services.subscription import SubscriptionService
@@ -281,14 +281,19 @@ async def _run_mass_extend_worker(
                     )
                     did_extend = bool(ok)
                 else:
-                    updated = await SubscriptionService.extend_subscription(
-                        session,
-                        tg_id,
-                        days=days,
-                        admin_id=admin_id,
-                        reason=reason or f"mass_extend:{batch_id}",
-                    )
-                    did_extend = updated is not None
+                    user_row = await session.get(User, uid)
+                    if user_row is not None and not user_row.is_deleted:
+                        await get_or_create_subscription(session, uid)
+                        target_limit = None if (user_row.device_limit or 0) >= 2 else 2
+                        updated = await SubscriptionService.extend_subscription(
+                            session,
+                            tg_id,
+                            days=days,
+                            new_device_limit=target_limit,
+                            admin_id=admin_id,
+                            reason=reason or f"mass_extend:{batch_id}",
+                        )
+                        did_extend = updated is not None
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -423,21 +428,15 @@ async def start_mass_extend(
 
 
 async def _revenue_for_period(session: AsyncSession, since: Any) -> Decimal:
-    # Exclude balance-settled orders from cashflow totals to avoid double-counting topups.
+    # Exclude internal wallet spends to avoid double-counting topups.
     external_orders_sum = await session.scalar(
         select(func.coalesce(func.sum(Order.amount_rub), 0)).where(
             Order.status == OrderStatus.PAID,
-            Order.payment_method != "balance",
+            Order.payment_method != "wallet",
             Order.created_at >= since,
         )
     )
-    legacy_topups_sum = await session.scalar(
-        select(func.coalesce(func.sum(Payment.amount), 0)).where(
-            Payment.provider_status == PaymentProviderStatus.SUCCEEDED,
-            Payment.created_at >= since,
-        )
-    )
-    return Decimal(str(external_orders_sum or 0)) + Decimal(str(legacy_topups_sum or 0))
+    return Decimal(str(external_orders_sum or 0))
 
 
 async def list_finances(
@@ -468,85 +467,63 @@ async def list_finances(
     safe_limit = max(1, min(int(limit), 100))
     safe_offset = max(0, int(offset))
 
-    items: list[dict[str, Any]] = []
-    total = 0
+    stmt = select(Order, User).join(User, User.id == Order.user_id)
+    count_stmt = select(func.count(Order.id)).join(User, User.id == Order.user_id)
+    if kind == "topups":
+        stmt = stmt.where(Order.service_type == OrderServiceType.TOPUP)
+        count_stmt = count_stmt.where(Order.service_type == OrderServiceType.TOPUP)
+    elif kind == "subscriptions":
+        sub_types = [OrderServiceType.STANDARD, OrderServiceType.WHITE_INTERNET]
+        stmt = stmt.where(Order.service_type.in_(sub_types))
+        count_stmt = count_stmt.where(Order.service_type.in_(sub_types))
 
-    if kind == "payments":
-        stmt = select(Payment, User).join(User, User.id == Payment.user_id)
-        count_stmt = select(func.count(Payment.id)).join(User, User.id == Payment.user_id)
-        if clean_status:
-            stmt = stmt.where(Payment.provider_status == clean_status)
-            count_stmt = count_stmt.where(Payment.provider_status == clean_status)
-        if clean_q:
-            conds = [Payment.public_order_id.ilike(f"%{clean_q}%"), User.username.ilike(f"%{clean_q}%")]
-            if clean_q.isdigit():
-                num = int(clean_q)
-                conds.extend([Payment.id == num, Payment.user_id == num, User.telegram_id == num])
-            stmt = stmt.where(or_(*conds))
-            count_stmt = count_stmt.where(or_(*conds))
+    if clean_status:
+        stmt = stmt.where(Order.status == clean_status)
+        count_stmt = count_stmt.where(Order.status == clean_status)
+    if clean_q:
+        conds = [
+            cast(Order.id, String).ilike(f"%{clean_q}%"),
+            Order.external_id.ilike(f"%{clean_q}%"),
+            Order.description.ilike(f"%{clean_q}%"),
+            User.username.ilike(f"%{clean_q}%"),
+        ]
+        try:
+            conds.append(Order.id == UUID(clean_q))
+        except ValueError:
+            pass
+        if clean_q.isdigit():
+            num = int(clean_q)
+            conds.extend([Order.user_id == num, User.telegram_id == num])
+        stmt = stmt.where(or_(*conds))
+        count_stmt = count_stmt.where(or_(*conds))
 
-        total = int((await session.scalar(count_stmt)) or 0)
-        rows = (
-            await session.execute(
-                stmt.order_by(desc(Payment.id)).offset(safe_offset).limit(safe_limit)
-            )
-        ).all()
-        for pay, usr in rows:
-            items.append({
-                "kind": "payment",
-                "id": pay.id,
-                "user_id": pay.user_id,
-                "telegram_id": usr.telegram_id,
-                "username": usr.username or "",
-                "amount_rub": float(pay.amount),
-                "status": pay.provider_status,
-                "fulfillment_status": pay.fulfillment_status,
-                "service_type": "topup",
-                "payment_method": "yookassa",
-                "reference": pay.public_order_id,
-                "created_at": pay.created_at.isoformat() if pay.created_at else None,
-            })
-    else:
-        stmt = select(Order, User).join(User, User.id == Order.user_id)
-        count_stmt = select(func.count(Order.id)).join(User, User.id == Order.user_id)
-        if clean_status:
-            stmt = stmt.where(Order.status == clean_status)
-            count_stmt = count_stmt.where(Order.status == clean_status)
-        if clean_q:
-            conds = [
-                Order.external_id.ilike(f"%{clean_q}%"),
-                Order.description.ilike(f"%{clean_q}%"),
-                User.username.ilike(f"%{clean_q}%"),
-            ]
-            if clean_q.isdigit():
-                num = int(clean_q)
-                conds.extend([Order.id == num, Order.user_id == num, User.telegram_id == num])
-            stmt = stmt.where(or_(*conds))
-            count_stmt = count_stmt.where(or_(*conds))
-
-        total = int((await session.scalar(count_stmt)) or 0)
-        rows = (
-            await session.execute(
-                stmt.order_by(desc(Order.id)).offset(safe_offset).limit(safe_limit)
-            )
-        ).all()
-        for order, usr in rows:
-            items.append({
-                "kind": "order",
-                "id": order.id,
-                "user_id": order.user_id,
-                "telegram_id": usr.telegram_id,
-                "username": usr.username or "",
-                "amount_rub": float(order.amount_rub),
-                "status": order.status,
-                "service_type": order.service_type,
-                "duration_days": order.duration_days,
-                "device_limit": order.device_limit,
-                "payment_method": order.payment_method,
-                "reference": order.external_id or order.description or "",
-                "created_at": order.created_at.isoformat() if order.created_at else None,
-                "paid_at": order.paid_at.isoformat() if order.paid_at else None,
-            })
+    total = int((await session.scalar(count_stmt)) or 0)
+    rows = (
+        await session.execute(
+            stmt.order_by(desc(Order.created_at), desc(Order.id))
+            .offset(safe_offset)
+            .limit(safe_limit)
+        )
+    ).all()
+    items = [
+        {
+            "kind": "order",
+            "id": str(order.id),
+            "user_id": order.user_id,
+            "telegram_id": usr.telegram_id,
+            "username": usr.username or "",
+            "amount_rub": float(order.amount_rub),
+            "status": order.status,
+            "service_type": order.service_type,
+            "duration_days": order.duration_days,
+            "device_limit": order.device_limit,
+            "payment_method": order.payment_method,
+            "reference": order.external_id or order.description or "",
+            "created_at": order.created_at.isoformat() if order.created_at else None,
+            "paid_at": order.paid_at.isoformat() if order.paid_at else None,
+        }
+        for order, usr in rows
+    ]
 
     return {
         "summary": {

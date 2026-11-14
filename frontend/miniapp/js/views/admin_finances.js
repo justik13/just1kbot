@@ -2,16 +2,32 @@ import { api } from "../api.js";
 import { escapeHtml, formatDate, showToast } from "../ui.js";
 
 function _financeStatusChip(status) {
-    if (status === "paid" || status === "succeeded") {
-        return `<span class="chip chip-ok">${escapeHtml(status)}</span>`;
+    if (status === "paid") {
+        return `<span class="chip chip-ok">Оплачен</span>`;
     }
-    if (status === "pending" || status === "creating" || status === "waiting_for_capture") {
-        return `<span class="chip chip-info">${escapeHtml(status)}</span>`;
+    if (status === "pending") {
+        return `<span class="chip chip-info">Ожидает</span>`;
     }
     if (status === "refunded") {
-        return `<span class="chip chip-warn">${escapeHtml(status)}</span>`;
+        return `<span class="chip chip-warn">Возврат</span>`;
+    }
+    if (status === "canceled") {
+        return `<span class="chip chip-muted">Отменён</span>`;
     }
     return `<span class="chip chip-muted">${escapeHtml(status)}</span>`;
+}
+
+function _formatServiceType(serviceType) {
+    if (serviceType === "standard") return "Стандарт";
+    if (serviceType === "white_internet") return "Белый интернет";
+    if (serviceType === "topup") return "Пополнение";
+    return serviceType || "";
+}
+
+function _formatPaymentMethod(method) {
+    if (method === "yookassa") return "ЮKassa";
+    if (method === "wallet") return "Баланс";
+    return method || "";
 }
 
 export function renderAdminFinancesView(root, state) {
@@ -37,9 +53,10 @@ export function renderAdminFinancesView(root, state) {
         <section class="card">
             <div class="row">
                 <div class="seg-group">
-                    <button type="button" class="seg-btn ${subTab === "orders" ? "active" : ""}" data-fintab="orders">Заказы</button>
-                    <button type="button" class="seg-btn ${subTab === "payments" ? "active" : ""}" data-fintab="payments">Пополнения</button>
-                    <button type="button" class="seg-btn ${subTab === "audit" ? "active" : ""}" data-fintab="audit">Аудит-лог</button>
+                    <button type="button" class="seg-btn ${subTab === "orders" ? "active" : ""}" data-fintab="orders">Все</button>
+                    <button type="button" class="seg-btn ${subTab === "subscriptions" ? "active" : ""}" data-fintab="subscriptions">Подписки</button>
+                    <button type="button" class="seg-btn ${subTab === "topups" ? "active" : ""}" data-fintab="topups">Пополнения</button>
+                    <button type="button" class="seg-btn ${subTab === "audit" ? "active" : ""}" data-fintab="audit">Аудит</button>
                 </div>
             </div>
 
@@ -73,24 +90,13 @@ export function renderAdminFinancesView(root, state) {
                 <form id="finFilterForm" class="row" style="flex-wrap:nowrap;">
                     <input id="finQueryInput" class="input" type="search" value="${escapeHtml(
                         state.finQuery || ""
-                    )}" placeholder="Telegram ID, @username, № заказа">
+                    )}" placeholder="Telegram ID, @username, ID заказа">
                     <select id="finStatusSelect" class="select" style="max-width:130px;">
                         <option value="">Все статусы</option>
-                        ${
-                            subTab === "orders"
-                                ? `
-                            <option value="paid" ${state.finStatus === "paid" ? "selected" : ""}>paid</option>
-                            <option value="pending" ${state.finStatus === "pending" ? "selected" : ""}>pending</option>
-                            <option value="canceled" ${state.finStatus === "canceled" ? "selected" : ""}>canceled</option>
-                            <option value="refunded" ${state.finStatus === "refunded" ? "selected" : ""}>refunded</option>
-                        `
-                                : `
-                            <option value="succeeded" ${state.finStatus === "succeeded" ? "selected" : ""}>succeeded</option>
-                            <option value="pending" ${state.finStatus === "pending" ? "selected" : ""}>pending</option>
-                            <option value="canceled" ${state.finStatus === "canceled" ? "selected" : ""}>canceled</option>
-                            <option value="refunded" ${state.finStatus === "refunded" ? "selected" : ""}>refunded</option>
-                        `
-                        }
+                        <option value="paid" ${state.finStatus === "paid" ? "selected" : ""}>Оплачен</option>
+                        <option value="pending" ${state.finStatus === "pending" ? "selected" : ""}>Ожидает</option>
+                        <option value="canceled" ${state.finStatus === "canceled" ? "selected" : ""}>Отменён</option>
+                        <option value="refunded" ${state.finStatus === "refunded" ? "selected" : ""}>Возврат</option>
                     </select>
                     <button type="submit" class="btn btn-primary btn-sm">Найти</button>
                 </form>
@@ -103,7 +109,9 @@ export function renderAdminFinancesView(root, state) {
 
     const loadFinances = async (offset = 0) => {
         try {
-            const kind = state.finSubTab === "payments" ? "payments" : "orders";
+            const kind = ["orders", "subscriptions", "topups"].includes(state.finSubTab)
+                ? state.finSubTab
+                : "orders";
             state.financesData = await api.listFinances(
                 kind,
                 state.finStatus || "",
@@ -181,13 +189,15 @@ function _renderFinanceRows(container, items) {
         const row = document.createElement("div");
         row.className = "item-row";
         const uname = item.username ? `@${item.username}` : `TG ${item.telegram_id}`;
-        const metaParts = [item.service_type, item.payment_method];
+        const shortId = String(item.id || "").slice(0, 8);
+        const metaParts = [_formatServiceType(item.service_type), _formatPaymentMethod(item.payment_method)];
         if (item.duration_days) metaParts.push(`${item.duration_days} дн.`);
         if (item.device_limit) metaParts.push(`${item.device_limit} устр.`);
         row.innerHTML = `
             <div class="row">
                 <div>
-                    <span style="font-weight:600;">#${item.id} · ${escapeHtml(uname)}</span>
+                    <span class="mono" style="font-weight:600;">#${escapeHtml(shortId)}</span>
+                    <span style="font-weight:600;"> · ${escapeHtml(uname)}</span>
                     <span class="mono muted" style="margin-left:6px;">${item.telegram_id}</span>
                 </div>
                 <span class="tabular" style="font-weight:600;">${item.amount_rub} ₽</span>

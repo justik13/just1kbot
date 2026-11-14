@@ -13,13 +13,13 @@ from aiogram.exceptions import (
     TelegramForbiddenError,
     TelegramRetryAfter,
 )
-from sqlalchemy import desc, func, or_, select, update
+from sqlalchemy import desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.keyboards.notifications import get_dismiss_notification_keyboard
-from config.enums import AdminAuditAction, WhiteInternetProvisioningStatus, WhiteInternetStatus
+from config.enums import AdminAuditAction
 from database.connection import session_scope
-from database.models import BroadcastProgress, Server, User, WhiteInternetSubscription
+from database.models import BroadcastProgress, User
 from database.repositories.users_repo import (
     get_effective_active_condition,
     get_effective_expired_condition,
@@ -59,24 +59,10 @@ def _is_parse_error(exc: Exception) -> bool:
     return "can't parse" in err or "parse entities" in err or "parse error" in err
 
 
-def _parse_server_audience(target_audience: str) -> int | None:
-    if not target_audience.startswith("server_"):
-        return None
-    raw_id = target_audience.removeprefix("server_").strip()
-    if not raw_id.isdigit():
-        return None
-    val = int(raw_id)
-    return val if val > 0 else None
-
-
 async def resolve_audience_label(session: AsyncSession, target_audience: str) -> str:
     """Return human-readable label for a broadcast audience code."""
     if target_audience in AUDIENCE_LABELS:
         return AUDIENCE_LABELS[target_audience]
-    server_id = _parse_server_audience(target_audience)
-    if server_id is not None:
-        srv_name = await session.scalar(select(Server.name).where(Server.id == server_id))
-        return f"Узел: {srv_name}" if srv_name else f"Узел #{server_id}"
     return target_audience[:50]
 
 
@@ -117,30 +103,6 @@ async def apply_audience_filter(
         if admin_id is None:
             return stmt.where(User.id < 0)
         return stmt.where(User.telegram_id == admin_id)
-
-    server_id = _parse_server_audience(target_audience)
-    if server_id is not None:
-        server = await session.get(Server, server_id)
-        if server is None:
-            return stmt.where(User.id < 0)
-        caps = set(server.capabilities or [])
-        wi_on_server = User.id.in_(
-            select(WhiteInternetSubscription.user_id).where(
-                WhiteInternetSubscription.origin_node_id == server_id,
-                WhiteInternetSubscription.status.in_([
-                    WhiteInternetStatus.ACTIVE,
-                    WhiteInternetStatus.PENDING,
-                    WhiteInternetStatus.EXHAUSTED,
-                ]),
-                WhiteInternetSubscription.expires_at > now,
-                WhiteInternetSubscription.provisioning_status
-                != WhiteInternetProvisioningStatus.PENDING_DELETE,
-            )
-        )
-        if "xray_origin" in caps and server.protocol == "xray":
-            return stmt.where(wi_on_server)
-        # Standard subscriptions are synced across all active standard servers.
-        return stmt.where(or_(User.subscription_end > now, wi_on_server))
 
     raise ValueError(f"Неизвестная аудитория рассылки: {target_audience}")
 

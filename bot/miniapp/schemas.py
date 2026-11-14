@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ipaddress
-import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -213,7 +212,7 @@ _ALLOWED_BROADCAST_AUDIENCES = frozenset({
 
 def _validate_audience(value: str) -> str:
     clean = value.strip()
-    if clean in _ALLOWED_BROADCAST_AUDIENCES or re.fullmatch(r"server_\d+", clean):
+    if clean in _ALLOWED_BROADCAST_AUDIENCES:
         return clean
     raise ValueError("Недопустимая аудитория")
 
