@@ -156,6 +156,10 @@ export const api = {
             method: "POST",
             body: JSON.stringify({ amount_rub: amountRub }),
         }),
+    checkOrderStatus: (orderId) =>
+        requestJson(`/api/app/user/orders/${encodeURIComponent(orderId)}/check`, {
+            method: "POST",
+        }),
     setAutoRenew: (scope, enabled) =>
         requestJson("/api/app/user/auto-renew", {
             method: "POST",

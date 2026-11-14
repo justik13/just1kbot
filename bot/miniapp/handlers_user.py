@@ -8,6 +8,7 @@ import logging
 import math
 from typing import Any, TypeVar
 from urllib.parse import unquote
+import uuid
 
 from aiohttp import web
 from pydantic import BaseModel, ValidationError
@@ -36,7 +37,7 @@ from config.constants import (
 )
 from config.settings import get_settings
 from database.connection import session_scope
-from database.models import User
+from database.models import Order, User
 from database.repositories.account_ledger_repo import (
     get_account_balance,
     get_account_history,
@@ -44,6 +45,7 @@ from database.repositories.account_ledger_repo import (
 from database.repositories.users_repo import create_user, get_user_by_telegram_id
 from database.repositories.vless_subscription_repo import get_or_create_subscription
 from database.repositories.white_internet_repo import get_subscription_by_user_id
+from integrations.payment_gateways.factory import get_payment_gateway
 from services import order_service, white_internet_service
 from services.referral_bonus import get_referral_tier
 from utils.datetime_helpers import now_utc
@@ -378,6 +380,9 @@ async def api_user_standard_checkout_handler(request: web.Request) -> web.Respon
                 bot_username=_resolve_bot_username(request),
             )
             return web.json_response({"ok": True, **res})
+    except order_service.ServiceUnavailableError as exc:
+        logger.warning("Standard checkout unavailable for %s: %s", ctx.telegram_id, exc)
+        return web.json_response({"ok": False, "error": str(exc)}, status=503)
     except Exception as exc:
         logger.warning("Standard checkout error for %s: %s", ctx.telegram_id, exc)
         return web.json_response({"ok": False, "error": str(exc)}, status=400)
@@ -443,6 +448,9 @@ async def api_user_wi_checkout_handler(request: web.Request) -> web.Response:
                 bot_username=_resolve_bot_username(request),
             )
             return web.json_response({"ok": True, **res})
+    except order_service.ServiceUnavailableError as exc:
+        logger.warning("WI checkout unavailable for %s: %s", ctx.telegram_id, exc)
+        return web.json_response({"ok": False, "error": str(exc)}, status=503)
     except Exception as exc:
         logger.warning("WI checkout error for %s: %s", ctx.telegram_id, exc)
         return web.json_response({"ok": False, "error": str(exc)}, status=400)
@@ -527,6 +535,94 @@ async def api_user_topup_handler(request: web.Request) -> web.Response:
     except Exception as exc:
         logger.warning("Topup error for %s: %s", ctx.telegram_id, exc)
         return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+
+async def api_user_order_check_handler(request: web.Request) -> web.Response:
+    """Check pending external payment status and settle immediately if paid."""
+    ctx, err_resp = require_authenticated_user(request)
+    if err_resp is not None or ctx is None:
+        return err_resp  # type: ignore[return-value]
+
+    raw_order_id = unquote(request.match_info.get("order_id", "")).strip()
+    try:
+        order_uuid = uuid.UUID(raw_order_id)
+    except ValueError:
+        return web.json_response({"ok": False, "error": "Некорректный идентификатор заказа"}, status=400)
+
+    async with session_scope() as session:
+        user = await _ensure_user(session, ctx)
+        order = await session.scalar(
+            select(Order).where(Order.id == order_uuid, Order.user_id == user.id)
+        )
+        if order is None:
+            return web.json_response({"ok": False, "error": "Заказ не найден"}, status=404)
+        if order.status != "pending" or not order.external_id:
+            return web.json_response({
+                "ok": True,
+                "order_id": str(order.id),
+                "status": order.status,
+                "service_type": order.service_type,
+            })
+        user_id = user.id
+        external_id = order.external_id
+        payment_method = order.payment_method
+        service_type = order.service_type
+
+    try:
+        gateway = get_payment_gateway(payment_method)
+        status_res = await gateway.check_payment_status(external_id)
+    except Exception as exc:
+        logger.warning("Mini App order %s gateway check error: %s", order_uuid, exc)
+        return web.json_response({
+            "ok": True,
+            "order_id": str(order_uuid),
+            "status": "pending",
+            "service_type": service_type,
+        })
+
+    if not (status_res.is_paid or status_res.is_canceled):
+        return web.json_response({
+            "ok": True,
+            "order_id": str(order_uuid),
+            "status": "pending",
+            "service_type": service_type,
+        })
+
+    try:
+        async with session_scope() as session:
+            locked = await session.scalar(
+                select(Order)
+                .where(Order.id == order_uuid, Order.user_id == user_id)
+                .with_for_update()
+            )
+            if locked is None:
+                return web.json_response({"ok": False, "error": "Заказ не найден"}, status=404)
+            if locked.status == "pending":
+                if status_res.is_paid:
+                    paid = await order_service.OrderService.mark_order_paid(
+                        session,
+                        locked.id,
+                        external_id=external_id,
+                        paid_amount_rub=status_res.amount_rub,
+                    )
+                    final_status = paid.status if paid else locked.status
+                else:
+                    order_service.OrderService.mark_order_canceled(
+                        locked,
+                        reason=status_res.cancellation_reason or "gateway_canceled",
+                    )
+                    final_status = locked.status
+            else:
+                final_status = locked.status
+            return web.json_response({
+                "ok": True,
+                "order_id": str(locked.id),
+                "status": final_status,
+                "service_type": locked.service_type,
+            })
+    except Exception as exc:
+        logger.warning("Mini App order %s check fulfillment error: %s", order_uuid, exc)
+        return web.json_response({"ok": False, "error": str(exc)}, status=500)
 
 
 async def api_user_auto_renew_handler(request: web.Request) -> web.Response:

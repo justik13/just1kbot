@@ -36,6 +36,7 @@ from database.repositories.account_ledger_repo import (
     create_order_refund_debit,
     get_account_balance,
 )
+from database.repositories.servers_repo import has_available_service_capacity
 from database.repositories.white_internet_repo import get_subscription_by_user_id as get_wi_sub_by_user_id
 from integrations.payment_gateways.base import PaymentCreationAmbiguousError
 from integrations.payment_gateways.factory import get_payment_gateway
@@ -62,6 +63,10 @@ class AccountDebtBlockedError(Exception):
 
 
 class FinancialHoldBlockedError(Exception):
+    pass
+
+
+class ServiceUnavailableError(Exception):
     pass
 
 
@@ -857,6 +862,7 @@ class OrderService:
         final_duration = 0
         final_devices = device_limit
         description = texts.CHECKOUT_DESCRIPTION_DEFAULT
+        checked_origin_id: int | None = None
 
         if service_type == "topup":
             if amount_rub is None:
@@ -887,6 +893,7 @@ class OrderService:
                 description = f"Доступ на {d_days} дн. ({d_limit} устр.)"
         elif service_type == "white_internet":
             wi_sub = await get_wi_sub_by_user_id(session, user_id)
+            checked_origin_id = getattr(wi_sub, "origin_node_id", None) if wi_sub else None
             op = operation or ("renew" if wi_sub else "purchase")
             order_meta["operation"] = op
             if op == "add_device_slot":
@@ -916,6 +923,18 @@ class OrderService:
                 description = f"Доп. опция высокой устойчивости ({d_limit} устр., 30 дн.)"
         else:
             raise ValueError(f"Unsupported service_type: {service_type}")
+
+        if service_type in ("standard", "white_internet"):
+            has_capacity = await has_available_service_capacity(
+                session,
+                service_type,
+                origin_node_id=checked_origin_id,
+            )
+            if not has_capacity:
+                raise ServiceUnavailableError(
+                    "Идут технические работы, сейчас оформление недоступно. "
+                    "Попробуйте позже или напишите в поддержку."
+                )
 
         bal = await get_account_balance(session, user_id=user_id, for_update=True, locked_user=user)
         if use_balance and bal.debt > 0:

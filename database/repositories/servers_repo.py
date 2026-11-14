@@ -271,6 +271,62 @@ async def get_origin_server_subscription_counts(session: AsyncSession) -> dict[i
     return {row[0]: row[1] for row in wl_result.all()}
 
 
+def _is_origin_server_eligible(server: Server | None) -> bool:
+    """Whether a Server row meets all hard prerequisites to host White Internet."""
+    if server is None:
+        return False
+    if (
+        not server.is_active
+        or server.health_state != ServerHealthState.ONLINE
+        or server.lifecycle_status != ServerLifecycleStatus.ACTIVE
+        or not (server.api_url and server.api_url.strip())
+        or not (server.api_key and server.api_key.strip())
+        or XRAY_ORIGIN_CAPABILITY not in (server.capabilities or [])
+    ):
+        return False
+    relays = (server.extra_data or {}).get("relays", [])
+    return bool(relays and len(relays) > 0)
+
+
+async def has_available_service_capacity(
+    session: AsyncSession,
+    service_type: str,
+    *,
+    origin_node_id: int | None = None,
+) -> bool:
+    """Fast read-only check before order creation that at least one usable node exists."""
+    if service_type == "standard":
+        active_servers = await get_active_servers(session)
+        return any(
+            is_vless_capable_server(srv)
+            and srv.health_state in (ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION)
+            for srv in active_servers
+        )
+
+    if service_type == "white_internet":
+        if origin_node_id is not None:
+            current_origin = await session.get(Server, origin_node_id)
+            if _is_origin_server_eligible(current_origin):
+                return True
+        candidates = (
+            await session.scalars(
+                select(Server)
+                .where(
+                    Server.protocol == XRAY_PROTOCOL,
+                    Server.is_active.is_(True),
+                    Server.health_state == ServerHealthState.ONLINE,
+                    Server.lifecycle_status == ServerLifecycleStatus.ACTIVE,
+                    Server.api_url.is_not(None),
+                    Server.api_key.is_not(None),
+                )
+                .order_by(Server.id.asc())
+            )
+        ).all()
+        return any(_is_origin_server_eligible(srv) for srv in candidates)
+
+    return True
+
+
 async def allocate_origin_server_atomic(session: AsyncSession) -> Server | None:
     """
     Atomically selects and locks an available Xray origin server with spare capacity.
@@ -278,7 +334,7 @@ async def allocate_origin_server_atomic(session: AsyncSession) -> Server | None:
     1. Select candidate server IDs that are active, online, and lifecycle ACTIVE.
     2. Sequentially acquire row locks (SELECT ... FOR UPDATE) on candidates.
     3. Re-verify is_active, health_state == ONLINE, lifecycle_status == ACTIVE,
-       valid api_url / api_key, and 'xray_origin' in capabilities.
+       valid api_url / api_key, 'xray_origin' in capabilities, and relays.
     4. Return the locked Server instance.
     5. Return None if no eligible origin server is found.
     """
@@ -304,23 +360,8 @@ async def allocate_origin_server_atomic(session: AsyncSession) -> Server | None:
             .with_for_update()
             .execution_options(populate_existing=True)
         )
-        if server is None:
-            continue
-        if (
-            not server.is_active
-            or server.health_state != ServerHealthState.ONLINE
-            or server.lifecycle_status != ServerLifecycleStatus.ACTIVE
-            or not (server.api_url and server.api_url.strip())
-            or not (server.api_key and server.api_key.strip())
-            or "xray_origin" not in (server.capabilities or [])
-        ):
-            continue
-
-        relays = (server.extra_data or {}).get("relays", [])
-        if not relays or len(relays) == 0:
-            continue
-
-        return server
+        if _is_origin_server_eligible(server):
+            return server
 
     return None
 

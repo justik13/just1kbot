@@ -29,6 +29,7 @@ from bot.miniapp.handlers_user import (
     api_user_dashboard_handler,
     api_user_device_delete_handler,
     api_user_device_priority_handler,
+    api_user_order_check_handler,
     api_user_standard_checkout_handler,
     api_user_standard_downgrade_handler,
     api_user_standard_quote_handler,
@@ -137,6 +138,7 @@ def setup_miniapp_routes(app: web.Application) -> None:
     app.router.add_post("/api/app/user/wi/downgrade", api_user_wi_downgrade_handler)
     app.router.add_delete("/api/app/user/wi/downgrade", api_user_wi_downgrade_cancel_handler)
     app.router.add_post("/api/app/user/topup", api_user_topup_handler)
+    app.router.add_post("/api/app/user/orders/{order_id}/check", api_user_order_check_handler)
     app.router.add_post("/api/app/user/auto-renew", api_user_auto_renew_handler)
     app.router.add_delete("/api/app/user/devices/{hwid}", api_user_device_delete_handler)
     app.router.add_post("/api/app/user/devices/{hwid}/priority", api_user_device_priority_handler)

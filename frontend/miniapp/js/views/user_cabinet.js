@@ -75,13 +75,114 @@ function _calcBalanceSplit(priceRub, bal, useBalance) {
 }
 
 function _handlePaymentResponse(res, successMsg, onReload) {
-    if (res && res.confirmation_url) {
-        showToast("Открываем страницу оплаты...");
-        openExternalLink(res.confirmation_url);
+    if (!res || !res.confirmation_url) {
+        showToast(successMsg);
+        onReload();
         return;
     }
-    showToast(successMsg);
-    onReload();
+
+    openExternalLink(res.confirmation_url);
+    if (!res.order_id) {
+        showToast("Открываем страницу оплаты...");
+        return;
+    }
+
+    const wrap = document.createElement("div");
+    wrap.className = "field";
+    wrap.style.gap = "12px";
+    wrap.innerHTML = `
+        <div class="hint" id="modalPayHint">
+            Страница оплаты открыта. После завершения платежа статус обновится автоматически — или нажмите «Проверить оплату».
+        </div>
+        <button id="modalPayCheckBtn" type="button" class="btn btn-primary btn-lg">Проверить оплату</button>
+        <button id="modalPayReopenBtn" type="button" class="btn btn-secondary">Открыть оплату снова</button>
+    `;
+
+    const close = openModal("Ожидание оплаты", wrap);
+    const hintEl = wrap.querySelector("#modalPayHint");
+    const checkBtn = wrap.querySelector("#modalPayCheckBtn");
+    const reopenBtn = wrap.querySelector("#modalPayReopenBtn");
+
+    let stopped = false;
+    let inFlight = false;
+    let pollCount = 0;
+
+    const cleanup = () => {
+        if (stopped) return;
+        stopped = true;
+        clearInterval(timerId);
+        document.removeEventListener("visibilitychange", onVisible);
+        window.removeEventListener("focus", onFocus);
+    };
+
+    const checkNow = async (manual = false) => {
+        if (stopped) return;
+        if (!wrap.isConnected) {
+            cleanup();
+            return;
+        }
+        if (inFlight) return;
+        inFlight = true;
+        checkBtn.disabled = true;
+        if (manual) checkBtn.textContent = "Проверяем...";
+        try {
+            const st = await api.checkOrderStatus(res.order_id);
+            if (!wrap.isConnected || stopped) {
+                cleanup();
+                return;
+            }
+            if (st.status === "paid") {
+                cleanup();
+                close();
+                if (st.service_type && st.service_type !== "topup") {
+                    _state.tab = "connect";
+                }
+                showToast(successMsg);
+                onReload();
+                return;
+            }
+            if (st.status === "canceled") {
+                cleanup();
+                hintEl.textContent = "Платёж отменён или истёк. Попробуйте оформить заказ заново.";
+                checkBtn.disabled = true;
+                checkBtn.textContent = "Платёж отменён";
+                return;
+            }
+            if (manual) {
+                hintEl.textContent = "Платёж ещё обрабатывается банком. Попробуйте через пару секунд.";
+            }
+        } catch (err) {
+            hintEl.textContent = err.message || "Не удалось проверить оплату";
+        } finally {
+            inFlight = false;
+            if (!stopped) {
+                checkBtn.disabled = false;
+                checkBtn.textContent = "Проверить оплату";
+            }
+        }
+    };
+
+    const onVisible = () => {
+        if (document.visibilityState === "visible") {
+            checkNow(false);
+        }
+    };
+    const onFocus = () => checkNow(false);
+
+    const timerId = setInterval(() => {
+        pollCount += 1;
+        if (pollCount > 60 || !wrap.isConnected) {
+            cleanup();
+            return;
+        }
+        checkNow(false);
+    }, 5000);
+
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onFocus);
+
+    checkBtn.addEventListener("click", () => checkNow(true));
+    reopenBtn.addEventListener("click", () => openExternalLink(res.confirmation_url));
 }
 
 function _openTopupModal(minTopup, onReload) {
