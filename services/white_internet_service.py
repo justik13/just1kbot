@@ -23,7 +23,6 @@ from config.constants import (
     WHITE_INTERNET_BASE_PRICE_RUB,
     WHITE_INTERNET_BASE_TRAFFIC_BYTES,
     WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB,
-    WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES,
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
     WHITE_INTERNET_MAX_EXPIRY_DAYS,
     WHITE_INTERNET_MAX_QUOTA_BYTES,
@@ -283,18 +282,29 @@ class WhiteInternetService:
         return order, None
 
     @staticmethod
-    def calculate_wi_add_slot_price(
+    def calculate_wi_add_slot_quote(
         expires_at: datetime | None, now: datetime | None = None
-    ) -> Decimal:
-        """Calculate mid-term device slot add-on price: 50 + round(50 * days_left / 30) * 4."""
+    ) -> tuple[Decimal, int]:
+        """Calculate mid-term device slot add-on (price_rub, gb_added)."""
         if not expires_at:
-            return WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB
+            return WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB, 50
         now = now or now_utc()
         if now.tzinfo is None:
             now = now.replace(tzinfo=timezone.utc)
         exp = expires_at if expires_at.tzinfo is not None else expires_at.replace(tzinfo=timezone.utc)
         days_left = max(0.0, (exp - now).total_seconds() / 86400.0)
-        return Decimal(50 + round(50 * days_left / 30.0) * 4)
+        gb_added = max(0, round(50 * days_left / 30.0))
+        if days_left > 0 and gb_added == 0:
+            gb_added = 1
+        return Decimal(50 + gb_added * 4), gb_added
+
+    @staticmethod
+    def calculate_wi_add_slot_price(
+        expires_at: datetime | None, now: datetime | None = None
+    ) -> Decimal:
+        """Calculate mid-term device slot add-on price: 50 + round(50 * days_left / 30) * 4."""
+        price, _ = WhiteInternetService.calculate_wi_add_slot_quote(expires_at, now=now)
+        return price
 
     @classmethod
     async def purchase_subscription(
@@ -538,6 +548,7 @@ class WhiteInternetService:
         user_id: int,
         actor_telegram_id: int | None = None,
         debit_balance: bool = True,
+        extra_bytes: int | None = None,
     ) -> tuple[bool, str, WhiteInternetSubscription | None]:
         user = await lock_checkout_user(session, user_id)
         if user is None:
@@ -587,7 +598,8 @@ class WhiteInternetService:
                 logger.warning("No healthy origin node available for device slot migration: %s", exc)
                 return False, texts.WL_NO_SERVERS_AVAILABLE, None
 
-        price = cls.calculate_wi_add_slot_price(sub.expires_at, now=now)
+        price, gb_added = cls.calculate_wi_add_slot_quote(sub.expires_at, now=now)
+        added_bytes = extra_bytes if extra_bytes is not None else gb_added * (1024**3)
         tariff = await cls.get_or_create_white_internet_tariff(session)
 
         if debit_balance:
@@ -598,7 +610,7 @@ class WhiteInternetService:
                 tariff_id=tariff.id,
                 amount_due=price,
                 duration_days=0,
-                traffic_bytes=WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES,
+                traffic_bytes=added_bytes,
                 device_limit=new_device_limit,
                 operation="add_device_slot",
                 insufficient_text=texts.WL_INSUFFICIENT_BALANCE_BUY,
@@ -622,7 +634,7 @@ class WhiteInternetService:
         updated_sub = await white_internet_repo.add_device_slot_atomic(
             session,
             subscription_id=sub.id,
-            extra_bytes=WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES,
+            extra_bytes=added_bytes,
         )
 
         if old_origin_for_cleanup:

@@ -101,6 +101,7 @@ class FulfillmentService:
                     user.id,
                     actor_telegram_id=user.telegram_id,
                     debit_balance=False,
+                    extra_bytes=order.traffic_bytes if order.traffic_bytes else None,
                 )
                 if not ok:
                     raise RuntimeError(f"White Internet device slot purchase failed: {msg}")
@@ -222,10 +223,10 @@ class FulfillmentService:
                         WHITE_INTERNET_DEFAULT_DEVICE_LIMIT,
                         (sub.device_limit or 1) - 1,
                     )
+                    revoked_bytes = order.traffic_bytes or WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES
                     sub.base_traffic_bytes = max(
                         0,
-                        (sub.base_traffic_bytes or 0)
-                        - WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES,
+                        (sub.base_traffic_bytes or 0) - revoked_bytes,
                     )
                     sub.desired_version = (sub.desired_version or 0) + 1
                     await session.flush()

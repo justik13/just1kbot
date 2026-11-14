@@ -20,7 +20,6 @@ from config.constants import (
     STANDARD_MIN_DEVICES,
     STANDARD_PLANS,
     WHITE_INTERNET_BASE_DURATION_DAYS,
-    WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES,
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
     WHITE_INTERNET_TOPUP_PACKS,
 )
@@ -893,9 +892,11 @@ class OrderService:
             if op == "add_device_slot":
                 if wi_sub is None:
                     raise ValueError("No active White Internet subscription")
-                total_cost = WhiteInternetService.calculate_wi_add_slot_price(wi_sub.expires_at)
+                total_cost, gb_added = WhiteInternetService.calculate_wi_add_slot_quote(
+                    wi_sub.expires_at
+                )
                 final_devices = min(WHITE_INTERNET_MAX_DEVICE_LIMIT, (wi_sub.device_limit or 1) + 1)
-                traffic_bytes = WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES
+                traffic_bytes = gb_added * (1024**3)
                 description = "Доп. устройство высокой устойчивости"
             elif op == "topup":
                 if gb is None or int(gb) not in WHITE_INTERNET_TOPUP_PACKS:
