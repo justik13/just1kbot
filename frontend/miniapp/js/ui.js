@@ -20,6 +20,68 @@ export function showToast(message) {
     }, 3200);
 }
 
+export async function copyText(text, successMsg = "Скопировано") {
+    const val = String(text || "");
+    if (!val) return;
+    try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(val);
+            showToast(successMsg);
+            return;
+        }
+    } catch {
+        // Fallback below
+    }
+    const ta = document.createElement("textarea");
+    ta.value = val;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+        document.execCommand("copy");
+        showToast(successMsg);
+    } catch {
+        showToast("Не удалось скопировать");
+    } finally {
+        document.body.removeChild(ta);
+    }
+}
+
+export function openExternalLink(url) {
+    if (!url) return;
+    const tg = window.Telegram && window.Telegram.WebApp;
+    if (tg && typeof tg.openLink === "function") {
+        try {
+            tg.openLink(url);
+            return;
+        } catch {
+            // Fallback
+        }
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+}
+
+export function formatDate(iso) {
+    if (!iso) return "—";
+    try {
+        return new Date(iso).toLocaleString("ru-RU", {
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+        });
+    } catch {
+        return String(iso);
+    }
+}
+
+export function formatBytesGb(bytes) {
+    const val = Number(bytes || 0);
+    return (val / (1024 * 1024 * 1024)).toFixed(1);
+}
+
 export function openModal(title, bodyNode) {
     const backdrop = document.getElementById("modalRoot");
     if (!backdrop) return () => {};

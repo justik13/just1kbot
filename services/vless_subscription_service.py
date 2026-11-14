@@ -12,13 +12,19 @@ import urllib.parse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.constants import VALID_VLESS_TLS_FINGERPRINTS, VLESS_TLS_FINGERPRINT
+from config.constants import (
+    DEFAULT_WHITE_INTERNET_PATH,
+    VALID_VLESS_TLS_FINGERPRINTS,
+    VLESS_TLS_FINGERPRINT,
+)
 from config.enums import ServerHealthState, ServerLifecycleStatus
-from database.models import Server, User, VlessSubscription
+from database.models import Server, User, VlessSubscription, WhiteInternetSubscription
 from database.repositories import vless_subscription_repo
+from database.repositories.servers_repo import get_server_role
 from services.xray_node_client import XrayNodeClient
 from utils.datetime_helpers import now_utc
 from utils.incy_routing import generate_incy_routing_header as _generate_incy_routing_header
+from utils.security import normalize_public_domain
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +52,7 @@ class VlessSubscriptionService:
                 not srv.is_active
                 or srv.health_state != ServerHealthState.ONLINE
                 or getattr(srv, "lifecycle_status", None) not in (None, ServerLifecycleStatus.ACTIVE)
+                or get_server_role(srv) == "ru_hub"
             ):
                 continue
 
@@ -112,6 +119,125 @@ class VlessSubscriptionService:
             )
             links.append(link)
         return links
+
+    @staticmethod
+    def generate_bi_xhttp_links(
+        subscription: WhiteInternetSubscription,
+        server: Server,
+    ) -> list[str]:
+        """Generate 3-layer XHTTP links for White Internet using xhttp_locations or legacy relays."""
+        from services.white_internet_service import WhiteInternetService
+
+        extra = server.extra_data if isinstance(server.extra_data, dict) else {}
+        default_cdn = normalize_public_domain(extra.get("cdn_domain") or os.getenv("WHITE_INTERNET_CDN_DOMAIN"))
+        turboflare_cdn = normalize_public_domain(extra.get("turboflare_domain"))
+        if not default_cdn and not turboflare_cdn:
+            return []
+
+        base_path = (
+            extra.get("secret_base_path")
+            or os.getenv("WHITE_INTERNET_PATH")
+            or DEFAULT_WHITE_INTERNET_PATH
+        )
+        origin_tag = extra.get("origin_tag")
+        origin_badge = extra.get("origin_badge")
+        default_relay_badge = extra.get("relay_badge")
+        relay_names = extra.get("relay_names") if isinstance(extra.get("relay_names"), dict) else None
+        relay_badges = extra.get("relay_badges") if isinstance(extra.get("relay_badges"), dict) else None
+        origin_hidden = bool(extra.get("origin_hidden", False))
+
+        relay_hidden_raw = extra.get("relay_hidden")
+        if isinstance(relay_hidden_raw, (list, tuple, set)):
+            relay_hidden = {str(item) for item in relay_hidden_raw}
+        elif isinstance(relay_hidden_raw, str) and relay_hidden_raw.strip():
+            relay_hidden = {item.strip() for item in relay_hidden_raw.split(",") if item.strip()}
+        else:
+            relay_hidden = set()
+
+        xhttp_locations = extra.get("xhttp_locations")
+        if isinstance(xhttp_locations, list) and xhttp_locations:
+            links: list[str] = []
+            by_cdn: dict[str, list[dict]] = {}
+            has_default_origin = False
+            for loc in xhttp_locations:
+                if not isinstance(loc, dict) or not loc.get("path"):
+                    continue
+                loc_code = str(loc.get("location_code") or "").strip()
+                cdn_hint = str(loc.get("cdn") or "").strip().lower()
+                loc_cdn = turboflare_cdn if (cdn_hint == "cdn_turboflare" and turboflare_cdn) else default_cdn
+                if not loc_cdn:
+                    continue
+                if loc_code:
+                    if loc_code in relay_hidden:
+                        continue
+                    by_cdn.setdefault(loc_cdn, []).append({
+                        "code": loc_code,
+                        "path": str(loc["path"]),
+                    })
+                else:
+                    has_default_origin = True
+
+            for loc_cdn, cdn_relays in by_cdn.items():
+                links.extend(
+                    WhiteInternetService.generate_vless_links(
+                        subscription,
+                        cdn_domain=loc_cdn,
+                        path=base_path,
+                        relays=cdn_relays,
+                        include_origin=False,
+                        origin_tag=origin_tag,
+                        origin_badge=origin_badge,
+                        default_relay_badge=default_relay_badge,
+                        relay_names=relay_names,
+                        relay_badges=relay_badges,
+                    )
+                )
+
+            if (not origin_hidden and has_default_origin) or not links:
+                if default_cdn:
+                    links.extend(
+                        WhiteInternetService.generate_vless_links(
+                            subscription,
+                            cdn_domain=default_cdn,
+                            path=base_path,
+                            relays=None,
+                            include_origin=not origin_hidden,
+                            origin_tag=origin_tag,
+                            origin_badge=origin_badge,
+                            default_relay_badge=default_relay_badge,
+                            relay_names=relay_names,
+                            relay_badges=relay_badges,
+                        )
+                    )
+            return links
+
+        if not default_cdn:
+            return []
+
+        relays = extra.get("relays")
+        if not isinstance(relays, list):
+            relays = None
+        active_relays = (
+            [
+                r
+                for r in relays
+                if isinstance(r, dict) and (r.get("code") or r.get("name")) not in relay_hidden
+            ]
+            if relays
+            else None
+        )
+        return WhiteInternetService.generate_vless_links(
+            subscription,
+            cdn_domain=default_cdn,
+            path=base_path,
+            relays=active_relays,
+            include_origin=not origin_hidden,
+            origin_tag=origin_tag,
+            origin_badge=origin_badge,
+            default_relay_badge=default_relay_badge,
+            relay_names=relay_names,
+            relay_badges=relay_badges,
+        )
 
     @staticmethod
     def build_subscription_url(token: str, domain: str | None = None) -> str:

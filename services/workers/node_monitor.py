@@ -51,6 +51,7 @@ from database.models import Server
 from database.repositories.servers_repo import (
     get_all_servers,
     get_server_by_id,
+    get_server_role,
     get_server_xray_api_url,
     is_v2_node_server,
     is_vless_capable_server,
@@ -493,8 +494,10 @@ async def check_node_resources_and_alerts(bot: Bot):
 
         if is_xray_node:
             try:
-                is_origin = (
-                    "xray_origin" in (getattr(server, "capabilities", None) or [])
+                node_role = get_server_role(server)
+                is_origin = node_role not in ("eu_hub", "exit_node") and (
+                    node_role == "ru_hub"
+                    or "xray_origin" in (getattr(server, "capabilities", None) or [])
                     or bool((getattr(server, "extra_data", None) or {}).get("relays"))
                     or bool((getattr(server, "extra_data", None) or {}).get("cdn_domain"))
                 )

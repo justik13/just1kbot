@@ -3,6 +3,17 @@ import { escapeHtml, healthChipInfo, roleLabel, showToast } from "../ui.js";
 
 let currentFilter = "all";
 
+function _nodeScopeBadges(node) {
+    const caps = Array.isArray(node.capabilities) ? node.capabilities : [];
+    const links = node.links && typeof node.links === "object" ? node.links : {};
+    const hasStd = caps.includes("vless") || caps.includes("standard") || Boolean(links.standard && Object.keys(links.standard).length);
+    const hasBi = caps.includes("white_internet") || caps.includes("xray_origin") || Boolean(links.bi && Object.keys(links.bi).length);
+    const badges = [];
+    if (hasStd) badges.push(`<span class="chip chip-muted">Standard</span>`);
+    if (hasBi) badges.push(`<span class="chip chip-info">Доп. опция</span>`);
+    return badges.join("");
+}
+
 export function renderNodesView(root, state, onReload, onSelectNode) {
     const nodes = state.nodes || [];
     const counts = {
@@ -128,6 +139,7 @@ export function renderNodesView(root, state, onReload, onSelectNode) {
                 <span class="mono">${escapeHtml(node.domain || node.api_url)}</span>
                 <span>${node.is_active ? "● Включен" : "○ Выключен"}</span>
             </div>
+            <div class="filter-pills" style="margin-top:4px;">${_nodeScopeBadges(node)}</div>
         `;
 
         card.addEventListener("click", () => {

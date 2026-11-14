@@ -178,7 +178,12 @@ async def _vless_traffic_sync_once(bot: Bot | None = None):
     from config.enums import ServerHealthState, ServerLifecycleStatus
     from database.models import VlessSubscription
     from database.repositories import vless_subscription_repo
-    from database.repositories.servers_repo import get_server_xray_api_url, is_vless_capable_server
+    from database.repositories.servers_repo import (
+        get_server_role,
+        get_server_xray_api_url,
+        is_v2_node_server,
+        is_vless_capable_server,
+    )
     from services.xray_node_client import XrayNodeClient
 
     server_targets: list[tuple[int, str, str, str]] = []
@@ -196,7 +201,10 @@ async def _vless_traffic_sync_once(bot: Bot | None = None):
         )
         candidates = (await session.execute(stmt)).scalars().all()
         for srv in candidates:
-            if not is_vless_capable_server(srv):
+            role = get_server_role(srv)
+            if role == "ru_hub":
+                continue
+            if not (is_vless_capable_server(srv) or is_v2_node_server(srv)):
                 continue
             api_url = get_server_xray_api_url(srv)
             api_key = srv.api_key
