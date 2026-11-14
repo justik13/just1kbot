@@ -1,10 +1,14 @@
-"""HTTP authentication, admin authorization, and rate-limit guards for Mini App."""
+"""HTTP authentication, admin authorization, 2FA session, and rate-limit guards for Mini App."""
 
 from __future__ import annotations
 
 from aiohttp import web
 
-from services.miniapp_auth_service import MiniAppUserContext, authenticate_miniapp_request
+from services.miniapp_auth_service import (
+    MiniAppUserContext,
+    authenticate_miniapp_request,
+    verify_admin_session_token,
+)
 from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
 
 _api_rate_limiter = HttpRateLimiter(rate_per_minute=120.0, burst=30)
@@ -45,6 +49,8 @@ def require_authenticated_user(
 
 def require_admin_user(
     request: web.Request,
+    *,
+    require_2fa: bool = True,
 ) -> tuple[MiniAppUserContext | None, web.Response | None]:
     ctx, err_resp = require_authenticated_user(request)
     if err_resp is not None or ctx is None:
@@ -55,4 +61,13 @@ def require_admin_user(
             {"ok": False, "error": "Access denied"},
             status=403,
         )
+
+    if require_2fa:
+        session_token = request.headers.get("X-Admin-Session")
+        if not verify_admin_session_token(session_token, ctx.telegram_id):
+            return None, web.json_response(
+                {"ok": False, "error": "Требуется подтверждение 2FA", "code": "2fa_required"},
+                status=403,
+            )
+
     return ctx, None

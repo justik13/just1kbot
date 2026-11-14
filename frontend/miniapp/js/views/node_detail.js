@@ -111,6 +111,44 @@ function _openCertModal(node, onDone) {
     });
 }
 
+function _openLinksModal(node, onDone) {
+    const box = document.createElement("form");
+    box.className = "field";
+    box.style.gap = "10px";
+    const initialJson = JSON.stringify(node.links || {}, null, 2);
+    box.innerHTML = `
+        <div class="field">
+            <label>Конфигурация связей (standard / bi / exit_nodes / routes)</label>
+            <textarea name="links_json" class="textarea" required style="min-height:200px;">${escapeHtml(initialJson)}</textarea>
+        </div>
+        <button type="submit" class="btn btn-primary">Сохранить связи на ноде</button>
+    `;
+    const close = openModal(`Связи контуров (#${node.id})`, box);
+    box.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const raw = String(new FormData(box).get("links_json") || "").trim();
+        let parsed;
+        try {
+            parsed = JSON.parse(raw);
+        } catch {
+            showToast("Некорректный JSON");
+            return;
+        }
+        const btn = box.querySelector("button[type='submit']");
+        btn.disabled = true;
+        try {
+            await api.updateNodeLinks(node.id, parsed);
+            showToast("Связи обновлены");
+            close();
+            await onDone();
+        } catch (err) {
+            showToast(err.message || "Ошибка сохранения связей");
+        } finally {
+            btn.disabled = false;
+        }
+    });
+}
+
 export function renderNodeDetailView(root, node, onBack, onReload) {
     const health = healthChipInfo(node);
 
@@ -184,7 +222,7 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
         </section>
 
         <section class="card">
-            <div class="card-title">Модули и шлюзы</div>
+            <div class="card-title">Модули и привязки контуров</div>
             <div class="filter-pills" style="margin-bottom:6px;">${_renderModules(node)}</div>
             ${node.inbounds && node.inbounds.length ? `
                 <div class="detail-item" style="margin-top:6px;">
@@ -192,6 +230,10 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
                     <span class="mono">${node.inbounds.map((ib) => escapeHtml(ib)).join(", ")}</span>
                 </div>
             ` : ""}
+            <div class="detail-item" style="margin-top:6px;">
+                <span class="detail-label">Привязка Standard / Доп. опция</span>
+                <button type="button" id="detailLinksBtn" class="btn btn-sm">Настроить связи (JSON)</button>
+            </div>
         </section>
 
         ${_renderModuleErrors(node)}
@@ -242,6 +284,10 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
 
     root.querySelector("#detailCertBtn").addEventListener("click", () => {
         _openCertModal(node, onReload);
+    });
+
+    root.querySelector("#detailLinksBtn").addEventListener("click", () => {
+        _openLinksModal(node, onReload);
     });
 
     root.querySelector("#detailDeleteBtn").addEventListener("click", async () => {

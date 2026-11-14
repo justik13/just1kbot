@@ -9,7 +9,9 @@ from aiohttp import web
 
 from bot.miniapp.auth import check_miniapp_rate_limit
 from bot.miniapp.handlers_admin import (
-    api_admin_2fa_verify_stub_handler,
+    api_admin_2fa_setup_handler,
+    api_admin_2fa_setup_pin_handler,
+    api_admin_2fa_verify_handler,
     api_admin_nodes_add_handler,
     api_admin_nodes_cert_post_handler,
     api_admin_nodes_delete_handler,
@@ -18,7 +20,21 @@ from bot.miniapp.handlers_admin import (
     api_admin_nodes_patch_handler,
     api_admin_nodes_refresh_handler,
     api_admin_nodes_toggle_handler,
+    api_admin_users_handler,
     api_me_handler,
+)
+from bot.miniapp.handlers_user import (
+    api_user_auto_renew_handler,
+    api_user_dashboard_handler,
+    api_user_device_delete_handler,
+    api_user_device_priority_handler,
+    api_user_standard_checkout_handler,
+    api_user_standard_downgrade_handler,
+    api_user_standard_quote_handler,
+    api_user_topup_handler,
+    api_user_wi_checkout_handler,
+    api_user_wi_downgrade_cancel_handler,
+    api_user_wi_downgrade_handler,
 )
 
 logger = logging.getLogger(__name__)
@@ -87,14 +103,19 @@ async def miniapp_asset_handler(request: web.Request) -> web.Response:
 
 
 def setup_miniapp_routes(app: web.Application) -> None:
-    """Register Mini App frontend shell, modular static assets, and admin JSON APIs."""
+    """Register Mini App frontend shell, modular static assets, user and admin JSON APIs."""
     app.router.add_get("/app", miniapp_index_handler)
     app.router.add_get("/app/", miniapp_index_handler)
     app.router.add_get("/app/assets/{asset_path:.+}", miniapp_asset_handler)
 
     app.router.add_get("/api/app/me", api_me_handler)
-    app.router.add_post("/api/app/admin/2fa/verify-stub", api_admin_2fa_verify_stub_handler)
 
+    # Admin 2FA & session
+    app.router.add_post("/api/app/admin/2fa/setup", api_admin_2fa_setup_handler)
+    app.router.add_post("/api/app/admin/2fa/setup-pin", api_admin_2fa_setup_pin_handler)
+    app.router.add_post("/api/app/admin/2fa/verify", api_admin_2fa_verify_handler)
+
+    # Admin nodes & users
     app.router.add_get("/api/app/admin/nodes", api_admin_nodes_list_handler)
     app.router.add_post("/api/app/admin/nodes/add", api_admin_nodes_add_handler)
     app.router.add_post("/api/app/admin/nodes/{server_id}/refresh", api_admin_nodes_refresh_handler)
@@ -103,5 +124,19 @@ def setup_miniapp_routes(app: web.Application) -> None:
     app.router.add_delete("/api/app/admin/nodes/{server_id}", api_admin_nodes_delete_handler)
     app.router.add_put("/api/app/admin/nodes/{server_id}/links", api_admin_nodes_links_put_handler)
     app.router.add_post("/api/app/admin/nodes/{server_id}/certificate", api_admin_nodes_cert_post_handler)
+    app.router.add_get("/api/app/admin/users", api_admin_users_handler)
+
+    # User cabinet APIs
+    app.router.add_get("/api/app/user/dashboard", api_user_dashboard_handler)
+    app.router.add_post("/api/app/user/standard/quote", api_user_standard_quote_handler)
+    app.router.add_post("/api/app/user/standard/checkout", api_user_standard_checkout_handler)
+    app.router.add_post("/api/app/user/standard/downgrade", api_user_standard_downgrade_handler)
+    app.router.add_post("/api/app/user/wi/checkout", api_user_wi_checkout_handler)
+    app.router.add_post("/api/app/user/wi/downgrade", api_user_wi_downgrade_handler)
+    app.router.add_delete("/api/app/user/wi/downgrade", api_user_wi_downgrade_cancel_handler)
+    app.router.add_post("/api/app/user/topup", api_user_topup_handler)
+    app.router.add_post("/api/app/user/auto-renew", api_user_auto_renew_handler)
+    app.router.add_delete("/api/app/user/devices/{hwid}", api_user_device_delete_handler)
+    app.router.add_post("/api/app/user/devices/{hwid}/priority", api_user_device_priority_handler)
 
     logger.info("Registered modular Mini App routes: /app, /app/assets/*, /api/app/*")

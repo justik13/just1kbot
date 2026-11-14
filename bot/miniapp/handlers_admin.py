@@ -1,25 +1,39 @@
-"""Thin HTTP handlers for Mini App identity and admin-only v2 node management."""
+"""Thin HTTP handlers for Mini App identity, admin 2FA, node management, and user stats."""
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import TypeVar
 
 from aiohttp import web
 from pydantic import BaseModel, ValidationError
+from sqlalchemy import func, or_, select
 
 from bot.miniapp.auth import require_admin_user, require_authenticated_user
 from bot.miniapp.schemas import (
     AddNodePayload,
     DeployCertPayload,
     NodeLinksUpdatePayload,
+    SetupPinPayload,
     ToggleNodePayload,
     UpdateNodePayload,
-    Verify2FAStubPayload,
+    Verify2FAPayload,
 )
 from database.connection import session_scope
+from database.models import AccountLedgerEntry, User, WhiteInternetSubscription
+from database.repositories.account_ledger_repo import get_account_balance
 from services import admin_nodes_service
 from services.admin_nodes_service import AdminNodeServiceError
-from services.miniapp_auth_service import verify_admin_2fa_stub
+from services.miniapp_auth_service import (
+    build_totp_uri,
+    generate_totp_secret,
+    get_admin_2fa_config,
+    issue_totp_setup_token,
+    setup_admin_pin,
+    verify_admin_2fa,
+    verify_admin_session_token,
+)
+from utils.datetime_helpers import now_utc
 
 SchemaT = TypeVar("SchemaT", bound=BaseModel)
 
@@ -61,23 +75,29 @@ def _service_error_response(exc: AdminNodeServiceError) -> web.Response:
 
 
 async def api_me_handler(request: web.Request) -> web.Response:
-    """Return authenticated Telegram Mini App user role and 2FA stub status."""
+    """Return authenticated Telegram Mini App user role and real 2FA status."""
     ctx, err_resp = require_authenticated_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
     display_name = " ".join(part for part in (ctx.first_name, ctx.last_name) if part).strip()
-    security_payload = (
-        {
+    if ctx.is_admin:
+        session_token = request.headers.get("X-Admin-Session")
+        session_valid = verify_admin_session_token(session_token, ctx.telegram_id)
+        async with session_scope() as session:
+            cfg = await get_admin_2fa_config(session, ctx.telegram_id)
+        security_payload = {
             "two_factor_required": True,
-            "two_factor_mode": "stub_todo",
-            "two_factor_todo": "TODO: TOTP 2FA (pyotp) pending",
+            "two_factor_verified": session_valid,
+            "two_factor_configured": cfg["configured"],
+            "two_factor_mode": cfg["mode"],
         }
-        if ctx.is_admin
-        else {
+    else:
+        security_payload = {
             "two_factor_required": False,
+            "two_factor_verified": True,
         }
-    )
+
     return web.json_response({
         "ok": True,
         "user": {
@@ -90,18 +110,70 @@ async def api_me_handler(request: web.Request) -> web.Response:
     })
 
 
-async def api_admin_2fa_verify_stub_handler(request: web.Request) -> web.Response:
-    """Temporary 2FA verification stub endpoint (TODO: wire real TOTP check)."""
-    ctx, err_resp = require_admin_user(request)
+async def api_admin_2fa_setup_handler(request: web.Request) -> web.Response:
+    """Generate a temporary TOTP secret & otpauth URI for initial admin 2FA setup."""
+    ctx, err_resp = require_admin_user(request, require_2fa=False)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
-    payload, parse_err = await _parse_json_model(request, Verify2FAStubPayload)
+    async with session_scope() as session:
+        cfg = await get_admin_2fa_config(session, ctx.telegram_id)
+        if cfg["configured"]:
+            return web.json_response(
+                {"ok": False, "error": "2FA уже настроена"},
+                status=409,
+            )
+
+    secret = generate_totp_secret()
+    account = f"@{ctx.username}" if ctx.username else str(ctx.telegram_id)
+    setup_token = issue_totp_setup_token(ctx.telegram_id, secret)
+    return web.json_response({
+        "ok": True,
+        "secret": secret,
+        "otpauth_uri": build_totp_uri(secret, account),
+        "setup_token": setup_token,
+    })
+
+
+async def api_admin_2fa_setup_pin_handler(request: web.Request) -> web.Response:
+    """Set initial admin PIN when 2FA is not yet configured."""
+    ctx, err_resp = require_admin_user(request, require_2fa=False)
+    if err_resp is not None or ctx is None:
+        return err_resp  # type: ignore[return-value]
+
+    payload, parse_err = await _parse_json_model(request, SetupPinPayload)
     if parse_err is not None or payload is None:
         return parse_err  # type: ignore[return-value]
 
-    result = verify_admin_2fa_stub(ctx.telegram_id, payload.code)
-    return web.json_response({"ok": bool(result.get("verified")), **result})
+    async with session_scope() as session:
+        result = await setup_admin_pin(session, ctx.telegram_id, payload.pin)
+
+    if not result.get("verified"):
+        return web.json_response({"ok": False, "error": result.get("error", "Ошибка")}, status=400)
+    return web.json_response({"ok": True, **result})
+
+
+async def api_admin_2fa_verify_handler(request: web.Request) -> web.Response:
+    """Verify TOTP or PIN code and issue signed X-Admin-Session token."""
+    ctx, err_resp = require_admin_user(request, require_2fa=False)
+    if err_resp is not None or ctx is None:
+        return err_resp  # type: ignore[return-value]
+
+    payload, parse_err = await _parse_json_model(request, Verify2FAPayload)
+    if parse_err is not None or payload is None:
+        return parse_err  # type: ignore[return-value]
+
+    async with session_scope() as session:
+        result = await verify_admin_2fa(
+            session,
+            ctx.telegram_id,
+            payload.code,
+            setup_token=payload.setup_token,
+        )
+
+    if not result.get("verified"):
+        return web.json_response({"ok": False, "error": result.get("error", "Неверный код")}, status=403)
+    return web.json_response({"ok": True, **result})
 
 
 async def api_admin_nodes_list_handler(request: web.Request) -> web.Response:
@@ -291,3 +363,117 @@ async def api_admin_nodes_cert_post_handler(request: web.Request) -> web.Respons
             return web.json_response({"ok": True, **result})
     except AdminNodeServiceError as exc:
         return _service_error_response(exc)
+
+
+async def api_admin_users_handler(request: web.Request) -> web.Response:
+    """Return user statistics and paginated user list with balances and subscriptions."""
+    ctx, err_resp = require_admin_user(request)
+    if err_resp is not None or ctx is None:
+        return err_resp  # type: ignore[return-value]
+
+    q = (request.query.get("q") or "").strip()
+    try:
+        limit = min(50, max(1, int(request.query.get("limit", "25"))))
+    except ValueError:
+        limit = 25
+    try:
+        offset = max(0, int(request.query.get("offset", "0")))
+    except ValueError:
+        offset = 0
+
+    now = now_utc()
+
+    async with session_scope() as session:
+        total_users = int(
+            await session.scalar(select(func.count(User.id)).where(User.is_deleted.is_(False))) or 0
+        )
+        active_standard = int(
+            await session.scalar(
+                select(func.count(User.id)).where(
+                    User.is_deleted.is_(False),
+                    User.subscription_end.is_not(None),
+                    User.subscription_end > now,
+                )
+            )
+            or 0
+        )
+        active_wi = int(
+            await session.scalar(
+                select(func.count(WhiteInternetSubscription.id)).where(
+                    WhiteInternetSubscription.status == "active",
+                    WhiteInternetSubscription.expires_at.is_not(None),
+                    WhiteInternetSubscription.expires_at > now,
+                )
+            )
+            or 0
+        )
+        total_balance_rub = Decimal(
+            await session.scalar(select(func.coalesce(func.sum(AccountLedgerEntry.amount), 0))) or 0
+        )
+
+        stmt = select(User).where(User.is_deleted.is_(False))
+        if q:
+            if q.isdigit():
+                stmt = stmt.where(
+                    or_(
+                        User.telegram_id == int(q),
+                        User.id == int(q),
+                    )
+                )
+            else:
+                pattern = f"%{q.lstrip('@')}%"
+                stmt = stmt.where(
+                    or_(
+                        User.username.ilike(pattern),
+                        User.first_name.ilike(pattern),
+                    )
+                )
+
+        stmt = stmt.order_by(User.created_at.desc(), User.id.desc()).limit(limit).offset(offset)
+        users = (await session.scalars(stmt)).all()
+
+        user_ids = [u.id for u in users]
+        wi_map: dict[int, WhiteInternetSubscription] = {}
+        if user_ids:
+            wi_rows = (
+                await session.scalars(
+                    select(WhiteInternetSubscription).where(
+                        WhiteInternetSubscription.user_id.in_(user_ids)
+                    )
+                )
+            ).all()
+            wi_map = {w.user_id: w for w in wi_rows}
+
+        items: list[dict] = []
+        for u in users:
+            bal = await get_account_balance(session, user_id=u.id)
+            wi = wi_map.get(u.id)
+            std_active = bool(u.subscription_end and u.subscription_end > now)
+            wi_active = bool(wi and wi.status == "active" and wi.expires_at and wi.expires_at > now)
+            items.append({
+                "id": u.id,
+                "telegram_id": u.telegram_id,
+                "username": u.username,
+                "first_name": u.first_name,
+                "real_balance": int(bal.real_available),
+                "bonus_balance": int(bal.bonus_available),
+                "total_balance": int(bal.available),
+                "standard_active": std_active,
+                "standard_end": u.subscription_end.isoformat() if u.subscription_end else None,
+                "standard_device_limit": int(u.device_limit or 0),
+                "wi_active": wi_active,
+                "wi_end": wi.expires_at.isoformat() if wi and wi.expires_at else None,
+                "wi_device_limit": int(wi.device_limit or 0) if wi else 0,
+                "created_at": u.created_at.isoformat() if u.created_at else None,
+            })
+
+        return web.json_response({
+            "ok": True,
+            "stats": {
+                "total_users": total_users,
+                "active_standard": active_standard,
+                "active_wi": active_wi,
+                "total_balance_rub": int(max(Decimal(0), total_balance_rub)),
+            },
+            "users": items,
+        })
