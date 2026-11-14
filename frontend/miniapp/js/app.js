@@ -10,7 +10,7 @@ const appState = {
     user: null,
     security: null,
     twoFactorPassed: false,
-    mode: "admin",
+    mode: "cabinet",
     adminTab: "nodes",
     nodes: [],
     selectedNodeId: null,
@@ -66,7 +66,7 @@ function _renderErrorCard(root, title, desc) {
 function _syncModeSwitch() {
     const modeSwitch = document.getElementById("modeSwitch");
     if (!modeSwitch) return;
-    const isAdmin = Boolean(appState.user && appState.user.is_admin && appState.twoFactorPassed);
+    const isAdmin = Boolean(appState.user && appState.user.is_admin);
     modeSwitch.hidden = !isAdmin;
     if (!isAdmin) return;
     modeSwitch.querySelectorAll("[data-mode]").forEach((btn) => {
@@ -143,12 +143,28 @@ async function _reloadNodesAndRender() {
     } catch (err) {
         if (err && err.code === "2fa_required") {
             appState.twoFactorPassed = false;
-            bootstrap();
+            const root = document.getElementById("appRoot");
+            if (root && appState.mode === "admin") {
+                _openAdmin2FAGate(root);
+            }
             return;
         }
         showToast(err.message || "Не удалось загрузить ноды");
     }
     _renderAdminView();
+}
+
+function _openAdmin2FAGate(root) {
+    _syncModeSwitch();
+    _updateTelegramBackButton(() => {
+        appState.mode = "cabinet";
+        _renderAdminView();
+    });
+    renderSecurity2FA(root, appState.security, async () => {
+        appState.twoFactorPassed = true;
+        appState.mode = "admin";
+        await _reloadNodesAndRender();
+    });
 }
 
 async function bootstrap() {
@@ -166,9 +182,15 @@ async function bootstrap() {
                 const nextMode = btn.dataset.mode;
                 if (nextMode === appState.mode) return;
                 appState.mode = nextMode;
-                if (nextMode === "admin" && !appState.nodes.length) {
-                    await _reloadNodesAndRender();
-                    return;
+                if (nextMode === "admin") {
+                    if (!appState.twoFactorPassed) {
+                        _openAdmin2FAGate(root);
+                        return;
+                    }
+                    if (!appState.nodes.length) {
+                        await _reloadNodesAndRender();
+                        return;
+                    }
                 }
                 _renderAdminView();
             });
@@ -189,20 +211,9 @@ async function bootstrap() {
         }
 
         roleChip.hidden = true;
-
         appState.twoFactorPassed = Boolean(me.security && me.security.two_factor_verified);
-        if (!appState.twoFactorPassed) {
-            if (modeSwitch) modeSwitch.hidden = true;
-            renderSecurity2FA(root, me.security, async () => {
-                appState.twoFactorPassed = true;
-                appState.mode = "admin";
-                await _reloadNodesAndRender();
-            });
-            return;
-        }
-
-        _syncModeSwitch();
-        await _reloadNodesAndRender();
+        appState.mode = "cabinet";
+        _renderAdminView();
     } catch (err) {
         _renderErrorCard(
             root,

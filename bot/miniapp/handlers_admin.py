@@ -576,7 +576,7 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                 "action": "grant_standard",
                 "standard_end": updated_user.subscription_end.isoformat() if updated_user.subscription_end else None,
                 "standard_device_limit": int(updated_user.device_limit or 0),
-                "message": f"Базовый доступ выдан/продлён на {payload.days} дн.",
+                "message": f"Подписка «Стандарт» выдана/продлена на {payload.days} дн.",
             })
 
         # grant_wi
@@ -603,7 +603,7 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                 "ok": True,
                 "action": "grant_wi",
                 "wi_end": end_iso,
-                "message": "Опция «Повышенная устойчивость» активирована",
+                "message": "Подписка «Белый интернет» активирована",
             })
 
         ok, msg, updated = await WhiteInternetService.extend_subscription(
@@ -616,5 +616,5 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
             "ok": True,
             "action": "grant_wi",
             "wi_end": end_iso,
-            "message": f"Повышенная устойчивость продлена на {payload.days} дн.",
+            "message": f"Подписка «Белый интернет» продлена на {payload.days} дн.",
         })

@@ -16,8 +16,8 @@ function _openAdjustUserModal(user, onUpdated) {
         </div>
         <div class="seg-group">
             <button type="button" class="seg-btn active" data-act="balance">Баланс</button>
-            <button type="button" class="seg-btn" data-act="grant_standard">Базовый</button>
-            <button type="button" class="seg-btn" data-act="grant_wi">Устойчивость</button>
+            <button type="button" class="seg-btn" data-act="grant_standard">Стандарт</button>
+            <button type="button" class="seg-btn" data-act="grant_wi">Белый интернет</button>
         </div>
 
         <div id="adjBalanceFields" class="field" style="gap:8px;">
@@ -143,8 +143,8 @@ export function renderAdminUsersView(root, state) {
     root.innerHTML = `
         <section class="stats-strip">
             <div class="stat-box"><div class="stat-val">${stats.total_users ?? 0}</div><div class="stat-lbl">Всего</div></div>
-            <div class="stat-box"><div class="stat-val">${stats.active_standard ?? 0}</div><div class="stat-lbl">Базовый</div></div>
-            <div class="stat-box"><div class="stat-val">${stats.active_wi ?? 0}</div><div class="stat-lbl">Устойчивость</div></div>
+            <div class="stat-box"><div class="stat-val">${stats.active_standard ?? 0}</div><div class="stat-lbl">Стандарт</div></div>
+            <div class="stat-box"><div class="stat-val">${stats.active_wi ?? 0}</div><div class="stat-lbl">Белый интернет</div></div>
             <div class="stat-box"><div class="stat-val">${stats.total_balance_rub ?? 0} ₽</div><div class="stat-lbl">Балансы</div></div>
         </section>
 
@@ -189,11 +189,11 @@ export function renderAdminUsersView(root, state) {
         card.className = "item-row";
         const uname = u.username ? `@${u.username}` : (u.first_name || `ID ${u.telegram_id}`);
         const stdBadge = u.standard_active
-            ? `<span class="chip chip-ok">Базовый: ${u.standard_device_limit} устр.</span>`
-            : `<span class="chip chip-muted">Базовый: нет</span>`;
+            ? `<span class="chip chip-ok">Стандарт: ${u.standard_device_limit} устр.</span>`
+            : `<span class="chip chip-muted">Стандарт: нет</span>`;
         const wiBadge = u.wi_active
-            ? `<span class="chip chip-info">Устойчивость: ${u.wi_device_limit} устр.</span>`
-            : `<span class="chip chip-muted">Устойчивость: нет</span>`;
+            ? `<span class="chip chip-info">Белый интернет: ${u.wi_device_limit} устр.</span>`
+            : `<span class="chip chip-muted">Белый интернет: нет</span>`;
 
         card.innerHTML = `
             <div class="row">

@@ -28,6 +28,7 @@ from config.constants import (
     DEFAULT_FALLBACK_BOT_USERNAME,
     REFERRAL_ACTIVE_MIN_TOPUP_RUB,
     REFERRAL_WELCOME_DISCOUNT_PERCENT,
+    STANDARD_PLANS,
     WHITE_INTERNET_BASE_PRICE_RUB,
     WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB,
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
@@ -287,6 +288,10 @@ async def api_user_dashboard_handler(request: web.Request) -> web.Response:
                 "standard_devices_min": 2,
                 "standard_devices_max": 10,
                 "standard_durations": [7, 30, 90],
+                "standard_plans": {
+                    str(days): {"base_rub": int(base), "step_rub": int(step)}
+                    for days, (base, step) in sorted(STANDARD_PLANS.items())
+                },
                 "wi_base_price_rub": int(WHITE_INTERNET_BASE_PRICE_RUB),
                 "wi_extra_device_price_rub": int(WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB),
                 "wi_max_devices": WHITE_INTERNET_MAX_DEVICE_LIMIT,
