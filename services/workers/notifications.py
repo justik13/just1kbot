@@ -29,7 +29,8 @@ from config.constants import (
 )
 from database.connection import session_scope
 from database.models import User
-from utils.datetime_helpers import format_tg_time, is_permanent_subscription, now_utc
+from utils.datetime_helpers import is_permanent_subscription, now_utc
+from utils.formatters import format_tg_time
 from utils.rate_limiter import global_send_limiter
 from utils.telegram import safe_send_message
 
