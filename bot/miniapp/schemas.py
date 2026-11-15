@@ -93,10 +93,33 @@ class AddNodePayload(BaseModel):
     allow_bootstrap_tls: bool = True
 
 
+class IncyGlobalSettingsPayload(BaseModel):
+    profile_title: str | None = Field(default=None, max_length=120)
+    announce: str | None = Field(default=None, max_length=300)
+    announce_url: str | None = Field(default=None, max_length=500)
+    profile_show_devices: bool | None = None
+    routing_enabled: bool | None = None
+    fragmentation_enabled: bool | None = None
+
+
 class UpdateNodePayload(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     country_flag: str | None = Field(default=None, max_length=10)
     allow_bootstrap_tls: bool | None = None
+    api_url: str | None = Field(default=None, min_length=1, max_length=255)
+    api_key: str | None = Field(default=None, min_length=1, max_length=255)
+    origin_tag: str | None = Field(default=None, max_length=100)
+    origin_badge: str | None = Field(default=None, max_length=120)
+    origin_hidden: bool | None = None
+    support_url: str | None = Field(default=None, max_length=500)
+    channel_url: str | None = Field(default=None, max_length=500)
+    relay_names: dict[str, str] | None = None
+    relay_badges: dict[str, str] | None = None
+    relay_hidden: dict[str, bool] | list[str] | None = None
+
+
+class MigrateNodePayload(BaseModel):
+    target_server_id: int = Field(ge=1, le=2_147_483_647)
 
 
 class ToggleNodePayload(BaseModel):
@@ -218,10 +241,12 @@ def _validate_audience(value: str) -> str:
 
 
 class AdminUserAdjustPayload(BaseModel):
-    action: Literal["balance", "grant_standard", "grant_wi"]
+    action: Literal["balance", "grant_standard", "grant_wi", "wi_traffic"]
     amount_rub: int | None = Field(default=None, ge=-100000, le=100000)
-    days: int | None = Field(default=None, ge=1, le=3650)
+    days: int | None = Field(default=None, ge=-3650, le=3650)
     device_limit: int | None = Field(default=None, ge=1, le=20)
+    traffic_action: Literal["add_gb", "reset_used", "set_base_gb"] | None = None
+    gb: int | None = Field(default=None, ge=1, le=5000)
     note: str | None = Field(default=None, max_length=120)
 
     @model_validator(mode="after")

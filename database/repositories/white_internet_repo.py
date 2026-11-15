@@ -268,6 +268,7 @@ async def renew_subscription_atomic(
     price_rub: Decimal = WHITE_INTERNET_BASE_PRICE_RUB,
     duration_days: int = WHITE_INTERNET_BASE_DURATION_DAYS,
     base_bytes: int | None = None,
+    target_device_limit: int | None = None,
     max_expiry_days: int = WHITE_INTERNET_MAX_EXPIRY_DAYS,
     now: datetime | None = None,
 ) -> WhiteInternetSubscription:
@@ -290,7 +291,12 @@ async def renew_subscription_atomic(
             f"Renewal exceeds maximum horizon of {max_expiry_days} days"
         )
 
-    if sub.pending_device_limit is not None:
+    if target_device_limit is not None:
+        effective_devices = max(1, min(WHITE_INTERNET_MAX_DEVICE_LIMIT, int(target_device_limit)))
+        sub.device_limit = effective_devices
+        sub.pending_device_limit = None
+        sub.pending_from = None
+    elif sub.pending_device_limit is not None:
         effective_devices = max(1, min(WHITE_INTERNET_MAX_DEVICE_LIMIT, int(sub.pending_device_limit)))
         sub.device_limit = effective_devices
         sub.pending_device_limit = None

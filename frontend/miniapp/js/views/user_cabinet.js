@@ -880,6 +880,12 @@ function _buildGuideHtml(subUrl, isActive) {
                         <div class="sub-url-box">${escapeHtml(subUrl)}</div>
                     </div>
                 ` : ""}
+                <div class="notice-box" style="flex-direction:column; align-items:flex-start; gap:6px; font-size:12px;">
+                    <strong>Раздельное туннелирование и частые вопросы</strong>
+                    <span>• Российские банки, Госуслуги и локальные сервисы работают напрямую — выключать приложение не нужно.</span>
+                    <span>• После добавления подписки используйте кнопку «Подключить» на главном экране или включите автообновление в приложении.</span>
+                    <span>• При смене устройства старое можно удалить в списке устройств ниже — ссылка подключения при этом останется прежней.</span>
+                </div>
             </div>
         </details>
     `;
@@ -1057,8 +1063,26 @@ function _renderTariffsTab(body, d, reload) {
                     <div class="card-title">Белый интернет</div>
                     <div class="muted" style="font-size:12px;">Для мобильной сети при жёстких ограничениях доступа</div>
                 </div>
-                <span class="chip ${wi.active ? "chip-info" : "chip-muted"}">
-                    ${wi.active ? `до ${formatDate(wi.expires_at)}` : "Не подключена"}
+                <span class="chip ${
+                    wi.status === "EXHAUSTED"
+                        ? "chip-warn"
+                        : wi.status === "PENDING"
+                            ? "chip-info"
+                            : wi.active
+                                ? "chip-info"
+                                : "chip-muted"
+                }">
+                    ${
+                        wi.status === "EXHAUSTED"
+                            ? "Трафик исчерпан"
+                            : wi.status === "PENDING"
+                                ? "Настраивается"
+                                : wi.active
+                                    ? `до ${formatDate(wi.expires_at)}`
+                                    : wi.status === "EXPIRED"
+                                        ? "Истекла"
+                                        : "Не подключена"
+                    }
                 </span>
             </div>
             <div class="plan-features">
@@ -1257,6 +1281,8 @@ function _renderProfileTab(body, d, reload) {
     const shareText = `Держи приглашение — скидка ${ref.welcome_discount_pct ?? 25}% на первый заказ`;
     const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(ref.link || "")}&text=${encodeURIComponent(shareText)}`;
     const items = d.history || [];
+    const sup = d.support || {};
+    const invitedUsers = ref.invited_users || [];
 
     body.innerHTML = `
         <section class="balance-card">
@@ -1280,6 +1306,9 @@ function _renderProfileTab(body, d, reload) {
                 <div class="card-title">Приглашения и бонусы</div>
                 <span class="chip chip-ok">${escapeHtml(ref.tier_name || "Standard")}</span>
             </div>
+            ${ref.invited_by ? `
+                <div class="muted" style="font-size:12px;">Вас пригласил: <strong style="color:var(--text-primary);">${escapeHtml(ref.invited_by)}</strong></div>
+            ` : ""}
             <p class="muted">
                 Друг получает скидку <b>${ref.welcome_discount_pct ?? 25}%</b> на первый заказ.
                 Реферал считается активным после оплаты или пополнения от <b>${minActive} ₽</b>.
@@ -1295,6 +1324,36 @@ function _renderProfileTab(body, d, reload) {
                 <button id="shareRefBtn" type="button" class="btn btn-primary">${_ICONS.share} Пригласить</button>
                 <button id="copyRefBtn" type="button" class="btn">${_ICONS.copy} Копировать</button>
             </div>
+            ${invitedUsers.length ? `
+                <details class="guide-details" style="margin-top:4px;">
+                    <summary class="guide-summary">
+                        <span>Приглашённые пользователи (${invitedUsers.length})</span>
+                        <span class="muted" style="font-size:11px;">▾</span>
+                    </summary>
+                    <div class="guide-body" style="gap:6px;">
+                        ${invitedUsers.map((u) => `
+                            <div class="item-row">
+                                <div class="row">
+                                    <span style="font-size:13px; font-weight:500;">${escapeHtml(u.label)}</span>
+                                    <span class="chip ${u.is_active ? "chip-ok" : "chip-muted"}">${u.is_active ? "Активен" : "Ожидает"}</span>
+                                </div>
+                                <div class="muted" style="font-size:11px;">${formatDate(u.created_at)}</div>
+                            </div>
+                        `).join("")}
+                    </div>
+                </details>
+            ` : ""}
+        </section>
+
+        <section class="card">
+            <div class="card-title">Поддержка и документы</div>
+            <div style="display:flex; flex-direction:column; gap:8px;">
+                ${sup.support_url ? `<button id="supportContactBtn" type="button" class="btn btn-primary">Написать в поддержку</button>` : ""}
+                <div class="connect-pair">
+                    ${sup.tos_url ? `<button id="tosLinkBtn" type="button" class="btn btn-sm">Соглашение</button>` : ""}
+                    ${sup.privacy_url ? `<button id="privacyLinkBtn" type="button" class="btn btn-sm">Конфиденциальность</button>` : ""}
+                </div>
+            </div>
         </section>
 
         <section class="card">
@@ -1306,6 +1365,12 @@ function _renderProfileTab(body, d, reload) {
     body.querySelector("#profileTopupBtn").addEventListener("click", () => _openTopupModal(minTopup, reload));
     body.querySelector("#shareRefBtn").addEventListener("click", () => openExternalLink(shareUrl));
     body.querySelector("#copyRefBtn").addEventListener("click", () => copyText(ref.link, "Ссылка скопирована"));
+    const supBtn = body.querySelector("#supportContactBtn");
+    if (supBtn && sup.support_url) supBtn.addEventListener("click", () => openExternalLink(sup.support_url));
+    const tosBtn = body.querySelector("#tosLinkBtn");
+    if (tosBtn && sup.tos_url) tosBtn.addEventListener("click", () => openExternalLink(sup.tos_url));
+    const privBtn = body.querySelector("#privacyLinkBtn");
+    if (privBtn && sup.privacy_url) privBtn.addEventListener("click", () => openExternalLink(sup.privacy_url));
 
     const list = body.querySelector("#historyList");
     if (!items.length) {

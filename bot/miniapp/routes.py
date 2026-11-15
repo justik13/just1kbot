@@ -17,6 +17,8 @@ from bot.miniapp.handlers_admin import (
     api_admin_broadcast_start_handler,
     api_admin_broadcasts_list_handler,
     api_admin_finances_handler,
+    api_admin_incy_get_handler,
+    api_admin_incy_put_handler,
     api_admin_mass_bonus_handler,
     api_admin_mass_extend_handler,
     api_admin_nodes_add_handler,
@@ -24,11 +26,15 @@ from bot.miniapp.handlers_admin import (
     api_admin_nodes_delete_handler,
     api_admin_nodes_links_put_handler,
     api_admin_nodes_list_handler,
+    api_admin_nodes_migrate_handler,
     api_admin_nodes_patch_handler,
     api_admin_nodes_refresh_handler,
     api_admin_nodes_toggle_handler,
     api_admin_user_adjust_handler,
+    api_admin_user_details_handler,
+    api_admin_user_devices_reset_handler,
     api_admin_user_message_handler,
+    api_admin_user_token_rotate_handler,
     api_admin_users_handler,
     api_me_handler,
 )
@@ -126,14 +132,20 @@ def setup_miniapp_routes(app: web.Application) -> None:
 
     # Admin nodes & users
     app.router.add_get("/api/app/admin/nodes", api_admin_nodes_list_handler)
+    app.router.add_get("/api/app/admin/incy-settings", api_admin_incy_get_handler)
+    app.router.add_put("/api/app/admin/incy-settings", api_admin_incy_put_handler)
     app.router.add_post("/api/app/admin/nodes/add", api_admin_nodes_add_handler)
     app.router.add_post("/api/app/admin/nodes/{server_id}/refresh", api_admin_nodes_refresh_handler)
     app.router.add_patch("/api/app/admin/nodes/{server_id}", api_admin_nodes_patch_handler)
     app.router.add_post("/api/app/admin/nodes/{server_id}/toggle", api_admin_nodes_toggle_handler)
+    app.router.add_post("/api/app/admin/nodes/{server_id}/migrate", api_admin_nodes_migrate_handler)
     app.router.add_delete("/api/app/admin/nodes/{server_id}", api_admin_nodes_delete_handler)
     app.router.add_put("/api/app/admin/nodes/{server_id}/links", api_admin_nodes_links_put_handler)
     app.router.add_post("/api/app/admin/nodes/{server_id}/certificate", api_admin_nodes_cert_post_handler)
     app.router.add_get("/api/app/admin/users", api_admin_users_handler)
+    app.router.add_get("/api/app/admin/users/{user_id}/details", api_admin_user_details_handler)
+    app.router.add_post("/api/app/admin/users/{user_id}/devices/reset", api_admin_user_devices_reset_handler)
+    app.router.add_post("/api/app/admin/users/{user_id}/token/rotate", api_admin_user_token_rotate_handler)
     app.router.add_post("/api/app/admin/users/{user_id}/adjust", api_admin_user_adjust_handler)
     app.router.add_post("/api/app/admin/users/{user_id}/message", api_admin_user_message_handler)
 

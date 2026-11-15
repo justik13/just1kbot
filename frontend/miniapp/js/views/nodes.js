@@ -1,7 +1,73 @@
 import { api } from "../api.js";
-import { escapeHtml, healthChipInfo, roleLabel, showToast } from "../ui.js";
+import { escapeHtml, healthChipInfo, openModal, roleLabel, showToast } from "../ui.js";
 
 let currentFilter = "all";
+
+async function _openIncySettingsModal() {
+    let current;
+    try {
+        const res = await api.getIncySettings();
+        current = res.settings || {};
+    } catch (err) {
+        showToast(err.message || "Не удалось загрузить настройки INCY");
+        return;
+    }
+
+    const box = document.createElement("form");
+    box.className = "field";
+    box.style.gap = "10px";
+    box.innerHTML = `
+        <div class="field">
+            <label>Название профиля (Profile-Title)</label>
+            <input name="profile_title" class="input" maxlength="120" value="${escapeHtml(current.profile_title || "")}" placeholder="✦ Just1k">
+        </div>
+        <div class="field">
+            <label>Баннер / Анонс (Announce, пусто = авто-статус)</label>
+            <textarea name="announce" class="textarea" maxlength="300" style="min-height:70px;" placeholder="Оставьте пустым для автоматического статуса подписки">${escapeHtml(current.announce || "")}</textarea>
+        </div>
+        <div class="field">
+            <label>Ссылка анонса (Announce-Url)</label>
+            <input name="announce_url" class="input" maxlength="500" value="${escapeHtml(current.announce_url || "")}" placeholder="https://t.me/...">
+        </div>
+        <label class="checkbox-row">
+            <input name="profile_show_devices" type="checkbox" ${current.profile_show_devices ? "checked" : ""}>
+            <span>Показывать счётчик устройств в названии профиля</span>
+        </label>
+        <label class="checkbox-row">
+            <input name="routing_enabled" type="checkbox" ${current.routing_enabled !== false ? "checked" : ""}>
+            <span>Автоматическая маршрутизация (Routing)</span>
+        </label>
+        <label class="checkbox-row">
+            <input name="fragmentation_enabled" type="checkbox" ${current.fragmentation_enabled !== false ? "checked" : ""}>
+            <span>Фрагментация TLS-пакетов</span>
+        </label>
+        <button type="submit" class="btn btn-primary">Сохранить настройки</button>
+    `;
+
+    const close = openModal("Оформление INCY / Happ", box);
+    box.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const fd = new FormData(box);
+        const btn = box.querySelector("button[type='submit']");
+        btn.disabled = true;
+        try {
+            await api.updateIncySettings({
+                profile_title: String(fd.get("profile_title") || "").trim(),
+                announce: String(fd.get("announce") || "").trim(),
+                announce_url: String(fd.get("announce_url") || "").trim(),
+                profile_show_devices: Boolean(fd.get("profile_show_devices")),
+                routing_enabled: Boolean(fd.get("routing_enabled")),
+                fragmentation_enabled: Boolean(fd.get("fragmentation_enabled")),
+            });
+            showToast("Настройки INCY / Happ сохранены");
+            close();
+        } catch (err) {
+            showToast(err.message || "Ошибка сохранения");
+        } finally {
+            btn.disabled = false;
+        }
+    });
+}
 
 function _nodeScopeBadges(node) {
     const caps = Array.isArray(node.capabilities) ? node.capabilities : [];
@@ -66,7 +132,10 @@ export function renderNodesView(root, state, onReload, onSelectNode) {
         <section class="card">
             <div class="row">
                 <div class="card-title">Список нод</div>
-                <button id="reloadNodesBtn" type="button" class="btn btn-sm">Обновить список</button>
+                <div style="display:flex;gap:6px;">
+                    <button id="incySettingsBtn" type="button" class="btn btn-sm">Оформление INCY</button>
+                    <button id="reloadNodesBtn" type="button" class="btn btn-sm">Обновить список</button>
+                </div>
             </div>
             <div class="filter-pills">
                 <button type="button" class="pill-btn ${currentFilter === "all" ? "active" : ""}" data-filter="all">Все (${counts.all})</button>
@@ -78,6 +147,7 @@ export function renderNodesView(root, state, onReload, onSelectNode) {
         </section>
     `;
 
+    root.querySelector("#incySettingsBtn").addEventListener("click", _openIncySettingsModal);
     root.querySelector("#reloadNodesBtn").addEventListener("click", onReload);
     root.querySelectorAll("[data-filter]").forEach((btn) => {
         btn.addEventListener("click", () => {

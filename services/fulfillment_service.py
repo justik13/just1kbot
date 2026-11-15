@@ -128,7 +128,10 @@ class FulfillmentService:
             else:
                 if sub and sub.status in ("ACTIVE", "EXPIRED", "EXHAUSTED"):
                     ok, msg, created_sub = await WhiteInternetService.renew_subscription(
-                        session, user.id, debit_balance=False
+                        session,
+                        user.id,
+                        debit_balance=False,
+                        target_device_limit=order.device_limit,
                     )
                 else:
                     ok, msg, created_sub = await WhiteInternetService.purchase_subscription(

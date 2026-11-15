@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from decimal import Decimal
 import logging
+import time
 from typing import Any, TypeVar
 from urllib.parse import unquote
 import uuid
 
 from aiohttp import web
+from cachetools import TTLCache
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import func, select
 
@@ -23,6 +25,7 @@ from bot.miniapp.schemas import (
     WiCheckoutPayload,
     WiDowngradePayload,
 )
+from bot.texts.backend import PRIVACY_POLICY_URL, TOS_AGREEMENT_URL
 from config.constants import (
     DEFAULT_FALLBACK_BOT_USERNAME,
     REFERRAL_ACTIVE_MIN_TOPUP_RUB,
@@ -33,28 +36,36 @@ from config.constants import (
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
     WHITE_INTERNET_TOPUP_PACKS,
 )
-from config.enums import WhiteInternetStatus
+from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
 from config.settings import get_settings
 from database.connection import session_scope
-from database.models import Order, User
+from database.models import Order, User, VlessSubscription
 from database.repositories import user_devices_repo
 from database.repositories.account_ledger_repo import (
     get_account_balance,
     get_account_history,
 )
-from database.repositories.users_repo import get_user_active_referrals_count
+from database.repositories.users_repo import (
+    get_user_active_referrals_count,
+    get_user_referrals_paginated,
+)
 from database.repositories.vless_subscription_repo import get_or_create_subscription
-from database.repositories.white_internet_repo import get_subscription_by_user_id
+from database.repositories.white_internet_repo import (
+    enqueue_orphan_cleanup,
+    get_subscription_by_user_id,
+)
 from integrations.payment_gateways.factory import get_payment_gateway
 from services import order_service
 from services.order_service import OrderService
 from services.referral_bonus import get_referral_tier
 from services.subscription import SubscriptionService
+from services.vless_subscription_service import VlessSubscriptionService
 from services.white_internet_service import WhiteInternetService
 from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger(__name__)
 SchemaT = TypeVar("SchemaT", bound=BaseModel)
+_DEVICE_DELETE_COOLDOWN: TTLCache[int, float] = TTLCache(maxsize=5000, ttl=300)
 
 
 async def _parse_json_model(
@@ -133,6 +144,37 @@ async def _get_referral_summary(
     )
     active_count = await get_user_active_referrals_count(session, user.telegram_id)
     tier = get_referral_tier(active_count)
+
+    invited_by_label: str | None = None
+    if user.referred_by:
+        inviter = await session.scalar(
+            select(User).where(User.telegram_id == user.referred_by)
+        )
+        if inviter:
+            invited_by_label = (
+                f"@{inviter.username}"
+                if inviter.username
+                else (inviter.first_name or f"ID {inviter.telegram_id}")
+            )
+        else:
+            invited_by_label = f"ID {user.referred_by}"
+
+    invited_rows = await get_user_referrals_paginated(
+        session, user.telegram_id, page=0, per_page=20
+    )
+    invited_users = [
+        {
+            "label": (
+                f"@{r.username}"
+                if r.username
+                else (r.first_name or f"ID {r.telegram_id}")
+            ),
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "is_active": bool(r.last_payment_at is not None),
+        }
+        for r in invited_rows
+    ]
+
     return {
         "link": f"https://t.me/{resolved_bot}?start=ref_{user.telegram_id}",
         "invited_count": invited_count,
@@ -144,6 +186,8 @@ async def _get_referral_summary(
         "next_rate_pct": int(tier.next_rate * 100) if tier.next_rate is not None else None,
         "active_min_topup_rub": int(REFERRAL_ACTIVE_MIN_TOPUP_RUB),
         "welcome_discount_pct": int(REFERRAL_WELCOME_DISCOUNT_PERCENT * 100),
+        "invited_by": invited_by_label,
+        "invited_users": invited_users,
     }
 
 
@@ -228,9 +272,16 @@ async def api_user_dashboard_handler(request: web.Request) -> web.Response:
         cooldown_until = user.standard_downgrade_cooldown_until
         pending_limit = wi_sub.pending_device_limit if wi_sub else None
         pending_from = wi_sub.pending_from if wi_sub else None
+        support_username = (get_settings().SUPPORT_USERNAME or "").strip().lstrip("@")
+        support_url = f"https://t.me/{support_username}" if support_username else None
 
         return web.json_response({
             "ok": True,
+            "support": {
+                "support_url": support_url,
+                "tos_url": TOS_AGREEMENT_URL,
+                "privacy_url": PRIVACY_POLICY_URL,
+            },
             "balance": {
                 "real": int(bal.real_available),
                 "bonus": int(bal.bonus_available),
@@ -565,7 +616,7 @@ async def api_user_auto_renew_handler(request: web.Request) -> web.Response:
 
 
 async def api_user_device_delete_handler(request: web.Request) -> web.Response:
-    """Remove a bound HWID device."""
+    """Remove a bound HWID device and rotate internal client UUIDs without changing public token."""
     ctx, err_resp = require_authenticated_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
@@ -574,11 +625,73 @@ async def api_user_device_delete_handler(request: web.Request) -> web.Response:
     if not hwid or len(hwid) > 128:
         return web.json_response({"ok": False, "error": "Invalid HWID"}, status=400)
 
+    last_del = _DEVICE_DELETE_COOLDOWN.get(ctx.telegram_id)
+    now_mono = time.monotonic()
+    if last_del is not None and (now_mono - last_del) < 300:
+        wait_sec = max(1, int(300 - (now_mono - last_del)))
+        return web.json_response(
+            {
+                "ok": False,
+                "error": f"Удалять устройства можно не чаще раза в 5 минут. Подождите {wait_sec} сек.",
+            },
+            status=429,
+        )
+
     async with session_scope() as session:
         user = await _ensure_user(session, ctx)
         deleted = await user_devices_repo.delete_user_device(session, user.id, hwid)
         if not deleted:
             return web.json_response({"ok": False, "error": "Устройство не найдено"}, status=404)
+
+        vless_sub = await session.scalar(
+            select(VlessSubscription).where(VlessSubscription.user_id == user.id).with_for_update()
+        )
+        if vless_sub is not None:
+            hwids_map = dict(vless_sub.active_hwids or {})
+            hwids_map.pop(hwid, None)
+            vless_sub.active_hwids = hwids_map
+            old_uuid = vless_sub.uuid
+            vless_sub.uuid = str(uuid.uuid4())
+            vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1
+            pending = list(getattr(vless_sub, "pending_revoked_uuids", None) or [])
+            if old_uuid and old_uuid not in pending:
+                pending.append(old_uuid)
+            vless_sub.pending_revoked_uuids = pending
+            await session.flush()
+            if old_uuid:
+                VlessSubscriptionService.deprovision_background(
+                    old_uuid,
+                    version=vless_sub.version,
+                    sub_id=vless_sub.id,
+                    session=session,
+                )
+            if vless_sub.is_active:
+                VlessSubscriptionService.ensure_synced_background(
+                    user.id,
+                    is_active=True,
+                    session=session,
+                )
+
+        wi_sub = await get_subscription_by_user_id(session, user.id)
+        if wi_sub is not None:
+            wi_hwids = dict(wi_sub.active_hwids or {})
+            wi_hwids.pop(hwid, None)
+            wi_sub.active_hwids = wi_hwids
+            old_wi_uuid = wi_sub.uuid
+            wi_sub.uuid = str(uuid.uuid4())
+            wi_sub.desired_version = (wi_sub.desired_version or 0) + 1
+            if wi_sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED):
+                wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+            await session.flush()
+            if wi_sub.origin_node_id and old_wi_uuid:
+                await enqueue_orphan_cleanup(
+                    session,
+                    server_id=wi_sub.origin_node_id,
+                    client_uuid=old_wi_uuid,
+                    desired_version=wi_sub.desired_version,
+                )
+
+        _DEVICE_DELETE_COOLDOWN[ctx.telegram_id] = now_mono
         return web.json_response({"ok": True})
 
 

@@ -69,6 +69,12 @@ export const api = {
         }),
 
     // Admin nodes & users
+    getIncySettings: () => requestJson("/api/app/admin/incy-settings"),
+    updateIncySettings: (payload) =>
+        requestJson("/api/app/admin/incy-settings", {
+            method: "PUT",
+            body: JSON.stringify(payload),
+        }),
     listNodes: () => requestJson("/api/app/admin/nodes"),
     addNode: (payload) =>
         requestJson("/api/app/admin/nodes/add", {
@@ -89,8 +95,13 @@ export const api = {
             method: "POST",
             body: JSON.stringify(isActive === null ? {} : { is_active: isActive }),
         }),
-    deleteNode: (id) =>
-        requestJson(`/api/app/admin/nodes/${id}`, {
+    migrateNode: (id, targetServerId) =>
+        requestJson(`/api/app/admin/nodes/${id}/migrate`, {
+            method: "POST",
+            body: JSON.stringify({ target_server_id: Number(targetServerId) }),
+        }),
+    deleteNode: (id, force = false) =>
+        requestJson(`/api/app/admin/nodes/${id}${force ? "?force=true" : ""}`, {
             method: "DELETE",
         }),
     updateNodeLinks: (id, payload) =>
@@ -103,8 +114,20 @@ export const api = {
             method: "POST",
             body: JSON.stringify(payload),
         }),
-    listUsers: (q = "", offset = 0, limit = 25) =>
-        requestJson(`/api/app/admin/users?q=${encodeURIComponent(q)}&offset=${offset}&limit=${limit}`),
+    listUsers: (q = "", offset = 0, limit = 25, filter = "all") =>
+        requestJson(
+            `/api/app/admin/users?q=${encodeURIComponent(q)}&offset=${offset}&limit=${limit}&filter=${encodeURIComponent(filter || "all")}`
+        ),
+    getUserDetails: (userId) =>
+        requestJson(`/api/app/admin/users/${userId}/details`),
+    resetUserDevices: (userId) =>
+        requestJson(`/api/app/admin/users/${userId}/devices/reset`, {
+            method: "POST",
+        }),
+    rotateUserToken: (userId) =>
+        requestJson(`/api/app/admin/users/${userId}/token/rotate`, {
+            method: "POST",
+        }),
     adjustUser: (userId, payload) =>
         requestJson(`/api/app/admin/users/${userId}/adjust`, {
             method: "POST",

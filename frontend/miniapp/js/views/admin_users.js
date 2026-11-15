@@ -58,6 +58,7 @@ function _openAdjustUserModal(user, onUpdated) {
             <button type="button" class="seg-btn active" data-act="balance">Баланс</button>
             <button type="button" class="seg-btn" data-act="grant_standard">Стандарт</button>
             <button type="button" class="seg-btn" data-act="grant_wi">Белый интернет</button>
+            <button type="button" class="seg-btn" data-act="wi_traffic">Трафик</button>
         </div>
 
         <div id="adjBalanceFields" class="field" style="gap:8px;">
@@ -74,8 +75,8 @@ function _openAdjustUserModal(user, onUpdated) {
         <div id="adjSubFields" class="field" style="gap:8px;" hidden>
             <div class="grid-2">
                 <div class="field">
-                    <label>Срок (дней)</label>
-                    <input name="days" class="input tabular" type="number" min="1" max="3650" step="1" value="30">
+                    <label>Срок (дней, 0 = только лимит, &lt;0 = сократить)</label>
+                    <input name="days" class="input tabular" type="number" min="-3650" max="3650" step="1" value="30">
                 </div>
                 <div class="field">
                     <label id="adjDevLbl">Устройств (2..10)</label>
@@ -83,9 +84,27 @@ function _openAdjustUserModal(user, onUpdated) {
                 </div>
             </div>
             <div class="filter-pills">
-                <button type="button" class="pill-btn" data-days="7">7 дн.</button>
-                <button type="button" class="pill-btn" data-days="30">30 дн.</button>
-                <button type="button" class="pill-btn" data-days="90">90 дн.</button>
+                <button type="button" class="pill-btn" data-days="0">0 (лимит)</button>
+                <button type="button" class="pill-btn" data-days="7">+7 дн.</button>
+                <button type="button" class="pill-btn" data-days="30">+30 дн.</button>
+                <button type="button" class="pill-btn" data-days="90">+90 дн.</button>
+                <button type="button" class="pill-btn" data-days="-7">-7 дн.</button>
+                <button type="button" class="pill-btn" data-days="-30">-30 дн.</button>
+            </div>
+        </div>
+
+        <div id="adjTrafficFields" class="field" style="gap:8px;" hidden>
+            <div class="field">
+                <label>Операция с трафиком</label>
+                <select name="traffic_action" class="select">
+                    <option value="add_gb">Добавить дополнительный трафик (+ГБ)</option>
+                    <option value="reset_used">Сбросить использованный трафик</option>
+                    <option value="set_base_gb">Установить базовую квоту (ГБ)</option>
+                </select>
+            </div>
+            <div class="field" id="adjGbField">
+                <label>Объём (ГБ)</label>
+                <input name="gb" class="input tabular" type="number" min="1" max="5000" step="1" value="50">
             </div>
         </div>
 
@@ -101,15 +120,23 @@ function _openAdjustUserModal(user, onUpdated) {
 
     const balFields = form.querySelector("#adjBalanceFields");
     const subFields = form.querySelector("#adjSubFields");
+    const trafficFields = form.querySelector("#adjTrafficFields");
+    const trafficSelect = form.querySelector("select[name='traffic_action']");
+    const gbField = form.querySelector("#adjGbField");
     const devInput = form.querySelector("input[name='device_limit']");
     const devLbl = form.querySelector("#adjDevLbl");
+
+    trafficSelect.addEventListener("change", () => {
+        gbField.hidden = trafficSelect.value === "reset_used";
+    });
 
     form.querySelectorAll("[data-act]").forEach((btn) => {
         btn.addEventListener("click", () => {
             action = btn.dataset.act;
             form.querySelectorAll("[data-act]").forEach((b) => b.classList.toggle("active", b === btn));
             balFields.hidden = action !== "balance";
-            subFields.hidden = action === "balance";
+            subFields.hidden = action !== "grant_standard" && action !== "grant_wi";
+            trafficFields.hidden = action !== "wi_traffic";
             if (action === "grant_standard") {
                 devInput.min = "2";
                 devInput.max = "10";
@@ -148,10 +175,20 @@ function _openAdjustUserModal(user, onUpdated) {
                 return;
             }
             payload.amount_rub = amount;
+        } else if (action === "wi_traffic") {
+            payload.traffic_action = trafficSelect.value;
+            if (payload.traffic_action !== "reset_used") {
+                const gb = Number(form.querySelector("input[name='gb']").value);
+                if (!Number.isInteger(gb) || gb < 1) {
+                    showToast("Укажите объём в ГБ (>= 1)");
+                    return;
+                }
+                payload.gb = gb;
+            }
         } else {
             const days = Number(form.querySelector("input[name='days']").value);
             const deviceLimit = Number(devInput.value);
-            if (!Number.isInteger(days) || days < 1) {
+            if (!Number.isInteger(days) || days < -3650 || days > 3650) {
                 showToast("Укажите корректное количество дней");
                 return;
             }
@@ -174,11 +211,119 @@ function _openAdjustUserModal(user, onUpdated) {
     });
 }
 
+async function _openUserDetailsModal(user, onUpdated) {
+    let details;
+    try {
+        const res = await api.getUserDetails(user.id);
+        details = res.user;
+    } catch (err) {
+        showToast(err.message || "Не удалось загрузить детали");
+        return;
+    }
+
+    const box = document.createElement("div");
+    box.className = "field";
+    box.style.gap = "10px";
+    const uname = details.username ? `@${details.username}` : (details.first_name || `ID ${details.telegram_id}`);
+    const inviterStr = details.inviter
+        ? (details.inviter.username ? `@${details.inviter.username}` : `ID ${details.inviter.telegram_id}`)
+        : "—";
+    const wi = details.wi;
+    const wiTotalGb = wi ? (((wi.base_traffic_bytes || 0) + (wi.extra_traffic_bytes || 0)) / (1024 ** 3)).toFixed(1) : "0";
+    const wiUsedGb = wi ? ((wi.traffic_used_bytes || 0) / (1024 ** 3)).toFixed(2) : "0";
+    const devicesHtml = (details.devices || []).length
+        ? details.devices
+              .map(
+                  (d) => `
+            <div class="item-row" style="padding:8px;">
+                <div class="row">
+                    <span style="font-weight:600; font-size:12px;">${escapeHtml(d.device_model || d.platform || "Устройство")}</span>
+                    <span class="muted" style="font-size:11px;">${d.last_seen_at ? formatDate(d.last_seen_at) : "—"}</span>
+                </div>
+                <div class="mono muted" style="font-size:11px; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(d.hwid)}</div>
+            </div>`
+              )
+              .join("")
+        : `<div class="muted" style="font-size:12px;">Устройства не привязаны</div>`;
+
+    box.innerHTML = `
+        <div class="detail-list">
+            <div class="detail-item"><span class="detail-label">Telegram ID</span><span class="mono">${details.telegram_id}</span></div>
+            <div class="detail-item"><span class="detail-label">Пригласил</span><span>${escapeHtml(inviterStr)}</span></div>
+            <div class="detail-item"><span class="detail-label">Стандарт до</span><span>${details.standard_end ? formatDate(details.standard_end) : "—"}</span></div>
+            <div class="detail-item"><span class="detail-label">Доп. опция до</span><span>${wi && wi.expires_at ? `${formatDate(wi.expires_at)} (${wiUsedGb} / ${wiTotalGb} ГБ)` : "—"}</span></div>
+        </div>
+        ${details.subscription_url ? `
+        <div class="field">
+            <label>Ссылка подписки</label>
+            <div class="row" style="gap:6px; flex-wrap:nowrap;">
+                <input id="detSubUrl" class="input mono" readonly value="${escapeHtml(details.subscription_url)}">
+                <button id="detCopySubBtn" type="button" class="btn btn-sm">Копировать</button>
+            </div>
+        </div>` : ""}
+        <div class="field">
+            <label>Устройства (${(details.devices || []).length})</label>
+            ${devicesHtml}
+        </div>
+        <div class="actions-row">
+            <button id="detResetHwidBtn" type="button" class="btn btn-sm">Сбросить HWID</button>
+            <button id="detRotateTokenBtn" type="button" class="btn btn-sm btn-danger">Перевыпустить токен</button>
+        </div>
+    `;
+
+    const close = openModal(`Детали · ${uname}`, box);
+
+    const copyBtn = box.querySelector("#detCopySubBtn");
+    if (copyBtn) {
+        copyBtn.addEventListener("click", async () => {
+            try {
+                await navigator.clipboard.writeText(details.subscription_url);
+                showToast("Ссылка скопирована");
+            } catch {
+                showToast("Не удалось скопировать");
+            }
+        });
+    }
+
+    box.querySelector("#detResetHwidBtn").addEventListener("click", async (e) => {
+        const b = e.currentTarget;
+        b.disabled = true;
+        try {
+            const res = await api.resetUserDevices(user.id);
+            showToast(res.message || "Устройства сброшены");
+            close();
+            onUpdated();
+        } catch (err) {
+            showToast(err.message || "Ошибка сброса");
+        } finally {
+            b.disabled = false;
+        }
+    });
+
+    box.querySelector("#detRotateTokenBtn").addEventListener("click", async (e) => {
+        if (!confirm("Перевыпустить токен подписки? Старая ссылка перестанет работать.")) return;
+        const b = e.currentTarget;
+        b.disabled = true;
+        try {
+            const res = await api.rotateUserToken(user.id);
+            showToast(res.message || "Токен перевыпущен");
+            close();
+            onUpdated();
+        } catch (err) {
+            showToast(err.message || "Ошибка перевыпуска");
+        } finally {
+            b.disabled = false;
+        }
+    });
+}
+
 export function renderAdminUsersView(root, state) {
-    const data = state.usersData || { stats: {}, users: [] };
+    const data = state.usersData || { stats: {}, filter_counts: {}, users: [] };
     const stats = data.stats || {};
+    const fc = data.filter_counts || {};
     const users = data.users || [];
     const query = state.usersQuery || "";
+    const activeFilter = state.usersFilter || "all";
 
     root.innerHTML = `
         <section class="stats-strip">
@@ -193,6 +338,13 @@ export function renderAdminUsersView(root, state) {
                 <div class="card-title">Пользователи и балансы</div>
                 <button id="reloadUsersBtn" type="button" class="btn btn-sm">Обновить</button>
             </div>
+            <div class="filter-pills">
+                <button type="button" class="pill-btn ${activeFilter === "all" ? "active" : ""}" data-ufilter="all">Все (${fc.total ?? stats.total_users ?? 0})</button>
+                <button type="button" class="pill-btn ${activeFilter === "active_standard" ? "active" : ""}" data-ufilter="active_standard">Стандарт (${fc.active_standard ?? stats.active_standard ?? 0})</button>
+                <button type="button" class="pill-btn ${activeFilter === "active_wi" ? "active" : ""}" data-ufilter="active_wi">Доп. опция (${fc.active_wi ?? stats.active_wi ?? 0})</button>
+                <button type="button" class="pill-btn ${activeFilter === "expired" ? "active" : ""}" data-ufilter="expired">Истекли (${fc.expired ?? 0})</button>
+                <button type="button" class="pill-btn ${activeFilter === "never" ? "active" : ""}" data-ufilter="never">Без подписки (${fc.never ?? 0})</button>
+            </div>
             <form id="userSearchForm" class="row" style="flex-wrap:nowrap;">
                 <input id="userSearchInput" class="input" type="search" value="${escapeHtml(query)}" placeholder="Telegram ID, @username или имя">
                 <button type="submit" class="btn btn-primary btn-sm">Найти</button>
@@ -201,21 +353,28 @@ export function renderAdminUsersView(root, state) {
         </section>
     `;
 
-    const reload = async (qVal) => {
+    const reload = async (qVal, filterVal = state.usersFilter || "all") => {
         try {
             state.usersQuery = qVal;
-            state.usersData = await api.listUsers(qVal);
+            state.usersFilter = filterVal;
+            state.usersData = await api.listUsers(qVal, 0, 25, filterVal);
             renderAdminUsersView(root, state);
         } catch (err) {
             showToast(err.message || "Не удалось загрузить пользователей");
         }
     };
 
-    root.querySelector("#reloadUsersBtn").addEventListener("click", () => reload(state.usersQuery || ""));
+    root.querySelectorAll("[data-ufilter]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            reload(state.usersQuery || "", btn.dataset.ufilter);
+        });
+    });
+
+    root.querySelector("#reloadUsersBtn").addEventListener("click", () => reload(state.usersQuery || "", state.usersFilter || "all"));
     root.querySelector("#userSearchForm").addEventListener("submit", (e) => {
         e.preventDefault();
         const val = root.querySelector("#userSearchInput").value.trim();
-        reload(val);
+        reload(val, state.usersFilter || "all");
     });
 
     const listEl = root.querySelector("#usersListContainer");
@@ -253,16 +412,20 @@ export function renderAdminUsersView(root, state) {
                     ${wiBadge}
                 </div>
                 <div class="btn-group">
+                    <button type="button" class="btn btn-sm" data-details-uid="${u.id}">Детали</button>
                     <button type="button" class="btn btn-sm" data-msg-uid="${u.id}">Написать</button>
                     <button type="button" class="btn btn-sm" data-manage-uid="${u.id}">Управление</button>
                 </div>
             </div>
         `;
+        card.querySelector("[data-details-uid]").addEventListener("click", () => {
+            _openUserDetailsModal(u, () => reload(state.usersQuery || "", state.usersFilter || "all"));
+        });
         card.querySelector("[data-msg-uid]").addEventListener("click", () => {
             _openDirectMessageModal(u);
         });
         card.querySelector("[data-manage-uid]").addEventListener("click", () => {
-            _openAdjustUserModal(u, () => reload(state.usersQuery || ""));
+            _openAdjustUserModal(u, () => reload(state.usersQuery || "", state.usersFilter || "all"));
         });
         listEl.appendChild(card);
     });

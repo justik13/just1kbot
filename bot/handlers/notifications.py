@@ -49,6 +49,15 @@ async def dismiss_notification(callback: CallbackQuery) -> None:
     await _delete_or_clear_markup(callback)
 
 
+@router.callback_query(F.data == "dismiss_broadcast")
+async def dismiss_broadcast(callback: CallbackQuery) -> None:
+    try:
+        await callback.answer(show_alert=False)
+    except Exception:
+        pass
+    await _delete_or_clear_markup(callback)
+
+
 @router.callback_query(F.data.startswith("admin_dismiss_alert"))
 async def dismiss_admin_alert(callback: CallbackQuery) -> None:
     if callback.from_user.id not in get_settings().ADMIN_IDS:

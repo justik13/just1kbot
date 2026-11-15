@@ -407,7 +407,11 @@ class WhiteInternetService:
 
     @classmethod
     async def renew_subscription(
-        cls, session: AsyncSession, user_id: int, debit_balance: bool = True
+        cls,
+        session: AsyncSession,
+        user_id: int,
+        debit_balance: bool = True,
+        target_device_limit: int | None = None,
     ):
         user = await lock_checkout_user(session, user_id)
         if user is None:
@@ -467,11 +471,12 @@ class WhiteInternetService:
         ):
             return False, texts.WL_RENEWAL_HORIZON_EXCEEDED, None
 
-        sub_device_limit = (
-            sub.pending_device_limit
-            if sub.pending_device_limit is not None
-            else max(1, getattr(sub, "device_limit", 1) or 1)
-        )
+        if target_device_limit is not None:
+            sub_device_limit = max(1, min(WHITE_INTERNET_MAX_DEVICE_LIMIT, int(target_device_limit)))
+        elif sub.pending_device_limit is not None:
+            sub_device_limit = sub.pending_device_limit
+        else:
+            sub_device_limit = max(1, getattr(sub, "device_limit", 1) or 1)
         tier_price = get_white_internet_tier_price(sub_device_limit, base_price=Decimal(tariff.price_rub))
         tier_base_bytes = sub_device_limit * WHITE_INTERNET_BASE_TRAFFIC_BYTES
 
@@ -509,6 +514,7 @@ class WhiteInternetService:
             price_rub=tier_price,
             duration_days=tariff.duration_days,
             base_bytes=tier_base_bytes,
+            target_device_limit=target_device_limit,
         )
 
         # Durable deprovisioning of UUID on old origin node: record the cleanup

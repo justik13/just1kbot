@@ -580,11 +580,11 @@ async def serve_unified_subscription_feed(
                     badge = texts.LANDING_INACTIVE_BADGE_PAUSED
                     title = texts.LANDING_INACTIVE_TITLE_DEFAULT
                     desc = texts.LANDING_INACTIVE_DESC_DEFAULT
-                elif wi_sub is not None and wi_is_exhausted and not wi_is_expired and vless_sub is None:
+                elif wi_sub is not None and wi_is_exhausted and not wi_is_expired:
                     badge = texts.LANDING_INACTIVE_BADGE_EXHAUSTED
                     title = texts.LANDING_INACTIVE_TITLE_EXHAUSTED
                     desc = texts.LANDING_INACTIVE_DESC_EXHAUSTED
-                elif wi_sub is not None and wi_is_disabled and vless_sub is None:
+                elif wi_sub is not None and wi_is_disabled and getattr(user, "subscription_end", None) is None:
                     badge = texts.LANDING_INACTIVE_BADGE_DISABLED
                     title = texts.LANDING_INACTIVE_TITLE_DISABLED
                     desc = texts.LANDING_INACTIVE_DESC_DISABLED
@@ -613,10 +613,10 @@ async def serve_unified_subscription_feed(
             if wi_sub and getattr(wi_sub, "expires_at", None):
                 fallback_exp_ts = max(fallback_exp_ts, int(wi_sub.expires_at.timestamp()))
 
-            if wi_sub is not None and wi_is_exhausted and not wi_is_expired and not std_active and vless_sub is None:
+            if wi_sub is not None and wi_is_exhausted and not wi_is_expired and not std_active:
                 stub_title = texts.WL_FEED_EXHAUSTED_TITLE
                 stub_notice = texts.WL_FEED_EXHAUSTED_NOTICE.format(bot_username=bot_username)
-            elif wi_sub is not None and wi_is_disabled and not std_active and vless_sub is None:
+            elif wi_sub is not None and wi_is_disabled and not std_active and getattr(user, "subscription_end", None) is None:
                 stub_title = texts.WL_FEED_DISABLED_TITLE
                 stub_notice = texts.WL_FEED_DISABLED_NOTICE.format(bot_username=bot_username)
             else:
@@ -858,13 +858,14 @@ async def serve_unified_subscription_feed(
         else:
             full_title = profile_title_base[:25]
 
+        userinfo_total = wi_total_quota if (not std_active and wi_active and wi_total_quota > 0) else 0
         b64_title = base64.b64encode(full_title.encode("utf-8")).decode("ascii")
         response_headers = {
             **common_headers,
             "Content-Type": "text/plain; charset=utf-8",
             "Content-Disposition": 'inline; filename="Just1k.txt"; filename*=UTF-8\'\'Just1k.txt',
             "Profile-Update-Interval": _get_vless_update_interval(),
-            "Subscription-Userinfo": f"upload={upload_bytes}; download={download_bytes}; total=0; expire={expire_ts}",
+            "Subscription-Userinfo": f"upload={upload_bytes}; download={download_bytes}; total={userinfo_total}; expire={expire_ts}",
             "Device-Limit": str(effective_limit),
             "Device-Active-Count": str(active_hwid_count),
             "Profile-Title": f"base64:{b64_title}",
@@ -911,13 +912,17 @@ async def serve_unified_subscription_feed(
             response_headers["Profile-Web-Page-Url"] = sanitized_channel
             response_headers["Channel-Url"] = sanitized_channel
 
-        announce_summary = _format_announce_summary(
-            std_active=std_active,
-            std_end=std_end,
-            wi_active=wi_active,
-            wi_end=wi_end,
-            wi_available_bytes=wi_available_bytes,
-        )
+        raw_announce = await get_system_setting(session, "vless_announce", None)
+        if isinstance(raw_announce, str) and raw_announce.strip():
+            announce_summary = raw_announce.strip()
+        else:
+            announce_summary = _format_announce_summary(
+                std_active=std_active,
+                std_end=std_end,
+                wi_active=wi_active,
+                wi_end=wi_end,
+                wi_available_bytes=wi_available_bytes,
+            )
         if announce_summary:
             b64_ann = base64.b64encode(announce_summary.encode("utf-8")).decode("ascii")
             response_headers["Announce"] = f"base64:{b64_ann}"

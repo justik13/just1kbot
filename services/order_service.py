@@ -865,6 +865,8 @@ class OrderService:
         checked_origin_id: int | None = None
 
         if service_type == "topup":
+            if getattr(user, "topup_blocked", False):
+                raise ValueError(texts.TOPUP_ERROR_BLOCKED)
             if amount_rub is None:
                 raise ValueError("amount_rub is required for topup")
             total_cost = Decimal(int(amount_rub))
@@ -963,8 +965,14 @@ class OrderService:
                 "total_cost_rub": int(total_cost),
             }
 
+        if getattr(user, "topup_blocked", False):
+            raise ValueError(texts.TOPUP_ERROR_BLOCKED)
+
         wallet_debit = bal.available if (use_balance and bal.available > 0) else Decimal(0)
         to_pay = total_cost - wallet_debit
+        if wallet_debit > 0 and 0 < to_pay < MIN_TOPUP_RUB and total_cost >= MIN_TOPUP_RUB:
+            wallet_debit = total_cost - MIN_TOPUP_RUB
+            to_pay = MIN_TOPUP_RUB
         if wallet_debit > 0:
             order_meta["wallet_debit_rub"] = int(wallet_debit)
             order_meta["total_cost_rub"] = int(total_cost)

@@ -8,6 +8,7 @@ from cachetools import TTLCache
 from sqlalchemy import or_, select, update
 
 from bot.keyboards.notifications import (
+    get_dismiss_notification_keyboard,
     get_post_expiry_keyboard,
     get_pre_expiry_keyboard,
 )
@@ -16,6 +17,8 @@ from bot.texts.runtime.notifications import (
     NOTIFY_2H,
     NOTIFY_3D,
     NOTIFY_EXPIRED,
+    NOTIFY_STANDARD_AUTORENEWED,
+    NOTIFY_WI_AUTORENEWED,
     TIME_DAYS_HOURS_FORMAT,
     TIME_HOURS_MINUTES_FORMAT,
     TIME_SOON_LABEL,
@@ -26,14 +29,14 @@ from config.constants import (
 )
 from database.connection import session_scope
 from database.models import User
-from utils.datetime_helpers import now_utc
+from utils.datetime_helpers import format_tg_time, is_permanent_subscription, now_utc
 from utils.rate_limiter import global_send_limiter
 from utils.telegram import safe_send_message
 
 logger = logging.getLogger(__name__)
 
 MAX_RETRY_COUNT = 4
-NOTIFICATION_CHECK_INTERVAL = max(NOTIFICATION_INTERVAL, 3600)
+NOTIFICATION_CHECK_INTERVAL = max(NOTIFICATION_INTERVAL, 900)
 BACKOFF_BASE_INTERVAL = NOTIFICATION_CHECK_INTERVAL
 NOTIFICATION_BATCH_SIZE = 20
 NOTIFICATION_START_DELAY = 60.0
@@ -112,6 +115,11 @@ async def subscription_notifications_loop(
         try:
             current_time = now_utc()
 
+            await _process_auto_renewals(
+                bot,
+                current_time,
+            )
+
             await _send_pre_expiry_notifications(
                 bot,
                 current_time,
@@ -157,6 +165,194 @@ async def subscription_notifications_loop(
             continue
 
     logger.info("Notifications worker stopped gracefully")
+
+
+async def _send_autorenew_notice(bot: Bot, telegram_id: int, text: str) -> None:
+    try:
+        await global_send_limiter.acquire()
+        await safe_send_message(
+            bot,
+            telegram_id,
+            text,
+            reply_markup=get_dismiss_notification_keyboard(),
+            parse_mode="HTML",
+            raise_forbidden=True,
+        )
+    except TelegramForbiddenError:
+        async with session_scope() as session:
+            u = await session.scalar(select(User).where(User.telegram_id == telegram_id))
+            if u:
+                u.is_bot_blocked = True
+    except Exception as exc:
+        logger.warning("Failed to send auto-renew notice to %s: %s", telegram_id, exc)
+
+
+async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
+    """Automatically renew Standard and White Internet subscriptions from wallet balance when enabled."""
+    from config.enums import WhiteInternetStatus
+    from config.tariffs import get_white_internet_tier_price
+    from database.models import WhiteInternetSubscription
+    from database.repositories.account_ledger_repo import get_account_balance
+    from services.order_service import OrderService
+    from services.subscription import SubscriptionService
+
+    window_start = current_time - timedelta(hours=24)
+    window_end = current_time + timedelta(hours=24)
+
+    # 1. Standard subscription auto-renewal (30 days at current device_limit)
+    async with session_scope() as session:
+        std_ids = list(
+            (
+                await session.execute(
+                    select(User.id)
+                    .where(
+                        User.auto_renew_enabled.is_(True),
+                        User.is_deleted.is_(False),
+                        User.financial_hold.is_(False),
+                        User.subscription_end.is_not(None),
+                        User.subscription_end >= window_start,
+                        User.subscription_end <= window_end,
+                    )
+                    .order_by(User.subscription_end.asc())
+                    .limit(200)
+                )
+            ).scalars().all()
+        )
+
+    for uid in std_ids:
+        push_tg_id: int | None = None
+        push_text: str | None = None
+        try:
+            async with session_scope() as session:
+                user = await session.scalar(
+                    select(User).where(User.id == uid).with_for_update(skip_locked=True)
+                )
+                if (
+                    user is None
+                    or not user.auto_renew_enabled
+                    or user.is_deleted
+                    or user.financial_hold
+                    or not user.subscription_end
+                    or is_permanent_subscription(user.subscription_end)
+                    or user.subscription_end < window_start
+                    or user.subscription_end > window_end
+                ):
+                    continue
+
+                std_limit = await SubscriptionService.get_effective_device_limit(session, user)
+                quote = await OrderService.quote_standard_change(session, user.id, std_limit, 30)
+                due_rub = int(quote["due_rub"])
+                bal = await get_account_balance(session, user_id=user.id, for_update=True, locked_user=user)
+                if bal.debt > 0 or bal.available < due_rub:
+                    continue
+
+                res = await OrderService.checkout_order(
+                    session,
+                    user_id=user.id,
+                    service_type="standard",
+                    device_limit=std_limit,
+                    duration_days=30,
+                    use_balance=True,
+                )
+                if res.get("status") == "paid" and not user.is_bot_blocked:
+                    await session.refresh(user)
+                    push_tg_id = user.telegram_id
+                    push_text = NOTIFY_STANDARD_AUTORENEWED.format(
+                        amount=res.get("charged_balance", due_rub),
+                        devices=std_limit,
+                        date=format_tg_time(user.subscription_end) if user.subscription_end else "",
+                    )
+        except Exception as exc:
+            logger.warning("Standard auto-renew failed for user_id=%s: %s", uid, exc)
+            continue
+
+        if push_tg_id and push_text:
+            await _send_autorenew_notice(bot, push_tg_id, push_text)
+
+    # 2. White Internet auto-renewal (30 days at effective device_limit)
+    async with session_scope() as session:
+        wi_ids = list(
+            (
+                await session.execute(
+                    select(WhiteInternetSubscription.id)
+                    .join(User, User.id == WhiteInternetSubscription.user_id)
+                    .where(
+                        WhiteInternetSubscription.auto_renew_enabled.is_(True),
+                        WhiteInternetSubscription.status.in_([
+                            WhiteInternetStatus.ACTIVE,
+                            WhiteInternetStatus.EXHAUSTED,
+                            WhiteInternetStatus.EXPIRED,
+                        ]),
+                        WhiteInternetSubscription.expires_at.is_not(None),
+                        WhiteInternetSubscription.expires_at >= window_start,
+                        WhiteInternetSubscription.expires_at <= window_end,
+                        User.is_deleted.is_(False),
+                        User.financial_hold.is_(False),
+                    )
+                    .order_by(WhiteInternetSubscription.expires_at.asc())
+                    .limit(200)
+                )
+            ).scalars().all()
+        )
+
+    for sid in wi_ids:
+        push_tg_id = None
+        push_text = None
+        try:
+            async with session_scope() as session:
+                sub = await session.scalar(
+                    select(WhiteInternetSubscription)
+                    .where(WhiteInternetSubscription.id == sid)
+                    .with_for_update(skip_locked=True)
+                )
+                if (
+                    sub is None
+                    or not sub.auto_renew_enabled
+                    or not sub.expires_at
+                    or sub.expires_at < window_start
+                    or sub.expires_at > window_end
+                    or sub.status not in (
+                        WhiteInternetStatus.ACTIVE,
+                        WhiteInternetStatus.EXHAUSTED,
+                        WhiteInternetStatus.EXPIRED,
+                    )
+                ):
+                    continue
+
+                user = await session.scalar(
+                    select(User).where(User.id == sub.user_id).with_for_update(skip_locked=True)
+                )
+                if user is None or user.is_deleted or user.financial_hold:
+                    continue
+
+                eff_limit = int(sub.pending_device_limit or sub.device_limit or 1)
+                due_rub = get_white_internet_tier_price(eff_limit)
+                bal = await get_account_balance(session, user_id=user.id, for_update=True, locked_user=user)
+                if bal.debt > 0 or bal.available < due_rub:
+                    continue
+
+                res = await OrderService.checkout_order(
+                    session,
+                    user_id=user.id,
+                    service_type="white_internet",
+                    device_limit=eff_limit,
+                    operation="renew",
+                    use_balance=True,
+                )
+                if res.get("status") == "paid" and not user.is_bot_blocked:
+                    await session.refresh(sub)
+                    push_tg_id = user.telegram_id
+                    push_text = NOTIFY_WI_AUTORENEWED.format(
+                        amount=res.get("charged_balance", int(due_rub)),
+                        devices=eff_limit,
+                        date=format_tg_time(sub.expires_at) if sub.expires_at else "",
+                    )
+        except Exception as exc:
+            logger.warning("WI auto-renew failed for sub_id=%s: %s", sid, exc)
+            continue
+
+        if push_tg_id and push_text:
+            await _send_autorenew_notice(bot, push_tg_id, push_text)
 
 
 async def _send_pre_expiry_notifications(
