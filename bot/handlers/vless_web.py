@@ -515,13 +515,14 @@ async def serve_unified_subscription_feed(
         std_active = bool(vless_sub and vless_sub.is_active and not is_financial_hold and is_std_access)
         std_end = getattr(user, "subscription_end", None) if std_active else None
 
+        wi_total_quota = 0
         wi_available_bytes = 0
         wi_is_pending = False
         wi_is_expired = False
         wi_is_exhausted = False
         wi_is_disabled = False
         if wi_sub is not None:
-            _, wi_available_bytes = _compute_wi_traffic_stats(wi_sub)
+            wi_total_quota, wi_available_bytes = _compute_wi_traffic_stats(wi_sub)
             wi_is_pending = wi_sub.status == WhiteInternetStatus.PENDING and not is_financial_hold
             wi_is_disabled = wi_sub.status == WhiteInternetStatus.DISABLED
             wi_is_expired = bool(
