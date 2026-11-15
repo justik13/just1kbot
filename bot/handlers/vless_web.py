@@ -797,12 +797,17 @@ async def serve_unified_subscription_feed(
                     headers={**common_headers, "Retry-After": "5"},
                 )
 
+        no_servers_mode = False
         if not all_links:
-            retry_after = "5" if (wi_active and not std_active) else "60"
-            return web.Response(
-                status=503,
-                text="No servers available",
-                headers={**common_headers, "Retry-After": retry_after},
+            no_servers_mode = True
+            placeholder_label = (
+                "⏳ Идёт настройка подключения — обновите позже"
+                if (wi_active and not std_active)
+                else "⚠️ Локации временно недоступны — обновите позже"
+            )
+            all_links.append(
+                f"vless://00000000-0000-0000-0000-000000000000@127.0.0.1:443"
+                f"?encryption=none&security=none&type=tcp#{urllib.parse.quote(placeholder_label)}"
             )
 
         payload = "\n".join(all_links)
@@ -914,7 +919,13 @@ async def serve_unified_subscription_feed(
             response_headers["Channel-Url"] = sanitized_channel
 
         raw_announce = await get_system_setting(session, "vless_announce", None)
-        if isinstance(raw_announce, str) and raw_announce.strip():
+        if no_servers_mode:
+            announce_summary = (
+                "Идёт настройка подключения — обновите подписку через минуту."
+                if (wi_active and not std_active)
+                else "Локации временно недоступны — ведутся работы. Попробуйте обновить позже или напишите в поддержку."
+            )
+        elif isinstance(raw_announce, str) and raw_announce.strip():
             announce_summary = raw_announce.strip()
         else:
             announce_summary = _format_announce_summary(
