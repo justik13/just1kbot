@@ -17,12 +17,21 @@ from bot.keyboards.start import build_start_inline_keyboard
 from config.settings import get_settings
 from database.connection import session_scope
 from services.subscription import SubscriptionService
-from utils.telegram import EFFECT_LIKE, safe, safe_delete_message, safe_send_message
+from utils.telegram import EFFECT_LIKE, safe, safe_send_message
 
 router = Router()
 logger = logging.getLogger(__name__)
 _background_tasks: set[asyncio.Task] = set()
 _LAST_START_MESSAGES: TTLCache[int, int] = TTLCache(maxsize=10000, ttl=172800)
+
+
+async def _safe_delete_message(bot, chat_id: int, message_id: int) -> None:
+    if bot is None:
+        return
+    try:
+        await bot.delete_message(chat_id, message_id)
+    except Exception:
+        pass
 
 
 def parse_referral_id(command_args: str) -> int | None:
@@ -46,10 +55,10 @@ async def cmd_start(message: Message) -> None:
     if not message.from_user or not message.chat:
         return
 
-    await safe_delete_message(message.bot, message.chat.id, message.message_id)
+    await _safe_delete_message(message.bot, message.chat.id, message.message_id)
     prev_msg_id = _LAST_START_MESSAGES.pop(message.chat.id, None)
     if prev_msg_id:
-        await safe_delete_message(message.bot, message.chat.id, prev_msg_id)
+        await _safe_delete_message(message.bot, message.chat.id, prev_msg_id)
 
     tg_user = message.from_user
     command_args = ""
