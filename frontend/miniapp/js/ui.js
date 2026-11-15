@@ -51,6 +51,15 @@ export async function copyText(text, successMsg = "Скопировано") {
 export function openExternalLink(url) {
     if (!url) return;
     const tg = window.Telegram && window.Telegram.WebApp;
+    const isTgLink = /^(https?:\/\/t\.me\/|tg:\/\/)/i.test(url);
+    if (isTgLink && tg && typeof tg.openTelegramLink === "function") {
+        try {
+            tg.openTelegramLink(url);
+            return;
+        } catch {
+            // Fallback to openLink / window.open
+        }
+    }
     if (tg && typeof tg.openLink === "function") {
         try {
             tg.openLink(url);
