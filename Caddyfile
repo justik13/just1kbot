@@ -38,7 +38,7 @@ http:// {
 		}
 	}
 
-	@subscription_paths path {$WHITE_INTERNET_SUB_PATH_PREFIX:/sub/wl}/* /sub/vless/* /sub/access/*
+	@subscription_paths path {$WHITE_INTERNET_SUB_PATH_PREFIX:/sub/wl}/* /sub/*
 	handle @subscription_paths {
 		header X-Frame-Options "DENY"
 		log_skip

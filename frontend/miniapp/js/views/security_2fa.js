@@ -18,11 +18,17 @@ function _bindPasteCodeButton(btn, input) {
         const tgWebApp = window.Telegram && window.Telegram.WebApp;
         if (tgWebApp && typeof tgWebApp.readTextFromClipboard === "function") {
             let handled = false;
+            const timer = setTimeout(() => {
+                if (handled) return;
+                handled = true;
+                _tryNavigatorClipboard(input);
+            }, 350);
             try {
                 tgWebApp.readTextFromClipboard((clipText) => {
                     if (handled) return;
                     handled = true;
-                    if (clipText !== null && clipText !== undefined) {
+                    clearTimeout(timer);
+                    if (clipText) {
                         _applyClipCode(input, clipText);
                     } else {
                         _tryNavigatorClipboard(input);
@@ -30,6 +36,7 @@ function _bindPasteCodeButton(btn, input) {
                 });
                 return;
             } catch {
+                clearTimeout(timer);
                 // Fall through to navigator.clipboard
             }
         }
@@ -41,14 +48,24 @@ async function _tryNavigatorClipboard(input) {
     if (navigator.clipboard && typeof navigator.clipboard.readText === "function") {
         try {
             const text = await navigator.clipboard.readText();
-            _applyClipCode(input, text);
-            return;
+            if (text) {
+                _applyClipCode(input, text);
+                return;
+            }
         } catch {
             // Clipboard permission blocked inside WebView
         }
     }
     input.focus();
-    showToast("Нажмите и удерживайте поле, чтобы вставить код");
+    try {
+        if (document.execCommand && document.execCommand("paste") && input.value) {
+            _applyClipCode(input, input.value);
+            return;
+        }
+    } catch {
+        // Ignore execCommand failure
+    }
+    showToast("Доступ к буферу ограничен — удерживайте поле и нажмите «Вставить»");
 }
 
 export function renderSecurity2FA(root, securityMeta, onVerified) {
@@ -74,7 +91,7 @@ export function renderSecurity2FA(root, securityMeta, onVerified) {
                 <div class="row" style="flex-wrap:nowrap;">
                     <input id="twoFaCodeInput" class="input" type="text"
                         inputmode="numeric" maxlength="6" required
-                        placeholder="000000" autocomplete="off">
+                        placeholder="000000" autocomplete="one-time-code">
                     <button id="twoFaPasteBtn" type="button" class="btn btn-sm">Вставить</button>
                 </div>
                 <button id="twoFaSubmitBtn" type="submit" class="btn btn-primary" style="margin-top:6px;">
