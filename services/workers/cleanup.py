@@ -5,13 +5,10 @@ from datetime import timedelta
 from typing import Any
 
 from aiogram import Bot
-from aiogram.exceptions import TelegramForbiddenError
 from cachetools import TTLCache
-from sqlalchemy import and_, cast, delete, or_, select, String
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from config.constants import (
-    AdminAuditAction,
-    GRACE_PERIOD_HOURS,
     VPN_ACCESS_GRACE_HOURS,
 )
 from database.connection import session_scope
@@ -22,11 +19,8 @@ from database.models import (
     WebhookInbox,
 )
 from database.repositories.audit_repo import clear_audit_logs
-from bot.keyboards.notifications import get_devices_deleted_keyboard
-from bot.texts.runtime.notifications import NOTIFY_DEVICES_DELETED
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc
-from utils.telegram import safe_send_message
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +48,6 @@ async def cleanup_expired_subscriptions_loop(
 ):
     global _last_old_cleanup, _last_heavy_cleanup
 
-    bot: Bot | None = bot_or_shutdown if isinstance(bot_or_shutdown, Bot) else None
     if isinstance(bot_or_shutdown, asyncio.Event):
         event = bot_or_shutdown
     else:
@@ -76,7 +69,6 @@ async def cleanup_expired_subscriptions_loop(
             if now - _last_heavy_cleanup >= CLEANUP_LOOP_INTERVAL:
                 await _apply_due_white_internet_downgrades()
                 await _cleanup_expired_vless_network_grace()
-                await _cleanup_expired_vless_retention_grace(bot)
                 await _sweep_vless_pending_revocations()
                 _last_heavy_cleanup = now
 
@@ -169,126 +161,6 @@ async def _cleanup_expired_vless_network_grace() -> None:
                 logger.info("VLESS network grace/hold deactivation applied for user_id=%s", user_id)
         except Exception as e:
             logger.warning("VLESS network grace deactivation failed for user_id=%s: %s", user_id, e)
-
-
-async def _cleanup_expired_vless_retention_grace(bot: Bot | None = None) -> None:
-    """Perform 24h grace retention cleanup for expired VLESS subscriptions (clear active HWIDs, notify user)."""
-    current_time = now_utc()
-    threshold = current_time - timedelta(hours=GRACE_PERIOD_HOURS)
-
-    async with session_scope() as session:
-        from database.models import UserDevice
-
-        has_user_devices = (
-            select(UserDevice.id)
-            .where(UserDevice.user_id == User.id)
-            .correlate(User)
-            .exists()
-        )
-        stmt = (
-            select(User.id)
-            .join(VlessSubscription, VlessSubscription.user_id == User.id)
-            .where(
-                User.is_deleted.is_(False),
-                User.subscription_end.is_not(None),
-                User.subscription_end < threshold,
-                or_(
-                    VlessSubscription.is_active.is_(True),
-                    and_(
-                        VlessSubscription.active_hwids.is_not(None),
-                        cast(VlessSubscription.active_hwids, String) != "{}",
-                    ),
-                    has_user_devices,
-                ),
-            )
-            .order_by(User.subscription_end.asc())
-            .limit(50)
-        )
-        result = await session.execute(stmt)
-        user_ids = [row[0] for row in result.all()]
-
-    if not user_ids:
-        return
-
-    from database.repositories import user_devices_repo, vless_subscription_repo
-    from services.audit_service import AuditService
-    from services.vless_subscription_service import VlessSubscriptionService
-
-    for user_id in user_ids:
-        notify_tg_id = None
-        try:
-            async with session_scope() as session:
-                user = await session.get(User, user_id, with_for_update=True)
-                if not user or user.is_deleted or not user.subscription_end:
-                    continue
-
-                from utils.datetime_helpers import is_permanent_subscription
-
-                if is_permanent_subscription(user.subscription_end):
-                    continue
-                if user.subscription_end >= threshold:
-                    continue
-
-                vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
-                active_dev_count = await user_devices_repo.count_active_user_devices(session, user.id)
-                had_vless_devices = bool(
-                    vless_sub and (vless_sub.active_hwids or vless_sub.is_active or active_dev_count > 0)
-                )
-
-                await SubscriptionService.sync_access_state(session, user)
-
-                if not vless_sub or not had_vless_devices:
-                    continue
-
-                cleared_legacy = await vless_subscription_repo.clear_active_hwids(session, vless_sub.id)
-                from database.models import UserDevice
-                from sqlalchemy import delete as sa_delete
-
-                del_res = await session.execute(sa_delete(UserDevice).where(UserDevice.user_id == user.id))
-                cleared = max(cleared_legacy, int(del_res.rowcount or 0))
-                vless_sub.is_active = False
-                await session.flush()
-
-                VlessSubscriptionService.ensure_synced_background(user.id, is_active=False, session=session)
-
-                notify_tg_id = user.telegram_id
-                await AuditService.log_action(
-                    session,
-                    admin_id=0,
-                    action=AdminAuditAction.CLEANUP_DEVICE_DELETE,
-                    target_type="user",
-                    target_id=user.id,
-                    details={
-                        "hwids_cleared": cleared,
-                        "vless_deactivated": True,
-                        "reason": "grace_expiry",
-                    },
-                )
-                logger.info(
-                    "VLESS 24h retention grace cleanup: cleared HWIDs for user_id=%s without UUID rotation",
-                    user_id,
-                )
-
-            if notify_tg_id and bot:
-                try:
-                    await safe_send_message(
-                        bot,
-                        notify_tg_id,
-                        NOTIFY_DEVICES_DELETED,
-                        reply_markup=get_devices_deleted_keyboard(),
-                        parse_mode="HTML",
-                        raise_forbidden=True,
-                    )
-                except TelegramForbiddenError:
-                    async with session_scope() as blocked_session:
-                        b_user = await blocked_session.get(User, user_id)
-                        if b_user:
-                            b_user.is_bot_blocked = True
-                except Exception as e:
-                    logger.warning("Failed to notify user %s on device deletion: %s", user_id, e)
-
-        except Exception as e:
-            logger.warning("VLESS 24h retention grace cleanup failed for user_id=%s: %s", user_id, e)
 
 
 async def _sweep_vless_pending_revocations() -> None:

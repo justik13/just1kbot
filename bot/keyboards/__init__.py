@@ -1,5 +1,4 @@
 from .notifications import (
-    get_devices_deleted_keyboard,
     get_dismiss_alert_keyboard,
     get_dismiss_notification_keyboard,
     get_node_monitor_alert_keyboard,
@@ -10,7 +9,6 @@ from .notifications import (
 )
 
 __all__ = [
-    "get_devices_deleted_keyboard",
     "get_dismiss_alert_keyboard",
     "get_dismiss_notification_keyboard",
     "get_node_monitor_alert_keyboard",

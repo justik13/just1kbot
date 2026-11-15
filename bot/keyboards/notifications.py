@@ -37,10 +37,6 @@ def get_post_expiry_keyboard() -> InlineKeyboardMarkup:
     return get_dismiss_notification_keyboard()
 
 
-def get_devices_deleted_keyboard() -> InlineKeyboardMarkup:
-    return get_dismiss_notification_keyboard()
-
-
 def get_referral_bonus_keyboard() -> InlineKeyboardMarkup:
     return get_dismiss_notification_keyboard()
 
