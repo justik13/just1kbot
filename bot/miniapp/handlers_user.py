@@ -159,8 +159,8 @@ async def _get_referral_summary(
         else:
             invited_by_label = f"ID {user.referred_by}"
 
-    invited_rows = await get_user_referrals_paginated(
-        session, user.telegram_id, page=0, per_page=20
+    invited_rows, _total, _page = await get_user_referrals_paginated(
+        session, user.telegram_id, page=1, per_page=20
     )
     invited_users = [
         {

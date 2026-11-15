@@ -191,11 +191,11 @@ async def _send_autorenew_notice(bot: Bot, telegram_id: int, text: str) -> None:
 async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
     """Automatically renew Standard and White Internet subscriptions from wallet balance when enabled."""
     from config.enums import WhiteInternetStatus
-    from config.tariffs import get_white_internet_tier_price
     from database.models import WhiteInternetSubscription
     from database.repositories.account_ledger_repo import get_account_balance
     from services.order_service import OrderService
     from services.subscription import SubscriptionService
+    from services.white_internet_service import get_white_internet_tier_price
 
     window_start = current_time - timedelta(hours=24)
     window_end = current_time + timedelta(hours=24)
