@@ -1,50 +1,53 @@
 import { api } from "../api.js";
-import { escapeHtml, healthChipInfo, openModal, roleLabel, showToast } from "../ui.js";
+import { escapeHtml, healthChipInfo, roleLabel, showToast } from "../ui.js";
 
 let currentFilter = "all";
 
-async function _openIncySettingsModal() {
+export async function renderSubscriptionSettingsView(body) {
+    body.innerHTML = `<section class="card card-center"><div class="muted">Загрузка настроек подписки...</div></section>`;
     let current;
     try {
         const res = await api.getIncySettings();
         current = res.settings || {};
     } catch (err) {
-        showToast(err.message || "Не удалось загрузить настройки INCY");
+        body.innerHTML = `<section class="card"><div class="muted">${escapeHtml(err.message || "Не удалось загрузить настройки подписки")}</div></section>`;
         return;
     }
 
-    const box = document.createElement("form");
-    box.className = "field";
-    box.style.gap = "10px";
-    box.innerHTML = `
-        <div class="field">
-            <label>Название профиля (Profile-Title)</label>
-            <input name="profile_title" class="input" maxlength="120" value="${escapeHtml(current.profile_title || "")}" placeholder="✦ Just1k">
-        </div>
-        <div class="field">
-            <label>Баннер / Анонс (Announce, пусто = авто-статус)</label>
-            <textarea name="announce" class="textarea" maxlength="300" style="min-height:70px;" placeholder="Оставьте пустым для автоматического статуса подписки">${escapeHtml(current.announce || "")}</textarea>
-        </div>
-        <div class="field">
-            <label>Ссылка анонса (Announce-Url)</label>
-            <input name="announce_url" class="input" maxlength="500" value="${escapeHtml(current.announce_url || "")}" placeholder="https://t.me/...">
-        </div>
-        <label class="checkbox-row">
-            <input name="profile_show_devices" type="checkbox" ${current.profile_show_devices ? "checked" : ""}>
-            <span>Показывать счётчик устройств в названии профиля</span>
-        </label>
-        <label class="checkbox-row">
-            <input name="fragmentation_enabled" type="checkbox" ${current.fragmentation_enabled !== false ? "checked" : ""}>
-            <span>Фрагментация TLS-пакетов</span>
-        </label>
-        <button type="submit" class="btn btn-primary">Сохранить настройки</button>
+    body.innerHTML = `
+        <section class="card">
+            <div class="card-title">Оформление подписки (INCY / Happ)</div>
+            <form id="subSettingsForm" class="field" style="gap:10px;">
+                <div class="field">
+                    <label>Название профиля (Profile-Title)</label>
+                    <input name="profile_title" class="input" maxlength="120" value="${escapeHtml(current.profile_title || "")}" placeholder="✦ Just1k">
+                </div>
+                <div class="field">
+                    <label>Баннер / Анонс (Announce, пусто = авто-статус)</label>
+                    <textarea name="announce" class="textarea" maxlength="300" style="min-height:70px;" placeholder="Оставьте пустым для автоматического статуса подписки">${escapeHtml(current.announce || "")}</textarea>
+                </div>
+                <div class="field">
+                    <label>Ссылка анонса (Announce-Url)</label>
+                    <input name="announce_url" class="input" maxlength="500" value="${escapeHtml(current.announce_url || "")}" placeholder="https://t.me/...">
+                </div>
+                <label class="checkbox-row">
+                    <input name="profile_show_devices" type="checkbox" ${current.profile_show_devices ? "checked" : ""}>
+                    <span>Показывать счётчик устройств в названии профиля</span>
+                </label>
+                <label class="checkbox-row">
+                    <input name="fragmentation_enabled" type="checkbox" ${current.fragmentation_enabled !== false ? "checked" : ""}>
+                    <span>Фрагментация TLS-пакетов</span>
+                </label>
+                <button type="submit" class="btn btn-primary">Сохранить настройки</button>
+            </form>
+        </section>
     `;
 
-    const close = openModal("Оформление INCY / Happ", box);
-    box.addEventListener("submit", async (e) => {
+    const form = body.querySelector("#subSettingsForm");
+    form.addEventListener("submit", async (e) => {
         e.preventDefault();
-        const fd = new FormData(box);
-        const btn = box.querySelector("button[type='submit']");
+        const fd = new FormData(form);
+        const btn = form.querySelector("button[type='submit']");
         btn.disabled = true;
         try {
             await api.updateIncySettings({
@@ -54,8 +57,7 @@ async function _openIncySettingsModal() {
                 profile_show_devices: Boolean(fd.get("profile_show_devices")),
                 fragmentation_enabled: Boolean(fd.get("fragmentation_enabled")),
             });
-            showToast("Настройки INCY / Happ сохранены");
-            close();
+            showToast("Оформление подписки сохранено");
         } catch (err) {
             showToast(err.message || "Ошибка сохранения");
         } finally {
@@ -127,10 +129,7 @@ export function renderNodesView(root, state, onReload, onSelectNode) {
         <section class="card">
             <div class="row">
                 <div class="card-title">Список нод</div>
-                <div style="display:flex;gap:6px;">
-                    <button id="incySettingsBtn" type="button" class="btn btn-sm">Оформление INCY</button>
-                    <button id="reloadNodesBtn" type="button" class="btn btn-sm">Обновить список</button>
-                </div>
+                <button id="reloadNodesBtn" type="button" class="btn btn-sm">Обновить список</button>
             </div>
             <div class="filter-pills">
                 <button type="button" class="pill-btn ${currentFilter === "all" ? "active" : ""}" data-filter="all">Все (${counts.all})</button>
@@ -142,7 +141,6 @@ export function renderNodesView(root, state, onReload, onSelectNode) {
         </section>
     `;
 
-    root.querySelector("#incySettingsBtn").addEventListener("click", _openIncySettingsModal);
     root.querySelector("#reloadNodesBtn").addEventListener("click", onReload);
     root.querySelectorAll("[data-filter]").forEach((btn) => {
         btn.addEventListener("click", () => {

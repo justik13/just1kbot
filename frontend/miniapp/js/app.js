@@ -1,7 +1,7 @@
 import { api } from "./api.js";
 import { escapeHtml, showToast } from "./ui.js";
 import { renderSecurity2FA } from "./views/security_2fa.js";
-import { renderNodesView } from "./views/nodes.js";
+import { renderNodesView, renderSubscriptionSettingsView } from "./views/nodes.js";
 import { renderNodeDetailView } from "./views/node_detail.js";
 import { renderAdminUsersView } from "./views/admin_users.js";
 import { clearBroadcastPollTimer, renderAdminBroadcastsView } from "./views/admin_broadcasts.js";
@@ -121,6 +121,7 @@ function _renderAdminView() {
     root.innerHTML = `
         <nav class="tabs-bar">
             <button type="button" class="tab-btn ${appState.adminTab === "nodes" ? "active" : ""}" data-atab="nodes">Ноды</button>
+            <button type="button" class="tab-btn ${appState.adminTab === "subscription" ? "active" : ""}" data-atab="subscription">Подписка</button>
             <button type="button" class="tab-btn ${appState.adminTab === "users" ? "active" : ""}" data-atab="users">Пользователи</button>
             <button type="button" class="tab-btn ${appState.adminTab === "broadcasts" ? "active" : ""}" data-atab="broadcasts">Рассылки</button>
             <button type="button" class="tab-btn ${appState.adminTab === "finances" ? "active" : ""}" data-atab="finances">Финансы</button>
@@ -172,6 +173,8 @@ function _renderAdminView() {
             appState.selectedNodeId = id;
             _renderAdminView();
         });
+    } else if (appState.adminTab === "subscription") {
+        renderSubscriptionSettingsView(body);
     } else if (appState.adminTab === "users") {
         renderAdminUsersView(body, appState);
     } else if (appState.adminTab === "broadcasts") {

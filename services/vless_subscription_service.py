@@ -84,11 +84,9 @@ class VlessSubscriptionService:
                 port = 443
             if port == 10443:
                 port = 443
-            if extra.get("origin_hidden"):
-                continue
 
             flag = srv.country_flag or "🌐"
-            raw_name = extra.get("origin_tag") or extra.get("vless_name") or srv.name
+            raw_name = extra.get("vless_name") or srv.name
             clean_name = str(raw_name)
             for ch in ("#", "?", "&"):
                 clean_name = clean_name.replace(ch, " ")
@@ -101,7 +99,7 @@ class VlessSubscriptionService:
             quoted_label = urllib.parse.quote(label)
             # INCY renders vector flag when emoji is the first character after #
             # and displays serverDescription badge via ?serverDescription=base64(UTF-8)
-            badge_raw = extra.get("origin_badge") if "origin_badge" in extra else extra.get("server_description")
+            badge_raw = extra.get("server_description")
             if badge_raw and str(badge_raw).strip() and str(badge_raw).strip().lower() != "none":
                 clean_badge = str(badge_raw).strip()[:30]
                 b64_badge = base64.b64encode(clean_badge.encode("utf-8")).decode("utf-8")
@@ -138,20 +136,6 @@ class VlessSubscriptionService:
             or os.getenv("WHITE_INTERNET_PATH")
             or DEFAULT_WHITE_INTERNET_PATH
         )
-        origin_tag = extra.get("origin_tag")
-        origin_badge = extra.get("origin_badge")
-        default_relay_badge = extra.get("relay_badge")
-        relay_names = extra.get("relay_names") if isinstance(extra.get("relay_names"), dict) else None
-        relay_badges = extra.get("relay_badges") if isinstance(extra.get("relay_badges"), dict) else None
-        origin_hidden = bool(extra.get("origin_hidden", False))
-
-        relay_hidden_raw = extra.get("relay_hidden")
-        if isinstance(relay_hidden_raw, (list, tuple, set)):
-            relay_hidden = {str(item) for item in relay_hidden_raw}
-        elif isinstance(relay_hidden_raw, str) and relay_hidden_raw.strip():
-            relay_hidden = {item.strip() for item in relay_hidden_raw.split(",") if item.strip()}
-        else:
-            relay_hidden = set()
 
         xhttp_locations = extra.get("xhttp_locations")
         if isinstance(xhttp_locations, list) and xhttp_locations:
@@ -167,8 +151,6 @@ class VlessSubscriptionService:
                 if not loc_cdn:
                     continue
                 if loc_code:
-                    if loc_code in relay_hidden:
-                        continue
                     by_cdn.setdefault(loc_cdn, []).append({
                         "code": loc_code,
                         "path": str(loc["path"]),
@@ -184,15 +166,10 @@ class VlessSubscriptionService:
                         path=base_path,
                         relays=cdn_relays,
                         include_origin=False,
-                        origin_tag=origin_tag,
-                        origin_badge=origin_badge,
-                        default_relay_badge=default_relay_badge,
-                        relay_names=relay_names,
-                        relay_badges=relay_badges,
                     )
                 )
 
-            if (not origin_hidden and has_default_origin) or not links:
+            if has_default_origin or not links:
                 if default_cdn:
                     links.extend(
                         WhiteInternetService.generate_vless_links(
@@ -200,12 +177,7 @@ class VlessSubscriptionService:
                             cdn_domain=default_cdn,
                             path=base_path,
                             relays=None,
-                            include_origin=not origin_hidden,
-                            origin_tag=origin_tag,
-                            origin_badge=origin_badge,
-                            default_relay_badge=default_relay_badge,
-                            relay_names=relay_names,
-                            relay_badges=relay_badges,
+                            include_origin=True,
                         )
                     )
             return links
@@ -213,29 +185,12 @@ class VlessSubscriptionService:
         if not default_cdn:
             return []
 
-        relays = extra.get("relays")
-        if not isinstance(relays, list):
-            relays = None
-        active_relays = (
-            [
-                r
-                for r in relays
-                if isinstance(r, dict) and (r.get("code") or r.get("name")) not in relay_hidden
-            ]
-            if relays
-            else None
-        )
         return WhiteInternetService.generate_vless_links(
             subscription,
             cdn_domain=default_cdn,
             path=base_path,
-            relays=active_relays,
-            include_origin=not origin_hidden,
-            origin_tag=origin_tag,
-            origin_badge=origin_badge,
-            default_relay_badge=default_relay_badge,
-            relay_names=relay_names,
-            relay_badges=relay_badges,
+            relays=None,
+            include_origin=True,
         )
 
     @staticmethod
