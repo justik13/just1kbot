@@ -382,7 +382,6 @@ async def api_admin_incy_get_handler(request: web.Request) -> web.Response:
         announce = await get_system_setting(session, "vless_announce", "")
         announce_url = await get_system_setting(session, "vless_announce_url", "")
         show_devices_raw = await get_system_setting(session, "vless_profile_show_devices", "false")
-        routing_raw = await get_system_setting(session, "vless_routing_enabled", "true")
         frag_raw = await get_system_setting(session, "vless_fragmentation_enabled", "true")
 
     return web.json_response(
@@ -393,7 +392,6 @@ async def api_admin_incy_get_handler(request: web.Request) -> web.Response:
                 "announce": str(announce or ""),
                 "announce_url": str(announce_url or ""),
                 "profile_show_devices": _as_bool_setting(show_devices_raw, False),
-                "routing_enabled": _as_bool_setting(routing_raw, True),
                 "fragmentation_enabled": _as_bool_setting(frag_raw, True),
             },
         }
@@ -442,10 +440,6 @@ async def api_admin_incy_put_handler(request: web.Request) -> web.Response:
             val = "true" if payload.profile_show_devices else "false"
             await set_system_setting(session, "vless_profile_show_devices", val, updated_by=ctx.telegram_id)
             changed["profile_show_devices"] = payload.profile_show_devices
-        if payload.routing_enabled is not None:
-            val = "true" if payload.routing_enabled else "false"
-            await set_system_setting(session, "vless_routing_enabled", val, updated_by=ctx.telegram_id)
-            changed["routing_enabled"] = payload.routing_enabled
         if payload.fragmentation_enabled is not None:
             val = "true" if payload.fragmentation_enabled else "false"
             await set_system_setting(session, "vless_fragmentation_enabled", val, updated_by=ctx.telegram_id)

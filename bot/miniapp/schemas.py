@@ -98,7 +98,6 @@ class IncyGlobalSettingsPayload(BaseModel):
     announce: str | None = Field(default=None, max_length=300)
     announce_url: str | None = Field(default=None, max_length=500)
     profile_show_devices: bool | None = None
-    routing_enabled: bool | None = None
     fragmentation_enabled: bool | None = None
 
 

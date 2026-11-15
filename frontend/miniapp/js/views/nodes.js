@@ -34,10 +34,6 @@ async function _openIncySettingsModal() {
             <span>Показывать счётчик устройств в названии профиля</span>
         </label>
         <label class="checkbox-row">
-            <input name="routing_enabled" type="checkbox" ${current.routing_enabled !== false ? "checked" : ""}>
-            <span>Автоматическая маршрутизация (Routing)</span>
-        </label>
-        <label class="checkbox-row">
             <input name="fragmentation_enabled" type="checkbox" ${current.fragmentation_enabled !== false ? "checked" : ""}>
             <span>Фрагментация TLS-пакетов</span>
         </label>
@@ -56,7 +52,6 @@ async function _openIncySettingsModal() {
                 announce: String(fd.get("announce") || "").trim(),
                 announce_url: String(fd.get("announce_url") || "").trim(),
                 profile_show_devices: Boolean(fd.get("profile_show_devices")),
-                routing_enabled: Boolean(fd.get("routing_enabled")),
                 fragmentation_enabled: Boolean(fd.get("fragmentation_enabled")),
             });
             showToast("Настройки INCY / Happ сохранены");

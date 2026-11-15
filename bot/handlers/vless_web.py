@@ -843,12 +843,6 @@ async def serve_unified_subscription_feed(
         else:
             show_devices = bool(show_devices_setting)
 
-        routing_setting = await get_system_setting(session, "vless_routing_enabled", True)
-        if isinstance(routing_setting, str):
-            routing_enabled = routing_setting.lower() in ("1", "true", "yes", "on")
-        else:
-            routing_enabled = bool(routing_setting)
-
         fragmentation_setting = await get_system_setting(session, "vless_fragmentation_enabled", True)
         if isinstance(fragmentation_setting, str):
             fragmentation_enabled = fragmentation_setting.lower() in ("1", "true", "yes", "on")
@@ -880,27 +874,15 @@ async def serve_unified_subscription_feed(
             "Hide-Url": "1",
             "No-Limit-Enabled": "1",
         }
-        routing_scheme = "happ" if is_happ else "incy"
-
         if fragmentation_enabled:
             response_headers["fragmentation-enable"] = "1"
             response_headers["fragmentation-packets"] = "tlshello"
             response_headers["fragmentation-length"] = "10-30"
             response_headers["fragmentation-interval"] = "10-30"
 
-        if routing_enabled:
-            response_headers["Routing"] = VlessSubscriptionService.generate_incy_routing_header(
-                profile_name=constants.DEFAULT_VLESS_PROFILE_TITLE,
-                direct_ru=bool(std_active),
-                scheme=routing_scheme,
-            )
-            response_headers["routing-geo-update-interval"] = "168"
-            if is_happ:
-                response_headers["Routing-Enable"] = "true"
-        else:
-            response_headers["Routing"] = "off"
-            if is_happ:
-                response_headers["Routing-Enable"] = "0"
+        response_headers["Routing"] = "off"
+        if is_happ:
+            response_headers["Routing-Enable"] = "0"
 
         if is_happ:
             clean_bot = str(bot_username).strip().lstrip("@") or constants.DEFAULT_FALLBACK_BOT_USERNAME
