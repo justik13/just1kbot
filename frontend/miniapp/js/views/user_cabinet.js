@@ -950,9 +950,6 @@ function _renderConnectTab(body, d, reload, root) {
         pills.push(`<span class="chip chip-info">Белый интернет · ${Number(wi.device_limit || 1)} устр. · ${usedGb}/${totalGb} ГБ · до ${formatDate(wi.expires_at)}</span>`);
     }
 
-    const incyHref = `incy://add/${subUrl}`;
-    const happHref = `happ://add/${subUrl}`;
-
     body.innerHTML = `
         <section class="hero-card is-active">
             <div class="row">
@@ -965,15 +962,15 @@ function _renderConnectTab(body, d, reload, root) {
             <div class="option-pills">${pills.join("")}</div>
             <div class="connect-actions">
                 ${desktopFirst ? `
-                    <a href="${escapeHtml(happHref)}" class="btn btn-primary btn-lg">${_ICONS.bolt} Подключить в Happ</a>
+                    <button type="button" data-open-client="happ" class="btn btn-primary btn-lg">${_ICONS.bolt} Подключить в Happ</button>
                 ` : `
-                    <a href="${escapeHtml(incyHref)}" class="btn btn-primary btn-lg">${_ICONS.bolt} Подключить в INCY</a>
+                    <button type="button" data-open-client="incy" class="btn btn-primary btn-lg">${_ICONS.bolt} Подключить в INCY</button>
                 `}
                 <div class="connect-pair">
                     ${desktopFirst ? `
-                        <a href="${escapeHtml(incyHref)}" class="btn btn-sm">Открыть в INCY</a>
+                        <button type="button" data-open-client="incy" class="btn btn-sm">Открыть в INCY</button>
                     ` : `
-                        <a href="${escapeHtml(happHref)}" class="btn btn-sm">Открыть в Happ</a>
+                        <button type="button" data-open-client="happ" class="btn btn-sm">Открыть в Happ</button>
                     `}
                     <button id="copySubBtn" type="button" class="btn btn-sm">${_ICONS.copy} Копировать ключ</button>
                 </div>
@@ -984,6 +981,13 @@ function _renderConnectTab(body, d, reload, root) {
         ${_buildDevicesSectionHtml(d)}
     `;
 
+    body.querySelectorAll("[data-open-client]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            const client = btn.dataset.openClient;
+            const bridgeUrl = `${window.location.origin}/app/open-client?client=${encodeURIComponent(client)}&sub=${encodeURIComponent(subUrl)}`;
+            openExternalLink(bridgeUrl);
+        });
+    });
     body.querySelector("#copySubBtn").addEventListener("click", () => copyText(subUrl, "Ключ скопирован"));
     _bindGuideEvents(body, root);
     _bindDevicesEvents(body, reload);

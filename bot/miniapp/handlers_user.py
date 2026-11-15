@@ -272,8 +272,17 @@ async def api_user_dashboard_handler(request: web.Request) -> web.Response:
         cooldown_until = user.standard_downgrade_cooldown_until
         pending_limit = wi_sub.pending_device_limit if wi_sub else None
         pending_from = wi_sub.pending_from if wi_sub else None
-        support_username = (get_settings().SUPPORT_USERNAME or "").strip().lstrip("@")
-        support_url = f"https://t.me/{support_username}" if support_username else None
+        raw_support = (get_settings().SUPPORT_USERNAME or "").strip()
+        if raw_support.startswith(("https://", "http://")):
+            support_url = raw_support
+        elif raw_support.startswith("t.me/"):
+            support_url = f"https://{raw_support}"
+        elif raw_support.startswith("tg://resolve?domain="):
+            domain_part = raw_support.split("domain=", 1)[1].split("&", 1)[0].strip().lstrip("@")
+            support_url = f"https://t.me/{domain_part}" if domain_part else None
+        else:
+            support_username = raw_support.lstrip("@")
+            support_url = f"https://t.me/{support_username}" if support_username else None
 
         return web.json_response({
             "ok": True,

@@ -50,25 +50,32 @@ export async function copyText(text, successMsg = "Скопировано") {
 
 export function openExternalLink(url) {
     if (!url) return;
+    let target = String(url).trim();
+    if (/^tg:\/\/resolve\?domain=/i.test(target)) {
+        const m = target.match(/domain=([^&]+)/i);
+        if (m && m[1]) {
+            target = `https://t.me/${m[1].replace(/^@/, "")}`;
+        }
+    }
     const tg = window.Telegram && window.Telegram.WebApp;
-    const isTgLink = /^(https?:\/\/t\.me\/|tg:\/\/)/i.test(url);
+    const isTgLink = /^https?:\/\/t\.me\//i.test(target);
     if (isTgLink && tg && typeof tg.openTelegramLink === "function") {
         try {
-            tg.openTelegramLink(url);
+            tg.openTelegramLink(target);
             return;
         } catch {
             // Fallback to openLink / window.open
         }
     }
-    if (tg && typeof tg.openLink === "function") {
+    if (tg && typeof tg.openLink === "function" && /^https?:\/\//i.test(target)) {
         try {
-            tg.openLink(url);
+            tg.openLink(target);
             return;
         } catch {
             // Fallback
         }
     }
-    window.open(url, "_blank", "noopener,noreferrer");
+    window.open(target, "_blank", "noopener,noreferrer");
 }
 
 export function formatDate(iso) {
