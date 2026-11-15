@@ -86,164 +86,6 @@ function _openEditModal(node, onDone) {
     });
 }
 
-function _openNodeIncyModal(node, onDone) {
-    const relayCodes = [];
-    const seen = new Set();
-    const addCode = (c) => {
-        const clean = String(c || "").trim();
-        if (clean && !seen.has(clean)) {
-            seen.add(clean);
-            relayCodes.push(clean);
-        }
-    };
-    (node.relays || []).forEach((r) => addCode(r && (r.code || r.name)));
-    (node.xhttp_locations || []).forEach((loc) => addCode(loc && (loc.code || loc.name || loc.location)));
-
-    const relayNames = node.relay_names || {};
-    const relayBadges = node.relay_badges || {};
-    const relayHiddenSet = new Set(Array.isArray(node.relay_hidden) ? node.relay_hidden : []);
-
-    const relaysHtml = relayCodes.length
-        ? `<div class="field" style="margin-top:6px;">
-            <label>Локации / Relay (имя, бейдж, скрытие)</label>
-            ${relayCodes
-                .map(
-                    (code) => `
-                <div class="card" style="padding:8px; margin:0; display:flex; flex-direction:column; gap:6px;">
-                    <div style="font-size:12px; font-weight:600;">${escapeHtml(code)}</div>
-                    <div class="grid-2">
-                        <input data-relay-name="${escapeHtml(code)}" class="input" placeholder="Имя в списке" value="${escapeHtml(relayNames[code] || "")}">
-                        <input data-relay-badge="${escapeHtml(code)}" class="input" placeholder="Бейдж (или none)" value="${escapeHtml(relayBadges[code] || "")}">
-                    </div>
-                    <label class="checkbox-row">
-                        <input data-relay-hidden="${escapeHtml(code)}" type="checkbox" ${relayHiddenSet.has(code) ? "checked" : ""}>
-                        <span>Скрыть локацию</span>
-                    </label>
-                </div>`
-                )
-                .join("")}
-        </div>`
-        : "";
-
-    const box = document.createElement("form");
-    box.className = "field";
-    box.style.gap = "10px";
-    box.innerHTML = `
-        <div class="field">
-            <label>Имя Origin в INCY / Happ (origin_tag)</label>
-            <input name="origin_tag" class="input" maxlength="100" value="${escapeHtml(node.origin_tag || "")}" placeholder="По умолчанию — имя сервера">
-        </div>
-        <div class="field">
-            <label>Бейдж Origin (origin_badge, «none» = убрать)</label>
-            <input name="origin_badge" class="input" maxlength="120" value="${escapeHtml(node.origin_badge || "")}">
-        </div>
-        <label class="checkbox-row">
-            <input name="origin_hidden" type="checkbox" ${node.origin_hidden ? "checked" : ""}>
-            <span>Скрыть прямой Origin из подписки</span>
-        </label>
-        <div class="field">
-            <label>Ссылка поддержки для ноды (Support-Url)</label>
-            <input name="support_url" class="input" maxlength="500" value="${escapeHtml(node.support_url || "")}" placeholder="https://t.me/...">
-        </div>
-        <div class="field">
-            <label>Ссылка канала для ноды (Channel-Url)</label>
-            <input name="channel_url" class="input" maxlength="500" value="${escapeHtml(node.channel_url || "")}" placeholder="https://t.me/...">
-        </div>
-        ${relaysHtml}
-        <button type="submit" class="btn btn-primary">Сохранить оформление</button>
-    `;
-
-    const close = openModal(`INCY / Happ — #${node.id}`, box);
-    box.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const fd = new FormData(box);
-        const rNames = {};
-        const rBadges = {};
-        const rHidden = [];
-        relayCodes.forEach((code) => {
-            const nVal = box.querySelector(`[data-relay-name="${CSS.escape(code)}"]`)?.value.trim() || "";
-            const bVal = box.querySelector(`[data-relay-badge="${CSS.escape(code)}"]`)?.value.trim() || "";
-            const hVal = Boolean(box.querySelector(`[data-relay-hidden="${CSS.escape(code)}"]`)?.checked);
-            if (nVal) rNames[code] = nVal;
-            if (bVal) rBadges[code] = bVal;
-            if (hVal) rHidden.push(code);
-        });
-
-        const btn = box.querySelector("button[type='submit']");
-        btn.disabled = true;
-        try {
-            await api.patchNode(node.id, {
-                origin_tag: String(fd.get("origin_tag") || "").trim(),
-                origin_badge: String(fd.get("origin_badge") || "").trim(),
-                origin_hidden: Boolean(fd.get("origin_hidden")),
-                support_url: String(fd.get("support_url") || "").trim(),
-                channel_url: String(fd.get("channel_url") || "").trim(),
-                relay_names: rNames,
-                relay_badges: rBadges,
-                relay_hidden: rHidden,
-            });
-            showToast("Оформление ноды сохранено");
-            close();
-            await onDone();
-        } catch (err) {
-            showToast(err.message || "Ошибка сохранения");
-        } finally {
-            btn.disabled = false;
-        }
-    });
-}
-
-function _openMigrateModal(node, allNodes, onDone) {
-    const targets = (allNodes || []).filter(
-        (n) =>
-            n.id !== node.id &&
-            n.is_active &&
-            Array.isArray(n.capabilities) &&
-            n.capabilities.includes("xray_origin")
-    );
-    if (!targets.length) {
-        showToast("Нет активных целевых нод для переноса");
-        return;
-    }
-    const box = document.createElement("form");
-    box.className = "field";
-    box.style.gap = "10px";
-    box.innerHTML = `
-        <div class="muted" style="font-size:12px;">
-            Перенос всех активных подписок (${node.wi_subscriptions_count || 0} шт.) с ноды <b>#${node.id} ${escapeHtml(node.name)}</b>. Исходная нода будет переведена в режим вывода (decommissioning).
-        </div>
-        <div class="field">
-            <label>Целевая нода</label>
-            <select name="target_server_id" class="select" required>
-                ${targets
-                    .map(
-                        (t) =>
-                            `<option value="${t.id}">#${t.id} ${escapeHtml(t.country_flag || "")} ${escapeHtml(t.name)}</option>`
-                    )
-                    .join("")}
-            </select>
-        </div>
-        <button type="submit" class="btn btn-primary">Перенести подписки</button>
-    `;
-    const close = openModal(`Миграция с #${node.id}`, box);
-    box.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const targetId = Number(new FormData(box).get("target_server_id"));
-        const btn = box.querySelector("button[type='submit']");
-        btn.disabled = true;
-        try {
-            const res = await api.migrateNode(node.id, targetId);
-            showToast(`Перенесено подписок: ${res.migrated_count ?? 0}`);
-            close();
-            await onDone();
-        } catch (err) {
-            showToast(err.message || "Ошибка миграции");
-        } finally {
-            btn.disabled = false;
-        }
-    });
-}
-
 function _openCertModal(node, onDone) {
     const box = document.createElement("form");
     box.className = "field";
@@ -371,10 +213,6 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
                     <span class="detail-label">Роль</span>
                     <span>${escapeHtml(roleLabel(node.role))}</span>
                 </div>
-                <div class="detail-item">
-                    <span class="detail-label">Протокол</span>
-                    <span>${escapeHtml(node.protocol || "—")}</span>
-                </div>
                 ${node.cdn_domain ? `
                 <div class="detail-item">
                     <span class="detail-label">CDN Домен</span>
@@ -388,10 +226,6 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
                 <div class="detail-item">
                     <span class="detail-label">Bootstrap TLS</span>
                     <span>${node.tls_bootstrap ? "Да (self-signed разрешен)" : "Нет (строгий TLS)"}</span>
-                </div>
-                <div class="detail-item">
-                    <span class="detail-label">Подписок доп. опции</span>
-                    <span>${Number(node.wi_subscriptions_count || 0)}</span>
                 </div>
                 ${node.traffic_limit && typeof node.traffic_limit === "object" ? `
                 <div class="detail-item">
@@ -426,9 +260,7 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
             <div class="card-title">Настройки и обслуживание</div>
             <div class="actions-row">
                 <button type="button" id="detailEditBtn" class="btn btn-sm">Изменить</button>
-                <button type="button" id="detailIncyBtn" class="btn btn-sm">Оформление INCY</button>
                 <button type="button" id="detailCertBtn" class="btn btn-sm">TLS сертификат</button>
-                ${(node.wi_subscriptions_count > 0 || (Array.isArray(node.capabilities) && node.capabilities.includes("xray_origin"))) ? `<button type="button" id="detailMigrateBtn" class="btn btn-sm">Миграция подписок</button>` : ""}
                 <button type="button" id="detailDeleteBtn" class="btn btn-sm btn-danger">Удалить сервер</button>
             </div>
         </section>
@@ -467,17 +299,6 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
     root.querySelector("#detailEditBtn").addEventListener("click", () => {
         _openEditModal(node, onReload);
     });
-
-    root.querySelector("#detailIncyBtn").addEventListener("click", () => {
-        _openNodeIncyModal(node, onReload);
-    });
-
-    const migrateBtn = root.querySelector("#detailMigrateBtn");
-    if (migrateBtn) {
-        migrateBtn.addEventListener("click", () => {
-            _openMigrateModal(node, state.nodes || [], onReload);
-        });
-    }
 
     root.querySelector("#detailCertBtn").addEventListener("click", () => {
         _openCertModal(node, onReload);

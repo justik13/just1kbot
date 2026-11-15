@@ -107,18 +107,6 @@ class UpdateNodePayload(BaseModel):
     allow_bootstrap_tls: bool | None = None
     api_url: str | None = Field(default=None, min_length=1, max_length=255)
     api_key: str | None = Field(default=None, min_length=1, max_length=255)
-    origin_tag: str | None = Field(default=None, max_length=100)
-    origin_badge: str | None = Field(default=None, max_length=120)
-    origin_hidden: bool | None = None
-    support_url: str | None = Field(default=None, max_length=500)
-    channel_url: str | None = Field(default=None, max_length=500)
-    relay_names: dict[str, str] | None = None
-    relay_badges: dict[str, str] | None = None
-    relay_hidden: dict[str, bool] | list[str] | None = None
-
-
-class MigrateNodePayload(BaseModel):
-    target_server_id: int = Field(ge=1, le=2_147_483_647)
 
 
 class ToggleNodePayload(BaseModel):

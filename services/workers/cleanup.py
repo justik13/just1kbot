@@ -43,15 +43,11 @@ _pending_order_backoff_cache: TTLCache[Any, float] = TTLCache(maxsize=2000, ttl=
 
 
 async def cleanup_expired_subscriptions_loop(
-    bot_or_shutdown: Bot | asyncio.Event | None = None,
     shutdown_event: asyncio.Event | None = None,
 ):
     global _last_old_cleanup, _last_heavy_cleanup
 
-    if isinstance(bot_or_shutdown, asyncio.Event):
-        event = bot_or_shutdown
-    else:
-        event = shutdown_event or asyncio.Event()
+    event = shutdown_event or asyncio.Event()
 
     try:
         await asyncio.wait_for(

@@ -326,8 +326,13 @@ async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
                 if user is None or user.is_deleted or user.financial_hold:
                     continue
 
+                from decimal import Decimal
+                from database.repositories import tariffs_repo
+
                 eff_limit = int(sub.pending_device_limit or sub.device_limit or 1)
-                due_rub = get_white_internet_tier_price(eff_limit)
+                wi_tariff = await tariffs_repo.get_tariff_by_type(session, "white_internet")
+                base_price = Decimal(wi_tariff.price_rub) if wi_tariff else None
+                due_rub = get_white_internet_tier_price(eff_limit, base_price=base_price)
                 bal = await get_account_balance(session, user_id=user.id, for_update=True, locked_user=user)
                 if bal.debt > 0 or bal.available < due_rub:
                     continue

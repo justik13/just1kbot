@@ -23,7 +23,6 @@ from bot.miniapp.schemas import (
     IncyGlobalSettingsPayload,
     MassBonusPayload,
     MassExtendPayload,
-    MigrateNodePayload,
     NodeLinksUpdatePayload,
     ToggleNodePayload,
     UpdateNodePayload,
@@ -265,14 +264,6 @@ async def api_admin_nodes_patch_handler(request: web.Request) -> web.Response:
                 allow_bootstrap_tls=payload.allow_bootstrap_tls,
                 api_url=payload.api_url,
                 api_key=payload.api_key,
-                origin_tag=payload.origin_tag,
-                origin_badge=payload.origin_badge,
-                origin_hidden=payload.origin_hidden,
-                support_url=payload.support_url,
-                channel_url=payload.channel_url,
-                relay_names=payload.relay_names,
-                relay_badges=payload.relay_badges,
-                relay_hidden=payload.relay_hidden,
             )
             return web.json_response({"ok": True, "node": node})
     except AdminNodeServiceError as exc:
@@ -328,32 +319,6 @@ async def api_admin_nodes_delete_handler(request: web.Request) -> web.Response:
                 force=force,
             )
             return web.json_response({"ok": True, **deleted})
-    except AdminNodeServiceError as exc:
-        return _service_error_response(exc)
-
-
-async def api_admin_nodes_migrate_handler(request: web.Request) -> web.Response:
-    ctx, err_resp = require_admin_user(request)
-    if err_resp is not None or ctx is None:
-        return err_resp  # type: ignore[return-value]
-
-    server_id, id_err = _parse_server_id(request)
-    if id_err is not None or server_id is None:
-        return id_err  # type: ignore[return-value]
-
-    payload, parse_err = await _parse_json_model(request, MigrateNodePayload)
-    if parse_err is not None or payload is None:
-        return parse_err  # type: ignore[return-value]
-
-    try:
-        async with session_scope() as session:
-            result = await admin_nodes_service.migrate_node_subscriptions(
-                session,
-                admin_id=ctx.telegram_id,
-                source_server_id=server_id,
-                target_server_id=payload.target_server_id,
-            )
-            return web.json_response({"ok": True, **result})
     except AdminNodeServiceError as exc:
         return _service_error_response(exc)
 
@@ -745,7 +710,14 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                     details={"service": "standard", "days": payload.days, "note": note},
                 )
                 if new_end <= now:
-                    VlessSubscriptionService.deprovision_background(user.id)
+                    vless_sub = await vless_subscription_repo.get_subscription_by_user_id(
+                        session, user.id, for_update=True
+                    )
+                    if vless_sub is not None:
+                        old_uuid = str(vless_sub.uuid)
+                        vless_sub.is_active = False
+                        await session.flush()
+                        VlessSubscriptionService.deprovision_background(old_uuid, session=session)
                 return web.json_response({
                     "ok": True,
                     "action": "grant_standard",
@@ -1136,7 +1108,7 @@ async def api_admin_user_message_handler(request: web.Request) -> web.Response:
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
-    user_id, id_err = _parse_positive_int(request, "user_id")
+    user_id, id_err = _parse_user_id(request)
     if id_err is not None or user_id is None:
         return id_err  # type: ignore[return-value]
 

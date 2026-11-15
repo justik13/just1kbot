@@ -23,7 +23,6 @@ from database.repositories import vless_subscription_repo
 from database.repositories.servers_repo import get_server_role
 from services.xray_node_client import XrayNodeClient
 from utils.datetime_helpers import now_utc
-from utils.incy_routing import generate_incy_routing_header as _generate_incy_routing_header
 from utils.security import normalize_public_domain
 
 logger = logging.getLogger(__name__)
@@ -254,22 +253,6 @@ class VlessSubscriptionService:
             raise ValueError("No public DOMAIN configured for subscription URLs")
         clean_domain = domain.strip().replace("https://", "").replace("http://", "").rstrip("/")
         return f"https://{clean_domain}/sub/access/{token}"
-
-    @staticmethod
-    def generate_incy_routing_header(
-        profile_name: str | None = None,
-        *,
-        direct_ru: bool = True,
-        last_updated: str | int | None = None,
-        scheme: str = "incy",
-    ) -> str:
-        """Construct incy:// or happ:// routing deep link header for split tunneling."""
-        return _generate_incy_routing_header(
-            profile_name=profile_name,
-            direct_ru=direct_ru,
-            last_updated=last_updated,
-            scheme=scheme,
-        )
 
     @classmethod
     def ensure_synced_background(

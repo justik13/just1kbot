@@ -570,10 +570,18 @@ async def serve_unified_subscription_feed(
                         "Content-Security-Policy": "default-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self';",
                     }
                     return web.Response(status=200, text=html_body, headers=landing_headers)
-                return web.Response(
-                    status=503,
-                    text=texts.WL_WEB_PENDING,
-                    headers={**common_headers, "Retry-After": "5"},
+                return _build_unified_notice_response(
+                    title_text="⏳ Идёт настройка подключения",
+                    notice_text=texts.WL_WEB_PENDING,
+                    common_headers=common_headers,
+                    bot_username=bot_username,
+                    support_url=support_url,
+                    channel_url=channel_url,
+                    announce_url=channel_url,
+                    upload_bytes=upload_bytes,
+                    download_bytes=download_bytes,
+                    expire_ts=expire_ts,
+                    is_happ=is_happ,
                 )
 
             if not raw_hwid and _is_browser_request(request):
@@ -585,7 +593,7 @@ async def serve_unified_subscription_feed(
                     badge = texts.LANDING_INACTIVE_BADGE_EXHAUSTED
                     title = texts.LANDING_INACTIVE_TITLE_EXHAUSTED
                     desc = texts.LANDING_INACTIVE_DESC_EXHAUSTED
-                elif wi_sub is not None and wi_is_disabled and getattr(user, "subscription_end", None) is None:
+                elif wi_sub is not None and wi_is_disabled and not std_active:
                     badge = texts.LANDING_INACTIVE_BADGE_DISABLED
                     title = texts.LANDING_INACTIVE_TITLE_DISABLED
                     desc = texts.LANDING_INACTIVE_DESC_DISABLED
@@ -617,7 +625,7 @@ async def serve_unified_subscription_feed(
             if wi_sub is not None and wi_is_exhausted and not wi_is_expired and not std_active:
                 stub_title = texts.WL_FEED_EXHAUSTED_TITLE
                 stub_notice = texts.WL_FEED_EXHAUSTED_NOTICE.format(bot_username=bot_username)
-            elif wi_sub is not None and wi_is_disabled and not std_active and getattr(user, "subscription_end", None) is None:
+            elif wi_sub is not None and wi_is_disabled and not std_active:
                 stub_title = texts.WL_FEED_DISABLED_TITLE
                 stub_notice = texts.WL_FEED_DISABLED_NOTICE.format(bot_username=bot_username)
             else:
@@ -790,12 +798,6 @@ async def serve_unified_subscription_feed(
             if is_wi_node_ready and wi_server is not None:
                 wi_links = VlessSubscriptionService.generate_bi_xhttp_links(wi_sub, wi_server)
                 all_links.extend(wi_links)
-            elif not std_active:
-                return web.Response(
-                    status=503,
-                    text=texts.WL_WEB_UNSYNCED,
-                    headers={**common_headers, "Retry-After": "5"},
-                )
 
         no_servers_mode = False
         if not all_links:
@@ -827,15 +829,6 @@ async def serve_unified_subscription_feed(
 
         raw_announce_url = await get_system_setting(session, "vless_announce_url", None)
         clean_announce_url = _sanitize_header_url(raw_announce_url)
-
-        first_extra = {}
-        if std_servers and isinstance(std_servers[0].extra_data, dict):
-            first_extra = std_servers[0].extra_data
-        elif wi_server and isinstance(wi_server.extra_data, dict):
-            first_extra = wi_server.extra_data
-
-        support_url = _resolve_support_url(first_extra, default_bot_url)
-        channel_url = _resolve_channel_url(first_extra, default_bot_url)
 
         show_devices_setting = await get_system_setting(session, "vless_profile_show_devices", False)
         if isinstance(show_devices_setting, str):

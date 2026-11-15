@@ -30,7 +30,6 @@ from bot.miniapp.handlers_admin import (
     api_admin_nodes_delete_handler,
     api_admin_nodes_links_put_handler,
     api_admin_nodes_list_handler,
-    api_admin_nodes_migrate_handler,
     api_admin_nodes_patch_handler,
     api_admin_nodes_refresh_handler,
     api_admin_nodes_toggle_handler,
@@ -218,7 +217,6 @@ def setup_miniapp_routes(app: web.Application) -> None:
     app.router.add_post("/api/app/admin/nodes/{server_id}/refresh", api_admin_nodes_refresh_handler)
     app.router.add_patch("/api/app/admin/nodes/{server_id}", api_admin_nodes_patch_handler)
     app.router.add_post("/api/app/admin/nodes/{server_id}/toggle", api_admin_nodes_toggle_handler)
-    app.router.add_post("/api/app/admin/nodes/{server_id}/migrate", api_admin_nodes_migrate_handler)
     app.router.add_delete("/api/app/admin/nodes/{server_id}", api_admin_nodes_delete_handler)
     app.router.add_put("/api/app/admin/nodes/{server_id}/links", api_admin_nodes_links_put_handler)
     app.router.add_post("/api/app/admin/nodes/{server_id}/certificate", api_admin_nodes_cert_post_handler)

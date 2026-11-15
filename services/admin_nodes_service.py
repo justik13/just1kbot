@@ -178,21 +178,12 @@ def serialize_server_node(
     if not flag:
         flag = "🇷🇺" if role == "ru_hub" else "🌐"
 
-    relay_hidden_raw = extra.get("relay_hidden")
-    if isinstance(relay_hidden_raw, (list, tuple, set)):
-        relay_hidden = [str(item) for item in relay_hidden_raw if str(item).strip()]
-    elif isinstance(relay_hidden_raw, str) and relay_hidden_raw.strip():
-        relay_hidden = [item.strip() for item in relay_hidden_raw.split(",") if item.strip()]
-    else:
-        relay_hidden = []
-
     return {
         "id": server.id,
         "name": server.name,
         "country_flag": flag,
         "api_url": server.api_url,
         "has_api_key": bool(server.api_key),
-        "protocol": server.protocol,
         "role": role,
         "is_active": bool(server.is_active),
         "health_state": server.health_state,
@@ -204,15 +195,6 @@ def serialize_server_node(
         "sub_path_prefix": extra.get("sub_path_prefix") or "",
         "secret_base_path": extra.get("secret_base_path") or "",
         "bridge_uuid": extra.get("bridge_uuid") or "",
-        "origin_tag": extra.get("origin_tag") or "",
-        "origin_badge": extra.get("origin_badge") or "",
-        "origin_hidden": bool(extra.get("origin_hidden", False)),
-        "support_url": extra.get("support_url") or "",
-        "channel_url": extra.get("channel_url") or "",
-        "relay_names": extra.get("relay_names") if isinstance(extra.get("relay_names"), dict) else {},
-        "relay_badges": extra.get("relay_badges") if isinstance(extra.get("relay_badges"), dict) else {},
-        "relay_hidden": relay_hidden,
-        "relays": extra.get("relays") if isinstance(extra.get("relays"), list) else [],
         "modules": extra.get("modules") if isinstance(extra.get("modules"), dict) else {},
         "module_errors": extra.get("module_errors") if isinstance(extra.get("module_errors"), dict) else {},
         "links": extra.get("links") if isinstance(extra.get("links"), dict) else {},
@@ -407,16 +389,8 @@ async def update_node_settings(
     allow_bootstrap_tls: bool | None = None,
     api_url: str | None = None,
     api_key: str | None = None,
-    origin_tag: str | None = None,
-    origin_badge: str | None = None,
-    origin_hidden: bool | None = None,
-    support_url: str | None = None,
-    channel_url: str | None = None,
-    relay_names: dict[str, str] | None = None,
-    relay_badges: dict[str, str] | None = None,
-    relay_hidden: dict[str, bool] | list[str] | None = None,
 ) -> dict[str, Any]:
-    """Update admin-editable node metadata, credentials, and INCY/Happ presentation settings."""
+    """Update admin-editable node metadata and credentials."""
     server = await get_server_by_id(session, server_id, for_update=True)
     if server is None:
         raise AdminNodeServiceError("Node not found", status_code=404)
@@ -451,44 +425,6 @@ async def update_node_settings(
     extra_changed = False
     if allow_bootstrap_tls is not None:
         extra["tls_bootstrap"] = bool(allow_bootstrap_tls)
-        extra_changed = True
-    for str_key, str_val in (
-        ("origin_tag", origin_tag),
-        ("origin_badge", origin_badge),
-        ("support_url", support_url),
-        ("channel_url", channel_url),
-    ):
-        if str_val is not None:
-            cleaned = str_val.strip()
-            if cleaned:
-                extra[str_key] = cleaned
-            else:
-                extra.pop(str_key, None)
-            extra_changed = True
-    if origin_hidden is not None:
-        extra["origin_hidden"] = bool(origin_hidden)
-        extra_changed = True
-    for dict_key, dict_val in (("relay_names", relay_names), ("relay_badges", relay_badges)):
-        if dict_val is not None:
-            cleaned_dict = {
-                str(k).strip(): str(v).strip()
-                for k, v in dict_val.items()
-                if str(k).strip() and str(v).strip()
-            }
-            if cleaned_dict:
-                extra[dict_key] = cleaned_dict
-            else:
-                extra.pop(dict_key, None)
-            extra_changed = True
-    if relay_hidden is not None:
-        if isinstance(relay_hidden, dict):
-            hidden_list = [str(k).strip() for k, v in relay_hidden.items() if v and str(k).strip()]
-        else:
-            hidden_list = [str(item).strip() for item in relay_hidden if str(item).strip()]
-        if hidden_list:
-            extra["relay_hidden"] = hidden_list
-        else:
-            extra.pop("relay_hidden", None)
         extra_changed = True
 
     if extra_changed:
@@ -585,39 +521,6 @@ async def delete_node(
         details={"name": deleted_name, "force": force, "active_wi": active_wi},
     )
     return {"deleted_id": server_id, "name": deleted_name}
-
-
-async def migrate_node_subscriptions(
-    session: AsyncSession,
-    *,
-    admin_id: int,
-    source_server_id: int,
-    target_server_id: int,
-) -> dict[str, Any]:
-    """Migrate all active White Internet subscriptions from source node to target node."""
-    try:
-        migrated_count = await migrate_origin_subscriptions(
-            session,
-            source_server_id,
-            target_server_id,
-            admin_id=admin_id,
-        )
-    except ValueError as exc:
-        raise AdminNodeServiceError(str(exc), status_code=400) from exc
-
-    await AuditService.log_action(
-        session,
-        admin_id=admin_id,
-        action=AdminAuditAction.WHITE_INTERNET_ORIGIN_MIGRATED,
-        target_type="server",
-        target_id=source_server_id,
-        details={"target_server_id": target_server_id, "migrated_count": migrated_count},
-    )
-    return {
-        "source_server_id": source_server_id,
-        "target_server_id": target_server_id,
-        "migrated_count": migrated_count,
-    }
 
 
 async def update_node_links(

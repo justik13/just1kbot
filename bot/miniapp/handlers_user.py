@@ -162,6 +162,19 @@ async def _get_referral_summary(
     invited_rows, _total, _page = await get_user_referrals_paginated(
         session, user.telegram_id, page=1, per_page=20
     )
+    active_ids: set[int] = set()
+    if invited_rows:
+        from database.repositories.users_repo import _referral_paid_activity_condition
+
+        row_ids = [r.id for r in invited_rows]
+        active_result = await session.scalars(
+            select(User.id).where(
+                User.id.in_(row_ids),
+                _referral_paid_activity_condition(User),
+            )
+        )
+        active_ids = set(active_result.all())
+
     invited_users = [
         {
             "label": (
@@ -170,7 +183,7 @@ async def _get_referral_summary(
                 else (r.first_name or f"ID {r.telegram_id}")
             ),
             "created_at": r.created_at.isoformat() if r.created_at else None,
-            "is_active": bool(r.last_payment_at is not None),
+            "is_active": r.id in active_ids,
         }
         for r in invited_rows
     ]

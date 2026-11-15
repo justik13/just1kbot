@@ -95,11 +95,6 @@ export const api = {
             method: "POST",
             body: JSON.stringify(isActive === null ? {} : { is_active: isActive }),
         }),
-    migrateNode: (id, targetServerId) =>
-        requestJson(`/api/app/admin/nodes/${id}/migrate`, {
-            method: "POST",
-            body: JSON.stringify({ target_server_id: Number(targetServerId) }),
-        }),
     deleteNode: (id, force = false) =>
         requestJson(`/api/app/admin/nodes/${id}${force ? "?force=true" : ""}`, {
             method: "DELETE",

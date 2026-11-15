@@ -96,7 +96,7 @@ _ALERT_SHUTDOWN_GRACE = 1.0
 
 
 def _traffic(bot): return traffic_sync_loop(bot, shutdown_event)
-def _cleanup(bot): return cleanup_expired_subscriptions_loop(bot, shutdown_event)
+def _cleanup(bot): return cleanup_expired_subscriptions_loop(shutdown_event)
 def _notifications(bot): return subscription_notifications_loop(bot, shutdown_event)
 def _credit_notifications(bot): return credit_notifications_loop(bot, shutdown_event)
 def _heartbeat(bot): return heartbeat_loop(shutdown_event, heartbeat_allowed)
