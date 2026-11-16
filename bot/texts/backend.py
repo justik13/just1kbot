@@ -29,6 +29,9 @@ PAYMENT_PURCHASE_SUCCESS_CARD = """🎉 <b>{operation_title}</b>
 🎁 Бонусный баланс: <b>{bonus_balance} ₽</b>"""
 PURCHASE_COMPLETED = "Тариф куплен"
 PAYMENT_OP_TITLE_CHANGE = "🔄 Смена тарифа"
+TARIFF_DISPLAY_BASIC = "📱 Базовый"
+TARIFF_DISPLAY_FAMILY = "👨‍👩‍👧‍👦 Семейный"
+TARIFF_DISPLAY_PRO = "🚀 Pro"
 
 # Admin alerts
 ADMIN_ALERT_ORDER_REQUIRES_MANUAL_REVIEW = (
