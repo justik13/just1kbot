@@ -99,16 +99,6 @@ export const api = {
         requestJson(`/api/app/admin/nodes/${id}${force ? "?force=true" : ""}`, {
             method: "DELETE",
         }),
-    updateNodeLinks: (id, payload) =>
-        requestJson(`/api/app/admin/nodes/${id}/links`, {
-            method: "PUT",
-            body: JSON.stringify(payload),
-        }),
-    deployNodeCert: (id, payload) =>
-        requestJson(`/api/app/admin/nodes/${id}/certificate`, {
-            method: "POST",
-            body: JSON.stringify(payload),
-        }),
     listUsers: (q = "", offset = 0, limit = 25, filter = "all") =>
         requestJson(
             `/api/app/admin/users?q=${encodeURIComponent(q)}&offset=${offset}&limit=${limit}&filter=${encodeURIComponent(filter || "all")}`

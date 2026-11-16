@@ -33,7 +33,7 @@ from config.enums import (
 # Protocol
 XRAY_PROTOCOL = "xray"
 VLESS_PROTOCOL = "vless"
-XRAY_ORIGIN_CAPABILITY = "xray_origin"
+WHITE_INTERNET_CAPABILITY = "white_internet"
 
 # Default HTTP rate limiter settings
 RATE_LIMIT_REQUESTS_PER_MINUTE = 30.0
@@ -242,6 +242,12 @@ CANONICAL_XHTTP_PROFILE: dict[str, Any] = {
     "xPaddingMethod": "tokenish",
     "xPaddingObfsMode": True,
     "xPaddingBytes": _validate_xhttp_padding_bytes(os.getenv("WHITE_INTERNET_PADDING_BYTES")),
+    "xmux": {
+        "maxConnections": 2,
+        "cMaxReuseTimes": "10-20",
+        "hMaxRequestTimes": "300-500",
+        "hMaxReusableSecs": "120-240",
+    },
     "security": "tls",
     "alpn": ["h2", "http/1.1"],
     "fp": WHITE_INTERNET_TLS_FINGERPRINT,
@@ -316,7 +322,7 @@ __all__ = [
     "WhiteInternetProvisioningStatus",
     "WhiteInternetStatus",
     "WORKER_ERROR_SLEEP_INTERVAL",
-    "XRAY_ORIGIN_CAPABILITY",
+    "WHITE_INTERNET_CAPABILITY",
     "XRAY_PROTOCOL",
     "YOOKASSA_IP_RANGES",
 ]

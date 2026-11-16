@@ -40,21 +40,182 @@ class VlessSubscriptionService:
     _ACTIVE_SERVER_SYNCS: set[int] = set()
 
     @staticmethod
+    def _build_vless_fragment(
+        flag: str | None,
+        raw_name: str,
+        badge_raw: str | None = None,
+        *,
+        suffix: str = "",
+    ) -> str:
+        clean_flag = (flag or "🌐").strip()
+        clean_name = str(raw_name or "")
+        for ch in ("?", "&", "\r", "\n"):
+            clean_name = clean_name.replace(ch, " ")
+        clean_name = clean_name.strip()
+        if clean_flag and not clean_name.startswith(clean_flag):
+            label = f"{clean_flag} {clean_name}".strip()
+        else:
+            label = clean_name
+        if suffix and not label.endswith(suffix):
+            label = f"{label} {suffix}".strip()
+
+        quoted_label = urllib.parse.quote(label)
+        # INCY renders vector flag when emoji is the first character after #
+        # and displays serverDescription badge via ?serverDescription=base64(UTF-8)
+        if badge_raw and str(badge_raw).strip() and str(badge_raw).strip().lower() != "none":
+            clean_badge = str(badge_raw).strip()[:30]
+            b64_badge = base64.b64encode(clean_badge.encode("utf-8")).decode("utf-8")
+            return f"{quoted_label}?serverDescription={b64_badge}"
+        return quoted_label
+
+    @staticmethod
+    def _resolve_port_and_fp(extra: dict) -> tuple[int, str]:
+        raw_port = extra.get("vless_port", 443)
+        try:
+            port = int(raw_port) if raw_port is not None else 443
+            if not (1 <= port <= 65535):
+                port = 443
+        except (ValueError, TypeError):
+            port = 443
+
+        raw_fp = str(extra.get("fp") or extra.get("fingerprint") or "").strip().lower()
+        fp = raw_fp if raw_fp in VALID_VLESS_TLS_FINGERPRINTS else VLESS_TLS_FINGERPRINT
+        return port, fp
+
+    @staticmethod
+    def _extract_sni_routes(extra: dict) -> list[dict[str, str]]:
+        raw = extra.get("sni_routes")
+        if not isinstance(raw, list):
+            links_d = extra.get("links")
+            if isinstance(links_d, dict):
+                std_d = links_d.get("standard")
+                if isinstance(std_d, dict):
+                    raw = std_d.get("sni_routes")
+        if not isinstance(raw, list):
+            return []
+        routes: list[dict[str, str]] = []
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            sni = str(item.get("sni") or "").strip().lower()
+            bridge_code = str(item.get("bridge_code") or "").strip().lower()
+            if sni and bridge_code and _FQDN_REGEX.match(sni):
+                routes.append({"sni": sni, "bridge_code": bridge_code})
+        return routes
+
+    @staticmethod
     def generate_vless_links(
         subscription: VlessSubscription,
         servers: list[Server],
+        exit_nodes: list[Server] | None = None,
     ) -> list[str]:
-        """Generate VLESS TLS xtls-rprx-vision links for given servers."""
+        """Generate VLESS TLS xtls-rprx-vision links.
+
+        Never emits direct links to eu_hub or exit_node.
+        For v2 ru_hubs, routes Standard traffic via ru_hub sni_routes (or exit_node.std_sni)
+        on port 443 while displaying exit_node name and flag.
+        """
         links: list[str] = []
+        ru_hubs: list[Server] = []
+        legacy_servers: list[Server] = []
+        discovered_exits: list[Server] = []
+
         for srv in servers:
             if (
                 not srv.is_active
                 or srv.health_state != ServerHealthState.ONLINE
                 or getattr(srv, "lifecycle_status", None) not in (None, ServerLifecycleStatus.ACTIVE)
-                or get_server_role(srv) == "ru_hub"
             ):
                 continue
+            role = get_server_role(srv)
+            if role == "ru_hub":
+                ru_hubs.append(srv)
+            elif role == "exit_node":
+                discovered_exits.append(srv)
+            elif role == "eu_hub":
+                continue
+            else:
+                legacy_servers.append(srv)
 
+        active_exits: list[Server] = []
+        exit_source = exit_nodes if exit_nodes is not None else discovered_exits
+        for ex in exit_source:
+            if (
+                not ex.is_active
+                or ex.health_state != ServerHealthState.ONLINE
+                or getattr(ex, "lifecycle_status", None) not in (None, ServerLifecycleStatus.ACTIVE)
+                or get_server_role(ex) != "exit_node"
+            ):
+                continue
+            active_exits.append(ex)
+
+        seen_links: set[str] = set()
+
+        for hub in ru_hubs:
+            hub_extra = hub.extra_data if isinstance(hub.extra_data, dict) else {}
+            port, fp = VlessSubscriptionService._resolve_port_and_fp(hub_extra)
+            sni_routes = VlessSubscriptionService._extract_sni_routes(hub_extra)
+            route_by_code = {r["bridge_code"]: r["sni"] for r in sni_routes}
+
+            if active_exits:
+                for ex in active_exits:
+                    ex_extra = ex.extra_data if isinstance(ex.extra_data, dict) else {}
+                    if ex_extra.get("in_standard") is False:
+                        continue
+                    explicit_sni = str(ex_extra.get("std_sni") or "").strip().lower()
+                    loc_code = str(ex_extra.get("location_code") or "").strip().lower()
+                    target_sni = explicit_sni or route_by_code.get(loc_code, "")
+                    if not target_sni or not _FQDN_REGEX.match(target_sni):
+                        continue
+                    fragment = VlessSubscriptionService._build_vless_fragment(
+                        ex.country_flag,
+                        ex_extra.get("vless_name") or ex.name,
+                        ex_extra.get("server_description"),
+                    )
+                    link = (
+                        f"vless://{subscription.uuid}@{target_sni}:{port}"
+                        f"?encryption=none&security=tls&sni={target_sni}&fp={fp}"
+                        f"&type=tcp&flow=xtls-rprx-vision#{fragment}"
+                    )
+                    if link not in seen_links:
+                        seen_links.add(link)
+                        links.append(link)
+            elif sni_routes:
+                for r in sni_routes:
+                    target_sni = r["sni"]
+                    fragment = VlessSubscriptionService._build_vless_fragment(
+                        hub.country_flag,
+                        r["bridge_code"].upper(),
+                        hub_extra.get("server_description"),
+                    )
+                    link = (
+                        f"vless://{subscription.uuid}@{target_sni}:{port}"
+                        f"?encryption=none&security=tls&sni={target_sni}&fp={fp}"
+                        f"&type=tcp&flow=xtls-rprx-vision#{fragment}"
+                    )
+                    if link not in seen_links:
+                        seen_links.add(link)
+                        links.append(link)
+            else:
+                domain = hub_extra.get("domain") or hub_extra.get("vless_domain")
+                if domain:
+                    domain = str(domain).strip().lower()
+                    if _FQDN_REGEX.match(domain):
+                        fragment = VlessSubscriptionService._build_vless_fragment(
+                            hub.country_flag,
+                            hub_extra.get("vless_name") or hub.name,
+                            hub_extra.get("server_description"),
+                        )
+                        link = (
+                            f"vless://{subscription.uuid}@{domain}:{port}"
+                            f"?encryption=none&security=tls&sni={domain}&fp={fp}"
+                            f"&type=tcp&flow=xtls-rprx-vision#{fragment}"
+                        )
+                        if link not in seen_links:
+                            seen_links.add(link)
+                            links.append(link)
+
+        for srv in legacy_servers:
             extra = srv.extra_data if isinstance(srv.extra_data, dict) else {}
             domain = extra.get("domain") or extra.get("vless_domain")
             if not domain and srv.api_url:
@@ -75,59 +236,46 @@ class VlessSubscriptionService:
                 logger.warning("Skipping server %s: invalid FQDN domain '%s'", srv.id, domain)
                 continue
 
-            raw_port = extra.get("vless_port", 443)
-            try:
-                port = int(raw_port) if raw_port is not None else 443
-                if not (1 <= port <= 65535):
-                    port = 443
-            except (ValueError, TypeError):
-                port = 443
-            if port == 10443:
-                port = 443
-
-            flag = srv.country_flag or "🌐"
-            raw_name = extra.get("vless_name") or srv.name
-            clean_name = str(raw_name)
-            for ch in ("#", "?", "&"):
-                clean_name = clean_name.replace(ch, " ")
-            clean_name = clean_name.strip()
-            if flag and not clean_name.startswith(flag):
-                label = f"{flag} {clean_name}"
-            else:
-                label = clean_name
-
-            quoted_label = urllib.parse.quote(label)
-            # INCY renders vector flag when emoji is the first character after #
-            # and displays serverDescription badge via ?serverDescription=base64(UTF-8)
-            badge_raw = extra.get("server_description")
-            if badge_raw and str(badge_raw).strip() and str(badge_raw).strip().lower() != "none":
-                clean_badge = str(badge_raw).strip()[:30]
-                b64_badge = base64.b64encode(clean_badge.encode("utf-8")).decode("utf-8")
-                fragment = f"{quoted_label}?serverDescription={b64_badge}"
-            else:
-                fragment = quoted_label
-
-            raw_fp = str(extra.get("fp") or extra.get("fingerprint") or "").strip().lower()
-            fp = raw_fp if raw_fp in VALID_VLESS_TLS_FINGERPRINTS else VLESS_TLS_FINGERPRINT
+            port, fp = VlessSubscriptionService._resolve_port_and_fp(extra)
+            fragment = VlessSubscriptionService._build_vless_fragment(
+                srv.country_flag,
+                extra.get("vless_name") or srv.name,
+                extra.get("server_description"),
+            )
             link = (
                 f"vless://{subscription.uuid}@{domain}:{port}"
-                f"?encryption=none&security=tls&sni={domain}&alpn=http/1.1&fp={fp}"
+                f"?encryption=none&security=tls&sni={domain}&fp={fp}"
                 f"&type=tcp&flow=xtls-rprx-vision#{fragment}"
             )
-            links.append(link)
+            if link not in seen_links:
+                seen_links.add(link)
+                links.append(link)
         return links
 
     @staticmethod
     def generate_bi_xhttp_links(
         subscription: WhiteInternetSubscription,
         server: Server,
+        exit_nodes: list[Server] | None = None,
+        *,
+        cdn_label_mode: str = "badge",
+        cdn_yandex_label: str = "Yandex",
+        cdn_turboflare_label: str = "Turboflare",
     ) -> list[str]:
         """Generate 3-layer XHTTP links for White Internet using xhttp_locations or legacy relays."""
         from services.white_internet_service import WhiteInternetService
 
         extra = server.extra_data if isinstance(server.extra_data, dict) else {}
-        default_cdn = normalize_public_domain(extra.get("cdn_domain") or os.getenv("WHITE_INTERNET_CDN_DOMAIN"))
-        turboflare_cdn = normalize_public_domain(extra.get("turboflare_domain"))
+        cdn_domains = extra.get("cdn_domains") if isinstance(extra.get("cdn_domains"), dict) else {}
+        default_cdn = normalize_public_domain(
+            cdn_domains.get("cdn_yandex")
+            or extra.get("cdn_domain")
+            or os.getenv("WHITE_INTERNET_CDN_DOMAIN")
+        )
+        turboflare_cdn = normalize_public_domain(
+            cdn_domains.get("cdn_turboflare")
+            or extra.get("turboflare_domain")
+        )
         if not default_cdn and not turboflare_cdn:
             return []
 
@@ -137,28 +285,83 @@ class VlessSubscriptionService:
             or DEFAULT_WHITE_INTERNET_PATH
         )
 
+        has_exit_filter = False
+        wi_exit_names: dict[str, str] = {}
+        wi_exit_badges: dict[str, str] = {}
+        if exit_nodes:
+            active_exits = [
+                ex for ex in exit_nodes
+                if (
+                    ex.is_active
+                    and ex.health_state == ServerHealthState.ONLINE
+                    and getattr(ex, "lifecycle_status", None) in (None, ServerLifecycleStatus.ACTIVE)
+                    and get_server_role(ex) == "exit_node"
+                )
+            ]
+            if active_exits:
+                has_exit_filter = True
+                for ex in active_exits:
+                    ex_extra = ex.extra_data if isinstance(ex.extra_data, dict) else {}
+                    if not bool(ex_extra.get("in_white_internet", False)):
+                        continue
+                    loc_code = str(ex_extra.get("location_code") or "").strip().lower()
+                    if not loc_code:
+                        continue
+                    flag = (ex.country_flag or "🌐").strip()
+                    raw_name = str(ex_extra.get("vless_name") or ex.name or loc_code).strip()
+                    for ch in ("?", "&", "\r", "\n"):
+                        raw_name = raw_name.replace(ch, " ")
+                    raw_name = raw_name.strip()
+                    base_label = f"{flag} {raw_name}".strip() if (flag and not raw_name.startswith(flag)) else raw_name
+                    label = base_label if base_label.endswith("(БИ)") else f"{base_label} (БИ)"
+                    wi_exit_names[loc_code] = label
+                    desc = ex_extra.get("server_description")
+                    if desc and str(desc).strip():
+                        wi_exit_badges[loc_code] = str(desc).strip()
+
         xhttp_locations = extra.get("xhttp_locations")
         if isinstance(xhttp_locations, list) and xhttp_locations:
             links: list[str] = []
-            by_cdn: dict[str, list[dict]] = {}
-            has_default_origin = False
+            by_cdn: dict[tuple[str, str], list[dict]] = {}
+            origin_entries: list[tuple[str, str, str]] = []
+            seen_origins: set[tuple[str, str, str]] = set()
             for loc in xhttp_locations:
                 if not isinstance(loc, dict) or not loc.get("path"):
                     continue
-                loc_code = str(loc.get("location_code") or "").strip()
+                loc_code = str(loc.get("location_code") or "").strip().lower()
+                if has_exit_filter and loc_code and loc_code not in wi_exit_names:
+                    continue
                 cdn_hint = str(loc.get("cdn") or "").strip().lower()
-                loc_cdn = turboflare_cdn if (cdn_hint == "cdn_turboflare" and turboflare_cdn) else default_cdn
+                cdn_type = "cdn_turboflare" if cdn_hint == "cdn_turboflare" else "cdn_yandex"
+                loc_cdn = turboflare_cdn if cdn_type == "cdn_turboflare" else default_cdn
                 if not loc_cdn:
                     continue
+                loc_path = str(loc["path"])
                 if loc_code:
-                    by_cdn.setdefault(loc_cdn, []).append({
+                    by_cdn.setdefault((cdn_type, loc_cdn), []).append({
                         "code": loc_code,
-                        "path": str(loc["path"]),
+                        "path": loc_path,
                     })
-                else:
-                    has_default_origin = True
+                elif not has_exit_filter:
+                    origin_key = (cdn_type, loc_cdn, loc_path)
+                    if origin_key not in seen_origins:
+                        seen_origins.add(origin_key)
+                        origin_entries.append(origin_key)
 
-            for loc_cdn, cdn_relays in by_cdn.items():
+            for (cdn_type, loc_cdn), cdn_relays in by_cdn.items():
+                cdn_label = (
+                    (cdn_turboflare_label or "Turboflare").strip()
+                    if cdn_type == "cdn_turboflare"
+                    else (cdn_yandex_label or "Yandex").strip()
+                )
+                eff_names = dict(wi_exit_names) if wi_exit_names else None
+                eff_badges = dict(wi_exit_badges) if wi_exit_badges else {}
+                if cdn_label and cdn_label_mode == "name" and eff_names:
+                    eff_names = {k: f"{v} · {cdn_label}" for k, v in eff_names.items()}
+                elif cdn_label and cdn_label_mode == "badge":
+                    for k in (wi_exit_names or {r["code"]: r["code"] for r in cdn_relays}):
+                        prev = eff_badges.get(k, "").strip()
+                        eff_badges[k] = f"{prev} · {cdn_label}".strip(" ·") if prev else cdn_label
                 links.extend(
                     WhiteInternetService.generate_vless_links(
                         subscription,
@@ -166,10 +369,26 @@ class VlessSubscriptionService:
                         path=base_path,
                         relays=cdn_relays,
                         include_origin=False,
+                        relay_names=eff_names,
+                        relay_badges=eff_badges or None,
+                        cdn_type=cdn_type,
                     )
                 )
 
-            if has_default_origin or not links:
+            for cdn_type, loc_cdn, origin_path in origin_entries:
+                links.extend(
+                    WhiteInternetService.generate_vless_links(
+                        subscription,
+                        cdn_domain=loc_cdn,
+                        path=base_path,
+                        relays=None,
+                        include_origin=True,
+                        cdn_type=cdn_type,
+                        origin_path=origin_path,
+                    )
+                )
+
+            if not links and not has_exit_filter:
                 if default_cdn:
                     links.extend(
                         WhiteInternetService.generate_vless_links(
@@ -178,20 +397,49 @@ class VlessSubscriptionService:
                             path=base_path,
                             relays=None,
                             include_origin=True,
+                            cdn_type="cdn_yandex",
+                        )
+                    )
+                if turboflare_cdn:
+                    links.extend(
+                        WhiteInternetService.generate_vless_links(
+                            subscription,
+                            cdn_domain=turboflare_cdn,
+                            path=base_path,
+                            relays=None,
+                            include_origin=True,
+                            cdn_type="cdn_turboflare",
                         )
                     )
             return links
 
-        if not default_cdn:
+        if has_exit_filter and not wi_exit_names:
             return []
 
-        return WhiteInternetService.generate_vless_links(
-            subscription,
-            cdn_domain=default_cdn,
-            path=base_path,
-            relays=None,
-            include_origin=True,
-        )
+        links = []
+        if default_cdn:
+            links.extend(
+                WhiteInternetService.generate_vless_links(
+                    subscription,
+                    cdn_domain=default_cdn,
+                    path=base_path,
+                    relays=None,
+                    include_origin=True,
+                    cdn_type="cdn_yandex",
+                )
+            )
+        if turboflare_cdn:
+            links.extend(
+                WhiteInternetService.generate_vless_links(
+                    subscription,
+                    cdn_domain=turboflare_cdn,
+                    path=base_path,
+                    relays=None,
+                    include_origin=True,
+                    cdn_type="cdn_turboflare",
+                )
+            )
+        return links
 
     @staticmethod
     def build_subscription_url(token: str, domain: str | None = None) -> str:
@@ -199,15 +447,16 @@ class VlessSubscriptionService:
         if not domain:
             try:
                 from config.settings import get_settings
-                domain = get_settings().DOMAIN
+                settings = get_settings()
+                domain = settings.SUBSCRIPTION_DOMAIN or settings.DOMAIN
             except Exception:
                 domain = None
         if not domain:
-            domain = os.getenv("DOMAIN") or os.getenv("BOT_DOMAIN")
+            domain = os.getenv("SUBSCRIPTION_DOMAIN") or os.getenv("DOMAIN") or os.getenv("BOT_DOMAIN")
         if not domain:
             raise ValueError("No public DOMAIN configured for subscription URLs")
         clean_domain = domain.strip().replace("https://", "").replace("http://", "").rstrip("/")
-        return f"https://{clean_domain}/sub/access/{token}"
+        return f"https://{clean_domain}/sub/{token}"
 
     @classmethod
     def ensure_synced_background(
@@ -317,6 +566,23 @@ class VlessSubscriptionService:
         return [srv for srv in servers if is_vless_capable_server(srv)]
 
     @staticmethod
+    async def get_eligible_exit_nodes(
+        session: AsyncSession,
+    ) -> list[Server]:
+        """Fetch all online active exit_node servers."""
+        stmt = (
+            select(Server)
+            .where(
+                Server.is_active.is_(True),
+                Server.health_state == ServerHealthState.ONLINE,
+                Server.lifecycle_status == ServerLifecycleStatus.ACTIVE,
+            )
+            .order_by(Server.id.asc())
+        )
+        servers = (await session.execute(stmt)).scalars().all()
+        return [srv for srv in servers if get_server_role(srv) == "exit_node"]
+
+    @staticmethod
     async def get_configured_vless_servers(
         session: AsyncSession,
     ) -> list[Server]:
@@ -359,10 +625,10 @@ class VlessSubscriptionService:
         return [srv for srv in servers if is_vless_capable_server(srv)]
 
     @staticmethod
-    def _extract_node_targets(servers: list[Server]) -> list[tuple[int, str, str, bool]]:
+    def _extract_node_targets(servers: list[Server]) -> list[tuple[int, str, str]]:
         from database.repositories.servers_repo import get_server_xray_api_url
 
-        targets: list[tuple[int, str, str, bool]] = []
+        targets: list[tuple[int, str, str]] = []
         for srv in servers:
             api_url = get_server_xray_api_url(srv)
             api_key = srv.api_key
@@ -380,13 +646,12 @@ class VlessSubscriptionService:
                     srv.name,
                 )
                 continue
-            allow_bootstrap = bool((getattr(srv, "extra_data", None) or {}).get("tls_bootstrap"))
-            targets.append((srv.id, api_url, api_key, allow_bootstrap))
+            targets.append((srv.id, api_url, api_key))
         return targets
 
     @staticmethod
     async def _execute_sync_to_nodes(
-        targets: list[tuple[int, str, str] | tuple[int, str, str, bool]],
+        targets: list[tuple[int, str, str]],
         client_uuid: str,
         desired_active: bool,
         version: int | None = None,
@@ -400,7 +665,7 @@ class VlessSubscriptionService:
 
     @staticmethod
     async def _execute_sync_to_nodes_with_status(
-        targets: list[tuple[int, str, str] | tuple[int, str, str, bool]],
+        targets: list[tuple[int, str, str]],
         client_uuid: str,
         desired_active: bool,
         version: int | None = None,
@@ -411,11 +676,11 @@ class VlessSubscriptionService:
             return {}, False
 
         async def _sync_one(
-            srv_id: int, api_url: str, api_key: str, allow_bootstrap: bool = False
+            srv_id: int, api_url: str, api_key: str
         ) -> tuple[int, bool, bool]:
             needs_bump = False
             try:
-                async with XrayNodeClient(timeout=5.0, allow_insecure_tls=allow_bootstrap) as client:
+                async with XrayNodeClient(timeout=5.0) as client:
                     resp = await client.sync_client(
                         api_url=api_url,
                         api_key=api_key,
@@ -457,7 +722,7 @@ class VlessSubscriptionService:
                 return srv_id, False, False
 
         tasks = [
-            _sync_one(t[0], t[1], t[2], t[3] if len(t) > 3 else False)
+            _sync_one(t[0], t[1], t[2])
             for t in targets
         ]
         res_list = await asyncio.gather(*tasks)
@@ -473,7 +738,7 @@ class VlessSubscriptionService:
 
     @staticmethod
     async def _execute_deprovision_on_nodes(
-        targets: list[tuple[int, str, str] | tuple[int, str, str, bool]],
+        targets: list[tuple[int, str, str]],
         client_uuid: str,
         version: int | None = None,
     ) -> dict[int, bool]:
@@ -481,10 +746,10 @@ class VlessSubscriptionService:
             return {}
 
         async def _deprov_one(
-            srv_id: int, api_url: str, api_key: str, allow_bootstrap: bool = False
+            srv_id: int, api_url: str, api_key: str
         ) -> tuple[int, bool]:
             try:
-                async with XrayNodeClient(timeout=5.0, allow_insecure_tls=allow_bootstrap) as client:
+                async with XrayNodeClient(timeout=5.0) as client:
                     resp = await client.sync_client(
                         api_url=api_url,
                         api_key=api_key,
@@ -520,7 +785,7 @@ class VlessSubscriptionService:
                 return srv_id, False
 
         tasks = [
-            _deprov_one(t[0], t[1], t[2], t[3] if len(t) > 3 else False)
+            _deprov_one(t[0], t[1], t[2])
             for t in targets
         ]
         res_list = await asyncio.gather(*tasks)
@@ -634,8 +899,7 @@ class VlessSubscriptionService:
             try:
                 from services.xray_node_client import XrayNodeClient
 
-                allow_bootstrap = srv_tuple[3] if len(srv_tuple) > 3 else False
-                async with XrayNodeClient(timeout=3.0, max_retries=1, allow_insecure_tls=allow_bootstrap) as client:
+                async with XrayNodeClient(timeout=3.0, max_retries=1) as client:
                     is_healthy, err, _ = await client.check_health(srv_tuple[1], srv_tuple[2])
                     if not is_healthy:
                         logger.warning(

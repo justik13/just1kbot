@@ -38,6 +38,24 @@ export async function renderSubscriptionSettingsView(body) {
                     <input name="fragmentation_enabled" type="checkbox" ${current.fragmentation_enabled !== false ? "checked" : ""}>
                     <span>Фрагментация TLS-пакетов</span>
                 </label>
+                <div class="field">
+                    <label>Подпись CDN в ссылках Белого Интернета</label>
+                    <select name="cdn_label_mode" class="input">
+                        <option value="badge" ${(current.cdn_label_mode || "badge") === "badge" ? "selected" : ""}>В описании / бейдже (например [Yandex])</option>
+                        <option value="name" ${current.cdn_label_mode === "name" ? "selected" : ""}>В названии сервера (например · Yandex)</option>
+                        <option value="none" ${current.cdn_label_mode === "none" ? "selected" : ""}>Не показывать CDN</option>
+                    </select>
+                </div>
+                <div class="row" style="gap:8px;">
+                    <div class="field" style="flex:1;">
+                        <label>Метка Yandex CDN</label>
+                        <input name="cdn_yandex_label" class="input" maxlength="32" value="${escapeHtml(current.cdn_yandex_label || "Yandex")}" placeholder="Yandex">
+                    </div>
+                    <div class="field" style="flex:1;">
+                        <label>Метка Turboflare CDN</label>
+                        <input name="cdn_turboflare_label" class="input" maxlength="32" value="${escapeHtml(current.cdn_turboflare_label || "Turboflare")}" placeholder="Turboflare">
+                    </div>
+                </div>
                 <button type="submit" class="btn btn-primary">Сохранить настройки</button>
             </form>
         </section>
@@ -56,6 +74,9 @@ export async function renderSubscriptionSettingsView(body) {
                 announce_url: String(fd.get("announce_url") || "").trim(),
                 profile_show_devices: Boolean(fd.get("profile_show_devices")),
                 fragmentation_enabled: Boolean(fd.get("fragmentation_enabled")),
+                cdn_label_mode: String(fd.get("cdn_label_mode") || "badge"),
+                cdn_yandex_label: String(fd.get("cdn_yandex_label") || "").trim(),
+                cdn_turboflare_label: String(fd.get("cdn_turboflare_label") || "").trim(),
             });
             showToast("Оформление подписки сохранено");
         } catch (err) {
@@ -70,7 +91,7 @@ function _nodeScopeBadges(node) {
     const caps = Array.isArray(node.capabilities) ? node.capabilities : [];
     const links = node.links && typeof node.links === "object" ? node.links : {};
     const hasStd = caps.includes("vless") || caps.includes("standard") || Boolean(links.standard && Object.keys(links.standard).length);
-    const hasBi = caps.includes("white_internet") || caps.includes("xray_origin") || Boolean(links.bi && Object.keys(links.bi).length);
+    const hasBi = caps.includes("white_internet") || Boolean(links.bi && Object.keys(links.bi).length);
     const badges = [];
     if (hasStd) badges.push(`<span class="chip chip-muted">Standard</span>`);
     if (hasBi) badges.push(`<span class="chip chip-info">Доп. опция</span>`);
@@ -118,10 +139,6 @@ export function renderNodesView(root, state, onReload, onSelectNode) {
                         <input id="addFlag" class="input" type="text" maxlength="10">
                     </div>
                 </div>
-                <label class="checkbox-row">
-                    <input id="addBootstrapTls" type="checkbox" checked>
-                    <span>Разрешить self-signed TLS (свежая нода)</span>
-                </label>
                 <button id="addSubmitBtn" type="submit" class="btn btn-primary">Проверить и добавить</button>
             </form>
         </section>
@@ -160,10 +177,8 @@ export function renderNodesView(root, state, onReload, onSelectNode) {
                 api_key: root.querySelector("#addApiKey").value.trim(),
                 name: root.querySelector("#addName").value.trim(),
                 country_flag: root.querySelector("#addFlag").value.trim() || null,
-                allow_bootstrap_tls: root.querySelector("#addBootstrapTls").checked,
             });
             addForm.reset();
-            root.querySelector("#addBootstrapTls").checked = true;
             showToast("Нода добавлена и выключена. Откройте её для включения.");
             await onReload();
         } catch (err) {

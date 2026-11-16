@@ -187,7 +187,7 @@ class WhiteInternetService:
         server = await servers_repo.allocate_origin_server_atomic(session)
         if server is None:
             raise RuntimeError(
-                "No healthy server with xray_origin capability and available capacity is available."
+                "No healthy server with white_internet capability and available capacity is available."
             )
         return server
 
@@ -438,6 +438,8 @@ class WhiteInternetService:
             or origin_node.lifecycle_status != ServerLifecycleStatus.ACTIVE
             or not (
                 (origin_node.extra_data or {}).get("xhttp_locations")
+                or (origin_node.extra_data or {}).get("cdn_domains")
+                or (origin_node.extra_data or {}).get("cdn_domain")
                 or (origin_node.extra_data or {}).get("relays")
             )
         )
@@ -599,6 +601,8 @@ class WhiteInternetService:
             or origin_node.lifecycle_status != ServerLifecycleStatus.ACTIVE
             or not (
                 (origin_node.extra_data or {}).get("xhttp_locations")
+                or (origin_node.extra_data or {}).get("cdn_domains")
+                or (origin_node.extra_data or {}).get("cdn_domain")
                 or (origin_node.extra_data or {}).get("relays")
             )
         )
@@ -725,6 +729,8 @@ class WhiteInternetService:
             or origin_node.lifecycle_status != ServerLifecycleStatus.ACTIVE
             or not (
                 (origin_node.extra_data or {}).get("xhttp_locations")
+                or (origin_node.extra_data or {}).get("cdn_domains")
+                or (origin_node.extra_data or {}).get("cdn_domain")
                 or (origin_node.extra_data or {}).get("relays")
             )
         )
@@ -884,18 +890,24 @@ class WhiteInternetService:
         ALREADY_NEWER against runtime inventory. Anything unconfirmed stays
         PENDING_CREATE for the background worker to converge.
         """
-        expected_inbound_tags: set[str] = {"just1k-wl-default"}
+        expected_inbound_tags: set[str] = set()
         extra_data = origin_node.extra_data or {}
         endpoint_entries = extra_data.get("xhttp_locations") or extra_data.get("relays") or []
         for entry in endpoint_entries:
             if isinstance(entry, dict):
-                code = entry.get("code")
+                inbound_tag = entry.get("inbound_tag")
+                if inbound_tag:
+                    expected_inbound_tags.add(str(inbound_tag))
+                    continue
+                code = entry.get("location_code") or entry.get("code")
             elif isinstance(entry, str):
                 code = entry
             else:
                 code = None
             if code:
                 expected_inbound_tags.add(f"just1k-wl-inbound-{code}")
+        if not expected_inbound_tags:
+            expected_inbound_tags.add("just1k-wl-default")
         target_version = sub.desired_version or 1
         try:
             async with XrayNodeClient(timeout=4.0) as xray_client:
@@ -1129,22 +1141,43 @@ class WhiteInternetService:
         default_relay_badge: str | None = None,
         relay_names: dict[str, str] | None = None,
         relay_badges: dict[str, str] | None = None,
+        cdn_type: str = "cdn_yandex",
+        origin_path: str | None = None,
     ) -> list[str]:
-        extra_dict = {
-            "mode": CANONICAL_XHTTP_PROFILE["mode"],
-            "uplinkHTTPMethod": CANONICAL_XHTTP_PROFILE["uplinkHTTPMethod"],
-            "uplinkDataPlacement": CANONICAL_XHTTP_PROFILE["uplinkDataPlacement"],
-            "uplinkDataKey": CANONICAL_XHTTP_PROFILE["uplinkDataKey"],
-            "scMaxEachPostBytes": CANONICAL_XHTTP_PROFILE["scMaxEachPostBytes"],
-            "scMaxConcurrentPosts": CANONICAL_XHTTP_PROFILE["scMaxConcurrentPosts"],
-            "scMinPostsIntervalMs": CANONICAL_XHTTP_PROFILE["scMinPostsIntervalMs"],
-            "xPaddingObfsMode": CANONICAL_XHTTP_PROFILE["xPaddingObfsMode"],
-            "xPaddingKey": CANONICAL_XHTTP_PROFILE["xPaddingKey"],
-            "xPaddingHeader": CANONICAL_XHTTP_PROFILE["xPaddingHeader"],
-            "xPaddingMethod": CANONICAL_XHTTP_PROFILE["xPaddingMethod"],
-            "xPaddingPlacement": CANONICAL_XHTTP_PROFILE["xPaddingPlacement"],
-            "xPaddingBytes": CANONICAL_XHTTP_PROFILE.get("xPaddingBytes", "100-1000"),
-        }
+        if str(cdn_type or "").strip().lower() == "cdn_turboflare":
+            extra_dict = {
+                "mode": CANONICAL_XHTTP_PROFILE["mode"],
+                "uplinkHTTPMethod": "POST",
+                "uplinkDataPlacement": "body",
+                "uplinkDataKey": "",
+                "scMaxEachPostBytes": 65536,
+                "scMaxConcurrentPosts": 2,
+                "scMinPostsIntervalMs": 10,
+                "xPaddingObfsMode": CANONICAL_XHTTP_PROFILE["xPaddingObfsMode"],
+                "xPaddingKey": CANONICAL_XHTTP_PROFILE["xPaddingKey"],
+                "xPaddingHeader": CANONICAL_XHTTP_PROFILE["xPaddingHeader"],
+                "xPaddingMethod": CANONICAL_XHTTP_PROFILE["xPaddingMethod"],
+                "xPaddingPlacement": "header",
+                "xPaddingBytes": CANONICAL_XHTTP_PROFILE.get("xPaddingBytes", "100-1000"),
+                "xmux": CANONICAL_XHTTP_PROFILE["xmux"],
+            }
+        else:
+            extra_dict = {
+                "mode": CANONICAL_XHTTP_PROFILE["mode"],
+                "uplinkHTTPMethod": CANONICAL_XHTTP_PROFILE["uplinkHTTPMethod"],
+                "uplinkDataPlacement": CANONICAL_XHTTP_PROFILE["uplinkDataPlacement"],
+                "uplinkDataKey": CANONICAL_XHTTP_PROFILE["uplinkDataKey"],
+                "scMaxEachPostBytes": CANONICAL_XHTTP_PROFILE["scMaxEachPostBytes"],
+                "scMaxConcurrentPosts": CANONICAL_XHTTP_PROFILE["scMaxConcurrentPosts"],
+                "scMinPostsIntervalMs": CANONICAL_XHTTP_PROFILE["scMinPostsIntervalMs"],
+                "xPaddingObfsMode": CANONICAL_XHTTP_PROFILE["xPaddingObfsMode"],
+                "xPaddingKey": CANONICAL_XHTTP_PROFILE["xPaddingKey"],
+                "xPaddingHeader": CANONICAL_XHTTP_PROFILE["xPaddingHeader"],
+                "xPaddingMethod": CANONICAL_XHTTP_PROFILE["xPaddingMethod"],
+                "xPaddingPlacement": CANONICAL_XHTTP_PROFILE["xPaddingPlacement"],
+                "xPaddingBytes": CANONICAL_XHTTP_PROFILE.get("xPaddingBytes", "100-1000"),
+                "xmux": CANONICAL_XHTTP_PROFILE["xmux"],
+            }
         extra_param = urllib.parse.quote(json.dumps(extra_dict, separators=(",", ":")))
         fp = CANONICAL_XHTTP_PROFILE.get("fp", WHITE_INTERNET_TLS_FINGERPRINT)
         base = _normalize_base_path(path)
@@ -1168,7 +1201,9 @@ class WhiteInternetService:
             else:
                 effective_origin_badge = None
             origin_tag_formatted = WhiteInternetService._format_vless_tag(origin_tag_str, effective_origin_badge)
-            standalone_path = f"{base}/default"
+            standalone_path = origin_path or (
+                f"{base}/turboflare" if str(cdn_type or "").strip().lower() == "cdn_turboflare" else f"{base}/default"
+            )
             origin_link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={fp}&type=xhttp&path={urllib.parse.quote(standalone_path, safe='')}&mode=packet-up&mux=false&extra={extra_param}#{origin_tag_formatted}"
             links.append(origin_link)
 

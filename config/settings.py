@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     YOOKASSA_RETURN_URL: str
     YOOKASSA_WEBHOOK_PORT: int
     DOMAIN: str
+    SUBSCRIPTION_DOMAIN: str | None = None
     SSL_EMAIL: str
     YOOKASSA_EXTRA_IPS: str = ""
 

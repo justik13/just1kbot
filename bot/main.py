@@ -292,7 +292,7 @@ async def _http_rate_limit_middleware(request: web.Request, handler):
     if (
         path in {"/health", "/webhook/yookassa", "/yookassa/webhook"}
         or path == "/app"
-        or path.startswith(("/app/", "/api/app/"))
+        or path.startswith(("/app/", "/api/app/", "/sub/"))
     ):
         return await handler(request)
     client_ip = get_trusted_client_ip(request)

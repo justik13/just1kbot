@@ -28,6 +28,9 @@ function _renderModuleErrors(node) {
 }
 
 function _openEditModal(node, onDone) {
+    const isExitNode = node.role === "exit_node";
+    const inStdChecked = node.in_standard !== false;
+    const inWiChecked = Boolean(node.in_white_internet);
     const box = document.createElement("form");
     box.className = "field";
     box.style.gap = "10px";
@@ -48,10 +51,24 @@ function _openEditModal(node, onDone) {
             <label>Новый API Токен (оставьте пустым, чтобы не менять)</label>
             <input name="api_key" class="input" type="password" maxlength="255" placeholder="••••••••">
         </div>
-        <label class="checkbox-row">
-            <input name="allow_bootstrap_tls" type="checkbox" ${node.tls_bootstrap ? "checked" : ""}>
-            <span>Bootstrap self-signed TLS</span>
-        </label>
+        ${isExitNode ? `
+        <div class="field" style="flex-direction:row; align-items:center; gap:8px;">
+            <input id="editInStandard" name="in_standard" type="checkbox" ${inStdChecked ? "checked" : ""}>
+            <label for="editInStandard" style="margin:0;">Входит в Стандарт</label>
+        </div>
+        <div class="field" style="flex-direction:row; align-items:center; gap:8px;">
+            <input id="editInWhiteInternet" name="in_white_internet" type="checkbox" ${inWiChecked ? "checked" : ""}>
+            <label for="editInWhiteInternet" style="margin:0;">Входит в Белый Интернет</label>
+        </div>
+        <div class="field">
+            <label>Код локации</label>
+            <input name="location_code" class="input" maxlength="32" placeholder="de, se1, fi1, pl" value="${escapeHtml(node.location_code || "")}">
+        </div>
+        <div class="field">
+            <label>SNI для Стандарта (опционально)</label>
+            <input name="std_sni" class="input" maxlength="253" placeholder="Авто по sni_routes на ru_hub" value="${escapeHtml(node.std_sni || "")}">
+        </div>
+        ` : ""}
         <button type="submit" class="btn btn-primary">Сохранить</button>
     `;
     const close = openModal(`Редактировать #${node.id}`, box);
@@ -64,7 +81,6 @@ function _openEditModal(node, onDone) {
             const payload = {
                 name: String(fd.get("name") || "").trim(),
                 country_flag: String(fd.get("country_flag") || "").trim(),
-                allow_bootstrap_tls: Boolean(fd.get("allow_bootstrap_tls")),
             };
             const newUrl = String(fd.get("api_url") || "").trim();
             if (newUrl && newUrl !== node.api_url) {
@@ -73,6 +89,12 @@ function _openEditModal(node, onDone) {
             const newKey = String(fd.get("api_key") || "").trim();
             if (newKey) {
                 payload.api_key = newKey;
+            }
+            if (isExitNode) {
+                payload.in_standard = Boolean(box.querySelector("input[name='in_standard']")?.checked);
+                payload.in_white_internet = Boolean(box.querySelector("input[name='in_white_internet']")?.checked);
+                payload.location_code = String(fd.get("location_code") || "").trim().toLowerCase();
+                payload.std_sni = String(fd.get("std_sni") || "").trim().toLowerCase();
             }
             await api.patchNode(node.id, payload);
             showToast("Параметры обновлены");
@@ -86,85 +108,6 @@ function _openEditModal(node, onDone) {
     });
 }
 
-function _openCertModal(node, onDone) {
-    const box = document.createElement("form");
-    box.className = "field";
-    box.style.gap = "10px";
-    box.innerHTML = `
-        <div class="field">
-            <label>Домен сертификата</label>
-            <input name="domain" class="input" required value="${escapeHtml(node.domain || "")}" placeholder="edge.example.com">
-        </div>
-        <div class="field">
-            <label>Fullchain PEM</label>
-            <textarea name="fullchain_pem" class="textarea" required placeholder="-----BEGIN CERTIFICATE-----"></textarea>
-        </div>
-        <div class="field">
-            <label>Private Key PEM</label>
-            <textarea name="privkey_pem" class="textarea" required placeholder="-----BEGIN PRIVATE KEY-----"></textarea>
-        </div>
-        <button type="submit" class="btn btn-primary">Отправить на ноду</button>
-    `;
-    const close = openModal(`TLS сертификат (#${node.id})`, box);
-    box.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const fd = new FormData(box);
-        const btn = box.querySelector("button[type='submit']");
-        btn.disabled = true;
-        try {
-            await api.deployNodeCert(node.id, {
-                domain: String(fd.get("domain") || "").trim(),
-                fullchain_pem: String(fd.get("fullchain_pem") || ""),
-                privkey_pem: String(fd.get("privkey_pem") || ""),
-            });
-            showToast("Сертификат отправлен на ноду");
-            close();
-            await onDone();
-        } catch (err) {
-            showToast(err.message || "Ошибка отправки сертификата");
-        } finally {
-            btn.disabled = false;
-        }
-    });
-}
-
-function _openLinksModal(node, onDone) {
-    const box = document.createElement("form");
-    box.className = "field";
-    box.style.gap = "10px";
-    const initialJson = JSON.stringify(node.links || {}, null, 2);
-    box.innerHTML = `
-        <div class="field">
-            <label>Конфигурация связей (standard / bi / exit_nodes / routes)</label>
-            <textarea name="links_json" class="textarea" required style="min-height:200px;">${escapeHtml(initialJson)}</textarea>
-        </div>
-        <button type="submit" class="btn btn-primary">Сохранить связи на ноде</button>
-    `;
-    const close = openModal(`Связи контуров (#${node.id})`, box);
-    box.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const raw = String(new FormData(box).get("links_json") || "").trim();
-        let parsed;
-        try {
-            parsed = JSON.parse(raw);
-        } catch {
-            showToast("Некорректный JSON");
-            return;
-        }
-        const btn = box.querySelector("button[type='submit']");
-        btn.disabled = true;
-        try {
-            await api.updateNodeLinks(node.id, parsed);
-            showToast("Связи обновлены");
-            close();
-            await onDone();
-        } catch (err) {
-            showToast(err.message || "Ошибка сохранения связей");
-        } finally {
-            btn.disabled = false;
-        }
-    });
-}
 
 export function renderNodeDetailView(root, node, onBack, onReload) {
     const health = healthChipInfo(node);
@@ -223,10 +166,6 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
                     <span class="detail-label">Bridge UUID</span>
                     <span class="mono">${escapeHtml(node.bridge_uuid)}</span>
                 </div>` : ""}
-                <div class="detail-item">
-                    <span class="detail-label">Bootstrap TLS</span>
-                    <span>${node.tls_bootstrap ? "Да (self-signed разрешен)" : "Нет (строгий TLS)"}</span>
-                </div>
                 ${node.traffic_limit && typeof node.traffic_limit === "object" ? `
                 <div class="detail-item">
                     <span class="detail-label">Трафик за месяц</span>
@@ -242,16 +181,32 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
         <section class="card">
             <div class="card-title">Модули и привязки контуров</div>
             <div class="filter-pills" style="margin-bottom:6px;">${_renderModules(node)}</div>
+            ${node.role === "exit_node" ? `
+                <div class="detail-grid" style="margin-top:6px;">
+                    <div class="detail-item">
+                        <span class="detail-label">Входит в Стандарт</span>
+                        <span>${node.in_standard !== false ? "Да" : "Нет"}</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Входит в Белый Интернет</span>
+                        <span>${node.in_white_internet ? "Да" : "Нет"}</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Код локации</span>
+                        <span class="mono">${escapeHtml(node.location_code || "—")}</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">SNI для Стандарта</span>
+                        <span class="mono">${escapeHtml(node.std_sni || "авто")}</span>
+                    </div>
+                </div>
+            ` : ""}
             ${node.inbounds && node.inbounds.length ? `
                 <div class="detail-item" style="margin-top:6px;">
                     <span class="detail-label">Inbounds:</span>
                     <span class="mono">${node.inbounds.map((ib) => escapeHtml(ib)).join(", ")}</span>
                 </div>
             ` : ""}
-            <div class="detail-item" style="margin-top:6px;">
-                <span class="detail-label">Привязка Standard / Доп. опция</span>
-                <button type="button" id="detailLinksBtn" class="btn btn-sm">Настроить связи (JSON)</button>
-            </div>
         </section>
 
         ${_renderModuleErrors(node)}
@@ -260,7 +215,6 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
             <div class="card-title">Настройки и обслуживание</div>
             <div class="actions-row">
                 <button type="button" id="detailEditBtn" class="btn btn-sm">Изменить</button>
-                <button type="button" id="detailCertBtn" class="btn btn-sm">TLS сертификат</button>
                 <button type="button" id="detailDeleteBtn" class="btn btn-sm btn-danger">Удалить сервер</button>
             </div>
         </section>
@@ -298,14 +252,6 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
 
     root.querySelector("#detailEditBtn").addEventListener("click", () => {
         _openEditModal(node, onReload);
-    });
-
-    root.querySelector("#detailCertBtn").addEventListener("click", () => {
-        _openCertModal(node, onReload);
-    });
-
-    root.querySelector("#detailLinksBtn").addEventListener("click", () => {
-        _openLinksModal(node, onReload);
     });
 
     root.querySelector("#detailDeleteBtn").addEventListener("click", async () => {

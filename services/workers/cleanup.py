@@ -4,7 +4,6 @@ import time
 from datetime import timedelta
 from typing import Any
 
-from aiogram import Bot
 from cachetools import TTLCache
 from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -63,7 +62,6 @@ async def cleanup_expired_subscriptions_loop(
         try:
             now = time.monotonic()
             if now - _last_heavy_cleanup >= CLEANUP_LOOP_INTERVAL:
-                await _apply_due_white_internet_downgrades()
                 await _cleanup_expired_vless_network_grace()
                 await _sweep_vless_pending_revocations()
                 _last_heavy_cleanup = now
@@ -120,43 +118,50 @@ async def _cleanup_expired_vless_network_grace() -> None:
     current_time = now_utc()
     threshold = current_time - timedelta(hours=VPN_ACCESS_GRACE_HOURS)
 
-    async with session_scope() as session:
-        stmt = (
-            select(User.id)
-            .join(VlessSubscription, VlessSubscription.user_id == User.id)
-            .where(
-                User.is_deleted.is_(False),
-                or_(
-                    and_(
-                        User.subscription_end.is_not(None),
-                        User.subscription_end < threshold,
+    for _batch in range(10):
+        async with session_scope() as session:
+            stmt = (
+                select(User.id)
+                .join(VlessSubscription, VlessSubscription.user_id == User.id)
+                .where(
+                    User.is_deleted.is_(False),
+                    or_(
+                        and_(
+                            User.subscription_end.is_not(None),
+                            User.subscription_end < threshold,
+                        ),
+                        User.financial_hold.is_(True),
                     ),
-                    User.financial_hold.is_(True),
-                ),
-                VlessSubscription.is_active.is_(True),
+                    VlessSubscription.is_active.is_(True),
+                )
+                .order_by(User.subscription_end.asc().nullslast())
+                .limit(50)
             )
-            .order_by(User.subscription_end.asc().nullslast())
-            .limit(50)
-        )
-        result = await session.execute(stmt)
-        user_ids = [row[0] for row in result.all()]
+            result = await session.execute(stmt)
+            user_ids = [row[0] for row in result.all()]
 
-    for user_id in user_ids:
-        try:
-            async with session_scope() as session:
-                user = await session.get(User, user_id, with_for_update=True)
-                if not user or user.is_deleted:
-                    continue
-                from utils.datetime_helpers import is_permanent_subscription
+        if not user_ids:
+            break
 
-                if user.subscription_end and is_permanent_subscription(user.subscription_end):
-                    continue
-                if not user.financial_hold and (not user.subscription_end or user.subscription_end >= threshold):
-                    continue
-                await SubscriptionService.sync_access_state(session, user)
-                logger.info("VLESS network grace/hold deactivation applied for user_id=%s", user_id)
-        except Exception as e:
-            logger.warning("VLESS network grace deactivation failed for user_id=%s: %s", user_id, e)
+        for user_id in user_ids:
+            try:
+                async with session_scope() as session:
+                    user = await session.get(User, user_id, with_for_update=True)
+                    if not user or user.is_deleted:
+                        continue
+                    from utils.datetime_helpers import is_permanent_subscription
+
+                    if user.subscription_end and is_permanent_subscription(user.subscription_end):
+                        continue
+                    if not user.financial_hold and (not user.subscription_end or user.subscription_end >= threshold):
+                        continue
+                    await SubscriptionService.sync_access_state(session, user)
+                    logger.info("VLESS network grace/hold deactivation applied for user_id=%s", user_id)
+            except Exception as e:
+                logger.warning("VLESS network grace deactivation failed for user_id=%s: %s", user_id, e)
+
+        if len(user_ids) < 50:
+            break
 
 
 async def _sweep_vless_pending_revocations() -> None:

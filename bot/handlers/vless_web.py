@@ -722,82 +722,123 @@ async def serve_unified_subscription_feed(
                 },
             )
 
+        devices_list = await user_devices_repo.list_user_devices(
+            session, user.id, wi_device_limit=wi_limit if wi_active else 0
+        )
+
+        is_std_assigned = False
+        if std_active:
+            if std_limit >= wi_limit or len(devices_list) <= std_limit:
+                is_std_assigned = True
+            else:
+                fifo_hwids = [
+                    d.get("hwid")
+                    for d in sorted(
+                        devices_list,
+                        key=lambda item: (item.get("first_seen_at") or "", item.get("id") or 0),
+                    )[:std_limit]
+                ]
+                is_std_assigned = raw_hwid in fifo_hwids
+
         is_bi_assigned = False
         if wi_active:
-            devices_list = await user_devices_repo.list_user_devices(
-                session, user.id, wi_device_limit=wi_limit
-            )
             is_bi_assigned = any(
                 d.get("hwid") == raw_hwid and bool(d.get("is_bi_assigned"))
                 for d in devices_list
             )
-            if not std_active and not is_bi_assigned:
-                limit_msg = texts.WL_FEED_DEVICE_LIMIT_NOTICE.format(
-                    active=active_hwid_count,
-                    limit=wi_limit,
-                    bot_username=bot_username,
-                )
-                return _build_unified_notice_response(
-                    title_text=texts.VLESS_FEED_DEVICE_LIMIT_TITLE,
-                    notice_text=limit_msg,
-                    common_headers=common_headers,
-                    bot_username=bot_username,
-                    support_url=support_url,
-                    channel_url=channel_url,
-                    announce_url=channel_url,
-                    upload_bytes=upload_bytes,
-                    download_bytes=download_bytes,
-                    expire_ts=expire_ts,
-                    is_happ=is_happ,
-                    extra_headers={
-                        "Device-Limit-Exceeded": "1",
-                        "Device-Limit": str(wi_limit),
-                        "Device-Active-Count": str(active_hwid_count),
-                        "x-hwid-max-devices-reached": "true",
-                        "x-hwid-limit": "true",
-                        "x-hwid-active": str(active_hwid_count),
-                    },
-                )
 
-        # 4. Generate links for active options
+        def _make_inline_stub(text: str) -> str:
+            return (
+                f"vless://00000000-0000-0000-0000-000000000000@127.0.0.1:443"
+                f"?encryption=none&security=none&type=tcp#{urllib.parse.quote(text)}"
+            )
+
+        # 4. Generate links for active options (with independent per-option stubs)
         all_links: list[str] = []
         std_servers: list[Server] = []
-        if std_active and vless_sub is not None:
-            std_servers = await VlessSubscriptionService.get_eligible_vless_servers(session)
-            std_links = VlessSubscriptionService.generate_vless_links(vless_sub, std_servers)
-            all_links.extend(std_links)
+        exit_nodes: list[Server] = []
+        if (std_active and is_std_assigned and vless_sub is not None) or (wi_active and is_bi_assigned and wi_sub is not None):
+            exit_nodes = await VlessSubscriptionService.get_eligible_exit_nodes(session)
 
-            last_synced_version = getattr(vless_sub, "last_synced_version", None)
-            current_version = getattr(vless_sub, "version", 1) or 1
-            needs_sync = (
-                vless_sub.last_synced_at is None
-                or (now - vless_sub.last_synced_at).total_seconds() > 300
-                or bool(getattr(vless_sub, "pending_revoked_uuids", None))
-                or (last_synced_version is not None and last_synced_version < current_version)
-            )
-            if needs_sync:
-                VlessSubscriptionService.ensure_synced_background(user.id, session=session)
+        if std_active and vless_sub is not None:
+            if is_std_assigned:
+                std_servers = await VlessSubscriptionService.get_eligible_vless_servers(session)
+                std_links = VlessSubscriptionService.generate_vless_links(
+                    vless_sub,
+                    std_servers,
+                    exit_nodes=exit_nodes,
+                )
+                all_links.extend(std_links)
+
+                last_synced_version = getattr(vless_sub, "last_synced_version", None)
+                current_version = getattr(vless_sub, "version", 1) or 1
+                needs_sync = (
+                    vless_sub.last_synced_at is None
+                    or (now - vless_sub.last_synced_at).total_seconds() > 300
+                    or bool(getattr(vless_sub, "pending_revoked_uuids", None))
+                    or (last_synced_version is not None and last_synced_version < current_version)
+                )
+                if needs_sync:
+                    VlessSubscriptionService.ensure_synced_background(user.id, session=session)
+            else:
+                all_links.append(
+                    _make_inline_stub(f"⚠️ Стандарт: лимит устройств ({std_limit}/{std_limit})")
+                )
+        elif getattr(user, "subscription_end", None) is not None and wi_active:
+            all_links.append(_make_inline_stub("⛔ Стандарт: подписка истекла — продлите в боте"))
 
         wi_server: Server | None = None
-        if wi_active and is_bi_assigned and wi_sub is not None:
-            if getattr(wi_sub, "origin_node_id", None):
-                wi_server = await session.scalar(select(Server).where(Server.id == wi_sub.origin_node_id))
-            is_wi_node_ready = bool(
-                wi_server is not None
-                and "xray_origin" in (wi_server.capabilities or [])
-                and wi_sub.actual_version == wi_sub.desired_version
-                and wi_sub.last_reconciled_node_epoch == wi_server.xray_instance_epoch
-                and (
-                    (wi_server.is_active and wi_server.health_state == ServerHealthState.ONLINE)
-                    or (
-                        getattr(wi_sub, "provisioning_status", None) == WhiteInternetProvisioningStatus.ACTIVE
-                        and (getattr(wi_sub, "actual_version", 0) or 0) > 0
+        if wi_active and wi_sub is not None:
+            if is_bi_assigned:
+                if getattr(wi_sub, "origin_node_id", None):
+                    wi_server = await session.scalar(select(Server).where(Server.id == wi_sub.origin_node_id))
+                if wi_server is None or not wi_server.is_active or wi_server.health_state != ServerHealthState.ONLINE:
+                    # Fallback to any online WI-capable ru_hub
+                    cand_servers = await VlessSubscriptionService.get_eligible_vless_servers(session)
+                    for cand in cand_servers:
+                        if constants.WHITE_INTERNET_CAPABILITY in (cand.capabilities or []):
+                            wi_server = cand
+                            break
+                is_wi_node_ready = bool(
+                    wi_server is not None
+                    and constants.WHITE_INTERNET_CAPABILITY in (wi_server.capabilities or [])
+                    and wi_sub.actual_version == wi_sub.desired_version
+                    and (
+                        wi_sub.last_reconciled_node_epoch == wi_server.xray_instance_epoch
+                        or (
+                            getattr(wi_sub, "provisioning_status", None) == WhiteInternetProvisioningStatus.ACTIVE
+                            and (getattr(wi_sub, "actual_version", 0) or 0) > 0
+                        )
                     )
                 )
-            )
-            if is_wi_node_ready and wi_server is not None:
-                wi_links = VlessSubscriptionService.generate_bi_xhttp_links(wi_sub, wi_server)
-                all_links.extend(wi_links)
+                if is_wi_node_ready and wi_server is not None:
+                    cdn_label_mode = str(await get_system_setting(session, "bi_cdn_label_mode", "badge") or "badge")
+                    cdn_yandex_label = str(await get_system_setting(session, "bi_cdn_yandex_label", "Yandex") or "Yandex")
+                    cdn_turboflare_label = str(await get_system_setting(session, "bi_cdn_turboflare_label", "Turboflare") or "Turboflare")
+                    wi_links = VlessSubscriptionService.generate_bi_xhttp_links(
+                        wi_sub,
+                        wi_server,
+                        exit_nodes=exit_nodes,
+                        cdn_label_mode=cdn_label_mode,
+                        cdn_yandex_label=cdn_yandex_label,
+                        cdn_turboflare_label=cdn_turboflare_label,
+                    )
+                    all_links.extend(wi_links)
+                else:
+                    all_links.append(_make_inline_stub("⏳ Белый интернет: идёт настройка подключения"))
+            else:
+                all_links.append(
+                    _make_inline_stub(f"⚠️ Белый интернет: лимит устройств ({wi_limit}/{wi_limit})")
+                )
+        elif wi_sub is not None and std_active:
+            if wi_is_pending:
+                all_links.append(_make_inline_stub("⏳ Белый интернет: идёт настройка подключения"))
+            elif wi_is_exhausted and not wi_is_expired:
+                all_links.append(_make_inline_stub("⚠️ Белый интернет: трафик исчерпан"))
+            elif wi_is_disabled:
+                all_links.append(_make_inline_stub("⛔ Белый интернет: отключён"))
+            else:
+                all_links.append(_make_inline_stub("⛔ Белый интернет: подписка истекла"))
 
         no_servers_mode = False
         if not all_links:

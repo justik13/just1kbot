@@ -175,11 +175,11 @@ async def _send_quota_alert(
 
 
 async def _vless_traffic_sync_once(bot: Bot | None = None):
+    from config.constants import WHITE_INTERNET_CAPABILITY
     from config.enums import ServerHealthState, ServerLifecycleStatus
     from database.models import VlessSubscription
     from database.repositories import vless_subscription_repo
     from database.repositories.servers_repo import (
-        get_server_role,
         get_server_xray_api_url,
         is_v2_node_server,
         is_vless_capable_server,
@@ -201,9 +201,6 @@ async def _vless_traffic_sync_once(bot: Bot | None = None):
         )
         candidates = (await session.execute(stmt)).scalars().all()
         for srv in candidates:
-            role = get_server_role(srv)
-            if role == "ru_hub":
-                continue
             if not (is_vless_capable_server(srv) or is_v2_node_server(srv)):
                 continue
             api_url = get_server_xray_api_url(srv)
@@ -300,7 +297,9 @@ async def _vless_traffic_sync_once(bot: Bot | None = None):
                             else:
                                 extra["monthly_traffic_bytes"] = int(extra.get("monthly_traffic_bytes", 0)) + server_delta
                             changed = True
-                        if host_tx > 0 or host_rx > 0:
+                        if (host_tx > 0 or host_rx > 0) and WHITE_INTERNET_CAPABILITY not in (
+                            getattr(server_obj, "capabilities", None) or []
+                        ):
                             host_cycle = get_hosting_billing_cycle(
                                 current_time,
                                 get_server_hosting_reset_day(extra),

@@ -36,7 +36,7 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.constants import VLESS_PROTOCOL, XRAY_PROTOCOL
+from config.constants import VLESS_PROTOCOL, WHITE_INTERNET_CAPABILITY, XRAY_PROTOCOL
 from config.enums import (
     AccountLedgerEntryType,
     ServerHealthState,
@@ -230,7 +230,7 @@ async def assert_inv_7_subscription_period_usage(session: AsyncSession) -> Invar
 
 
 async def assert_inv_8_origin_node_capabilities(session: AsyncSession) -> InvariantResult:
-    """Inv 8: All subscription origin nodes exist and have 'xray_origin' capability."""
+    """Inv 8: All subscription origin nodes exist and have 'white_internet' capability."""
     subs = (await session.scalars(select(WhiteInternetSubscription))).all()
     origin_ids = {s.origin_node_id for s in subs if s.origin_node_id is not None}
     if not origin_ids:
@@ -246,13 +246,13 @@ async def assert_inv_8_origin_node_capabilities(session: AsyncSession) -> Invari
         srv = server_map.get(srv_id)
         if srv is None:
             bad_nodes.append(f"Server {srv_id} missing")
-        elif "xray_origin" not in (srv.capabilities or []):
-            bad_nodes.append(f"Server {srv_id} lacks 'xray_origin' capability")
+        elif WHITE_INTERNET_CAPABILITY not in (srv.capabilities or []):
+            bad_nodes.append(f"Server {srv_id} lacks 'white_internet' capability")
 
     if bad_nodes:
         return InvariantResult(8, "Origin Node Capabilities", False, "; ".join(bad_nodes))
     return InvariantResult(
-        8, "Origin Node Capabilities", True, "All origin servers have 'xray_origin' capability"
+        8, "Origin Node Capabilities", True, "All origin servers have 'white_internet' capability"
     )
 
 

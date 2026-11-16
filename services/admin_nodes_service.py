@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 import aiohttp
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.constants import VLESS_PROTOCOL, XRAY_PROTOCOL
+from config.constants import VLESS_PROTOCOL, WHITE_INTERNET_CAPABILITY, XRAY_PROTOCOL
 from config.enums import AdminAuditAction, ServerHealthState, ServerLifecycleStatus
 from database.models import Server
 from database.repositories.servers_repo import (
@@ -25,14 +25,13 @@ from database.repositories.servers_repo import (
     get_server_by_id,
     get_server_role,
     merge_v2_extra_data,
-    migrate_origin_subscriptions,
     update_server,
 )
 from services.audit_service import AuditService
 from services.workers.node_monitor import reset_server_monitor_state
 from services.xray_node_client import XrayNodeClient
 from utils.datetime_helpers import now_utc
-from utils.security import is_safe_url
+from utils.security import is_safe_url, normalize_public_domain
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +64,7 @@ def _derive_default_name(api_url: str, status_data: dict | None, role: str | Non
 
 
 def _derive_protocol(capabilities: list[str], role: str | None) -> str:
-    if "white_internet" in capabilities or "xray_origin" in capabilities or role in {"eu_hub", "exit_node"}:
+    if WHITE_INTERNET_CAPABILITY in capabilities or role in {"eu_hub", "exit_node"}:
         return XRAY_PROTOCOL
     return VLESS_PROTOCOL
 
@@ -178,10 +177,17 @@ def serialize_server_node(
     if not flag:
         flag = "🇷🇺" if role == "ru_hub" else "🌐"
 
+    raw_in_std = extra.get("in_standard")
+    in_standard = True if raw_in_std is None else bool(raw_in_std)
+    in_white_internet = bool(extra.get("in_white_internet", False))
+    location_code = str(extra.get("location_code") or "").strip().lower()
+    std_sni = str(extra.get("std_sni") or "").strip().lower()
+
     return {
         "id": server.id,
         "name": server.name,
         "country_flag": flag,
+        "country_code": extra.get("country_code") or "",
         "api_url": server.api_url,
         "has_api_key": bool(server.api_key),
         "role": role,
@@ -190,18 +196,23 @@ def serialize_server_node(
         "lifecycle_status": server.lifecycle_status,
         "capabilities": caps,
         "wi_subscriptions_count": wi_subscriptions_count,
+        "in_standard": in_standard,
+        "in_white_internet": in_white_internet,
+        "location_code": location_code,
+        "std_sni": std_sni,
         "domain": extra.get("domain") or "",
         "cdn_domain": extra.get("cdn_domain") or "",
+        "cdn_domains": extra.get("cdn_domains") if isinstance(extra.get("cdn_domains"), dict) else {},
         "sub_path_prefix": extra.get("sub_path_prefix") or "",
         "secret_base_path": extra.get("secret_base_path") or "",
         "bridge_uuid": extra.get("bridge_uuid") or "",
         "modules": extra.get("modules") if isinstance(extra.get("modules"), dict) else {},
         "module_errors": extra.get("module_errors") if isinstance(extra.get("module_errors"), dict) else {},
         "links": extra.get("links") if isinstance(extra.get("links"), dict) else {},
+        "sni_routes": extra.get("sni_routes") if isinstance(extra.get("sni_routes"), list) else [],
         "xhttp_locations": extra.get("xhttp_locations") if isinstance(extra.get("xhttp_locations"), list) else [],
         "inbounds": extra.get("inbounds") if isinstance(extra.get("inbounds"), list) else [],
         "traffic_limit": extra.get("traffic_limit") if isinstance(extra.get("traffic_limit"), dict) else None,
-        "tls_bootstrap": bool(extra.get("tls_bootstrap")),
         "last_successful_check": (
             server.last_successful_check.isoformat() if server.last_successful_check else None
         ),
@@ -212,8 +223,6 @@ def serialize_server_node(
 async def _probe_v2_node(
     api_url: str,
     api_key: str,
-    *,
-    allow_insecure_tls: bool = False,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, bool, str | None]:
     if not await is_safe_url(api_url):
         raise AdminNodeServiceError("Unsafe or forbidden node URL", status_code=400)
@@ -221,7 +230,6 @@ async def _probe_v2_node(
     async with XrayNodeClient(
         timeout=8.0,
         max_retries=1,
-        allow_insecure_tls=allow_insecure_tls,
     ) as client:
         status_ok, status_data, status_err = await client.get_node_status(api_url, api_key)
         health_ok, _epoch, health_data = await client.check_health(api_url, api_key)
@@ -243,7 +251,6 @@ async def discover_and_add_node(
     api_key: str,
     name: str = "",
     country_flag: str | None = None,
-    allow_bootstrap_tls: bool = True,
 ) -> dict[str, Any]:
     """Validate URL, probe bare v2 node for auto-discovery, persist Server, and write audit log."""
     clean_url = _normalize_api_url(api_url)
@@ -261,7 +268,6 @@ async def discover_and_add_node(
     status_data, health_data, probe_ok, probe_error = await _probe_v2_node(
         clean_url,
         clean_key,
-        allow_insecure_tls=allow_bootstrap_tls,
     )
     if not probe_ok or not isinstance(status_data, dict):
         raise AdminNodeServiceError(
@@ -274,7 +280,6 @@ async def discover_and_add_node(
         {},
         status_data,
         health_data,
-        tls_bootstrap=allow_bootstrap_tls,
     )
     role = extra.get("role")
     detected_name, detected_flag = await auto_detect_node_geo(clean_url, status_data, role)
@@ -327,7 +332,6 @@ async def discover_and_add_node(
             "name": server.name,
             "role": role,
             "capabilities": caps,
-            "tls_bootstrap": allow_bootstrap_tls,
         },
     )
     return {
@@ -348,11 +352,9 @@ async def refresh_node(
         raise AdminNodeServiceError("Node not found", status_code=404)
 
     extra_cur = server.extra_data if isinstance(server.extra_data, dict) else {}
-    allow_insecure = bool(extra_cur.get("tls_bootstrap"))
     status_data, health_data, probe_ok, probe_error = await _probe_v2_node(
         server.api_url,
         server.api_key,
-        allow_insecure_tls=allow_insecure,
     )
     if not probe_ok:
         raise AdminNodeServiceError(
@@ -369,12 +371,20 @@ async def refresh_node(
         "extra_data": extra,
         "protocol": _derive_protocol(caps, role),
     }
+    if isinstance(status_data, dict):
+        cc = str(status_data.get("country_code") or "").strip()
+        if cc and (not server.country_flag or server.country_flag == "🌐"):
+            cc_flag = country_code_to_flag(cc)
+            if cc_flag:
+                updates["country_flag"] = cc_flag
     if isinstance(health_data, dict) and health_data.get("status") == "ok":
         updates["health_state"] = ServerHealthState.ONLINE
         updates["last_successful_check"] = now_utc()
         updates["consecutive_fails"] = 0
 
     updated = await update_server(session, server, **updates)
+    from services.topology_sync_service import sync_v2_topology_to_nodes
+    await sync_v2_topology_to_nodes(session)
     logger.info("Admin %s refreshed v2 node %s (role=%s)", admin_id, server.id, role)
     return serialize_server_node(updated)
 
@@ -386,9 +396,12 @@ async def update_node_settings(
     server_id: int,
     name: str | None = None,
     country_flag: str | None = None,
-    allow_bootstrap_tls: bool | None = None,
     api_url: str | None = None,
     api_key: str | None = None,
+    in_standard: bool | None = None,
+    in_white_internet: bool | None = None,
+    location_code: str | None = None,
+    std_sni: str | None = None,
 ) -> dict[str, Any]:
     """Update admin-editable node metadata and credentials."""
     server = await get_server_by_id(session, server_id, for_update=True)
@@ -421,13 +434,27 @@ async def update_node_settings(
             raise AdminNodeServiceError("api_key cannot be empty", status_code=400)
         updates["api_key"] = clean_key
 
-    extra = dict(server.extra_data or {})
-    extra_changed = False
-    if allow_bootstrap_tls is not None:
-        extra["tls_bootstrap"] = bool(allow_bootstrap_tls)
-        extra_changed = True
-
-    if extra_changed:
+    if any(v is not None for v in (in_standard, in_white_internet, location_code, std_sni)):
+        extra = dict(server.extra_data) if isinstance(server.extra_data, dict) else {}
+        if in_standard is not None:
+            extra["in_standard"] = bool(in_standard)
+        if in_white_internet is not None:
+            extra["in_white_internet"] = bool(in_white_internet)
+        if location_code is not None:
+            clean_loc = location_code.strip().lower()[:32]
+            if clean_loc:
+                extra["location_code"] = clean_loc
+            else:
+                extra.pop("location_code", None)
+        if std_sni is not None:
+            clean_sni = std_sni.strip().lower()
+            if clean_sni:
+                norm_sni = normalize_public_domain(clean_sni, require_fqdn=True)
+                if not norm_sni:
+                    raise AdminNodeServiceError("std_sni must be a valid public FQDN", status_code=400)
+                extra["std_sni"] = norm_sni
+            else:
+                extra.pop("std_sni", None)
         updates["extra_data"] = extra
 
     if not updates:
@@ -435,6 +462,9 @@ async def update_node_settings(
         return serialize_server_node(server, wi_subscriptions_count=wi_counts.get(server.id, 0))
 
     updated = await update_server(session, server, **updates)
+    if any(v is not None for v in (in_standard, in_white_internet, location_code, std_sni)):
+        from services.topology_sync_service import sync_v2_topology_to_nodes
+        await sync_v2_topology_to_nodes(session)
     await AuditService.log_action(
         session,
         admin_id=admin_id,
@@ -477,7 +507,12 @@ async def toggle_node(
         }
 
     updated = await update_server(session, server, **updates)
-    reset_server_monitor_state(updated.id, is_active=target_active, health_state=updated.health_state)
+    reset_server_monitor_state(
+        updated.id,
+        new_state=updated.health_state or (ServerHealthState.ONLINE if target_active else ServerHealthState.MANUAL_DISABLED),
+    )
+    from services.topology_sync_service import sync_v2_topology_to_nodes
+    await sync_v2_topology_to_nodes(session)
     await AuditService.log_action(
         session,
         admin_id=admin_id,
@@ -512,6 +547,8 @@ async def delete_node(
 
     deleted_name = server.name
     await delete_server(session, server)
+    from services.topology_sync_service import sync_v2_topology_to_nodes
+    await sync_v2_topology_to_nodes(session)
     await AuditService.log_action(
         session,
         admin_id=admin_id,
@@ -521,121 +558,3 @@ async def delete_node(
         details={"name": deleted_name, "force": force, "active_wi": active_wi},
     )
     return {"deleted_id": server_id, "name": deleted_name}
-
-
-async def update_node_links(
-    session: AsyncSession,
-    *,
-    admin_id: int,
-    server_id: int,
-    links_payload: dict[str, Any],
-) -> dict[str, Any]:
-    """Push cascade topology links to node via PUT /v1/node/links and sync DB extra_data."""
-    server = await get_server_by_id(session, server_id, for_update=True)
-    if server is None:
-        raise AdminNodeServiceError("Node not found", status_code=404)
-
-    if not await is_safe_url(server.api_url):
-        raise AdminNodeServiceError("Unsafe or forbidden node URL", status_code=400)
-
-    extra_cur = server.extra_data if isinstance(server.extra_data, dict) else {}
-    allow_insecure = bool(extra_cur.get("tls_bootstrap"))
-
-    async with XrayNodeClient(
-        timeout=10.0,
-        max_retries=1,
-        allow_insecure_tls=allow_insecure,
-    ) as client:
-        ok, resp_data, err = await client.update_node_links(
-            server.api_url,
-            server.api_key,
-            links_payload,
-        )
-
-    if not ok or not isinstance(resp_data, dict):
-        raise AdminNodeServiceError(
-            f"Node rejected links update: {err or 'unknown error'}",
-            status_code=502,
-        )
-
-    saved_links = resp_data.get("links") if isinstance(resp_data.get("links"), dict) else links_payload
-    merged_extra = merge_v2_extra_data(extra_cur, links_override=saved_links)
-    updated = await update_server(session, server, extra_data=merged_extra)
-
-    await AuditService.log_action(
-        session,
-        admin_id=admin_id,
-        action=AdminAuditAction.EDIT_SERVER,
-        target_type="server",
-        target_id=server.id,
-        details={
-            "operation": "update_node_links",
-            "apply_queued": bool(resp_data.get("apply_queued")),
-        },
-    )
-    return {
-        "node": serialize_server_node(updated),
-        "apply_queued": bool(resp_data.get("apply_queued")),
-    }
-
-
-async def push_node_certificate(
-    session: AsyncSession,
-    *,
-    admin_id: int,
-    server_id: int,
-    domain: str,
-    fullchain_pem: str,
-    privkey_pem: str,
-) -> dict[str, Any]:
-    """Push TLS certificate bundle to node via POST /v1/system/certificate."""
-    server = await get_server_by_id(session, server_id, for_update=True)
-    if server is None:
-        raise AdminNodeServiceError("Node not found", status_code=404)
-
-    if not await is_safe_url(server.api_url):
-        raise AdminNodeServiceError("Unsafe or forbidden node URL", status_code=400)
-
-    clean_domain = (domain or "").strip().lower()
-    if not clean_domain or not fullchain_pem.strip() or not privkey_pem.strip():
-        raise AdminNodeServiceError("domain, fullchain_pem, and privkey_pem are required", status_code=400)
-
-    extra_cur = server.extra_data if isinstance(server.extra_data, dict) else {}
-    allow_insecure = bool(extra_cur.get("tls_bootstrap"))
-
-    async with XrayNodeClient(
-        timeout=15.0,
-        max_retries=1,
-        allow_insecure_tls=allow_insecure,
-    ) as client:
-        ok, err = await client.deploy_certificate(
-            server.api_url,
-            server.api_key,
-            clean_domain,
-            fullchain_pem,
-            privkey_pem,
-        )
-
-    if not ok:
-        raise AdminNodeServiceError(
-            f"Certificate deployment failed: {err or 'unknown error'}",
-            status_code=502,
-        )
-
-    extra_new = dict(extra_cur)
-    extra_new["domain"] = clean_domain
-    extra_new["tls_bootstrap"] = False
-    updated = await update_server(session, server, extra_data=extra_new)
-
-    await AuditService.log_action(
-        session,
-        admin_id=admin_id,
-        action=AdminAuditAction.EDIT_SERVER,
-        target_type="server",
-        target_id=server.id,
-        details={"operation": "deploy_certificate", "domain": clean_domain},
-    )
-    return {
-        "node": serialize_server_node(updated),
-        "domain": clean_domain,
-    }

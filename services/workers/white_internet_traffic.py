@@ -12,7 +12,7 @@ from aiogram import Bot
 from sqlalchemy import case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.constants import XRAY_PROTOCOL
+from config.constants import WHITE_INTERNET_CAPABILITY, XRAY_PROTOCOL
 from config.enums import ServerHealthState, ServerLifecycleStatus, WhiteInternetStatus
 from database.connection import session_scope
 from database.models import Server, User, WhiteInternetSubscription
@@ -95,9 +95,9 @@ class WhiteInternetTrafficWorker:
                 for s in servers
                 if (
                     getattr(s, "protocol", None) == XRAY_PROTOCOL
-                    or (getattr(s, "protocol", None) is None and "xray_origin" in (s.capabilities or []))
+                    or (getattr(s, "protocol", None) is None and WHITE_INTERNET_CAPABILITY in (s.capabilities or []))
                 )
-                and "xray_origin" in (s.capabilities or [])
+                and WHITE_INTERNET_CAPABILITY in (s.capabilities or [])
                 and s.api_url
                 and s.api_key
             ]
@@ -107,8 +107,12 @@ class WhiteInternetTrafficWorker:
         warn_90p_users_to_notify: list[tuple[int, int, bool, int]] = []
 
         for server_id, api_url, api_key, cur_epoch, cur_boot_id, cur_starttime in server_list:
-            # Network I/O outside DB transaction
-            snapshot = await self.client.get_traffic_snapshot(api_url, api_key)
+            # Network I/O outside DB transaction (isolated per server)
+            try:
+                snapshot = await self.client.get_traffic_snapshot(api_url, api_key)
+            except Exception as snap_err:
+                logger.warning("Traffic snapshot failed for server %d: %s", server_id, snap_err)
+                continue
             (
                 node_epoch,
                 node_boot_id,

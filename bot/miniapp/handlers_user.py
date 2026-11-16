@@ -103,7 +103,7 @@ async def _ensure_user(session, ctx) -> User:
 
 def _build_sub_url(token: str) -> str:
     settings = get_settings()
-    domain = (settings.DOMAIN or "").strip().rstrip("/")
+    domain = (settings.SUBSCRIPTION_DOMAIN or settings.DOMAIN or "").strip().rstrip("/")
     if domain and not domain.startswith("http"):
         return f"https://{domain}/sub/{token}"
     if domain:

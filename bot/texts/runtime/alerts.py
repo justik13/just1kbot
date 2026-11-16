@@ -81,23 +81,6 @@ ALERT_CDN_INGRESS_RESTORED = """✅ <b>Доставка подписок чер�
 🌐 CDN Домен: <code>{domain}</code>
 Эндпоинт <code>{endpoint}</code> через CDN снова отвечает 200 OK."""
 
-ALERT_RELAY_TSPU_PROBLEM = """⚠️ <b>Сбой доступности узла из РФ (возможно ТСПУ)</b>
-
-🌍 Сервер: <b>{relay_name}</b> (<code>{relay_ip}:{relay_port}</code>)
-📡 Контрольный узел: <b>{origin_name}</b> (Москва, ID: {origin_id})
-⚠️ Ошибка проверки: <code>{status_or_err}</code>
-
-Сетевой узел стабильно не отвечает на TCP-подключение со стороны Origin в Москве.
-Возможна трансграничная фильтрация, сбой магистрального провайдера или блокировка IP на оборудовании ТСПУ."""
-
-ALERT_RELAY_TSPU_RESTORED = """✅ <b>Доступность узла из РФ восстановлена</b>
-
-🌍 Сервер: <b>{relay_name}</b> (<code>{relay_ip}:{relay_port}</code>)
-📡 Контрольный узел: <b>{origin_name}</b> (Москва, ID: {origin_id})
-⏱ RTT соединения: <b>{rtt_ms} мс</b>
-
-TCP-соединение из Москвы снова успешно устанавливается."""
-
 ALERT_SERVER_OUTAGE_REMINDER = """⚠️ <b>Напоминание: Связь отсутствует уже {hours_text}</b>
 
 🌍 Сервер: <b>{server_name}</b> (ID: {server_id})
@@ -120,13 +103,6 @@ ALERT_CDN_INGRESS_PROBLEM_REMINDER = """⚠️ <b>Напоминание: Сбо
 Эндпоинт <code>{endpoint}</code> через CDN по-прежнему не отвечает.
 
 🔍 <i>Проверьте Яндекс Облако (баланс, сертификат и статус CDN).</i>"""
-
-ALERT_RELAY_TSPU_PROBLEM_REMINDER = """⚠️ <b>Напоминание: Сбой доступности узла из РФ продолжается ({hours_text})</b>
-
-🌍 Сервер: <b>{relay_name}</b> (<code>{relay_ip}:{relay_port}</code>)
-📡 Контрольный узел: <b>{origin_name}</b> (Москва, ID: {origin_id})
-
-Сетевой узел по-прежнему не отвечает на TCP-подключение со стороны Origin в Москве."""
 
 
 ALERT_WHITE_INTERNET_ORIGIN_EXHAUSTED = """🚨 <b>Внимание: Нет доступных Origin-серверов!</b>

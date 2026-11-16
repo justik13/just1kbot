@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from aiohttp import web
 from pydantic import BaseModel, ValidationError
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, func, or_, select
 
 from bot.miniapp.auth import require_admin_user, require_authenticated_user
 from bot.miniapp.handlers_user import _build_sub_url
@@ -19,11 +19,9 @@ from bot.miniapp.schemas import (
     AdminUserAdjustPayload,
     BroadcastPreviewPayload,
     BroadcastStartPayload,
-    DeployCertPayload,
     IncyGlobalSettingsPayload,
     MassBonusPayload,
     MassExtendPayload,
-    NodeLinksUpdatePayload,
     ToggleNodePayload,
     UpdateNodePayload,
     Verify2FAPayload,
@@ -212,7 +210,6 @@ async def api_admin_nodes_add_handler(request: web.Request) -> web.Response:
                 api_key=payload.api_key,
                 name=payload.name,
                 country_flag=payload.country_flag,
-                allow_bootstrap_tls=payload.allow_bootstrap_tls,
             )
             return web.json_response({"ok": True, **result}, status=201)
     except AdminNodeServiceError as exc:
@@ -261,9 +258,12 @@ async def api_admin_nodes_patch_handler(request: web.Request) -> web.Response:
                 server_id=server_id,
                 name=payload.name,
                 country_flag=payload.country_flag,
-                allow_bootstrap_tls=payload.allow_bootstrap_tls,
                 api_url=payload.api_url,
                 api_key=payload.api_key,
+                in_standard=payload.in_standard,
+                in_white_internet=payload.in_white_internet,
+                location_code=payload.location_code,
+                std_sni=payload.std_sni,
             )
             return web.json_response({"ok": True, "node": node})
     except AdminNodeServiceError as exc:
@@ -348,6 +348,9 @@ async def api_admin_incy_get_handler(request: web.Request) -> web.Response:
         announce_url = await get_system_setting(session, "vless_announce_url", "")
         show_devices_raw = await get_system_setting(session, "vless_profile_show_devices", "false")
         frag_raw = await get_system_setting(session, "vless_fragmentation_enabled", "true")
+        cdn_label_mode = await get_system_setting(session, "bi_cdn_label_mode", "badge")
+        cdn_yandex_label = await get_system_setting(session, "bi_cdn_yandex_label", "Yandex")
+        cdn_turboflare_label = await get_system_setting(session, "bi_cdn_turboflare_label", "Turboflare")
 
     return web.json_response(
         {
@@ -358,6 +361,9 @@ async def api_admin_incy_get_handler(request: web.Request) -> web.Response:
                 "announce_url": str(announce_url or ""),
                 "profile_show_devices": _as_bool_setting(show_devices_raw, False),
                 "fragmentation_enabled": _as_bool_setting(frag_raw, True),
+                "cdn_label_mode": str(cdn_label_mode or "badge"),
+                "cdn_yandex_label": str(cdn_yandex_label or "Yandex"),
+                "cdn_turboflare_label": str(cdn_turboflare_label or "Turboflare"),
             },
         }
     )
@@ -409,6 +415,17 @@ async def api_admin_incy_put_handler(request: web.Request) -> web.Response:
             val = "true" if payload.fragmentation_enabled else "false"
             await set_system_setting(session, "vless_fragmentation_enabled", val, updated_by=ctx.telegram_id)
             changed["fragmentation_enabled"] = payload.fragmentation_enabled
+        if payload.cdn_label_mode is not None:
+            await set_system_setting(session, "bi_cdn_label_mode", payload.cdn_label_mode, updated_by=ctx.telegram_id)
+            changed["cdn_label_mode"] = payload.cdn_label_mode
+        if payload.cdn_yandex_label is not None:
+            clean_yd = payload.cdn_yandex_label.strip()
+            await set_system_setting(session, "bi_cdn_yandex_label", clean_yd or None, updated_by=ctx.telegram_id)
+            changed["cdn_yandex_label"] = clean_yd or "Yandex"
+        if payload.cdn_turboflare_label is not None:
+            clean_tf = payload.cdn_turboflare_label.strip()
+            await set_system_setting(session, "bi_cdn_turboflare_label", clean_tf or None, updated_by=ctx.telegram_id)
+            changed["cdn_turboflare_label"] = clean_tf or "Turboflare"
 
         if changed:
             await AuditService.log_action(
@@ -420,60 +437,6 @@ async def api_admin_incy_put_handler(request: web.Request) -> web.Response:
             )
 
     return await api_admin_incy_get_handler(request)
-
-
-async def api_admin_nodes_links_put_handler(request: web.Request) -> web.Response:
-    ctx, err_resp = require_admin_user(request)
-    if err_resp is not None or ctx is None:
-        return err_resp  # type: ignore[return-value]
-
-    server_id, id_err = _parse_server_id(request)
-    if id_err is not None or server_id is None:
-        return id_err  # type: ignore[return-value]
-
-    payload, parse_err = await _parse_json_model(request, NodeLinksUpdatePayload)
-    if parse_err is not None or payload is None:
-        return parse_err  # type: ignore[return-value]
-
-    try:
-        async with session_scope() as session:
-            result = await admin_nodes_service.update_node_links(
-                session,
-                admin_id=ctx.telegram_id,
-                server_id=server_id,
-                links_payload=payload.model_dump(exclude_none=True),
-            )
-            return web.json_response({"ok": True, **result})
-    except AdminNodeServiceError as exc:
-        return _service_error_response(exc)
-
-
-async def api_admin_nodes_cert_post_handler(request: web.Request) -> web.Response:
-    ctx, err_resp = require_admin_user(request)
-    if err_resp is not None or ctx is None:
-        return err_resp  # type: ignore[return-value]
-
-    server_id, id_err = _parse_server_id(request)
-    if id_err is not None or server_id is None:
-        return id_err  # type: ignore[return-value]
-
-    payload, parse_err = await _parse_json_model(request, DeployCertPayload)
-    if parse_err is not None or payload is None:
-        return parse_err  # type: ignore[return-value]
-
-    try:
-        async with session_scope() as session:
-            result = await admin_nodes_service.push_node_certificate(
-                session,
-                admin_id=ctx.telegram_id,
-                server_id=server_id,
-                domain=payload.domain,
-                fullchain_pem=payload.fullchain_pem,
-                privkey_pem=payload.privkey_pem,
-            )
-            return web.json_response({"ok": True, **result})
-    except AdminNodeServiceError as exc:
-        return _service_error_response(exc)
 
 
 async def api_admin_users_handler(request: web.Request) -> web.Response:
@@ -553,7 +516,11 @@ async def api_admin_users_handler(request: web.Request) -> web.Response:
             std_active = bool(u.subscription_end and u.subscription_end > now)
             wi_active = bool(
                 wi
-                and wi.status in ("active", "pending", "exhausted")
+                and wi.status in (
+                    WhiteInternetStatus.ACTIVE.value,
+                    WhiteInternetStatus.PENDING.value,
+                    WhiteInternetStatus.EXHAUSTED.value,
+                )
                 and wi.expires_at
                 and wi.expires_at > now
             )
@@ -644,7 +611,7 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
             await AuditService.log_action(
                 session,
                 admin_id=ctx.telegram_id,
-                action=AdminAuditAction.ADD_BALANCE if payload.amount_rub >= 0 else AdminAuditAction.REDUCE,
+                action=AdminAuditAction.ADMIN_BALANCE_TOPUP if payload.amount_rub >= 0 else AdminAuditAction.REDUCE,
                 target_type="user",
                 target_id=user.id,
                 details={"amount_rub": payload.amount_rub, "note": note or default_desc},
@@ -954,7 +921,11 @@ async def api_admin_user_details_handler(request: web.Request) -> web.Response:
         bal = await get_account_balance(session, user_id=user.id)
         vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
         wi_sub = await get_subscription_by_user_id(session, user.id)
-        devices = await user_devices_repo.list_user_devices(session, user.id)
+        devices = await user_devices_repo.list_user_devices(
+            session,
+            user.id,
+            wi_device_limit=int(wi_sub.device_limit or 0) if wi_sub else 0,
+        )
 
         inviter = None
         if user.referred_by:
@@ -1001,12 +972,13 @@ async def api_admin_user_details_handler(request: web.Request) -> web.Response:
                 "inviter": inviter,
                 "devices": [
                     {
-                        "hwid": d.hwid,
-                        "device_model": d.device_model,
-                        "platform": d.platform,
-                        "app_version": d.app_version,
-                        "is_bi_priority": bool(d.is_bi_priority),
-                        "last_seen_at": d.last_seen_at.isoformat() if d.last_seen_at else None,
+                        "hwid": d.get("hwid"),
+                        "device_model": d.get("device_name"),
+                        "platform": d.get("platform"),
+                        "app_version": d.get("app_version"),
+                        "is_bi_priority": bool(d.get("bi_priority", 0)),
+                        "is_bi_assigned": bool(d.get("is_bi_assigned", False)),
+                        "last_seen_at": d.get("last_seen_at"),
                     }
                     for d in devices
                 ],
@@ -1035,7 +1007,7 @@ async def api_admin_user_devices_reset_handler(request: web.Request) -> web.Resp
         if wi_sub is not None:
             await white_internet_repo.reset_active_hwids_atomic(session, wi_sub.id, cooldown_seconds=0)
         await session.execute(
-            update(UserDevice).where(UserDevice.user_id == user.id).values(is_active=False)
+            delete(UserDevice).where(UserDevice.user_id == user.id)
         )
         await AuditService.log_action(
             session,
@@ -1077,7 +1049,7 @@ async def api_admin_user_token_rotate_handler(request: web.Request) -> web.Respo
             )
             new_token = new_token or wi_token
         await session.execute(
-            update(UserDevice).where(UserDevice.user_id == user.id).values(is_active=False)
+            delete(UserDevice).where(UserDevice.user_id == user.id)
         )
         await AuditService.log_action(
             session,

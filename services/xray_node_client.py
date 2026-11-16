@@ -88,13 +88,11 @@ class XrayNodeClient:
         timeout: float = 10.0,
         max_retries: int = 2,
         ca_file: str | None = None,
-        allow_insecure_tls: bool = False,
         use_safe_resolver: bool = True,
     ):
         self.timeout = timeout
         self.max_retries = max_retries
         self.ca_file = ca_file or os.getenv("XRAY_NODE_CA_FILE")
-        self.allow_insecure_tls = allow_insecure_tls
         self.use_safe_resolver = use_safe_resolver
         self._session: aiohttp.ClientSession | None = None
 
@@ -118,12 +116,7 @@ class XrayNodeClient:
         }
 
     def _ssl_context(self) -> ssl.SSLContext:
-        """Create TLS context: strict CA validation by default, bootstrap self-signed only when opted in."""
-        if self.allow_insecure_tls:
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            return ctx
+        """Create TLS context with strict CA validation."""
         return ssl.create_default_context(cafile=self.ca_file)
 
     async def _get_session(self) -> aiohttp.ClientSession:
@@ -305,31 +298,6 @@ class XrayNodeClient:
             return True, data, None
         return False, None, err
 
-    async def remove_client(
-        self,
-        api_url: str,
-        api_key: str,
-        client_uuid: str,
-        version: int | None = None,
-    ) -> tuple[SyncResult, str | None]:
-        """Remove a client from all inbounds on the node with version fencing."""
-        url = f"{api_url.rstrip('/')}/v1/clients/{client_uuid}"
-        if version is not None:
-            url = f"{url}?version={version}"
-        headers = self._get_headers(api_key)
-        status_code, data, err = await self._make_request("DELETE", url, headers)
-        if status_code in (200, 204):
-            if isinstance(data, dict):
-                res_str = data.get("result", "applied")
-                if res_str == "already_newer":
-                    return SyncResult.ALREADY_NEWER, None
-                if res_str == "fenced":
-                    return SyncResult.FENCED, "Request was fenced by node version"
-            return SyncResult.APPLIED, None
-        if status_code in (409, 412):
-            return SyncResult.FENCED, err or "Version fenced"
-        return SyncResult.FAILED, err or f"Delete failed with HTTP {status_code}"
-
     async def get_traffic_snapshot(
         self, api_url: str, api_key: str
     ) -> TrafficSnapshot:
@@ -347,47 +315,6 @@ class XrayNodeClient:
             return TrafficSnapshot(node_epoch, node_boot_id, node_starttime, users, host_tx, host_rx)
         logger.error("Traffic snapshot fetch failed for %s: %s", _sanitize_url(url), err)
         return TrafficSnapshot(None, None, None, None, 0, 0)
-
-    async def get_relays_health(
-        self,
-        api_url: str,
-        api_key: str,
-        timeout: float = 5.0,
-        retries: int = 2,
-    ) -> tuple[bool, dict[str, Any] | None, str | None]:
-        """Fetch real-time health status of all relay nodes connected through Origin."""
-        url = f"{api_url.rstrip('/')}/v1/relays/health?timeout={timeout}&retries={retries}"
-        headers = self._get_headers(api_key)
-        # Node probe takes up to: (retries + 1) * timeout + retries * 0.5s.
-        # Add a 4.0s network/TLS handshake buffer and run with max_retries=0 (node already retried internally).
-        needed_timeout = max(10.0, (retries + 1) * timeout + retries * 0.5 + 4.0)
-        status_code, data, err = await self._make_request(
-            "GET", url, headers, request_timeout=needed_timeout, max_retries=0
-        )
-        if status_code == 200 and isinstance(data, dict):
-            return True, data, None
-        return False, None, err or f"Relays health check failed with HTTP {status_code}"
-
-    async def deploy_certificate(
-        self,
-        api_url: str,
-        api_key: str,
-        domain: str,
-        fullchain_pem: str,
-        privkey_pem: str,
-    ) -> tuple[bool, str | None]:
-        """Deploy or rotate TLS certificates (e.g. DNS-01 wildcard) to the node."""
-        url = f"{api_url.rstrip('/')}/v1/system/certificate"
-        headers = self._get_headers(api_key)
-        payload = {
-            "domain": domain,
-            "fullchain_pem": fullchain_pem,
-            "privkey_pem": privkey_pem,
-        }
-        status_code, data, err = await self._make_request("POST", url, headers, json_data=payload)
-        if status_code in (200, 201):
-            return True, None
-        return False, err or f"Certificate deployment failed with HTTP {status_code}"
 
     async def get_node_status(
         self,
@@ -410,15 +337,20 @@ class XrayNodeClient:
         api_url: str,
         api_key: str,
         links_payload: dict[str, Any],
-        timeout: float | None = None,
+        timeout: float = 10.0,
     ) -> tuple[bool, dict[str, Any] | None, str | None]:
-        """Atomically update topology links on a v2 node via PUT /v1/node/links."""
+        """Push auto-orchestrated v2 topology links.json to a node via PUT /v1/node/links."""
         url = f"{api_url.rstrip('/')}/v1/node/links"
         headers = self._get_headers(api_key)
         status_code, data, err = await self._make_request(
-            "PUT", url, headers, json_data=links_payload, request_timeout=timeout
+            "PUT",
+            url,
+            headers,
+            json_data=links_payload,
+            request_timeout=timeout,
+            max_retries=1,
         )
-        if status_code in (200, 201) and isinstance(data, dict):
+        if status_code == 200 and isinstance(data, dict):
             return True, data, None
         return False, None, err or f"Node links update failed with HTTP {status_code}"
 

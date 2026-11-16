@@ -7,7 +7,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from config.constants import (
     VLESS_PROTOCOL,
-    XRAY_ORIGIN_CAPABILITY,
+    WHITE_INTERNET_CAPABILITY,
     XRAY_PROTOCOL,
 )
 from config.enums import ServerHealthState, ServerLifecycleStatus
@@ -64,14 +64,9 @@ def is_white_internet_origin_server(server) -> bool:
         caps = []
     raw_proto = getattr(server, "protocol", None)
     proto = raw_proto.strip().lower() if isinstance(raw_proto, str) else ""
-    if XRAY_ORIGIN_CAPABILITY in caps:
+    if WHITE_INTERNET_CAPABILITY in caps:
         return True
     return proto == XRAY_PROTOCOL and not is_vless_capable_server(server)
-
-
-def is_pure_vless_server(server) -> bool:
-    """Whether a server is a pure direct VLESS server (not White Internet Origin)."""
-    return is_vless_capable_server(server) and not is_white_internet_origin_server(server)
 
 
 def get_server_xray_api_url(server) -> str | None:
@@ -105,9 +100,7 @@ def derive_v2_capabilities(
         if isinstance(svc, str) and svc.strip():
             s = svc.strip().lower()
             _add(s)
-            if s == "white_internet":
-                _add(XRAY_ORIGIN_CAPABILITY)
-            elif s == "vless":
+            if s == "vless":
                 _add("xray_vless")
 
     modules = status_d.get("modules") or health_d.get("modules") or {}
@@ -118,8 +111,7 @@ def derive_v2_capabilities(
             _add("xray_vless")
         xhttp_mod = modules.get("vless_xhttp")
         if isinstance(xhttp_mod, dict) and xhttp_mod.get("enabled"):
-            _add("white_internet")
-            _add(XRAY_ORIGIN_CAPABILITY)
+            _add(WHITE_INTERNET_CAPABILITY)
 
     if role == "eu_hub":
         _add("bridge_hub")
@@ -133,9 +125,6 @@ def merge_v2_extra_data(
     existing_extra: dict | None,
     status_data: dict | None = None,
     health_data: dict | None = None,
-    *,
-    links_override: dict | None = None,
-    tls_bootstrap: bool | None = None,
 ) -> dict:
     """Merge v2 auto-discovery metadata into Server.extra_data cleanly without losing monitor state."""
     merged = dict(existing_extra) if isinstance(existing_extra, dict) else {}
@@ -151,13 +140,16 @@ def merge_v2_extra_data(
     role = str(_pick("role", merged.get("role") or "unconfigured")).strip().lower()
     merged["role"] = role
     for key in (
+        "country_code",
         "domain",
         "cdn_domain",
+        "cdn_domains",
         "sub_path_prefix",
         "secret_base_path",
         "bridge_uuid",
         "modules",
         "module_errors",
+        "sni_routes",
         "xhttp_locations",
         "inbounds",
         "traffic_limit",
@@ -166,15 +158,21 @@ def merge_v2_extra_data(
         if val is not None:
             merged[key] = val
 
-    if links_override is not None:
-        merged["links"] = links_override
-    else:
-        node_links = _pick("links")
-        if isinstance(node_links, dict):
-            merged["links"] = node_links
+    cdn_domains = merged.get("cdn_domains")
+    if isinstance(cdn_domains, dict):
+        tf_dom = cdn_domains.get("cdn_turboflare")
+        if tf_dom:
+            merged["turboflare_domain"] = tf_dom
+        else:
+            merged.pop("turboflare_domain", None)
 
-    if tls_bootstrap is not None:
-        merged["tls_bootstrap"] = bool(tls_bootstrap)
+    node_links = _pick("links")
+    if isinstance(node_links, dict):
+        merged["links"] = node_links
+        if "sni_routes" not in merged or not isinstance(merged.get("sni_routes"), list):
+            std_sec = node_links.get("standard")
+            if isinstance(std_sec, dict) and isinstance(std_sec.get("sni_routes"), list):
+                merged["sni_routes"] = std_sec["sni_routes"]
 
     return merged
 
@@ -281,11 +279,16 @@ def _is_origin_server_eligible(server: Server | None) -> bool:
         or server.lifecycle_status != ServerLifecycleStatus.ACTIVE
         or not (server.api_url and server.api_url.strip())
         or not (server.api_key and server.api_key.strip())
-        or XRAY_ORIGIN_CAPABILITY not in (server.capabilities or [])
+        or WHITE_INTERNET_CAPABILITY not in (server.capabilities or [])
     ):
         return False
-    relays = (server.extra_data or {}).get("relays", [])
-    return bool(relays and len(relays) > 0)
+    extra = server.extra_data or {}
+    return bool(
+        extra.get("xhttp_locations")
+        or extra.get("cdn_domains")
+        or extra.get("cdn_domain")
+        or extra.get("relays")
+    )
 
 
 async def has_available_service_capacity(
@@ -334,7 +337,7 @@ async def allocate_origin_server_atomic(session: AsyncSession) -> Server | None:
     1. Select candidate server IDs that are active, online, and lifecycle ACTIVE.
     2. Sequentially acquire row locks (SELECT ... FOR UPDATE) on candidates.
     3. Re-verify is_active, health_state == ONLINE, lifecycle_status == ACTIVE,
-       valid api_url / api_key, 'xray_origin' in capabilities, and relays.
+       valid api_url / api_key, 'white_internet' in capabilities, and relays.
     4. Return the locked Server instance.
     5. Return None if no eligible origin server is found.
     """
@@ -630,12 +633,17 @@ async def migrate_origin_subscriptions(
     if target_server.protocol != XRAY_PROTOCOL or not target_server.is_active:
         raise ValueError("Target server is not an active Xray node.")
 
-    if XRAY_ORIGIN_CAPABILITY not in (target_server.capabilities or []):
-        raise ValueError("Target server does not have the required 'xray_origin' capability.")
+    if WHITE_INTERNET_CAPABILITY not in (target_server.capabilities or []):
+        raise ValueError("Target server does not have the required 'white_internet' capability.")
 
-    relays = (target_server.extra_data or {}).get("relays", [])
-    if not relays or len(relays) == 0:
-        raise ValueError("Target server does not have relays configured.")
+    target_extra = target_server.extra_data or {}
+    if not (
+        target_extra.get("xhttp_locations")
+        or target_extra.get("cdn_domains")
+        or target_extra.get("cdn_domain")
+        or target_extra.get("relays")
+    ):
+        raise ValueError("Target server does not have White Internet endpoints configured.")
 
     if target_server.health_state not in (ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION):
         raise ValueError("Target server health state is not eligible for migration.")

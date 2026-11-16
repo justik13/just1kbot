@@ -16,7 +16,7 @@ from bot.texts.runtime.alerts import (
     ALERT_WHITE_INTERNET_ORIGIN_EXHAUSTED,
     ALERT_WHITE_INTERNET_ORIGIN_RESTORED,
 )
-from config.constants import XRAY_PROTOCOL
+from config.constants import WHITE_INTERNET_CAPABILITY, XRAY_PROTOCOL
 from config.enums import (
     ServerHealthState,
     ServerLifecycleStatus,
@@ -146,12 +146,11 @@ class WhiteInternetReconciliationWorker:
         notify_user_id: int | None = None
         async with self._get_sub_lock(sub_id):
             async with self._semaphore:
-                async with sf() as lock_session:
-                    lock_conn = None
-                    locked = False
-                    bind = getattr(lock_session, "bind", None)
-                    if not bind and hasattr(lock_session, "sync_session"):
-                        bind = getattr(lock_session.sync_session, "bind", None)
+                lock_conn = None
+                async with sf() as _probe_session:
+                    bind = getattr(_probe_session, "bind", None)
+                    if not bind and hasattr(_probe_session, "sync_session"):
+                        bind = getattr(_probe_session.sync_session, "bind", None)
                     if bind and getattr(bind, "dialect", None) and getattr(bind.dialect, "name", None) == "postgresql":
                         if hasattr(bind, "connect"):
                             lock_conn = await bind.connect()
@@ -163,23 +162,31 @@ class WhiteInternetReconciliationWorker:
                                 logger.debug("Subscription %d locked by peer worker process. Skipping.", sub_id)
                                 return False
 
-                    try:
-                        # 1. External network mutation on Xray node (executed under distributed advisory lock)
-                        resp = await self.client.sync_client(
-                            api_url,
-                            api_key,
-                            sub_uuid,
-                            is_active=desired_active,
-                            version=target_version,
-                            expected_node_epoch=target_epoch,
-                            idempotency_key=f"reconcile:{sub_id}:{target_epoch}:{target_version}:{desired_active}",
+                try:
+                    # 1. External network mutation on Xray node (no ORM session held during HTTP I/O)
+                    resp = await self.client.sync_client(
+                        api_url,
+                        api_key,
+                        sub_uuid,
+                        is_active=desired_active,
+                        version=target_version,
+                        expected_node_epoch=target_epoch,
+                        idempotency_key=f"reconcile:{sub_id}:{target_epoch}:{target_version}:{desired_active}",
+                    )
+
+                    sync_result = resp.result if hasattr(resp, "result") else resp[0]
+                    err_msg = resp.error if hasattr(resp, "error") else resp[1]
+                    verified_epoch = getattr(resp, "verified_epoch", None) or target_epoch
+                    verified_inbounds = set(getattr(resp, "verified_inbounds", None) or [])
+
+                    inv_data = None
+                    inv_ok = False
+                    if sync_result == SyncResult.ALREADY_NEWER:
+                        inv_ok, inv_data, _ = await self.client.get_inventory(
+                            api_url, api_key, client_ids=[sub_uuid], service="white_internet"
                         )
 
-                        sync_result = resp.result if hasattr(resp, "result") else resp[0]
-                        err_msg = resp.error if hasattr(resp, "error") else resp[1]
-                        verified_epoch = getattr(resp, "verified_epoch", None) or target_epoch
-                        verified_inbounds = set(getattr(resp, "verified_inbounds", None) or [])
-
+                    async with sf() as lock_session:
                         sub = await white_internet_repo.get_subscription_with_lock(lock_session, sub_id)
                         if sub is None:
                             return False
@@ -233,10 +240,7 @@ class WhiteInternetReconciliationWorker:
                                 notify_user_id = sub.user_id
                             return True
                         elif sync_result == SyncResult.ALREADY_NEWER:
-                            # Check real observed runtime inventory before trusting ALREADY_NEWER
-                            inv_ok, inv_data, _ = await self.client.get_inventory(
-                                api_url, api_key, client_ids=[sub_uuid], service="white_internet"
-                            )
+                            # Runtime inventory was already fetched before opening lock_session
                             if inv_ok and inv_data and "inventory" in inv_data:
                                 client_inv = inv_data["inventory"].get(sub_uuid)
                                 if client_inv:
@@ -323,35 +327,35 @@ class WhiteInternetReconciliationWorker:
                             )
                             await lock_session.commit()
                             return False
-                    finally:
-                        if lock_conn is not None:
-                            async def _do_unlock():
-                                try:
-                                    await lock_conn.scalar(select(func.pg_advisory_unlock(sub_id + 7_000_000_000)))
-                                except Exception as exc:
-                                    logger.debug("Error releasing advisory lock for sub_id %d: %s", sub_id, exc)
-                                finally:
-                                    try:
-                                        await lock_conn.close()
-                                    except Exception:
-                                        pass
-
+                finally:
+                    if lock_conn is not None:
+                        async def _do_unlock():
                             try:
-                                await asyncio.shield(_do_unlock())
-                            except BaseException as exc:
-                                logger.debug("Shielded advisory unlock for sub_id %d completed or interrupted: %s", sub_id, exc)
-
-                        if notify_user_id is not None:
-                            try:
-                                async with sf() as notify_session:
-                                    await self._notify_sub_ready(notify_session, notify_user_id)
+                                await lock_conn.scalar(select(func.pg_advisory_unlock(sub_id + 7_000_000_000)))
                             except Exception as exc:
-                                logger.warning(
-                                    "Failed to notify user %s for sub %d after advisory unlock: %s",
-                                    notify_user_id,
-                                    sub_id,
-                                    exc,
-                                )
+                                logger.debug("Error releasing advisory lock for sub_id %d: %s", sub_id, exc)
+                            finally:
+                                try:
+                                    await lock_conn.close()
+                                except Exception:
+                                    pass
+
+                        try:
+                            await asyncio.shield(_do_unlock())
+                        except BaseException as exc:
+                            logger.debug("Shielded advisory unlock for sub_id %d completed or interrupted: %s", sub_id, exc)
+
+                    if notify_user_id is not None:
+                        try:
+                            async with sf() as notify_session:
+                                await self._notify_sub_ready(notify_session, notify_user_id)
+                        except Exception as exc:
+                            logger.warning(
+                                "Failed to notify user %s for sub %d after advisory unlock: %s",
+                                notify_user_id,
+                                sub_id,
+                                exc,
+                            )
 
     async def run_reconciliation_cycle(self, session: AsyncSession | None = None) -> int:
         now = now_utc()
@@ -421,9 +425,9 @@ class WhiteInternetReconciliationWorker:
                 for s in servers
                 if (
                     getattr(s, "protocol", None) == XRAY_PROTOCOL
-                    or (getattr(s, "protocol", None) is None and "xray_origin" in (s.capabilities or []))
+                    or (getattr(s, "protocol", None) is None and WHITE_INTERNET_CAPABILITY in (s.capabilities or []))
                 )
-                and "xray_origin" in (s.capabilities or [])
+                and WHITE_INTERNET_CAPABILITY in (s.capabilities or [])
                 and s.api_url
                 and s.api_key
             ]
@@ -620,7 +624,7 @@ class WhiteInternetReconciliationWorker:
                     server_proto = getattr(server, "protocol", None)
                     if not server_proto:
                         caps = getattr(server, "capabilities", None) or []
-                        server_proto = XRAY_PROTOCOL if "xray_origin" in caps else None
+                        server_proto = XRAY_PROTOCOL if WHITE_INTERNET_CAPABILITY in caps else None
                     if (
                         server_proto != XRAY_PROTOCOL
                         or not server.is_active

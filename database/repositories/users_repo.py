@@ -11,7 +11,7 @@ from config.constants import (
     REFERRAL_ACTIVE_MIN_TOPUP_RUB,
 )
 from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
-from database.models import Order, Payment, Tariff, User, VlessSubscription, WhiteInternetSubscription
+from database.models import Order, Payment, Tariff, User, UserDevice, VlessSubscription, WhiteInternetSubscription
 from utils.datetime_helpers import now_utc
 
 ALLOWED_USER_UPDATE_FIELDS = {
@@ -610,8 +610,21 @@ async def search_user_flexible(session: AsyncSession, query: str) -> User | None
         )
         return (await session.execute(stmt)).scalar_one_or_none()
 
-    # 6. HWID lookup (GIN index on active_hwids)
+    # 6. HWID lookup (v2 user_devices first, fallback to legacy active_hwids)
     if len(query_str) >= 8:
+        device_user_id = await session.scalar(
+            select(UserDevice.user_id)
+            .where(UserDevice.hwid == query_str)
+            .limit(1)
+        )
+        if device_user_id:
+            stmt = (
+                select(User)
+                .where(User.id == device_user_id, User.is_deleted.is_(False))
+                .options(selectinload(User.vless_subscription))
+            )
+            return (await session.execute(stmt)).scalar_one_or_none()
+
         vless_hwid_user_id = await session.scalar(
             select(VlessSubscription.user_id)
             .where(VlessSubscription.active_hwids.has_key(query_str))

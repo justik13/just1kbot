@@ -89,7 +89,7 @@ def run_audit() -> list[str]:
 
         # Check raw protocols
         clean_no_placeholders = re.sub(r"\{[a-zA-Z0-9_]+\}", "", text_val).lower()
-        for proto in ("vless", "wireguard", "amnezia", "amneziawg"):
+        for proto in ("vless", "xray", "wireguard", "amnezia", "amneziawg"):
             if proto in clean_no_placeholders:
                 violations.append(f"[{key}] Exposes forbidden protocol name: {proto!r}")
         if re.search(r"\bawg\b", clean_no_placeholders):
