@@ -548,10 +548,9 @@ class VlessSubscriptionService:
     ) -> list[Server]:
         """Fetch all configured active servers capable of serving VLESS TLS regardless of transient health state.
 
-        Used for synchronization and deprovisioning to guarantee that offline or degraded nodes
-        are not silently omitted from revocation/sync targets.
+        In v2 topology, returns ru_hub nodes where end-user VLESS credentials reside.
         """
-        from database.repositories.servers_repo import is_vless_capable_server
+        from database.repositories.servers_repo import is_vless_sync_target_server
 
         stmt = (
             select(Server)
@@ -562,7 +561,7 @@ class VlessSubscriptionService:
             .order_by(Server.id.asc())
         )
         servers = (await session.execute(stmt)).scalars().all()
-        return [srv for srv in servers if is_vless_capable_server(srv)]
+        return [srv for srv in servers if is_vless_sync_target_server(srv)]
 
     @staticmethod
     async def get_revocation_target_servers(
@@ -572,7 +571,7 @@ class VlessSubscriptionService:
         Includes servers where is_active=False, provided they are still active machines
         (lifecycle_status == ServerLifecycleStatus.ACTIVE).
         """
-        from database.repositories.servers_repo import is_vless_capable_server
+        from database.repositories.servers_repo import is_vless_sync_target_server
 
         stmt = (
             select(Server)
@@ -582,7 +581,7 @@ class VlessSubscriptionService:
             .order_by(Server.id.asc())
         )
         servers = (await session.execute(stmt)).scalars().all()
-        return [srv for srv in servers if is_vless_capable_server(srv)]
+        return [srv for srv in servers if is_vless_sync_target_server(srv)]
 
     @staticmethod
     def _extract_node_targets(servers: list[Server]) -> list[tuple[int, str, str]]:

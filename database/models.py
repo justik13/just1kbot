@@ -79,7 +79,7 @@ class User(Base):
                 is_deleted = false
                 AND is_bot_blocked = false
                 AND subscription_end IS NOT NULL
-                AND (notified_expired = false OR notified_grace_12h = false)
+                AND notified_expired = false
                 """
             ),
         ),
@@ -156,9 +156,6 @@ class User(Base):
     notified_1d: Mapped[bool] = mapped_column(Boolean, default=False)
     notified_2h: Mapped[bool] = mapped_column(Boolean, default=False)
     notified_expired: Mapped[bool] = mapped_column(Boolean, default=False)
-    notified_grace_12h: Mapped[bool] = mapped_column(
-        Boolean, default=False, nullable=False, server_default=text("false")
-    )
 
     total_traffic_bytes: Mapped[int] = mapped_column(
         BigInteger, default=0, server_default=text("0")
@@ -810,11 +807,6 @@ class WhiteInternetSubscription(Base):
             postgresql_where=text("status IN ('PENDING', 'ACTIVE', 'EXHAUSTED')"),
         ),
         Index(
-            "ix_white_internet_subscriptions_active_hwids",
-            "active_hwids",
-            postgresql_using="gin",
-        ),
-        Index(
             "ix_wi_subs_expiring_notify",
             "expires_at",
             "user_id",
@@ -895,9 +887,6 @@ class WhiteInternetSubscription(Base):
 
     traffic_stats_epoch: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
-    active_hwids: Mapped[dict | None] = mapped_column(
-        JSONB, nullable=True, default=dict, server_default=text("'{}'::jsonb")
-    )
     device_limit: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default=text("1")
     )
@@ -1047,9 +1036,6 @@ class VlessSubscription(Base):
         Integer, nullable=False, default=1, server_default=text("1")
     )
 
-    active_hwids: Mapped[dict | None] = mapped_column(
-        JSONB, nullable=True, default=dict, server_default=text("'{}'::jsonb")
-    )
     pending_revoked_uuids: Mapped[list[str]] = mapped_column(
         JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
     )

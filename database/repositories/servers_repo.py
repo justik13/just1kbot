@@ -53,6 +53,25 @@ def is_vless_capable_server(server) -> bool:
     return "vless" in caps or "xray_vless" in caps or proto == VLESS_PROTOCOL
 
 
+def is_vless_sync_target_server(server) -> bool:
+    """Whether a server hosts individual user VLESS client credentials.
+
+    In v2 topology, end-user VLESS credentials are authenticated strictly on ru_hub
+    (where TLS is terminated and SNI routes are matched).
+    eu_hub and exit_node communicate strictly over shared inter-hub bridge UUIDs
+    and never host individual user credentials.
+    """
+    if not server:
+        return False
+    role = get_server_role(server)
+    if role in ("eu_hub", "exit_node"):
+        return False
+    if role == "ru_hub":
+        return is_vless_capable_server(server)
+    # Standalone legacy servers without a v2 role
+    return is_vless_capable_server(server)
+
+
 def is_white_internet_origin_server(server) -> bool:
     """Whether a server is an origin server for White Internet contour."""
     if not server:

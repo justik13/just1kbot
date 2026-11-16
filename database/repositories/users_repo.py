@@ -610,7 +610,7 @@ async def search_user_flexible(session: AsyncSession, query: str) -> User | None
         )
         return (await session.execute(stmt)).scalar_one_or_none()
 
-    # 6. HWID lookup (v2 user_devices first, fallback to legacy active_hwids)
+    # 6. HWID lookup (authoritative user_devices registry)
     if len(query_str) >= 8:
         device_user_id = await session.scalar(
             select(UserDevice.user_id)
@@ -621,32 +621,6 @@ async def search_user_flexible(session: AsyncSession, query: str) -> User | None
             stmt = (
                 select(User)
                 .where(User.id == device_user_id, User.is_deleted.is_(False))
-                .options(selectinload(User.vless_subscription))
-            )
-            return (await session.execute(stmt)).scalar_one_or_none()
-
-        vless_hwid_user_id = await session.scalar(
-            select(VlessSubscription.user_id)
-            .where(VlessSubscription.active_hwids.has_key(query_str))
-            .limit(1)
-        )
-        if vless_hwid_user_id:
-            stmt = (
-                select(User)
-                .where(User.id == vless_hwid_user_id, User.is_deleted.is_(False))
-                .options(selectinload(User.vless_subscription))
-            )
-            return (await session.execute(stmt)).scalar_one_or_none()
-
-        hwid_user_id = await session.scalar(
-            select(WhiteInternetSubscription.user_id)
-            .where(WhiteInternetSubscription.active_hwids.has_key(query_str))
-            .limit(1)
-        )
-        if hwid_user_id:
-            stmt = (
-                select(User)
-                .where(User.id == hwid_user_id, User.is_deleted.is_(False))
                 .options(selectinload(User.vless_subscription))
             )
             return (await session.execute(stmt)).scalar_one_or_none()

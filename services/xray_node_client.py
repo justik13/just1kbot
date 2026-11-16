@@ -1,4 +1,4 @@
-"""HTTP REST Client for interacting with the Origin server's xray-api daemon."""
+"""HTTP REST Client for interacting with the Just1kNode v2 (ru_hub, eu_hub, exit_node) xray-api daemon."""
 
 from __future__ import annotations
 
