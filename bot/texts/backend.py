@@ -29,9 +29,6 @@ PAYMENT_PURCHASE_SUCCESS_CARD = """🎉 <b>{operation_title}</b>
 🎁 Бонусный баланс: <b>{bonus_balance} ₽</b>"""
 PURCHASE_COMPLETED = "Тариф куплен"
 PAYMENT_OP_TITLE_CHANGE = "🔄 Смена тарифа"
-TARIFF_DISPLAY_BASIC = "📱 Базовый"
-TARIFF_DISPLAY_FAMILY = "👨‍👩‍👧‍👦 Семейный"
-TARIFF_DISPLAY_PRO = "🚀 Pro"
 
 # Admin alerts
 ADMIN_ALERT_ORDER_REQUIRES_MANUAL_REVIEW = (
@@ -40,8 +37,6 @@ ADMIN_ALERT_ORDER_REQUIRES_MANUAL_REVIEW = (
     "Сумма заказа: {amount_rub} ₽\n"
     "Причина: частичный возврат или несовпадение суммы ({mismatch})"
 )
-ADMIN_WL_RESET_SUCCESS = "✅ Сброс триала принят: доступ будет отключён на узле и запись удалена автоматически."
-ADMIN_WL_RESET_COOLDOWN = "Сброс триала возможен не чаще одного раза в минуту (подождите {seconds}с)"
 ADMIN_WI_SUB_NOT_FOUND = "❌ Подписка Белый Интернет не найдена"
 ADMIN_WI_TRIAL_EXTEND_FORBIDDEN = (
     "Продление пробного периода недоступно. Пользователь должен перейти на платную подписку"
@@ -153,16 +148,22 @@ WL_TRAFFIC_90P_TRIAL_ALERT = (
     "Оформите регулярную подписку заранее, чтобы оставаться на связи."
 )
 
-WL_WEB_TOO_MANY_REQUESTS = "Слишком много запросов. Пожалуйста, подождите минуту."
 WL_WEB_PENDING = "Шлюз настраивается, повторите через несколько секунд."
-WL_WEB_HWID_REQUIRED = "Требуется HWID устройства. Включите отправку HWID в приложении."
 
 WL_FEED_EXHAUSTED_TITLE = "⚠️ Трафик исчерпан"
 WL_FEED_EXHAUSTED_NOTICE = "⚠️ Трафик исчерпан. Докупите пакет в @{bot_username}"
-WL_FEED_EXHAUSTED_TRIAL_NOTICE = "⚠️ Пробный трафик исчерпан. Оформите подписку в @{bot_username}"
 WL_FEED_DISABLED_TITLE = "🚫 Доступ отключен"
 WL_FEED_DISABLED_NOTICE = "🚫 Доступ отключен администратором. Обратитесь в поддержку: @{bot_username}"
-WL_FEED_DEVICE_LIMIT_NOTICE = "⚠️ Превышен лимит устройств ({active}/{limit}). Управление в @{bot_username}"
+
+FEED_STUB_STD_DEVICE_LIMIT = "⚠️ Стандарт: лимит устройств ({limit}/{limit})"
+FEED_STUB_STD_EXPIRED = "⛔ Стандарт: подписка истекла — продлите в боте"
+FEED_STUB_WI_PENDING = "⏳ Белый интернет: идёт настройка подключения"
+FEED_STUB_WI_DEVICE_LIMIT = "⚠️ Белый интернет: лимит устройств ({limit}/{limit})"
+FEED_STUB_WI_EXHAUSTED = "⚠️ Белый интернет: трафик исчерпан"
+FEED_STUB_WI_DISABLED = "⛔ Белый интернет: отключён"
+FEED_STUB_WI_EXPIRED = "⛔ Белый интернет: подписка истекла"
+FEED_STUB_NO_LOCATIONS = "⚠️ Локации временно недоступны — обновите позже"
+FEED_STUB_PENDING_SETUP = "⏳ Идёт настройка подключения — обновите позже"
 
 WL_VLESS_TAG = "⚪️ Белый Интернет"
 WL_DEFAULT_TARIFF_NAME = "Белый Интернет 50 ГБ"

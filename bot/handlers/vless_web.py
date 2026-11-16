@@ -782,10 +782,10 @@ async def serve_unified_subscription_feed(
                     VlessSubscriptionService.ensure_synced_background(user.id, session=session)
             else:
                 all_links.append(
-                    _make_inline_stub(f"⚠️ Стандарт: лимит устройств ({std_limit}/{std_limit})")
+                    _make_inline_stub(texts.FEED_STUB_STD_DEVICE_LIMIT.format(limit=std_limit))
                 )
         elif getattr(user, "subscription_end", None) is not None and wi_active:
-            all_links.append(_make_inline_stub("⛔ Стандарт: подписка истекла — продлите в боте"))
+            all_links.append(_make_inline_stub(texts.FEED_STUB_STD_EXPIRED))
 
         wi_server: Server | None = None
         if wi_active and wi_sub is not None:
@@ -825,28 +825,28 @@ async def serve_unified_subscription_feed(
                     )
                     all_links.extend(wi_links)
                 else:
-                    all_links.append(_make_inline_stub("⏳ Белый интернет: идёт настройка подключения"))
+                    all_links.append(_make_inline_stub(texts.FEED_STUB_WI_PENDING))
             else:
                 all_links.append(
-                    _make_inline_stub(f"⚠️ Белый интернет: лимит устройств ({wi_limit}/{wi_limit})")
+                    _make_inline_stub(texts.FEED_STUB_WI_DEVICE_LIMIT.format(limit=wi_limit))
                 )
         elif wi_sub is not None and std_active:
             if wi_is_pending:
-                all_links.append(_make_inline_stub("⏳ Белый интернет: идёт настройка подключения"))
+                all_links.append(_make_inline_stub(texts.FEED_STUB_WI_PENDING))
             elif wi_is_exhausted and not wi_is_expired:
-                all_links.append(_make_inline_stub("⚠️ Белый интернет: трафик исчерпан"))
+                all_links.append(_make_inline_stub(texts.FEED_STUB_WI_EXHAUSTED))
             elif wi_is_disabled:
-                all_links.append(_make_inline_stub("⛔ Белый интернет: отключён"))
+                all_links.append(_make_inline_stub(texts.FEED_STUB_WI_DISABLED))
             else:
-                all_links.append(_make_inline_stub("⛔ Белый интернет: подписка истекла"))
+                all_links.append(_make_inline_stub(texts.FEED_STUB_WI_EXPIRED))
 
         no_servers_mode = False
         if not all_links:
             no_servers_mode = True
             placeholder_label = (
-                "⏳ Идёт настройка подключения — обновите позже"
+                texts.FEED_STUB_PENDING_SETUP
                 if (wi_active and not std_active)
-                else "⚠️ Локации временно недоступны — обновите позже"
+                else texts.FEED_STUB_NO_LOCATIONS
             )
             all_links.append(
                 f"vless://00000000-0000-0000-0000-000000000000@127.0.0.1:443"
