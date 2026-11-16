@@ -88,11 +88,13 @@ class XrayNodeClient:
         timeout: float = 10.0,
         max_retries: int = 2,
         ca_file: str | None = None,
+        allow_insecure_tls: bool = True,
         use_safe_resolver: bool = True,
     ):
         self.timeout = timeout
         self.max_retries = max_retries
         self.ca_file = ca_file or os.getenv("XRAY_NODE_CA_FILE")
+        self.allow_insecure_tls = allow_insecure_tls
         self.use_safe_resolver = use_safe_resolver
         self._session: aiohttp.ClientSession | None = None
 
@@ -116,8 +118,12 @@ class XrayNodeClient:
         }
 
     def _ssl_context(self) -> ssl.SSLContext:
-        """Create TLS context with strict CA validation."""
-        return ssl.create_default_context(cafile=self.ca_file)
+        """Create TLS context: allow self-signed node certs by default unless CA file pinned."""
+        ctx = ssl.create_default_context(cafile=self.ca_file)
+        if self.allow_insecure_tls and not self.ca_file:
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+        return ctx
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
