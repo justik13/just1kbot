@@ -396,8 +396,7 @@ async def _snapshot(order_id) -> dict | None:
                     )
                     if not has_credit:
                         logger.warning(
-                            "Credit-notify skips order %s: paid topup but no "
-                            "payment_credit (pre-flight 3B owns this anomaly)",
+                            "Credit-notify skips order %s: paid topup without payment_credit",
                             order.id,
                         )
                         owner = {"kind": "anomaly"}

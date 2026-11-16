@@ -18,10 +18,9 @@ from database.connection import session_scope
 from database.models import Server, User, WhiteInternetSubscription
 from database.repositories import servers_repo, white_internet_repo
 from services.xray_node_client import XrayNodeClient
-from utils.datetime_helpers import get_hosting_billing_cycle, now_utc
+from utils.datetime_helpers import now_utc
 from utils.rate_limiter import global_send_limiter
 from utils.telegram import safe_send_message
-from utils.traffic_helpers import accumulate_host_traffic_cycle, get_server_hosting_reset_day
 
 import enum
 
@@ -200,16 +199,6 @@ class WhiteInternetTrafficWorker:
                         if sub is None or sub.origin_node_id != server_id:
                             continue
 
-                        if uplink < 0 or downlink < 0:
-                            logger.warning(
-                                "Invalid negative counter detected for sub_id=%d on server %d: up=%d, down=%d. Skipping.",
-                                sub.id,
-                                server_id,
-                                uplink,
-                                downlink,
-                            )
-                            continue
-
                         if sub.traffic_stats_epoch != node_epoch:
                             counter_state = TrafficCounterState.EPOCH_CHANGED
                             before_up = 0
@@ -349,30 +338,19 @@ class WhiteInternetTrafficWorker:
             host_tx = getattr(snapshot, "host_tx_bytes", 0) or 0
             host_rx = getattr(snapshot, "host_rx_bytes", 0) or 0
             if server_consumed > 0 or host_tx > 0 or host_rx > 0:
-                current_cycle = now.strftime("%Y-%m")
+                from utils.traffic_helpers import accumulate_server_traffic_extra
+
                 async with sf() as sess:
                     server_obj = await sess.get(Server, server_id, with_for_update=True)
                     if server_obj:
-                        raw_extra = getattr(server_obj, "extra_data", None)
-                        extra = dict(raw_extra) if isinstance(raw_extra, dict) else {}
-                        changed = False
-                        if server_consumed > 0:
-                            saved_cycle = extra.get("traffic_cycle")
-                            if saved_cycle != current_cycle:
-                                extra["traffic_cycle"] = current_cycle
-                                extra["monthly_traffic_bytes"] = server_consumed
-                            else:
-                                extra["monthly_traffic_bytes"] = int(extra.get("monthly_traffic_bytes", 0)) + server_consumed
-                            changed = True
-                        if host_tx > 0 or host_rx > 0:
-                            host_cycle = get_hosting_billing_cycle(
-                                now,
-                                get_server_hosting_reset_day(extra),
-                            )
-                            if accumulate_host_traffic_cycle(extra, host_tx, host_rx, host_cycle):
-                                changed = True
-                        if changed:
-                            server_obj.extra_data = extra
+                        accumulate_server_traffic_extra(
+                            server_obj,
+                            server_consumed,
+                            host_tx,
+                            host_rx,
+                            now,
+                            accumulate_host=True,
+                        )
 
         # Send Telegram notifications strictly outside all DB transactions
         if self.bot is not None and exhausted_users_to_notify:

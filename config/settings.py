@@ -8,7 +8,7 @@ except ImportError:
 from functools import lru_cache
 from typing import Any
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _SERVICE_USER = "just1kbot"
@@ -69,14 +69,6 @@ class Settings(BaseSettings):
     SSL_EMAIL: str
     YOOKASSA_EXTRA_IPS: str = ""
 
-    # Removed legacy and unsupported settings are declared so stale .env files fail fast.
-    AMNEZIA_API_URL: str | None = None
-    AMNEZIA_API_KEY: str | None = None
-    WEBHOOK_URL: str | None = None
-    INCY_HOST: str | None = None
-    INCY_API_KEY: str | None = None
-    AMNEZIA_BRIDGE_HMAC_SECRET: str | None = None
-
     # ── Security ──
     ALLOW_LOCAL_HTTP: bool = False
     ALLOW_LOCAL_HTTPS: bool = False
@@ -94,22 +86,6 @@ class Settings(BaseSettings):
                 f"LOG_LEVEL must be one of {sorted(allowed)}, got {value!r}"
             )
         return normalized
-
-    @model_validator(mode="after")
-    def reject_removed_settings(self):
-        removed = {
-            "AMNEZIA_API_URL": self.AMNEZIA_API_URL,
-            "AMNEZIA_API_KEY": self.AMNEZIA_API_KEY,
-            "WEBHOOK_URL": self.WEBHOOK_URL,
-            "INCY_HOST": self.INCY_HOST,
-            "INCY_API_KEY": self.INCY_API_KEY,
-            "AMNEZIA_BRIDGE_HMAC_SECRET": self.AMNEZIA_BRIDGE_HMAC_SECRET,
-        }
-        configured = [name for name, value in removed.items() if value]
-        if configured:
-            names = ", ".join(sorted(configured))
-            raise ValueError(f"removed settings are not supported: {names}")
-        return self
 
     @field_validator("BOT_TOKEN", mode="before")
     @classmethod

@@ -108,3 +108,38 @@ def accumulate_host_traffic_cycle(
     return False
 
 
+def accumulate_server_traffic_extra(
+    server_obj,
+    delta_bytes: int,
+    host_tx: int,
+    host_rx: int,
+    now,
+    *,
+    accumulate_host: bool = True,
+) -> bool:
+    """Update monthly_traffic_bytes and host_monthly_traffic_bytes on server_obj.extra_data."""
+    from utils.datetime_helpers import get_hosting_billing_cycle
+
+    raw_extra = getattr(server_obj, "extra_data", None)
+    extra = dict(raw_extra) if isinstance(raw_extra, dict) else {}
+    changed = False
+    current_cycle = now.strftime("%Y-%m")
+
+    if delta_bytes > 0:
+        if extra.get("traffic_cycle") != current_cycle:
+            extra["traffic_cycle"] = current_cycle
+            extra["monthly_traffic_bytes"] = delta_bytes
+        else:
+            extra["monthly_traffic_bytes"] = int(extra.get("monthly_traffic_bytes", 0)) + delta_bytes
+        changed = True
+
+    if accumulate_host and (host_tx > 0 or host_rx > 0):
+        host_cycle = get_hosting_billing_cycle(now, get_server_hosting_reset_day(extra))
+        if accumulate_host_traffic_cycle(extra, host_tx, host_rx, host_cycle):
+            changed = True
+
+    if changed:
+        server_obj.extra_data = extra
+    return changed
+
+

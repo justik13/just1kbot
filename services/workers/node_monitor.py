@@ -453,9 +453,8 @@ async def check_node_resources_and_alerts(bot: Bot):
         else:
             is_healthy = False
 
-        # 4b. Изолированная синтетическая проверка Ingress (публичный CDN / Nginx Origin)
-        # Строгое расцепление (AGENTS.md §9.7): сбои на синтетическом эндпоинте не аффектят статус ядра
-        # и выполняются независимо от того, успешен ли был core healthcheck.
+        # 4b. Изолированная синтетическая проверка Ingress (публичный CDN / Nginx шлюза)
+        # Сбои на синтетическом эндпоинте не аффектят статус ядра и выполняются независимо.
         origin_probe_result: tuple[bool, str] | None = None
         cdn_probe_result: tuple[bool, str] | None = None
         origin_domain: str | None = None

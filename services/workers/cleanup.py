@@ -28,10 +28,6 @@ CLEANUP_START_DELAY = 60.0
 CLEANUP_LOOP_INTERVAL = 3600.0
 RECONCILE_LOOP_INTERVAL = 60.0
 OLD_RECORDS_INTERVAL = 86400.0
-# Auto-expire throughput: each daily pass drains the pending-expiry backlog
-# within a wall-clock budget (and at most MAX_BATCHES batches ≈ 400
-# verifications), so a large backlog shrinks every day without one unbounded
-# or stalled run.
 
 AUDIT_LOG_RETENTION_DAYS = 180
 WEBHOOK_INBOX_RETENTION_DAYS = 30

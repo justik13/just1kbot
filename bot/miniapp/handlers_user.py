@@ -669,9 +669,6 @@ async def api_user_device_delete_handler(request: web.Request) -> web.Response:
             select(VlessSubscription).where(VlessSubscription.user_id == user.id).with_for_update()
         )
         if vless_sub is not None:
-            hwids_map = dict(vless_sub.active_hwids or {})
-            hwids_map.pop(hwid, None)
-            vless_sub.active_hwids = hwids_map
             old_uuid = vless_sub.uuid
             vless_sub.uuid = str(uuid.uuid4())
             vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1
@@ -696,9 +693,6 @@ async def api_user_device_delete_handler(request: web.Request) -> web.Response:
 
         wi_sub = await get_subscription_by_user_id(session, user.id)
         if wi_sub is not None:
-            wi_hwids = dict(wi_sub.active_hwids or {})
-            wi_hwids.pop(hwid, None)
-            wi_sub.active_hwids = wi_hwids
             old_wi_uuid = wi_sub.uuid
             wi_sub.uuid = str(uuid.uuid4())
             wi_sub.desired_version = (wi_sub.desired_version or 0) + 1

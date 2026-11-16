@@ -121,20 +121,10 @@ WL_CAP_EXCEEDED = "Докупка {gb} ГБ превысит максималь�
 WL_INVALID_TOPUP_PACK = "Недопустимый пакет трафика: {gb} ГБ."
 WL_DEBIT_FAILED = "Ошибка списания средств."
 WL_NO_SERVERS_AVAILABLE = "К сожалению, сейчас нет доступных свободных шлюзов для подключения. Пожалуйста, обратитесь в поддержку или повторите попытку позже."
-WL_TRIAL_ACTIVATED_SUCCESS = "🎁 Пробный период на 3 дня успешно активирован!"
-WL_TRIAL_ALREADY_USED = (
-    "Вы уже использовали бесплатный пробный период на 3 дня. "
-    "Спасибо за участие в тестировании!\n\n"
-    "Вы можете оформить регулярную подписку для продолжения работы."
-)
 WL_DEACTIVATION_PENDING = "Ожидается завершение деактивации предыдущей подписки на узле."
 WL_TRIAL_CANNOT_TOPUP = (
     "⚠️ В пробном периоде докупка дополнительного трафика недоступна. "
     "Вы можете перейти на полный тариф в разделе «Белый Интернет»."
-)
-WL_TRIAL_CANNOT_ADD_DEVICE = (
-    "⚠️ В пробном периоде добавление устройств недоступно. "
-    "Вы можете перейти на полный тариф."
 )
 WL_AUTO_PUSH_READY = (
     "🚀 <b>Белый Интернет готов к работе!</b>\n\n"
@@ -165,10 +155,7 @@ WL_TRAFFIC_90P_TRIAL_ALERT = (
 
 WL_WEB_TOO_MANY_REQUESTS = "Слишком много запросов. Пожалуйста, подождите минуту."
 WL_WEB_PENDING = "Шлюз настраивается, повторите через несколько секунд."
-WL_WEB_UNSYNCED = "Шлюз синхронизируется, повторите через несколько секунд."
-WL_WEB_CDN_UNCONFIGURED = "Сетевой шлюз временно недоступен. Обратитесь к администратору."
 WL_WEB_HWID_REQUIRED = "Требуется HWID устройства. Включите отправку HWID в приложении."
-WL_ANNOUNCE_MAINTENANCE = "⚠️ Сервер на техническом обслуживании. Связь скоро восстановится."
 
 WL_FEED_EXHAUSTED_TITLE = "⚠️ Трафик исчерпан"
 WL_FEED_EXHAUSTED_NOTICE = "⚠️ Трафик исчерпан. Докупите пакет в @{bot_username}"
@@ -178,10 +165,7 @@ WL_FEED_DISABLED_NOTICE = "🚫 Доступ отключен администр
 WL_FEED_DEVICE_LIMIT_NOTICE = "⚠️ Превышен лимит устройств ({active}/{limit}). Управление в @{bot_username}"
 
 WL_VLESS_TAG = "⚪️ Белый Интернет"
-WL_ORIGIN_VLESS_TAG = "🇷🇺 Россия"
 WL_DEFAULT_TARIFF_NAME = "Белый Интернет 50 ГБ"
-WL_PROFILE_NAME = "✦ Just1k WL"
-WL_USERINFO_HEADER_TEMPLATE = "upload={upload}; download={download}; total={total}; expire={expire}"
 
 
 # Onboarding & Mini App entry

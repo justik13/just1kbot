@@ -26,8 +26,6 @@ from config.constants import (
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
     WHITE_INTERNET_MAX_EXPIRY_DAYS,
     WHITE_INTERNET_MAX_QUOTA_BYTES,
-    WHITE_INTERNET_ORIGIN_BADGE,
-    WHITE_INTERNET_RELAY_BADGE,
     WHITE_INTERNET_SERVICE_TYPE,
     WHITE_INTERNET_TLS_FINGERPRINT,
     WHITE_INTERNET_TOPUP_PACKS,
@@ -1185,19 +1183,16 @@ class WhiteInternetService:
         links: list[str] = []
 
         if include_origin:
-            default_origin_name = texts.WL_ORIGIN_VLESS_TAG if relays else texts.WL_VLESS_TAG
             origin_tag_str = (
                 origin_tag.strip()
                 if origin_tag and isinstance(origin_tag, str) and origin_tag.strip()
-                else default_origin_name
+                else texts.WL_VLESS_TAG
             )
             origin_tag_str = WhiteInternetService._ensure_country_flag(origin_tag_str, "ru")
             if origin_badge and isinstance(origin_badge, str) and origin_badge.strip().lower() == "none":
                 effective_origin_badge = None
             elif origin_badge and isinstance(origin_badge, str) and origin_badge.strip():
                 effective_origin_badge = origin_badge.strip()
-            elif WHITE_INTERNET_ORIGIN_BADGE and WHITE_INTERNET_ORIGIN_BADGE.strip():
-                effective_origin_badge = WHITE_INTERNET_ORIGIN_BADGE.strip()
             else:
                 effective_origin_badge = None
             origin_tag_formatted = WhiteInternetService._format_vless_tag(origin_tag_str, effective_origin_badge)
@@ -1238,8 +1233,6 @@ class WhiteInternetService:
                 elif default_relay_badge and isinstance(default_relay_badge, str) and default_relay_badge.strip():
                     val = default_relay_badge.strip()
                     r_badge = None if val.lower() == "none" else val
-                elif WHITE_INTERNET_RELAY_BADGE and WHITE_INTERNET_RELAY_BADGE.strip():
-                    r_badge = WHITE_INTERNET_RELAY_BADGE.strip()
                 else:
                     r_badge = None
 

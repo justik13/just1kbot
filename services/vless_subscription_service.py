@@ -117,7 +117,6 @@ class VlessSubscriptionService:
         """
         links: list[str] = []
         ru_hubs: list[Server] = []
-        legacy_servers: list[Server] = []
         discovered_exits: list[Server] = []
 
         for srv in servers:
@@ -132,10 +131,6 @@ class VlessSubscriptionService:
                 ru_hubs.append(srv)
             elif role == "exit_node":
                 discovered_exits.append(srv)
-            elif role == "eu_hub":
-                continue
-            else:
-                legacy_servers.append(srv)
 
         active_exits: list[Server] = []
         exit_source = exit_nodes if exit_nodes is not None else discovered_exits
@@ -215,41 +210,6 @@ class VlessSubscriptionService:
                             seen_links.add(link)
                             links.append(link)
 
-        for srv in legacy_servers:
-            extra = srv.extra_data if isinstance(srv.extra_data, dict) else {}
-            domain = extra.get("domain") or extra.get("vless_domain")
-            if not domain and srv.api_url:
-                try:
-                    domain = urllib.parse.urlsplit(srv.api_url).hostname
-                except Exception:
-                    domain = None
-            if not domain:
-                logger.warning(
-                    "Skipping server %s (%s) in VLESS links: no public TLS client domain configured",
-                    srv.id,
-                    srv.name,
-                )
-                continue
-
-            domain = str(domain).strip().lower()
-            if not domain or not _FQDN_REGEX.match(domain):
-                logger.warning("Skipping server %s: invalid FQDN domain '%s'", srv.id, domain)
-                continue
-
-            port, fp = VlessSubscriptionService._resolve_port_and_fp(extra)
-            fragment = VlessSubscriptionService._build_vless_fragment(
-                srv.country_flag,
-                extra.get("vless_name") or srv.name,
-                extra.get("server_description"),
-            )
-            link = (
-                f"vless://{subscription.uuid}@{domain}:{port}"
-                f"?encryption=none&security=tls&sni={domain}&fp={fp}"
-                f"&type=tcp&flow=xtls-rprx-vision#{fragment}"
-            )
-            if link not in seen_links:
-                seen_links.add(link)
-                links.append(link)
         return links
 
     @staticmethod

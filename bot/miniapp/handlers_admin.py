@@ -953,7 +953,6 @@ async def api_admin_user_details_handler(request: web.Request) -> web.Response:
                 "standard_end": user.subscription_end.isoformat() if user.subscription_end else None,
                 "standard_device_limit": int(user.device_limit or 0),
                 "subscription_url": _build_sub_url(sub_token) if sub_token else None,
-                "vless_active_hwids": list(vless_sub.active_hwids or []) if vless_sub else [],
                 "wi": (
                     {
                         "id": wi_sub.id,
@@ -961,7 +960,6 @@ async def api_admin_user_details_handler(request: web.Request) -> web.Response:
                         "provisioning_status": str(wi_sub.provisioning_status),
                         "expires_at": wi_sub.expires_at.isoformat() if wi_sub.expires_at else None,
                         "device_limit": int(wi_sub.device_limit or 0),
-                        "active_hwids": list(wi_sub.active_hwids or []),
                         "base_traffic_bytes": int(wi_sub.base_traffic_bytes or 0),
                         "extra_traffic_bytes": int(wi_sub.extra_traffic_bytes or 0),
                         "traffic_used_bytes": int(wi_sub.traffic_used_bytes or 0),

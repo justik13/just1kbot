@@ -50,7 +50,7 @@ _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\b\d{6,}:[A-Za-z0-9_-]{20,}\b"), "[TELEGRAM_TOKEN_REDACTED]"),
     (
         re.compile(
-            r"(?i)\b(?:vpn|amnezia|vless|vmess|trojan|ss|wg|wireguard|incy|clash|sing-box|shadowrocket)://[^\s<>'\"]+"
+            r"(?i)\b(?:vpn|vless|vmess|trojan|ss|wg|wireguard|incy|clash|sing-box|shadowrocket)://[^\s<>'\"]+"
         ),
         "[VPN_URI_REDACTED]",
     ),

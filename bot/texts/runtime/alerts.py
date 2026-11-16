@@ -56,7 +56,7 @@ ALERT_INGRESS_PROBLEM = """⚠️ <b>Проблема с проксирован�
 Ошибка: Эндпоинт <code>{endpoint}</code> вернул статус {status_or_err}.
 
 ⚠️ Узел Xray работает в штатном режиме, но выдача подписок через Nginx может быть недоступна (ошибка 502 / SSL).
-🔍 <b>Проверьте настройки Nginx и сертификаты на Origin.</b>"""
+🔍 <b>Проверьте настройки Nginx и сертификаты на шлюзе (ru_hub).</b>"""
 
 ALERT_INGRESS_RESTORED = """✅ <b>Проксирование подписок восстановлено</b>
 
@@ -69,10 +69,10 @@ ALERT_INGRESS_ERR_TIMEOUT = "Timeout (таймаут соединения)"
 ALERT_CDN_INGRESS_PROBLEM = """⚠️ <b>Проблема с доставкой подписок через CDN (Яндекс Облако)</b>
 
 🌍 Сервер: <b>{server_name}</b> (ID: {server_id})
-🌐 CDN Домен: <code>{domain}</code> (Origin: <code>{origin_domain}</code>)
+🌐 CDN Домен: <code>{domain}</code> (шлюз: <code>{origin_domain}</code>)
 Ошибка: Эндпоинт <code>{endpoint}</code> через CDN вернул статус {status_or_err}.
 
-ℹ️ <i>Origin Nginx доступен (200 OK), но CDN стабильно не доставляет запросы.</i>
+ℹ️ <i>Nginx на шлюзе доступен (200 OK), но CDN стабильно не доставляет запросы.</i>
 🔍 <b>Проверьте баланс Яндекс Облака, сертификат в Certificate Manager и статус CDN-ресурса.</b>"""
 
 ALERT_CDN_INGRESS_RESTORED = """✅ <b>Доставка подписок через CDN восстановлена</b>
@@ -94,7 +94,7 @@ ALERT_INGRESS_PROBLEM_REMINDER = """⚠️ <b>Напоминание: Сбой �
 🌐 Домен: <code>{domain}</code>
 Эндпоинт <code>{endpoint}</code> по-прежнему недоступен.
 
-🔍 <i>Проверьте Nginx и SSL-сертификаты на Origin.</i>"""
+🔍 <i>Проверьте Nginx и SSL-сертификаты на шлюзе (ru_hub).</i>"""
 
 ALERT_CDN_INGRESS_PROBLEM_REMINDER = """⚠️ <b>Напоминание: Сбой доставки подписок через CDN продолжается ({hours_text})</b>
 
@@ -105,14 +105,14 @@ ALERT_CDN_INGRESS_PROBLEM_REMINDER = """⚠️ <b>Напоминание: Сбо
 🔍 <i>Проверьте Яндекс Облако (баланс, сертификат и статус CDN).</i>"""
 
 
-ALERT_WHITE_INTERNET_ORIGIN_EXHAUSTED = """🚨 <b>Внимание: Нет доступных Origin-серверов!</b>
+ALERT_WHITE_INTERNET_ORIGIN_EXHAUSTED = """🚨 <b>Внимание: Нет доступных шлюзов (ru_hub)!</b>
 
-Не удалось выделить Origin-узел для подписки ID: <code>{sub_id}</code>.
-Все Origin-серверы либо недоступны (сбой связи / отключены), либо исчерпали лимит емкости.
+Не удалось выделить шлюз (ru_hub) для подписки ID: <code>{sub_id}</code>.
+Все шлюзы либо недоступны (сбой связи / отключены), либо недоступны для выдачи.
 
-🔍 <i>Проверьте доступность Origin-серверов в админке или увеличьте лимит емкости.</i>"""
+🔍 <i>Проверьте доступность ru_hub в админке.</i>"""
 
-ALERT_WHITE_INTERNET_ORIGIN_RESTORED = """✅ <b>Origin-сервер снова доступен для распределения</b>
+ALERT_WHITE_INTERNET_ORIGIN_RESTORED = """✅ <b>Шлюз (ru_hub) снова доступен для распределения</b>
 
 Выделение узлов для новых подписок возобновлено в штатном режиме."""
 

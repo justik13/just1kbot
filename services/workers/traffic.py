@@ -14,13 +14,12 @@ from config.constants import (
 from config.settings import get_settings
 from database.connection import session_scope
 from database.models import Server, User
-from utils.datetime_helpers import get_hosting_billing_cycle, now_utc
+from utils.datetime_helpers import now_utc
 from utils.telegram import safe, safe_send_message
-from utils.traffic_helpers import accumulate_host_traffic_cycle, get_server_hosting_reset_day
+from utils.traffic_helpers import accumulate_server_traffic_extra
 
 logger = logging.getLogger(__name__)
 
-BATCH_SIZE = 100
 TRAFFIC_QUOTA_BYTES = 1 * 1024 * 1024 * 1024 * 1024
 TRAFFIC_MAX_BACKOFF = 900
 WORKER_START_DELAY = 30.0
@@ -282,32 +281,20 @@ async def _vless_traffic_sync_once(bot: Bot | None = None):
 
             # 1. In a separate transaction, update Server extra_data immediately after subscription commit
             if server_delta > 0 or host_tx > 0 or host_rx > 0:
-                current_cycle = current_time.strftime("%Y-%m")
                 async with session_scope() as session:
                     server_obj = await session.get(Server, server_id, with_for_update=True)
                     if server_obj:
-                        raw_extra = getattr(server_obj, "extra_data", None)
-                        extra = dict(raw_extra) if isinstance(raw_extra, dict) else {}
-                        changed = False
-                        if server_delta > 0:
-                            saved_cycle = extra.get("traffic_cycle")
-                            if saved_cycle != current_cycle:
-                                extra["traffic_cycle"] = current_cycle
-                                extra["monthly_traffic_bytes"] = server_delta
-                            else:
-                                extra["monthly_traffic_bytes"] = int(extra.get("monthly_traffic_bytes", 0)) + server_delta
-                            changed = True
-                        if (host_tx > 0 or host_rx > 0) and WHITE_INTERNET_CAPABILITY not in (
+                        accumulate_host = WHITE_INTERNET_CAPABILITY not in (
                             getattr(server_obj, "capabilities", None) or []
-                        ):
-                            host_cycle = get_hosting_billing_cycle(
-                                current_time,
-                                get_server_hosting_reset_day(extra),
-                            )
-                            if accumulate_host_traffic_cycle(extra, host_tx, host_rx, host_cycle):
-                                changed = True
-                        if changed:
-                            server_obj.extra_data = extra
+                        )
+                        accumulate_server_traffic_extra(
+                            server_obj,
+                            server_delta,
+                            host_tx,
+                            host_rx,
+                            current_time,
+                            accumulate_host=accumulate_host,
+                        )
 
             # 2. Check user quota alerts in an isolated try-block so notification errors never impact server stats
             if affected_user_ids and bot:

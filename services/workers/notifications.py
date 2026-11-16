@@ -413,8 +413,7 @@ async def _send_pre_expiry_notifications(
                 retry_count = user.notification_retry_count or 0
 
                 if retry_count >= MAX_RETRY_COUNT:
-                    # P0-4: НЕ помечаем notified_* как True при исчерпании ретраев
-                    # Это предотвращает потерю уведомлений, если Telegram был недоступен
+                    # Не помечаем notified_* как True при исчерпании ретраев, чтобы не терять уведомления при сбое Telegram.
                     user.notification_retry_count = 0
                     user.last_notification_attempt = None
                     await session.flush()

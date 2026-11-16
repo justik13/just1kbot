@@ -247,8 +247,7 @@ async def _supervise_workers(bot: Bot, *, check_interval: float | None = None,
                 continue
 
             if health.state == "backoff":
-                # P2 #9 (audit): backoff is a timestamp, never an inline await,
-                # so one flapping worker cannot delay supervision of the rest.
+                # Backoff is a timestamp, never an inline await, so one flapping worker cannot delay others.
                 if health.next_restart_at is not None and now < health.next_restart_at:
                     continue
                 health.next_restart_at = None
