@@ -33,7 +33,6 @@ from sqlalchemy import func, or_, select
 
 from bot import texts
 from bot.keyboards.notifications import (
-    get_dismiss_notification_keyboard,
     get_referral_bonus_keyboard,
 )
 from bot.texts import get_tariff_display_name

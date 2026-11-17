@@ -797,13 +797,8 @@ async def serve_unified_subscription_feed(
             if is_bi_assigned:
                 if getattr(wi_sub, "origin_node_id", None):
                     wi_server = await session.scalar(select(Server).where(Server.id == wi_sub.origin_node_id))
-                if wi_server is None or not wi_server.is_active or wi_server.health_state != ServerHealthState.ONLINE:
-                    # Fallback to any online WI-capable ru_hub
-                    cand_servers = await VlessSubscriptionService.get_eligible_vless_servers(session)
-                    for cand in cand_servers:
-                        if constants.WHITE_INTERNET_CAPABILITY in (cand.capabilities or []):
-                            wi_server = cand
-                            break
+                if wi_server and (not wi_server.is_active or wi_server.health_state != ServerHealthState.ONLINE):
+                    wi_server = None
                 is_wi_node_ready = bool(
                     wi_server is not None
                     and constants.WHITE_INTERNET_CAPABILITY in (wi_server.capabilities or [])

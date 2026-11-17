@@ -34,11 +34,6 @@ def get_action_notification_keyboard(
     return builder.as_markup()
 
 
-def get_dismiss_notification_keyboard() -> InlineKeyboardMarkup:
-    """Contextual action button fallback for user-facing push notifications."""
-    return get_action_notification_keyboard(texts.BTN_OPEN_CABINET, tab="connect")
-
-
 def get_pre_expiry_keyboard() -> InlineKeyboardMarkup:
     return get_action_notification_keyboard(texts.BTN_RENEW_ACCESS, tab="tariffs")
 

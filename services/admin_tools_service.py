@@ -18,7 +18,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.keyboards.notifications import (
     get_action_notification_keyboard,
     get_bonus_credited_keyboard,
-    get_dismiss_notification_keyboard,
 )
 from config.enums import AdminAuditAction, OrderServiceType, OrderStatus
 from database.connection import session_scope
@@ -189,7 +188,6 @@ async def _run_mass_bonus_worker(
                 bot,
                 admin_id,
                 summary,
-                reply_markup=get_dismiss_notification_keyboard(),
             )
         except Exception:
             pass
@@ -361,7 +359,6 @@ async def _run_mass_extend_worker(
                 bot,
                 admin_id,
                 summary,
-                reply_markup=get_dismiss_notification_keyboard(),
             )
         except Exception:
             pass
