@@ -393,7 +393,6 @@ async def start_mass_extend(
                     await session.scalars(
                         select(WhiteInternetSubscription.user_id).where(
                             WhiteInternetSubscription.user_id.in_([t[0] for t in targets]),
-                            WhiteInternetSubscription.is_trial.is_(False),
                         )
                     )
                 ).all()

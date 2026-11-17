@@ -24,7 +24,6 @@ from sqlalchemy.orm import (
     Mapped,
     mapped_column,
     relationship,
-    synonym,
 )
 
 from config.constants import VLESS_PROTOCOL
@@ -918,15 +917,12 @@ class WhiteInternetSubscription(Base):
     user = relationship("User", foreign_keys=[user_id])
     hub_server = relationship("Server", foreign_keys=[hub_server_id])
 
-    origin_node_id = synonym("hub_server_id")
-    origin_node = synonym("hub_server")
-
 
 class WhiteInternetOrphanCleanup(Base):
-    """Durable outbox for disabling a client UUID on a former origin node.
+    """Durable outbox for disabling a client UUID on a former hub server (ru_hub).
 
     Inserted in the same transaction as a renew migration that moves a
-    subscription to a new origin. The reconciliation worker claims pending rows
+    subscription to a new hub server. The reconciliation worker claims pending rows
     (FOR UPDATE SKIP LOCKED) and converges the old node to disabled, so a lost
     fire-and-forget task or a process restart can never silently orphan an
     active credential on the old node.

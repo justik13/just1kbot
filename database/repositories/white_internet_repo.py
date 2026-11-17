@@ -71,10 +71,6 @@ class WhiteInternetInactiveSubscriptionError(WhiteInternetError):
     """Raised when an operation requires a live subscription."""
 
 
-class WhiteInternetTrialSubscriptionError(WhiteInternetError):
-    """Raised when an operation cannot be performed on a trial subscription."""
-
-
 async def get_subscription_by_token(
     session: AsyncSession, token: str
 ) -> WhiteInternetSubscription | None:
@@ -173,7 +169,8 @@ async def create_white_internet_subscription(
     session: AsyncSession,
     *,
     user_id: int,
-    origin_node_id: int,
+    hub_server_id: int | None = None,
+    origin_node_id: int | None = None,
     token: str,
     uuid: str,
     price_rub: Decimal = WHITE_INTERNET_BASE_PRICE_RUB,
@@ -181,6 +178,9 @@ async def create_white_internet_subscription(
     base_bytes: int | None = None,
     device_limit: int = 1,
 ) -> WhiteInternetSubscription:
+    effective_hub_id = hub_server_id if hub_server_id is not None else origin_node_id
+    if effective_hub_id is None:
+        raise ValueError("hub_server_id is required")
     now = now_utc()
     expires_at = now + timedelta(days=duration_days)
     clamped_devices = max(1, min(WHITE_INTERNET_MAX_DEVICE_LIMIT, int(device_limit)))
@@ -191,7 +191,7 @@ async def create_white_internet_subscription(
     )
     subscription = WhiteInternetSubscription(
         user_id=user_id,
-        origin_node_id=origin_node_id,
+        hub_server_id=effective_hub_id,
         token=token,
         uuid=uuid,
         status=WhiteInternetStatus.PENDING,
@@ -217,7 +217,7 @@ async def create_white_internet_subscription(
     )
     session.add(subscription)
     await session.flush()
-    await cancel_pending_orphan_cleanups_for_client(session, origin_node_id, uuid)
+    await cancel_pending_orphan_cleanups_for_client(session, effective_hub_id, uuid)
     await session.refresh(subscription)
     return subscription
 
@@ -277,13 +277,9 @@ async def renew_subscription_atomic(
         - used_quota,
     )
     extra_rollover = min(sub.extra_traffic_bytes or 0, total_left)
-
-    if getattr(sub, "is_trial", False) is True:
-        new_extra = 0
-    else:
-        is_grace_valid = (now <= (sub_expires_at + timedelta(days=7))) if sub_expires_at else True
-        max_extra_allowed = max(0, effective_devices * WHITE_INTERNET_MAX_QUOTA_BYTES)
-        new_extra = min(extra_rollover, max_extra_allowed) if is_grace_valid else 0
+    is_grace_valid = (now <= (sub_expires_at + timedelta(days=7))) if sub_expires_at else True
+    max_extra_allowed = max(0, effective_devices * WHITE_INTERNET_MAX_QUOTA_BYTES)
+    new_extra = min(extra_rollover, max_extra_allowed) if is_grace_valid else 0
 
     sub.is_trial = False
     sub.base_traffic_bytes = new_base_bytes
@@ -322,8 +318,6 @@ async def add_device_slot_atomic(
     sub = await get_subscription_with_lock(session, subscription_id)
     if sub is None:
         raise WhiteInternetSubscriptionNotFoundError(f"Subscription {subscription_id} not found")
-    if getattr(sub, "is_trial", False) is True:
-        raise WhiteInternetTrialSubscriptionError("Cannot add device slot to trial subscription")
     if sub.status in (WhiteInternetStatus.DISABLED, WhiteInternetStatus.PENDING):
         raise WhiteInternetInactiveSubscriptionError("Subscription is not eligible for device slot upgrade")
     now = now_utc()
@@ -439,8 +433,6 @@ async def topup_quota_atomic(
     sub = await get_subscription_with_lock(session, subscription_id)
     if sub is None:
         raise WhiteInternetSubscriptionNotFoundError(f"Subscription {subscription_id} not found")
-    if getattr(sub, "is_trial", False) is True:
-        raise WhiteInternetTrialSubscriptionError("Cannot top up trial subscription")
     if sub.status in (WhiteInternetStatus.PENDING, WhiteInternetStatus.DISABLED):
         raise WhiteInternetInactiveSubscriptionError("Subscription is not eligible for top-up")
     if sub.status == WhiteInternetStatus.EXPIRED or (sub.expires_at and sub.expires_at <= now):
@@ -621,8 +613,8 @@ async def finalize_hard_delete_subscription(
         sub.provisioning_status == WhiteInternetProvisioningStatus.SYNCED_INACTIVE
         and (sub.actual_version or 0) == (sub.desired_version or 0)
     )
-    origin_gone = sub.origin_node_id is None
-    if not (node_confirmed or origin_gone):
+    hub_gone = sub.hub_server_id is None
+    if not (node_confirmed or hub_gone):
         return False
     await session.delete(sub)
     await session.flush()
@@ -796,8 +788,6 @@ async def reset_traffic_used_atomic(
     sub = await get_subscription_with_lock(session, subscription_id)
     if sub is None:
         raise WhiteInternetSubscriptionNotFoundError(f"Subscription {subscription_id} not found")
-    if getattr(sub, "is_trial", False) is True:
-        raise WhiteInternetTrialSubscriptionError("Cannot reset traffic for trial subscription")
     if sub.status not in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED):
         raise WhiteInternetInactiveSubscriptionError(
             f"Cannot reset traffic for subscription in {sub.status} state"
@@ -831,8 +821,6 @@ async def add_extra_traffic_atomic(
     sub = await get_subscription_with_lock(session, subscription_id)
     if sub is None:
         raise WhiteInternetSubscriptionNotFoundError(f"Subscription {subscription_id} not found")
-    if getattr(sub, "is_trial", False) is True:
-        raise WhiteInternetTrialSubscriptionError("Cannot add extra traffic to trial subscription")
     if sub.status not in (
         WhiteInternetStatus.ACTIVE,
         WhiteInternetStatus.EXHAUSTED,
@@ -876,8 +864,6 @@ async def set_base_traffic_quota_atomic(
     sub = await get_subscription_with_lock(session, subscription_id)
     if sub is None:
         raise WhiteInternetSubscriptionNotFoundError(f"Subscription {subscription_id} not found")
-    if getattr(sub, "is_trial", False) is True:
-        raise WhiteInternetTrialSubscriptionError("Cannot change base quota for trial subscription")
     if sub.status not in (
         WhiteInternetStatus.ACTIVE,
         WhiteInternetStatus.EXHAUSTED,
@@ -929,8 +915,6 @@ async def set_device_limit_atomic(
     )
     if sub is None:
         raise WhiteInternetSubscriptionNotFoundError(f"Subscription {subscription_id} not found")
-    if getattr(sub, "is_trial", False) is True:
-        raise WhiteInternetTrialSubscriptionError("Cannot change device limit for trial subscription")
 
     sub.device_limit = limit
     max_extra_allowed = limit * WHITE_INTERNET_MAX_QUOTA_BYTES
@@ -968,9 +952,6 @@ async def extend_subscription_atomic(
 
     if sub.status == WhiteInternetStatus.DISABLED:
         raise WhiteInternetInactiveSubscriptionError("Subscription is disabled")
-
-    if getattr(sub, "is_trial", False) is True:
-        raise WhiteInternetTrialSubscriptionError("Cannot extend trial subscription")
 
     current_time = now or now_utc()
     if current_time.tzinfo is None:

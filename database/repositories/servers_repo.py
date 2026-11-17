@@ -73,8 +73,8 @@ def is_vless_sync_target_server(server) -> bool:
     return get_server_role(server) == "ru_hub" and is_vless_capable_server(server)
 
 
-def is_white_internet_origin_server(server) -> bool:
-    """Whether a server is an origin server for White Internet contour."""
+def is_white_internet_hub_server(server) -> bool:
+    """Whether a server is a ru_hub gateway for White Internet contour."""
     if not server:
         return False
     if get_server_role(server) in ("eu_hub", "exit_node"):
@@ -87,6 +87,9 @@ def is_white_internet_origin_server(server) -> bool:
     if WHITE_INTERNET_CAPABILITY in caps:
         return True
     return proto == XRAY_PROTOCOL and not is_vless_capable_server(server)
+
+
+is_white_internet_origin_server = is_white_internet_hub_server
 
 
 def get_server_xray_api_url(server) -> str | None:
@@ -274,8 +277,8 @@ def capacity_consuming_wl_condition():
     )
 
 
-async def get_origin_server_subscription_counts(session: AsyncSession) -> dict[int, int]:
-    # WhiteInternetSubscription counts (Xray Hub)
+async def get_wi_hub_subscription_counts(session: AsyncSession) -> dict[int, int]:
+    # WhiteInternetSubscription counts (Xray ru_hub)
     from database.models import WhiteInternetSubscription
 
     wl_result = await session.execute(
@@ -289,8 +292,11 @@ async def get_origin_server_subscription_counts(session: AsyncSession) -> dict[i
     return {row[0]: row[1] for row in wl_result.all()}
 
 
-def _is_origin_server_eligible(server: Server | None) -> bool:
-    """Whether a Server row meets all hard prerequisites to host White Internet."""
+get_origin_server_subscription_counts = get_wi_hub_subscription_counts
+
+
+def _is_wi_hub_eligible(server: Server | None) -> bool:
+    """Whether a Server row meets all hard prerequisites to host White Internet as ru_hub."""
     if server is None:
         return False
     if (
@@ -300,6 +306,7 @@ def _is_origin_server_eligible(server: Server | None) -> bool:
         or not (server.api_url and server.api_url.strip())
         or not (server.api_key and server.api_key.strip())
         or WHITE_INTERNET_CAPABILITY not in (server.capabilities or [])
+        or get_server_role(server) in ("eu_hub", "exit_node")
     ):
         return False
     extra = server.extra_data or {}
@@ -310,13 +317,18 @@ def _is_origin_server_eligible(server: Server | None) -> bool:
     )
 
 
+_is_origin_server_eligible = _is_wi_hub_eligible
+
+
 async def has_available_service_capacity(
     session: AsyncSession,
     service_type: str,
     *,
+    hub_server_id: int | None = None,
     origin_node_id: int | None = None,
 ) -> bool:
     """Fast read-only check before order creation that at least one usable node exists."""
+    effective_hub_id = hub_server_id if hub_server_id is not None else origin_node_id
     if service_type == "standard":
         active_servers = await get_active_servers(session)
         return any(
@@ -326,9 +338,9 @@ async def has_available_service_capacity(
         )
 
     if service_type == "white_internet":
-        if origin_node_id is not None:
-            current_origin = await session.get(Server, origin_node_id)
-            if _is_origin_server_eligible(current_origin):
+        if effective_hub_id is not None:
+            current_hub = await session.get(Server, effective_hub_id)
+            if _is_wi_hub_eligible(current_hub):
                 return True
         candidates = (
             await session.scalars(
@@ -344,21 +356,21 @@ async def has_available_service_capacity(
                 .order_by(Server.id.asc())
             )
         ).all()
-        return any(_is_origin_server_eligible(srv) for srv in candidates)
+        return any(_is_wi_hub_eligible(srv) for srv in candidates)
 
     return True
 
 
-async def allocate_origin_server_atomic(session: AsyncSession) -> Server | None:
+async def allocate_wi_hub_atomic(session: AsyncSession) -> Server | None:
     """
-    Atomically selects and locks an available Xray origin server with spare capacity.
+    Atomically selects and locks an available Xray ru_hub server with spare capacity.
 
     1. Select candidate server IDs that are active, online, and lifecycle ACTIVE.
     2. Sequentially acquire row locks (SELECT ... FOR UPDATE) on candidates.
     3. Re-verify is_active, health_state == ONLINE, lifecycle_status == ACTIVE,
-       valid api_url / api_key, 'white_internet' in capabilities, and relays.
+       valid api_url / api_key, and 'white_internet' in capabilities.
     4. Return the locked Server instance.
-    5. Return None if no eligible origin server is found.
+    5. Return None if no eligible ru_hub server is found.
     """
     candidate_ids = (
         await session.scalars(
@@ -382,10 +394,13 @@ async def allocate_origin_server_atomic(session: AsyncSession) -> Server | None:
             .with_for_update()
             .execution_options(populate_existing=True)
         )
-        if _is_origin_server_eligible(server):
+        if _is_wi_hub_eligible(server):
             return server
 
     return None
+
+
+allocate_origin_server_atomic = allocate_wi_hub_atomic
 
 
 async def get_server_by_id(
@@ -618,20 +633,20 @@ async def update_server_xray_epoch_cas(
     return False, None
 
 
-async def migrate_origin_subscriptions(
+async def migrate_wi_hub_subscriptions(
     session: AsyncSession,
     source_id: int,
     target_id: int,
     admin_id: int | None = None,
 ) -> int:
-    """Migrate all active White Internet subscriptions from source origin server to target origin server.
+    """Migrate all active White Internet subscriptions from source ru_hub server to target ru_hub server.
 
     1. Acquires row locks on source and target servers ordered by id ASC to avoid deadlocks.
     2. Verifies target server is active, Xray protocol, and has sufficient capacity using capacity_consuming_wl_condition.
     3. Sets source server lifecycle_status to DECOMMISSIONING.
     4. For each subscription:
        - Creates a WhiteInternetOrphanCleanup entry for source node (desired_version N).
-       - Updates subscription: origin_node_id = target_id, desired_version = N + 1, provisioning_status = PENDING_UPDATE.
+       - Updates subscription: hub_server_id = target_id, desired_version = N + 1, provisioning_status = PENDING_UPDATE.
     """
     if source_id == target_id:
         raise ValueError("Source and target servers must be different.")
@@ -662,7 +677,6 @@ async def migrate_origin_subscriptions(
         target_extra.get("xhttp_locations")
         or target_extra.get("cdn_domains")
         or target_extra.get("cdn_domain")
-        or target_extra.get("relays")
     ):
         raise ValueError("Target server does not have White Internet endpoints configured.")
 
@@ -674,7 +688,7 @@ async def migrate_origin_subscriptions(
 
     to_migrate_subs = list((await session.execute(
         select(WhiteInternetSubscription).where(
-            WhiteInternetSubscription.origin_node_id == source_id,
+            WhiteInternetSubscription.hub_server_id == source_id,
             capacity_consuming_wl_condition(),
         ).with_for_update()
     )).scalars().all())
@@ -696,9 +710,12 @@ async def migrate_origin_subscriptions(
         )
         session.add(orphan)
 
-        sub.origin_node_id = target_id
+        sub.hub_server_id = target_id
         sub.desired_version += 1
         sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
 
     await session.flush()
     return count
+
+
+migrate_origin_subscriptions = migrate_wi_hub_subscriptions

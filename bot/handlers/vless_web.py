@@ -795,8 +795,8 @@ async def serve_unified_subscription_feed(
         wi_server: Server | None = None
         if wi_active and wi_sub is not None:
             if is_bi_assigned:
-                if getattr(wi_sub, "origin_node_id", None):
-                    wi_server = await session.scalar(select(Server).where(Server.id == wi_sub.origin_node_id))
+                if getattr(wi_sub, "hub_server_id", None):
+                    wi_server = await session.scalar(select(Server).where(Server.id == wi_sub.hub_server_id))
                 if wi_server and (not wi_server.is_active or wi_server.health_state != ServerHealthState.ONLINE):
                     wi_server = None
                 is_wi_node_ready = bool(

@@ -230,7 +230,7 @@ class VlessSubscriptionService:
         cdn_yandex_label: str = "Yandex",
         cdn_turboflare_label: str = "Turboflare",
     ) -> list[str]:
-        """Generate 3-layer XHTTP links for White Internet using xhttp_locations or legacy relays."""
+        """Generate 3-layer XHTTP links for White Internet using xhttp_locations."""
         from services.white_internet_service import WhiteInternetService
 
         extra = server.extra_data if isinstance(server.extra_data, dict) else {}
@@ -291,8 +291,8 @@ class VlessSubscriptionService:
         if isinstance(xhttp_locations, list) and xhttp_locations:
             links: list[str] = []
             by_cdn: dict[tuple[str, str], list[dict]] = {}
-            origin_entries: list[tuple[str, str, str]] = []
-            seen_origins: set[tuple[str, str, str]] = set()
+            direct_hub_entries: list[tuple[str, str, str]] = []
+            seen_direct_hubs: set[tuple[str, str, str]] = set()
             for loc in xhttp_locations:
                 if not isinstance(loc, dict) or not loc.get("path"):
                     continue
@@ -311,12 +311,12 @@ class VlessSubscriptionService:
                         "path": loc_path,
                     })
                 elif not has_exit_filter:
-                    origin_key = (cdn_type, loc_cdn, loc_path)
-                    if origin_key not in seen_origins:
-                        seen_origins.add(origin_key)
-                        origin_entries.append(origin_key)
+                    hub_key = (cdn_type, loc_cdn, loc_path)
+                    if hub_key not in seen_direct_hubs:
+                        seen_direct_hubs.add(hub_key)
+                        direct_hub_entries.append(hub_key)
 
-            for (cdn_type, loc_cdn), cdn_relays in by_cdn.items():
+            for (cdn_type, loc_cdn), cdn_locs in by_cdn.items():
                 cdn_label = (
                     (cdn_turboflare_label or "Turboflare").strip()
                     if cdn_type == "cdn_turboflare"
@@ -327,7 +327,7 @@ class VlessSubscriptionService:
                 if cdn_label and cdn_label_mode == "name" and eff_names:
                     eff_names = {k: f"{v} · {cdn_label}" for k, v in eff_names.items()}
                 elif cdn_label and cdn_label_mode == "badge":
-                    for k in (wi_exit_names or {r["code"]: r["code"] for r in cdn_relays}):
+                    for k in (wi_exit_names or {r["code"]: r["code"] for r in cdn_locs}):
                         prev = eff_badges.get(k, "").strip()
                         eff_badges[k] = f"{prev} · {cdn_label}".strip(" ·") if prev else cdn_label
                 links.extend(
@@ -335,8 +335,8 @@ class VlessSubscriptionService:
                         subscription,
                         cdn_domain=loc_cdn,
                         path=base_path,
-                        relays=cdn_relays,
-                        include_origin=False,
+                        relays=cdn_locs,
+                        include_direct_hub=False,
                         relay_names=eff_names,
                         relay_badges=eff_badges or None,
                         cdn_type=cdn_type,
@@ -344,16 +344,15 @@ class VlessSubscriptionService:
                     )
                 )
 
-            for cdn_type, loc_cdn, origin_path in origin_entries:
+            for cdn_type, loc_cdn, hub_path in direct_hub_entries:
                 links.extend(
                     WhiteInternetService.generate_vless_links(
                         subscription,
                         cdn_domain=loc_cdn,
                         path=base_path,
-                        relays=None,
-                        include_origin=True,
+                        include_direct_hub=True,
                         cdn_type=cdn_type,
-                        origin_path=origin_path,
+                        direct_hub_path=hub_path,
                         client_uuid=client_uuid,
                     )
                 )
@@ -365,8 +364,7 @@ class VlessSubscriptionService:
                             subscription,
                             cdn_domain=default_cdn,
                             path=base_path,
-                            relays=None,
-                            include_origin=True,
+                            include_direct_hub=True,
                             cdn_type="cdn_yandex",
                             client_uuid=client_uuid,
                         )
@@ -377,8 +375,7 @@ class VlessSubscriptionService:
                             subscription,
                             cdn_domain=turboflare_cdn,
                             path=base_path,
-                            relays=None,
-                            include_origin=True,
+                            include_direct_hub=True,
                             cdn_type="cdn_turboflare",
                             client_uuid=client_uuid,
                         )
@@ -395,8 +392,7 @@ class VlessSubscriptionService:
                     subscription,
                     cdn_domain=default_cdn,
                     path=base_path,
-                    relays=None,
-                    include_origin=True,
+                    include_direct_hub=True,
                     cdn_type="cdn_yandex",
                 )
             )
@@ -406,8 +402,7 @@ class VlessSubscriptionService:
                     subscription,
                     cdn_domain=turboflare_cdn,
                     path=base_path,
-                    relays=None,
-                    include_origin=True,
+                    include_direct_hub=True,
                     cdn_type="cdn_turboflare",
                 )
             )

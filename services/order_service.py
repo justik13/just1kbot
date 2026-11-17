@@ -871,7 +871,7 @@ class OrderService:
         final_duration = 0
         final_devices = device_limit
         description = texts.CHECKOUT_DESCRIPTION_DEFAULT
-        checked_origin_id: int | None = None
+        checked_hub_id: int | None = None
 
         if service_type == "topup":
             if getattr(user, "topup_blocked", False):
@@ -904,7 +904,7 @@ class OrderService:
                 description = f"Доступ на {d_days} дн. ({d_limit} устр.)"
         elif service_type == "white_internet":
             wi_sub = await get_wi_sub_by_user_id(session, user_id)
-            checked_origin_id = getattr(wi_sub, "origin_node_id", None) if wi_sub else None
+            checked_hub_id = getattr(wi_sub, "hub_server_id", None) if wi_sub else None
             op = operation or ("renew" if wi_sub else "purchase")
             order_meta["operation"] = op
             if op == "add_device_slot":
@@ -939,7 +939,7 @@ class OrderService:
             has_capacity = await has_available_service_capacity(
                 session,
                 service_type,
-                origin_node_id=checked_origin_id,
+                hub_server_id=checked_hub_id,
             )
             if not has_capacity:
                 raise ServiceUnavailableError(

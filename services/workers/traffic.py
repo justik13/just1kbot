@@ -187,11 +187,11 @@ async def _send_quota_alert(
             _quota_alerted.pop(cache_key, None)
 
 
-async def _send_wi_exhausted_alerts(bot: Bot | None, exhausted_users: list[tuple[int, bool]]):
+async def _send_wi_exhausted_alerts(bot: Bot | None, exhausted_users: list[int]):
     if not bot or not exhausted_users:
         return
 
-    for uid, is_sub_trial in set(exhausted_users):
+    for uid in set(exhausted_users):
         async with session_scope() as session:
             user = await session.scalar(select(User).where(User.id == uid))
             telegram_id = user.telegram_id if (user and not user.is_bot_blocked) else None
@@ -199,11 +199,7 @@ async def _send_wi_exhausted_alerts(bot: Bot | None, exhausted_users: list[tuple
         if not telegram_id:
             continue
 
-        alert_text = (
-            texts.WL_TRAFFIC_EXHAUSTED_TRIAL_ALERT
-            if is_sub_trial
-            else texts.WL_TRAFFIC_EXHAUSTED_ALERT
-        )
+        alert_text = texts.WL_TRAFFIC_EXHAUSTED_ALERT
         for attempt in range(3):
             try:
                 await global_send_limiter.acquire()
@@ -229,11 +225,11 @@ async def _send_wi_exhausted_alerts(bot: Bot | None, exhausted_users: list[tuple
                     await asyncio.sleep(1)
 
 
-async def _send_wi_90p_alerts(bot: Bot | None, warn_users: list[tuple[int, int, bool, int]]):
+async def _send_wi_90p_alerts(bot: Bot | None, warn_users: list[tuple[int, int, int]]):
     if not bot or not warn_users:
         return
 
-    for sub_id, uid, is_sub_trial, expected_version in set(warn_users):
+    for sub_id, uid, expected_version in set(warn_users):
         async with session_scope() as session:
             user = await session.scalar(select(User).where(User.id == uid))
             telegram_id = user.telegram_id if (user and not user.is_bot_blocked) else None
@@ -251,11 +247,7 @@ async def _send_wi_90p_alerts(bot: Bot | None, warn_users: list[tuple[int, int, 
             continue
 
         try:
-            alert_text = (
-                texts.WL_TRAFFIC_90P_TRIAL_ALERT
-                if is_sub_trial
-                else texts.WL_TRAFFIC_90P_ALERT
-            )
+            alert_text = texts.WL_TRAFFIC_90P_ALERT
             await global_send_limiter.acquire()
             await safe_send_message(
                 bot,
@@ -517,7 +509,6 @@ async def _traffic_sync_once(bot: Bot | None = None):
                                             (
                                                 sub.id,
                                                 sub.user_id,
-                                                bool(getattr(sub, "is_trial", False)),
                                                 int(getattr(sub, "desired_version", 1) or 1),
                                             )
                                         )
@@ -566,13 +557,12 @@ async def _traffic_sync_once(bot: Bot | None = None):
                                     server_delta += consumed
 
                                 if became_exhausted:
-                                    exhausted_wi_users.append((sub.user_id, bool(getattr(sub, "is_trial", False))))
+                                    exhausted_wi_users.append(sub.user_id)
                                 elif event == "traffic_90p":
                                     warn_90p_wi_users.append(
                                         (
                                             sub.id,
                                             sub.user_id,
-                                            bool(getattr(sub, "is_trial", False)),
                                             int(getattr(sub, "desired_version", 1) or 1),
                                         )
                                     )

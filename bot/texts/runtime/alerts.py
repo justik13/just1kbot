@@ -105,16 +105,20 @@ ALERT_CDN_INGRESS_PROBLEM_REMINDER = """⚠️ <b>Напоминание: Сбо
 🔍 <i>Проверьте Яндекс Облако (баланс, сертификат и статус CDN).</i>"""
 
 
-ALERT_WHITE_INTERNET_ORIGIN_EXHAUSTED = """🚨 <b>Внимание: Нет доступных шлюзов (ru_hub)!</b>
+ALERT_WHITE_INTERNET_HUB_EXHAUSTED = """🚨 <b>Внимание: Нет доступных шлюзов (ru_hub)!</b>
 
 Не удалось выделить шлюз (ru_hub) для подписки ID: <code>{sub_id}</code>.
 Все шлюзы либо недоступны (сбой связи / отключены), либо недоступны для выдачи.
 
 🔍 <i>Проверьте доступность ru_hub в админке.</i>"""
 
-ALERT_WHITE_INTERNET_ORIGIN_RESTORED = """✅ <b>Шлюз (ru_hub) снова доступен для распределения</b>
+ALERT_WHITE_INTERNET_HUB_RESTORED = """✅ <b>Шлюз (ru_hub) снова доступен для распределения</b>
 
 Выделение узлов для новых подписок возобновлено в штатном режиме."""
+
+# Backward aliases
+ALERT_WHITE_INTERNET_ORIGIN_EXHAUSTED = ALERT_WHITE_INTERNET_HUB_EXHAUSTED
+ALERT_WHITE_INTERNET_ORIGIN_RESTORED = ALERT_WHITE_INTERNET_HUB_RESTORED
 
 ALERT_TITLE_WORKER_COOLDOWN = "Воркер превысил лимит ошибок и перешёл в режим ожидания (15 мин)"
 

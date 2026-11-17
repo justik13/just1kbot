@@ -88,7 +88,7 @@ async def _deprovision_old_node_safe(
                 service="white_internet",
             )
     except Exception as exc:
-        logger.warning("Failed to deprovision old origin node %s: %s", _sanitize_url(api_url), exc)
+        logger.warning("Failed to deprovision old hub node %s: %s", _sanitize_url(api_url), exc)
 
 
 def _dispatch_deprovision(
@@ -182,13 +182,16 @@ class WhiteInternetService:
         return tariff
 
     @staticmethod
-    async def select_origin_node(session: AsyncSession) -> Server:
-        server = await servers_repo.allocate_origin_server_atomic(session)
+    async def select_hub_node(session: AsyncSession) -> Server:
+        server = await servers_repo.allocate_wi_hub_atomic(session)
         if server is None:
             raise RuntimeError(
                 "No healthy server with white_internet capability and available capacity is available."
             )
         return server
+
+    # Backward alias
+    select_origin_node = select_hub_node
 
     @classmethod
     async def _checkout_wallet_order(
@@ -347,9 +350,9 @@ class WhiteInternetService:
             )
 
         try:
-            origin_node = await cls.select_origin_node(session)
+            hub_node = await cls.select_hub_node(session)
         except RuntimeError as exc:
-            logger.warning("No available origin node for white internet purchase: %s", exc)
+            logger.warning("No available hub node for white internet purchase: %s", exc)
             return False, texts.WL_NO_SERVERS_AVAILABLE, None
 
         clamped_devices = max(1, min(WHITE_INTERNET_MAX_DEVICE_LIMIT, int(device_limit)))
@@ -376,7 +379,7 @@ class WhiteInternetService:
         sub = await white_internet_repo.create_white_internet_subscription(
             session,
             user_id=user.id,
-            origin_node_id=origin_node.id,
+            hub_server_id=hub_node.id,
             token=secrets.token_hex(32),
             uuid=str(uuid.uuid4()),
             price_rub=tier_price,
@@ -392,7 +395,7 @@ class WhiteInternetService:
         await session.commit()
 
         await cls._try_inline_sync(
-            session, sub, origin_node, idempotency_key=f"purchase:{sub.id}:1:True"
+            session, sub, hub_node, idempotency_key=f"purchase:{sub.id}:1:True"
         )
         logger.info(
             "White Internet subscription purchased: user_id=%s, sub_id=%s, days=%s, devices=%s, node_id=%s",
@@ -400,7 +403,7 @@ class WhiteInternetService:
             sub.id,
             tariff.duration_days,
             clamped_devices,
-            origin_node.id,
+            hub_node.id,
         )
         return True, texts.WL_BUY_SUCCESS, sub
 
@@ -423,26 +426,25 @@ class WhiteInternetService:
         if sub.status == WhiteInternetStatus.PENDING:
             return False, texts.WL_SUB_NOT_READY, None
 
-        # Validate origin node health & availability before debiting funds
-        origin_node = await session.scalar(
+        # Validate hub node health & availability before debiting funds
+        hub_node = await session.scalar(
             select(Server).where(
-                Server.id == sub.origin_node_id,
+                Server.id == sub.hub_server_id,
                 Server.protocol.in_([XRAY_PROTOCOL, VLESS_PROTOCOL]),
             )
         )
         needs_migration = (
-            not origin_node
-            or not origin_node.is_active
-            or origin_node.health_state != ServerHealthState.ONLINE
-            or origin_node.lifecycle_status != ServerLifecycleStatus.ACTIVE
+            not hub_node
+            or not hub_node.is_active
+            or hub_node.health_state != ServerHealthState.ONLINE
+            or hub_node.lifecycle_status != ServerLifecycleStatus.ACTIVE
             or not (
-                (origin_node.extra_data or {}).get("xhttp_locations")
-                or (origin_node.extra_data or {}).get("cdn_domains")
-                or (origin_node.extra_data or {}).get("cdn_domain")
-                or (origin_node.extra_data or {}).get("relays")
+                (hub_node.extra_data or {}).get("xhttp_locations")
+                or (hub_node.extra_data or {}).get("cdn_domains")
+                or (hub_node.extra_data or {}).get("cdn_domain")
             )
         )
-        new_origin_server: Server | None = None
+        new_hub_server: Server | None = None
         if (
             getattr(sub, "pending_hard_delete", False)
             or getattr(sub, "provisioning_status", None)
@@ -460,9 +462,9 @@ class WhiteInternetService:
 
         if needs_migration:
             try:
-                new_origin_server = await cls.select_origin_node(session)
+                new_hub_server = await cls.select_hub_node(session)
             except RuntimeError as exc:
-                logger.warning("No alternative origin node for white internet renewal migration: %s", exc)
+                logger.warning("No alternative hub node for white internet renewal migration: %s", exc)
                 return False, texts.WL_NO_SERVERS_AVAILABLE, None
 
         now = now_utc()
@@ -497,16 +499,16 @@ class WhiteInternetService:
                 return checkout_failure
 
         # Apply node migration ONLY after successful financial debit
-        old_origin_for_cleanup: Server | None = None
-        if needs_migration and new_origin_server is not None:
-            old_origin_for_cleanup = origin_node
-            sub.origin_node_id = new_origin_server.id
+        old_hub_for_cleanup: Server | None = None
+        if needs_migration and new_hub_server is not None:
+            old_hub_for_cleanup = hub_node
+            sub.hub_server_id = new_hub_server.id
             sub.actual_version = 0
             sub.last_reconciled_node_epoch = None
             sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_CREATE
             await session.flush()
             await white_internet_repo.cancel_pending_orphan_cleanups_for_client(
-                session, new_origin_server.id, sub.uuid
+                session, new_hub_server.id, sub.uuid
             )
 
         renewed = await white_internet_repo.renew_subscription_atomic(
@@ -518,23 +520,23 @@ class WhiteInternetService:
             target_device_limit=target_device_limit,
         )
 
-        # Durable deprovisioning of UUID on old origin node: record the cleanup
+        # Durable deprovisioning of UUID on old hub node: record the cleanup
         # in the same transaction (survives crashes/restarts), then accelerate
         # with a best-effort background dispatch. The reconciliation worker
         # sweeps any row the dispatch misses, so no active credential orphans.
-        if old_origin_for_cleanup:
+        if old_hub_for_cleanup:
             await white_internet_repo.enqueue_orphan_cleanup(
                 session,
-                server_id=old_origin_for_cleanup.id,
+                server_id=old_hub_for_cleanup.id,
                 client_uuid=sub.uuid,
                 desired_version=sub.desired_version + 1,
             )
 
         await session.flush()
 
-        if old_origin_for_cleanup:
+        if old_hub_for_cleanup:
             _dispatch_deprovision(
-                old_origin_for_cleanup,
+                old_hub_for_cleanup,
                 client_uuid=sub.uuid,
                 version=sub.desired_version + 1,
                 context=f"renew sub {sub.id}",
@@ -547,7 +549,7 @@ class WhiteInternetService:
             user.id,
             renewed.id,
             tariff.duration_days,
-            renewed.origin_node_id,
+            renewed.hub_server_id,
         )
         return True, texts.WL_RENEW_SUCCESS, renewed
 
@@ -586,31 +588,30 @@ class WhiteInternetService:
 
         new_device_limit = current_limit + 1
 
-        # Pre-Debit Validation: validate origin node health & availability before debiting funds
-        origin_node = await session.scalar(
+        # Pre-Debit Validation: validate hub node health & availability before debiting funds
+        hub_node = await session.scalar(
             select(Server).where(
-                Server.id == sub.origin_node_id,
+                Server.id == sub.hub_server_id,
                 Server.protocol.in_([XRAY_PROTOCOL, VLESS_PROTOCOL]),
             )
         )
         needs_migration = (
-            not origin_node
-            or not origin_node.is_active
-            or origin_node.health_state != ServerHealthState.ONLINE
-            or origin_node.lifecycle_status != ServerLifecycleStatus.ACTIVE
+            not hub_node
+            or not hub_node.is_active
+            or hub_node.health_state != ServerHealthState.ONLINE
+            or hub_node.lifecycle_status != ServerLifecycleStatus.ACTIVE
             or not (
-                (origin_node.extra_data or {}).get("xhttp_locations")
-                or (origin_node.extra_data or {}).get("cdn_domains")
-                or (origin_node.extra_data or {}).get("cdn_domain")
-                or (origin_node.extra_data or {}).get("relays")
+                (hub_node.extra_data or {}).get("xhttp_locations")
+                or (hub_node.extra_data or {}).get("cdn_domains")
+                or (hub_node.extra_data or {}).get("cdn_domain")
             )
         )
-        new_origin_server: Server | None = None
+        new_hub_server: Server | None = None
         if needs_migration:
             try:
-                new_origin_server = await cls.select_origin_node(session)
+                new_hub_server = await cls.select_hub_node(session)
             except RuntimeError as exc:
-                logger.warning("No healthy origin node available for device slot migration: %s", exc)
+                logger.warning("No healthy hub node available for device slot migration: %s", exc)
                 return False, texts.WL_NO_SERVERS_AVAILABLE, None
 
         price, gb_added = cls.calculate_wi_add_slot_quote(sub.expires_at, now=now)
@@ -635,16 +636,16 @@ class WhiteInternetService:
                 return checkout_failure
 
         # Apply node migration ONLY after successful financial debit
-        old_origin_for_cleanup: Server | None = None
-        if needs_migration and new_origin_server is not None:
-            old_origin_for_cleanup = origin_node
-            sub.origin_node_id = new_origin_server.id
+        old_hub_for_cleanup: Server | None = None
+        if needs_migration and new_hub_server is not None:
+            old_hub_for_cleanup = hub_node
+            sub.hub_server_id = new_hub_server.id
             sub.actual_version = 0
             sub.last_reconciled_node_epoch = None
             sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_CREATE
             await session.flush()
             await white_internet_repo.cancel_pending_orphan_cleanups_for_client(
-                session, new_origin_server.id, sub.uuid
+                session, new_hub_server.id, sub.uuid
             )
 
         updated_sub = await white_internet_repo.add_device_slot_atomic(
@@ -653,19 +654,19 @@ class WhiteInternetService:
             extra_bytes=added_bytes,
         )
 
-        if old_origin_for_cleanup:
+        if old_hub_for_cleanup:
             await white_internet_repo.enqueue_orphan_cleanup(
                 session,
-                server_id=old_origin_for_cleanup.id,
+                server_id=old_hub_for_cleanup.id,
                 client_uuid=sub.uuid,
                 desired_version=sub.desired_version + 1,
             )
 
         await session.flush()
 
-        if old_origin_for_cleanup:
+        if old_hub_for_cleanup:
             _dispatch_deprovision(
-                old_origin_for_cleanup,
+                old_hub_for_cleanup,
                 client_uuid=sub.uuid,
                 version=sub.desired_version + 1,
                 context=f"add_device_slot sub {sub.id}",
@@ -707,39 +708,36 @@ class WhiteInternetService:
             return False, texts.WL_NO_SUB, None
         if sub.user_id != user.id:
             return False, texts.ERROR_ACCESS_DENIED, None
-        if getattr(sub, "is_trial", False):
-            return False, texts.WL_TRIAL_CANNOT_TOPUP, None
         now = now_utc()
         if sub.status in (WhiteInternetStatus.PENDING, WhiteInternetStatus.DISABLED):
             return False, texts.WL_SUB_NOT_READY, None
         if sub.status == WhiteInternetStatus.EXPIRED or (sub.expires_at and sub.expires_at <= now):
             return False, texts.WL_SUB_EXPIRED, None
 
-        # Pre-Debit Validation: validate origin node health & availability before debiting funds
-        origin_node = await session.scalar(
+        # Pre-Debit Validation: validate hub node health & availability before debiting funds
+        hub_node = await session.scalar(
             select(Server).where(
-                Server.id == sub.origin_node_id,
+                Server.id == sub.hub_server_id,
                 Server.protocol.in_([XRAY_PROTOCOL, VLESS_PROTOCOL]),
             )
         )
         needs_migration = (
-            not origin_node
-            or not origin_node.is_active
-            or origin_node.health_state != ServerHealthState.ONLINE
-            or origin_node.lifecycle_status != ServerLifecycleStatus.ACTIVE
+            not hub_node
+            or not hub_node.is_active
+            or hub_node.health_state != ServerHealthState.ONLINE
+            or hub_node.lifecycle_status != ServerLifecycleStatus.ACTIVE
             or not (
-                (origin_node.extra_data or {}).get("xhttp_locations")
-                or (origin_node.extra_data or {}).get("cdn_domains")
-                or (origin_node.extra_data or {}).get("cdn_domain")
-                or (origin_node.extra_data or {}).get("relays")
+                (hub_node.extra_data or {}).get("xhttp_locations")
+                or (hub_node.extra_data or {}).get("cdn_domains")
+                or (hub_node.extra_data or {}).get("cdn_domain")
             )
         )
-        new_origin_server: Server | None = None
+        new_hub_server: Server | None = None
         if needs_migration:
             try:
-                new_origin_server = await cls.select_origin_node(session)
+                new_hub_server = await cls.select_hub_node(session)
             except RuntimeError as exc:
-                logger.warning("No healthy origin node available for topup migration: %s", exc)
+                logger.warning("No healthy hub node available for topup migration: %s", exc)
                 return False, texts.WL_NO_SERVERS_AVAILABLE, None
 
         pack_bytes = pack_gb * 1024 * 1024 * 1024
@@ -775,16 +773,16 @@ class WhiteInternetService:
                 return checkout_failure
 
         # Apply node migration ONLY after successful financial debit
-        old_origin_for_cleanup: Server | None = None
-        if needs_migration and new_origin_server is not None:
-            old_origin_for_cleanup = origin_node
-            sub.origin_node_id = new_origin_server.id
+        old_hub_for_cleanup: Server | None = None
+        if needs_migration and new_hub_server is not None:
+            old_hub_for_cleanup = hub_node
+            sub.hub_server_id = new_hub_server.id
             sub.actual_version = 0
             sub.last_reconciled_node_epoch = None
             sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_CREATE
             await session.flush()
             await white_internet_repo.cancel_pending_orphan_cleanups_for_client(
-                session, new_origin_server.id, sub.uuid
+                session, new_hub_server.id, sub.uuid
             )
 
         grant = await white_internet_repo.topup_quota_atomic(
@@ -794,19 +792,19 @@ class WhiteInternetService:
             price_rub=pack_price,
         )
 
-        if old_origin_for_cleanup:
+        if old_hub_for_cleanup:
             await white_internet_repo.enqueue_orphan_cleanup(
                 session,
-                server_id=old_origin_for_cleanup.id,
+                server_id=old_hub_for_cleanup.id,
                 client_uuid=sub.uuid,
                 desired_version=sub.desired_version + 1,
             )
 
         await session.flush()
 
-        if old_origin_for_cleanup:
+        if old_hub_for_cleanup:
             _dispatch_deprovision(
-                old_origin_for_cleanup,
+                old_hub_for_cleanup,
                 client_uuid=sub.uuid,
                 version=sub.desired_version + 1,
                 context=f"topup sub {sub.id}",
@@ -880,10 +878,10 @@ class WhiteInternetService:
         cls,
         session: AsyncSession,
         sub: WhiteInternetSubscription,
-        origin_node: Server,
+        hub_node: Server,
         idempotency_key: str,
     ) -> bool:
-        """Attempt best-effort synchronous activation on origin node (timeout=4.0s).
+        """Attempt best-effort synchronous activation on hub node (timeout=4.0s).
 
         Fail-closed like the reconciliation worker: mark ACTIVE only when the
         node confirms the expected epoch and full inbound coverage; verify
@@ -891,8 +889,8 @@ class WhiteInternetService:
         PENDING_CREATE for the background worker to converge.
         """
         expected_inbound_tags: set[str] = set()
-        extra_data = origin_node.extra_data or {}
-        endpoint_entries = extra_data.get("xhttp_locations") or extra_data.get("relays") or []
+        extra_data = hub_node.extra_data or {}
+        endpoint_entries = extra_data.get("xhttp_locations") or []
         for entry in endpoint_entries:
             if isinstance(entry, dict):
                 inbound_tag = entry.get("inbound_tag")
@@ -912,21 +910,21 @@ class WhiteInternetService:
         try:
             async with XrayNodeClient(timeout=4.0) as xray_client:
                 resp = await xray_client.sync_client(
-                    origin_node.api_url,
-                    origin_node.api_key,
+                    hub_node.api_url,
+                    hub_node.api_key,
                     client_uuid=sub.uuid,
                     is_active=True,
                     version=target_version,
-                    expected_node_epoch=origin_node.xray_instance_epoch,
+                    expected_node_epoch=hub_node.xray_instance_epoch,
                     idempotency_key=idempotency_key,
                     service="white_internet",
                 )
                 sync_res = resp.result if hasattr(resp, "result") else resp[0]
                 verified_epoch = (
-                    getattr(resp, "verified_epoch", None) or origin_node.xray_instance_epoch
+                    getattr(resp, "verified_epoch", None) or hub_node.xray_instance_epoch
                 )
                 verified_inbounds = set(getattr(resp, "verified_inbounds", None) or [])
-                epoch_ok = verified_epoch == origin_node.xray_instance_epoch
+                epoch_ok = verified_epoch == hub_node.xray_instance_epoch
                 inbounds_ok = (
                     not verified_inbounds
                     or expected_inbound_tags.issubset(verified_inbounds)
@@ -936,8 +934,8 @@ class WhiteInternetService:
                     confirmed = True
                 elif sync_res == SyncResult.ALREADY_NEWER and epoch_ok:
                     inv_ok, inv_data, _ = await xray_client.get_inventory(
-                        origin_node.api_url,
-                        origin_node.api_key,
+                        hub_node.api_url,
+                        hub_node.api_key,
                         client_ids=[sub.uuid],
                         service="white_internet",
                     )
@@ -1005,10 +1003,10 @@ class WhiteInternetService:
         await session.flush()
 
         for sub in deactivated:
-            if sub.origin_node_id:
-                origin_server = await session.get(Server, sub.origin_node_id)
+            if sub.hub_server_id:
+                hub_server = await session.get(Server, sub.hub_server_id)
                 _dispatch_deprovision(
-                    origin_server,
+                    hub_server,
                     client_uuid=sub.uuid,
                     version=sub.desired_version,
                     context=f"deactivate sub {sub.id}",
@@ -1034,8 +1032,6 @@ class WhiteInternetService:
         sub = await white_internet_repo.get_subscription_by_user_id(session, user_id)
         if sub is None:
             return False, texts.ADMIN_WI_SUB_NOT_FOUND, None
-        if getattr(sub, "is_trial", False):
-            return False, texts.ADMIN_WI_TRIAL_EXTEND_FORBIDDEN, None
 
         try:
             sub = await white_internet_repo.extend_subscription_atomic(
@@ -1051,13 +1047,13 @@ class WhiteInternetService:
         # are not blocked during external network I/O.
         await session.commit()
 
-        if sub.origin_node_id:
-            origin_node = await session.get(Server, sub.origin_node_id)
-            if origin_node and origin_node.is_active:
+        if sub.hub_server_id:
+            hub_node = await session.get(Server, sub.hub_server_id)
+            if hub_node and hub_node.is_active:
                 await cls._try_inline_sync(
                     session,
                     sub,
-                    origin_node,
+                    hub_node,
                     idempotency_key=f"admin_extend:{sub.id}:{sub.desired_version}:{days}",
                 )
 
@@ -1135,16 +1131,28 @@ class WhiteInternetService:
         port: int = 443,
         path: str = DEFAULT_WHITE_INTERNET_PATH,
         relays: list[dict] | None = None,
-        include_origin: bool = True,
-        origin_tag: str | None = None,
-        origin_badge: str | None = None,
+        include_direct_hub: bool = True,
+        direct_hub_tag: str | None = None,
+        direct_hub_badge: str | None = None,
         default_relay_badge: str | None = None,
         relay_names: dict[str, str] | None = None,
         relay_badges: dict[str, str] | None = None,
         cdn_type: str = "cdn_yandex",
-        origin_path: str | None = None,
+        direct_hub_path: str | None = None,
         client_uuid: str | None = None,
+        *,
+        # Backward compatibility aliases
+        include_origin: bool | None = None,
+        origin_tag: str | None = None,
+        origin_badge: str | None = None,
+        origin_path: str | None = None,
     ) -> list[str]:
+        if include_origin is not None:
+            include_direct_hub = include_origin
+        effective_tag = direct_hub_tag or origin_tag
+        effective_badge = direct_hub_badge or origin_badge
+        effective_path = direct_hub_path or origin_path
+
         if str(cdn_type or "").strip().lower() == "cdn_turboflare":
             extra_dict = {
                 "mode": CANONICAL_XHTTP_PROFILE["mode"],
@@ -1183,25 +1191,25 @@ class WhiteInternetService:
         fp = CANONICAL_XHTTP_PROFILE.get("fp", WHITE_INTERNET_TLS_FINGERPRINT)
         base = _normalize_base_path(path)
 
-        if not include_origin:
+        if not include_direct_hub:
             return []
 
-        origin_tag_str = (
-            origin_tag.strip()
-            if origin_tag and isinstance(origin_tag, str) and origin_tag.strip()
+        hub_tag_str = (
+            effective_tag.strip()
+            if effective_tag and isinstance(effective_tag, str) and effective_tag.strip()
             else texts.WL_VLESS_TAG
         )
-        origin_tag_str = WhiteInternetService._ensure_country_flag(origin_tag_str, "ru")
-        if origin_badge and isinstance(origin_badge, str) and origin_badge.strip().lower() == "none":
-            effective_origin_badge = None
-        elif origin_badge and isinstance(origin_badge, str) and origin_badge.strip():
-            effective_origin_badge = origin_badge.strip()
+        hub_tag_str = WhiteInternetService._ensure_country_flag(hub_tag_str, "ru")
+        if effective_badge and isinstance(effective_badge, str) and effective_badge.strip().lower() == "none":
+            final_badge = None
+        elif effective_badge and isinstance(effective_badge, str) and effective_badge.strip():
+            final_badge = effective_badge.strip()
         else:
-            effective_origin_badge = None
-        origin_tag_formatted = WhiteInternetService._format_vless_tag(origin_tag_str, effective_origin_badge)
-        standalone_path = origin_path or (
+            final_badge = None
+        hub_tag_formatted = WhiteInternetService._format_vless_tag(hub_tag_str, final_badge)
+        standalone_path = effective_path or (
             f"{base}/turboflare" if str(cdn_type or "").strip().lower() == "cdn_turboflare" else f"{base}/default"
         )
         eff_uuid = client_uuid or subscription.uuid
-        origin_link = f"vless://{eff_uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={fp}&type=xhttp&path={urllib.parse.quote(standalone_path, safe='')}&mode=packet-up&mux=false&extra={extra_param}#{origin_tag_formatted}"
-        return [origin_link]
+        hub_link = f"vless://{eff_uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={fp}&type=xhttp&path={urllib.parse.quote(standalone_path, safe='')}&mode=packet-up&mux=false&extra={extra_param}#{hub_tag_formatted}"
+        return [hub_link]

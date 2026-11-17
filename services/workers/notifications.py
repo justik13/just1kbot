@@ -758,10 +758,6 @@ async def _send_white_internet_notifications(
                 ):
                     continue
 
-                if getattr(sub, "is_trial", False) and not sub.notified_3d:
-                    sub.notified_3d = True
-                    await session.flush()
-
                 time_left = sub.expires_at - current_time
                 notify_type = None
                 msg = None
@@ -778,7 +774,7 @@ async def _send_white_internet_notifications(
                     if not sub.notified_1d:
                         notify_type = "1d"
                         msg = NOTIFY_WI_1D.format(countdown=_format_countdown(time_left))
-                elif time_left <= timedelta(days=3) and not getattr(sub, "is_trial", False):
+                elif time_left <= timedelta(days=3):
                     if not sub.notified_3d:
                         notify_type = "3d"
                         msg = NOTIFY_WI_3D.format(

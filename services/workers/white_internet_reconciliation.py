@@ -1,4 +1,4 @@
-"""Reconciliation worker ensuring desired subscription state matches Xray Origin runtime."""
+"""Reconciliation worker ensuring desired subscription state matches Xray ru_hub runtime."""
 
 from __future__ import annotations
 
@@ -13,8 +13,8 @@ from sqlalchemy import and_, nulls_first, or_, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from bot.texts.runtime.alerts import (
-    ALERT_WHITE_INTERNET_ORIGIN_EXHAUSTED,
-    ALERT_WHITE_INTERNET_ORIGIN_RESTORED,
+    ALERT_WHITE_INTERNET_HUB_EXHAUSTED,
+    ALERT_WHITE_INTERNET_HUB_RESTORED,
 )
 from config.constants import VLESS_PROTOCOL, WHITE_INTERNET_CAPABILITY, XRAY_PROTOCOL
 from config.enums import (
@@ -56,32 +56,32 @@ class WhiteInternetReconciliationWorker:
         self.max_concurrency = max_concurrency
         self._semaphore = asyncio.Semaphore(self.max_concurrency)
         self._sub_locks: dict[int, asyncio.Lock] = {}
-        self._origin_exhausted_alerted: bool = False
-        self._origin_exhausted_last_sent: float | None = None
+        self._hub_exhausted_alerted: bool = False
+        self._hub_exhausted_last_sent: float | None = None
 
-    async def _send_origin_exhausted_alert(self, sub_id: int) -> None:
+    async def _send_hub_exhausted_alert(self, sub_id: int) -> None:
         if not self.bot:
             return
-        text = ALERT_WHITE_INTERNET_ORIGIN_EXHAUSTED.format(sub_id=sub_id)
+        text = ALERT_WHITE_INTERNET_HUB_EXHAUSTED.format(sub_id=sub_id)
         for aid in get_settings().ADMIN_IDS:
             try:
                 await safe_send_message(
                     self.bot, chat_id=aid, text=text, parse_mode="HTML"
                 )
             except Exception as e:
-                logger.warning("Failed to send origin exhausted alert to admin %s: %s", aid, e)
+                logger.warning("Failed to send hub exhausted alert to admin %s: %s", aid, e)
 
-    async def _send_origin_restored_alert(self) -> None:
+    async def _send_hub_restored_alert(self) -> None:
         if not self.bot:
             return
-        text = ALERT_WHITE_INTERNET_ORIGIN_RESTORED
+        text = ALERT_WHITE_INTERNET_HUB_RESTORED
         for aid in get_settings().ADMIN_IDS:
             try:
                 await safe_send_message(
                     self.bot, chat_id=aid, text=text, parse_mode="HTML"
                 )
             except Exception as e:
-                logger.warning("Failed to send origin restored alert to admin %s: %s", aid, e)
+                logger.warning("Failed to send hub restored alert to admin %s: %s", aid, e)
 
     def _get_sub_lock(self, sub_id: int) -> asyncio.Lock:
         lock = self._sub_locks.get(sub_id)
@@ -124,18 +124,19 @@ class WhiteInternetReconciliationWorker:
         sub_uuid = task["uuid"]
         desired_active = task["desired_active"]
         target_version = task["target_version"]
-        expected_relays = task.get("expected_relays") or []
         expected_xhttp = task.get("expected_xhttp_locations") or []
         expected_inbound_tags = set()
         for loc in expected_xhttp:
             if isinstance(loc, dict) and loc.get("inbound_tag"):
                 expected_inbound_tags.add(str(loc["inbound_tag"]))
+            elif isinstance(loc, dict):
+                code = loc.get("location_code") or loc.get("code")
+                if code:
+                    expected_inbound_tags.add(f"just1k-wl-inbound-{code}")
+            elif isinstance(loc, str) and loc:
+                expected_inbound_tags.add(f"just1k-wl-inbound-{loc}")
         if not expected_inbound_tags:
             expected_inbound_tags.add("just1k-wl-default")
-        for r in expected_relays:
-            code = r.get("code") if isinstance(r, dict) else r
-            if code:
-                expected_inbound_tags.add(f"just1k-wl-inbound-{code}")
 
         notify_user_id: int | None = None
         async with self._get_sub_lock(sub_id):
@@ -386,13 +387,11 @@ class WhiteInternetReconciliationWorker:
                         s.api_url,
                         s.api_key,
                         epoch,
-                        (s.extra_data or {}).get("relays", []),
                         (s.extra_data or {}).get("xhttp_locations", []),
-                        bool((s.extra_data or {}).get("origin_hidden", False)),
                     ))
 
         synced_count = 0
-        for server_id, api_url, api_key, target_epoch, relays, xhttp_locs, origin_hidden in active_server_targets:
+        for server_id, api_url, api_key, target_epoch, xhttp_locs in active_server_targets:
             if not target_epoch:
                 continue
 
@@ -450,9 +449,7 @@ class WhiteInternetReconciliationWorker:
                         "uuid": sub.uuid,
                         "desired_active": desired_active,
                         "target_version": sub.desired_version,
-                        "expected_relays": relays,
                         "expected_xhttp_locations": xhttp_locs,
-                        "origin_hidden": origin_hidden,
                     })
 
             # Bounded concurrent execution outside DB transaction
@@ -477,7 +474,7 @@ class WhiteInternetReconciliationWorker:
         return synced_count
 
     async def _sweep_orphan_cleanups(self, sf) -> int:
-        """Converge former origin nodes to disabled for migrated subscriptions.
+        """Converge former hub nodes to disabled for migrated subscriptions.
 
         Drains the durable orphan-cleanup outbox written by renew migrations in
         the same transaction. Fire-and-forget dispatches are only accelerators;
@@ -515,7 +512,7 @@ class WhiteInternetReconciliationWorker:
                         else None
                     )
                     if server is None:
-                        # Origin row is gone (node decommissioned): the credential
+                        # Hub server row is gone (node decommissioned): the credential
                         # dies with the node, nothing left to converge.
                         await white_internet_repo.mark_orphan_cleanup_done(sess, row.id)
                         await sess.commit()
@@ -523,7 +520,7 @@ class WhiteInternetReconciliationWorker:
                         continue
 
                     # Defense against A -> B -> A ping-pong migration:
-                    # If this client is currently active/pending on this origin node,
+                    # If this client is currently active/pending on this hub node,
                     # the orphan cleanup is stale and must not deactivate the active user!
                     reassigned_sub = await sess.scalar(
                         select(WhiteInternetSubscription.id).where(
@@ -539,7 +536,7 @@ class WhiteInternetReconciliationWorker:
                     if isinstance(reassigned_sub, (int, str)):
                         cred_hash = hashlib.sha256(row.client_uuid.encode()).hexdigest()[:12]
                         logger.info(
-                            "Orphan cleanup %d cancelled: credential sha256:%s... is currently active/placed on origin %d (sub_id=%s).",
+                            "Orphan cleanup %d cancelled: credential sha256:%s... is currently active/placed on hub %d (sub_id=%s).",
                             row.id,
                             cred_hash,
                             row.server_id,
@@ -582,7 +579,7 @@ class WhiteInternetReconciliationWorker:
                         swept += 1
                         cred_hash = hashlib.sha256(row.client_uuid.encode()).hexdigest()[:12]
                         logger.info(
-                            "Swept orphan credential id=%d sha256:%s... on former origin %d.",
+                            "Swept orphan credential id=%d sha256:%s... on former hub %d.",
                             row.id,
                             cred_hash,
                             server.id,
@@ -661,7 +658,7 @@ class WhiteInternetReconciliationWorker:
         return finalized
 
     async def _sweep_unallocated_subscriptions(self, sf) -> int:
-        """Allocate available origin nodes to active/pending subscriptions with origin_node_id IS NULL."""
+        """Allocate available ru_hub nodes to active/pending subscriptions with hub_server_id IS NULL."""
         allocated = 0
         try:
             async with sf() as sess:
@@ -699,32 +696,32 @@ class WhiteInternetReconciliationWorker:
                             ):
                                 continue
 
-                            origin = await servers_repo.allocate_origin_server_atomic(sess)
-                            if origin is None:
-                                logger.warning("No healthy origin server available for unallocated sub_id=%d", sub_id)
+                            hub = await servers_repo.allocate_wi_hub_atomic(sess)
+                            if hub is None:
+                                logger.warning("No healthy hub server available for unallocated sub_id=%d", sub_id)
                                 if self.bot:
                                     now_m = time.monotonic()
-                                    if not self._origin_exhausted_alerted or (
-                                        self._origin_exhausted_last_sent
-                                        and (now_m - self._origin_exhausted_last_sent) >= 3600.0
+                                    if not self._hub_exhausted_alerted or (
+                                        self._hub_exhausted_last_sent
+                                        and (now_m - self._hub_exhausted_last_sent) >= 3600.0
                                     ):
-                                        self._origin_exhausted_alerted = True
-                                        self._origin_exhausted_last_sent = now_m
-                                        asyncio.create_task(self._send_origin_exhausted_alert(sub_id))
+                                        self._hub_exhausted_alerted = True
+                                        self._hub_exhausted_last_sent = now_m
+                                        asyncio.create_task(self._send_hub_exhausted_alert(sub_id))
                                 break
 
-                            sub.hub_server_id = origin.id
+                            sub.hub_server_id = hub.id
                             sub.desired_version += 1
                             sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
                             sub.last_reconciled_node_epoch = None
                             await sess.commit()
                             allocated += 1
-                            if self._origin_exhausted_alerted and self.bot:
-                                self._origin_exhausted_alerted = False
-                                self._origin_exhausted_last_sent = None
-                                asyncio.create_task(self._send_origin_restored_alert())
+                            if self._hub_exhausted_alerted and self.bot:
+                                self._hub_exhausted_alerted = False
+                                self._hub_exhausted_last_sent = None
+                                asyncio.create_task(self._send_hub_restored_alert())
                         except Exception as exc:
-                            logger.error("Failed to allocate origin node for sub_id=%d: %s", sub_id, exc)
+                            logger.error("Failed to allocate hub node for sub_id=%d: %s", sub_id, exc)
                             await sess.rollback()
         return allocated
 

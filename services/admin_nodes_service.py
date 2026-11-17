@@ -21,7 +21,7 @@ from database.repositories.servers_repo import (
     delete_server,
     derive_v2_capabilities,
     get_all_servers,
-    get_origin_server_subscription_counts,
+    get_wi_hub_subscription_counts,
     get_server_by_api_url,
     get_server_by_id,
     get_server_role,
@@ -240,7 +240,7 @@ async def _probe_v2_node(
 
 async def list_nodes(session: AsyncSession) -> list[dict[str, Any]]:
     servers = await get_all_servers(session)
-    wi_counts = await get_origin_server_subscription_counts(session)
+    wi_counts = await get_wi_hub_subscription_counts(session)
     return [serialize_server_node(s, wi_subscriptions_count=wi_counts.get(s.id, 0)) for s in servers]
 
 
@@ -466,7 +466,7 @@ async def update_node_settings(
         updates["extra_data"] = extra
 
     if not updates:
-        wi_counts = await get_origin_server_subscription_counts(session)
+        wi_counts = await get_wi_hub_subscription_counts(session)
         return serialize_server_node(server, wi_subscriptions_count=wi_counts.get(server.id, 0))
 
     updated = await update_server(session, server, **updates)
@@ -481,7 +481,7 @@ async def update_node_settings(
         target_id=updated.id,
         details={"updated_fields": sorted(updates.keys())},
     )
-    wi_counts = await get_origin_server_subscription_counts(session)
+    wi_counts = await get_wi_hub_subscription_counts(session)
     return serialize_server_node(updated, wi_subscriptions_count=wi_counts.get(updated.id, 0))
 
 
@@ -529,7 +529,7 @@ async def toggle_node(
         target_id=updated.id,
         details={"is_active": target_active},
     )
-    wi_counts = await get_origin_server_subscription_counts(session)
+    wi_counts = await get_wi_hub_subscription_counts(session)
     return serialize_server_node(updated, wi_subscriptions_count=wi_counts.get(updated.id, 0))
 
 
@@ -545,7 +545,7 @@ async def delete_node(
     if server is None:
         raise AdminNodeServiceError("Node not found", status_code=404)
 
-    wi_counts = await get_origin_server_subscription_counts(session)
+    wi_counts = await get_wi_hub_subscription_counts(session)
     active_wi = wi_counts.get(server_id, 0)
     if active_wi > 0 and not force:
         raise AdminNodeServiceError(

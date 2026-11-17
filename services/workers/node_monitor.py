@@ -53,7 +53,7 @@ from database.repositories.servers_repo import (
     get_server_xray_api_url,
     is_v2_node_server,
     is_vless_capable_server,
-    is_white_internet_origin_server,
+    is_white_internet_hub_server,
     update_server,
     update_server_health_snapshot,
     update_server_xray_epoch_cas,
@@ -374,7 +374,7 @@ async def check_node_resources_and_alerts(bot: Bot):
 
         has_xray = (
             is_vless_capable_server(server)
-            or is_white_internet_origin_server(server)
+            or is_white_internet_hub_server(server)
             or is_v2_node_server(server)
         )
 
@@ -468,13 +468,13 @@ async def check_node_resources_and_alerts(bot: Bot):
         if is_xray_node:
             try:
                 node_role = get_server_role(server)
-                is_origin = node_role not in ("eu_hub", "exit_node") and (
+                is_wi_hub = node_role not in ("eu_hub", "exit_node") and (
                     node_role == "ru_hub"
                     or WHITE_INTERNET_CAPABILITY in (getattr(server, "capabilities", None) or [])
-                    or bool((getattr(server, "extra_data", None) or {}).get("relays"))
                     or bool((getattr(server, "extra_data", None) or {}).get("cdn_domain"))
+                    or bool((getattr(server, "extra_data", None) or {}).get("cdn_domains"))
                 )
-                if is_origin:
+                if is_wi_hub:
                     if isinstance(getattr(server, "extra_data", None), dict):
                         origin_domain = server.extra_data.get("domain")
                         cdn_domain = server.extra_data.get("cdn_domain")
@@ -1007,8 +1007,6 @@ async def check_node_resources_and_alerts(bot: Bot):
             update_kwargs["last_successful_check"] = now_utc()
             if is_xray_node and xray_data:
                 extra_update = {}
-                if "relays" in xray_data and not xray_data.get("relays_error"):
-                    extra_update["relays"] = xray_data["relays"]
                 if "secret_base_path" in xray_data:
                     extra_update["secret_base_path"] = xray_data["secret_base_path"]
                 if "sub_path_prefix" in xray_data and xray_data["sub_path_prefix"]:
@@ -1066,13 +1064,11 @@ async def check_node_resources_and_alerts(bot: Bot):
                     server.xray_instance_boot_id = updated_srv.xray_instance_boot_id
                     server.xray_instance_starttime = updated_srv.xray_instance_starttime
 
-                    # Синхронизация динамических метаданных (релеи, cdn_domain, cdn_domains, xhttp_locations) при изменениях на ноде
+                    # Синхронизация динамических метаданных (cdn_domain, cdn_domains, xhttp_locations) при изменениях на ноде
                     if xray_data and isinstance(xray_data, dict):
                         extra = dict(updated_srv.extra_data or {})
                         extra_changed = False
-                        for key in ("cdn_domain", "cdn_domains", "sni_routes", "xhttp_locations", "links", "relays", "secret_base_path"):
-                            if key == "relays" and xray_data.get("relays_error"):
-                                continue
+                        for key in ("cdn_domain", "cdn_domains", "sni_routes", "xhttp_locations", "links", "secret_base_path"):
                             if key in xray_data and xray_data[key] is not None and extra.get(key) != xray_data[key]:
                                 if key in ("cdn_domain", "secret_base_path") and not xray_data[key]:
                                     continue
