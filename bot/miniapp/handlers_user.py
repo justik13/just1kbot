@@ -45,6 +45,7 @@ from database.repositories.account_ledger_repo import (
     get_account_balance,
     get_account_history,
 )
+from database.repositories.system_settings_repo import get_system_setting
 from database.repositories.users_repo import (
     get_user_active_referrals_count,
     get_user_referrals_paginated,
@@ -297,8 +298,13 @@ async def api_user_dashboard_handler(request: web.Request) -> web.Response:
             support_username = raw_support.lstrip("@")
             support_url = f"https://t.me/{support_username}" if support_username else None
 
+        maint_val = await get_system_setting(session, "payments_maintenance_enabled", "false")
+        payments_maintenance = str(maint_val).strip().lower() in ("1", "true", "yes", "on")
+
         return web.json_response({
             "ok": True,
+            "financial_hold": bool(getattr(user, "financial_hold", False)),
+            "payments_maintenance": payments_maintenance,
             "support": {
                 "support_url": support_url,
                 "tos_url": TOS_AGREEMENT_URL,

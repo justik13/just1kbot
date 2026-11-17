@@ -909,6 +909,31 @@ function _bindGuideEvents(container, root) {
 }
 
 function _renderConnectTab(body, d, reload, root) {
+    if (d.financial_hold) {
+        body.innerHTML = `
+            <section class="hero-card" style="border-color: rgba(239, 68, 68, 0.4);">
+                <div class="row">
+                    <div style="display:flex; align-items:center; gap:9px;">
+                        <span class="status-dot" style="background:var(--accent-red); box-shadow:0 0 10px rgba(239, 68, 68, 0.5);"></span>
+                        <span class="hero-headline" style="color:var(--accent-red);">Обслуживание приостановлено</span>
+                    </div>
+                    <span class="chip chip-warn">Ограничение</span>
+                </div>
+                <p class="muted">Доступ к сервису временно ограничен администратором. Если у вас возникли вопросы по оплате или настройке, напишите нам в поддержку.</p>
+                ${d.support && d.support.support_url ? `
+                    <button id="holdContactSupportBtn" type="button" class="btn btn-primary btn-lg">Написать в поддержку</button>
+                ` : ""}
+            </section>
+            ${(d.devices || []).length ? _buildDevicesSectionHtml(d) : ""}
+        `;
+        const supBtn = body.querySelector("#holdContactSupportBtn");
+        if (supBtn) {
+            supBtn.addEventListener("click", () => openExternalLink(d.support.support_url));
+        }
+        _bindDevicesEvents(body, reload);
+        return;
+    }
+
     const std = d.standard || {};
     const wi = d.wi || {};
     const isAnyActive = Boolean(std.active || wi.active);
@@ -1014,6 +1039,16 @@ function _renderTariffsTab(body, d, reload) {
     const wiMaxDevices = pricing.wi_max_devices || 3;
 
     body.innerHTML = `
+        ${d.financial_hold ? `
+            <div class="notice-box notice-warn" style="margin-bottom:8px;">
+                <span>⚠️ Оплата и изменение подписок временно недоступны: профиль находится на проверке. Свяжитесь с поддержкой.</span>
+            </div>
+        ` : (d.payments_maintenance ? `
+            <div class="notice-box notice-warn" style="margin-bottom:8px;">
+                <span>🛠 Приём платежей временно приостановлен для проведения технических работ. Действующие подписки работают в штатном режиме.</span>
+            </div>
+        ` : "")}
+
         <section class="balance-card">
             <div>
                 <div class="muted" style="font-size:12px;">Баланс аккаунта</div>
@@ -1121,16 +1156,36 @@ function _renderTariffsTab(body, d, reload) {
         </section>
     `;
 
-    body.querySelector("#topupBtn").addEventListener("click", () => _openTopupModal(minTopup, reload));
+    const checkCanPay = () => {
+        if (d.financial_hold) {
+            showToast("Профиль на проверке — свяжитесь с поддержкой");
+            return false;
+        }
+        if (d.payments_maintenance) {
+            showToast("Приём платежей временно приостановлен (техработы)");
+            return false;
+        }
+        return true;
+    };
+
+    body.querySelector("#topupBtn").addEventListener("click", () => {
+        if (checkCanPay()) _openTopupModal(minTopup, reload);
+    });
 
     const stdBuyBtn = body.querySelector("#stdBuyBtn");
-    if (stdBuyBtn) stdBuyBtn.addEventListener("click", () => _openStandardPlanModal(d, "buy", reload));
+    if (stdBuyBtn) stdBuyBtn.addEventListener("click", () => {
+        if (checkCanPay()) _openStandardPlanModal(d, "buy", reload);
+    });
 
     const stdRenewBtn = body.querySelector("#stdRenewBtn");
-    if (stdRenewBtn) stdRenewBtn.addEventListener("click", () => _openStandardPlanModal(d, "renew", reload));
+    if (stdRenewBtn) stdRenewBtn.addEventListener("click", () => {
+        if (checkCanPay()) _openStandardPlanModal(d, "renew", reload);
+    });
 
     const stdDevBtn = body.querySelector("#stdDevicesBtn");
-    if (stdDevBtn) stdDevBtn.addEventListener("click", () => _openStandardDevicesModal(d, reload));
+    if (stdDevBtn) stdDevBtn.addEventListener("click", () => {
+        if (checkCanPay()) _openStandardDevicesModal(d, reload);
+    });
 
     const stdAuto = body.querySelector("#stdAutoRenewChk");
     if (stdAuto) {
@@ -1146,7 +1201,9 @@ function _renderTariffsTab(body, d, reload) {
     }
 
     const wiBuyBtn = body.querySelector("#wiBuyBtn");
-    if (wiBuyBtn) wiBuyBtn.addEventListener("click", () => _openWiPurchaseModal(d, reload));
+    if (wiBuyBtn) wiBuyBtn.addEventListener("click", () => {
+        if (checkCanPay()) _openWiPurchaseModal(d, reload);
+    });
 
     const wiAuto = body.querySelector("#wiAutoRenewChk");
     if (wiAuto) {
@@ -1164,6 +1221,7 @@ function _renderTariffsTab(body, d, reload) {
     const wiRenewBtn = body.querySelector("#wiRenewBtn");
     if (wiRenewBtn) {
         wiRenewBtn.addEventListener("click", async () => {
+            if (!checkCanPay()) return;
             wiRenewBtn.disabled = true;
             try {
                 const res = await api.checkoutWi({
@@ -1189,6 +1247,8 @@ function _renderTariffsTab(body, d, reload) {
 function _buildDevicesSectionHtml(d) {
     const devices = d.devices || [];
     const wiActive = Boolean(d.wi && d.wi.active);
+    const stdLimit = Number((d.standard && d.standard.device_limit) || 2);
+    const isLimitReached = devices.length >= stdLimit;
 
     const rowsHtml = !devices.length
         ? `
@@ -1232,8 +1292,13 @@ function _buildDevicesSectionHtml(d) {
         <section class="card">
             <div class="row">
                 <div class="card-title">Привязанные устройства</div>
-                <span class="chip chip-muted">${devices.length} шт.</span>
+                <span class="chip ${isLimitReached ? "chip-warn" : "chip-muted"}">${devices.length} из ${stdLimit}</span>
             </div>
+            ${isLimitReached ? `
+                <div class="notice-box notice-warn" style="margin-bottom:8px;">
+                    <span>Все слоты (${devices.length} из ${stdLimit}) заняты. Чтобы подключить новое устройство, удалите одно из старых ниже.</span>
+                </div>
+            ` : ""}
             <p class="muted" style="font-size:12px;">
                 ${wiActive
                     ? "Слоты «Белого интернета» выдаются по приоритету (или в порядке первого подключения)."
@@ -1289,6 +1354,16 @@ function _renderProfileTab(body, d, reload) {
     const invitedUsers = ref.invited_users || [];
 
     body.innerHTML = `
+        ${d.financial_hold ? `
+            <div class="notice-box notice-warn" style="margin-bottom:8px;">
+                <span>⚠️ Оплата и изменение подписок временно недоступны: профиль находится на проверке. Свяжитесь с поддержкой.</span>
+            </div>
+        ` : (d.payments_maintenance ? `
+            <div class="notice-box notice-warn" style="margin-bottom:8px;">
+                <span>🛠 Приём платежей временно приостановлен для проведения технических работ. Действующие подписки работают в штатном режиме.</span>
+            </div>
+        ` : "")}
+
         <section class="balance-card">
             <div>
                 <div class="muted" style="font-size:12px;">Баланс аккаунта</div>
@@ -1366,7 +1441,17 @@ function _renderProfileTab(body, d, reload) {
         </section>
     `;
 
-    body.querySelector("#profileTopupBtn").addEventListener("click", () => _openTopupModal(minTopup, reload));
+    body.querySelector("#profileTopupBtn").addEventListener("click", () => {
+        if (d.financial_hold) {
+            showToast("Профиль на проверке — свяжитесь с поддержкой");
+            return;
+        }
+        if (d.payments_maintenance) {
+            showToast("Приём платежей временно приостановлен (техработы)");
+            return;
+        }
+        _openTopupModal(minTopup, reload);
+    });
     body.querySelector("#shareRefBtn").addEventListener("click", () => openExternalLink(shareUrl));
     body.querySelector("#copyRefBtn").addEventListener("click", () => copyText(ref.link, "Ссылка скопирована"));
     const supBtn = body.querySelector("#supportContactBtn");

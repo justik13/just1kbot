@@ -123,7 +123,7 @@ export function renderNodesView(root, state, onReload, onSelectNode) {
             <form id="addNodeForm" class="field" style="gap:9px;">
                 <div class="field">
                     <label>URL API ноды</label>
-                    <input id="addApiUrl" class="input" type="url" required placeholder="https://1.2.3.4:8444">
+                    <input id="addApiUrl" class="input" type="url" required placeholder="https://node.domain.com:8444">
                 </div>
                 <div class="field">
                     <label>API Токен</label>
