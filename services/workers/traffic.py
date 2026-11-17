@@ -6,7 +6,6 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
 from bot import texts
 from bot.keyboards.notifications import (
-    get_dismiss_notification_keyboard,
     get_traffic_alert_keyboard,
 )
 from bot.texts.runtime.alerts import ALERT_TRAFFIC_OVERUSAGE
@@ -212,7 +211,6 @@ async def _send_wi_exhausted_alerts(bot: Bot | None, exhausted_users: list[tuple
                     bot,
                     chat_id=telegram_id,
                     text=alert_text,
-                    reply_markup=get_dismiss_notification_keyboard(),
                     parse_mode="HTML",
                     raise_forbidden=True,
                 )
@@ -263,7 +261,6 @@ async def _send_wi_90p_alerts(bot: Bot | None, warn_users: list[tuple[int, int, 
                 bot,
                 chat_id=telegram_id,
                 text=alert_text,
-                reply_markup=get_dismiss_notification_keyboard(),
                 parse_mode="HTML",
                 raise_forbidden=True,
             )

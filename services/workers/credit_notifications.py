@@ -209,7 +209,6 @@ async def notify_order_credited(
             bot,
             user.telegram_id,
             text,
-            reply_markup=get_dismiss_notification_keyboard(),
             message_effect_id=EFFECT_CONFETTI,
         )
         return sent_id is not None
@@ -251,7 +250,6 @@ async def _send_late_push(
             bot,
             telegram_id,
             text,
-            reply_markup=get_dismiss_notification_keyboard(),
             message_effect_id=EFFECT_CONFETTI,
             raise_forbidden=True,
         )

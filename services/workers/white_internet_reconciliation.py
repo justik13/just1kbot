@@ -101,12 +101,10 @@ class WhiteInternetReconciliationWorker:
             if not user or not user.telegram_id or user.is_bot_blocked:
                 return
             from bot import texts
-            from bot.keyboards.notifications import get_dismiss_notification_keyboard
             await safe_send_message(
                 self.bot,
                 chat_id=user.telegram_id,
                 text=texts.WL_AUTO_PUSH_READY,
-                reply_markup=get_dismiss_notification_keyboard(),
                 parse_mode="HTML",
                 raise_forbidden=False,
             )
