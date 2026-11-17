@@ -60,6 +60,7 @@ async def cleanup_expired_subscriptions_loop(
             if now - _last_heavy_cleanup >= CLEANUP_LOOP_INTERVAL:
                 await _cleanup_expired_vless_network_grace()
                 await _sweep_vless_pending_revocations()
+                await _apply_due_white_internet_downgrades()
                 _last_heavy_cleanup = now
 
             await _reconcile_stale_pending_orders()
@@ -378,6 +379,7 @@ async def _reconcile_stale_pending_orders() -> None:
                 .where(
                     Order.status == "pending",
                     Order.external_id.is_not(None),
+                    Order.external_id != "",
                     Order.created_at >= window_start,
                     Order.created_at <= stale_threshold,
                 )

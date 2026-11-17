@@ -5,8 +5,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
 from config.constants import (
-    PERMANENT_END_DATE,
-    PERMANENT_SUBSCRIPTION_DAYS,
     REFERRAL_ACTIVE_MIN_TOPUP_RUB,
 )
 from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus

@@ -40,7 +40,7 @@ from config.enums import WhiteInternetStatus
 from config.settings import get_settings
 from database.connection import session_scope
 from database.models import Order, User
-from database.repositories import user_devices_repo
+from database.repositories import user_devices_repo, vless_subscription_repo
 from database.repositories.account_ledger_repo import (
     get_account_balance,
     get_account_history,
@@ -678,8 +678,16 @@ async def api_user_device_delete_handler(request: web.Request) -> web.Response:
 
         deleted_uuid = getattr(deleted, "device_uuid", None)
         if deleted_uuid:
+            vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+            sub_id = vless_sub.id if vless_sub else None
+            sub_ver = getattr(vless_sub, "version", None) if vless_sub else None
+            if vless_sub is not None:
+                await vless_subscription_repo.add_pending_revocation_uuids(session, vless_sub.id, [deleted_uuid])
+
             VlessSubscriptionService.deprovision_background(
                 deleted_uuid,
+                version=sub_ver,
+                sub_id=sub_id,
                 session=session,
             )
 
