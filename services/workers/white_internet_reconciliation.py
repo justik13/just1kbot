@@ -365,16 +365,6 @@ class WhiteInternetReconciliationWorker:
             )
             res_servers = await sess.execute(stmt_servers)
             servers = res_servers.scalars().all()
-            from services.white_internet_service import WhiteInternetService
-
-            apply_fn = getattr(WhiteInternetService, "apply_due_wi_downgrades", None)
-            if apply_fn is not None:
-                try:
-                    await apply_fn(sess, now=now)
-                    await sess.commit()
-                except Exception as exc:
-                    logger.warning("Failed to apply due WI downgrades in reconciliation cycle: %s", exc)
-                    await sess.rollback()
 
             server_list = [
                 (

@@ -59,32 +59,6 @@ class User(Base):
             postgresql_where=text("is_deleted = false AND subscription_end IS NOT NULL"),
         ),
         Index(
-            "ix_users_expiring_subscription",
-            "subscription_end",
-            "telegram_id",
-            postgresql_where=text(
-                """
-                is_deleted = false
-                AND is_bot_blocked = false
-                AND subscription_end IS NOT NULL
-                AND (notified_3d = false OR notified_1d = false OR notified_2h = false)
-                """
-            ),
-        ),
-        Index(
-            "ix_users_expired_grace_notify",
-            "subscription_end",
-            "telegram_id",
-            postgresql_where=text(
-                """
-                is_deleted = false
-                AND is_bot_blocked = false
-                AND subscription_end IS NOT NULL
-                AND notified_expired = false
-                """
-            ),
-        ),
-        Index(
             "ix_users_paginated",
             "created_at",
             "id",

@@ -1,5 +1,5 @@
 import { api } from "../api.js";
-import { escapeHtml, formatDate, openModal, showToast } from "../ui.js";
+import { copyText, escapeHtml, formatDate, openModal, showToast } from "../ui.js";
 
 function _openDirectMessageModal(user) {
     const uname = user.username ? `@${user.username}` : (user.first_name || `ID ${user.telegram_id}`);
@@ -275,14 +275,7 @@ async function _openUserDetailsModal(user, onUpdated) {
 
     const copyBtn = box.querySelector("#detCopySubBtn");
     if (copyBtn) {
-        copyBtn.addEventListener("click", async () => {
-            try {
-                await navigator.clipboard.writeText(details.subscription_url);
-                showToast("Ссылка скопирована");
-            } catch {
-                showToast("Не удалось скопировать");
-            }
-        });
+        copyBtn.addEventListener("click", () => copyText(details.subscription_url, "Ссылка скопирована"));
     }
 
     box.querySelector("#detResetHwidBtn").addEventListener("click", async (e) => {

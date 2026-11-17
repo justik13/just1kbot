@@ -51,6 +51,10 @@ _last_notification_type: TTLCache[int, str] = TTLCache(
     maxsize=10000,
     ttl=86400,
 )
+_autorenew_fail_notified: TTLCache[tuple[str, int], str] = TTLCache(
+    maxsize=10000,
+    ttl=86400 * 2,
+)
 
 
 def _get_backoff_delay(retry_count: int) -> int:
@@ -257,11 +261,9 @@ async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
                 bal = await get_account_balance(session, user_id=user.id, for_update=True, locked_user=user)
                 if bal.debt > 0 or bal.available < due_rub:
                     cycle_key = user.subscription_end.strftime("%Y-%m-%d") if user.subscription_end else ""
-                    extra = dict(user.extra or {})
-                    if extra.get("autorenew_std_fail_notified") != cycle_key and not user.is_bot_blocked:
-                        extra["autorenew_std_fail_notified"] = cycle_key
-                        user.extra = extra
-                        await session.flush()
+                    cache_key = ("std", user.id)
+                    if _autorenew_fail_notified.get(cache_key) != cycle_key and not user.is_bot_blocked:
+                        _autorenew_fail_notified[cache_key] = cycle_key
                         push_tg_id = user.telegram_id
                         push_text = NOTIFY_AUTORENEW_INSUFFICIENT_FUNDS.format(
                             service="Стандарт",
@@ -361,11 +363,9 @@ async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
                 bal = await get_account_balance(session, user_id=user.id, for_update=True, locked_user=user)
                 if bal.debt > 0 or bal.available < due_rub:
                     cycle_key = sub.expires_at.strftime("%Y-%m-%d") if sub.expires_at else ""
-                    extra = dict(user.extra or {})
-                    if extra.get("autorenew_wi_fail_notified") != cycle_key and not user.is_bot_blocked:
-                        extra["autorenew_wi_fail_notified"] = cycle_key
-                        user.extra = extra
-                        await session.flush()
+                    cache_key = ("wi", user.id)
+                    if _autorenew_fail_notified.get(cache_key) != cycle_key and not user.is_bot_blocked:
+                        _autorenew_fail_notified[cache_key] = cycle_key
                         push_tg_id = user.telegram_id
                         push_text = NOTIFY_AUTORENEW_INSUFFICIENT_FUNDS.format(
                             service="Белый Интернет",

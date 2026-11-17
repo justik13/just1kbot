@@ -97,12 +97,9 @@ async def _apply_due_white_internet_downgrades() -> None:
     """Apply scheduled White Internet device limit downgrades when pending_from is reached."""
     from services.white_internet_service import WhiteInternetService
 
-    apply_fn = getattr(WhiteInternetService, "apply_due_wi_downgrades", None)
-    if apply_fn is None:
-        return
     try:
         async with session_scope() as session:
-            applied = await apply_fn(session, now=now_utc())
+            applied = await WhiteInternetService.apply_due_wi_downgrades(session, now=now_utc())
             if applied:
                 logger.info("Applied %d scheduled White Internet device downgrades", applied)
     except Exception as exc:

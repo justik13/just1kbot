@@ -295,13 +295,6 @@
     border-color: #e4e4e7;
 }
 
-.btn-accent {
-    background: var(--accent-emerald-soft);
-    color: var(--accent-emerald);
-    border-color: rgba(52, 211, 153, 0.3);
-    font-weight: 600;
-}
-
 .btn-lg {
     width: 100%;
     min-height: 44px;
@@ -522,12 +515,6 @@
     background: var(--accent-white);
     color: #050505;
     font-weight: 600;
-}
-
-.range-input {
-    width: 100%;
-    accent-color: var(--accent-white);
-    cursor: pointer;
 }
 
 .progress-track {

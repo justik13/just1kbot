@@ -120,25 +120,6 @@ async def update_user(session: AsyncSession, user: User, **kwargs) -> User:
     return user
 
 
-async def extend_subscription(session: AsyncSession, user: User, days: int) -> User:
-    # Lock the row so concurrent read-modify-write extensions cannot lose
-    # updates. Safe to call with an already-locked user (same transaction).
-    locked_user = await session.scalar(select(User).where(User.id == user.id).with_for_update())
-    target_user = locked_user if locked_user is not None else user
-    now = now_utc()
-    if target_user.subscription_end and target_user.subscription_end > now:
-        current_end = target_user.subscription_end
-    else:
-        current_end = now
-
-    if days >= PERMANENT_SUBSCRIPTION_DAYS:
-        new_end = PERMANENT_END_DATE
-    else:
-        new_end = current_end + timedelta(days=days)
-
-    return await update_user(session, target_user, subscription_end=new_end)
-
-
 async def get_user_count(session: AsyncSession) -> int:
     stmt = select(func.count(User.id)).where(User.is_deleted.is_(False))
     result = await session.execute(stmt)

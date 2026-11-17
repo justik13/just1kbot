@@ -1259,6 +1259,7 @@ function _renderTariffsTab(body, d, reload) {
                 _handlePaymentResponse(res, "Подписка продлена на 30 дней", reload);
             } catch (err) {
                 showToast(err.message || "Ошибка продления");
+            } finally {
                 wiRenewBtn.disabled = false;
             }
         });

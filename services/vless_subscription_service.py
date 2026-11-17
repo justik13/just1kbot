@@ -152,7 +152,12 @@ class VlessSubscriptionService:
             hub_extra = hub.extra_data if isinstance(hub.extra_data, dict) else {}
             port, fp = VlessSubscriptionService._resolve_port_and_fp(hub_extra)
             sni_routes = VlessSubscriptionService._extract_sni_routes(hub_extra)
-            route_by_code = {r["bridge_code"]: r["sni"] for r in sni_routes}
+            route_by_code: dict[str, str] = {}
+            for r in sni_routes:
+                b_code = r["bridge_code"]
+                route_by_code[b_code] = r["sni"]
+                if "-" in b_code:
+                    route_by_code.setdefault(b_code.split("-")[0], r["sni"])
 
             if active_exits:
                 for ex in active_exits:
