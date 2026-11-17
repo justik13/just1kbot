@@ -628,7 +628,8 @@ class WhiteInternetService:
                 traffic_bytes=added_bytes,
                 device_limit=new_device_limit,
                 operation="add_device_slot",
-                insufficient_text=texts.WL_INSUFFICIENT_BALANCE_BUY,
+                insufficient_text=texts.WL_INSUFFICIENT_BALANCE_ADD_DEVICE,
+                gb=int(gb_added),
             )
             if checkout_failure is not None:
                 return checkout_failure
