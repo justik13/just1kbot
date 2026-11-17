@@ -376,11 +376,23 @@ async def _traffic_sync_once(bot: Bot | None = None):
                         new_starttime=node_starttime,
                     )
                     if not cas_ok:
-                        logger.info(
-                            "Epoch already advanced concurrently for server %s (%d). Continuing with snapshot processing.",
-                            server_name,
-                            server_id,
-                        )
+                        srv_check = await session.scalar(select(Server).where(Server.id == server_id))
+                        if srv_check and srv_check.xray_instance_epoch == node_epoch:
+                            logger.info(
+                                "Server %s (%d) epoch already updated to %s concurrently. Continuing snapshot.",
+                                server_name,
+                                server_id,
+                                node_epoch,
+                            )
+                        else:
+                            logger.warning(
+                                "Stale snapshot for server %s (%d) (snapshot epoch %s != db %s). Discarding snapshot.",
+                                server_name,
+                                server_id,
+                                node_epoch,
+                                srv_check.xray_instance_epoch if srv_check else "unknown",
+                            )
+                            continue
 
             server_delta = 0
             affected_vless_user_ids: set[int] = set()

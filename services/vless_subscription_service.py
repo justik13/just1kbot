@@ -928,6 +928,9 @@ class VlessSubscriptionService:
 
             total_eligible = 0
             has_failures = False
+            sub_tasks: list[tuple[str, int, int, int]] = []
+            sub_devices: dict[int, set[str]] = {}
+
             for sub, user in rows:
                 if not SubscriptionService.check_vpn_access(user):
                     continue
@@ -935,28 +938,47 @@ class VlessSubscriptionService:
                 sub_ver = getattr(sub, "version", 1) or 1
                 all_sub_uuids = set(user_devices_map.get(user.id, []))
                 all_sub_uuids.add(sub.uuid)
-
-                sub_ok = True
+                sub_devices[sub.id] = all_sub_uuids
                 for cl_uuid in all_sub_uuids:
+                    sub_tasks.append((cl_uuid, sub_ver, user.id, sub.id))
+
+            sem = asyncio.Semaphore(20)
+
+            async def _sync_single(cl_uuid: str, s_ver: int, u_id: int, s_id: int) -> tuple[int, str, bool]:
+                async with sem:
                     try:
                         res_map = await cls._execute_sync_to_nodes(
-                            target, cl_uuid, True, version=sub_ver, user_id=user.id, sub_id=sub.id
+                            target, cl_uuid, True, version=s_ver, user_id=u_id, sub_id=s_id
                         )
-                        if res_map.get(srv_id) is not True:
-                            sub_ok = False
-                            has_failures = True
+                        return s_id, cl_uuid, (res_map.get(srv_id) is True)
                     except Exception as e:
-                        sub_ok = False
-                        has_failures = True
                         logger.warning(
                             "Failed to provision cl_uuid=%s for user_id=%s on server %s: %s",
                             cl_uuid,
-                            user.id,
+                            u_id,
                             srv_id,
                             e,
                         )
-                if sub_ok:
-                    synced_count += 1
+                        return s_id, cl_uuid, False
+
+            if sub_tasks:
+                results = await asyncio.gather(*[_sync_single(*t) for t in sub_tasks], return_exceptions=True)
+                succeeded_by_sub: dict[int, set[str]] = {}
+                for res in results:
+                    if isinstance(res, Exception):
+                        has_failures = True
+                        continue
+                    s_id, cl_uuid, ok = res
+                    if ok:
+                        if s_id not in succeeded_by_sub:
+                            succeeded_by_sub[s_id] = set()
+                        succeeded_by_sub[s_id].add(cl_uuid)
+                    else:
+                        has_failures = True
+
+                for sub_id, exp_uuids in sub_devices.items():
+                    if succeeded_by_sub.get(sub_id) == exp_uuids:
+                        synced_count += 1
 
             # Record synchronized epoch in server extra_data ONLY if all eligible subscriptions succeeded without failures
             if not has_failures and synced_count == total_eligible:

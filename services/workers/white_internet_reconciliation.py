@@ -349,7 +349,6 @@ class WhiteInternetReconciliationWorker:
                     Server.api_url.is_not(None),
                     Server.api_key.is_not(None),
                     Server.is_active.is_(True),
-                    Server.xray_instance_epoch.is_not(None),
                     Server.lifecycle_status.in_([
                         ServerLifecycleStatus.ACTIVE,
                         ServerLifecycleStatus.DECOMMISSIONING,
@@ -361,23 +360,36 @@ class WhiteInternetReconciliationWorker:
             res_servers = await sess.execute(stmt_servers)
             servers = res_servers.scalars().all()
 
-            active_server_targets = [
-                (
-                    s.id,
-                    s.api_url,
-                    s.api_key,
-                    s.xray_instance_epoch,
-                    (s.extra_data or {}).get("relays", []),
-                    (s.extra_data or {}).get("xhttp_locations", []),
-                    bool((s.extra_data or {}).get("origin_hidden", False)),
-                )
-                for s in servers
-                if (
+            active_server_targets = []
+            for s in servers:
+                if not (
                     getattr(s, "protocol", None) in (XRAY_PROTOCOL, VLESS_PROTOCOL)
                     or (getattr(s, "protocol", None) is None and WHITE_INTERNET_CAPABILITY in (s.capabilities or []))
-                )
-                and WHITE_INTERNET_CAPABILITY in (s.capabilities or [])
-            ]
+                ) or WHITE_INTERNET_CAPABILITY not in (s.capabilities or []):
+                    continue
+                epoch = s.xray_instance_epoch
+                if not epoch:
+                    try:
+                        is_h, node_ep, h_data = await self.client.check_health(s.api_url, s.api_key)
+                        if is_h and node_ep:
+                            epoch = node_ep
+                            s.xray_instance_epoch = node_ep
+                            if h_data:
+                                s.xray_instance_boot_id = h_data.get("boot_id")
+                                s.xray_instance_starttime = h_data.get("starttime")
+                            await sess.commit()
+                    except Exception as e:
+                        logger.debug("Failed initializing epoch for server %d: %s", s.id, e)
+                if epoch:
+                    active_server_targets.append((
+                        s.id,
+                        s.api_url,
+                        s.api_key,
+                        epoch,
+                        (s.extra_data or {}).get("relays", []),
+                        (s.extra_data or {}).get("xhttp_locations", []),
+                        bool((s.extra_data or {}).get("origin_hidden", False)),
+                    ))
 
         synced_count = 0
         for server_id, api_url, api_key, target_epoch, relays, xhttp_locs, origin_hidden in active_server_targets:
@@ -476,7 +488,10 @@ class WhiteInternetReconciliationWorker:
             async with sf() as sess:
                 stmt = (
                     select(white_internet_repo.WhiteInternetOrphanCleanup.id)
-                    .where(white_internet_repo.WhiteInternetOrphanCleanup.status == "pending")
+                    .where(
+                        white_internet_repo.WhiteInternetOrphanCleanup.status == "pending",
+                        white_internet_repo.WhiteInternetOrphanCleanup.attempts < 5,
+                    )
                     .order_by(white_internet_repo.WhiteInternetOrphanCleanup.id.asc())
                     .limit(BATCH_SIZE)
                 )

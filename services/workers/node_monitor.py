@@ -1100,6 +1100,21 @@ async def check_node_resources_and_alerts(bot: Bot):
                             from services.vless_subscription_service import VlessSubscriptionService
                             VlessSubscriptionService.sync_all_active_to_server_background(updated_srv.id)
 
+                    # Trigger White Internet re-convergence if epoch changed on a White Internet origin server
+                    if WHITE_INTERNET_CAPABILITY in (updated_srv.capabilities or []):
+                        if prev_epoch != updated_srv.xray_instance_epoch:
+                            from config.enums import WhiteInternetProvisioningStatus
+                            from database.models import WhiteInternetSubscription
+                            from sqlalchemy import update
+                            await session.execute(
+                                update(WhiteInternetSubscription)
+                                .where(WhiteInternetSubscription.hub_server_id == updated_srv.id)
+                                .values(
+                                    last_reconciled_node_epoch=None,
+                                    provisioning_status=WhiteInternetProvisioningStatus.PENDING_UPDATE,
+                                )
+                            )
+
             db_server, applied = await update_server_health_snapshot(
                 session,
                 server.id,
