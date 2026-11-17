@@ -334,7 +334,7 @@ async def has_available_service_capacity(
             await session.scalars(
                 select(Server)
                 .where(
-                    Server.protocol == XRAY_PROTOCOL,
+                    Server.protocol.in_([XRAY_PROTOCOL, VLESS_PROTOCOL]),
                     Server.is_active.is_(True),
                     Server.health_state == ServerHealthState.ONLINE,
                     Server.lifecycle_status == ServerLifecycleStatus.ACTIVE,
@@ -364,7 +364,7 @@ async def allocate_origin_server_atomic(session: AsyncSession) -> Server | None:
         await session.scalars(
             select(Server.id)
             .where(
-                Server.protocol == XRAY_PROTOCOL,
+                Server.protocol.in_([XRAY_PROTOCOL, VLESS_PROTOCOL]),
                 Server.is_active.is_(True),
                 Server.health_state == ServerHealthState.ONLINE,
                 Server.lifecycle_status == ServerLifecycleStatus.ACTIVE,
@@ -378,7 +378,7 @@ async def allocate_origin_server_atomic(session: AsyncSession) -> Server | None:
     for srv_id in candidate_ids:
         server = await session.scalar(
             select(Server)
-            .where(Server.id == srv_id, Server.protocol == XRAY_PROTOCOL)
+            .where(Server.id == srv_id, Server.protocol.in_([XRAY_PROTOCOL, VLESS_PROTOCOL]))
             .with_for_update()
             .execution_options(populate_existing=True)
         )

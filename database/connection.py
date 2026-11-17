@@ -2,10 +2,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
-from pathlib import Path
 
-from alembic.command import upgrade
-from alembic.config import Config
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -89,34 +86,6 @@ async def init_db():
 
         logger.info("PostgreSQL database initialized successfully")
         return _engine, _sessionmaker
-
-
-async def _run_alembic_migrations(database_url: str) -> None:
-    """Run Alembic migrations on the database and seed default data."""
-    try:
-        alembic_cfg = Config(str(Path(__file__).parent.parent / "alembic.ini"))
-        # ConfigParser (used internally by Alembic Config) treats '%' as
-        # interpolation syntax. URL-encoded database passwords legitimately
-        # contain '%' (for example %40 for '@'), so escape percent signs before
-        # passing the URL into Alembic. ConfigParser restores them when the
-        # option is read back by Alembic.
-        alembic_cfg.set_main_option(
-            "sqlalchemy.url",
-            database_url.replace("%", "%%"),
-        )
-
-        # env.py uses asyncio.run(). Running Alembic in a worker thread avoids
-        # nesting that event loop inside the bot's already-running loop. It also
-        # keeps migrations on the configured asyncpg driver, so startup does not
-        # require an undeclared psycopg2 dependency.
-        await asyncio.to_thread(upgrade, alembic_cfg, "head")
-        logger.info("Alembic migrations completed successfully.")
-
-        await _seed_default_data()
-
-    except Exception as e:
-        logger.error("Failed to run Alembic migrations: %s", e, exc_info=True)
-        raise
 
 
 async def _seed_default_data() -> None:

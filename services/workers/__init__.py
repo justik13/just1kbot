@@ -351,5 +351,31 @@ async def stop_background_workers(*, alert_grace_timeout: float | None = None) -
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
     _alert_tasks.clear()
+
+    # Drain auxiliary background tasks (sync, deprovision, post-commit tasks)
+    extra_tasks: list[asyncio.Task] = []
+    try:
+        from services.vless_subscription_service import _BACKGROUND_TASKS as vless_bg
+        extra_tasks.extend(list(vless_bg))
+    except Exception:
+        pass
+    try:
+        from services.white_internet_service import _BACKGROUND_TASKS as wi_bg
+        extra_tasks.extend(list(wi_bg))
+    except Exception:
+        pass
+    try:
+        from database.connection import _post_commit_background_tasks as pc_bg
+        extra_tasks.extend(list(pc_bg))
+    except Exception:
+        pass
+
+    if extra_tasks:
+        _, pending = await asyncio.wait(extra_tasks, timeout=3.0)
+        for t in pending:
+            t.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
     _supervisor_healthy = False
     logger.info("Background workers stopped")

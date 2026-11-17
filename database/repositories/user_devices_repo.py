@@ -134,12 +134,27 @@ async def register_user_device(
     cutoff = now - timedelta(hours=ttl_hours)
 
     # Prune expired devices so stale HWIDs never block slots
-    await session.execute(
-        delete(UserDevice).where(
-            UserDevice.user_id == user_id,
-            UserDevice.last_seen_at < cutoff,
+    expired_devices = (
+        await session.scalars(
+            select(UserDevice).where(
+                UserDevice.user_id == user_id,
+                UserDevice.last_seen_at < cutoff,
+            )
         )
-    )
+    ).all()
+    if expired_devices:
+        expired_uuids = [d.device_uuid for d in expired_devices if getattr(d, "device_uuid", None)]
+        await session.execute(
+            delete(UserDevice).where(
+                UserDevice.user_id == user_id,
+                UserDevice.last_seen_at < cutoff,
+            )
+        )
+        if expired_uuids:
+            from database.repositories import vless_subscription_repo
+            vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user_id)
+            if vless_sub is not None:
+                await vless_subscription_repo.add_pending_revocation_uuids(session, vless_sub.id, expired_uuids)
 
     devices = (
         await session.scalars(

@@ -798,10 +798,13 @@ class VlessSubscriptionService:
 
         results: dict[int, bool] = {}
         needs_version_bump = False
+        all_items_ok = True
         for cl_uuid in all_sync_uuids:
             res_item, bump_item = await VlessSubscriptionService._execute_sync_to_nodes_with_status(
                 targets, cl_uuid, desired_active, version=sub_version, user_id=user_id, sub_id=sub.id
             )
+            if not all(res_item.values()) or len(res_item) < len(targets):
+                all_items_ok = False
             if cl_uuid == sub.uuid:
                 results = res_item
                 needs_version_bump = bump_item
@@ -816,15 +819,19 @@ class VlessSubscriptionService:
                 sub.version = sub_version + 1
                 await session.flush()
                 sub_version = sub.version
+            all_items_ok = True
             for cl_uuid in all_sync_uuids:
                 res_item, _ = await VlessSubscriptionService._execute_sync_to_nodes_with_status(
                     targets, cl_uuid, desired_active, version=sub_version, user_id=user_id, sub_id=sub.id
                 )
+                if not all(res_item.values()) or len(res_item) < len(targets):
+                    all_items_ok = False
                 if cl_uuid == sub.uuid:
                     results = res_item
 
         if (
-            targets
+            all_items_ok
+            and targets
             and len(targets) == len(servers)
             and all(results.values())
             and len(results) == len(targets)
@@ -896,6 +903,7 @@ class VlessSubscriptionService:
                 )
                 return 0
 
+            user_devices_map: dict[int, list[str]] = {}
             async with session_scope() as session:
                 stmt = (
                     select(VlessSubscription, User)
@@ -909,6 +917,10 @@ class VlessSubscriptionService:
                 res = await session.execute(stmt)
                 rows = res.all()
 
+                from database.repositories import user_devices_repo
+                for _sub, user in rows:
+                    user_devices_map[user.id] = await user_devices_repo.get_active_device_uuids(session, user.id)
+
             total_eligible = 0
             has_failures = False
             for sub, user in rows:
@@ -916,17 +928,30 @@ class VlessSubscriptionService:
                     continue
                 total_eligible += 1
                 sub_ver = getattr(sub, "version", 1) or 1
-                try:
-                    res_map = await cls._execute_sync_to_nodes(
-                        target, sub.uuid, True, version=sub_ver, user_id=user.id, sub_id=sub.id
-                    )
-                    if res_map.get(srv_id) is True:
-                        synced_count += 1
-                    else:
+                all_sub_uuids = set(user_devices_map.get(user.id, []))
+                all_sub_uuids.add(sub.uuid)
+
+                sub_ok = True
+                for cl_uuid in all_sub_uuids:
+                    try:
+                        res_map = await cls._execute_sync_to_nodes(
+                            target, cl_uuid, True, version=sub_ver, user_id=user.id, sub_id=sub.id
+                        )
+                        if res_map.get(srv_id) is not True:
+                            sub_ok = False
+                            has_failures = True
+                    except Exception as e:
+                        sub_ok = False
                         has_failures = True
-                except Exception as e:
-                    has_failures = True
-                    logger.warning("Failed to provision sub_id=%s on new server %s: %s", sub.id, srv_id, e)
+                        logger.warning(
+                            "Failed to provision cl_uuid=%s for user_id=%s on server %s: %s",
+                            cl_uuid,
+                            user.id,
+                            srv_id,
+                            e,
+                        )
+                if sub_ok:
+                    synced_count += 1
 
             # Record synchronized epoch in server extra_data ONLY if all eligible subscriptions succeeded without failures
             if not has_failures and synced_count == total_eligible:

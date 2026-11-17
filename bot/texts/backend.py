@@ -204,6 +204,9 @@ START_HUB_MESSAGE = (
     f'<a href="{PRIVACY_POLICY_URL}">Политикой конфиденциальности</a>.</i>'
 )
 START_TECHNICAL_ERROR = "⚠️ Произошла техническая ошибка. Попробуйте позже."
+START_FALLBACK_MESSAGE = (
+    "Для управления доступом, тарифами и настройками откройте панель управления ниже:"
+)
 
 
 def get_tariff_display_name(device_limit: int) -> str:

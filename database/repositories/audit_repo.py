@@ -1,4 +1,3 @@
-import inspect
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,9 +20,7 @@ async def create_audit_log(
         target_id=target_id,
         details=details
     )
-    res = session.add(log)
-    if inspect.isawaitable(res):
-        await res
+    session.add(log)
     await session.flush()
     await session.refresh(log)
     return log

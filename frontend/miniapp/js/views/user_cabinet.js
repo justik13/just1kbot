@@ -726,7 +726,8 @@ function _openWiManageModal(d, onReload) {
 
     wrap.querySelectorAll("[data-modal-wi-pack]").forEach((b) => {
         b.addEventListener("click", async () => {
-            b.disabled = true;
+            const allPacks = wrap.querySelectorAll("[data-modal-wi-pack]");
+            allPacks.forEach((btn) => { btn.disabled = true; });
             try {
                 const res = await api.checkoutWi({
                     action: "topup",
@@ -737,8 +738,7 @@ function _openWiManageModal(d, onReload) {
                 _handlePaymentResponse(res, "Пакет трафика добавлен", onReload);
             } catch (err) {
                 showToast(err.message || "Ошибка покупки пакета");
-            } finally {
-                b.disabled = false;
+                allPacks.forEach((btn) => { btn.disabled = false; });
             }
         });
     });
@@ -1248,6 +1248,7 @@ function _renderTariffsTab(body, d, reload) {
     if (wiRenewBtn) {
         wiRenewBtn.addEventListener("click", async () => {
             if (!checkCanPay()) return;
+            if (wiRenewBtn.disabled) return;
             wiRenewBtn.disabled = true;
             try {
                 const res = await api.checkoutWi({
@@ -1258,7 +1259,6 @@ function _renderTariffsTab(body, d, reload) {
                 _handlePaymentResponse(res, "Подписка продлена на 30 дней", reload);
             } catch (err) {
                 showToast(err.message || "Ошибка продления");
-            } finally {
                 wiRenewBtn.disabled = false;
             }
         });

@@ -141,3 +141,20 @@ async def cmd_start(message: Message) -> None:
     )
     if sent and getattr(sent, "message_id", None):
         _LAST_START_MESSAGES[message.chat.id] = sent.message_id
+
+
+@router.message()
+async def cmd_fallback(message: Message) -> None:
+    """Fallback handler for unhandled messages; points user to the Mini App control panel."""
+    if not message.from_user or not message.chat:
+        return
+
+    settings = get_settings()
+    app_url = f"https://{settings.DOMAIN}/app"
+    kb = build_start_inline_keyboard(app_url)
+    await safe_send_message(
+        message.bot,
+        message.chat.id,
+        texts.START_FALLBACK_MESSAGE,
+        reply_markup=kb,
+    )

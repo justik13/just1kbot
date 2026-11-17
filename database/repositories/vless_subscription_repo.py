@@ -154,6 +154,35 @@ async def rotate_token(
     return token, old_uuid, new_uuid
 
 
+async def add_pending_revocation_uuids(
+    session: AsyncSession,
+    subscription_id: int,
+    uuids: list[str],
+) -> VlessSubscription | None:
+    """Adds a list of revoked UUIDs to pending_revoked_uuids under row lock."""
+    if not uuids:
+        return None
+    stmt = (
+        select(VlessSubscription)
+        .where(VlessSubscription.id == subscription_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    sub = await session.scalar(stmt)
+    if isinstance(sub, VlessSubscription):
+        pending = list(getattr(sub, "pending_revoked_uuids", None) or [])
+        added = False
+        for u in uuids:
+            if u and u not in pending:
+                pending.append(u)
+                added = True
+        if added:
+            sub.pending_revoked_uuids = pending
+            sub.version = (getattr(sub, "version", 1) or 1) + 1
+            await session.flush()
+    return sub
+
+
 async def pop_pending_revoked_uuid(
     session: AsyncSession,
     subscription_id: int,

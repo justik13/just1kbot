@@ -29,6 +29,7 @@ from config.constants import (
     WHITE_INTERNET_SERVICE_TYPE,
     WHITE_INTERNET_TLS_FINGERPRINT,
     WHITE_INTERNET_TOPUP_PACKS,
+    VLESS_PROTOCOL,
     XRAY_PROTOCOL,
 )
 from config.enums import (
@@ -100,7 +101,7 @@ def _dispatch_deprovision(
 ) -> None:
     if not server or not server.api_url or not server.api_key:
         return
-    if getattr(server, "protocol", None) != XRAY_PROTOCOL:
+    if getattr(server, "protocol", None) not in (XRAY_PROTOCOL, VLESS_PROTOCOL):
         logger.warning(
             "Refusing cross-protocol deprovision dispatch (%s): server %s is not xray",
             context,
@@ -426,7 +427,7 @@ class WhiteInternetService:
         origin_node = await session.scalar(
             select(Server).where(
                 Server.id == sub.origin_node_id,
-                Server.protocol == XRAY_PROTOCOL,
+                Server.protocol.in_([XRAY_PROTOCOL, VLESS_PROTOCOL]),
             )
         )
         needs_migration = (
@@ -589,7 +590,7 @@ class WhiteInternetService:
         origin_node = await session.scalar(
             select(Server).where(
                 Server.id == sub.origin_node_id,
-                Server.protocol == XRAY_PROTOCOL,
+                Server.protocol.in_([XRAY_PROTOCOL, VLESS_PROTOCOL]),
             )
         )
         needs_migration = (
@@ -717,7 +718,7 @@ class WhiteInternetService:
         origin_node = await session.scalar(
             select(Server).where(
                 Server.id == sub.origin_node_id,
-                Server.protocol == XRAY_PROTOCOL,
+                Server.protocol.in_([XRAY_PROTOCOL, VLESS_PROTOCOL]),
             )
         )
         needs_migration = (

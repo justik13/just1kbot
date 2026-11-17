@@ -1007,6 +1007,12 @@ async def api_admin_user_devices_reset_handler(request: web.Request) -> web.Resp
             await vless_subscription_repo.reset_hwids(session, vless_sub.id)
         if wi_sub is not None:
             await white_internet_repo.reset_active_hwids_atomic(session, wi_sub.id, cooldown_seconds=0)
+
+        existing_devs = (await session.scalars(select(UserDevice).where(UserDevice.user_id == user.id))).all()
+        dev_uuids = [d.device_uuid for d in existing_devs if getattr(d, "device_uuid", None)]
+        if vless_sub is not None and dev_uuids:
+            await vless_subscription_repo.add_pending_revocation_uuids(session, vless_sub.id, dev_uuids)
+
         await session.execute(
             delete(UserDevice).where(UserDevice.user_id == user.id)
         )
@@ -1049,6 +1055,12 @@ async def api_admin_user_token_rotate_handler(request: web.Request) -> web.Respo
                 session, wi_sub.id, new_token=new_token, reset_hwids=True
             )
             new_token = new_token or wi_token
+
+        existing_devs = (await session.scalars(select(UserDevice).where(UserDevice.user_id == user.id))).all()
+        dev_uuids = [d.device_uuid for d in existing_devs if getattr(d, "device_uuid", None)]
+        if vless_sub is not None and dev_uuids:
+            await vless_subscription_repo.add_pending_revocation_uuids(session, vless_sub.id, dev_uuids)
+
         await session.execute(
             delete(UserDevice).where(UserDevice.user_id == user.id)
         )
@@ -1258,8 +1270,9 @@ async def api_admin_finances_handler(request: web.Request) -> web.Response:
         kind = "orders"
     status = request.query.get("status", "").strip()
     query_str = request.query.get("q", "").strip()
-    offset = int(request.query.get("offset", "0") or 0) if request.query.get("offset", "0").isdigit() else 0
-    limit = int(request.query.get("limit", "25") or 25) if request.query.get("limit", "25").isdigit() else 25
+    offset = max(0, int(request.query.get("offset", "0") or 0) if request.query.get("offset", "0").isdigit() else 0)
+    raw_limit = int(request.query.get("limit", "25") or 25) if request.query.get("limit", "25").isdigit() else 25
+    limit = min(100, max(1, raw_limit))
 
     async with session_scope() as session:
         data = await admin_tools_service.list_finances(
@@ -1280,8 +1293,9 @@ async def api_admin_audit_logs_handler(request: web.Request) -> web.Response:
 
     action = request.query.get("action", "").strip()
     query_str = request.query.get("q", "").strip()
-    offset = int(request.query.get("offset", "0") or 0) if request.query.get("offset", "0").isdigit() else 0
-    limit = int(request.query.get("limit", "40") or 40) if request.query.get("limit", "40").isdigit() else 40
+    offset = max(0, int(request.query.get("offset", "0") or 0) if request.query.get("offset", "0").isdigit() else 0)
+    raw_limit = int(request.query.get("limit", "40") or 40) if request.query.get("limit", "40").isdigit() else 40
+    limit = min(100, max(1, raw_limit))
 
     async with session_scope() as session:
         data = await admin_tools_service.list_audit_logs(

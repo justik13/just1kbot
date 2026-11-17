@@ -1,4 +1,3 @@
-import inspect
 import time
 
 from sqlalchemy import select
@@ -23,17 +22,8 @@ async def get_system_setting(
             return val if val is not None else default
 
     stmt = select(SystemSetting.value).where(SystemSetting.key == key)
-    res = session.execute(stmt)
-    if inspect.isawaitable(res):
-        res = await res
-
-    scalar = getattr(res, "scalar_one_or_none", None)
-    if callable(scalar):
-        val = scalar()
-        if inspect.isawaitable(val):
-            val = await val
-    else:
-        val = None
+    res = await session.execute(stmt)
+    val = res.scalar_one_or_none()
 
     if val is not None and not isinstance(val, str):
         val = None

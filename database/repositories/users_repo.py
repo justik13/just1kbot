@@ -1,5 +1,4 @@
 from datetime import timedelta
-import inspect
 
 from sqlalchemy import and_, case, false, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -89,13 +88,7 @@ async def get_user_by_id(
         return None
     stmt = select(User).where(User.id == user_id)
     result = await session.execute(stmt)
-    scalar_fn = getattr(result, "scalar_one_or_none", None)
-    if callable(scalar_fn):
-        res = scalar_fn()
-        if inspect.isawaitable(res):
-            res = await res
-        return res
-    return None
+    return result.scalar_one_or_none()
 
 
 async def create_user(
