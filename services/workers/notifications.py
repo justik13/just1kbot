@@ -4,13 +4,18 @@ from datetime import datetime, timedelta
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
+from aiogram.types import InlineKeyboardMarkup
 from cachetools import TTLCache
 from sqlalchemy import or_, select, update
 
 from bot.keyboards.notifications import (
-    get_dismiss_notification_keyboard,
+    get_action_notification_keyboard,
+    get_autorenew_failed_keyboard,
     get_post_expiry_keyboard,
     get_pre_expiry_keyboard,
+)
+from bot.texts import (
+    NOTIFY_AUTORENEW_INSUFFICIENT_FUNDS,
 )
 from bot.texts.runtime.notifications import (
     NOTIFY_1D,
@@ -168,14 +173,19 @@ async def subscription_notifications_loop(
     logger.info("Notifications worker stopped gracefully")
 
 
-async def _send_autorenew_notice(bot: Bot, telegram_id: int, text: str) -> None:
+async def _send_autorenew_notice(
+    bot: Bot,
+    telegram_id: int,
+    text: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
+) -> None:
     try:
         await global_send_limiter.acquire()
         await safe_send_message(
             bot,
             telegram_id,
             text,
-            reply_markup=get_dismiss_notification_keyboard(),
+            reply_markup=reply_markup or get_action_notification_keyboard("⚡ Открыть кабинет", tab="connect"),
             parse_mode="HTML",
             raise_forbidden=True,
         )
@@ -223,6 +233,7 @@ async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
     for uid in std_ids:
         push_tg_id: int | None = None
         push_text: str | None = None
+        push_kb: InlineKeyboardMarkup | None = None
         try:
             async with session_scope() as session:
                 user = await session.scalar(
@@ -245,6 +256,19 @@ async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
                 due_rub = int(quote["due_rub"])
                 bal = await get_account_balance(session, user_id=user.id, for_update=True, locked_user=user)
                 if bal.debt > 0 or bal.available < due_rub:
+                    cycle_key = user.subscription_end.strftime("%Y-%m-%d") if user.subscription_end else ""
+                    extra = dict(user.extra or {})
+                    if extra.get("autorenew_std_fail_notified") != cycle_key and not user.is_bot_blocked:
+                        extra["autorenew_std_fail_notified"] = cycle_key
+                        user.extra = extra
+                        await session.flush()
+                        push_tg_id = user.telegram_id
+                        push_text = NOTIFY_AUTORENEW_INSUFFICIENT_FUNDS.format(
+                            service="Стандарт",
+                            due_rub=due_rub,
+                            available_rub=int(bal.available),
+                        )
+                        push_kb = get_autorenew_failed_keyboard()
                     continue
 
                 res = await OrderService.checkout_order(
@@ -268,7 +292,7 @@ async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
             continue
 
         if push_tg_id and push_text:
-            await _send_autorenew_notice(bot, push_tg_id, push_text)
+            await _send_autorenew_notice(bot, push_tg_id, push_text, reply_markup=push_kb)
 
     # 2. White Internet auto-renewal (30 days at effective device_limit)
     async with session_scope() as session:
@@ -299,6 +323,7 @@ async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
     for sid in wi_ids:
         push_tg_id = None
         push_text = None
+        push_kb = None
         try:
             async with session_scope() as session:
                 sub = await session.scalar(
@@ -335,6 +360,19 @@ async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
                 due_rub = get_white_internet_tier_price(eff_limit, base_price=base_price)
                 bal = await get_account_balance(session, user_id=user.id, for_update=True, locked_user=user)
                 if bal.debt > 0 or bal.available < due_rub:
+                    cycle_key = sub.expires_at.strftime("%Y-%m-%d") if sub.expires_at else ""
+                    extra = dict(user.extra or {})
+                    if extra.get("autorenew_wi_fail_notified") != cycle_key and not user.is_bot_blocked:
+                        extra["autorenew_wi_fail_notified"] = cycle_key
+                        user.extra = extra
+                        await session.flush()
+                        push_tg_id = user.telegram_id
+                        push_text = NOTIFY_AUTORENEW_INSUFFICIENT_FUNDS.format(
+                            service="Белый Интернет",
+                            due_rub=int(due_rub),
+                            available_rub=int(bal.available),
+                        )
+                        push_kb = get_autorenew_failed_keyboard()
                     continue
 
                 res = await OrderService.checkout_order(
@@ -358,7 +396,7 @@ async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
             continue
 
         if push_tg_id and push_text:
-            await _send_autorenew_notice(bot, push_tg_id, push_text)
+            await _send_autorenew_notice(bot, push_tg_id, push_text, reply_markup=push_kb)
 
 
 async def _send_pre_expiry_notifications(
@@ -618,7 +656,6 @@ async def _send_white_internet_notifications(
     if bot is None:
         return
 
-    from bot.keyboards.notifications import get_dismiss_notification_keyboard
     from config.enums import WhiteInternetStatus
     from database.models import User, WhiteInternetSubscription
     from utils.formatters import format_tg_time
@@ -770,11 +807,16 @@ async def _send_white_internet_notifications(
 
                 try:
                     await global_send_limiter.acquire()
+                    wi_kb = (
+                        get_post_expiry_keyboard()
+                        if notify_type == "expired"
+                        else get_pre_expiry_keyboard()
+                    )
                     await safe_send_message(
                         bot,
                         user.telegram_id,
                         msg,
-                        reply_markup=get_dismiss_notification_keyboard(),
+                        reply_markup=wi_kb,
                         parse_mode="HTML",
                         raise_forbidden=True,
                     )

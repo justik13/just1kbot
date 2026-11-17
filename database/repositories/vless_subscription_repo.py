@@ -216,6 +216,7 @@ async def record_vless_traffic_atomic(
     raw_uplink: int,
     raw_downlink: int,
     *,
+    client_uuid: str | None = None,
     expected_uuid: str | None = None,
     now: datetime | None = None,
 ) -> tuple[int, int, int]:
@@ -239,7 +240,7 @@ async def record_vless_traffic_atomic(
     if not sub_meta:
         return 0, 0, 0
 
-    if expected_uuid and sub_meta.uuid != expected_uuid:
+    if expected_uuid and sub_meta.uuid != expected_uuid and client_uuid != expected_uuid:
         return 0, 0, 0
 
     # 2. Lock User FIRST (hierarchy)
@@ -260,11 +261,12 @@ async def record_vless_traffic_atomic(
     if not sub:
         return 0, 0, 0
 
-    if expected_uuid and sub.uuid != expected_uuid:
+    if expected_uuid and sub.uuid != expected_uuid and client_uuid != expected_uuid:
         return 0, 0, 0
 
+    snap_key = f"{str_server_id}:{client_uuid}" if client_uuid else str_server_id
     snapshots = dict(sub.node_traffic_snapshots or {})
-    prev_snap = snapshots.get(str_server_id)
+    prev_snap = snapshots.get(snap_key) or (snapshots.get(str_server_id) if not client_uuid else None)
 
     prev_epoch = prev_snap.get("epoch") if isinstance(prev_snap, dict) else None
     prev_up = int(prev_snap.get("up", 0)) if isinstance(prev_snap, dict) else 0
@@ -273,7 +275,7 @@ async def record_vless_traffic_atomic(
     current_up = max(0, int(raw_uplink or 0))
     current_down = max(0, int(raw_downlink or 0))
 
-    if str_server_id not in snapshots:
+    if snap_key not in snapshots and str_server_id not in snapshots:
         if snapshots.get("_fresh"):
             delta_up = current_up
             delta_down = current_down
@@ -296,11 +298,11 @@ async def record_vless_traffic_atomic(
         or prev_epoch != str_epoch
         or prev_up != current_up
         or prev_down != current_down
-        or str_server_id not in snapshots
+        or snap_key not in snapshots
     ):
         sub.traffic_up = (sub.traffic_up or 0) + delta_up
         sub.traffic_down = (sub.traffic_down or 0) + delta_down
-        snapshots[str_server_id] = {
+        snapshots[snap_key] = {
             "epoch": str_epoch,
             "up": current_up,
             "down": current_down,

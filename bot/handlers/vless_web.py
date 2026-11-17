@@ -757,6 +757,9 @@ async def serve_unified_subscription_feed(
         all_links: list[str] = []
         std_servers: list[Server] = []
         exit_nodes: list[Server] = []
+        current_dev = await user_devices_repo.get_user_device_by_hwid(session, user.id, raw_hwid)
+        device_client_uuid = getattr(current_dev, "device_uuid", None) if current_dev else None
+
         if (std_active and is_std_assigned and vless_sub is not None) or (wi_active and is_bi_assigned and wi_sub is not None):
             exit_nodes = await VlessSubscriptionService.get_eligible_exit_nodes(session)
 
@@ -767,6 +770,7 @@ async def serve_unified_subscription_feed(
                     vless_sub,
                     std_servers,
                     exit_nodes=exit_nodes,
+                    client_uuid=device_client_uuid,
                 )
                 all_links.extend(std_links)
 
@@ -819,6 +823,7 @@ async def serve_unified_subscription_feed(
                         wi_sub,
                         wi_server,
                         exit_nodes=exit_nodes,
+                        client_uuid=device_client_uuid,
                         cdn_label_mode=cdn_label_mode,
                         cdn_yandex_label=cdn_yandex_label,
                         cdn_turboflare_label=cdn_turboflare_label,

@@ -1088,6 +1088,13 @@ class UserDevice(Base):
         index=True,
     )
     hwid: Mapped[str] = mapped_column(String(128), nullable=False)
+    device_uuid: Mapped[str] = mapped_column(
+        String(36),
+        nullable=False,
+        unique=True,
+        index=True,
+        default=lambda: str(uuid.uuid4()),
+    )
     device_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     platform: Mapped[str | None] = mapped_column(String(64), nullable=True)
     os_version: Mapped[str | None] = mapped_column(String(64), nullable=True)

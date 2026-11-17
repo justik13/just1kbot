@@ -784,7 +784,13 @@ export async function loadAndRenderUserCabinet(root) {
         const stdActive = Boolean(data.standard && data.standard.active);
         const wiActive = Boolean(data.wi && data.wi.active);
         if (!_state.tab) {
-            _state.tab = (stdActive || wiActive) ? "connect" : "tariffs";
+            const urlParams = new URLSearchParams(window.location.search);
+            const requestedTab = urlParams.get("tab");
+            if (requestedTab && ["connect", "tariffs", "profile"].includes(requestedTab)) {
+                _state.tab = requestedTab;
+            } else {
+                _state.tab = (stdActive || wiActive) ? "connect" : "tariffs";
+            }
         }
         _render(root);
     } catch (err) {
@@ -965,9 +971,18 @@ function _renderConnectTab(body, d, reload, root) {
         return;
     }
 
+    const stdExpMs = std.expires_at ? new Date(std.expires_at).getTime() : 0;
+    const isStdGrace = Boolean(std.active && stdExpMs && stdExpMs < Date.now());
+    const graceEndMs = stdExpMs + (4 * 3600 * 1000);
+    const graceHoursLeft = Math.max(1, Math.ceil((graceEndMs - Date.now()) / (3600 * 1000)));
+
     const pills = [];
     if (std.active) {
-        pills.push(`<span class="chip chip-ok">Стандарт · ${Number(std.device_limit || 2)} устр. · до ${formatDate(std.expires_at)}</span>`);
+        if (isStdGrace) {
+            pills.push(`<span class="chip chip-warn">Стандарт · Льготный период (~${graceHoursLeft} ч.)</span>`);
+        } else {
+            pills.push(`<span class="chip chip-ok">Стандарт · ${Number(std.device_limit || 2)} устр. · до ${formatDate(std.expires_at)}</span>`);
+        }
     }
     if (wi.active) {
         const usedGb = formatBytesGb(wi.traffic_used_bytes);
@@ -976,14 +991,18 @@ function _renderConnectTab(body, d, reload, root) {
     }
 
     body.innerHTML = `
-        <section class="hero-card is-active">
+        <section class="hero-card is-active" ${isStdGrace ? 'style="border-color: rgba(245, 158, 11, 0.4);"' : ""}>
             <div class="row">
                 <div style="display:flex; align-items:center; gap:9px;">
-                    <span class="status-dot active"></span>
-                    <span class="hero-headline">Доступ активен</span>
+                    <span class="status-dot ${isStdGrace ? "" : "active"}" ${isStdGrace ? 'style="background:var(--accent-warn); box-shadow:0 0 10px rgba(245, 158, 11, 0.5);"' : ""}></span>
+                    <span class="hero-headline" ${isStdGrace ? 'style="color:var(--accent-warn);"' : ""}>${isStdGrace ? "Подписка закончилась" : "Доступ активен"}</span>
                 </div>
-                <span class="chip chip-ok">Готов к работе</span>
+                <span class="chip ${isStdGrace ? "chip-warn" : "chip-ok"}">${isStdGrace ? "Льготный период" : "Готов к работе"}</span>
             </div>
+            ${isStdGrace ? `
+                <p class="muted" style="margin:4px 0 10px 0;">Основной срок подписки закончился, но доступ сохранён ещё на ~${graceHoursLeft} ч., чтобы вы успели продлить подписку без отключения.</p>
+                <button id="graceRenewBtn" type="button" class="btn btn-primary btn-lg" style="margin-bottom:12px;">Продлить подписку</button>
+            ` : ""}
             <div class="option-pills">${pills.join("")}</div>
             <div class="connect-actions">
                 ${desktopFirst ? `
@@ -1014,6 +1033,13 @@ function _renderConnectTab(body, d, reload, root) {
         });
     });
     body.querySelector("#copySubBtn").addEventListener("click", () => copyText(subUrl, "Ключ скопирован"));
+    const graceBtn = body.querySelector("#graceRenewBtn");
+    if (graceBtn) {
+        graceBtn.addEventListener("click", () => {
+            _state.tab = "tariffs";
+            _render(root);
+        });
+    }
     _bindGuideEvents(body, root);
     _bindDevicesEvents(body, reload);
 }

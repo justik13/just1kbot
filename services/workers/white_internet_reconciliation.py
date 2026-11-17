@@ -9,7 +9,7 @@ import logging
 import time
 
 from aiogram import Bot
-from sqlalchemy import and_, func, nulls_first, or_, select
+from sqlalchemy import and_, nulls_first, or_, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from bot.texts.runtime.alerts import (

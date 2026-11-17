@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -68,6 +69,7 @@ async def list_user_devices(
             {
                 "id": dev.id,
                 "hwid": dev.hwid,
+                "device_uuid": dev.device_uuid,
                 "device_name": dev.device_name,
                 "platform": dev.platform,
                 "os_version": dev.os_version,
@@ -163,6 +165,7 @@ async def register_user_device(
     dev = UserDevice(
         user_id=user_id,
         hwid=clean_hwid,
+        device_uuid=str(uuid4()),
         device_name=fields.get("device_name"),
         platform=fields.get("platform"),
         os_version=fields.get("os_version"),
@@ -180,19 +183,61 @@ async def delete_user_device(
     session: AsyncSession,
     user_id: int,
     hwid: str,
-) -> bool:
-    """Delete a specific HWID device, immediately freeing its slot."""
+) -> UserDevice | None:
+    """Delete a specific HWID device, returning the deleted device record."""
     clean_hwid = str(hwid or "").strip()[:128]
     if not clean_hwid:
-        return False
-    res = await session.execute(
-        delete(UserDevice).where(
+        return None
+    dev = await session.scalar(
+        select(UserDevice)
+        .where(
+            UserDevice.user_id == user_id,
+            UserDevice.hwid == clean_hwid,
+        )
+        .with_for_update()
+    )
+    if dev is None:
+        return None
+    await session.delete(dev)
+    await session.flush()
+    return dev
+
+
+async def get_user_device_by_hwid(
+    session: AsyncSession,
+    user_id: int,
+    hwid: str,
+) -> UserDevice | None:
+    """Fetch user device by exact HWID under user_id."""
+    clean_hwid = str(hwid or "").strip()[:128]
+    if not clean_hwid:
+        return None
+    return await session.scalar(
+        select(UserDevice).where(
             UserDevice.user_id == user_id,
             UserDevice.hwid == clean_hwid,
         )
     )
-    await session.flush()
-    return (res.rowcount or 0) > 0
+
+
+async def get_active_device_uuids(
+    session: AsyncSession,
+    user_id: int,
+    *,
+    ttl_hours: int = DEFAULT_HWID_TTL_HOURS,
+    now: datetime | None = None,
+) -> list[str]:
+    """Return all active device UUIDs for user within TTL window."""
+    now = now or now_utc()
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    cutoff = now - timedelta(hours=ttl_hours)
+    stmt = select(UserDevice.device_uuid).where(
+        UserDevice.user_id == user_id,
+        UserDevice.last_seen_at >= cutoff,
+    )
+    rows = (await session.scalars(stmt)).all()
+    return [u for u in rows if isinstance(u, str) and u.strip()]
 
 
 async def set_device_bi_priority(
@@ -221,6 +266,8 @@ async def set_device_bi_priority(
 __all__ = [
     "count_active_user_devices",
     "delete_user_device",
+    "get_active_device_uuids",
+    "get_user_device_by_hwid",
     "list_user_devices",
     "register_user_device",
     "set_device_bi_priority",

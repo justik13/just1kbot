@@ -36,10 +36,10 @@ from config.constants import (
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
     WHITE_INTERNET_TOPUP_PACKS,
 )
-from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
+from config.enums import WhiteInternetStatus
 from config.settings import get_settings
 from database.connection import session_scope
-from database.models import Order, User, VlessSubscription
+from database.models import Order, User
 from database.repositories import user_devices_repo
 from database.repositories.account_ledger_repo import (
     get_account_balance,
@@ -674,49 +674,23 @@ async def api_user_device_delete_handler(request: web.Request) -> web.Response:
     async with session_scope() as session:
         user = await _ensure_user(session, ctx)
         deleted = await user_devices_repo.delete_user_device(session, user.id, hwid)
-        if not deleted:
+        if deleted is None:
             return web.json_response({"ok": False, "error": "Устройство не найдено"}, status=404)
 
-        vless_sub = await session.scalar(
-            select(VlessSubscription).where(VlessSubscription.user_id == user.id).with_for_update()
-        )
-        if vless_sub is not None:
-            old_uuid = vless_sub.uuid
-            vless_sub.uuid = str(uuid.uuid4())
-            vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1
-            pending = list(getattr(vless_sub, "pending_revoked_uuids", None) or [])
-            if old_uuid and old_uuid not in pending:
-                pending.append(old_uuid)
-            vless_sub.pending_revoked_uuids = pending
-            await session.flush()
-            if old_uuid:
-                VlessSubscriptionService.deprovision_background(
-                    old_uuid,
-                    version=vless_sub.version,
-                    sub_id=vless_sub.id,
-                    session=session,
-                )
-            if vless_sub.is_active:
-                VlessSubscriptionService.ensure_synced_background(
-                    user.id,
-                    is_active=True,
-                    session=session,
-                )
+        deleted_uuid = getattr(deleted, "device_uuid", None)
+        if deleted_uuid:
+            VlessSubscriptionService.deprovision_background(
+                deleted_uuid,
+                session=session,
+            )
 
-        wi_sub = await get_subscription_by_user_id(session, user.id)
-        if wi_sub is not None:
-            old_wi_uuid = wi_sub.uuid
-            wi_sub.uuid = str(uuid.uuid4())
-            wi_sub.desired_version = (wi_sub.desired_version or 0) + 1
-            if wi_sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED):
-                wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
-            await session.flush()
-            if wi_sub.origin_node_id and old_wi_uuid:
+            wi_sub = await get_subscription_by_user_id(session, user.id)
+            if wi_sub is not None and wi_sub.origin_node_id:
                 await enqueue_orphan_cleanup(
                     session,
                     server_id=wi_sub.origin_node_id,
-                    client_uuid=old_wi_uuid,
-                    desired_version=wi_sub.desired_version,
+                    client_uuid=deleted_uuid,
+                    desired_version=(wi_sub.desired_version or 0) + 1,
                 )
 
         _DEVICE_DELETE_COOLDOWN[ctx.telegram_id] = now_mono

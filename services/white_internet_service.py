@@ -1141,6 +1141,7 @@ class WhiteInternetService:
         relay_badges: dict[str, str] | None = None,
         cdn_type: str = "cdn_yandex",
         origin_path: str | None = None,
+        client_uuid: str | None = None,
     ) -> list[str]:
         if str(cdn_type or "").strip().lower() == "cdn_turboflare":
             extra_dict = {
@@ -1199,5 +1200,6 @@ class WhiteInternetService:
         standalone_path = origin_path or (
             f"{base}/turboflare" if str(cdn_type or "").strip().lower() == "cdn_turboflare" else f"{base}/default"
         )
-        origin_link = f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={fp}&type=xhttp&path={urllib.parse.quote(standalone_path, safe='')}&mode=packet-up&mux=false&extra={extra_param}#{origin_tag_formatted}"
+        eff_uuid = client_uuid or subscription.uuid
+        origin_link = f"vless://{eff_uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={fp}&type=xhttp&path={urllib.parse.quote(standalone_path, safe='')}&mode=packet-up&mux=false&extra={extra_param}#{origin_tag_formatted}"
         return [origin_link]

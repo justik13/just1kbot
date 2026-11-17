@@ -4,6 +4,19 @@ from __future__ import annotations
 # Notification buttons
 BTN_DISMISS_ALERT = "Закрыть"
 BTN_DISMISS_NOTIFICATION = "✅ Прочитано (убрать)"
+BTN_RENEW_ACCESS = "💳 Продлить доступ"
+BTN_RESUME_ACCESS = "💳 Возобновить доступ"
+BTN_TOPUP_BALANCE = "💰 Пополнить баланс"
+BTN_OPEN_CABINET = "⚡ Открыть кабинет"
+BTN_OPEN_PROFILE = "👤 Открыть профиль"
+BTN_OPEN_APP = "⚡ Открыть приложение"
+
+NOTIFY_AUTORENEW_INSUFFICIENT_FUNDS = """⚠️ <b>Автопродление не удалось: недостаточно средств</b>
+
+Для продления подписки «{service}» требуется <b>{due_rub} ₽</b>.
+Доступный баланс: <b>{available_rub} ₽</b>.
+
+Пополните баланс, чтобы доступ не отключился."""
 
 # Errors & statuses
 ALERT_COPY_TEXT_TOO_LONG = (

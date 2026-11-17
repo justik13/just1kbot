@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 from decimal import Decimal
 from typing import TypeVar
@@ -60,6 +61,7 @@ from services.white_internet_service import WhiteInternetService
 from utils.datetime_helpers import now_utc
 
 SchemaT = TypeVar("SchemaT", bound=BaseModel)
+logger = logging.getLogger(__name__)
 
 
 def _parse_server_id(request: web.Request) -> tuple[int | None, web.Response | None]:

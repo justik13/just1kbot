@@ -108,6 +108,7 @@ class VlessSubscriptionService:
         subscription: VlessSubscription,
         servers: list[Server],
         exit_nodes: list[Server] | None = None,
+        client_uuid: str | None = None,
     ) -> list[str]:
         """Generate VLESS TLS xtls-rprx-vision links.
 
@@ -145,6 +146,7 @@ class VlessSubscriptionService:
             active_exits.append(ex)
 
         seen_links: set[str] = set()
+        eff_uuid = client_uuid or subscription.uuid
 
         for hub in ru_hubs:
             hub_extra = hub.extra_data if isinstance(hub.extra_data, dict) else {}
@@ -168,7 +170,7 @@ class VlessSubscriptionService:
                         ex_extra.get("server_description"),
                     )
                     link = (
-                        f"vless://{subscription.uuid}@{target_sni}:{port}"
+                        f"vless://{eff_uuid}@{target_sni}:{port}"
                         f"?encryption=none&security=tls&sni={target_sni}&fp={fp}"
                         f"&type=tcp&flow=xtls-rprx-vision#{fragment}"
                     )
@@ -184,7 +186,7 @@ class VlessSubscriptionService:
                         hub_extra.get("server_description"),
                     )
                     link = (
-                        f"vless://{subscription.uuid}@{target_sni}:{port}"
+                        f"vless://{eff_uuid}@{target_sni}:{port}"
                         f"?encryption=none&security=tls&sni={target_sni}&fp={fp}"
                         f"&type=tcp&flow=xtls-rprx-vision#{fragment}"
                     )
@@ -202,7 +204,7 @@ class VlessSubscriptionService:
                             hub_extra.get("server_description"),
                         )
                         link = (
-                            f"vless://{subscription.uuid}@{domain}:{port}"
+                            f"vless://{eff_uuid}@{domain}:{port}"
                             f"?encryption=none&security=tls&sni={domain}&fp={fp}"
                             f"&type=tcp&flow=xtls-rprx-vision#{fragment}"
                         )
@@ -218,6 +220,7 @@ class VlessSubscriptionService:
         server: Server,
         exit_nodes: list[Server] | None = None,
         *,
+        client_uuid: str | None = None,
         cdn_label_mode: str = "badge",
         cdn_yandex_label: str = "Yandex",
         cdn_turboflare_label: str = "Turboflare",
@@ -332,6 +335,7 @@ class VlessSubscriptionService:
                         relay_names=eff_names,
                         relay_badges=eff_badges or None,
                         cdn_type=cdn_type,
+                        client_uuid=client_uuid,
                     )
                 )
 
@@ -345,6 +349,7 @@ class VlessSubscriptionService:
                         include_origin=True,
                         cdn_type=cdn_type,
                         origin_path=origin_path,
+                        client_uuid=client_uuid,
                     )
                 )
 
@@ -358,6 +363,7 @@ class VlessSubscriptionService:
                             relays=None,
                             include_origin=True,
                             cdn_type="cdn_yandex",
+                            client_uuid=client_uuid,
                         )
                     )
                 if turboflare_cdn:
@@ -369,6 +375,7 @@ class VlessSubscriptionService:
                             relays=None,
                             include_origin=True,
                             cdn_type="cdn_turboflare",
+                            client_uuid=client_uuid,
                         )
                     )
             return links
@@ -784,9 +791,20 @@ class VlessSubscriptionService:
             return {}
 
         sub_version = getattr(sub, "version", 1) or 1
-        results, needs_version_bump = await VlessSubscriptionService._execute_sync_to_nodes_with_status(
-            targets, sub.uuid, desired_active, version=sub_version, user_id=user_id, sub_id=sub.id
-        )
+        from database.repositories import user_devices_repo
+        dev_uuids = await user_devices_repo.get_active_device_uuids(session, user_id)
+        all_sync_uuids = set(dev_uuids)
+        all_sync_uuids.add(sub.uuid)
+
+        results: dict[int, bool] = {}
+        needs_version_bump = False
+        for cl_uuid in all_sync_uuids:
+            res_item, bump_item = await VlessSubscriptionService._execute_sync_to_nodes_with_status(
+                targets, cl_uuid, desired_active, version=sub_version, user_id=user_id, sub_id=sub.id
+            )
+            if cl_uuid == sub.uuid:
+                results = res_item
+                needs_version_bump = bump_item
 
         # If node reported version conflict, bump version and retry once
         if needs_version_bump:
@@ -798,9 +816,12 @@ class VlessSubscriptionService:
                 sub.version = sub_version + 1
                 await session.flush()
                 sub_version = sub.version
-            results, _ = await VlessSubscriptionService._execute_sync_to_nodes_with_status(
-                targets, sub.uuid, desired_active, version=sub_version, user_id=user_id, sub_id=sub.id
-            )
+            for cl_uuid in all_sync_uuids:
+                res_item, _ = await VlessSubscriptionService._execute_sync_to_nodes_with_status(
+                    targets, cl_uuid, desired_active, version=sub_version, user_id=user_id, sub_id=sub.id
+                )
+                if cl_uuid == sub.uuid:
+                    results = res_item
 
         if (
             targets

@@ -16,7 +16,9 @@ from aiogram.exceptions import (
 from sqlalchemy import desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.keyboards.notifications import get_dismiss_notification_keyboard
+from bot.keyboards.notifications import (
+    get_broadcast_action_keyboard,
+)
 from config.enums import AdminAuditAction
 from database.connection import session_scope
 from database.models import BroadcastProgress, User
@@ -217,7 +219,7 @@ async def _deliver_to_user(
     content_type: str,
 ) -> bool:
     """Deliver broadcast item to one user. Returns True on success, raises TelegramForbiddenError if blocked."""
-    kb = get_dismiss_notification_keyboard()
+    kb = get_broadcast_action_keyboard()
     if media_id and content_type == "photo":
         if len(text) <= MAX_BROADCAST_CAPTION_LEN:
             await _send_photo_with_resilience(bot, chat_id, media_id, text, kb)

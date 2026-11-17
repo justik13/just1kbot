@@ -15,7 +15,11 @@ from aiogram.exceptions import TelegramForbiddenError
 from sqlalchemy import String, cast, desc, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.keyboards.notifications import get_dismiss_notification_keyboard
+from bot.keyboards.notifications import (
+    get_action_notification_keyboard,
+    get_bonus_credited_keyboard,
+    get_dismiss_notification_keyboard,
+)
 from config.enums import AdminAuditAction, OrderServiceType, OrderStatus
 from database.connection import session_scope
 from database.models import (
@@ -81,7 +85,7 @@ async def send_direct_message(
             bot,
             tg_id,
             clean_text,
-            reply_markup=get_dismiss_notification_keyboard(),
+            reply_markup=get_action_notification_keyboard("⚡ Открыть приложение", tab="connect"),
             parse_mode="HTML",
             raise_forbidden=True,
         )
@@ -155,7 +159,7 @@ async def _run_mass_bonus_worker(
                     bot,
                     tg_id,
                     notify_text,
-                    reply_markup=get_dismiss_notification_keyboard(),
+                    reply_markup=get_bonus_credited_keyboard(),
                     parse_mode="HTML",
                     raise_forbidden=True,
                 )
@@ -264,7 +268,11 @@ async def _run_mass_extend_worker(
     skipped = 0
     notified = 0
     failed = 0
-    scope_label = "Белый Интернет" if service_scope == "white_internet" else "Стандартный доступ"
+    scope_label = (
+        "Все подписки"
+        if service_scope == "all"
+        else ("Белый Интернет" if service_scope == "white_internet" else "Стандартный доступ")
+    )
     reason_safe = html.escape(reason) if reason else "Продление от администратора"
     notify_text = (
         f"🎁 <b>Ваша подписка ({scope_label}) продлена на +{days} дн.</b>\n\n"
@@ -275,12 +283,7 @@ async def _run_mass_extend_worker(
         did_extend = False
         try:
             async with session_scope() as session:
-                if service_scope == "white_internet":
-                    ok, _msg, _sub = await WhiteInternetService.extend_subscription(
-                        session, uid, days
-                    )
-                    did_extend = bool(ok)
-                else:
+                if service_scope in ("standard", "all"):
                     user_row = await session.get(User, uid)
                     if user_row is not None and not user_row.is_deleted:
                         await get_or_create_subscription(session, uid)
@@ -293,7 +296,21 @@ async def _run_mass_extend_worker(
                             admin_id=admin_id,
                             reason=reason or f"mass_extend:{batch_id}",
                         )
-                        did_extend = updated is not None
+                        if updated is not None:
+                            did_extend = True
+
+                if service_scope in ("white_internet", "all"):
+                    wi_sub = await session.scalar(
+                        select(WhiteInternetSubscription).where(
+                            WhiteInternetSubscription.user_id == uid
+                        )
+                    )
+                    if wi_sub is not None:
+                        ok, _msg, _sub = await WhiteInternetService.extend_subscription(
+                            session, uid, days
+                        )
+                        if ok:
+                            did_extend = True
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -313,7 +330,7 @@ async def _run_mass_extend_worker(
                     bot,
                     tg_id,
                     notify_text,
-                    reply_markup=get_dismiss_notification_keyboard(),
+                    reply_markup=get_action_notification_keyboard("⚡ Открыть кабинет", tab="connect"),
                     parse_mode="HTML",
                     raise_forbidden=True,
                 )

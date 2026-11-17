@@ -401,7 +401,17 @@ async def _traffic_sync_once(bot: Bot | None = None):
                             .where(VlessSubscription.uuid.in_(matching_uuids))
                             .order_by(VlessSubscription.user_id, VlessSubscription.id)
                         )
-                        candidate_subs = (await session.execute(subs_stmt)).all()
+                        candidate_subs = list((await session.execute(subs_stmt)).all())
+
+                        from database.models import UserDevice
+                        dev_stmt = (
+                            select(VlessSubscription.id, UserDevice.device_uuid, VlessSubscription.user_id)
+                            .join(UserDevice, UserDevice.user_id == VlessSubscription.user_id)
+                            .where(UserDevice.device_uuid.in_(matching_uuids))
+                            .order_by(VlessSubscription.user_id, VlessSubscription.id)
+                        )
+                        candidate_subs.extend((await session.execute(dev_stmt)).all())
+
                         for sub_id, sub_uuid, _sub_uid in candidate_subs:
                             stats = users_stats.get(sub_uuid)
                             if not isinstance(stats, dict):
@@ -421,7 +431,7 @@ async def _traffic_sync_once(bot: Bot | None = None):
                                 node_epoch=str(node_epoch),
                                 raw_uplink=uplink,
                                 raw_downlink=downlink,
-                                expected_uuid=sub_uuid,
+                                client_uuid=sub_uuid,
                                 now=current_time,
                             )
                             if delta_total > 0:
@@ -439,7 +449,18 @@ async def _traffic_sync_once(bot: Bot | None = None):
                             )
                             .order_by(WhiteInternetSubscription.user_id, WhiteInternetSubscription.id)
                         )
-                        candidate_wi_subs = (await session.execute(wi_stmt)).all()
+                        candidate_wi_subs = list((await session.execute(wi_stmt)).all())
+
+                        wi_dev_stmt = (
+                            select(WhiteInternetSubscription.id, UserDevice.device_uuid, WhiteInternetSubscription.user_id)
+                            .join(UserDevice, UserDevice.user_id == WhiteInternetSubscription.user_id)
+                            .where(
+                                UserDevice.device_uuid.in_(matching_uuids),
+                                WhiteInternetSubscription.hub_server_id == server_id,
+                            )
+                            .order_by(WhiteInternetSubscription.user_id, WhiteInternetSubscription.id)
+                        )
+                        candidate_wi_subs.extend((await session.execute(wi_dev_stmt)).all())
 
                     for wi_sub_id, wi_sub_uuid, wi_sub_uid in candidate_wi_subs:
                         stats = users_stats.get(wi_sub_uuid)
