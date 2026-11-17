@@ -451,17 +451,6 @@ async def _traffic_sync_once(bot: Bot | None = None):
                         )
                         candidate_wi_subs = list((await session.execute(wi_stmt)).all())
 
-                        wi_dev_stmt = (
-                            select(WhiteInternetSubscription.id, UserDevice.device_uuid, WhiteInternetSubscription.user_id)
-                            .join(UserDevice, UserDevice.user_id == WhiteInternetSubscription.user_id)
-                            .where(
-                                UserDevice.device_uuid.in_(matching_uuids),
-                                WhiteInternetSubscription.hub_server_id == server_id,
-                            )
-                            .order_by(WhiteInternetSubscription.user_id, WhiteInternetSubscription.id)
-                        )
-                        candidate_wi_subs.extend((await session.execute(wi_dev_stmt)).all())
-
                     for wi_sub_id, wi_sub_uuid, wi_sub_uid in candidate_wi_subs:
                         stats = users_stats.get(wi_sub_uuid)
                         if not isinstance(stats, dict):

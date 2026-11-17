@@ -110,19 +110,23 @@ async def register_user_device(
     *,
     ttl_hours: int = DEFAULT_HWID_TTL_HOURS,
     device_info: dict | None = None,
-) -> tuple[bool, int, int]:
-    """Atomically register or refresh a unified HWID device under user row lock."""
+) -> tuple[bool, bool, int, int]:
+    """Atomically register or refresh a unified HWID device under user row lock.
+
+    Returns:
+        tuple[allowed_hwid, is_new_device, active_count, effective_limit]
+    """
     clean_hwid = str(hwid or "").strip()[:128]
     effective_limit = max(1, int(max_devices or 1))
     if not clean_hwid:
         active_count = await count_active_user_devices(session, user_id, ttl_hours=ttl_hours)
-        return False, active_count, effective_limit
+        return False, False, active_count, effective_limit
 
     user = await session.scalar(
         select(User).where(User.id == user_id).with_for_update()
     )
     if user is None:
-        return False, 0, effective_limit
+        return False, False, 0, effective_limit
 
     now = now_utc()
     if now.tzinfo is None:
@@ -157,10 +161,10 @@ async def register_user_device(
                 if v is not None:
                     setattr(existing, k, v)
             await session.flush()
-        return True, len(devices), effective_limit
+        return True, False, len(devices), effective_limit
 
     if len(devices) >= effective_limit:
-        return False, len(devices), effective_limit
+        return False, False, len(devices), effective_limit
 
     dev = UserDevice(
         user_id=user_id,
@@ -176,7 +180,7 @@ async def register_user_device(
     )
     session.add(dev)
     await session.flush()
-    return True, len(devices) + 1, effective_limit
+    return True, True, len(devices) + 1, effective_limit
 
 
 async def delete_user_device(

@@ -691,7 +691,7 @@ async def serve_unified_subscription_feed(
 
         # 3. Unified HWID registration + priority-based BI slot assignment
         device_meta = extract_device_metadata(request.headers)
-        allowed_hwid, active_hwid_count, effective_limit = await user_devices_repo.register_user_device(
+        allowed_hwid, is_new_device, active_hwid_count, effective_limit = await user_devices_repo.register_user_device(
             session, user.id, raw_hwid, max_devices, device_info=device_meta
         )
         if not allowed_hwid:
@@ -777,7 +777,8 @@ async def serve_unified_subscription_feed(
                 last_synced_version = getattr(vless_sub, "last_synced_version", None)
                 current_version = getattr(vless_sub, "version", 1) or 1
                 needs_sync = (
-                    vless_sub.last_synced_at is None
+                    is_new_device
+                    or vless_sub.last_synced_at is None
                     or (now - vless_sub.last_synced_at).total_seconds() > 300
                     or bool(getattr(vless_sub, "pending_revoked_uuids", None))
                     or (last_synced_version is not None and last_synced_version < current_version)
@@ -823,7 +824,6 @@ async def serve_unified_subscription_feed(
                         wi_sub,
                         wi_server,
                         exit_nodes=exit_nodes,
-                        client_uuid=device_client_uuid,
                         cdn_label_mode=cdn_label_mode,
                         cdn_yandex_label=cdn_yandex_label,
                         cdn_turboflare_label=cdn_turboflare_label,

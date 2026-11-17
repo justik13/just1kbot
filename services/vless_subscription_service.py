@@ -653,7 +653,7 @@ class VlessSubscriptionService:
                         client_uuid=client_uuid,
                         is_active=desired_active,
                         version=version,
-                        idempotency_key=f"vless:{sub_id or user_id or client_uuid[:8]}:{version}:{desired_active}",
+                        idempotency_key=f"vless:{sub_id or user_id or 'anon'}:{client_uuid}:{version}:{desired_active}",
                         service="vless",
                     )
                     verified = [

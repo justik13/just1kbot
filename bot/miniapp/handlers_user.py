@@ -52,7 +52,6 @@ from database.repositories.users_repo import (
 )
 from database.repositories.vless_subscription_repo import get_or_create_subscription
 from database.repositories.white_internet_repo import (
-    enqueue_orphan_cleanup,
     get_subscription_by_user_id,
 )
 from integrations.payment_gateways.factory import get_payment_gateway
@@ -683,15 +682,6 @@ async def api_user_device_delete_handler(request: web.Request) -> web.Response:
                 deleted_uuid,
                 session=session,
             )
-
-            wi_sub = await get_subscription_by_user_id(session, user.id)
-            if wi_sub is not None and wi_sub.origin_node_id:
-                await enqueue_orphan_cleanup(
-                    session,
-                    server_id=wi_sub.origin_node_id,
-                    client_uuid=deleted_uuid,
-                    desired_version=(wi_sub.desired_version or 0) + 1,
-                )
 
         _DEVICE_DELETE_COOLDOWN[ctx.telegram_id] = now_mono
         return web.json_response({"ok": True})

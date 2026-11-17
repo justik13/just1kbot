@@ -275,7 +275,7 @@ async def record_vless_traffic_atomic(
     current_up = max(0, int(raw_uplink or 0))
     current_down = max(0, int(raw_downlink or 0))
 
-    if snap_key not in snapshots and str_server_id not in snapshots:
+    if snap_key not in snapshots:
         if snapshots.get("_fresh"):
             delta_up = current_up
             delta_down = current_down
