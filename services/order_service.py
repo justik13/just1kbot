@@ -140,27 +140,34 @@ class OrderService:
         if wallet_debit_raw and order.payment_method != "wallet" and order.service_type != "topup":
             wallet_debit = Decimal(str(wallet_debit_raw))
             if wallet_debit > 0:
-                bal = await get_account_balance(session, user_id=order.user_id, for_update=True)
-                if bal.debt == 0 and bal.available >= wallet_debit:
-                    await create_order_debit(
-                        session,
-                        user_id=order.user_id,
-                        amount_rub=wallet_debit,
-                        order_id=order.id,
-                        metadata={"description": f"Смешанная оплата: {order.description}"},
+                existing_debit = await session.scalar(
+                    select(AccountLedgerEntry).where(
+                        AccountLedgerEntry.entry_type == "purchase_debit",
+                        AccountLedgerEntry.order_id == order.id,
                     )
-                else:
-                    mixed_fallback = True
-                    await create_order_credit(
-                        session,
-                        user_id=order.user_id,
-                        amount_rub=order.amount_rub,
-                        order_id=order.id,
-                        metadata={"source": "mixed_fallback_topup"},
-                    )
-                    fb_meta = dict(order.metadata_ or {})
-                    fb_meta["mixed_fallback_credited"] = True
-                    order.metadata_ = fb_meta
+                )
+                if existing_debit is None:
+                    bal = await get_account_balance(session, user_id=order.user_id, for_update=True)
+                    if bal.debt == 0 and bal.available >= wallet_debit:
+                        await create_order_debit(
+                            session,
+                            user_id=order.user_id,
+                            amount_rub=wallet_debit,
+                            order_id=order.id,
+                            metadata={"description": f"Смешанная оплата: {order.description}"},
+                        )
+                    else:
+                        mixed_fallback = True
+                        await create_order_credit(
+                            session,
+                            user_id=order.user_id,
+                            amount_rub=order.amount_rub,
+                            order_id=order.id,
+                            metadata={"source": "mixed_fallback_topup"},
+                        )
+                        fb_meta = dict(order.metadata_ or {})
+                        fb_meta["mixed_fallback_credited"] = True
+                        order.metadata_ = fb_meta
 
         # Fulfill benefits linearly
         if order.status != "refunded" and not mixed_fallback:
@@ -389,6 +396,7 @@ class OrderService:
             status="pending",
             description=final_desc,
             metadata_=order_meta,
+            expires_at=now_utc() + timedelta(minutes=15) if payment_method != "wallet" else None,
         )
         session.add(order)
         await session.flush()
@@ -534,6 +542,39 @@ class OrderService:
             if "cancellation_reason" not in order_meta:
                 order_meta["cancellation_reason"] = reason
                 order.metadata_ = order_meta
+
+    @staticmethod
+    async def refund_reserved_mixed_debit(session: AsyncSession, order: Order) -> None:
+        """Refund reserved wallet debit for canceled or expired mixed payment orders."""
+        wallet_debit_raw = (order.metadata_ or {}).get("wallet_debit_rub")
+        if not wallet_debit_raw:
+            return
+        wallet_debit = Decimal(str(wallet_debit_raw))
+        if wallet_debit <= 0:
+            return
+        debit = await session.scalar(
+            select(AccountLedgerEntry).where(
+                AccountLedgerEntry.entry_type == "purchase_debit",
+                AccountLedgerEntry.order_id == order.id,
+            )
+        )
+        if debit is None:
+            return
+        refund_key = f"mixed_cancel_refund:{order.id}"
+        existing_refund = await session.scalar(
+            select(AccountLedgerEntry).where(
+                AccountLedgerEntry.idempotency_key == refund_key,
+            )
+        )
+        if existing_refund is not None:
+            return
+        await create_order_credit(
+            session,
+            user_id=order.user_id,
+            amount_rub=wallet_debit,
+            order_id=order.id,
+            metadata={"source": "mixed_canceled_refund", "order_id": str(order.id)},
+        )
 
     @staticmethod
     async def mark_order_paid(
@@ -1001,6 +1042,15 @@ class OrderService:
             metadata=order_meta,
             bot_username=bot_username,
         )
+        if wallet_debit > 0:
+            await create_order_debit(
+                session,
+                user_id=user.id,
+                amount_rub=wallet_debit,
+                order_id=order.id,
+                metadata={"description": f"Резерв смешанной оплаты: {order.description}"},
+                locked_user=user,
+            )
         charged_bonus = min(bal.bonus_available, wallet_debit) if wallet_debit > 0 else Decimal(0)
         return {
             "order_id": str(order.id),
@@ -1127,6 +1177,7 @@ class OrderService:
         if result.is_canceled:
             if order.status == "pending":
                 OrderService.mark_order_canceled(order, reason="gateway_canceled")
+                await OrderService.refund_reserved_mixed_debit(session, order)
                 await session.flush()
                 logger.info(
                     "Order %s marked canceled via gateway webhook (external_id=%s)",
@@ -1143,7 +1194,7 @@ class OrderService:
                 )
                 return order
 
-            if order.status != "paid":
+            if order.status not in ("paid", "partially_refunded"):
                 logger.warning(
                     "Refund received for non-paid order %s (status=%s), deferring to retry",
                     order.id,
@@ -1151,9 +1202,14 @@ class OrderService:
                 )
                 return None
 
-            if result.amount_rub is None or result.amount_rub != order.amount_rub:
+            refund_amount = (
+                result.amount_rub
+                if (result.amount_rub is not None and result.amount_rub > 0)
+                else order.amount_rub
+            )
+            if refund_amount > order.amount_rub:
                 logger.warning(
-                    "Refund amount mismatch or missing for order %s: expected %s, got %s (ext_id=%s)",
+                    "Refund amount mismatch or missing for order %s: expected <= %s, got %s (ext_id=%s)",
                     order.id,
                     order.amount_rub,
                     result.amount_rub,
@@ -1162,7 +1218,7 @@ class OrderService:
                 order_meta = dict(order.metadata_ or {})
                 order_meta["requires_manual_review"] = True
                 order_meta["refund_amount_mismatch"] = (
-                    str(result.amount_rub) if result.amount_rub is not None else "missing"
+                    f"Refund {refund_amount} exceeds order {order.amount_rub}"
                 )
                 if result.external_id:
                     order_meta["refund_external_id"] = result.external_id
@@ -1170,12 +1226,15 @@ class OrderService:
                 await session.flush()
                 return order
 
-            order.status = "refunded"
+            is_partial = refund_amount < order.amount_rub
+            order.status = "refunded" if not is_partial else "partially_refunded"
             order.refunded_at = now_utc()
+            order_meta = dict(order.metadata_ or {})
             if result.external_id:
-                order_meta = dict(order.metadata_ or {})
                 order_meta["refund_external_id"] = result.external_id
-                order.metadata_ = order_meta
+            if is_partial:
+                order_meta["partial_refund_amount_rub"] = str(refund_amount)
+            order.metadata_ = order_meta
 
             if order.service_type == "topup":
                 has_credit = bool(
@@ -1195,10 +1254,10 @@ class OrderService:
                     await create_order_refund_debit(
                         session,
                         user_id=order.user_id,
-                        amount_rub=order.amount_rub,
+                        amount_rub=refund_amount,
                         order_id=order.id,
                         refund_id=refund_ref,
-                        metadata={"source": "yookassa_refund"},
+                        metadata={"source": "yookassa_refund", "partial": is_partial},
                     )
                     await reverse_referral_bonus_for_topup(
                         session,

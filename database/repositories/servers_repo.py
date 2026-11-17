@@ -89,9 +89,6 @@ def is_white_internet_hub_server(server) -> bool:
     return proto == XRAY_PROTOCOL and not is_vless_capable_server(server)
 
 
-is_white_internet_origin_server = is_white_internet_hub_server
-
-
 def get_server_xray_api_url(server) -> str | None:
     """Return explicit Xray API URL for the server."""
     extra = getattr(server, "extra_data", None) if isinstance(getattr(server, "extra_data", None), dict) else {}
@@ -317,9 +314,6 @@ def _is_wi_hub_eligible(server: Server | None) -> bool:
     )
 
 
-_is_origin_server_eligible = _is_wi_hub_eligible
-
-
 async def has_available_service_capacity(
     session: AsyncSession,
     service_type: str,
@@ -398,9 +392,6 @@ async def allocate_wi_hub_atomic(session: AsyncSession) -> Server | None:
             return server
 
     return None
-
-
-allocate_origin_server_atomic = allocate_wi_hub_atomic
 
 
 async def get_server_by_id(
@@ -717,5 +708,3 @@ async def migrate_wi_hub_subscriptions(
     await session.flush()
     return count
 
-
-migrate_origin_subscriptions = migrate_wi_hub_subscriptions

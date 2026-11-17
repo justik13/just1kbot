@@ -379,7 +379,7 @@ async def is_eligible_for_referral_first_discount(
             Order.user_id == user_id,
             Order.status == "paid",
             Order.amount_rub > 0,
-            Order.service_type != "topup",
+            Order.service_type == "standard",
         )
     )
     if not isinstance(paid_orders, (int, float)):

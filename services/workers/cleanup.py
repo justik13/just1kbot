@@ -447,6 +447,7 @@ async def _reconcile_stale_pending_orders() -> None:
                         order,
                         reason=status_res.cancellation_reason or "gateway_canceled",
                     )
+                    await OrderService.refund_reserved_mixed_debit(session, order)
                     _pending_order_backoff_cache.pop(order_id, None)
                     logger.info(
                         "Reconciliation canceled stale pending order %s (reason=%s)",
@@ -487,6 +488,7 @@ async def _reconcile_stale_pending_orders() -> None:
             for exp_order in expired_orders:
                 reason = "ambiguous_creation_timeout" if exp_order.external_id is None else "order_expired_24h"
                 OrderService.mark_order_canceled(exp_order, reason=reason)
+                await OrderService.refund_reserved_mixed_debit(session, exp_order)
                 logger.info(
                     "Reconciliation expired pending order %s (reason=%s)",
                     exp_order.id,

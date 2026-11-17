@@ -665,9 +665,6 @@ async def mark_orphan_cleanup_failed(
         return
     row.attempts = (row.attempts or 0) + 1
     row.last_error = error[:500]
-    if row.attempts >= 5:
-        row.status = "done"
-        row.last_error = f"abandoned_max_attempts:{error[:450]}"
     await session.flush()
 
 

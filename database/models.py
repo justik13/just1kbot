@@ -58,6 +58,24 @@ class User(Base):
             postgresql_where=text("is_deleted = false AND subscription_end IS NOT NULL"),
         ),
         Index(
+            "ix_users_expiring_subscription",
+            "subscription_end",
+            "telegram_id",
+            postgresql_where=text(
+                "is_deleted = false AND is_bot_blocked = false AND subscription_end IS NOT NULL "
+                "AND (notified_3d = false OR notified_1d = false OR notified_2h = false)"
+            ),
+        ),
+        Index(
+            "ix_users_expired_grace_notify",
+            "subscription_end",
+            "telegram_id",
+            postgresql_where=text(
+                "is_deleted = false AND is_bot_blocked = false AND subscription_end IS NOT NULL "
+                "AND notified_expired = false"
+            ),
+        ),
+        Index(
             "ix_users_paginated",
             "created_at",
             "id",
@@ -772,6 +790,11 @@ class WhiteInternetSubscription(Base):
                 "status IN ('ACTIVE', 'EXHAUSTED', 'EXPIRED') AND (notified_3d = false OR notified_1d = false OR notified_2h = false OR notified_expired = false)"
             ),
         ),
+        Index(
+            "ix_wi_subscriptions_pending_hard_delete",
+            "id",
+            postgresql_where=text("pending_hard_delete IS TRUE"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -935,6 +958,11 @@ class WhiteInternetOrphanCleanup(Base):
             "status IN ('pending', 'done')",
             name="ck_white_internet_orphan_cleanups_status",
         ),
+        Index(
+            "ix_wi_orphan_cleanups_pending",
+            "id",
+            postgresql_where=text("status = 'pending'"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -973,6 +1001,14 @@ class VlessSubscription(Base):
     """VLESS TLS subscription for standard access with INCY HWID device quota tracking."""
 
     __tablename__ = "vless_subscriptions"
+
+    __table_args__ = (
+        Index(
+            "ix_vless_subscriptions_pending_revoked",
+            "id",
+            postgresql_where=text("pending_revoked_uuids != '[]'::jsonb"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 

@@ -1190,26 +1190,61 @@ class WhiteInternetService:
         extra_param = urllib.parse.quote(json.dumps(extra_dict, separators=(",", ":")))
         fp = CANONICAL_XHTTP_PROFILE.get("fp", WHITE_INTERNET_TLS_FINGERPRINT)
         base = _normalize_base_path(path)
-
-        if not include_direct_hub:
-            return []
-
-        hub_tag_str = (
-            effective_tag.strip()
-            if effective_tag and isinstance(effective_tag, str) and effective_tag.strip()
-            else texts.WL_VLESS_TAG
-        )
-        hub_tag_str = WhiteInternetService._ensure_country_flag(hub_tag_str, "ru")
-        if effective_badge and isinstance(effective_badge, str) and effective_badge.strip().lower() == "none":
-            final_badge = None
-        elif effective_badge and isinstance(effective_badge, str) and effective_badge.strip():
-            final_badge = effective_badge.strip()
-        else:
-            final_badge = None
-        hub_tag_formatted = WhiteInternetService._format_vless_tag(hub_tag_str, final_badge)
-        standalone_path = effective_path or (
-            f"{base}/turboflare" if str(cdn_type or "").strip().lower() == "cdn_turboflare" else f"{base}/default"
-        )
         eff_uuid = client_uuid or subscription.uuid
-        hub_link = f"vless://{eff_uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={fp}&type=xhttp&path={urllib.parse.quote(standalone_path, safe='')}&mode=packet-up&mux=false&extra={extra_param}#{hub_tag_formatted}"
-        return [hub_link]
+
+        links: list[str] = []
+
+        if include_direct_hub:
+            hub_tag_str = (
+                effective_tag.strip()
+                if effective_tag and isinstance(effective_tag, str) and effective_tag.strip()
+                else texts.WL_VLESS_TAG
+            )
+            hub_tag_str = WhiteInternetService._ensure_country_flag(hub_tag_str, "ru")
+            if effective_badge and isinstance(effective_badge, str) and effective_badge.strip().lower() == "none":
+                final_badge = None
+            elif effective_badge and isinstance(effective_badge, str) and effective_badge.strip():
+                final_badge = effective_badge.strip()
+            else:
+                final_badge = None
+            hub_tag_formatted = WhiteInternetService._format_vless_tag(hub_tag_str, final_badge)
+            standalone_path = effective_path or (
+                f"{base}/turboflare" if str(cdn_type or "").strip().lower() == "cdn_turboflare" else f"{base}/default"
+            )
+            hub_link = f"vless://{eff_uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={fp}&type=xhttp&path={urllib.parse.quote(standalone_path, safe='')}&mode=packet-up&mux=false&extra={extra_param}#{hub_tag_formatted}"
+            links.append(hub_link)
+
+        if relays and isinstance(relays, list):
+            for r in relays:
+                if not isinstance(r, dict):
+                    continue
+                relay_code = r.get("code") or r.get("name") or "default"
+                r_path = r.get("path") or f"{base}/{relay_code}"
+                custom_name = relay_names.get(relay_code) if (relay_names and isinstance(relay_names, dict)) else None
+                r_name = (
+                    custom_name.strip()
+                    if custom_name and isinstance(custom_name, str) and custom_name.strip()
+                    else (r.get("name") or texts.WL_VLESS_TAG)
+                )
+                r_name = WhiteInternetService._ensure_country_flag(r_name, relay_code)
+
+                if relay_badges and relay_code in relay_badges and isinstance(relay_badges[relay_code], str):
+                    val = relay_badges[relay_code].strip()
+                    r_badge = None if (not val or val.lower() == "none") else val
+                elif r.get("badge") and str(r.get("badge")).strip():
+                    val = str(r.get("badge")).strip()
+                    r_badge = None if val.lower() == "none" else val
+                elif r.get("server_description") and str(r.get("server_description")).strip():
+                    val = str(r.get("server_description")).strip()
+                    r_badge = None if val.lower() == "none" else val
+                elif default_relay_badge and isinstance(default_relay_badge, str) and default_relay_badge.strip():
+                    val = default_relay_badge.strip()
+                    r_badge = None if val.lower() == "none" else val
+                else:
+                    r_badge = None
+
+                r_tag = WhiteInternetService._format_vless_tag(r_name, r_badge)
+                link = f"vless://{eff_uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp={fp}&type=xhttp&path={urllib.parse.quote(r_path, safe='')}&mode=packet-up&mux=false&extra={extra_param}#{r_tag}"
+                links.append(link)
+
+        return links

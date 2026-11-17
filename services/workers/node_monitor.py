@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 import aiohttp
 from aiogram import Bot
 from sqlalchemy import func, select
+from sqlalchemy.orm.attributes import flag_modified
 
 from bot.texts.backend import TIME_HOURS_LEFT
 from bot.texts.runtime.alerts import (
@@ -1086,6 +1087,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 extra_changed = True
                         if extra_changed:
                             updated_srv.extra_data = extra
+                            flag_modified(updated_srv, "extra_data")
                             server.extra_data = extra
                             await session.flush()
 

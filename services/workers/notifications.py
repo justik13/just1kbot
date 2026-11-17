@@ -298,36 +298,40 @@ async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
 
     # 2. White Internet auto-renewal (30 days at effective device_limit)
     async with session_scope() as session:
-        wi_ids = list(
-            (
-                await session.execute(
-                    select(WhiteInternetSubscription.id)
-                    .join(User, User.id == WhiteInternetSubscription.user_id)
-                    .where(
-                        WhiteInternetSubscription.auto_renew_enabled.is_(True),
-                        WhiteInternetSubscription.status.in_([
-                            WhiteInternetStatus.ACTIVE,
-                            WhiteInternetStatus.EXHAUSTED,
-                            WhiteInternetStatus.EXPIRED,
-                        ]),
-                        WhiteInternetSubscription.expires_at.is_not(None),
-                        WhiteInternetSubscription.expires_at >= window_start,
-                        WhiteInternetSubscription.expires_at <= window_end,
-                        User.is_deleted.is_(False),
-                        User.financial_hold.is_(False),
-                    )
-                    .order_by(WhiteInternetSubscription.expires_at.asc())
-                    .limit(200)
+        wi_items = (
+            await session.execute(
+                select(WhiteInternetSubscription.id, WhiteInternetSubscription.user_id)
+                .join(User, User.id == WhiteInternetSubscription.user_id)
+                .where(
+                    WhiteInternetSubscription.auto_renew_enabled.is_(True),
+                    WhiteInternetSubscription.status.in_([
+                        WhiteInternetStatus.ACTIVE,
+                        WhiteInternetStatus.EXHAUSTED,
+                        WhiteInternetStatus.EXPIRED,
+                    ]),
+                    WhiteInternetSubscription.expires_at.is_not(None),
+                    WhiteInternetSubscription.expires_at >= window_start,
+                    WhiteInternetSubscription.expires_at <= window_end,
+                    User.is_deleted.is_(False),
+                    User.financial_hold.is_(False),
                 )
-            ).scalars().all()
-        )
+                .order_by(WhiteInternetSubscription.expires_at.asc())
+                .limit(200)
+            )
+        ).all()
 
-    for sid in wi_ids:
+    for sid, uid in wi_items:
         push_tg_id = None
         push_text = None
         push_kb = None
         try:
             async with session_scope() as session:
+                user = await session.scalar(
+                    select(User).where(User.id == uid).with_for_update(skip_locked=True)
+                )
+                if user is None or user.is_deleted or user.financial_hold:
+                    continue
+
                 sub = await session.scalar(
                     select(WhiteInternetSubscription)
                     .where(WhiteInternetSubscription.id == sid)
@@ -345,12 +349,6 @@ async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
                         WhiteInternetStatus.EXPIRED,
                     )
                 ):
-                    continue
-
-                user = await session.scalar(
-                    select(User).where(User.id == sub.user_id).with_for_update(skip_locked=True)
-                )
-                if user is None or user.is_deleted or user.financial_hold:
                     continue
 
                 from decimal import Decimal

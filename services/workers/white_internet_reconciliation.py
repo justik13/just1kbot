@@ -487,7 +487,7 @@ class WhiteInternetReconciliationWorker:
                     select(white_internet_repo.WhiteInternetOrphanCleanup.id)
                     .where(
                         white_internet_repo.WhiteInternetOrphanCleanup.status == "pending",
-                        white_internet_repo.WhiteInternetOrphanCleanup.attempts < 5,
+                        white_internet_repo.WhiteInternetOrphanCleanup.attempts < 20,
                     )
                     .order_by(white_internet_repo.WhiteInternetOrphanCleanup.id.asc())
                     .limit(BATCH_SIZE)
@@ -686,16 +686,6 @@ class WhiteInternetReconciliationWorker:
                 async with self._semaphore:
                     async with sf() as sess:
                         try:
-                            sub = await sess.get(WhiteInternetSubscription, sub_id, with_for_update=True)
-                            if sub is None or sub.hub_server_id is not None:
-                                continue
-                            if sub.status not in (
-                                WhiteInternetStatus.PENDING,
-                                WhiteInternetStatus.ACTIVE,
-                                WhiteInternetStatus.EXHAUSTED,
-                            ):
-                                continue
-
                             hub = await servers_repo.allocate_wi_hub_atomic(sess)
                             if hub is None:
                                 logger.warning("No healthy hub server available for unallocated sub_id=%d", sub_id)
@@ -709,6 +699,16 @@ class WhiteInternetReconciliationWorker:
                                         self._hub_exhausted_last_sent = now_m
                                         asyncio.create_task(self._send_hub_exhausted_alert(sub_id))
                                 break
+
+                            sub = await sess.get(WhiteInternetSubscription, sub_id, with_for_update=True)
+                            if sub is None or sub.hub_server_id is not None:
+                                continue
+                            if sub.status not in (
+                                WhiteInternetStatus.PENDING,
+                                WhiteInternetStatus.ACTIVE,
+                                WhiteInternetStatus.EXHAUSTED,
+                            ):
+                                continue
 
                             sub.hub_server_id = hub.id
                             sub.desired_version += 1

@@ -11,6 +11,7 @@ import urllib.parse
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from config.constants import (
     DEFAULT_WHITE_INTERNET_PATH,
@@ -978,11 +979,12 @@ class VlessSubscriptionService:
             # Record synchronized epoch in server extra_data ONLY if all eligible subscriptions succeeded without failures
             if not has_failures and synced_count == total_eligible:
                 async with session_scope() as session:
-                    server = await session.get(Server, srv_id)
+                    server = await session.get(Server, srv_id, with_for_update=True)
                     if server and server.xray_instance_epoch:
                         extra = dict(server.extra_data or {})
                         extra["vless_synced_epoch"] = server.xray_instance_epoch
                         server.extra_data = extra
+                        flag_modified(server, "extra_data")
                         await session.flush()
             else:
                 logger.warning(
