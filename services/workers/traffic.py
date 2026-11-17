@@ -376,12 +376,11 @@ async def _traffic_sync_once(bot: Bot | None = None):
                         new_starttime=node_starttime,
                     )
                     if not cas_ok:
-                        logger.warning(
-                            "CAS rejected stale snapshot for server %s (%d). Discarding snapshot.",
+                        logger.info(
+                            "Epoch already advanced concurrently for server %s (%d). Continuing with snapshot processing.",
                             server_name,
                             server_id,
                         )
-                        continue
 
             server_delta = 0
             affected_vless_user_ids: set[int] = set()

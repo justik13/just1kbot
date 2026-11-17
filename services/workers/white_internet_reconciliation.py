@@ -33,7 +33,7 @@ from utils.telegram import safe_send_message
 
 logger = logging.getLogger(__name__)
 
-RECONCILIATION_INTERVAL_SECONDS = 15.0
+RECONCILIATION_INTERVAL_SECONDS = 30.0
 BATCH_SIZE = 50
 
 
@@ -349,6 +349,7 @@ class WhiteInternetReconciliationWorker:
                     Server.api_url.is_not(None),
                     Server.api_key.is_not(None),
                     Server.is_active.is_(True),
+                    Server.xray_instance_epoch.is_not(None),
                     Server.lifecycle_status.in_([
                         ServerLifecycleStatus.ACTIVE,
                         ServerLifecycleStatus.DECOMMISSIONING,
@@ -360,15 +361,12 @@ class WhiteInternetReconciliationWorker:
             res_servers = await sess.execute(stmt_servers)
             servers = res_servers.scalars().all()
 
-            server_list = [
+            active_server_targets = [
                 (
                     s.id,
-                    s.name,
                     s.api_url,
                     s.api_key,
                     s.xray_instance_epoch,
-                    s.xray_instance_boot_id,
-                    s.xray_instance_starttime,
                     (s.extra_data or {}).get("relays", []),
                     (s.extra_data or {}).get("xhttp_locations", []),
                     bool((s.extra_data or {}).get("origin_hidden", False)),
@@ -379,43 +377,7 @@ class WhiteInternetReconciliationWorker:
                     or (getattr(s, "protocol", None) is None and WHITE_INTERNET_CAPABILITY in (s.capabilities or []))
                 )
                 and WHITE_INTERNET_CAPABILITY in (s.capabilities or [])
-                and s.api_url
-                and s.api_key
             ]
-
-        # Check health outside DB transaction
-        active_server_targets: list[tuple[int, str, str, str, list, list, bool]] = []
-        for server_id, _name, api_url, api_key, cur_epoch, cur_boot_id, cur_starttime, relays, xhttp_locs, origin_hidden in server_list:
-            is_healthy, node_epoch, health_data = await self.client.check_health(api_url, api_key)
-            if is_healthy and node_epoch and health_data:
-                boot_id = health_data.get("boot_id")
-                starttime = health_data.get("starttime")
-                target_node_epoch = cur_epoch
-                if (
-                    node_epoch != cur_epoch
-                    or boot_id != cur_boot_id
-                    or starttime != cur_starttime
-                ):
-                    async with sf() as sess:
-                        cas_ok, updated = await servers_repo.update_server_xray_epoch_cas(
-                            sess,
-                            server_id,
-                            expected_boot_id=cur_boot_id,
-                            expected_starttime=cur_starttime,
-                            new_epoch=node_epoch,
-                            new_boot_id=boot_id,
-                            new_starttime=starttime,
-                        )
-                        if cas_ok and updated:
-                            target_node_epoch = node_epoch
-                        else:
-                            # CAS Fencing: reload fresh state from DB to get the true winner's epoch
-                            fresh_server = await sess.scalar(select(Server).where(Server.id == server_id))
-                            target_node_epoch = fresh_server.xray_instance_epoch if fresh_server else None
-
-                node_relays = health_data.get("relays")
-                target_relays = node_relays if isinstance(node_relays, list) and not health_data.get("relays_error") else relays
-                active_server_targets.append((server_id, api_url, api_key, target_node_epoch or node_epoch, target_relays, xhttp_locs, origin_hidden))
 
         synced_count = 0
         for server_id, api_url, api_key, target_epoch, relays, xhttp_locs, origin_hidden in active_server_targets:
