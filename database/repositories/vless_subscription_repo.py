@@ -28,6 +28,14 @@ async def get_or_create_subscription(
     if isinstance(sub, VlessSubscription):
         return sub
 
+    from database.models import User
+    u = await session.get(User, user_id)
+    expires_at = u.subscription_end if u else None
+    device_limit = (u.device_limit or 2) if u else 2
+    auto_renew_enabled = bool(getattr(u, "auto_renew_enabled", False)) if u else False
+    notified_expired = bool(getattr(u, "notified_expired", False)) if u else False
+    notified_before_days = getattr(u, "notified_before_days", None) if u else None
+
     token = secrets.token_urlsafe(32)
     client_uuid = str(uuid.uuid4())
     sub = VlessSubscription(
@@ -35,6 +43,11 @@ async def get_or_create_subscription(
         token=token,
         uuid=client_uuid,
         is_active=True,
+        expires_at=expires_at,
+        device_limit=device_limit,
+        auto_renew_enabled=auto_renew_enabled,
+        notified_expired=notified_expired,
+        notified_before_days=notified_before_days,
         version=1,
         pending_revoked_uuids=[],
         node_traffic_snapshots={"_fresh": True},
