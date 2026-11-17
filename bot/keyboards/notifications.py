@@ -62,6 +62,10 @@ def get_autorenew_failed_keyboard() -> InlineKeyboardMarkup:
     return get_action_notification_keyboard(texts.BTN_TOPUP_BALANCE, tab="profile")
 
 
+def get_bonus_credited_keyboard() -> InlineKeyboardMarkup:
+    return get_action_notification_keyboard(texts.BTN_OPEN_PROFILE, tab="profile")
+
+
 def get_referral_bonus_keyboard() -> InlineKeyboardMarkup:
     return get_action_notification_keyboard(texts.BTN_OPEN_PROFILE, tab="profile")
 
