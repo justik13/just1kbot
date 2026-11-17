@@ -16,7 +16,6 @@ import aiohttp
 from aiogram import Bot
 from sqlalchemy import func, select
 
-from bot.keyboards.notifications import get_node_monitor_alert_keyboard
 from bot.texts.backend import TIME_HOURS_LEFT
 from bot.texts.runtime.alerts import (
     ALERT_CDN_INGRESS_PROBLEM,
@@ -62,6 +61,10 @@ from database.repositories.servers_repo import (
 from utils.datetime_helpers import now_utc
 from utils.telegram import safe, safe_send_message
 from utils.traffic_helpers import get_server_hosting_usage
+
+def get_node_monitor_alert_keyboard(server_id: int | None = None) -> None:
+    return None
+
 
 _build_alert_keyboard = get_node_monitor_alert_keyboard
 

@@ -18,7 +18,6 @@ from bot import texts
 from bot.handlers.notifications import router as notifications_router
 from bot.handlers.start import router as start_router
 from bot.handlers.webhook import setup_webhook_routes
-from bot.keyboards.notifications import get_dismiss_alert_keyboard
 from bot.middlewares import (
     CorrelationFilter,
     CorrelationMiddleware,
@@ -155,7 +154,6 @@ async def global_error_handler(
                         event.bot,
                         admin_id,
                         error_msg,
-                        reply_markup=get_dismiss_alert_keyboard("general"),
                     )
                 except Exception as exc:
                     logger.error(

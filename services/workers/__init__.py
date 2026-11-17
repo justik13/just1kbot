@@ -7,7 +7,6 @@ from dataclasses import asdict, dataclass
 
 import aiohttp
 from aiogram import Bot
-from bot.keyboards.notifications import get_dismiss_alert_keyboard
 from bot.texts.runtime.alerts import (
     ALERT_TITLE_CRITICAL_STOP,
     ALERT_TITLE_WORKER_COOLDOWN,
@@ -156,7 +155,6 @@ async def _send_alert(bot: Bot, title: str, worker: str,
         failure_count=failure_count,
         error_type=error_type,
     )
-    reply_markup = get_dismiss_alert_keyboard("general")
     try:
         for admin_id in get_settings().ADMIN_IDS:
             try:
@@ -164,7 +162,6 @@ async def _send_alert(bot: Bot, title: str, worker: str,
                     bot,
                     admin_id,
                     message,
-                    reply_markup=reply_markup,
                     parse_mode="HTML",
                 )
             except Exception:

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 # Notification buttons
-BTN_DISMISS_ALERT = "Закрыть"
 BTN_RENEW_ACCESS = "💳 Продлить доступ"
 BTN_RESUME_ACCESS = "💳 Возобновить доступ"
 BTN_TOPUP_BALANCE = "💰 Пополнить баланс"

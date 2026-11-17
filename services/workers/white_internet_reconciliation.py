@@ -62,13 +62,11 @@ class WhiteInternetReconciliationWorker:
     async def _send_origin_exhausted_alert(self, sub_id: int) -> None:
         if not self.bot:
             return
-        from bot.keyboards.notifications import get_dismiss_alert_keyboard
         text = ALERT_WHITE_INTERNET_ORIGIN_EXHAUSTED.format(sub_id=sub_id)
-        dismiss_kb = get_dismiss_alert_keyboard("general")
         for aid in get_settings().ADMIN_IDS:
             try:
                 await safe_send_message(
-                    self.bot, chat_id=aid, text=text, reply_markup=dismiss_kb, parse_mode="HTML"
+                    self.bot, chat_id=aid, text=text, parse_mode="HTML"
                 )
             except Exception as e:
                 logger.warning("Failed to send origin exhausted alert to admin %s: %s", aid, e)
@@ -76,13 +74,11 @@ class WhiteInternetReconciliationWorker:
     async def _send_origin_restored_alert(self) -> None:
         if not self.bot:
             return
-        from bot.keyboards.notifications import get_dismiss_alert_keyboard
         text = ALERT_WHITE_INTERNET_ORIGIN_RESTORED
-        dismiss_kb = get_dismiss_alert_keyboard("general")
         for aid in get_settings().ADMIN_IDS:
             try:
                 await safe_send_message(
-                    self.bot, chat_id=aid, text=text, reply_markup=dismiss_kb, parse_mode="HTML"
+                    self.bot, chat_id=aid, text=text, parse_mode="HTML"
                 )
             except Exception as e:
                 logger.warning("Failed to send origin restored alert to admin %s: %s", aid, e)

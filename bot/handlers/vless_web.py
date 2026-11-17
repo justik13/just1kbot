@@ -1100,16 +1100,14 @@ async def vless_report_handler(request: web.Request) -> web.Response:
     bot = request.app.get("bot")
     delivered = False
     if bot:
-        from bot.keyboards.notifications import get_dismiss_alert_keyboard
         from config.settings import get_settings
         from utils.telegram import safe_send_message
 
         admin_ids = get_settings().ADMIN_IDS
-        dismiss_kb = get_dismiss_alert_keyboard("general")
         for aid in admin_ids:
             try:
                 msg_id = await safe_send_message(
-                    bot, aid, admin_text, reply_markup=dismiss_kb, parse_mode="HTML"
+                    bot, aid, admin_text, parse_mode="HTML"
                 )
                 if msg_id is not None:
                     delivered = True

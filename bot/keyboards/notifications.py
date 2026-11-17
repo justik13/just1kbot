@@ -39,17 +39,6 @@ def get_dismiss_notification_keyboard() -> InlineKeyboardMarkup:
     return get_action_notification_keyboard(texts.BTN_OPEN_CABINET, tab="connect")
 
 
-def get_dismiss_alert_keyboard(target: str = "general") -> InlineKeyboardMarkup:
-    """Single close button for admin alert notifications."""
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text=texts.BTN_DISMISS_ALERT,
-        callback_data=f"admin_dismiss_alert:{target}",
-    )
-    builder.adjust(1)
-    return builder.as_markup()
-
-
 def get_pre_expiry_keyboard() -> InlineKeyboardMarkup:
     return get_action_notification_keyboard(texts.BTN_RENEW_ACCESS, tab="tariffs")
 
@@ -81,17 +70,5 @@ def get_broadcast_action_keyboard(
     return get_action_notification_keyboard(text, tab=tab)
 
 
-def get_node_monitor_alert_keyboard(
-    server_id: int,
-) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text=texts.BTN_DISMISS_ALERT,
-        callback_data=f"admin_dismiss_alert:{server_id}",
-    )
-    builder.adjust(1)
-    return builder.as_markup()
-
-
 def get_traffic_alert_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
-    return get_dismiss_alert_keyboard("general")
+    return get_action_notification_keyboard(texts.BTN_OPEN_CABINET, tab="connect")

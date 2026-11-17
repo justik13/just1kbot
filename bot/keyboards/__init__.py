@@ -1,7 +1,5 @@
 from .notifications import (
-    get_dismiss_alert_keyboard,
     get_dismiss_notification_keyboard,
-    get_node_monitor_alert_keyboard,
     get_post_expiry_keyboard,
     get_pre_expiry_keyboard,
     get_referral_bonus_keyboard,
@@ -9,9 +7,7 @@ from .notifications import (
 )
 
 __all__ = [
-    "get_dismiss_alert_keyboard",
     "get_dismiss_notification_keyboard",
-    "get_node_monitor_alert_keyboard",
     "get_post_expiry_keyboard",
     "get_pre_expiry_keyboard",
     "get_referral_bonus_keyboard",
