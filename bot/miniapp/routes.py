@@ -31,6 +31,8 @@ from bot.miniapp.handlers_admin import (
     api_admin_nodes_patch_handler,
     api_admin_nodes_refresh_handler,
     api_admin_nodes_toggle_handler,
+    api_admin_payments_maintenance_get_handler,
+    api_admin_payments_maintenance_post_handler,
     api_admin_user_adjust_handler,
     api_admin_user_details_handler,
     api_admin_user_devices_reset_handler,
@@ -224,6 +226,8 @@ def setup_miniapp_routes(app: web.Application) -> None:
     app.router.add_post("/api/app/admin/users/{user_id}/message", api_admin_user_message_handler)
 
     # Admin broadcasts, mass operations, finances, audit logs
+    app.router.add_get("/api/app/admin/settings/payments-maintenance", api_admin_payments_maintenance_get_handler)
+    app.router.add_post("/api/app/admin/settings/payments-maintenance", api_admin_payments_maintenance_post_handler)
     app.router.add_get("/api/app/admin/broadcasts", api_admin_broadcasts_list_handler)
     app.router.add_post("/api/app/admin/broadcasts/preview", api_admin_broadcast_preview_handler)
     app.router.add_post("/api/app/admin/broadcasts", api_admin_broadcast_start_handler)

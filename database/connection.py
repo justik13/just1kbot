@@ -74,9 +74,9 @@ async def init_db():
         _engine = create_async_engine(
             settings.DATABASE_URL,
             echo=False,
-            pool_size=10,
-            max_overflow=10,
-            pool_timeout=30,
+            pool_size=20,
+            max_overflow=15,
+            pool_timeout=20,
             pool_pre_ping=True,
             pool_recycle=1800,
             connect_args=_asyncpg_connect_args(),
@@ -120,9 +120,8 @@ async def _run_alembic_migrations(database_url: str) -> None:
 
 
 async def _seed_default_data() -> None:
-    """Seed default tariffs and maintenance mode after migrations."""
+    """Seed default tariffs after migrations."""
     from config.tariffs import DEFAULT_TARIFFS_SEEDS
-    from database.models import DEFAULT_MAINTENANCE_MESSAGE, MaintenanceMode
 
     async with session_scope() as session:
         # Seed tariffs
@@ -136,19 +135,6 @@ async def _seed_default_data() -> None:
                 session.add(Tariff(**tariff_data, is_active=True))
             await session.commit()
             logger.info("Default tariffs seeded successfully.")
-
-        # Seed maintenance mode
-        result = await session.execute(select(func.count(MaintenanceMode.id)))
-        if result.scalar_one() == 0:
-            session.add(
-                MaintenanceMode(
-                    id=1,
-                    is_enabled=False,
-                    message=DEFAULT_MAINTENANCE_MESSAGE,
-                )
-            )
-            await session.commit()
-            logger.info("Maintenance mode singleton seeded.")
 
 
 async def get_session() -> AsyncSession:

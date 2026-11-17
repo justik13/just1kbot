@@ -17,7 +17,14 @@ V2_NODE_ROLES = ("ru_hub", "eu_hub", "exit_node")
 
 
 def get_server_role(server) -> str | None:
-    """Extract normalized v2 node role from Server.extra_data/capabilities."""
+    """Extract normalized v2 node role from Server.role / extra_data / capabilities."""
+    if not server:
+        return None
+    direct_role = getattr(server, "role", None)
+    if isinstance(direct_role, str):
+        direct_role = direct_role.strip().lower()
+        if direct_role in V2_NODE_ROLES:
+            return direct_role
     extra = getattr(server, "extra_data", None)
     if isinstance(extra, dict):
         role = str(extra.get("role") or "").strip().lower()
@@ -63,13 +70,7 @@ def is_vless_sync_target_server(server) -> bool:
     """
     if not server:
         return False
-    role = get_server_role(server)
-    if role in ("eu_hub", "exit_node"):
-        return False
-    if role == "ru_hub":
-        return is_vless_capable_server(server)
-    # Standalone legacy servers without a v2 role
-    return is_vless_capable_server(server)
+    return get_server_role(server) == "ru_hub" and is_vless_capable_server(server)
 
 
 def is_white_internet_origin_server(server) -> bool:
@@ -274,16 +275,16 @@ def capacity_consuming_wl_condition():
 
 
 async def get_origin_server_subscription_counts(session: AsyncSession) -> dict[int, int]:
-    # WhiteInternetSubscription counts (Xray Origin)
+    # WhiteInternetSubscription counts (Xray Hub)
     from database.models import WhiteInternetSubscription
 
     wl_result = await session.execute(
-        select(WhiteInternetSubscription.origin_node_id, func.count(WhiteInternetSubscription.id))
+        select(WhiteInternetSubscription.hub_server_id, func.count(WhiteInternetSubscription.id))
         .where(
-            WhiteInternetSubscription.origin_node_id.is_not(None),
+            WhiteInternetSubscription.hub_server_id.is_not(None),
             capacity_consuming_wl_condition(),
         )
-        .group_by(WhiteInternetSubscription.origin_node_id)
+        .group_by(WhiteInternetSubscription.hub_server_id)
     )
     return {row[0]: row[1] for row in wl_result.all()}
 
@@ -306,7 +307,6 @@ def _is_origin_server_eligible(server: Server | None) -> bool:
         extra.get("xhttp_locations")
         or extra.get("cdn_domains")
         or extra.get("cdn_domain")
-        or extra.get("relays")
     )
 
 
@@ -408,6 +408,7 @@ async def create_server(
     name: str,
     api_url: str,
     api_key: str,
+    role: str = "ru_hub",
     country_flag: str = None,
     protocol: str = VLESS_PROTOCOL,
     capabilities: list[str] | None = None,
@@ -422,6 +423,7 @@ async def create_server(
     )
     server = Server(
         name=name,
+        role=role,
         api_url=api_url,
         api_key=api_key,
         country_flag=country_flag,

@@ -160,6 +160,12 @@ export const api = {
                 q
             )}&offset=${offset}&limit=${limit}`
         ),
+    getPaymentsMaintenance: () => requestJson("/api/app/admin/settings/payments-maintenance"),
+    setPaymentsMaintenance: (enabled) =>
+        requestJson("/api/app/admin/settings/payments-maintenance", {
+            method: "POST",
+            body: JSON.stringify({ enabled }),
+        }),
 
     // User cabinet
     getUserDashboard: () => requestJson("/api/app/user/dashboard"),

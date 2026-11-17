@@ -857,6 +857,15 @@ class OrderService:
         if getattr(user, "financial_hold", False):
             raise FinancialHoldBlockedError("Financial hold active on user")
 
+        # Payments maintenance mode guard
+        from database.repositories.system_settings_repo import get_system_setting
+        maint_val = await get_system_setting(session, "payments_maintenance_enabled", "false")
+        if str(maint_val or "").strip().lower() in ("true", "1", "yes"):
+            raise ServiceUnavailableError(
+                "Платежи и оформление заказов временно приостановлены в связи с техническими работами. "
+                "Попробуйте позже."
+            )
+
         order_meta: dict = {}
         traffic_bytes = 0
         final_duration = 0

@@ -51,14 +51,13 @@ async def reencrypt_all(*, force: bool = False) -> None:
     logger.info("Starting database re-encryption with primary key...")
 
     # Hard safety guard: rotation must not run against a live writer. Rotation
-    # proceeds ONLY with maintenance explicitly enabled; every other state
-    # (row missing, maintenance OFF) aborts unless the operator passed --force.
-    from database.models import MaintenanceMode
+    # proceeds ONLY with payments maintenance explicitly enabled; every other state
+    # (setting missing, maintenance OFF) aborts unless the operator passed --force.
+    from database.repositories.system_settings_repo import get_system_setting
 
     async with session_scope() as session:
-        maintenance_enabled = await session.scalar(
-            select(MaintenanceMode.is_enabled).where(MaintenanceMode.id == 1)
-        )
+        maint_val = await get_system_setting(session, "payments_maintenance_enabled", "false")
+        maintenance_enabled = str(maint_val or "").strip().lower() in ("true", "1", "yes")
     if maintenance_enabled is True:
         pass
     elif force:

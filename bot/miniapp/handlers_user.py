@@ -421,6 +421,9 @@ async def api_user_standard_downgrade_handler(request: web.Request) -> web.Respo
                 session, user.id, payload.target_device_limit
             )
             return web.json_response({"ok": True, **res})
+    except order_service.ServiceUnavailableError as exc:
+        logger.warning("Topup unavailable for %s: %s", ctx.telegram_id, exc)
+        return web.json_response({"ok": False, "error": str(exc)}, status=503)
     except Exception as exc:
         return web.json_response({"ok": False, "error": str(exc)}, status=400)
 
@@ -519,6 +522,9 @@ async def api_user_topup_handler(request: web.Request) -> web.Response:
                 bot_username=_resolve_bot_username(request),
             )
             return web.json_response({"ok": True, **res})
+    except order_service.ServiceUnavailableError as exc:
+        logger.warning("Topup unavailable for %s: %s", ctx.telegram_id, exc)
+        return web.json_response({"ok": False, "error": str(exc)}, status=503)
     except Exception as exc:
         logger.warning("Topup error for %s: %s", ctx.telegram_id, exc)
         return web.json_response({"ok": False, "error": str(exc)}, status=400)

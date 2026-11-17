@@ -29,7 +29,6 @@ ALLOWED_USER_UPDATE_FIELDS = {
     "notified_expired",
     "notification_retry_count",
     "last_notification_attempt",
-    "last_trial_reset_at",
     "show_in_leaderboard",
 }
 

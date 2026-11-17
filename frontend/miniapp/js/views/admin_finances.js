@@ -50,6 +50,25 @@ export function renderAdminFinancesView(root, state) {
             <div class="stat-box"><div class="stat-val tabular">${summary.paid_orders_count ?? 0}</div><div class="stat-lbl">Заказов</div></div>
         </section>
 
+        <section class="card" style="margin-bottom:12px;">
+            <div class="row" style="align-items:center; justify-content:space-between; gap:12px;">
+                <div>
+                    <div style="font-weight:600; display:flex; align-items:center; gap:8px;">
+                        <span>🛠 Техработы платежей</span>
+                        <span id="paymentsMaintBadge" class="chip ${state.paymentsMaintenance ? "chip-warn" : "chip-ok"}">
+                            ${state.paymentsMaintenance ? "ВКЛЮЧЕНЫ (оплата заблокирована)" : "ВЫКЛЮЧЕНЫ (оплата активна)"}
+                        </span>
+                    </div>
+                    <div class="muted" style="font-size:12px; margin-top:4px;">
+                        Блокирует создание новых заказов и пополнение баланса. Действующие подписки продолжают работать.
+                    </div>
+                </div>
+                <button type="button" id="togglePaymentsMaintBtn" class="btn ${state.paymentsMaintenance ? "btn-secondary" : "btn-danger"}" style="white-space:nowrap;">
+                    ${state.paymentsMaintenance ? "Включить приём платежей" : "Приостановить платежи"}
+                </button>
+            </div>
+        </section>
+
         <section class="card">
             <div class="row">
                 <div class="seg-group">
@@ -150,6 +169,37 @@ export function renderAdminFinancesView(root, state) {
             }
         });
     });
+
+    const toggleMaintBtn = root.querySelector("#togglePaymentsMaintBtn");
+    if (toggleMaintBtn) {
+        toggleMaintBtn.addEventListener("click", async () => {
+            const nextVal = !state.paymentsMaintenance;
+            toggleMaintBtn.disabled = true;
+            try {
+                const res = await api.setPaymentsMaintenance(nextVal);
+                state.paymentsMaintenance = !!res.enabled;
+                showToast(res.enabled ? "Техработы платежей включены" : "Приём платежей возобновлён");
+                renderAdminFinancesView(root, state);
+            } catch (err) {
+                showToast(err.message || "Ошибка переключения техработ");
+                toggleMaintBtn.disabled = false;
+            }
+        });
+    }
+
+    if (typeof state.paymentsMaintenance === "undefined") {
+        api.getPaymentsMaintenance().then((res) => {
+            state.paymentsMaintenance = !!res.enabled;
+            const badge = root.querySelector("#paymentsMaintBadge");
+            const btn = root.querySelector("#togglePaymentsMaintBtn");
+            if (badge && btn) {
+                badge.className = `chip ${state.paymentsMaintenance ? "chip-warn" : "chip-ok"}`;
+                badge.textContent = state.paymentsMaintenance ? "ВКЛЮЧЕНЫ (оплата заблокирована)" : "ВЫКЛЮЧЕНЫ (оплата активна)";
+                btn.className = `btn ${state.paymentsMaintenance ? "btn-secondary" : "btn-danger"}`;
+                btn.textContent = state.paymentsMaintenance ? "Включить приём платежей" : "Приостановить платежи";
+            }
+        }).catch(() => {});
+    }
 
     if (subTab === "audit") {
         root.querySelector("#auditFilterForm").addEventListener("submit", async (e) => {

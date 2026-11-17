@@ -16,6 +16,7 @@ from config.constants import VLESS_PROTOCOL, WHITE_INTERNET_CAPABILITY, XRAY_PRO
 from config.enums import AdminAuditAction, ServerHealthState, ServerLifecycleStatus
 from database.models import Server
 from database.repositories.servers_repo import (
+    V2_NODE_ROLES,
     create_server,
     delete_server,
     derive_v2_capabilities,
@@ -281,7 +282,13 @@ async def discover_and_add_node(
         status_data,
         health_data,
     )
-    role = extra.get("role")
+    role = str(extra.get("role") or "").strip().lower()
+    if role not in V2_NODE_ROLES:
+        raise AdminNodeServiceError(
+            f"Узел имеет ненастроенную или недопустимую роль ('{role or 'none'}'). "
+            "Допустимые роли: ru_hub, eu_hub, exit_node. Завершите настройку узла перед добавлением в бот.",
+            status_code=400,
+        )
     detected_name, detected_flag = await auto_detect_node_geo(clean_url, status_data, role)
 
     clean_name = (name or "").strip()[:255]
@@ -297,6 +304,7 @@ async def discover_and_add_node(
     server = await create_server(
         session=session,
         name=resolved_name,
+        role=role,
         api_url=clean_url,
         api_key=clean_key,
         country_flag=resolved_flag,

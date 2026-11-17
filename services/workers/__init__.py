@@ -25,7 +25,6 @@ from .node_monitor import node_monitor_loop
 from .notifications import subscription_notifications_loop
 from .traffic import traffic_sync_loop
 from .white_internet_reconciliation import white_internet_reconciliation_loop
-from .white_internet_traffic import white_internet_traffic_loop
 
 
 class _ExpectedNodeMonitorNetworkWarningFilter(logging.Filter):
@@ -102,7 +101,6 @@ def _credit_notifications(bot): return credit_notifications_loop(bot, shutdown_e
 def _heartbeat(bot): return heartbeat_loop(shutdown_event, heartbeat_allowed)
 def _node_monitor(bot): return node_monitor_loop(bot, shutdown_event)
 def _white_internet_reconciliation(bot): return white_internet_reconciliation_loop(bot, shutdown_event)
-def _white_internet_traffic(bot): return white_internet_traffic_loop(bot, shutdown_event)
 
 
 WORKERS: tuple[WorkerDefinition, ...] = (
@@ -113,7 +111,6 @@ WORKERS: tuple[WorkerDefinition, ...] = (
     WorkerDefinition("heartbeat", _heartbeat, False),
     WorkerDefinition("node_monitor", _node_monitor, False),
     WorkerDefinition("white_internet_reconciliation", _white_internet_reconciliation, True),
-    WorkerDefinition("white_internet_traffic", _white_internet_traffic, True),
 )
 
 

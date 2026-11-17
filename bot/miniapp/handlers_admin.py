@@ -22,6 +22,7 @@ from bot.miniapp.schemas import (
     IncyGlobalSettingsPayload,
     MassBonusPayload,
     MassExtendPayload,
+    PaymentsMaintenancePayload,
     ToggleNodePayload,
     UpdateNodePayload,
     Verify2FAPayload,
@@ -1289,3 +1290,48 @@ async def api_admin_audit_logs_handler(request: web.Request) -> web.Response:
             limit=limit,
         )
     return web.json_response({"ok": True, **data})
+
+
+async def api_admin_payments_maintenance_get_handler(request: web.Request) -> web.Response:
+    """Get status of payments maintenance mode."""
+    ctx, err_resp = require_admin_user(request)
+    if err_resp is not None or ctx is None:
+        return err_resp  # type: ignore[return-value]
+
+    async with session_scope() as session:
+        val = await get_system_setting(session, "payments_maintenance_enabled", "false")
+        enabled = str(val or "").strip().lower() in ("true", "1", "yes")
+
+    return web.json_response({"ok": True, "enabled": enabled})
+
+
+async def api_admin_payments_maintenance_post_handler(request: web.Request) -> web.Response:
+    """Toggle payments maintenance mode."""
+    ctx, err_resp = require_admin_user(request)
+    if err_resp is not None or ctx is None:
+        return err_resp  # type: ignore[return-value]
+
+    payload, parse_err = await _parse_json_model(request, PaymentsMaintenancePayload)
+    if parse_err is not None or payload is None:
+        return parse_err  # type: ignore[return-value]
+
+    new_val = "true" if payload.enabled else "false"
+    async with session_scope() as session:
+        await set_system_setting(
+            session,
+            key="payments_maintenance_enabled",
+            value=new_val,
+            updated_by=ctx.telegram_id,
+        )
+        await AuditService.log_action(
+            session,
+            admin_id=ctx.telegram_id,
+            action=AdminAuditAction.TOGGLE_MAINTENANCE,
+            target_type="system_setting",
+            target_id="payments_maintenance_enabled",
+            details={"enabled": payload.enabled},
+        )
+
+    logger.info("Payments maintenance mode toggled to %s by admin %s", payload.enabled, ctx.telegram_id)
+    return web.json_response({"ok": True, "enabled": payload.enabled})
+

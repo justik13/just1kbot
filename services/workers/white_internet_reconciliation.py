@@ -37,7 +37,7 @@ RECONCILIATION_INTERVAL_SECONDS = 15.0
 BATCH_SIZE = 50
 
 
-DEFAULT_RECONCILIATION_CONCURRENCY = 10
+DEFAULT_RECONCILIATION_CONCURRENCY = 5
 
 
 class WhiteInternetReconciliationWorker:
@@ -146,22 +146,6 @@ class WhiteInternetReconciliationWorker:
         notify_user_id: int | None = None
         async with self._get_sub_lock(sub_id):
             async with self._semaphore:
-                lock_conn = None
-                async with sf() as _probe_session:
-                    bind = getattr(_probe_session, "bind", None)
-                    if not bind and hasattr(_probe_session, "sync_session"):
-                        bind = getattr(_probe_session.sync_session, "bind", None)
-                    if bind and getattr(bind, "dialect", None) and getattr(bind.dialect, "name", None) == "postgresql":
-                        if hasattr(bind, "connect"):
-                            lock_conn = await bind.connect()
-                            locked = bool(await lock_conn.scalar(
-                                select(func.pg_try_advisory_lock(sub_id + 7_000_000_000))
-                            ))
-                            if not locked:
-                                await lock_conn.close()
-                                logger.debug("Subscription %d locked by peer worker process. Skipping.", sub_id)
-                                return False
-
                 try:
                     # 1. External network mutation on Xray node (no ORM session held during HTTP I/O)
                     resp = await self.client.sync_client(
@@ -328,23 +312,6 @@ class WhiteInternetReconciliationWorker:
                             await lock_session.commit()
                             return False
                 finally:
-                    if lock_conn is not None:
-                        async def _do_unlock():
-                            try:
-                                await lock_conn.scalar(select(func.pg_advisory_unlock(sub_id + 7_000_000_000)))
-                            except Exception as exc:
-                                logger.debug("Error releasing advisory lock for sub_id %d: %s", sub_id, exc)
-                            finally:
-                                try:
-                                    await lock_conn.close()
-                                except Exception:
-                                    pass
-
-                        try:
-                            await asyncio.shield(_do_unlock())
-                        except BaseException as exc:
-                            logger.debug("Shielded advisory unlock for sub_id %d completed or interrupted: %s", sub_id, exc)
-
                     if notify_user_id is not None:
                         try:
                             async with sf() as notify_session:

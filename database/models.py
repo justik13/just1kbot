@@ -112,9 +112,6 @@ class User(Base):
     subscription_end: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    last_trial_reset_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
     device_limit: Mapped[int] = mapped_column(Integer, default=0)
     standard_downgrade_cooldown_until: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -208,12 +205,20 @@ class Server(Base):
             sql_enum_in("lifecycle_status", ServerLifecycleStatus),
             name="ck_servers_lifecycle_status",
         ),
+        CheckConstraint(
+            "role IN ('ru_hub', 'eu_hub', 'exit_node')",
+            name="ck_servers_role",
+        ),
         Index("ix_servers_lifecycle_status", "lifecycle_status"),
+        Index("ix_servers_role", "role"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="ru_hub", server_default="ru_hub"
+    )
     country_flag: Mapped[str | None] = mapped_column(String(10), nullable=True)
 
     api_url: Mapped[str] = mapped_column(String(500), nullable=False)
@@ -739,27 +744,6 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
-DEFAULT_MAINTENANCE_MESSAGE = (
-    "🛠 Бот находится на техническом обслуживании. Пожалуйста, попробуйте позже."
-)
-
-
-class MaintenanceMode(Base):
-    __tablename__ = "maintenance_mode"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
-
-    is_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    message: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-    updated_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=now_utc,
-        onupdate=now_utc,
-    )
-
-
 class SystemSetting(Base):
     __tablename__ = "system_settings"
 
@@ -824,7 +808,7 @@ class WhiteInternetSubscription(Base):
         nullable=False,
         index=True,
     )
-    origin_node_id: Mapped[int | None] = mapped_column(
+    hub_server_id: Mapped[int | None] = mapped_column(
         Integer,
         ForeignKey("servers.id", ondelete="SET NULL"),
         nullable=True,
@@ -957,7 +941,23 @@ class WhiteInternetSubscription(Base):
     )
 
     user = relationship("User", foreign_keys=[user_id])
-    origin_node = relationship("Server", foreign_keys=[origin_node_id])
+    hub_server = relationship("Server", foreign_keys=[hub_server_id])
+
+    @property
+    def origin_node_id(self) -> int | None:
+        return self.hub_server_id
+
+    @origin_node_id.setter
+    def origin_node_id(self, val: int | None) -> None:
+        self.hub_server_id = val
+
+    @property
+    def origin_node(self):
+        return self.hub_server
+
+    @origin_node.setter
+    def origin_node(self, val):
+        self.hub_server = val
 
 
 class WhiteInternetOrphanCleanup(Base):
@@ -1032,6 +1032,19 @@ class VlessSubscription(Base):
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=text("true")
     )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    device_limit: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=2, server_default=text("2")
+    )
+    auto_renew_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    notified_expired: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    notified_before_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     version: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default=text("1")
     )

@@ -227,3 +227,8 @@ class MassExtendPayload(BaseModel):
     @classmethod
     def check_audience(cls, value: str) -> str:
         return _validate_audience(value)
+
+
+class PaymentsMaintenancePayload(BaseModel):
+    enabled: bool
+
