@@ -24,6 +24,7 @@ from sqlalchemy.orm import (
     Mapped,
     mapped_column,
     relationship,
+    synonym,
 )
 
 from config.constants import VLESS_PROTOCOL
@@ -943,21 +944,8 @@ class WhiteInternetSubscription(Base):
     user = relationship("User", foreign_keys=[user_id])
     hub_server = relationship("Server", foreign_keys=[hub_server_id])
 
-    @property
-    def origin_node_id(self) -> int | None:
-        return self.hub_server_id
-
-    @origin_node_id.setter
-    def origin_node_id(self, val: int | None) -> None:
-        self.hub_server_id = val
-
-    @property
-    def origin_node(self):
-        return self.hub_server
-
-    @origin_node.setter
-    def origin_node(self, val):
-        self.hub_server = val
+    origin_node_id = synonym("hub_server_id")
+    origin_node = synonym("hub_server")
 
 
 class WhiteInternetOrphanCleanup(Base):

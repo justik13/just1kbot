@@ -14,7 +14,7 @@ Safety:
     enabled, or with an explicit `--force` EMERGENCY override (not a normal
     mode - it permits live writers during rotation). Stopping the bot
     container alone does NOT satisfy the guard — the check reads the
-    MaintenanceMode row. Typical flow: stop bot → enable maintenance →
+    payments_maintenance_enabled setting. Typical flow: stop bot → enable maintenance →
     rotate → verify → disable maintenance → start bot. Interactive
     confirmation is required unless `--yes` is passed. The maintenance state
     is sampled once at startup; the operator must keep the environment

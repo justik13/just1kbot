@@ -443,7 +443,7 @@ class WhiteInternetReconciliationWorker:
                 stmt_subs = (
                     select(WhiteInternetSubscription)
                     .where(
-                        WhiteInternetSubscription.origin_node_id == server_id,
+                        WhiteInternetSubscription.hub_server_id == server_id,
                         or_(
                             WhiteInternetSubscription.actual_version
                             != WhiteInternetSubscription.desired_version,
@@ -567,7 +567,7 @@ class WhiteInternetReconciliationWorker:
                     reassigned_sub = await sess.scalar(
                         select(WhiteInternetSubscription.id).where(
                             WhiteInternetSubscription.uuid == row.client_uuid,
-                            WhiteInternetSubscription.origin_node_id == row.server_id,
+                            WhiteInternetSubscription.hub_server_id == row.server_id,
                             WhiteInternetSubscription.status.in_([
                                 WhiteInternetStatus.ACTIVE,
                                 WhiteInternetStatus.PENDING,
@@ -707,7 +707,7 @@ class WhiteInternetReconciliationWorker:
                 stmt = (
                     select(WhiteInternetSubscription.id)
                     .where(
-                        WhiteInternetSubscription.origin_node_id.is_(None),
+                        WhiteInternetSubscription.hub_server_id.is_(None),
                         WhiteInternetSubscription.status.in_([
                             WhiteInternetStatus.PENDING,
                             WhiteInternetStatus.ACTIVE,
@@ -729,7 +729,7 @@ class WhiteInternetReconciliationWorker:
                     async with sf() as sess:
                         try:
                             sub = await sess.get(WhiteInternetSubscription, sub_id, with_for_update=True)
-                            if sub is None or sub.origin_node_id is not None:
+                            if sub is None or sub.hub_server_id is not None:
                                 continue
                             if sub.status not in (
                                 WhiteInternetStatus.PENDING,
@@ -752,7 +752,7 @@ class WhiteInternetReconciliationWorker:
                                         asyncio.create_task(self._send_origin_exhausted_alert(sub_id))
                                 break
 
-                            sub.origin_node_id = origin.id
+                            sub.hub_server_id = origin.id
                             sub.desired_version += 1
                             sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
                             sub.last_reconciled_node_epoch = None
