@@ -983,7 +983,7 @@ async def serve_unified_subscription_feed(
                     )
                 )
                 if is_wi_node_ready and wi_server is not None:
-                    cdn_label_mode = str(await get_system_setting(session, "bi_cdn_label_mode", "badge") or "badge")
+                    cdn_label_mode = str(await get_system_setting(session, "bi_cdn_label_mode", "name") or "name")
                     cdn_yandex_label = str(await get_system_setting(session, "bi_cdn_yandex_label", "Yandex") or "Yandex")
                     cdn_turboflare_label = str(await get_system_setting(session, "bi_cdn_turboflare_label", "Turboflare") or "Turboflare")
                     wi_links = VlessSubscriptionService.generate_bi_xhttp_links(
@@ -1113,14 +1113,16 @@ async def serve_unified_subscription_feed(
             response_headers["subscriptions-sort-type"] = happ_sort_map.get(sort_order, "without")
             _apply_happ_headers(response_headers, ui_settings, bot_username=bot_username, expire_ts=expire_ts)
 
-        sanitized_support = _sanitize_header_url(support_url)
+        sanitized_support = _sanitize_header_url(str(ui_settings.get("support_url") or ""), fallback=support_url)
         sanitized_channel = _sanitize_header_url(channel_url)
+        sanitized_web_page = _sanitize_header_url(str(ui_settings.get("web_page_url") or ""), fallback=sanitized_channel)
         sanitized_announce = _sanitize_header_url(clean_announce_url, fallback=sanitized_channel)
 
         if sanitized_support:
             response_headers["Support-Url"] = sanitized_support
+        if sanitized_web_page:
+            response_headers["Profile-Web-Page-Url"] = sanitized_web_page
         if sanitized_channel:
-            response_headers["Profile-Web-Page-Url"] = sanitized_channel
             response_headers["Channel-Url"] = sanitized_channel
 
         raw_announce = await get_system_setting(session, "vless_announce", None)

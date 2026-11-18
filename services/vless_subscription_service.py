@@ -227,7 +227,7 @@ class VlessSubscriptionService:
         exit_nodes: list[Server] | None = None,
         *,
         client_uuid: str | None = None,
-        cdn_label_mode: str = "badge",
+        cdn_label_mode: str = "name",
         cdn_yandex_label: str = "Yandex",
         cdn_turboflare_label: str = "Turboflare",
     ) -> list[str]:

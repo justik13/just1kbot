@@ -377,7 +377,7 @@ async def api_admin_incy_get_handler(request: web.Request) -> web.Response:
         per_app_raw = await get_system_setting(session, "vless_per_app_proxy_enabled", "false")
         per_app_mode = await get_system_setting(session, "vless_per_app_proxy_mode", "bypass")
         per_app_list = await get_system_setting(session, "vless_per_app_proxy_list", "")
-        cdn_label_mode = await get_system_setting(session, "bi_cdn_label_mode", "badge")
+        cdn_label_mode = await get_system_setting(session, "bi_cdn_label_mode", "name")
         cdn_yandex_label = await get_system_setting(session, "bi_cdn_yandex_label", "Yandex")
         cdn_turboflare_label = await get_system_setting(session, "bi_cdn_turboflare_label", "Turboflare")
         happ_provider_id = await get_system_setting(session, "happ_provider_id", "")
@@ -418,7 +418,7 @@ async def api_admin_incy_get_handler(request: web.Request) -> web.Response:
                 "per_app_proxy_enabled": _as_bool_setting(per_app_raw, False),
                 "per_app_proxy_mode": str(per_app_mode or "bypass"),
                 "per_app_proxy_list": str(per_app_list or ""),
-                "cdn_label_mode": str(cdn_label_mode or "badge"),
+                "cdn_label_mode": str(cdn_label_mode or "name"),
                 "cdn_yandex_label": str(cdn_yandex_label or "Yandex"),
                 "cdn_turboflare_label": str(cdn_turboflare_label or "Turboflare"),
                 "happ_provider_id": str(happ_provider_id or ""),
@@ -464,7 +464,7 @@ async def api_admin_incy_put_handler(request: web.Request) -> web.Response:
             ("dns_resolve_ip", "vless_dns_resolve_ip", ""),
             ("per_app_proxy_mode", "vless_per_app_proxy_mode", "bypass"),
             ("per_app_proxy_list", "vless_per_app_proxy_list", ""),
-            ("cdn_label_mode", "bi_cdn_label_mode", "badge"),
+            ("cdn_label_mode", "bi_cdn_label_mode", "name"),
             ("cdn_yandex_label", "bi_cdn_yandex_label", "Yandex"),
             ("cdn_turboflare_label", "bi_cdn_turboflare_label", "Turboflare"),
             ("happ_provider_id", "happ_provider_id", ""),

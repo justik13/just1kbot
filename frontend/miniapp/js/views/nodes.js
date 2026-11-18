@@ -191,8 +191,8 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                 <div class="field">
                     <label>Подпись CDN по умолчанию</label>
                     <select name="cdn_label_mode" class="input">
-                        <option value="badge" ${(current.cdn_label_mode || "badge") === "badge" ? "selected" : ""}>В описании / бейдже</option>
-                        <option value="name" ${current.cdn_label_mode === "name" ? "selected" : ""}>В названии (🇩🇪 Германия Yandex)</option>
+                        <option value="badge" ${current.cdn_label_mode === "badge" ? "selected" : ""}>В описании / бейдже</option>
+                        <option value="name" ${(current.cdn_label_mode || "name") === "name" ? "selected" : ""}>В названии (🇩🇪 Германия Yandex)</option>
                         <option value="none" ${current.cdn_label_mode === "none" ? "selected" : ""}>Не показывать CDN</option>
                     </select>
                 </div>
@@ -373,7 +373,7 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                 no_limit_mode: String(fd.get("no_limit_mode") || "all"),
                 hide_url: Boolean(fd.get("hide_url")),
                 hide_check: Boolean(fd.get("hide_check")),
-                cdn_label_mode: String(fd.get("cdn_label_mode") || "badge"),
+                cdn_label_mode: String(fd.get("cdn_label_mode") || "name"),
                 cdn_yandex_label: String(fd.get("cdn_yandex_label") || "").trim(),
                 cdn_turboflare_label: String(fd.get("cdn_turboflare_label") || "").trim(),
                 fragmentation_enabled: Boolean(fd.get("fragmentation_enabled")),
