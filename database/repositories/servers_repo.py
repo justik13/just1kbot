@@ -178,6 +178,13 @@ def merge_v2_extra_data(
         if val is not None:
             merged[key] = val
 
+    raw_loc_code = _pick("location_code")
+    if isinstance(raw_loc_code, str) and raw_loc_code.strip():
+        import re
+        clean_loc = re.sub(r"[^a-z0-9_-]+", "", raw_loc_code.strip().lower())[:32]
+        if clean_loc:
+            merged["location_code"] = clean_loc
+
     cdn_domains = merged.get("cdn_domains")
     if isinstance(cdn_domains, dict):
         tf_dom = cdn_domains.get("cdn_turboflare")

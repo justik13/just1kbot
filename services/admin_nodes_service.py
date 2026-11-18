@@ -182,6 +182,8 @@ def serialize_server_node(
     in_standard = True if raw_in_std is None else bool(raw_in_std)
     in_white_internet = bool(extra.get("in_white_internet", False))
     location_code = str(extra.get("location_code") or "").strip().lower()
+    if role == "exit_node" and not location_code:
+        location_code = f"exit{server.id}"
     std_sni = str(extra.get("std_sni") or "").strip().lower()
 
     return {
@@ -201,6 +203,12 @@ def serialize_server_node(
         "in_white_internet": in_white_internet,
         "location_code": location_code,
         "std_sni": std_sni,
+        "vless_name": str(extra.get("vless_name") or "").strip(),
+        "server_description": str(extra.get("server_description") or "").strip(),
+        "wi_yandex_name": str(extra.get("wi_yandex_name") or "").strip(),
+        "wi_yandex_badge": str(extra.get("wi_yandex_badge") or "").strip(),
+        "wi_turboflare_name": str(extra.get("wi_turboflare_name") or "").strip(),
+        "wi_turboflare_badge": str(extra.get("wi_turboflare_badge") or "").strip(),
         "domain": extra.get("domain") or "",
         "cdn_domain": extra.get("cdn_domain") or "",
         "cdn_domains": extra.get("cdn_domains") if isinstance(extra.get("cdn_domains"), dict) else {},
@@ -319,6 +327,11 @@ async def discover_and_add_node(
     server.health_state = ServerHealthState.MANUAL_DISABLED
     server.disabled_reason = "manual"
     server.disabled_at = now_utc()
+    if role == "exit_node" and not str(extra.get("location_code") or "").strip():
+        extra["location_code"] = f"exit{server.id}"
+        server.extra_data = dict(extra)
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(server, "extra_data")
     if isinstance(health_data, dict) and health_data.get("status") == "ok":
         server.last_successful_check = now_utc()
         if health_data.get("node_epoch"):
@@ -373,6 +386,8 @@ async def refresh_node(
     caps = derive_v2_capabilities(status_data, health_data)
     extra = merge_v2_extra_data(extra_cur, status_data, health_data)
     role = extra.get("role")
+    if role == "exit_node" and not str(extra.get("location_code") or "").strip():
+        extra["location_code"] = f"exit{server.id}"
 
     updates: dict[str, Any] = {
         "capabilities": caps or list(server.capabilities or []),
@@ -408,8 +423,13 @@ async def update_node_settings(
     api_key: str | None = None,
     in_standard: bool | None = None,
     in_white_internet: bool | None = None,
-    location_code: str | None = None,
     std_sni: str | None = None,
+    vless_name: str | None = None,
+    server_description: str | None = None,
+    wi_yandex_name: str | None = None,
+    wi_yandex_badge: str | None = None,
+    wi_turboflare_name: str | None = None,
+    wi_turboflare_badge: str | None = None,
 ) -> dict[str, Any]:
     """Update admin-editable node metadata and credentials."""
     server = await get_server_by_id(session, server_id, for_update=True)
@@ -442,18 +462,23 @@ async def update_node_settings(
             raise AdminNodeServiceError("api_key cannot be empty", status_code=400)
         updates["api_key"] = clean_key
 
-    if any(v is not None for v in (in_standard, in_white_internet, location_code, std_sni)):
+    extra_fields = (
+        in_standard,
+        in_white_internet,
+        std_sni,
+        vless_name,
+        server_description,
+        wi_yandex_name,
+        wi_yandex_badge,
+        wi_turboflare_name,
+        wi_turboflare_badge,
+    )
+    if any(v is not None for v in extra_fields):
         extra = dict(server.extra_data) if isinstance(server.extra_data, dict) else {}
         if in_standard is not None:
             extra["in_standard"] = bool(in_standard)
         if in_white_internet is not None:
             extra["in_white_internet"] = bool(in_white_internet)
-        if location_code is not None:
-            clean_loc = location_code.strip().lower()[:32]
-            if clean_loc:
-                extra["location_code"] = clean_loc
-            else:
-                extra.pop("location_code", None)
         if std_sni is not None:
             clean_sni = std_sni.strip().lower()
             if clean_sni:
@@ -463,6 +488,20 @@ async def update_node_settings(
                 extra["std_sni"] = norm_sni
             else:
                 extra.pop("std_sni", None)
+        for key, raw_val, max_len in (
+            ("vless_name", vless_name, 120),
+            ("server_description", server_description, 30),
+            ("wi_yandex_name", wi_yandex_name, 120),
+            ("wi_yandex_badge", wi_yandex_badge, 30),
+            ("wi_turboflare_name", wi_turboflare_name, 120),
+            ("wi_turboflare_badge", wi_turboflare_badge, 30),
+        ):
+            if raw_val is not None:
+                clean_val = raw_val.strip()[:max_len]
+                if clean_val:
+                    extra[key] = clean_val
+                else:
+                    extra.pop(key, None)
         updates["extra_data"] = extra
 
     if not updates:
@@ -470,7 +509,7 @@ async def update_node_settings(
         return serialize_server_node(server, wi_subscriptions_count=wi_counts.get(server.id, 0))
 
     updated = await update_server(session, server, **updates)
-    if any(v is not None for v in (in_standard, in_white_internet, location_code, std_sni)):
+    if any(v is not None for v in (in_standard, in_white_internet, std_sni)):
         from services.topology_sync_service import sync_v2_topology_to_nodes
         await sync_v2_topology_to_nodes(session)
     await AuditService.log_action(

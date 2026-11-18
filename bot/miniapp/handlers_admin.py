@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import timedelta
 from decimal import Decimal
 from typing import TypeVar
@@ -265,8 +266,13 @@ async def api_admin_nodes_patch_handler(request: web.Request) -> web.Response:
                 api_key=payload.api_key,
                 in_standard=payload.in_standard,
                 in_white_internet=payload.in_white_internet,
-                location_code=payload.location_code,
                 std_sni=payload.std_sni,
+                vless_name=payload.vless_name,
+                server_description=payload.server_description,
+                wi_yandex_name=payload.wi_yandex_name,
+                wi_yandex_badge=payload.wi_yandex_badge,
+                wi_turboflare_name=payload.wi_turboflare_name,
+                wi_turboflare_badge=payload.wi_turboflare_badge,
             )
             return web.json_response({"ok": True, "node": node})
     except AdminNodeServiceError as exc:
@@ -341,6 +347,10 @@ async def api_admin_incy_get_handler(request: web.Request) -> web.Response:
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
+    default_interval = os.getenv("VLESS_PROFILE_UPDATE_INTERVAL", "6").strip()
+    if not (default_interval.isdigit() and int(default_interval) > 0):
+        default_interval = "6"
+
     async with session_scope() as session:
         profile_title = await get_system_setting(
             session,
@@ -350,11 +360,39 @@ async def api_admin_incy_get_handler(request: web.Request) -> web.Response:
         announce = await get_system_setting(session, "vless_announce", "")
         announce_url = await get_system_setting(session, "vless_announce_url", "")
         show_devices_raw = await get_system_setting(session, "vless_profile_show_devices", "false")
+        interval_raw = await get_system_setting(session, "vless_profile_update_interval", default_interval)
+        support_url = await get_system_setting(session, "vless_support_url", "")
+        web_page_url = await get_system_setting(session, "vless_web_page_url", "")
+        sort_order = await get_system_setting(session, "vless_sort_order", "none")
+        hide_url_raw = await get_system_setting(session, "vless_hide_url", "true")
+        hide_check_raw = await get_system_setting(session, "vless_hide_check", "false")
         frag_raw = await get_system_setting(session, "vless_fragmentation_enabled", "true")
+        frag_packets = await get_system_setting(session, "vless_fragmentation_packets", "tlshello")
+        frag_length = await get_system_setting(session, "vless_fragmentation_length", "10-30")
+        frag_interval = await get_system_setting(session, "vless_fragmentation_interval", "10-30")
+        no_limit_mode = await get_system_setting(session, "vless_no_limit_mode", "all")
+        dns_resolve_raw = await get_system_setting(session, "vless_dns_resolve_enabled", "false")
+        dns_resolve_domain = await get_system_setting(session, "vless_dns_resolve_domain", "")
+        dns_resolve_ip = await get_system_setting(session, "vless_dns_resolve_ip", "")
+        per_app_raw = await get_system_setting(session, "vless_per_app_proxy_enabled", "false")
+        per_app_mode = await get_system_setting(session, "vless_per_app_proxy_mode", "bypass")
+        per_app_list = await get_system_setting(session, "vless_per_app_proxy_list", "")
         cdn_label_mode = await get_system_setting(session, "bi_cdn_label_mode", "badge")
         cdn_yandex_label = await get_system_setting(session, "bi_cdn_yandex_label", "Yandex")
         cdn_turboflare_label = await get_system_setting(session, "bi_cdn_turboflare_label", "Turboflare")
+        happ_provider_id = await get_system_setting(session, "happ_provider_id", "")
+        happ_sub_expire_raw = await get_system_setting(session, "happ_sub_expire", "true")
+        happ_sub_expire_button_link = await get_system_setting(session, "happ_sub_expire_button_link", "")
+        happ_fallback_url = await get_system_setting(session, "happ_fallback_url", "")
+        happ_hide_settings_raw = await get_system_setting(session, "happ_hide_settings", "false")
+        happ_always_hwid_raw = await get_system_setting(session, "happ_always_hwid_enable", "false")
+        happ_collapse_raw = await get_system_setting(session, "happ_subscriptions_collapse", "false")
+        happ_sub_info_text = await get_system_setting(session, "happ_sub_info_text", "")
+        happ_sub_info_color = await get_system_setting(session, "happ_sub_info_color", "")
+        happ_sub_info_button_text = await get_system_setting(session, "happ_sub_info_button_text", "")
+        happ_sub_info_button_link = await get_system_setting(session, "happ_sub_info_button_link", "")
 
+    interval_val = int(interval_raw) if str(interval_raw or "").strip().isdigit() else int(default_interval)
     return web.json_response(
         {
             "ok": True,
@@ -363,10 +401,37 @@ async def api_admin_incy_get_handler(request: web.Request) -> web.Response:
                 "announce": str(announce or ""),
                 "announce_url": str(announce_url or ""),
                 "profile_show_devices": _as_bool_setting(show_devices_raw, False),
+                "profile_update_interval": max(1, min(720, interval_val)),
+                "support_url": str(support_url or ""),
+                "web_page_url": str(web_page_url or ""),
+                "sort_order": str(sort_order or "none"),
+                "hide_url": _as_bool_setting(hide_url_raw, True),
+                "hide_check": _as_bool_setting(hide_check_raw, False),
                 "fragmentation_enabled": _as_bool_setting(frag_raw, True),
+                "fragmentation_packets": str(frag_packets or "tlshello"),
+                "fragmentation_length": str(frag_length or "10-30"),
+                "fragmentation_interval": str(frag_interval or "10-30"),
+                "no_limit_mode": str(no_limit_mode or "all"),
+                "dns_resolve_enabled": _as_bool_setting(dns_resolve_raw, False),
+                "dns_resolve_domain": str(dns_resolve_domain or ""),
+                "dns_resolve_ip": str(dns_resolve_ip or ""),
+                "per_app_proxy_enabled": _as_bool_setting(per_app_raw, False),
+                "per_app_proxy_mode": str(per_app_mode or "bypass"),
+                "per_app_proxy_list": str(per_app_list or ""),
                 "cdn_label_mode": str(cdn_label_mode or "badge"),
                 "cdn_yandex_label": str(cdn_yandex_label or "Yandex"),
                 "cdn_turboflare_label": str(cdn_turboflare_label or "Turboflare"),
+                "happ_provider_id": str(happ_provider_id or ""),
+                "happ_sub_expire": _as_bool_setting(happ_sub_expire_raw, True),
+                "happ_sub_expire_button_link": str(happ_sub_expire_button_link or ""),
+                "happ_fallback_url": str(happ_fallback_url or ""),
+                "happ_hide_settings": _as_bool_setting(happ_hide_settings_raw, False),
+                "happ_always_hwid_enable": _as_bool_setting(happ_always_hwid_raw, False),
+                "happ_subscriptions_collapse": _as_bool_setting(happ_collapse_raw, False),
+                "happ_sub_info_text": str(happ_sub_info_text or ""),
+                "happ_sub_info_color": str(happ_sub_info_color or ""),
+                "happ_sub_info_button_text": str(happ_sub_info_button_text or ""),
+                "happ_sub_info_button_link": str(happ_sub_info_button_link or ""),
             },
         }
     )
@@ -383,52 +448,73 @@ async def api_admin_incy_put_handler(request: web.Request) -> web.Response:
 
     async with session_scope() as session:
         changed: dict[str, object] = {}
-        if payload.profile_title is not None:
-            clean_title = payload.profile_title.strip()
+
+        str_fields = (
+            ("profile_title", "vless_profile_title", constants.DEFAULT_VLESS_PROFILE_TITLE),
+            ("announce", "vless_announce", ""),
+            ("announce_url", "vless_announce_url", ""),
+            ("support_url", "vless_support_url", ""),
+            ("web_page_url", "vless_web_page_url", ""),
+            ("sort_order", "vless_sort_order", "none"),
+            ("fragmentation_packets", "vless_fragmentation_packets", "tlshello"),
+            ("fragmentation_length", "vless_fragmentation_length", "10-30"),
+            ("fragmentation_interval", "vless_fragmentation_interval", "10-30"),
+            ("no_limit_mode", "vless_no_limit_mode", "all"),
+            ("dns_resolve_domain", "vless_dns_resolve_domain", ""),
+            ("dns_resolve_ip", "vless_dns_resolve_ip", ""),
+            ("per_app_proxy_mode", "vless_per_app_proxy_mode", "bypass"),
+            ("per_app_proxy_list", "vless_per_app_proxy_list", ""),
+            ("cdn_label_mode", "bi_cdn_label_mode", "badge"),
+            ("cdn_yandex_label", "bi_cdn_yandex_label", "Yandex"),
+            ("cdn_turboflare_label", "bi_cdn_turboflare_label", "Turboflare"),
+            ("happ_provider_id", "happ_provider_id", ""),
+            ("happ_sub_expire_button_link", "happ_sub_expire_button_link", ""),
+            ("happ_fallback_url", "happ_fallback_url", ""),
+            ("happ_sub_info_text", "happ_sub_info_text", ""),
+            ("happ_sub_info_color", "happ_sub_info_color", ""),
+            ("happ_sub_info_button_text", "happ_sub_info_button_text", ""),
+            ("happ_sub_info_button_link", "happ_sub_info_button_link", ""),
+        )
+        for field_name, setting_key, default_val in str_fields:
+            raw_val = getattr(payload, field_name)
+            if raw_val is not None:
+                clean_val = str(raw_val).strip()
+                await set_system_setting(
+                    session,
+                    setting_key,
+                    clean_val or None,
+                    updated_by=ctx.telegram_id,
+                )
+                changed[field_name] = clean_val or default_val
+
+        if payload.profile_update_interval is not None:
+            interval_str = str(int(payload.profile_update_interval))
             await set_system_setting(
                 session,
-                "vless_profile_title",
-                clean_title or None,
+                "vless_profile_update_interval",
+                interval_str,
                 updated_by=ctx.telegram_id,
             )
-            changed["profile_title"] = clean_title or constants.DEFAULT_VLESS_PROFILE_TITLE
-        if payload.announce is not None:
-            clean_ann = payload.announce.strip()
-            await set_system_setting(
-                session,
-                "vless_announce",
-                clean_ann or None,
-                updated_by=ctx.telegram_id,
-            )
-            changed["announce"] = clean_ann
-        if payload.announce_url is not None:
-            clean_ann_url = payload.announce_url.strip()
-            await set_system_setting(
-                session,
-                "vless_announce_url",
-                clean_ann_url or None,
-                updated_by=ctx.telegram_id,
-            )
-            changed["announce_url"] = clean_ann_url
-        if payload.profile_show_devices is not None:
-            val = "true" if payload.profile_show_devices else "false"
-            await set_system_setting(session, "vless_profile_show_devices", val, updated_by=ctx.telegram_id)
-            changed["profile_show_devices"] = payload.profile_show_devices
-        if payload.fragmentation_enabled is not None:
-            val = "true" if payload.fragmentation_enabled else "false"
-            await set_system_setting(session, "vless_fragmentation_enabled", val, updated_by=ctx.telegram_id)
-            changed["fragmentation_enabled"] = payload.fragmentation_enabled
-        if payload.cdn_label_mode is not None:
-            await set_system_setting(session, "bi_cdn_label_mode", payload.cdn_label_mode, updated_by=ctx.telegram_id)
-            changed["cdn_label_mode"] = payload.cdn_label_mode
-        if payload.cdn_yandex_label is not None:
-            clean_yd = payload.cdn_yandex_label.strip()
-            await set_system_setting(session, "bi_cdn_yandex_label", clean_yd or None, updated_by=ctx.telegram_id)
-            changed["cdn_yandex_label"] = clean_yd or "Yandex"
-        if payload.cdn_turboflare_label is not None:
-            clean_tf = payload.cdn_turboflare_label.strip()
-            await set_system_setting(session, "bi_cdn_turboflare_label", clean_tf or None, updated_by=ctx.telegram_id)
-            changed["cdn_turboflare_label"] = clean_tf or "Turboflare"
+            changed["profile_update_interval"] = int(payload.profile_update_interval)
+
+        bool_fields = (
+            ("profile_show_devices", "vless_profile_show_devices"),
+            ("hide_url", "vless_hide_url"),
+            ("hide_check", "vless_hide_check"),
+            ("fragmentation_enabled", "vless_fragmentation_enabled"),
+            ("dns_resolve_enabled", "vless_dns_resolve_enabled"),
+            ("per_app_proxy_enabled", "vless_per_app_proxy_enabled"),
+            ("happ_sub_expire", "happ_sub_expire"),
+            ("happ_hide_settings", "happ_hide_settings"),
+            ("happ_always_hwid_enable", "happ_always_hwid_enable"),
+            ("happ_subscriptions_collapse", "happ_subscriptions_collapse"),
+        )
+        for field_name, setting_key in bool_fields:
+            raw_bool = getattr(payload, field_name)
+            if raw_bool is not None:
+                val = "true" if raw_bool else "false"
+                await set_system_setting(session, setting_key, val, updated_by=ctx.telegram_id)
+                changed[field_name] = bool(raw_bool)
 
         if changed:
             await AuditService.log_action(

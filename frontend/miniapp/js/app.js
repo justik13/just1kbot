@@ -174,7 +174,7 @@ function _renderAdminView() {
             _renderAdminView();
         });
     } else if (appState.adminTab === "subscription") {
-        renderSubscriptionSettingsView(body);
+        renderSubscriptionSettingsView(body, appState, _reloadNodesAndRender);
     } else if (appState.adminTab === "users") {
         renderAdminUsersView(body, appState);
     } else if (appState.adminTab === "broadcasts") {

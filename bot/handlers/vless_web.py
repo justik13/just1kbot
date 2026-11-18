@@ -160,6 +160,145 @@ def _sanitize_header_url(url: str | None, fallback: str = "") -> str:
     return ""
 
 
+def _sanitize_ascii_header(val: str | None, fallback: str = "", *, max_len: int = 256) -> str:
+    """Sanitize plain header value to safe printable ASCII without CR/LF."""
+    for candidate in (val, fallback):
+        if candidate and isinstance(candidate, str):
+            clean = candidate.strip().replace("\r", " ").replace("\n", " ")[:max_len]
+            if clean and clean.isascii() and all(32 <= ord(c) < 127 for c in clean):
+                return clean
+    return ""
+
+
+def _normalize_per_app_proxy_list(raw: str | None) -> str:
+    """Normalize newline/whitespace/comma-separated app entries into a clean CSV string."""
+    if not raw or not isinstance(raw, str):
+        return ""
+    items = [item for item in re.split(r"[\s,]+", raw.strip()) if item]
+    return ",".join(items)
+
+
+def _as_bool_setting(val: object, default: bool = False) -> bool:
+    if val is None:
+        return default
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, str):
+        return val.strip().lower() in ("1", "true", "yes", "on")
+    return bool(val)
+
+
+async def _load_subscription_ui_settings(session) -> dict[str, object]:
+    """Load global INCY & Happ subscription customization settings from SystemSetting."""
+    default_interval = _get_vless_update_interval()
+    interval_raw = await get_system_setting(session, "vless_profile_update_interval", default_interval)
+    interval_val = str(interval_raw).strip() if interval_raw is not None else default_interval
+    if not (interval_val.isdigit() and 1 <= int(interval_val) <= 720):
+        interval_val = default_interval
+
+    sort_order = str(await get_system_setting(session, "vless_sort_order", "none") or "none").strip().lower()
+    if sort_order not in {"none", "ping", "name"}:
+        sort_order = "none"
+
+    no_limit_mode = str(await get_system_setting(session, "vless_no_limit_mode", "all") or "all").strip().lower()
+    if no_limit_mode not in {"off", "all", "xhttp"}:
+        no_limit_mode = "all"
+
+    per_app_mode = str(await get_system_setting(session, "vless_per_app_proxy_mode", "bypass") or "bypass").strip().lower()
+    if per_app_mode not in {"bypass", "proxy"}:
+        per_app_mode = "bypass"
+
+    return {
+        "profile_update_interval": interval_val,
+        "support_url": str(await get_system_setting(session, "vless_support_url", "") or "").strip(),
+        "web_page_url": str(await get_system_setting(session, "vless_web_page_url", "") or "").strip(),
+        "sort_order": sort_order,
+        "hide_url": _as_bool_setting(await get_system_setting(session, "vless_hide_url", "true"), True),
+        "hide_check": _as_bool_setting(await get_system_setting(session, "vless_hide_check", "false"), False),
+        "fragmentation_enabled": _as_bool_setting(await get_system_setting(session, "vless_fragmentation_enabled", "true"), True),
+        "fragmentation_packets": str(await get_system_setting(session, "vless_fragmentation_packets", "tlshello") or "tlshello").strip(),
+        "fragmentation_length": str(await get_system_setting(session, "vless_fragmentation_length", "10-30") or "10-30").strip(),
+        "fragmentation_interval": str(await get_system_setting(session, "vless_fragmentation_interval", "10-30") or "10-30").strip(),
+        "no_limit_mode": no_limit_mode,
+        "dns_resolve_enabled": _as_bool_setting(await get_system_setting(session, "vless_dns_resolve_enabled", "false"), False),
+        "dns_resolve_domain": str(await get_system_setting(session, "vless_dns_resolve_domain", "") or "").strip(),
+        "dns_resolve_ip": str(await get_system_setting(session, "vless_dns_resolve_ip", "") or "").strip(),
+        "per_app_proxy_enabled": _as_bool_setting(await get_system_setting(session, "vless_per_app_proxy_enabled", "false"), False),
+        "per_app_proxy_mode": per_app_mode,
+        "per_app_proxy_list": str(await get_system_setting(session, "vless_per_app_proxy_list", "") or "").strip(),
+        "happ_provider_id": str(await get_system_setting(session, "happ_provider_id", "") or "").strip(),
+        "happ_sub_expire": _as_bool_setting(await get_system_setting(session, "happ_sub_expire", "true"), True),
+        "happ_sub_expire_button_link": str(await get_system_setting(session, "happ_sub_expire_button_link", "") or "").strip(),
+        "happ_fallback_url": str(await get_system_setting(session, "happ_fallback_url", "") or "").strip(),
+        "happ_hide_settings": _as_bool_setting(await get_system_setting(session, "happ_hide_settings", "false"), False),
+        "happ_always_hwid_enable": _as_bool_setting(await get_system_setting(session, "happ_always_hwid_enable", "false"), False),
+        "happ_subscriptions_collapse": _as_bool_setting(await get_system_setting(session, "happ_subscriptions_collapse", "false"), False),
+        "happ_sub_info_text": str(await get_system_setting(session, "happ_sub_info_text", "") or "").strip(),
+        "happ_sub_info_color": str(await get_system_setting(session, "happ_sub_info_color", "") or "").strip(),
+        "happ_sub_info_button_text": str(await get_system_setting(session, "happ_sub_info_button_text", "") or "").strip(),
+        "happ_sub_info_button_link": str(await get_system_setting(session, "happ_sub_info_button_link", "") or "").strip(),
+    }
+
+
+def _apply_no_limit_headers(headers: dict[str, str], no_limit_mode: str, *, is_happ: bool) -> None:
+    """Apply No-Limit-Enabled / no-limit-xhttp-enabled without ever sending both simultaneously."""
+    if no_limit_mode == "all":
+        headers["No-Limit-Enabled"] = "1"
+    elif no_limit_mode == "xhttp":
+        if is_happ:
+            headers["no-limit-xhttp-enabled"] = "1"
+        else:
+            headers["No-Limit-Enabled"] = "1"
+
+
+def _apply_happ_headers(
+    headers: dict[str, str],
+    ui_settings: dict[str, object],
+    *,
+    bot_username: str,
+    expire_ts: int,
+) -> None:
+    clean_bot = str(bot_username).strip().lstrip("@") or constants.DEFAULT_FALLBACK_BOT_USERNAME
+    default_bot_link = f"https://t.me/{clean_bot}"
+
+    if ui_settings.get("happ_sub_expire", True) and expire_ts > 0:
+        headers["sub-expire"] = "1"
+    expire_link = _sanitize_header_url(
+        str(ui_settings.get("happ_sub_expire_button_link") or ""),
+        fallback=default_bot_link,
+    )
+    if expire_link:
+        headers["sub-expire-button-link"] = expire_link
+
+    provider_id = _sanitize_ascii_header(str(ui_settings.get("happ_provider_id") or ""), max_len=128)
+    if provider_id:
+        headers["providerid"] = provider_id
+        fallback_url = _sanitize_header_url(str(ui_settings.get("happ_fallback_url") or ""))
+        if fallback_url:
+            headers["fallback-url"] = fallback_url
+        if ui_settings.get("happ_hide_settings"):
+            headers["hide-settings"] = "1"
+        if ui_settings.get("happ_always_hwid_enable"):
+            headers["subscription-always-hwid-enable"] = "1"
+        if ui_settings.get("happ_subscriptions_collapse"):
+            headers["subscriptions-collapse"] = "1"
+
+        sub_info_text = str(ui_settings.get("happ_sub_info_text") or "").strip()[:200]
+        if sub_info_text:
+            b64_info = base64.b64encode(sub_info_text.encode("utf-8")).decode("ascii")
+            headers["sub-info-text"] = f"base64:{b64_info}"
+            info_color = _sanitize_ascii_header(str(ui_settings.get("happ_sub_info_color") or ""), max_len=32)
+            if info_color:
+                headers["sub-info-color"] = info_color
+            btn_text = str(ui_settings.get("happ_sub_info_button_text") or "").strip()[:64]
+            if btn_text:
+                b64_btn = base64.b64encode(btn_text.encode("utf-8")).decode("ascii")
+                headers["sub-info-button-text"] = f"base64:{b64_btn}"
+            btn_link = _sanitize_header_url(str(ui_settings.get("happ_sub_info_button_link") or ""))
+            if btn_link:
+                headers["sub-info-button-link"] = btn_link
+
+
 def _is_browser_request(request: web.Request) -> bool:
     """Check if incoming request is from a browser navigating to the page."""
     raw_hwid = (
@@ -352,6 +491,7 @@ def _build_unified_notice_response(
     download_bytes: int,
     expire_ts: int,
     is_happ: bool,
+    ui_settings: dict[str, object] | None = None,
     extra_headers: dict[str, str] | None = None,
 ) -> web.Response:
     quoted_notice = urllib.parse.quote(notice_text)
@@ -362,20 +502,21 @@ def _build_unified_notice_response(
     b64_payload = base64.b64encode(notice_link.encode("utf-8")).decode("utf-8")
     b64_title = base64.b64encode(title_text.encode("utf-8")).decode("utf-8")
 
+    cfg = ui_settings or {}
+    interval_val = str(cfg.get("profile_update_interval") or _get_vless_update_interval())
+    hide_url_val = "1" if cfg.get("hide_url", True) else "0"
+
     headers = {
         **common_headers,
         "Content-Type": "text/plain; charset=utf-8",
-        "Profile-Update-Interval": _get_vless_update_interval(),
+        "Profile-Update-Interval": interval_val,
         "Subscription-Userinfo": f"upload={upload_bytes}; download={download_bytes}; total=0; expire={expire_ts}",
         "Profile-Title": f"base64:{b64_title}",
-        "Hide-Url": "1",
-        "No-Limit-Enabled": "1",
+        "Hide-Url": hide_url_val,
     }
+    _apply_no_limit_headers(headers, str(cfg.get("no_limit_mode") or "all"), is_happ=is_happ)
     if is_happ:
-        clean_bot = str(bot_username).strip().lstrip("@") or constants.DEFAULT_FALLBACK_BOT_USERNAME
-        if expire_ts > 0:
-            headers["sub-expire"] = "1"
-        headers["sub-expire-button-link"] = f"https://t.me/{clean_bot}"
+        _apply_happ_headers(headers, cfg, bot_username=bot_username, expire_ts=expire_ts)
 
     sanitized_support = _sanitize_header_url(support_url)
     sanitized_channel = _sanitize_header_url(channel_url)
@@ -555,8 +696,15 @@ async def serve_unified_subscription_feed(
 
         bot_username = await _resolve_bot_username(request)
         default_bot_url = f"https://t.me/{bot_username}"
-        support_url = _resolve_support_url({}, default_bot_url)
-        channel_url = _resolve_channel_url({}, default_bot_url)
+        ui_settings = await _load_subscription_ui_settings(session)
+        support_url = _sanitize_header_url(
+            str(ui_settings.get("support_url") or ""),
+            fallback=_resolve_support_url({}, default_bot_url),
+        )
+        channel_url = _sanitize_header_url(
+            str(ui_settings.get("web_page_url") or ""),
+            fallback=_resolve_channel_url({}, default_bot_url),
+        )
 
         # 1. Neither option is active -> return pending or expired/inactive stub
         if not std_active and not wi_active:
@@ -582,6 +730,7 @@ async def serve_unified_subscription_feed(
                     download_bytes=download_bytes,
                     expire_ts=expire_ts,
                     is_happ=is_happ,
+                    ui_settings=ui_settings,
                 )
 
             if not raw_hwid and _is_browser_request(request):
@@ -644,6 +793,7 @@ async def serve_unified_subscription_feed(
                 download_bytes=download_bytes,
                 expire_ts=fallback_exp_ts,
                 is_happ=is_happ,
+                ui_settings=ui_settings,
             )
 
         # 2. Active subscription(s), but no HWID provided -> landing page for browser or 403 for app
@@ -719,6 +869,7 @@ async def serve_unified_subscription_feed(
                 download_bytes=download_bytes,
                 expire_ts=expire_ts,
                 is_happ=is_happ,
+                ui_settings=ui_settings,
                 extra_headers={
                     "Device-Limit-Exceeded": "1",
                     "Device-Limit": str(effective_limit),
@@ -879,16 +1030,7 @@ async def serve_unified_subscription_feed(
         clean_announce_url = _sanitize_header_url(raw_announce_url)
 
         show_devices_setting = await get_system_setting(session, "vless_profile_show_devices", False)
-        if isinstance(show_devices_setting, str):
-            show_devices = show_devices_setting.lower() in ("1", "true", "yes", "on")
-        else:
-            show_devices = bool(show_devices_setting)
-
-        fragmentation_setting = await get_system_setting(session, "vless_fragmentation_enabled", True)
-        if isinstance(fragmentation_setting, str):
-            fragmentation_enabled = fragmentation_setting.lower() in ("1", "true", "yes", "on")
-        else:
-            fragmentation_enabled = bool(fragmentation_setting)
+        show_devices = _as_bool_setting(show_devices_setting, False)
 
         profile_title_base = str(profile_title).strip().replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
         if show_devices:
@@ -901,35 +1043,62 @@ async def serve_unified_subscription_feed(
 
         userinfo_total = wi_total_quota if (not std_active and wi_active and wi_total_quota > 0) else 0
         b64_title = base64.b64encode(full_title.encode("utf-8")).decode("ascii")
+        sort_order = str(ui_settings.get("sort_order") or "none")
+        happ_sort_map = {"none": "without", "ping": "ping", "name": "alphabet"}
+
         response_headers = {
             **common_headers,
             "Content-Type": "text/plain; charset=utf-8",
             "Content-Disposition": 'inline; filename="Just1k.txt"; filename*=UTF-8\'\'Just1k.txt',
-            "Profile-Update-Interval": _get_vless_update_interval(),
+            "Profile-Update-Interval": str(ui_settings.get("profile_update_interval") or _get_vless_update_interval()),
             "Subscription-Userinfo": f"upload={upload_bytes}; download={download_bytes}; total={userinfo_total}; expire={expire_ts}",
             "Device-Limit": str(effective_limit),
             "Device-Active-Count": str(active_hwid_count),
             "Profile-Title": f"base64:{b64_title}",
-            "Sort-Order": "none",
+            "Sort-Order": sort_order,
             "x-hwid-active": "true",
-            "Hide-Url": "1",
-            "No-Limit-Enabled": "1",
+            "Hide-Url": "1" if ui_settings.get("hide_url", True) else "0",
         }
-        if fragmentation_enabled:
+        if ui_settings.get("hide_check"):
+            response_headers["Hide-Check"] = "1"
+        _apply_no_limit_headers(response_headers, str(ui_settings.get("no_limit_mode") or "all"), is_happ=is_happ)
+
+        if ui_settings.get("fragmentation_enabled", True):
             response_headers["fragmentation-enable"] = "1"
-            response_headers["fragmentation-packets"] = "tlshello"
-            response_headers["fragmentation-length"] = "10-30"
-            response_headers["fragmentation-interval"] = "10-30"
+            response_headers["fragmentation-packets"] = _sanitize_ascii_header(
+                str(ui_settings.get("fragmentation_packets") or ""), "tlshello", max_len=64
+            )
+            response_headers["fragmentation-length"] = _sanitize_ascii_header(
+                str(ui_settings.get("fragmentation_length") or ""), "10-30", max_len=32
+            )
+            response_headers["fragmentation-interval"] = _sanitize_ascii_header(
+                str(ui_settings.get("fragmentation_interval") or ""), "10-30", max_len=32
+            )
+
+        if ui_settings.get("dns_resolve_enabled"):
+            response_headers["Server-Address-Resolve-Enable"] = "1"
+            dns_dom = _sanitize_ascii_header(str(ui_settings.get("dns_resolve_domain") or ""), max_len=253)
+            dns_ip = _sanitize_ascii_header(str(ui_settings.get("dns_resolve_ip") or ""), max_len=64)
+            if dns_dom:
+                response_headers["Server-Address-Resolve-Dns-Domain"] = dns_dom
+            if dns_ip:
+                response_headers["Server-Address-Resolve-Dns-Ip"] = dns_ip
+
+        if ui_settings.get("per_app_proxy_enabled"):
+            response_headers["Per-App-Proxy-Enable"] = "1"
+            response_headers["Per-App-Proxy-Mode"] = str(ui_settings.get("per_app_proxy_mode") or "bypass")
+            normalized_app_list = _normalize_per_app_proxy_list(
+                str(ui_settings.get("per_app_proxy_list") or "")
+            )
+            app_list = _sanitize_ascii_header(normalized_app_list, max_len=2000)
+            if app_list:
+                response_headers["Per-App-Proxy-List"] = app_list
 
         response_headers["Routing"] = "off"
         if is_happ:
             response_headers["Routing-Enable"] = "0"
-
-        if is_happ:
-            clean_bot = str(bot_username).strip().lstrip("@") or constants.DEFAULT_FALLBACK_BOT_USERNAME
-            if expire_ts > 0:
-                response_headers["sub-expire"] = "1"
-            response_headers["sub-expire-button-link"] = f"https://t.me/{clean_bot}"
+            response_headers["subscriptions-sort-type"] = happ_sort_map.get(sort_order, "without")
+            _apply_happ_headers(response_headers, ui_settings, bot_username=bot_username, expire_ts=expire_ts)
 
         sanitized_support = _sanitize_header_url(support_url)
         sanitized_channel = _sanitize_header_url(channel_url)

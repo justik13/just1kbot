@@ -29,8 +29,6 @@ function _renderModuleErrors(node) {
 
 function _openEditModal(node, onDone) {
     const isExitNode = node.role === "exit_node";
-    const inStdChecked = node.in_standard !== false;
-    const inWiChecked = Boolean(node.in_white_internet);
     const box = document.createElement("form");
     box.className = "field";
     box.style.gap = "10px";
@@ -38,10 +36,6 @@ function _openEditModal(node, onDone) {
         <div class="field">
             <label>Название</label>
             <input name="name" class="input" required maxlength="255" value="${escapeHtml(node.name)}">
-        </div>
-        <div class="field">
-            <label>Флаг</label>
-            <input name="country_flag" class="input" maxlength="10" value="${escapeHtml(node.country_flag || "")}">
         </div>
         <div class="field">
             <label>URL API ноды</label>
@@ -52,18 +46,6 @@ function _openEditModal(node, onDone) {
             <input name="api_key" class="input" type="password" maxlength="255" placeholder="••••••••">
         </div>
         ${isExitNode ? `
-        <div class="field" style="flex-direction:row; align-items:center; gap:8px;">
-            <input id="editInStandard" name="in_standard" type="checkbox" ${inStdChecked ? "checked" : ""}>
-            <label for="editInStandard" style="margin:0;">Входит в Стандарт</label>
-        </div>
-        <div class="field" style="flex-direction:row; align-items:center; gap:8px;">
-            <input id="editInWhiteInternet" name="in_white_internet" type="checkbox" ${inWiChecked ? "checked" : ""}>
-            <label for="editInWhiteInternet" style="margin:0;">Входит в Белый Интернет</label>
-        </div>
-        <div class="field">
-            <label>Код локации</label>
-            <input name="location_code" class="input" maxlength="32" placeholder="de, se1, fi1, pl" value="${escapeHtml(node.location_code || "")}">
-        </div>
         <div class="field">
             <label>SNI для Стандарта (опционально)</label>
             <input name="std_sni" class="input" maxlength="253" placeholder="Авто по sni_routes на ru_hub" value="${escapeHtml(node.std_sni || "")}">
@@ -80,7 +62,6 @@ function _openEditModal(node, onDone) {
         try {
             const payload = {
                 name: String(fd.get("name") || "").trim(),
-                country_flag: String(fd.get("country_flag") || "").trim(),
             };
             const newUrl = String(fd.get("api_url") || "").trim();
             if (newUrl && newUrl !== node.api_url) {
@@ -91,9 +72,6 @@ function _openEditModal(node, onDone) {
                 payload.api_key = newKey;
             }
             if (isExitNode) {
-                payload.in_standard = Boolean(box.querySelector("input[name='in_standard']")?.checked);
-                payload.in_white_internet = Boolean(box.querySelector("input[name='in_white_internet']")?.checked);
-                payload.location_code = String(fd.get("location_code") || "").trim().toLowerCase();
                 payload.std_sni = String(fd.get("std_sni") || "").trim().toLowerCase();
             }
             await api.patchNode(node.id, payload);
@@ -171,6 +149,15 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
                     <span class="detail-label">Трафик за месяц</span>
                     <span>${((Number(node.traffic_limit.monthly_bytes || node.traffic_limit.used_bytes || 0)) / (1024 ** 3)).toFixed(2)} ГБ${node.traffic_limit.limit_bytes ? ` / ${(Number(node.traffic_limit.limit_bytes) / (1024 ** 3)).toFixed(0)} ГБ` : ""}</span>
                 </div>` : ""}
+                ${node.role === "exit_node" ? `
+                <div class="detail-item">
+                    <span class="detail-label">Код локации</span>
+                    <span class="mono">${escapeHtml(node.location_code || "—")}</span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">SNI для Стандарта</span>
+                    <span class="mono">${escapeHtml(node.std_sni || "авто")}</span>
+                </div>` : ""}
                 <div class="detail-item">
                     <span class="detail-label">Последняя проверка</span>
                     <span class="muted">${node.last_successful_check ? new Date(node.last_successful_check).toLocaleString("ru-RU") : "—"}</span>
@@ -179,28 +166,8 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
         </section>
 
         <section class="card">
-            <div class="card-title">Модули и привязки контуров</div>
+            <div class="card-title">Модули</div>
             <div class="filter-pills" style="margin-bottom:6px;">${_renderModules(node)}</div>
-            ${node.role === "exit_node" ? `
-                <div class="detail-grid" style="margin-top:6px;">
-                    <div class="detail-item">
-                        <span class="detail-label">Входит в Стандарт</span>
-                        <span>${node.in_standard !== false ? "Да" : "Нет"}</span>
-                    </div>
-                    <div class="detail-item">
-                        <span class="detail-label">Входит в Белый Интернет</span>
-                        <span>${node.in_white_internet ? "Да" : "Нет"}</span>
-                    </div>
-                    <div class="detail-item">
-                        <span class="detail-label">Код локации</span>
-                        <span class="mono">${escapeHtml(node.location_code || "—")}</span>
-                    </div>
-                    <div class="detail-item">
-                        <span class="detail-label">SNI для Стандарта</span>
-                        <span class="mono">${escapeHtml(node.std_sni || "авто")}</span>
-                    </div>
-                </div>
-            ` : ""}
             ${node.inbounds && node.inbounds.length ? `
                 <div class="detail-item" style="margin-top:6px;">
                     <span class="detail-label">Inbounds:</span>

@@ -166,7 +166,7 @@ class VlessSubscriptionService:
                     if ex_extra.get("in_standard") is False:
                         continue
                     explicit_sni = str(ex_extra.get("std_sni") or "").strip().lower()
-                    loc_code = str(ex_extra.get("location_code") or "").strip().lower()
+                    loc_code = str(ex_extra.get("location_code") or f"exit{ex.id}").strip().lower()
                     target_sni = explicit_sni or route_by_code.get(loc_code, "")
                     if not target_sni or not _FQDN_REGEX.match(target_sni):
                         continue
@@ -255,8 +255,7 @@ class VlessSubscriptionService:
         )
 
         has_exit_filter = False
-        wi_exit_names: dict[str, str] = {}
-        wi_exit_badges: dict[str, str] = {}
+        wi_exit_meta: dict[str, dict[str, str]] = {}
         if exit_nodes:
             active_exits = [
                 ex for ex in exit_nodes
@@ -273,7 +272,7 @@ class VlessSubscriptionService:
                     ex_extra = ex.extra_data if isinstance(ex.extra_data, dict) else {}
                     if not bool(ex_extra.get("in_white_internet", False)):
                         continue
-                    loc_code = str(ex_extra.get("location_code") or "").strip().lower()
+                    loc_code = str(ex_extra.get("location_code") or f"exit{ex.id}").strip().lower()
                     if not loc_code:
                         continue
                     flag = (ex.country_flag or "🌐").strip()
@@ -281,12 +280,14 @@ class VlessSubscriptionService:
                     for ch in ("?", "&", "\r", "\n"):
                         raw_name = raw_name.replace(ch, " ")
                     raw_name = raw_name.strip()
-                    base_label = f"{flag} {raw_name}".strip() if (flag and not raw_name.startswith(flag)) else raw_name
-                    label = base_label if base_label.endswith("(БИ)") else f"{base_label} (БИ)"
-                    wi_exit_names[loc_code] = label
-                    desc = ex_extra.get("server_description")
-                    if desc and str(desc).strip():
-                        wi_exit_badges[loc_code] = str(desc).strip()
+                    wi_exit_meta[loc_code] = {
+                        "flag": flag,
+                        "base_name": raw_name,
+                        "wi_yandex_name": str(ex_extra.get("wi_yandex_name") or "").strip(),
+                        "wi_yandex_badge": str(ex_extra.get("wi_yandex_badge") or "").strip()[:30],
+                        "wi_turboflare_name": str(ex_extra.get("wi_turboflare_name") or "").strip(),
+                        "wi_turboflare_badge": str(ex_extra.get("wi_turboflare_badge") or "").strip()[:30],
+                    }
 
         xhttp_locations = extra.get("xhttp_locations")
         if isinstance(xhttp_locations, list) and xhttp_locations:
@@ -298,7 +299,7 @@ class VlessSubscriptionService:
                 if not isinstance(loc, dict) or not loc.get("path"):
                     continue
                 loc_code = str(loc.get("location_code") or "").strip().lower()
-                if has_exit_filter and loc_code and loc_code not in wi_exit_names:
+                if has_exit_filter and loc_code and loc_code not in wi_exit_meta:
                     continue
                 cdn_hint = str(loc.get("cdn") or "").strip().lower()
                 cdn_type = "cdn_turboflare" if cdn_hint == "cdn_turboflare" else "cdn_yandex"
@@ -323,14 +324,50 @@ class VlessSubscriptionService:
                     if cdn_type == "cdn_turboflare"
                     else (cdn_yandex_label or "Yandex").strip()
                 )
-                eff_names = dict(wi_exit_names) if wi_exit_names else None
-                eff_badges = dict(wi_exit_badges) if wi_exit_badges else {}
-                if cdn_label and cdn_label_mode == "name" and eff_names:
-                    eff_names = {k: f"{v} · {cdn_label}" for k, v in eff_names.items()}
+                eff_names: dict[str, str] = {}
+                eff_badges: dict[str, str] = {}
+                if wi_exit_meta:
+                    for loc_code, meta in wi_exit_meta.items():
+                        flag = meta["flag"]
+                        custom_name = (
+                            meta["wi_turboflare_name"]
+                            if cdn_type == "cdn_turboflare"
+                            else meta["wi_yandex_name"]
+                        )
+                        for ch in ("?", "&", "\r", "\n"):
+                            custom_name = custom_name.replace(ch, " ")
+                        custom_name = custom_name.strip()
+                        if custom_name:
+                            eff_names[loc_code] = (
+                                f"{flag} {custom_name}".strip()
+                                if (flag and not custom_name.startswith(flag))
+                                else custom_name
+                            )
+                        else:
+                            base_name = meta["base_name"]
+                            base_label = (
+                                f"{flag} {base_name}".strip()
+                                if (flag and not base_name.startswith(flag))
+                                else base_name
+                            )
+                            if cdn_label and cdn_label_mode == "name":
+                                eff_names[loc_code] = f"{base_label} {cdn_label}".strip()
+                            else:
+                                eff_names[loc_code] = base_label
+
+                        custom_badge = (
+                            meta["wi_turboflare_badge"]
+                            if cdn_type == "cdn_turboflare"
+                            else meta["wi_yandex_badge"]
+                        )
+                        if custom_badge:
+                            eff_badges[loc_code] = custom_badge[:30]
+                        elif cdn_label and cdn_label_mode == "badge":
+                            eff_badges[loc_code] = cdn_label[:30]
                 elif cdn_label and cdn_label_mode == "badge":
-                    for k in (wi_exit_names or {r["code"]: r["code"] for r in cdn_locs}):
-                        prev = eff_badges.get(k, "").strip()
-                        eff_badges[k] = f"{prev} · {cdn_label}".strip(" ·") if prev else cdn_label
+                    for r in cdn_locs:
+                        eff_badges[r["code"]] = cdn_label[:30]
+
                 links.extend(
                     WhiteInternetService.generate_vless_links(
                         subscription,
@@ -338,7 +375,7 @@ class VlessSubscriptionService:
                         path=base_path,
                         relays=cdn_locs,
                         include_direct_hub=False,
-                        relay_names=eff_names,
+                        relay_names=eff_names or None,
                         relay_badges=eff_badges or None,
                         cdn_type=cdn_type,
                         client_uuid=client_uuid,
@@ -383,7 +420,7 @@ class VlessSubscriptionService:
                     )
             return links
 
-        if has_exit_filter and not wi_exit_names:
+        if has_exit_filter and not wi_exit_meta:
             return []
 
         links = []

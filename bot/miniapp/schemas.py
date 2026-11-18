@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -78,10 +77,37 @@ class IncyGlobalSettingsPayload(BaseModel):
     announce: str | None = Field(default=None, max_length=300)
     announce_url: str | None = Field(default=None, max_length=500)
     profile_show_devices: bool | None = None
+    profile_update_interval: int | None = Field(default=None, ge=1, le=720)
+    support_url: str | None = Field(default=None, max_length=500)
+    web_page_url: str | None = Field(default=None, max_length=500)
+    sort_order: Literal["none", "ping", "name"] | None = None
+    hide_url: bool | None = None
+    hide_check: bool | None = None
     fragmentation_enabled: bool | None = None
+    fragmentation_packets: str | None = Field(default=None, max_length=64)
+    fragmentation_length: str | None = Field(default=None, max_length=32)
+    fragmentation_interval: str | None = Field(default=None, max_length=32)
+    no_limit_mode: Literal["off", "all", "xhttp"] | None = None
+    dns_resolve_enabled: bool | None = None
+    dns_resolve_domain: str | None = Field(default=None, max_length=253)
+    dns_resolve_ip: str | None = Field(default=None, max_length=64)
+    per_app_proxy_enabled: bool | None = None
+    per_app_proxy_mode: Literal["bypass", "proxy"] | None = None
+    per_app_proxy_list: str | None = Field(default=None, max_length=2000)
     cdn_label_mode: Literal["badge", "name", "none"] | None = None
     cdn_yandex_label: str | None = Field(default=None, max_length=32)
     cdn_turboflare_label: str | None = Field(default=None, max_length=32)
+    happ_provider_id: str | None = Field(default=None, max_length=128)
+    happ_sub_expire: bool | None = None
+    happ_sub_expire_button_link: str | None = Field(default=None, max_length=500)
+    happ_fallback_url: str | None = Field(default=None, max_length=500)
+    happ_hide_settings: bool | None = None
+    happ_always_hwid_enable: bool | None = None
+    happ_subscriptions_collapse: bool | None = None
+    happ_sub_info_text: str | None = Field(default=None, max_length=200)
+    happ_sub_info_color: str | None = Field(default=None, max_length=32)
+    happ_sub_info_button_text: str | None = Field(default=None, max_length=64)
+    happ_sub_info_button_link: str | None = Field(default=None, max_length=500)
 
 
 class UpdateNodePayload(BaseModel):
@@ -91,20 +117,13 @@ class UpdateNodePayload(BaseModel):
     api_key: str | None = Field(default=None, min_length=1, max_length=255)
     in_standard: bool | None = None
     in_white_internet: bool | None = None
-    location_code: str | None = Field(default=None, max_length=32)
     std_sni: str | None = Field(default=None, max_length=253)
-
-    @field_validator("location_code")
-    @classmethod
-    def check_location_code(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        clean = value.strip().lower()
-        if not clean:
-            return ""
-        if not re.fullmatch(r"[a-z0-9_-]{1,32}", clean):
-            raise ValueError("location_code must contain only a-z, 0-9, _ or -")
-        return clean
+    vless_name: str | None = Field(default=None, max_length=120)
+    server_description: str | None = Field(default=None, max_length=30)
+    wi_yandex_name: str | None = Field(default=None, max_length=120)
+    wi_yandex_badge: str | None = Field(default=None, max_length=30)
+    wi_turboflare_name: str | None = Field(default=None, max_length=120)
+    wi_turboflare_badge: str | None = Field(default=None, max_length=30)
 
     @field_validator("std_sni")
     @classmethod

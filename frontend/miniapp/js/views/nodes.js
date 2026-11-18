@@ -1,9 +1,101 @@
 import { api } from "../api.js";
-import { escapeHtml, healthChipInfo, roleLabel, showToast } from "../ui.js";
+import { escapeHtml, healthChipInfo, openModal, roleLabel, showToast } from "../ui.js";
 
 let currentFilter = "all";
 
-export async function renderSubscriptionSettingsView(body) {
+function _openLocationSubModal(node, onDone) {
+    const inStdChecked = node.in_standard !== false;
+    const inWiChecked = Boolean(node.in_white_internet);
+    const box = document.createElement("form");
+    box.className = "field";
+    box.style.gap = "10px";
+    box.innerHTML = `
+        <div class="grid-2">
+            <div class="field">
+                <label>Флаг</label>
+                <input name="country_flag" class="input" maxlength="10" value="${escapeHtml(node.country_flag || "")}" placeholder="🇩🇪">
+            </div>
+            <div class="field">
+                <label>Код локации (авто)</label>
+                <input class="input" disabled value="${escapeHtml(node.location_code || `exit${node.id}`)}">
+            </div>
+        </div>
+        <label class="checkbox-row">
+            <input name="in_standard" type="checkbox" ${inStdChecked ? "checked" : ""}>
+            <span>Входит в Стандарт</span>
+        </label>
+        <label class="checkbox-row">
+            <input name="in_white_internet" type="checkbox" ${inWiChecked ? "checked" : ""}>
+            <span>Входит в Белый Интернет</span>
+        </label>
+        <hr style="border:none; border-top:1px solid var(--border-subtle); margin:2px 0;">
+        <div class="muted" style="font-size:12px; font-weight:600;">Стандарт</div>
+        <div class="grid-2">
+            <div class="field">
+                <label>Название (пусто = имя ноды)</label>
+                <input name="vless_name" class="input" maxlength="120" value="${escapeHtml(node.vless_name || "")}" placeholder="${escapeHtml(node.name)}">
+            </div>
+            <div class="field">
+                <label>Бейдж (до 30 симв.)</label>
+                <input name="server_description" class="input" maxlength="30" value="${escapeHtml(node.server_description || "")}" placeholder="Опционально">
+            </div>
+        </div>
+        <div class="muted" style="font-size:12px; font-weight:600;">Белый Интернет — Yandex</div>
+        <div class="grid-2">
+            <div class="field">
+                <label>Название (пусто = авто)</label>
+                <input name="wi_yandex_name" class="input" maxlength="120" value="${escapeHtml(node.wi_yandex_name || "")}" placeholder="Напр. Гер Ян">
+            </div>
+            <div class="field">
+                <label>Бейдж (до 30 симв.)</label>
+                <input name="wi_yandex_badge" class="input" maxlength="30" value="${escapeHtml(node.wi_yandex_badge || "")}" placeholder="По умолчанию">
+            </div>
+        </div>
+        <div class="muted" style="font-size:12px; font-weight:600;">Белый Интернет — Turboflare</div>
+        <div class="grid-2">
+            <div class="field">
+                <label>Название (пусто = авто)</label>
+                <input name="wi_turboflare_name" class="input" maxlength="120" value="${escapeHtml(node.wi_turboflare_name || "")}" placeholder="Напр. Гер ТФ">
+            </div>
+            <div class="field">
+                <label>Бейдж (до 30 симв.)</label>
+                <input name="wi_turboflare_badge" class="input" maxlength="30" value="${escapeHtml(node.wi_turboflare_badge || "")}" placeholder="По умолчанию">
+            </div>
+        </div>
+        <button type="submit" class="btn btn-primary">Сохранить локацию</button>
+    `;
+    const close = openModal(`${node.country_flag || "🌐"} ${node.name} (#${node.id})`, box);
+    box.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const fd = new FormData(box);
+        const btn = box.querySelector("button[type='submit']");
+        btn.disabled = true;
+        try {
+            await api.patchNode(node.id, {
+                country_flag: String(fd.get("country_flag") || "").trim(),
+                in_standard: Boolean(box.querySelector("input[name='in_standard']")?.checked),
+                in_white_internet: Boolean(box.querySelector("input[name='in_white_internet']")?.checked),
+                vless_name: String(fd.get("vless_name") || "").trim(),
+                server_description: String(fd.get("server_description") || "").trim(),
+                wi_yandex_name: String(fd.get("wi_yandex_name") || "").trim(),
+                wi_yandex_badge: String(fd.get("wi_yandex_badge") || "").trim(),
+                wi_turboflare_name: String(fd.get("wi_turboflare_name") || "").trim(),
+                wi_turboflare_badge: String(fd.get("wi_turboflare_badge") || "").trim(),
+            });
+            showToast("Локация обновлена");
+            close();
+            if (typeof onDone === "function") {
+                await onDone();
+            }
+        } catch (err) {
+            showToast(err.message || "Ошибка обновления локации");
+        } finally {
+            btn.disabled = false;
+        }
+    });
+}
+
+export async function renderSubscriptionSettingsView(body, state = null, onReloadNodes = null) {
     body.innerHTML = `<section class="card card-center"><div class="muted">Загрузка настроек подписки...</div></section>`;
     let current;
     try {
@@ -14,52 +106,252 @@ export async function renderSubscriptionSettingsView(body) {
         return;
     }
 
+    const exitNodes = (state && Array.isArray(state.nodes) ? state.nodes : []).filter(
+        (n) => n.role === "exit_node"
+    );
+
     body.innerHTML = `
+        <section class="card">
+            <div class="row">
+                <div class="card-title">Локации в подписке (Exit Nodes)</div>
+                <span class="chip chip-muted">${exitNodes.length}</span>
+            </div>
+            <div id="subLocationsList" class="nodes-list"></div>
+        </section>
+
         <section class="card">
             <div class="card-title">Оформление подписки (INCY / Happ)</div>
             <form id="subSettingsForm" class="field" style="gap:10px;">
-                <div class="field">
-                    <label>Название профиля (Profile-Title)</label>
-                    <input name="profile_title" class="input" maxlength="120" value="${escapeHtml(current.profile_title || "")}" placeholder="✦ Just1k">
-                </div>
-                <div class="field">
-                    <label>Баннер / Анонс (Announce, пусто = авто-статус)</label>
-                    <textarea name="announce" class="textarea" maxlength="300" style="min-height:70px;" placeholder="Оставьте пустым для автоматического статуса подписки">${escapeHtml(current.announce || "")}</textarea>
-                </div>
-                <div class="field">
-                    <label>Ссылка анонса (Announce-Url)</label>
-                    <input name="announce_url" class="input" maxlength="500" value="${escapeHtml(current.announce_url || "")}" placeholder="https://t.me/...">
+                <div class="grid-2">
+                    <div class="field">
+                        <label>Название (Profile-Title)</label>
+                        <input name="profile_title" class="input" maxlength="120" value="${escapeHtml(current.profile_title || "")}" placeholder="✦ Just1k">
+                    </div>
+                    <div class="field">
+                        <label>Автообновление (часы)</label>
+                        <input name="profile_update_interval" class="input" type="number" min="1" max="720" value="${escapeHtml(String(current.profile_update_interval || 6))}">
+                    </div>
                 </div>
                 <label class="checkbox-row">
                     <input name="profile_show_devices" type="checkbox" ${current.profile_show_devices ? "checked" : ""}>
                     <span>Показывать счётчик устройств в названии профиля</span>
                 </label>
-                <label class="checkbox-row">
-                    <input name="fragmentation_enabled" type="checkbox" ${current.fragmentation_enabled !== false ? "checked" : ""}>
-                    <span>Фрагментация TLS-пакетов</span>
-                </label>
                 <div class="field">
-                    <label>Подпись CDN в ссылках Белого Интернета</label>
+                    <label>Баннер / Анонс (Announce, пусто = авто-статус)</label>
+                    <textarea name="announce" class="textarea" maxlength="300" style="min-height:64px;" placeholder="Оставьте пустым для автоматического статуса подписки">${escapeHtml(current.announce || "")}</textarea>
+                </div>
+                <div class="field">
+                    <label>Ссылка анонса (Announce-Url)</label>
+                    <input name="announce_url" class="input" maxlength="500" value="${escapeHtml(current.announce_url || "")}" placeholder="https://t.me/...">
+                </div>
+                <div class="grid-2">
+                    <div class="field">
+                        <label>Support-Url</label>
+                        <input name="support_url" class="input" maxlength="500" value="${escapeHtml(current.support_url || "")}" placeholder="По умолчанию из настроек бота">
+                    </div>
+                    <div class="field">
+                        <label>Profile-Web-Page-Url</label>
+                        <input name="web_page_url" class="input" maxlength="500" value="${escapeHtml(current.web_page_url || "")}" placeholder="По умолчанию ссылка на бота">
+                    </div>
+                </div>
+
+                <hr style="border:none; border-top:1px solid var(--border-subtle); margin:2px 0;">
+                <div class="card-title" style="font-size:13px;">Поведение и сортировка</div>
+                <div class="grid-2">
+                    <div class="field">
+                        <label>Сортировка серверов</label>
+                        <select name="sort_order" class="input">
+                            <option value="none" ${(current.sort_order || "none") === "none" ? "selected" : ""}>Как отдал сервер (none)</option>
+                            <option value="ping" ${current.sort_order === "ping" ? "selected" : ""}>По пингу (ping)</option>
+                            <option value="name" ${current.sort_order === "name" ? "selected" : ""}>По имени (name)</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label>No-Limit режим</label>
+                        <select name="no_limit_mode" class="input">
+                            <option value="all" ${(current.no_limit_mode || "all") === "all" ? "selected" : ""}>No-Limit-Enabled (все)</option>
+                            <option value="xhttp" ${current.no_limit_mode === "xhttp" ? "selected" : ""}>no-limit-xhttp-enabled (Happ)</option>
+                            <option value="off" ${current.no_limit_mode === "off" ? "selected" : ""}>Выключено</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="grid-2">
+                    <label class="checkbox-row">
+                        <input name="hide_url" type="checkbox" ${current.hide_url !== false ? "checked" : ""}>
+                        <span>Hide-Url (скрыть ссылку)</span>
+                    </label>
+                    <label class="checkbox-row">
+                        <input name="hide_check" type="checkbox" ${current.hide_check ? "checked" : ""}>
+                        <span>Hide-Check (INCY: скрыть тест)</span>
+                    </label>
+                </div>
+
+                <hr style="border:none; border-top:1px solid var(--border-subtle); margin:2px 0;">
+                <div class="card-title" style="font-size:13px;">Белый Интернет — подписи CDN</div>
+                <div class="field">
+                    <label>Подпись CDN по умолчанию</label>
                     <select name="cdn_label_mode" class="input">
-                        <option value="badge" ${(current.cdn_label_mode || "badge") === "badge" ? "selected" : ""}>В описании / бейдже (например [Yandex])</option>
-                        <option value="name" ${current.cdn_label_mode === "name" ? "selected" : ""}>В названии сервера (например · Yandex)</option>
+                        <option value="badge" ${(current.cdn_label_mode || "badge") === "badge" ? "selected" : ""}>В описании / бейдже</option>
+                        <option value="name" ${current.cdn_label_mode === "name" ? "selected" : ""}>В названии (🇩🇪 Германия Yandex)</option>
                         <option value="none" ${current.cdn_label_mode === "none" ? "selected" : ""}>Не показывать CDN</option>
                     </select>
                 </div>
-                <div class="row" style="gap:8px;">
-                    <div class="field" style="flex:1;">
+                <div class="grid-2">
+                    <div class="field">
                         <label>Метка Yandex CDN</label>
                         <input name="cdn_yandex_label" class="input" maxlength="32" value="${escapeHtml(current.cdn_yandex_label || "Yandex")}" placeholder="Yandex">
                     </div>
-                    <div class="field" style="flex:1;">
+                    <div class="field">
                         <label>Метка Turboflare CDN</label>
                         <input name="cdn_turboflare_label" class="input" maxlength="32" value="${escapeHtml(current.cdn_turboflare_label || "Turboflare")}" placeholder="Turboflare">
                     </div>
                 </div>
+
+                <hr style="border:none; border-top:1px solid var(--border-subtle); margin:2px 0;">
+                <div class="card-title" style="font-size:13px;">Фрагментация TLS</div>
+                <label class="checkbox-row">
+                    <input name="fragmentation_enabled" type="checkbox" ${current.fragmentation_enabled !== false ? "checked" : ""}>
+                    <span>Включить fragmentation-enable</span>
+                </label>
+                <div class="grid-2">
+                    <div class="field">
+                        <label>Packets</label>
+                        <input name="fragmentation_packets" class="input" maxlength="64" value="${escapeHtml(current.fragmentation_packets || "tlshello")}" placeholder="tlshello">
+                    </div>
+                    <div class="field">
+                        <label>Length</label>
+                        <input name="fragmentation_length" class="input" maxlength="32" value="${escapeHtml(current.fragmentation_length || "10-30")}" placeholder="10-30">
+                    </div>
+                </div>
+                <div class="field">
+                    <label>Interval</label>
+                    <input name="fragmentation_interval" class="input" maxlength="32" value="${escapeHtml(current.fragmentation_interval || "10-30")}" placeholder="10-30">
+                </div>
+
+                <hr style="border:none; border-top:1px solid var(--border-subtle); margin:2px 0;">
+                <div class="card-title" style="font-size:13px;">DoH Pre-resolve (INCY)</div>
+                <label class="checkbox-row">
+                    <input name="dns_resolve_enabled" type="checkbox" ${current.dns_resolve_enabled ? "checked" : ""}>
+                    <span>Включить Server-Address-Resolve-Enable</span>
+                </label>
+                <div class="grid-2">
+                    <div class="field">
+                        <label>DoH Домен</label>
+                        <input name="dns_resolve_domain" class="input" maxlength="253" value="${escapeHtml(current.dns_resolve_domain || "")}" placeholder="dns.google">
+                    </div>
+                    <div class="field">
+                        <label>Bootstrap DNS IP</label>
+                        <input name="dns_resolve_ip" class="input" maxlength="64" value="${escapeHtml(current.dns_resolve_ip || "")}" placeholder="8.8.8.8">
+                    </div>
+                </div>
+
+                <hr style="border:none; border-top:1px solid var(--border-subtle); margin:2px 0;">
+                <div class="card-title" style="font-size:13px;">Раздельное туннелирование (Android)</div>
+                <label class="checkbox-row">
+                    <input name="per_app_proxy_enabled" type="checkbox" ${current.per_app_proxy_enabled ? "checked" : ""}>
+                    <span>Включить Per-App-Proxy-Enable</span>
+                </label>
+                <div class="field">
+                    <label>Режим</label>
+                    <select name="per_app_proxy_mode" class="input">
+                        <option value="bypass" ${(current.per_app_proxy_mode || "bypass") === "bypass" ? "selected" : ""}>Исключить (bypass)</option>
+                        <option value="proxy" ${current.per_app_proxy_mode === "proxy" ? "selected" : ""}>Только выбранные (proxy)</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label>Список приложений (CSV package names или URL)</label>
+                    <textarea name="per_app_proxy_list" class="textarea" maxlength="2000" style="min-height:56px;" placeholder="ru.sberbankmobile,com.whatsapp">${escapeHtml(current.per_app_proxy_list || "")}</textarea>
+                </div>
+
+                <hr style="border:none; border-top:1px solid var(--border-subtle); margin:2px 0;">
+                <div class="card-title" style="font-size:13px;">Happ — бесплатные параметры</div>
+                <div class="field">
+                    <label>Provider ID (providerid, для расширенных флагов Happ)</label>
+                    <input name="happ_provider_id" class="input" maxlength="128" value="${escapeHtml(current.happ_provider_id || "")}" placeholder="Оставьте пустым, если не используется">
+                </div>
+                <div class="grid-2">
+                    <label class="checkbox-row">
+                        <input name="happ_sub_expire" type="checkbox" ${current.happ_sub_expire !== false ? "checked" : ""}>
+                        <span>sub-expire</span>
+                    </label>
+                    <div class="field">
+                        <label>sub-expire-button-link</label>
+                        <input name="happ_sub_expire_button_link" class="input" maxlength="500" value="${escapeHtml(current.happ_sub_expire_button_link || "")}" placeholder="По умолчанию бот">
+                    </div>
+                </div>
+                <div class="field">
+                    <label>fallback-url (при наличии Provider ID)</label>
+                    <input name="happ_fallback_url" class="input" maxlength="500" value="${escapeHtml(current.happ_fallback_url || "")}" placeholder="https://...">
+                </div>
+                <div class="grid-2">
+                    <label class="checkbox-row">
+                        <input name="happ_hide_settings" type="checkbox" ${current.happ_hide_settings ? "checked" : ""}>
+                        <span>hide-settings</span>
+                    </label>
+                    <label class="checkbox-row">
+                        <input name="happ_always_hwid_enable" type="checkbox" ${current.happ_always_hwid_enable ? "checked" : ""}>
+                        <span>always-hwid-enable</span>
+                    </label>
+                </div>
+                <label class="checkbox-row">
+                    <input name="happ_subscriptions_collapse" type="checkbox" ${current.happ_subscriptions_collapse ? "checked" : ""}>
+                    <span>subscriptions-collapse (сворачивать список)</span>
+                </label>
+                <div class="grid-2">
+                    <div class="field">
+                        <label>sub-info-text (до 200 симв.)</label>
+                        <input name="happ_sub_info_text" class="input" maxlength="200" value="${escapeHtml(current.happ_sub_info_text || "")}" placeholder="Инфо-блок в Happ">
+                    </div>
+                    <div class="field">
+                        <label>sub-info-color</label>
+                        <input name="happ_sub_info_color" class="input" maxlength="32" value="${escapeHtml(current.happ_sub_info_color || "")}" placeholder="blue / green / red">
+                    </div>
+                </div>
+                <div class="grid-2">
+                    <div class="field">
+                        <label>sub-info-button-text</label>
+                        <input name="happ_sub_info_button_text" class="input" maxlength="64" value="${escapeHtml(current.happ_sub_info_button_text || "")}" placeholder="Текст кнопки">
+                    </div>
+                    <div class="field">
+                        <label>sub-info-button-link</label>
+                        <input name="happ_sub_info_button_link" class="input" maxlength="500" value="${escapeHtml(current.happ_sub_info_button_link || "")}" placeholder="https://...">
+                    </div>
+                </div>
+
                 <button type="submit" class="btn btn-primary">Сохранить настройки</button>
             </form>
         </section>
     `;
+
+    const locListEl = body.querySelector("#subLocationsList");
+    if (!exitNodes.length) {
+        locListEl.innerHTML = `<div class="muted" style="text-align:center; padding:10px;">Нет exit-нод. Добавьте их во вкладке «Ноды».</div>`;
+    } else {
+        exitNodes.forEach((node) => {
+            const inStd = node.in_standard !== false;
+            const inWi = Boolean(node.in_white_internet);
+            const row = document.createElement("div");
+            row.className = "node-card node-card-compact";
+            row.innerHTML = `
+                <div class="row" style="align-items:center;">
+                    <div class="node-compact-title">
+                        <span style="font-size:18px;">${escapeHtml(node.country_flag || "🌐")}</span>
+                        <span style="font-weight:600; font-size:14px;">${escapeHtml(node.vless_name || node.name)}</span>
+                        <span class="mono muted" style="font-size:11px;">${escapeHtml(node.location_code || `exit${node.id}`)}</span>
+                    </div>
+                    <button type="button" class="btn btn-sm">Настроить</button>
+                </div>
+                <div class="filter-pills" style="margin-top:4px;">
+                    <span class="chip ${inStd ? "chip-ok" : "chip-muted"}">Стандарт: ${inStd ? "да" : "нет"}</span>
+                    <span class="chip ${inWi ? "chip-info" : "chip-muted"}">БИ: ${inWi ? "да" : "нет"}</span>
+                </div>
+            `;
+            row.querySelector("button").addEventListener("click", () => {
+                _openLocationSubModal(node, onReloadNodes);
+            });
+            locListEl.appendChild(row);
+        });
+    }
 
     const form = body.querySelector("#subSettingsForm");
     form.addEventListener("submit", async (e) => {
@@ -68,17 +360,45 @@ export async function renderSubscriptionSettingsView(body) {
         const btn = form.querySelector("button[type='submit']");
         btn.disabled = true;
         try {
+            const intervalRaw = parseInt(String(fd.get("profile_update_interval") || "6"), 10);
             await api.updateIncySettings({
                 profile_title: String(fd.get("profile_title") || "").trim(),
+                profile_update_interval: Number.isFinite(intervalRaw) ? Math.max(1, Math.min(720, intervalRaw)) : 6,
+                profile_show_devices: Boolean(fd.get("profile_show_devices")),
                 announce: String(fd.get("announce") || "").trim(),
                 announce_url: String(fd.get("announce_url") || "").trim(),
-                profile_show_devices: Boolean(fd.get("profile_show_devices")),
-                fragmentation_enabled: Boolean(fd.get("fragmentation_enabled")),
+                support_url: String(fd.get("support_url") || "").trim(),
+                web_page_url: String(fd.get("web_page_url") || "").trim(),
+                sort_order: String(fd.get("sort_order") || "none"),
+                no_limit_mode: String(fd.get("no_limit_mode") || "all"),
+                hide_url: Boolean(fd.get("hide_url")),
+                hide_check: Boolean(fd.get("hide_check")),
                 cdn_label_mode: String(fd.get("cdn_label_mode") || "badge"),
                 cdn_yandex_label: String(fd.get("cdn_yandex_label") || "").trim(),
                 cdn_turboflare_label: String(fd.get("cdn_turboflare_label") || "").trim(),
+                fragmentation_enabled: Boolean(fd.get("fragmentation_enabled")),
+                fragmentation_packets: String(fd.get("fragmentation_packets") || "").trim(),
+                fragmentation_length: String(fd.get("fragmentation_length") || "").trim(),
+                fragmentation_interval: String(fd.get("fragmentation_interval") || "").trim(),
+                dns_resolve_enabled: Boolean(fd.get("dns_resolve_enabled")),
+                dns_resolve_domain: String(fd.get("dns_resolve_domain") || "").trim(),
+                dns_resolve_ip: String(fd.get("dns_resolve_ip") || "").trim(),
+                per_app_proxy_enabled: Boolean(fd.get("per_app_proxy_enabled")),
+                per_app_proxy_mode: String(fd.get("per_app_proxy_mode") || "bypass"),
+                per_app_proxy_list: String(fd.get("per_app_proxy_list") || "").trim(),
+                happ_provider_id: String(fd.get("happ_provider_id") || "").trim(),
+                happ_sub_expire: Boolean(fd.get("happ_sub_expire")),
+                happ_sub_expire_button_link: String(fd.get("happ_sub_expire_button_link") || "").trim(),
+                happ_fallback_url: String(fd.get("happ_fallback_url") || "").trim(),
+                happ_hide_settings: Boolean(fd.get("happ_hide_settings")),
+                happ_always_hwid_enable: Boolean(fd.get("happ_always_hwid_enable")),
+                happ_subscriptions_collapse: Boolean(fd.get("happ_subscriptions_collapse")),
+                happ_sub_info_text: String(fd.get("happ_sub_info_text") || "").trim(),
+                happ_sub_info_color: String(fd.get("happ_sub_info_color") || "").trim(),
+                happ_sub_info_button_text: String(fd.get("happ_sub_info_button_text") || "").trim(),
+                happ_sub_info_button_link: String(fd.get("happ_sub_info_button_link") || "").trim(),
             });
-            showToast("Оформление подписки сохранено");
+            showToast("Настройки подписки сохранены");
         } catch (err) {
             showToast(err.message || "Ошибка сохранения");
         } finally {
