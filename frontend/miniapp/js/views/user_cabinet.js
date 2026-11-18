@@ -882,18 +882,18 @@ function _buildGuideHtml(subUrl, backupSubUrl, isActive) {
                 </div>
                 ${isActive && subUrl ? `
                     <div class="field">
-                        <label>Основной ключ подключения</label>
+                        <label>Основная ссылка подключения</label>
                         <div class="sub-url-box">${escapeHtml(subUrl)}</div>
                     </div>
                 ` : ""}
                 ${isActive && backupSubUrl ? `
                     <div class="field" style="margin-top:8px;">
                         <div style="display:flex; justify-content:space-between; align-items:center;">
-                            <label style="margin:0;">Резервный ключ (прямой)</label>
-                            <button id="copyBackupSubBtn" type="button" class="btn btn-xs" style="padding:2px 8px; font-size:11px;">Скопировать резерв</button>
+                            <label style="margin:0;">Резервная ссылка (прямая)</label>
+                            <button id="copyBackupSubBtn" type="button" class="btn btn-xs" style="padding:2px 8px; font-size:11px;">Скопировать резервную</button>
                         </div>
                         <div class="sub-url-box" style="font-size:11px; opacity:0.85;">${escapeHtml(backupSubUrl)}</div>
-                        <span class="muted" style="font-size:10px; margin-top:2px;">Используйте прямое подключение, если по основному ключу есть задержки</span>
+                        <span class="muted" style="font-size:10px; margin-top:2px;">Используйте прямое подключение, если по основной ссылке есть задержки</span>
                     </div>
                 ` : ""}
                 <div class="notice-box" style="flex-direction:column; align-items:flex-start; gap:6px; font-size:12px;">
@@ -967,7 +967,7 @@ function _renderConnectTab(body, d, reload, root) {
                     </div>
                     <span class="chip chip-muted">Не подключено</span>
                 </div>
-                <p class="muted">Оформите «Стандарт» или «Белый интернет» — ключ подключения активируется сразу после оплаты.</p>
+                <p class="muted">Оформите «Стандарт» или «Белый интернет» — ссылка подключения активируется сразу после оплаты.</p>
                 <button id="goTariffsBtn" type="button" class="btn btn-primary btn-lg">Перейти к тарифам</button>
                 ${_buildGuideHtml(subUrl, backupSubUrl, false)}
             </section>
@@ -1027,7 +1027,7 @@ function _renderConnectTab(body, d, reload, root) {
                     ` : `
                         <button type="button" data-open-client="happ" class="btn btn-sm">Открыть в Happ</button>
                     `}
-                    <button id="copySubBtn" type="button" class="btn btn-sm">${_ICONS.copy} Копировать ключ</button>
+                    <button id="copySubBtn" type="button" class="btn btn-sm">${_ICONS.copy} Копировать ссылку</button>
                 </div>
             </div>
             ${_buildGuideHtml(subUrl, backupSubUrl, true)}
@@ -1043,10 +1043,10 @@ function _renderConnectTab(body, d, reload, root) {
             openExternalLink(bridgeUrl);
         });
     });
-    body.querySelector("#copySubBtn").addEventListener("click", () => copyText(subUrl, "Ключ скопирован"));
+    body.querySelector("#copySubBtn").addEventListener("click", () => copyText(subUrl, "Ссылка скопирована"));
     const copyBackupBtn = body.querySelector("#copyBackupSubBtn");
     if (copyBackupBtn) {
-        copyBackupBtn.addEventListener("click", () => copyText(backupSubUrl, "Резервный ключ скопирован"));
+        copyBackupBtn.addEventListener("click", () => copyText(backupSubUrl, "Резервная ссылка скопирована"));
     }
     const graceBtn = body.querySelector("#graceRenewBtn");
     if (graceBtn) {
@@ -1100,7 +1100,7 @@ function _renderTariffsTab(body, d, reload) {
         </section>
 
         <div class="muted" style="font-size:12px; padding:0 2px;">
-            Две независимые подписки на один ключ — выберите нужную или подключите обе.
+            Две независимые подписки на одну ссылку — выберите нужную или подключите обе.
         </div>
 
         <section class="plan-card ${std.active ? "plan-active" : ""}">
@@ -1344,7 +1344,7 @@ function _buildDevicesSectionHtml(d) {
             <p class="muted" style="font-size:12px;">
                 ${wiActive
                     ? "Слоты «Белого интернета» выдаются по приоритету (или в порядке первого подключения)."
-                    : "Устройства добавляются автоматически при обновлении ключа в INCY или Happ."}
+                    : "Устройства добавляются автоматически при обновлении подписки в INCY или Happ."}
             </p>
             <div style="display:flex; flex-direction:column; gap:8px;">${rowsHtml}</div>
         </section>
