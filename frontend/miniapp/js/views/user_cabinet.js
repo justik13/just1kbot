@@ -22,6 +22,9 @@ const _ICONS = {
     share: `<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>`,
     plus: `<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
     phone: `<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>`,
+    desktop: `<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>`,
+    refresh: `<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>`,
+    trash: `<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>`,
 };
 
 const _CLIENT_LINKS = {
@@ -1322,20 +1325,25 @@ function _buildDevicesSectionHtml(d) {
         `
         : devices.map((dev, idx) => {
             const label = dev.device_name || dev.platform || "Устройство";
-            const meta = [dev.platform, dev.os_version, dev.app_version].filter(Boolean).join(" · ");
+            const rawHwid = String(dev.hwid || "");
+            const shortHwid = rawHwid.length > 14 ? `${rawHwid.slice(0, 6)}…${rawHwid.slice(-4)}` : rawHwid;
+            const meta = [dev.platform, dev.os_version].filter(Boolean).join(" · ");
+            const isDesktop = /win|mac|linux|desktop|amd64|x86_64/i.test(`${label} ${meta}`);
+            const devIcon = isDesktop ? _ICONS.desktop : _ICONS.phone;
+            const isBi = Boolean(wiActive && dev.is_bi_assigned);
 
             let badgeHtml = "";
             let actionBtnHtml = "";
 
             if (wiActive) {
                 if (dev.is_bi_assigned) {
-                    badgeHtml = `<span class="chip chip-ok" style="font-size:11px;">Белый интернет</span>`;
+                    badgeHtml = `<span class="chip chip-ok" style="font-size:11px; flex-shrink:0;">Белый интернет</span>`;
                 } else {
-                    badgeHtml = `<span class="chip chip-muted" style="font-size:11px;">Стандарт</span>`;
+                    badgeHtml = `<span class="chip chip-muted" style="font-size:11px; flex-shrink:0;">Стандарт</span>`;
                     if (hasMultipleDevices) {
                         actionBtnHtml = `
-                            <button type="button" class="btn btn-sm btn-primary" data-prio="${escapeHtml(dev.hwid)}">
-                                ⚡ Перенести Белый интернет сюда
+                            <button type="button" class="btn btn-sm" data-prio="${escapeHtml(dev.hwid)}" style="border-color:rgba(52,211,153,0.35); color:var(--accent-emerald); background:var(--accent-emerald-soft);">
+                                ${_ICONS.bolt} Перенести Белый интернет
                             </button>
                         `;
                     }
@@ -1343,33 +1351,37 @@ function _buildDevicesSectionHtml(d) {
             } else {
                 if (hasMultipleDevices) {
                     if (idx === 0) {
-                        badgeHtml = `<span class="chip chip-info" style="font-size:11px;">⭐ Основное для Белого интернета</span>`;
+                        badgeHtml = `<span class="chip chip-info" style="font-size:11px; flex-shrink:0;">Основное для БИ</span>`;
                     } else {
-                        badgeHtml = `<span class="chip chip-muted" style="font-size:11px;">Стандарт</span>`;
+                        badgeHtml = `<span class="chip chip-muted" style="font-size:11px; flex-shrink:0;">Стандарт</span>`;
                         actionBtnHtml = `
-                            <button type="button" class="btn btn-sm" data-prio="${escapeHtml(dev.hwid)}">
-                                ⭐ Сделать основным для Белого интернета
+                            <button type="button" class="btn btn-sm" data-prio="${escapeHtml(dev.hwid)}" style="border-color:rgba(56,189,248,0.35); color:var(--accent-sky); background:var(--accent-sky-soft);">
+                                ${_ICONS.bolt} Сделать основным для БИ
                             </button>
                         `;
                     }
                 }
             }
 
+            const subParts = [meta || shortHwid, formatDate(dev.last_seen_at)].filter(Boolean).join(" • ");
+
             return `
-                <div class="item-row">
-                    <div class="row">
-                        <div>
-                            <div style="font-weight:600;">${escapeHtml(label)}</div>
-                            <div class="muted" style="font-size:11px;">${escapeHtml(meta || dev.hwid)}</div>
+                <div class="item-row" style="gap:10px; padding:12px; ${isBi ? "border-color:rgba(52,211,153,0.28); background:rgba(52,211,153,0.03);" : ""}">
+                    <div class="row" style="align-items:flex-start; gap:10px;">
+                        <div style="display:flex; align-items:center; gap:10px; min-width:0;">
+                            <div style="width:36px; height:36px; border-radius:10px; display:flex; align-items:center; justify-content:center; flex-shrink:0; background:${isBi ? "var(--accent-emerald-soft)" : "var(--bg-elevated)"}; color:${isBi ? "var(--accent-emerald)" : "var(--text-secondary)"}; border:1px solid ${isBi ? "rgba(52,211,153,0.24)" : "var(--border-subtle)"};">
+                                ${devIcon}
+                            </div>
+                            <div style="min-width:0;">
+                                <div style="font-weight:600; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(label)}</div>
+                                <div class="muted" style="font-size:11px; font-family:var(--font-mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(subParts)}</div>
+                            </div>
                         </div>
                         ${badgeHtml}
                     </div>
-                    <div class="row muted" style="font-size:11px;">
-                        <span>Активность: ${formatDate(dev.last_seen_at)}</span>
-                    </div>
-                    <div class="actions-row">
-                        ${actionBtnHtml}
-                        <button type="button" class="btn btn-sm btn-danger" data-del="${escapeHtml(dev.hwid)}" data-name="${escapeHtml(label)}">Удалить</button>
+                    <div class="actions-row" style="justify-content:space-between; align-items:center; gap:8px;">
+                        ${actionBtnHtml || "<span></span>"}
+                        <button type="button" class="btn btn-sm btn-danger" data-del="${escapeHtml(dev.hwid)}" data-name="${escapeHtml(label)}" style="margin-left:auto;">${_ICONS.trash} Удалить</button>
                     </div>
                 </div>
             `;
@@ -1378,32 +1390,34 @@ function _buildDevicesSectionHtml(d) {
     let noteText = "";
     if (wiActive) {
         if (devices.length > wiLimit) {
-            noteText = `Слот «Белого интернета» (${wiLimit} из ${devices.length}) закреплен за отмеченным устройством. Вы можете перенести его на другой гаджет кнопкой выше.`;
+            noteText = `Слот «Белого интернета» (${wiLimit} из ${devices.length}) закреплён за отмеченным устройством — его можно перенести на другой гаджет.`;
         } else {
-            noteText = "Все ваши подключенные устройства имеют полный доступ ко всем активным тарифам.";
+            noteText = "Все ваши подключённые устройства имеют полный доступ ко всем активным тарифам.";
         }
     } else if (devices.length >= 2) {
-        noteText = "При подключении опции «Белый интернет» доступ в первую очередь получит основное устройство (отмечено ⭐). Вы можете назначить другой гаджет кнопкой выше.";
+        noteText = "При подключении «Белого интернета» приоритет получит основное устройство.";
     } else {
         noteText = "Устройства добавляются автоматически при обновлении подписки в INCY или Happ.";
     }
 
     return `
-        <section class="card">
-            <div class="row" style="align-items:center;">
-                <div class="card-title">Привязанные устройства</div>
-                <div style="display:flex; align-items:center; gap:6px;">
-                    <button type="button" class="btn btn-sm" id="refreshDevicesBtn" style="font-size:11px; padding:4px 8px; min-height:28px;">Обновить</button>
-                    ${devices.length > 1 ? `<button type="button" class="btn btn-sm btn-danger" id="resetAllDevicesBtn" style="font-size:11px; padding:4px 8px; min-height:28px;">Сбросить все</button>` : ""}
+        <section class="card" style="gap:10px;">
+            <div class="row" style="align-items:center; gap:8px;">
+                <div style="display:flex; align-items:center; gap:8px; min-width:0;">
+                    <div class="card-title" style="margin:0;">Устройства</div>
                     <span class="chip ${isLimitReached ? "chip-warn" : "chip-muted"}">${devices.length} из ${stdLimit}</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+                    <button type="button" class="btn btn-sm" id="refreshDevicesBtn" aria-label="Обновить" title="Обновить" style="padding:6px 10px; min-height:32px;">${_ICONS.refresh}</button>
+                    ${devices.length > 1 ? `<button type="button" class="btn btn-sm btn-danger" id="resetAllDevicesBtn" style="font-size:12px; padding:6px 10px; min-height:32px;">Сбросить</button>` : ""}
                 </div>
             </div>
             ${isLimitReached ? `
-                <div class="notice-box notice-warn" style="margin-bottom:8px;">
-                    <span>Все слоты (${devices.length} из ${stdLimit}) заняты. Чтобы подключить новое устройство, удалите одно из старых ниже.</span>
+                <div class="notice-box notice-warn" style="margin:0;">
+                    <span>Все слоты (${devices.length} из ${stdLimit}) заняты — удалите старое устройство, чтобы подключить новое.</span>
                 </div>
             ` : ""}
-            <p class="muted" style="font-size:12px;">
+            <p class="muted" style="font-size:12px; margin:0;">
                 ${noteText}
             </p>
             <div style="display:flex; flex-direction:column; gap:8px; max-height:420px; overflow-y:auto; padding-right:2px;">${rowsHtml}</div>
@@ -1441,7 +1455,7 @@ function _bindDevicesEvents(container, reload) {
     if (refreshBtn) {
         refreshBtn.addEventListener("click", async () => {
             refreshBtn.disabled = true;
-            refreshBtn.textContent = "Обновляем...";
+            refreshBtn.style.opacity = "0.5";
             await reload();
         });
     }
