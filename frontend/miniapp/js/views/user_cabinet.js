@@ -973,7 +973,7 @@ function _renderConnectTab(body, d, reload, root) {
         if (supBtn) {
             supBtn.addEventListener("click", () => openExternalLink(d.support.support_url));
         }
-        _bindDevicesEvents(body, reload);
+        _bindDevicesEvents(body, d, reload);
         return;
     }
 
@@ -1005,7 +1005,7 @@ function _renderConnectTab(body, d, reload, root) {
             _render(root);
         });
         _bindGuideEvents(body, root);
-        _bindDevicesEvents(body, reload);
+        _bindDevicesEvents(body, d, reload);
         return;
     }
 
@@ -1088,7 +1088,7 @@ function _renderConnectTab(body, d, reload, root) {
         });
     }
     _bindGuideEvents(body, root);
-    _bindDevicesEvents(body, reload);
+    _bindDevicesEvents(body, d, reload);
 }
 
 function _renderTariffsTab(body, d, reload) {
@@ -1357,17 +1357,19 @@ function _buildDevicesSectionHtml(d) {
 
             let biControlHtml = "";
             if (wiActive && hasMultipleDevices) {
-                if (isBi) {
-                    biControlHtml = `<span class="chip chip-ok" style="font-size:11px; flex-shrink:0;">Белый интернет</span>`;
-                } else {
-                    biControlHtml = `
-                        <button type="button" class="btn btn-sm" data-prio="${escapeHtml(dev.hwid)}" style="padding:5px 10px; min-height:30px; font-size:12px; border-color:rgba(52,211,153,0.35); color:var(--accent-emerald); background:var(--accent-emerald-soft);">
-                            ${_ICONS.bolt} Включить БИ
-                        </button>
-                    `;
-                }
+                biControlHtml = `
+                    <label class="toggle-row" style="padding:4px 8px; background:rgba(255,255,255,0.02); border:1px solid ${isBi ? "rgba(52,211,153,0.32)" : "var(--border-subtle)"}; border-radius:9px; width:100%; cursor:pointer;">
+                        <span class="toggle-label" style="font-size:12px; display:flex; align-items:center; gap:6px; color:${isBi ? "var(--accent-emerald)" : "var(--text-secondary)"}; font-weight:${isBi ? "600" : "500"};">
+                            ${_ICONS.bolt} Белый интернет: ${isBi ? "Включён" : "Выключен"}
+                        </span>
+                        <span class="switch" style="transform:scale(0.88); transform-origin:right center;">
+                            <input type="checkbox" data-bi-toggle="${escapeHtml(dev.hwid)}" data-name="${escapeHtml(label)}" ${isBi ? "checked" : ""}>
+                            <span class="switch-track"></span>
+                        </span>
+                    </label>
+                `;
             } else if (wiActive) {
-                biControlHtml = `<span class="chip chip-ok" style="font-size:11px; flex-shrink:0;">Белый интернет</span>`;
+                biControlHtml = `<span class="chip chip-ok" style="font-size:11px; flex-shrink:0;">Белый интернет · Включён</span>`;
             }
 
             return `
@@ -1393,8 +1395,8 @@ function _buildDevicesSectionHtml(d) {
         }).join("");
 
     let noteText = "";
-    if (wiActive && devices.length > wiLimit) {
-        noteText = `Слотов «Белого интернета»: ${biAssignedCount} из ${wiLimit}. Нажмите «Включить БИ» на нужном устройстве, затем ⟳ в приложении.`;
+    if (wiActive && devices.length > 1) {
+        noteText = `Слотов «Белого интернета»: ${biAssignedCount} из ${wiLimit}. Переключайте слоты тумблером на карточках устройств, затем нажмите ⟳ в приложении.`;
     } else if (wiActive) {
         noteText = "Все подключённые устройства получают доступ ко всем активным тарифам.";
     } else {
@@ -1427,7 +1429,54 @@ function _buildDevicesSectionHtml(d) {
     `;
 }
 
-function _bindDevicesEvents(container, reload) {
+function _openBiReplaceModal(targetDev, activeBiDevices, onReplaced) {
+    const wrap = document.createElement("div");
+    wrap.className = "field";
+    wrap.style.gap = "10px";
+
+    const targetLabel = targetDev.device_name || targetDev.platform || "Устройство";
+    const close = openModal("Замена слота · Белый интернет", wrap);
+
+    wrap.innerHTML = `
+        <div class="muted" style="font-size:12px; line-height:1.45;">
+            Все слоты (${activeBiDevices.length} из ${activeBiDevices.length}) уже заняты. Выберите, с какого устройства перенести «Белый интернет» на <strong style="color:var(--text-primary);">${escapeHtml(targetLabel)}</strong>:
+        </div>
+        <div style="display:flex; flex-direction:column; gap:8px;">
+            ${activeBiDevices.map((dev) => {
+                const label = dev.device_name || dev.platform || "Устройство";
+                const osText = [dev.platform, dev.os_version].filter(Boolean).join(" ");
+                const meta = [osText, dev.app_version].filter(Boolean).join(" · ");
+                return `
+                    <button type="button" class="item-row" data-replace-from="${escapeHtml(dev.hwid)}" style="text-align:left; cursor:pointer; align-items:center; flex-direction:row; justify-content:space-between; gap:10px; padding:10px 12px; border-color:rgba(52,211,153,0.28);">
+                        <div style="min-width:0; flex:1;">
+                            <div style="font-weight:600; font-size:13px; color:var(--text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(label)}</div>
+                            ${meta ? `<div class="muted" style="font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(meta)}</div>` : ""}
+                        </div>
+                        <span class="chip chip-ok" style="flex-shrink:0;">Забрать слот →</span>
+                    </button>
+                `;
+            }).join("")}
+        </div>
+    `;
+
+    wrap.querySelectorAll("[data-replace-from]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+            const fromHwid = btn.dataset.replaceFrom;
+            wrap.querySelectorAll("[data-replace-from]").forEach((b) => { b.disabled = true; });
+            try {
+                await api.setDevicePriority(targetDev.hwid, 10, fromHwid);
+                close();
+                showToast("Слот перенесён — нажмите ⟳ в приложении");
+                onReplaced();
+            } catch (err) {
+                showToast(err.message || "Не удалось перенести слот");
+                wrap.querySelectorAll("[data-replace-from]").forEach((b) => { b.disabled = false; });
+            }
+        });
+    });
+}
+
+function _bindDevicesEvents(container, d, reload) {
     container.querySelectorAll("[data-del]").forEach((btn) => {
         btn.addEventListener("click", () => {
             const devName = btn.dataset.name || "это устройство";
@@ -1488,17 +1537,49 @@ function _bindDevicesEvents(container, reload) {
         });
     }
 
-    container.querySelectorAll("[data-prio]").forEach((btn) => {
-        btn.addEventListener("click", async () => {
-            btn.disabled = true;
+    const devices = [...(d?.devices || [])].sort((a, b) => (a.id || 0) - (b.id || 0));
+    const wiLimit = Number((d?.wi && d.wi.device_limit) || 1);
+    const activeBiDevices = devices.filter((dev) => dev.is_bi_assigned);
+
+    container.querySelectorAll("[data-bi-toggle]").forEach((chk) => {
+        chk.addEventListener("change", async () => {
+            const hwid = chk.dataset.biToggle;
+            const wantEnable = chk.checked;
+            const targetDev = devices.find((dev) => dev.hwid === hwid) || { hwid, device_name: chk.dataset.name };
+
+            if (wantEnable && activeBiDevices.length >= wiLimit) {
+                chk.checked = false;
+                if (activeBiDevices.length === 1) {
+                    chk.disabled = true;
+                    try {
+                        await api.setDevicePriority(hwid, 10, activeBiDevices[0].hwid);
+                        showToast("Слот перенесён — нажмите ⟳ в приложении");
+                        reload();
+                    } catch (err) {
+                        showToast(err.message || "Не удалось перенести слот");
+                    } finally {
+                        chk.disabled = false;
+                    }
+                    return;
+                }
+                _openBiReplaceModal(targetDev, activeBiDevices, reload);
+                return;
+            }
+
+            chk.disabled = true;
             try {
-                await api.setDevicePriority(btn.dataset.prio, 10);
-                showToast("Приоритет обновлён — нажмите ⟳ в приложении");
+                await api.setDevicePriority(hwid, wantEnable ? 10 : -1);
+                showToast(
+                    wantEnable
+                        ? "Белый интернет включён — нажмите ⟳ в приложении"
+                        : "Белый интернет отключён на устройстве"
+                );
                 reload();
             } catch (err) {
-                showToast(err.message || "Не удалось изменить приоритет");
+                chk.checked = !wantEnable;
+                showToast(err.message || "Не удалось изменить статус слота");
             } finally {
-                btn.disabled = false;
+                chk.disabled = false;
             }
         });
     });

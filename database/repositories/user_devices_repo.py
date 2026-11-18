@@ -101,8 +101,13 @@ async def list_user_devices(
     )
     rows = (await session.scalars(stmt)).all()
     limit = max(0, int(wi_device_limit or 0))
+    assigned_count = 0
     result: list[dict[str, Any]] = []
-    for idx, dev in enumerate(rows):
+    for dev in rows:
+        is_assigned = False
+        if assigned_count < limit and (dev.bi_priority or 0) >= 0:
+            is_assigned = True
+            assigned_count += 1
         result.append(
             {
                 "id": dev.id,
@@ -115,7 +120,7 @@ async def list_user_devices(
                 "bi_priority": dev.bi_priority,
                 "first_seen_at": dev.first_seen_at.isoformat() if dev.first_seen_at else None,
                 "last_seen_at": dev.last_seen_at.isoformat() if dev.last_seen_at else None,
-                "is_bi_assigned": idx < limit,
+                "is_bi_assigned": is_assigned,
             }
         )
     return result
@@ -344,8 +349,10 @@ async def set_device_bi_priority(
     user_id: int,
     hwid: str,
     priority: int,
+    *,
+    replace_hwid: str | None = None,
 ) -> bool:
-    """Set manual BI priority for a specific HWID device (higher = higher priority)."""
+    """Set manual BI priority for a specific HWID device (priority > 0 enables, <= 0 disables)."""
     clean_hwid = str(hwid or "").strip()[:128]
     if not clean_hwid:
         return False
@@ -357,6 +364,19 @@ async def set_device_bi_priority(
     )
     if dev is None:
         return False
+
+    if replace_hwid:
+        clean_replace = str(replace_hwid).strip()[:128]
+        if clean_replace and clean_replace != clean_hwid:
+            rep_dev = await session.scalar(
+                select(UserDevice).where(
+                    UserDevice.user_id == user_id,
+                    UserDevice.hwid == clean_replace,
+                )
+            )
+            if rep_dev is not None:
+                rep_dev.bi_priority = -1
+
     if priority > 0:
         max_prio = await session.scalar(
             select(func.coalesce(func.max(UserDevice.bi_priority), 0)).where(
@@ -365,7 +385,7 @@ async def set_device_bi_priority(
         )
         dev.bi_priority = max(int(priority), int(max_prio or 0) + 10)
     else:
-        dev.bi_priority = 0
+        dev.bi_priority = -1
     await session.flush()
     return True
 

@@ -792,7 +792,11 @@ async def api_user_device_priority_handler(request: web.Request) -> web.Response
     async with session_scope() as session:
         user = await _ensure_user(session, ctx)
         updated = await user_devices_repo.set_device_bi_priority(
-            session, user.id, hwid, payload.priority
+            session,
+            user.id,
+            hwid,
+            payload.priority,
+            replace_hwid=payload.replace_hwid,
         )
         if not updated:
             return web.json_response({"ok": False, "error": "Устройство не найдено"}, status=404)

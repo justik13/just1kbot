@@ -62,7 +62,8 @@ class AutoRenewPayload(BaseModel):
 
 
 class DevicePriorityPayload(BaseModel):
-    priority: int = Field(..., ge=0, le=100)
+    priority: int = Field(..., ge=-1, le=100)
+    replace_hwid: str | None = Field(default=None, max_length=128)
 
 
 class AddNodePayload(BaseModel):

@@ -224,9 +224,11 @@ export const api = {
         requestJson("/api/app/user/devices/reset", {
             method: "POST",
         }),
-    setDevicePriority: (hwid, priority) =>
+    setDevicePriority: (hwid, priority, replaceHwid = null) =>
         requestJson(`/api/app/user/devices/${encodeURIComponent(hwid)}/priority`, {
             method: "POST",
-            body: JSON.stringify({ priority }),
+            body: JSON.stringify(
+                replaceHwid ? { priority, replace_hwid: replaceHwid } : { priority }
+            ),
         }),
 };
