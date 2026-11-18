@@ -230,9 +230,13 @@ async def assert_inv_7_subscription_period_usage(session: AsyncSession) -> Invar
 
 
 async def assert_inv_8_origin_node_capabilities(session: AsyncSession) -> InvariantResult:
-    """Inv 8: All subscription origin nodes exist and have 'white_internet' capability."""
+    """Inv 8: All subscription origin/hub nodes exist and have 'white_internet' capability."""
     subs = (await session.scalars(select(WhiteInternetSubscription))).all()
-    origin_ids = {s.origin_node_id for s in subs if s.origin_node_id is not None}
+    origin_ids = {
+        (getattr(s, "hub_server_id", None) if getattr(s, "hub_server_id", None) is not None else getattr(s, "origin_node_id", None))
+        for s in subs
+    }
+    origin_ids = {oid for oid in origin_ids if oid is not None}
     if not origin_ids:
         return InvariantResult(
             8, "Origin Node Capabilities", True, "No subscription origin nodes to check"
