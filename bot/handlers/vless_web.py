@@ -489,13 +489,13 @@ def _format_announce_summary(
     lines: list[str] = []
     if std_active:
         if std_end and is_permanent_subscription(std_end):
-            lines.append("Стандарт: без срока • безлимит")
+            lines.append("Стандарт: без срока • ∞")
         else:
             std_days = _format_days_left(std_end, cur_now)
             if std_days is not None:
-                lines.append(f"Стандарт: {std_days} дн. • безлимит")
+                lines.append(f"Стандарт: {std_days} дн. • ∞")
             else:
-                lines.append("Стандарт: активен • безлимит")
+                lines.append("Стандарт: активен • ∞")
 
     if wi_active:
         total_b = max(0, wi_total_bytes)
@@ -938,11 +938,16 @@ async def serve_unified_subscription_feed(
                 for d in devices_list
             )
 
-        def _make_inline_stub(text: str) -> str:
-            return (
+        def _make_inline_stub(text: str, description: str = "") -> str:
+            base_stub = (
                 f"vless://00000000-0000-0000-0000-000000000000@127.0.0.1:443"
                 f"?encryption=none&security=none&type=tcp#{urllib.parse.quote(text)}"
             )
+            clean_desc = description.strip()[:30]
+            if clean_desc:
+                desc_b64 = base64.b64encode(clean_desc.encode("utf-8")).decode("ascii")
+                return f"{base_stub}?serverDescription={desc_b64}"
+            return base_stub
 
         # 4. Generate links for active options (with independent per-option stubs)
         all_links: list[str] = []
@@ -978,10 +983,13 @@ async def serve_unified_subscription_feed(
                     VlessSubscriptionService.ensure_synced_background(user.id, session=session)
             else:
                 all_links.append(
-                    _make_inline_stub(texts.FEED_STUB_STD_DEVICE_LIMIT.format(limit=std_limit))
+                    _make_inline_stub(
+                        texts.FEED_STUB_STD_DEVICE_LIMIT.format(limit=std_limit),
+                        "Удалите старое в боте",
+                    )
                 )
         elif getattr(user, "subscription_end", None) is not None and wi_active:
-            all_links.append(_make_inline_stub(texts.FEED_STUB_STD_EXPIRED))
+            all_links.append(_make_inline_stub(texts.FEED_STUB_STD_EXPIRED, "Продлите доступ в боте"))
 
         wi_server: Server | None = None
         if wi_active and wi_sub is not None:
@@ -1016,20 +1024,23 @@ async def serve_unified_subscription_feed(
                     )
                     all_links.extend(wi_links)
                 else:
-                    all_links.append(_make_inline_stub(texts.FEED_STUB_WI_PENDING))
+                    all_links.append(_make_inline_stub(texts.FEED_STUB_WI_PENDING, "Обновите через 1 минуту"))
             else:
                 all_links.append(
-                    _make_inline_stub(texts.FEED_STUB_WI_DEVICE_LIMIT.format(limit=wi_limit))
+                    _make_inline_stub(
+                        texts.FEED_STUB_WI_DEVICE_LIMIT.format(limit=wi_limit),
+                        "Удалите старое в боте",
+                    )
                 )
         elif wi_sub is not None and std_active:
             if wi_is_pending:
-                all_links.append(_make_inline_stub(texts.FEED_STUB_WI_PENDING))
+                all_links.append(_make_inline_stub(texts.FEED_STUB_WI_PENDING, "Обновите через 1 минуту"))
             elif wi_is_exhausted and not wi_is_expired:
-                all_links.append(_make_inline_stub(texts.FEED_STUB_WI_EXHAUSTED))
+                all_links.append(_make_inline_stub(texts.FEED_STUB_WI_EXHAUSTED, "Докупите пакет ГБ в боте"))
             elif wi_is_disabled:
-                all_links.append(_make_inline_stub(texts.FEED_STUB_WI_DISABLED))
+                all_links.append(_make_inline_stub(texts.FEED_STUB_WI_DISABLED, "Обратитесь в поддержку"))
             else:
-                all_links.append(_make_inline_stub(texts.FEED_STUB_WI_EXPIRED))
+                all_links.append(_make_inline_stub(texts.FEED_STUB_WI_EXPIRED, "Продлите доступ в боте"))
 
         no_servers_mode = False
         if not all_links:
@@ -1039,10 +1050,8 @@ async def serve_unified_subscription_feed(
                 if (wi_active and not std_active)
                 else texts.FEED_STUB_NO_LOCATIONS
             )
-            all_links.append(
-                f"vless://00000000-0000-0000-0000-000000000000@127.0.0.1:443"
-                f"?encryption=none&security=none&type=tcp#{urllib.parse.quote(placeholder_label)}"
-            )
+            placeholder_desc = "Обновите через 1 минуту" if (wi_active and not std_active) else "Напишите в поддержку"
+            all_links.append(_make_inline_stub(placeholder_label, placeholder_desc))
 
         payload = "\n".join(all_links)
         b64_payload = base64.b64encode(payload.encode("utf-8")).decode("utf-8")

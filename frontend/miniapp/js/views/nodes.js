@@ -146,7 +146,7 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
             <div class="notice-box" style="flex-direction:column; align-items:flex-start; gap:3px; font-size:11px; margin-bottom:10px;">
                 <strong>Пример карточки в INCY / Happ:</strong>
                 <span><b>✦ Just1k [1/2]</b> <span class="muted">(Profile-Title + счётчик устройств, автообновление 6 ч)</span></span>
-                <span>🔔 <i>Стандарт: 6 дн. • безлимит / Белый интернет: 29 дн. • 0/50 ГБ</i> <span class="muted">(Announce)</span></span>
+                <span>🔔 <i>Стандарт: 6 дн. • ∞ / Белый интернет: 29 дн. • 0/50 ГБ</i> <span class="muted">(Announce)</span></span>
                 <span>Кнопки: <b>Поддержка</b> (Support-Url) • <b>Канал / Бот</b> (Announce-Url)</span>
             </div>
             <form id="subSettingsForm" class="field" style="gap:10px;">
