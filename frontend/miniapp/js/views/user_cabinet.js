@@ -853,7 +853,7 @@ function _render(root) {
     else _renderProfileTab(body, d, reload);
 }
 
-function _buildGuideHtml(subUrl, isActive) {
+function _buildGuideHtml(subUrl, backupSubUrl, isActive) {
     const platformLabels = { ios: "iOS", android: "Android", windows: "Windows", macos: "macOS" };
     const clients = _CLIENT_LINKS[_state.platform] || _CLIENT_LINKS.ios;
 
@@ -882,8 +882,18 @@ function _buildGuideHtml(subUrl, isActive) {
                 </div>
                 ${isActive && subUrl ? `
                     <div class="field">
-                        <label>Ключ подключения (для ручного ввода)</label>
+                        <label>Основной ключ подключения</label>
                         <div class="sub-url-box">${escapeHtml(subUrl)}</div>
+                    </div>
+                ` : ""}
+                ${isActive && backupSubUrl ? `
+                    <div class="field" style="margin-top:8px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <label style="margin:0;">Резервный ключ (прямой)</label>
+                            <button id="copyBackupSubBtn" type="button" class="btn btn-xs" style="padding:2px 8px; font-size:11px;">Скопировать резерв</button>
+                        </div>
+                        <div class="sub-url-box" style="font-size:11px; opacity:0.85;">${escapeHtml(backupSubUrl)}</div>
+                        <span class="muted" style="font-size:10px; margin-top:2px;">Используйте прямое подключение, если по основному ключу есть задержки</span>
                     </div>
                 ` : ""}
                 <div class="notice-box" style="flex-direction:column; align-items:flex-start; gap:6px; font-size:12px;">
@@ -944,6 +954,7 @@ function _renderConnectTab(body, d, reload, root) {
     const wi = d.wi || {};
     const isAnyActive = Boolean(std.active || wi.active);
     const subUrl = d.subscription_url || "";
+    const backupSubUrl = d.subscription_backup_url || "";
     const desktopFirst = _state.platform === "windows" || _state.platform === "macos";
 
     if (!isAnyActive) {
@@ -958,7 +969,7 @@ function _renderConnectTab(body, d, reload, root) {
                 </div>
                 <p class="muted">Оформите «Стандарт» или «Белый интернет» — ключ подключения активируется сразу после оплаты.</p>
                 <button id="goTariffsBtn" type="button" class="btn btn-primary btn-lg">Перейти к тарифам</button>
-                ${_buildGuideHtml(subUrl, false)}
+                ${_buildGuideHtml(subUrl, backupSubUrl, false)}
             </section>
             ${(d.devices || []).length ? _buildDevicesSectionHtml(d) : ""}
         `;
@@ -1019,7 +1030,7 @@ function _renderConnectTab(body, d, reload, root) {
                     <button id="copySubBtn" type="button" class="btn btn-sm">${_ICONS.copy} Копировать ключ</button>
                 </div>
             </div>
-            ${_buildGuideHtml(subUrl, true)}
+            ${_buildGuideHtml(subUrl, backupSubUrl, true)}
         </section>
 
         ${_buildDevicesSectionHtml(d)}
@@ -1033,6 +1044,10 @@ function _renderConnectTab(body, d, reload, root) {
         });
     });
     body.querySelector("#copySubBtn").addEventListener("click", () => copyText(subUrl, "Ключ скопирован"));
+    const copyBackupBtn = body.querySelector("#copyBackupSubBtn");
+    if (copyBackupBtn) {
+        copyBackupBtn.addEventListener("click", () => copyText(backupSubUrl, "Резервный ключ скопирован"));
+    }
     const graceBtn = body.querySelector("#graceRenewBtn");
     if (graceBtn) {
         graceBtn.addEventListener("click", () => {

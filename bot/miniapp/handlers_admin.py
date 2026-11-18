@@ -13,7 +13,7 @@ from pydantic import BaseModel, ValidationError
 from sqlalchemy import delete, func, or_, select
 
 from bot.miniapp.auth import require_admin_user, require_authenticated_user
-from bot.miniapp.handlers_user import _build_sub_url
+from bot.miniapp.handlers_user import _build_backup_sub_url, _build_sub_url
 from bot.miniapp.schemas import (
     AddNodePayload,
     AdminDirectMessagePayload,
@@ -956,6 +956,7 @@ async def api_admin_user_details_handler(request: web.Request) -> web.Response:
                 "standard_end": user.subscription_end.isoformat() if user.subscription_end else None,
                 "standard_device_limit": int(user.device_limit or 0),
                 "subscription_url": _build_sub_url(sub_token) if sub_token else None,
+                "subscription_backup_url": _build_backup_sub_url(sub_token) if sub_token else None,
                 "wi": (
                     {
                         "id": wi_sub.id,
@@ -1077,6 +1078,7 @@ async def api_admin_user_token_rotate_handler(request: web.Request) -> web.Respo
     return web.json_response({
         "ok": True,
         "subscription_url": _build_sub_url(new_token) if new_token else None,
+        "subscription_backup_url": _build_backup_sub_url(new_token) if new_token else None,
         "message": "Токен подписки перевыпущен, старая ссылка отключена",
     })
 

@@ -255,10 +255,18 @@ async function _openUserDetailsModal(user, onUpdated) {
         </div>
         ${details.subscription_url ? `
         <div class="field">
-            <label>Ссылка подписки</label>
+            <label>Основная ссылка (CDN)</label>
             <div class="row" style="gap:6px; flex-wrap:nowrap;">
                 <input id="detSubUrl" class="input mono" readonly value="${escapeHtml(details.subscription_url)}">
                 <button id="detCopySubBtn" type="button" class="btn btn-sm">Копировать</button>
+            </div>
+        </div>` : ""}
+        ${details.subscription_backup_url ? `
+        <div class="field">
+            <label>Резервная ссылка (Прямая)</label>
+            <div class="row" style="gap:6px; flex-wrap:nowrap;">
+                <input id="detBackupSubUrl" class="input mono" readonly value="${escapeHtml(details.subscription_backup_url)}">
+                <button id="detCopyBackupSubBtn" type="button" class="btn btn-sm">Копировать</button>
             </div>
         </div>` : ""}
         <div class="field">
@@ -275,7 +283,12 @@ async function _openUserDetailsModal(user, onUpdated) {
 
     const copyBtn = box.querySelector("#detCopySubBtn");
     if (copyBtn) {
-        copyBtn.addEventListener("click", () => copyText(details.subscription_url, "Ссылка скопирована"));
+        copyBtn.addEventListener("click", () => copyText(details.subscription_url, "Основная ссылка скопирована"));
+    }
+
+    const copyBackupBtn = box.querySelector("#detCopyBackupSubBtn");
+    if (copyBackupBtn) {
+        copyBackupBtn.addEventListener("click", () => copyText(details.subscription_backup_url, "Резервная ссылка скопирована"));
     }
 
     box.querySelector("#detResetHwidBtn").addEventListener("click", async (e) => {

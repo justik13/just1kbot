@@ -111,6 +111,20 @@ def _build_sub_url(token: str) -> str:
     return f"/sub/{token}"
 
 
+def _build_backup_sub_url(token: str) -> str | None:
+    """Generate backup direct subscription URL if backup domain differs from primary CDN domain."""
+    if not token:
+        return None
+    settings = get_settings()
+    backup_domain = (settings.SUBSCRIPTION_BACKUP_DOMAIN or settings.DOMAIN or "").strip().rstrip("/")
+    primary_domain = (settings.SUBSCRIPTION_DOMAIN or "").strip().rstrip("/")
+    if not backup_domain or backup_domain == primary_domain:
+        return None
+    if not backup_domain.startswith("http"):
+        return f"https://{backup_domain}/sub/{token}"
+    return f"{backup_domain}/sub/{token}"
+
+
 def _calc_payment_split(amount_rub: int, real_avail: int, bonus_avail: int, use_balance: bool) -> dict[str, int]:
     if not use_balance or amount_rub <= 0:
         return {"bonus_used": 0, "real_used": 0, "card_to_pay": max(0, amount_rub)}
@@ -315,6 +329,7 @@ async def api_user_dashboard_handler(request: web.Request) -> web.Response:
                 "total": int(bal.available),
             },
             "subscription_url": _build_sub_url(vless_sub.token),
+            "subscription_backup_url": _build_backup_sub_url(vless_sub.token),
             "standard": {
                 "active": std_active,
                 "expires_at": user.subscription_end.isoformat() if user.subscription_end else None,
