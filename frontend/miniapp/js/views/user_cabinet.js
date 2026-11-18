@@ -580,6 +580,11 @@ function _openWiPurchaseModal(d, onReload) {
             <div class="muted" style="font-size:12px;">
                 Независимая подписка на 30 дней для мобильной сети при жёстких ограничениях. Работает как отдельно, так и в дополнение к «Стандарту».
             </div>
+            ${d.devices && d.devices.length > devices ? `
+                <div class="notice-box notice-info" style="font-size:11px; padding:6px 10px; margin-top:4px;">
+                    <span>ℹ️ Слот будет привязан к основному устройству (${escapeHtml(d.devices[0].device_name || d.devices[0].platform || "Устройство")}). Выбрать другое можно в любой момент на вкладке подключения.</span>
+                </div>
+            ` : ""}
             <div class="field">
                 <label>Количество устройств (по 50 ГБ на слот)</label>
                 <div class="price-tile-grid">
@@ -1288,9 +1293,12 @@ function _renderTariffsTab(body, d, reload) {
 
 function _buildDevicesSectionHtml(d) {
     const devices = d.devices || [];
-    const wiActive = Boolean(d.wi && d.wi.active);
+    const wi = d.wi || {};
+    const wiActive = Boolean(wi && wi.active);
+    const wiLimit = Number(wi.device_limit || 1);
     const stdLimit = Number((d.standard && d.standard.device_limit) || 2);
     const isLimitReached = devices.length >= stdLimit;
+    const hasMultipleDevices = devices.length >= 2;
 
     const rowsHtml = !devices.length
         ? `
@@ -1302,9 +1310,41 @@ function _buildDevicesSectionHtml(d) {
                 </p>
             </div>
         `
-        : devices.map((dev) => {
+        : devices.map((dev, idx) => {
             const label = dev.device_name || dev.platform || "Устройство";
             const meta = [dev.platform, dev.os_version, dev.app_version].filter(Boolean).join(" · ");
+
+            let badgeHtml = "";
+            let actionBtnHtml = "";
+
+            if (wiActive) {
+                if (dev.is_bi_assigned) {
+                    badgeHtml = `<span class="chip chip-ok" style="font-size:11px;">Белый интернет</span>`;
+                } else {
+                    badgeHtml = `<span class="chip chip-muted" style="font-size:11px;">Стандарт</span>`;
+                    if (hasMultipleDevices) {
+                        actionBtnHtml = `
+                            <button type="button" class="btn btn-sm btn-primary" data-prio="${escapeHtml(dev.hwid)}">
+                                ⚡ Перенести Белый интернет сюда
+                            </button>
+                        `;
+                    }
+                }
+            } else {
+                if (hasMultipleDevices) {
+                    if (idx === 0) {
+                        badgeHtml = `<span class="chip chip-info" style="font-size:11px;">⭐ Основное для Белого интернета</span>`;
+                    } else {
+                        badgeHtml = `<span class="chip chip-muted" style="font-size:11px;">Стандарт</span>`;
+                        actionBtnHtml = `
+                            <button type="button" class="btn btn-sm" data-prio="${escapeHtml(dev.hwid)}">
+                                ⭐ Сделать основным для Белого интернета
+                            </button>
+                        `;
+                    }
+                }
+            }
+
             return `
                 <div class="item-row">
                     <div class="row">
@@ -1312,23 +1352,31 @@ function _buildDevicesSectionHtml(d) {
                             <div style="font-weight:600;">${escapeHtml(label)}</div>
                             <div class="muted" style="font-size:11px;">${escapeHtml(meta || dev.hwid)}</div>
                         </div>
-                        ${dev.is_bi_assigned ? `<span class="chip chip-info">Слот БИ</span>` : ""}
+                        ${badgeHtml}
                     </div>
                     <div class="row muted" style="font-size:11px;">
                         <span>Активность: ${formatDate(dev.last_seen_at)}</span>
-                        <span class="tabular">Приоритет: ${dev.bi_priority || 0}</span>
                     </div>
                     <div class="actions-row">
-                        ${wiActive ? `
-                            <button type="button" class="btn btn-sm" data-prio="${escapeHtml(dev.hwid)}" data-cur="${dev.bi_priority || 0}">
-                                ${(dev.bi_priority || 0) > 0 ? "Сбросить приоритет" : "Повысить приоритет"}
-                            </button>
-                        ` : ""}
+                        ${actionBtnHtml}
                         <button type="button" class="btn btn-sm btn-danger" data-del="${escapeHtml(dev.hwid)}">Удалить</button>
                     </div>
                 </div>
             `;
         }).join("");
+
+    let noteText = "";
+    if (wiActive) {
+        if (devices.length > wiLimit) {
+            noteText = `Слот «Белого интернета» (${wiLimit} из ${devices.length}) закреплен за отмеченным устройством. Вы можете перенести его на другой гаджет кнопкой выше.`;
+        } else {
+            noteText = "Все ваши подключенные устройства имеют полный доступ ко всем активным тарифам.";
+        }
+    } else if (devices.length >= 2) {
+        noteText = "При подключении опции «Белый интернет» доступ в первую очередь получит основное устройство (отмечено ⭐). Вы можете назначить другой гаджет кнопкой выше.";
+    } else {
+        noteText = "Устройства добавляются автоматически при обновлении подписки в INCY или Happ.";
+    }
 
     return `
         <section class="card">
@@ -1342,9 +1390,7 @@ function _buildDevicesSectionHtml(d) {
                 </div>
             ` : ""}
             <p class="muted" style="font-size:12px;">
-                ${wiActive
-                    ? "Слоты «Белого интернета» выдаются по приоритету (или в порядке первого подключения)."
-                    : "Устройства добавляются автоматически при обновлении подписки в INCY или Happ."}
+                ${noteText}
             </p>
             <div style="display:flex; flex-direction:column; gap:8px;">${rowsHtml}</div>
         </section>
@@ -1370,10 +1416,9 @@ function _bindDevicesEvents(container, reload) {
     container.querySelectorAll("[data-prio]").forEach((btn) => {
         btn.addEventListener("click", async () => {
             btn.disabled = true;
-            const nextPrio = Number(btn.dataset.cur) > 0 ? 0 : 10;
             try {
-                await api.setDevicePriority(btn.dataset.prio, nextPrio);
-                showToast(nextPrio > 0 ? "Приоритет повышен" : "Приоритет сброшен");
+                await api.setDevicePriority(btn.dataset.prio, 10);
+                showToast("Устройство выбрано основным");
                 reload();
             } catch (err) {
                 showToast(err.message || "Не удалось изменить приоритет");

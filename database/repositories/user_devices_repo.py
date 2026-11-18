@@ -277,7 +277,15 @@ async def set_device_bi_priority(
     )
     if dev is None:
         return False
-    dev.bi_priority = int(priority)
+    if priority > 0:
+        max_prio = await session.scalar(
+            select(func.coalesce(func.max(UserDevice.bi_priority), 0)).where(
+                UserDevice.user_id == user_id
+            )
+        )
+        dev.bi_priority = max(int(priority), int(max_prio or 0) + 10)
+    else:
+        dev.bi_priority = 0
     await session.flush()
     return True
 
