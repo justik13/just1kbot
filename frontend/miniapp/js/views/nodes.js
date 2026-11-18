@@ -6,6 +6,9 @@ let currentFilter = "all";
 function _openLocationSubModal(node, onDone) {
     const inStdChecked = node.in_standard !== false;
     const inWiChecked = Boolean(node.in_white_internet);
+    const baseLocName = String(node.vless_name || node.name || "").trim();
+    const defaultYandexName = baseLocName ? `${baseLocName} Yandex` : "Yandex";
+    const defaultTurboflareName = baseLocName ? `${baseLocName} Turboflare` : "Turboflare";
     const box = document.createElement("form");
     box.className = "field";
     box.style.gap = "10px";
@@ -26,8 +29,8 @@ function _openLocationSubModal(node, onDone) {
         <div class="muted" style="font-size:12px; font-weight:600;">Стандарт</div>
         <div class="grid-2">
             <div class="field">
-                <label>Название (пусто = имя ноды)</label>
-                <input name="vless_name" class="input" maxlength="120" value="${escapeHtml(node.vless_name || "")}" placeholder="${escapeHtml(node.name)}">
+                <label>Название</label>
+                <input name="vless_name" class="input" maxlength="120" value="${escapeHtml(baseLocName)}" placeholder="${escapeHtml(node.name)}">
             </div>
             <div class="field">
                 <label>Бейдж (до 30 симв.)</label>
@@ -37,23 +40,23 @@ function _openLocationSubModal(node, onDone) {
         <div class="muted" style="font-size:12px; font-weight:600;">Белый Интернет — Yandex</div>
         <div class="grid-2">
             <div class="field">
-                <label>Название (пусто = авто)</label>
-                <input name="wi_yandex_name" class="input" maxlength="120" value="${escapeHtml(node.wi_yandex_name || "")}" placeholder="Напр. Гер Ян">
+                <label>Название</label>
+                <input name="wi_yandex_name" class="input" maxlength="120" value="${escapeHtml(node.wi_yandex_name || defaultYandexName)}" placeholder="${escapeHtml(defaultYandexName)}">
             </div>
             <div class="field">
                 <label>Бейдж (до 30 симв.)</label>
-                <input name="wi_yandex_badge" class="input" maxlength="30" value="${escapeHtml(node.wi_yandex_badge || "")}" placeholder="По умолчанию">
+                <input name="wi_yandex_badge" class="input" maxlength="30" value="${escapeHtml(node.wi_yandex_badge || "")}" placeholder="Опционально">
             </div>
         </div>
         <div class="muted" style="font-size:12px; font-weight:600;">Белый Интернет — Turboflare</div>
         <div class="grid-2">
             <div class="field">
-                <label>Название (пусто = авто)</label>
-                <input name="wi_turboflare_name" class="input" maxlength="120" value="${escapeHtml(node.wi_turboflare_name || "")}" placeholder="Напр. Гер ТФ">
+                <label>Название</label>
+                <input name="wi_turboflare_name" class="input" maxlength="120" value="${escapeHtml(node.wi_turboflare_name || defaultTurboflareName)}" placeholder="${escapeHtml(defaultTurboflareName)}">
             </div>
             <div class="field">
                 <label>Бейдж (до 30 симв.)</label>
-                <input name="wi_turboflare_badge" class="input" maxlength="30" value="${escapeHtml(node.wi_turboflare_badge || "")}" placeholder="По умолчанию">
+                <input name="wi_turboflare_badge" class="input" maxlength="30" value="${escapeHtml(node.wi_turboflare_badge || "")}" placeholder="Опционально">
             </div>
         </div>
         <button type="submit" class="btn btn-primary">Сохранить локацию</button>
@@ -178,27 +181,6 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                         <input name="hide_check" type="checkbox" ${current.hide_check ? "checked" : ""}>
                         <span>Hide-Check (INCY: скрыть тест)</span>
                     </label>
-                </div>
-
-                <hr style="border:none; border-top:1px solid var(--border-subtle); margin:2px 0;">
-                <div class="card-title" style="font-size:13px;">Белый Интернет — подписи CDN</div>
-                <div class="field">
-                    <label>Подпись CDN по умолчанию</label>
-                    <select name="cdn_label_mode" class="input">
-                        <option value="badge" ${current.cdn_label_mode === "badge" ? "selected" : ""}>В описании / бейдже</option>
-                        <option value="name" ${(current.cdn_label_mode || "name") === "name" ? "selected" : ""}>В названии (🇩🇪 Германия Yandex)</option>
-                        <option value="none" ${current.cdn_label_mode === "none" ? "selected" : ""}>Не показывать CDN</option>
-                    </select>
-                </div>
-                <div class="grid-2">
-                    <div class="field">
-                        <label>Метка Yandex CDN</label>
-                        <input name="cdn_yandex_label" class="input" maxlength="32" value="${escapeHtml(current.cdn_yandex_label || "Yandex")}" placeholder="Yandex">
-                    </div>
-                    <div class="field">
-                        <label>Метка Turboflare CDN</label>
-                        <input name="cdn_turboflare_label" class="input" maxlength="32" value="${escapeHtml(current.cdn_turboflare_label || "Turboflare")}" placeholder="Turboflare">
-                    </div>
                 </div>
 
                 <hr style="border:none; border-top:1px solid var(--border-subtle); margin:2px 0;">
@@ -366,9 +348,6 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                 no_limit_mode: String(fd.get("no_limit_mode") || "all"),
                 hide_url: Boolean(fd.get("hide_url")),
                 hide_check: Boolean(fd.get("hide_check")),
-                cdn_label_mode: String(fd.get("cdn_label_mode") || "name"),
-                cdn_yandex_label: String(fd.get("cdn_yandex_label") || "").trim(),
-                cdn_turboflare_label: String(fd.get("cdn_turboflare_label") || "").trim(),
                 fragmentation_enabled: Boolean(fd.get("fragmentation_enabled")),
                 fragmentation_packets: String(fd.get("fragmentation_packets") || "").trim(),
                 fragmentation_length: String(fd.get("fragmentation_length") || "").trim(),
