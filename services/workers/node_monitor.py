@@ -478,11 +478,10 @@ async def check_node_resources_and_alerts(bot: Bot):
         if not sub_prefix.startswith("/"):
             sub_prefix = f"/{sub_prefix}"
 
-        if is_xray_node:
+        if is_xray_node and not (server.api_url or "").startswith("mock://"):
             try:
-                is_mock_server = bool((getattr(server, "extra_data", None) or {}).get("is_mock"))
                 node_role = get_server_role(server)
-                is_wi_hub = not is_mock_server and node_role not in ("eu_hub", "exit_node") and (
+                is_wi_hub = node_role not in ("eu_hub", "exit_node") and (
                     node_role == "ru_hub"
                     or WHITE_INTERNET_CAPABILITY in (getattr(server, "capabilities", None) or [])
                     or bool((getattr(server, "extra_data", None) or {}).get("cdn_domain"))
