@@ -462,6 +462,18 @@ def _render_vless_landing_html(
 
 
 
+def _format_gb_compact(num_bytes: int) -> str:
+    gb = max(0, num_bytes) / (1024**3)
+    return f"{int(round(gb))}" if abs(gb - round(gb)) < 0.05 else f"{gb:.1f}"
+
+
+def _format_days_left(end_dt, cur_now) -> int | None:
+    if not end_dt or not hasattr(end_dt, "timestamp"):
+        return None
+    diff_sec = end_dt.timestamp() - cur_now.timestamp()
+    return max(0, int(diff_sec // 86400))
+
+
 def _format_announce_summary(
     *,
     std_active: bool,
@@ -469,26 +481,33 @@ def _format_announce_summary(
     wi_active: bool,
     wi_end,
     wi_available_bytes: int,
+    wi_total_bytes: int = 0,
+    now_dt=None,
 ) -> str:
-    """Build concise stop-word-free Announce summary of active options, dates, and remaining GB."""
-    parts: list[str] = []
+    """Build 2-line stop-word-free Announce summary with days left and used/total GB."""
+    cur_now = now_dt or now_utc()
+    lines: list[str] = []
     if std_active:
         if std_end and is_permanent_subscription(std_end):
-            parts.append("Стандарт (без срока)")
-        elif std_end and hasattr(std_end, "strftime"):
-            parts.append(f"Стандарт до {std_end.strftime('%d.%m.%Y')}")
+            lines.append("Стандарт: без срока • безлимит")
         else:
-            parts.append("Стандарт (активен)")
+            std_days = _format_days_left(std_end, cur_now)
+            if std_days is not None:
+                lines.append(f"Стандарт: {std_days} дн. • безлимит")
+            else:
+                lines.append("Стандарт: активен • безлимит")
 
     if wi_active:
-        rem_gb = max(0, wi_available_bytes) / (1024**3)
-        gb_str = f"{int(round(rem_gb))}" if abs(rem_gb - round(rem_gb)) < 0.05 else f"{rem_gb:.1f}"
-        if wi_end and hasattr(wi_end, "strftime"):
-            parts.append(f"Белый интернет до {wi_end.strftime('%d.%m.%Y')} (остаток {gb_str} ГБ)")
+        total_b = max(0, wi_total_bytes)
+        used_b = max(0, total_b - max(0, wi_available_bytes)) if total_b > 0 else 0
+        gb_part = f"{_format_gb_compact(used_b)}/{_format_gb_compact(total_b)} ГБ" if total_b > 0 else f"остаток {_format_gb_compact(wi_available_bytes)} ГБ"
+        wi_days = _format_days_left(wi_end, cur_now)
+        if wi_days is not None:
+            lines.append(f"Белый интернет: {wi_days} дн. • {gb_part}")
         else:
-            parts.append(f"Белый интернет (остаток {gb_str} ГБ)")
+            lines.append(f"Белый интернет: {gb_part}")
 
-    return " | ".join(parts)[:200]
+    return "\n".join(lines)[:200]
 
 
 def _build_unified_notice_response(
@@ -705,7 +724,8 @@ async def serve_unified_subscription_feed(
 
         std_ts = int(std_end.timestamp()) if std_end and hasattr(std_end, "timestamp") else 0
         wi_ts = int(wi_end.timestamp()) if wi_end and hasattr(wi_end, "timestamp") else 0
-        expire_ts = max(std_ts, wi_ts)
+        active_ts = [ts for ts in (std_ts, wi_ts) if ts > 0]
+        expire_ts = min(active_ts) if active_ts else 0
 
         bot_username = await _resolve_bot_username(request)
         default_bot_url = f"https://t.me/{bot_username}"
@@ -1141,6 +1161,8 @@ async def serve_unified_subscription_feed(
                 wi_active=wi_active,
                 wi_end=wi_end,
                 wi_available_bytes=wi_available_bytes,
+                wi_total_bytes=wi_total_quota,
+                now_dt=now,
             )
         if announce_summary:
             b64_ann = base64.b64encode(announce_summary.encode("utf-8")).decode("ascii")

@@ -10,15 +10,9 @@ function _openLocationSubModal(node, onDone) {
     box.className = "field";
     box.style.gap = "10px";
     box.innerHTML = `
-        <div class="grid-2">
-            <div class="field">
-                <label>Флаг</label>
-                <input name="country_flag" class="input" maxlength="10" value="${escapeHtml(node.country_flag || "")}" placeholder="🇩🇪">
-            </div>
-            <div class="field">
-                <label>Код локации (авто)</label>
-                <input class="input" disabled value="${escapeHtml(node.location_code || `exit${node.id}`)}">
-            </div>
+        <div class="field">
+            <label>Флаг</label>
+            <input name="country_flag" class="input" maxlength="10" value="${escapeHtml(node.country_flag || "")}" placeholder="🇩🇪">
         </div>
         <label class="checkbox-row">
             <input name="in_standard" type="checkbox" ${inStdChecked ? "checked" : ""}>
@@ -337,7 +331,6 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                     <div class="node-compact-title">
                         <span style="font-size:18px;">${escapeHtml(node.country_flag || "🌐")}</span>
                         <span style="font-weight:600; font-size:14px;">${escapeHtml(node.vless_name || node.name)}</span>
-                        <span class="mono muted" style="font-size:11px;">${escapeHtml(node.location_code || `exit${node.id}`)}</span>
                     </div>
                     <button type="button" class="btn btn-sm">Настроить</button>
                 </div>
