@@ -458,6 +458,16 @@ def _format_announce_summary(
     return "\n".join(lines)[:200]
 
 
+def _make_inline_stub(text: str, description: str = "") -> str:
+    """Build a non-routable stub VLESS URI with optional base64 serverDescription before #."""
+    query = "encryption=none&security=none&type=tcp"
+    clean_desc = description.strip()[:30]
+    if clean_desc:
+        desc_b64 = base64.b64encode(clean_desc.encode("utf-8")).decode("ascii")
+        query = f"{query}&serverDescription={desc_b64}"
+    return f"vless://00000000-0000-0000-0000-000000000000@127.0.0.1:443?{query}#{urllib.parse.quote(text)}"
+
+
 def _build_unified_notice_response(
     *,
     title_text: str,
@@ -474,13 +484,11 @@ def _build_unified_notice_response(
     ui_settings: dict[str, object] | None = None,
     extra_headers: dict[str, str] | None = None,
 ) -> web.Response:
-    quoted_notice = urllib.parse.quote(notice_text)
-    notice_link = (
-        f"vless://00000000-0000-0000-0000-000000000000@127.0.0.1:443"
-        f"?encryption=none&security=none#{quoted_notice}"
-    )
+    action_hint = f"Откройте @{bot_username}" if bot_username else "Откройте бота"
+    notice_link = _make_inline_stub(title_text, description=action_hint)
     b64_payload = base64.b64encode(notice_link.encode("utf-8")).decode("utf-8")
     b64_title = base64.b64encode(title_text.encode("utf-8")).decode("utf-8")
+    b64_announce = base64.b64encode(notice_text.strip()[:200].encode("utf-8")).decode("ascii")
 
     cfg = ui_settings or {}
     interval_val = str(cfg.get("profile_update_interval") or _get_vless_update_interval())
@@ -492,6 +500,7 @@ def _build_unified_notice_response(
         "Profile-Update-Interval": interval_val,
         "Subscription-Userinfo": f"upload={upload_bytes}; download={download_bytes}; total=0; expire={expire_ts}",
         "Profile-Title": f"base64:{b64_title}",
+        "Announce": f"base64:{b64_announce}",
         "Hide-Url": hide_url_val,
     }
     _apply_no_limit_headers(headers, str(cfg.get("no_limit_mode") or "all"), is_happ=is_happ)
@@ -883,17 +892,6 @@ async def serve_unified_subscription_feed(
                 d.get("hwid") == raw_hwid and bool(d.get("is_bi_assigned"))
                 for d in devices_list
             )
-
-        def _make_inline_stub(text: str, description: str = "") -> str:
-            base_stub = (
-                f"vless://00000000-0000-0000-0000-000000000000@127.0.0.1:443"
-                f"?encryption=none&security=none&type=tcp#{urllib.parse.quote(text)}"
-            )
-            clean_desc = description.strip()[:30]
-            if clean_desc:
-                desc_b64 = base64.b64encode(clean_desc.encode("utf-8")).decode("ascii")
-                return f"{base_stub}?serverDescription={desc_b64}"
-            return base_stub
 
         # 4. Generate links for active options (with independent per-option stubs)
         all_links: list[str] = []
