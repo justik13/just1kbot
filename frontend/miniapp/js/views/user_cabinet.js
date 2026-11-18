@@ -848,6 +848,7 @@ function _render(root) {
         b.addEventListener("click", () => {
             _state.tab = b.dataset.utab;
             _render(root);
+            loadAndRenderUserCabinet(root);
         });
     });
 
@@ -1391,7 +1392,8 @@ function _buildDevicesSectionHtml(d) {
         <section class="card">
             <div class="row" style="align-items:center;">
                 <div class="card-title">Привязанные устройства</div>
-                <div style="display:flex; align-items:center; gap:8px;">
+                <div style="display:flex; align-items:center; gap:6px;">
+                    <button type="button" class="btn btn-sm" id="refreshDevicesBtn" style="font-size:11px; padding:4px 8px; min-height:28px;">Обновить</button>
                     ${devices.length > 1 ? `<button type="button" class="btn btn-sm btn-danger" id="resetAllDevicesBtn" style="font-size:11px; padding:4px 8px; min-height:28px;">Сбросить все</button>` : ""}
                     <span class="chip ${isLimitReached ? "chip-warn" : "chip-muted"}">${devices.length} из ${stdLimit}</span>
                 </div>
@@ -1434,6 +1436,15 @@ function _bindDevicesEvents(container, reload) {
             });
         });
     });
+
+    const refreshBtn = container.querySelector("#refreshDevicesBtn");
+    if (refreshBtn) {
+        refreshBtn.addEventListener("click", async () => {
+            refreshBtn.disabled = true;
+            refreshBtn.textContent = "Обновляем...";
+            await reload();
+        });
+    }
 
     const resetBtn = container.querySelector("#resetAllDevicesBtn");
     if (resetBtn) {
