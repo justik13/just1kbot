@@ -59,8 +59,33 @@ function _openLocationSubModal(node, onDone) {
                 <input name="wi_turboflare_badge" class="input" maxlength="30" value="${escapeHtml(node.wi_turboflare_badge || "")}" placeholder="Опционально">
             </div>
         </div>
+        <div id="locPreviewBox" class="notice-box" style="flex-direction:column; align-items:flex-start; gap:4px; font-size:12px;"></div>
         <button type="submit" class="btn btn-primary">Сохранить локацию</button>
     `;
+    const previewEl = box.querySelector("#locPreviewBox");
+    const refreshLocPreview = () => {
+        const flagVal = String(box.querySelector("input[name='country_flag']")?.value || "").trim() || "🌐";
+        const stdOn = Boolean(box.querySelector("input[name='in_standard']")?.checked);
+        const wiOn = Boolean(box.querySelector("input[name='in_white_internet']")?.checked);
+        const stdName = String(box.querySelector("input[name='vless_name']")?.value || "").trim() || baseLocName;
+        const stdBadge = String(box.querySelector("input[name='server_description']")?.value || "").trim();
+        const yanName = String(box.querySelector("input[name='wi_yandex_name']")?.value || "").trim() || defaultYandexName;
+        const yanBadge = String(box.querySelector("input[name='wi_yandex_badge']")?.value || "").trim();
+        const lines = [];
+        if (stdOn) {
+            lines.push(`<div><b>Стандарт:</b> ${escapeHtml(flagVal)} ${escapeHtml(stdName)}${stdBadge ? ` <span class="muted">(${escapeHtml(stdBadge)})</span>` : ""}</div>`);
+        }
+        if (wiOn) {
+            lines.push(`<div><b>БИ Yandex:</b> ${escapeHtml(flagVal)} ${escapeHtml(yanName)}${yanBadge ? ` <span class="muted">(${escapeHtml(yanBadge)})</span>` : ""}</div>`);
+        }
+        if (!lines.length) {
+            lines.push(`<div class="muted">Локация скрыта из всех подписок</div>`);
+        }
+        previewEl.innerHTML = `<div class="muted" style="font-size:11px;">Как будет выглядеть в клиенте:</div>${lines.join("")}`;
+    };
+    box.addEventListener("input", refreshLocPreview);
+    box.addEventListener("change", refreshLocPreview);
+    refreshLocPreview();
     const close = openModal(`${node.country_flag || "🌐"} ${node.name} (#${node.id})`, box);
     box.addEventListener("submit", async (e) => {
         e.preventDefault();
@@ -118,6 +143,12 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
 
         <section class="card">
             <div class="card-title">Оформление подписки (INCY / Happ)</div>
+            <div class="notice-box" style="flex-direction:column; align-items:flex-start; gap:3px; font-size:11px; margin-bottom:10px;">
+                <strong>Пример карточки в INCY / Happ:</strong>
+                <span><b>✦ Just1k [1/2]</b> <span class="muted">(Profile-Title + счётчик устройств, автообновление 6 ч)</span></span>
+                <span>🔔 <i>Стандарт: 6 дн. • безлимит / Белый интернет: 29 дн. • 0/50 ГБ</i> <span class="muted">(Announce)</span></span>
+                <span>Кнопки: <b>Поддержка</b> (Support-Url) • <b>Канал / Бот</b> (Announce-Url)</span>
+            </div>
             <form id="subSettingsForm" class="field" style="gap:10px;">
                 <div class="grid-2">
                     <div class="field">
@@ -131,11 +162,12 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                 </div>
                 <label class="checkbox-row">
                     <input name="profile_show_devices" type="checkbox" ${current.profile_show_devices ? "checked" : ""}>
-                    <span>Показывать счётчик устройств в названии профиля</span>
+                    <span>Показывать счётчик устройств в названии профиля (напр. [1/2])</span>
                 </label>
                 <div class="field">
-                    <label>Баннер / Анонс (Announce, пусто = авто-статус)</label>
-                    <textarea name="announce" class="textarea" maxlength="300" style="min-height:64px;" placeholder="Оставьте пустым для автоматического статуса подписки">${escapeHtml(current.announce || "")}</textarea>
+                    <label>Баннер / Анонс (Announce)</label>
+                    <textarea name="announce" class="textarea" maxlength="300" style="min-height:64px;" placeholder="Оставьте пустым для авто-статуса в 2 строки (дни + ГБ)">${escapeHtml(current.announce || "")}</textarea>
+                    <div class="muted" style="font-size:11px;">Жёлтая плашка сверху. Пусто = авто-сводка по срокам и ГБ обоих тарифов.</div>
                 </div>
                 <div class="field">
                     <label>Ссылка анонса (Announce-Url)</label>
@@ -143,17 +175,18 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                 </div>
                 <div class="grid-2">
                     <div class="field">
-                        <label>Support-Url</label>
+                        <label>Support-Url (кнопка «Поддержка»)</label>
                         <input name="support_url" class="input" maxlength="500" value="${escapeHtml(current.support_url || "")}" placeholder="По умолчанию из настроек бота">
                     </div>
                     <div class="field">
-                        <label>Profile-Web-Page-Url</label>
+                        <label>Profile-Web-Page-Url (сайт/бот)</label>
                         <input name="web_page_url" class="input" maxlength="500" value="${escapeHtml(current.web_page_url || "")}" placeholder="По умолчанию ссылка на бота">
                     </div>
                 </div>
 
                 <hr style="border:none; border-top:1px solid var(--border-subtle); margin:2px 0;">
                 <div class="card-title" style="font-size:13px;">Поведение и сортировка</div>
+                <div class="muted" style="font-size:11px;">Порядок серверов, лимит памяти iOS для XHTTP и скрытие элементов интерфейса в клиенте.</div>
                 <div class="grid-2">
                     <div class="field">
                         <label>Сортировка серверов</label>
@@ -164,7 +197,7 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                         </select>
                     </div>
                     <div class="field">
-                        <label>No-Limit режим</label>
+                        <label>No-Limit режим (память iOS)</label>
                         <select name="no_limit_mode" class="input">
                             <option value="all" ${(current.no_limit_mode || "all") === "all" ? "selected" : ""}>No-Limit-Enabled (все)</option>
                             <option value="xhttp" ${current.no_limit_mode === "xhttp" ? "selected" : ""}>no-limit-xhttp-enabled (Happ)</option>
@@ -175,16 +208,17 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                 <div class="grid-2">
                     <label class="checkbox-row">
                         <input name="hide_url" type="checkbox" ${current.hide_url !== false ? "checked" : ""}>
-                        <span>Hide-Url (скрыть ссылку)</span>
+                        <span>Hide-Url (скрыть URL и QR)</span>
                     </label>
                     <label class="checkbox-row">
                         <input name="hide_check" type="checkbox" ${current.hide_check ? "checked" : ""}>
-                        <span>Hide-Check (INCY: скрыть тест)</span>
+                        <span>Hide-Check (INCY: скрыть пинг)</span>
                     </label>
                 </div>
 
                 <hr style="border:none; border-top:1px solid var(--border-subtle); margin:2px 0;">
                 <div class="card-title" style="font-size:13px;">Фрагментация TLS</div>
+                <div class="muted" style="font-size:11px;">Дробит TLS ClientHello (напр. tlshello, 10-30 байт каждые 10-30 мс) от DPI. Выключайте, если тормозит хендшейк.</div>
                 <label class="checkbox-row">
                     <input name="fragmentation_enabled" type="checkbox" ${current.fragmentation_enabled !== false ? "checked" : ""}>
                     <span>Включить fragmentation-enable</span>
@@ -205,7 +239,8 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                 </div>
 
                 <hr style="border:none; border-top:1px solid var(--border-subtle); margin:2px 0;">
-                <div class="card-title" style="font-size:13px;">DoH Pre-resolve (INCY)</div>
+                <div class="card-title" style="font-size:13px;">DoH Pre-resolve (INCY / Happ)</div>
+                <div class="muted" style="font-size:11px;">Резолвит домен сервера через DoH до старта туннеля (защита от DNS-подмены; пример: dns.google + 8.8.8.8).</div>
                 <label class="checkbox-row">
                     <input name="dns_resolve_enabled" type="checkbox" ${current.dns_resolve_enabled ? "checked" : ""}>
                     <span>Включить Server-Address-Resolve-Enable</span>
@@ -223,6 +258,7 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
 
                 <hr style="border:none; border-top:1px solid var(--border-subtle); margin:2px 0;">
                 <div class="card-title" style="font-size:13px;">Раздельное туннелирование (Android)</div>
+                <div class="muted" style="font-size:11px;">Исключает выбранные приложения (bypass, напр. банки) или пускает только их (proxy). Список через запятую или с новой строки.</div>
                 <label class="checkbox-row">
                     <input name="per_app_proxy_enabled" type="checkbox" ${current.per_app_proxy_enabled ? "checked" : ""}>
                     <span>Включить Per-App-Proxy-Enable</span>
@@ -235,64 +271,70 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                     </select>
                 </div>
                 <div class="field">
-                    <label>Список приложений (CSV package names или URL)</label>
+                    <label>Список приложений (package names)</label>
                     <textarea name="per_app_proxy_list" class="textarea" maxlength="2000" style="min-height:56px;" placeholder="ru.sberbankmobile,com.whatsapp">${escapeHtml(current.per_app_proxy_list || "")}</textarea>
                 </div>
 
                 <hr style="border:none; border-top:1px solid var(--border-subtle); margin:2px 0;">
-                <div class="card-title" style="font-size:13px;">Happ — бесплатные параметры</div>
+                <div class="card-title" style="font-size:13px;">Happ — расширенные параметры (бесплатно)</div>
+                <div class="muted" style="font-size:11px;">Требуют бесплатный Provider ID с happ-proxy.com: без него Happ применяет только базовые поля (название, интервал, анонс, поддержка).</div>
                 <div class="field">
-                    <label>Provider ID (providerid, для расширенных флагов Happ)</label>
+                    <label>Provider ID (providerid)</label>
                     <input name="happ_provider_id" class="input" maxlength="128" value="${escapeHtml(current.happ_provider_id || "")}" placeholder="Оставьте пустым, если не используется">
+                    <div class="muted" style="font-size:11px;">Бесплатный ID провайдера с happ-proxy.com — открывает все параметры Happ ниже, бейджи и фрагментацию в Happ.</div>
                 </div>
                 <div class="grid-2">
                     <label class="checkbox-row">
                         <input name="happ_sub_expire" type="checkbox" ${current.happ_sub_expire !== false ? "checked" : ""}>
-                        <span>sub-expire</span>
+                        <span>sub-expire (баннер истечения)</span>
                     </label>
                     <div class="field">
-                        <label>sub-expire-button-link</label>
+                        <label>Кнопка продления (sub-expire-button-link)</label>
                         <input name="happ_sub_expire_button_link" class="input" maxlength="500" value="${escapeHtml(current.happ_sub_expire_button_link || "")}" placeholder="По умолчанию бот">
                     </div>
                 </div>
+                <div class="muted" style="font-size:11px;">Когда подписка заканчивается, Happ покажет плашку и кнопку «Продлить» со ссылкой на бота.</div>
                 <div class="field">
-                    <label>fallback-url (при наличии Provider ID)</label>
-                    <input name="happ_fallback_url" class="input" maxlength="500" value="${escapeHtml(current.happ_fallback_url || "")}" placeholder="https://...">
+                    <label>Резервный URL (fallback-url)</label>
+                    <input name="happ_fallback_url" class="input" maxlength="500" value="${escapeHtml(current.happ_fallback_url || "")}" placeholder="https://sub.just1k.pro/sub/...">
+                    <div class="muted" style="font-size:11px;">Если основной домен недоступен, Happ сам обновит подписку по этому запасному URL.</div>
                 </div>
                 <div class="grid-2">
                     <label class="checkbox-row">
                         <input name="happ_hide_settings" type="checkbox" ${current.happ_hide_settings ? "checked" : ""}>
-                        <span>hide-settings</span>
+                        <span>hide-settings (скрыть конфиги)</span>
                     </label>
                     <label class="checkbox-row">
                         <input name="happ_always_hwid_enable" type="checkbox" ${current.happ_always_hwid_enable ? "checked" : ""}>
-                        <span>always-hwid-enable</span>
+                        <span>always-hwid-enable (принуд. HWID)</span>
                     </label>
                 </div>
+                <div class="muted" style="font-size:11px;">hide-settings прячет сырые параметры серверов; always-hwid-enable запрещает юзеру отключать передачу HWID.</div>
                 <label class="checkbox-row">
                     <input name="happ_subscriptions_collapse" type="checkbox" ${current.happ_subscriptions_collapse ? "checked" : ""}>
-                    <span>subscriptions-collapse (сворачивать список)</span>
+                    <span>subscriptions-collapse (сворачивать список серверов при открытии)</span>
                 </label>
                 <div class="grid-2">
                     <div class="field">
-                        <label>sub-info-text (до 200 симв.)</label>
-                        <input name="happ_sub_info_text" class="input" maxlength="200" value="${escapeHtml(current.happ_sub_info_text || "")}" placeholder="Инфо-блок в Happ">
+                        <label>Инфо-блок (sub-info-text, до 200 симв.)</label>
+                        <input name="happ_sub_info_text" class="input" maxlength="200" value="${escapeHtml(current.happ_sub_info_text || "")}" placeholder="Напр. Скидка 20% по промокоду">
                     </div>
                     <div class="field">
-                        <label>sub-info-color</label>
+                        <label>Цвет блока (sub-info-color)</label>
                         <input name="happ_sub_info_color" class="input" maxlength="32" value="${escapeHtml(current.happ_sub_info_color || "")}" placeholder="blue / green / red">
                     </div>
                 </div>
                 <div class="grid-2">
                     <div class="field">
-                        <label>sub-info-button-text</label>
-                        <input name="happ_sub_info_button_text" class="input" maxlength="64" value="${escapeHtml(current.happ_sub_info_button_text || "")}" placeholder="Текст кнопки">
+                        <label>Текст кнопки (sub-info-button-text)</label>
+                        <input name="happ_sub_info_button_text" class="input" maxlength="64" value="${escapeHtml(current.happ_sub_info_button_text || "")}" placeholder="Подробнее">
                     </div>
                     <div class="field">
-                        <label>sub-info-button-link</label>
-                        <input name="happ_sub_info_button_link" class="input" maxlength="500" value="${escapeHtml(current.happ_sub_info_button_link || "")}" placeholder="https://...">
+                        <label>Ссылка кнопки (sub-info-button-link)</label>
+                        <input name="happ_sub_info_button_link" class="input" maxlength="500" value="${escapeHtml(current.happ_sub_info_button_link || "")}" placeholder="https://t.me/...">
                     </div>
                 </div>
+                <div class="muted" style="font-size:11px;">Цветная карточка внутри Happ. Пример: синий блок «Новые локации • Открыть».</div>
 
                 <button type="submit" class="btn btn-primary">Сохранить настройки</button>
             </form>
