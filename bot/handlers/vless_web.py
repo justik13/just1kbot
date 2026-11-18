@@ -239,17 +239,6 @@ async def _load_subscription_ui_settings(session) -> dict[str, object]:
         "per_app_proxy_enabled": _as_bool_setting(await get_system_setting(session, "vless_per_app_proxy_enabled", "false"), False),
         "per_app_proxy_mode": per_app_mode,
         "per_app_proxy_list": str(await get_system_setting(session, "vless_per_app_proxy_list", "") or "").strip(),
-        "happ_provider_id": str(await get_system_setting(session, "happ_provider_id", "") or "").strip(),
-        "happ_sub_expire": _as_bool_setting(await get_system_setting(session, "happ_sub_expire", "true"), True),
-        "happ_sub_expire_button_link": str(await get_system_setting(session, "happ_sub_expire_button_link", "") or "").strip(),
-        "happ_fallback_url": str(await get_system_setting(session, "happ_fallback_url", "") or "").strip(),
-        "happ_hide_settings": _as_bool_setting(await get_system_setting(session, "happ_hide_settings", "false"), False),
-        "happ_always_hwid_enable": _as_bool_setting(await get_system_setting(session, "happ_always_hwid_enable", "false"), False),
-        "happ_subscriptions_collapse": _as_bool_setting(await get_system_setting(session, "happ_subscriptions_collapse", "false"), False),
-        "happ_sub_info_text": str(await get_system_setting(session, "happ_sub_info_text", "") or "").strip(),
-        "happ_sub_info_color": str(await get_system_setting(session, "happ_sub_info_color", "") or "").strip(),
-        "happ_sub_info_button_text": str(await get_system_setting(session, "happ_sub_info_button_text", "") or "").strip(),
-        "happ_sub_info_button_link": str(await get_system_setting(session, "happ_sub_info_button_link", "") or "").strip(),
     }
 
 
@@ -262,54 +251,6 @@ def _apply_no_limit_headers(headers: dict[str, str], no_limit_mode: str, *, is_h
             headers["no-limit-xhttp-enabled"] = "1"
         else:
             headers["No-Limit-Enabled"] = "1"
-
-
-def _apply_happ_headers(
-    headers: dict[str, str],
-    ui_settings: dict[str, object],
-    *,
-    bot_username: str,
-    expire_ts: int,
-) -> None:
-    clean_bot = str(bot_username).strip().lstrip("@") or constants.DEFAULT_FALLBACK_BOT_USERNAME
-    default_bot_link = f"https://t.me/{clean_bot}"
-
-    if ui_settings.get("happ_sub_expire", True) and expire_ts > 0:
-        headers["sub-expire"] = "1"
-    expire_link = _sanitize_header_url(
-        str(ui_settings.get("happ_sub_expire_button_link") or ""),
-        fallback=default_bot_link,
-    )
-    if expire_link:
-        headers["sub-expire-button-link"] = expire_link
-
-    provider_id = _sanitize_ascii_header(str(ui_settings.get("happ_provider_id") or ""), max_len=128)
-    if provider_id:
-        headers["providerid"] = provider_id
-        fallback_url = _sanitize_header_url(str(ui_settings.get("happ_fallback_url") or ""))
-        if fallback_url:
-            headers["fallback-url"] = fallback_url
-        if ui_settings.get("happ_hide_settings"):
-            headers["hide-settings"] = "1"
-        if ui_settings.get("happ_always_hwid_enable"):
-            headers["subscription-always-hwid-enable"] = "1"
-        if ui_settings.get("happ_subscriptions_collapse"):
-            headers["subscriptions-collapse"] = "1"
-
-        sub_info_text = str(ui_settings.get("happ_sub_info_text") or "").strip()[:200]
-        if sub_info_text:
-            b64_info = base64.b64encode(sub_info_text.encode("utf-8")).decode("ascii")
-            headers["sub-info-text"] = f"base64:{b64_info}"
-            info_color = _sanitize_ascii_header(str(ui_settings.get("happ_sub_info_color") or ""), max_len=32)
-            if info_color:
-                headers["sub-info-color"] = info_color
-            btn_text = str(ui_settings.get("happ_sub_info_button_text") or "").strip()[:64]
-            if btn_text:
-                b64_btn = base64.b64encode(btn_text.encode("utf-8")).decode("ascii")
-                headers["sub-info-button-text"] = f"base64:{b64_btn}"
-            btn_link = _sanitize_header_url(str(ui_settings.get("happ_sub_info_button_link") or ""))
-            if btn_link:
-                headers["sub-info-button-link"] = btn_link
 
 
 def _is_browser_request(request: web.Request) -> bool:
@@ -547,8 +488,6 @@ def _build_unified_notice_response(
         "Hide-Url": hide_url_val,
     }
     _apply_no_limit_headers(headers, str(cfg.get("no_limit_mode") or "all"), is_happ=is_happ)
-    if is_happ:
-        _apply_happ_headers(headers, cfg, bot_username=bot_username, expire_ts=expire_ts)
 
     sanitized_support = _sanitize_header_url(support_url)
     sanitized_channel = _sanitize_header_url(channel_url)
@@ -1140,7 +1079,6 @@ async def serve_unified_subscription_feed(
         if is_happ:
             response_headers["Routing-Enable"] = "0"
             response_headers["subscriptions-sort-type"] = happ_sort_map.get(sort_order, "without")
-            _apply_happ_headers(response_headers, ui_settings, bot_username=bot_username, expire_ts=expire_ts)
 
         sanitized_support = _sanitize_header_url(str(ui_settings.get("support_url") or ""), fallback=support_url)
         sanitized_channel = _sanitize_header_url(channel_url)

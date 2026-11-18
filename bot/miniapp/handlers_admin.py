@@ -380,17 +380,6 @@ async def api_admin_incy_get_handler(request: web.Request) -> web.Response:
         cdn_label_mode = await get_system_setting(session, "bi_cdn_label_mode", "name")
         cdn_yandex_label = await get_system_setting(session, "bi_cdn_yandex_label", "Yandex")
         cdn_turboflare_label = await get_system_setting(session, "bi_cdn_turboflare_label", "Turboflare")
-        happ_provider_id = await get_system_setting(session, "happ_provider_id", "")
-        happ_sub_expire_raw = await get_system_setting(session, "happ_sub_expire", "true")
-        happ_sub_expire_button_link = await get_system_setting(session, "happ_sub_expire_button_link", "")
-        happ_fallback_url = await get_system_setting(session, "happ_fallback_url", "")
-        happ_hide_settings_raw = await get_system_setting(session, "happ_hide_settings", "false")
-        happ_always_hwid_raw = await get_system_setting(session, "happ_always_hwid_enable", "false")
-        happ_collapse_raw = await get_system_setting(session, "happ_subscriptions_collapse", "false")
-        happ_sub_info_text = await get_system_setting(session, "happ_sub_info_text", "")
-        happ_sub_info_color = await get_system_setting(session, "happ_sub_info_color", "")
-        happ_sub_info_button_text = await get_system_setting(session, "happ_sub_info_button_text", "")
-        happ_sub_info_button_link = await get_system_setting(session, "happ_sub_info_button_link", "")
 
     interval_val = int(interval_raw) if str(interval_raw or "").strip().isdigit() else int(default_interval)
     return web.json_response(
@@ -421,17 +410,6 @@ async def api_admin_incy_get_handler(request: web.Request) -> web.Response:
                 "cdn_label_mode": str(cdn_label_mode or "name"),
                 "cdn_yandex_label": str(cdn_yandex_label or "Yandex"),
                 "cdn_turboflare_label": str(cdn_turboflare_label or "Turboflare"),
-                "happ_provider_id": str(happ_provider_id or ""),
-                "happ_sub_expire": _as_bool_setting(happ_sub_expire_raw, True),
-                "happ_sub_expire_button_link": str(happ_sub_expire_button_link or ""),
-                "happ_fallback_url": str(happ_fallback_url or ""),
-                "happ_hide_settings": _as_bool_setting(happ_hide_settings_raw, False),
-                "happ_always_hwid_enable": _as_bool_setting(happ_always_hwid_raw, False),
-                "happ_subscriptions_collapse": _as_bool_setting(happ_collapse_raw, False),
-                "happ_sub_info_text": str(happ_sub_info_text or ""),
-                "happ_sub_info_color": str(happ_sub_info_color or ""),
-                "happ_sub_info_button_text": str(happ_sub_info_button_text or ""),
-                "happ_sub_info_button_link": str(happ_sub_info_button_link or ""),
             },
         }
     )
@@ -467,13 +445,6 @@ async def api_admin_incy_put_handler(request: web.Request) -> web.Response:
             ("cdn_label_mode", "bi_cdn_label_mode", "name"),
             ("cdn_yandex_label", "bi_cdn_yandex_label", "Yandex"),
             ("cdn_turboflare_label", "bi_cdn_turboflare_label", "Turboflare"),
-            ("happ_provider_id", "happ_provider_id", ""),
-            ("happ_sub_expire_button_link", "happ_sub_expire_button_link", ""),
-            ("happ_fallback_url", "happ_fallback_url", ""),
-            ("happ_sub_info_text", "happ_sub_info_text", ""),
-            ("happ_sub_info_color", "happ_sub_info_color", ""),
-            ("happ_sub_info_button_text", "happ_sub_info_button_text", ""),
-            ("happ_sub_info_button_link", "happ_sub_info_button_link", ""),
         )
         for field_name, setting_key, default_val in str_fields:
             raw_val = getattr(payload, field_name)
@@ -504,10 +475,6 @@ async def api_admin_incy_put_handler(request: web.Request) -> web.Response:
             ("fragmentation_enabled", "vless_fragmentation_enabled"),
             ("dns_resolve_enabled", "vless_dns_resolve_enabled"),
             ("per_app_proxy_enabled", "vless_per_app_proxy_enabled"),
-            ("happ_sub_expire", "happ_sub_expire"),
-            ("happ_hide_settings", "happ_hide_settings"),
-            ("happ_always_hwid_enable", "happ_always_hwid_enable"),
-            ("happ_subscriptions_collapse", "happ_subscriptions_collapse"),
         )
         for field_name, setting_key in bool_fields:
             raw_bool = getattr(payload, field_name)

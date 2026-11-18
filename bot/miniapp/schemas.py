@@ -97,17 +97,6 @@ class IncyGlobalSettingsPayload(BaseModel):
     cdn_label_mode: Literal["badge", "name", "none"] | None = None
     cdn_yandex_label: str | None = Field(default=None, max_length=32)
     cdn_turboflare_label: str | None = Field(default=None, max_length=32)
-    happ_provider_id: str | None = Field(default=None, max_length=128)
-    happ_sub_expire: bool | None = None
-    happ_sub_expire_button_link: str | None = Field(default=None, max_length=500)
-    happ_fallback_url: str | None = Field(default=None, max_length=500)
-    happ_hide_settings: bool | None = None
-    happ_always_hwid_enable: bool | None = None
-    happ_subscriptions_collapse: bool | None = None
-    happ_sub_info_text: str | None = Field(default=None, max_length=200)
-    happ_sub_info_color: str | None = Field(default=None, max_length=32)
-    happ_sub_info_button_text: str | None = Field(default=None, max_length=64)
-    happ_sub_info_button_link: str | None = Field(default=None, max_length=500)
 
 
 class UpdateNodePayload(BaseModel):

@@ -275,67 +275,6 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                     <textarea name="per_app_proxy_list" class="textarea" maxlength="2000" style="min-height:56px;" placeholder="ru.sberbankmobile,com.whatsapp">${escapeHtml(current.per_app_proxy_list || "")}</textarea>
                 </div>
 
-                <hr style="border:none; border-top:1px solid var(--border-subtle); margin:2px 0;">
-                <div class="card-title" style="font-size:13px;">Happ — расширенные параметры (бесплатно)</div>
-                <div class="muted" style="font-size:11px;">Требуют бесплатный Provider ID с happ-proxy.com: без него Happ применяет только базовые поля (название, интервал, анонс, поддержка).</div>
-                <div class="field">
-                    <label>Provider ID (providerid)</label>
-                    <input name="happ_provider_id" class="input" maxlength="128" value="${escapeHtml(current.happ_provider_id || "")}" placeholder="Оставьте пустым, если не используется">
-                    <div class="muted" style="font-size:11px;">Бесплатный ID провайдера с happ-proxy.com — открывает все параметры Happ ниже, бейджи и фрагментацию в Happ.</div>
-                </div>
-                <div class="grid-2">
-                    <label class="checkbox-row">
-                        <input name="happ_sub_expire" type="checkbox" ${current.happ_sub_expire !== false ? "checked" : ""}>
-                        <span>sub-expire (баннер истечения)</span>
-                    </label>
-                    <div class="field">
-                        <label>Кнопка продления (sub-expire-button-link)</label>
-                        <input name="happ_sub_expire_button_link" class="input" maxlength="500" value="${escapeHtml(current.happ_sub_expire_button_link || "")}" placeholder="По умолчанию бот">
-                    </div>
-                </div>
-                <div class="muted" style="font-size:11px;">Когда подписка заканчивается, Happ покажет плашку и кнопку «Продлить» со ссылкой на бота.</div>
-                <div class="field">
-                    <label>Резервный URL (fallback-url)</label>
-                    <input name="happ_fallback_url" class="input" maxlength="500" value="${escapeHtml(current.happ_fallback_url || "")}" placeholder="https://sub.just1k.pro/sub/...">
-                    <div class="muted" style="font-size:11px;">Если основной домен недоступен, Happ сам обновит подписку по этому запасному URL.</div>
-                </div>
-                <div class="grid-2">
-                    <label class="checkbox-row">
-                        <input name="happ_hide_settings" type="checkbox" ${current.happ_hide_settings ? "checked" : ""}>
-                        <span>hide-settings (скрыть конфиги)</span>
-                    </label>
-                    <label class="checkbox-row">
-                        <input name="happ_always_hwid_enable" type="checkbox" ${current.happ_always_hwid_enable ? "checked" : ""}>
-                        <span>always-hwid-enable (принуд. HWID)</span>
-                    </label>
-                </div>
-                <div class="muted" style="font-size:11px;">hide-settings прячет сырые параметры серверов; always-hwid-enable запрещает юзеру отключать передачу HWID.</div>
-                <label class="checkbox-row">
-                    <input name="happ_subscriptions_collapse" type="checkbox" ${current.happ_subscriptions_collapse ? "checked" : ""}>
-                    <span>subscriptions-collapse (сворачивать список серверов при открытии)</span>
-                </label>
-                <div class="grid-2">
-                    <div class="field">
-                        <label>Инфо-блок (sub-info-text, до 200 симв.)</label>
-                        <input name="happ_sub_info_text" class="input" maxlength="200" value="${escapeHtml(current.happ_sub_info_text || "")}" placeholder="Напр. Скидка 20% по промокоду">
-                    </div>
-                    <div class="field">
-                        <label>Цвет блока (sub-info-color)</label>
-                        <input name="happ_sub_info_color" class="input" maxlength="32" value="${escapeHtml(current.happ_sub_info_color || "")}" placeholder="blue / green / red">
-                    </div>
-                </div>
-                <div class="grid-2">
-                    <div class="field">
-                        <label>Текст кнопки (sub-info-button-text)</label>
-                        <input name="happ_sub_info_button_text" class="input" maxlength="64" value="${escapeHtml(current.happ_sub_info_button_text || "")}" placeholder="Подробнее">
-                    </div>
-                    <div class="field">
-                        <label>Ссылка кнопки (sub-info-button-link)</label>
-                        <input name="happ_sub_info_button_link" class="input" maxlength="500" value="${escapeHtml(current.happ_sub_info_button_link || "")}" placeholder="https://t.me/...">
-                    </div>
-                </div>
-                <div class="muted" style="font-size:11px;">Цветная карточка внутри Happ. Пример: синий блок «Новые локации • Открыть».</div>
-
                 <button type="submit" class="btn btn-primary">Сохранить настройки</button>
             </form>
         </section>
@@ -400,17 +339,6 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                 per_app_proxy_enabled: Boolean(fd.get("per_app_proxy_enabled")),
                 per_app_proxy_mode: String(fd.get("per_app_proxy_mode") || "bypass"),
                 per_app_proxy_list: String(fd.get("per_app_proxy_list") || "").trim(),
-                happ_provider_id: String(fd.get("happ_provider_id") || "").trim(),
-                happ_sub_expire: Boolean(fd.get("happ_sub_expire")),
-                happ_sub_expire_button_link: String(fd.get("happ_sub_expire_button_link") || "").trim(),
-                happ_fallback_url: String(fd.get("happ_fallback_url") || "").trim(),
-                happ_hide_settings: Boolean(fd.get("happ_hide_settings")),
-                happ_always_hwid_enable: Boolean(fd.get("happ_always_hwid_enable")),
-                happ_subscriptions_collapse: Boolean(fd.get("happ_subscriptions_collapse")),
-                happ_sub_info_text: String(fd.get("happ_sub_info_text") || "").trim(),
-                happ_sub_info_color: String(fd.get("happ_sub_info_color") || "").trim(),
-                happ_sub_info_button_text: String(fd.get("happ_sub_info_button_text") || "").trim(),
-                happ_sub_info_button_link: String(fd.get("happ_sub_info_button_link") || "").trim(),
             });
             showToast("Настройки подписки сохранены");
         } catch (err) {
