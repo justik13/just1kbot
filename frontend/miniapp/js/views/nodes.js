@@ -145,8 +145,8 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
             <div class="card-title">Оформление подписки (INCY / Happ)</div>
             <div class="notice-box" style="flex-direction:column; align-items:flex-start; gap:3px; font-size:11px; margin-bottom:10px;">
                 <strong>Пример карточки в INCY / Happ:</strong>
-                <span><b>✦ Just1k [1/2]</b> <span class="muted">(Profile-Title + счётчик устройств, автообновление 6 ч)</span></span>
-                <span>🔔 <i>Стандарт: 6 дн. • ∞ / Белый интернет: 29 дн. • 0/50 ГБ</i> <span class="muted">(Announce)</span></span>
+                <span><b>✦ Just1k</b> <span class="muted">(Profile-Title, автообновление 6 ч)</span></span>
+                <span>🔔 <i>Стандарт: 6 дн. • ∞ • устр. 1/2 / Белый интернет: 29 дн. • 0/50 ГБ • устр. 1/1</i> <span class="muted">(Announce)</span></span>
                 <span>Кнопки: <b>Поддержка</b> (Support-Url) • <b>Канал / Бот</b> (Announce-Url)</span>
             </div>
             <form id="subSettingsForm" class="field" style="gap:10px;">
@@ -162,7 +162,7 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                 </div>
                 <label class="checkbox-row">
                     <input name="profile_show_devices" type="checkbox" ${current.profile_show_devices ? "checked" : ""}>
-                    <span>Показывать счётчик устройств в названии профиля (напр. [1/2])</span>
+                    <span>Показывать счётчик устройств в Announce (раздельно по тарифам)</span>
                 </label>
                 <div class="field">
                     <label>Баннер / Анонс (Announce)</label>

@@ -423,30 +423,37 @@ def _format_announce_summary(
     wi_end,
     wi_available_bytes: int,
     wi_total_bytes: int = 0,
+    show_devices: bool = False,
+    std_devices_active: int = 0,
+    std_devices_limit: int = 0,
+    wi_devices_active: int = 0,
+    wi_devices_limit: int = 0,
     now_dt=None,
 ) -> str:
-    """Build 2-line stop-word-free Announce summary with days left and used/total GB."""
+    """Build 2-line stop-word-free Announce summary with days left, used/total GB, and per-tier devices."""
     cur_now = now_dt or now_utc()
     lines: list[str] = []
     if std_active:
+        dev_part = f" • устр. {std_devices_active}/{std_devices_limit}" if show_devices and std_devices_limit > 0 else ""
         if std_end and is_permanent_subscription(std_end):
-            lines.append("Стандарт: без срока • ∞")
+            lines.append(f"Стандарт: без срока • ∞{dev_part}")
         else:
             std_days = _format_days_left(std_end, cur_now)
             if std_days is not None:
-                lines.append(f"Стандарт: {std_days} дн. • ∞")
+                lines.append(f"Стандарт: {std_days} дн. • ∞{dev_part}")
             else:
-                lines.append("Стандарт: активен • ∞")
+                lines.append(f"Стандарт: активен • ∞{dev_part}")
 
     if wi_active:
         total_b = max(0, wi_total_bytes)
         used_b = max(0, total_b - max(0, wi_available_bytes)) if total_b > 0 else 0
         gb_part = f"{_format_gb_compact(used_b)}/{_format_gb_compact(total_b)} ГБ" if total_b > 0 else f"остаток {_format_gb_compact(wi_available_bytes)} ГБ"
+        dev_part = f" • устр. {wi_devices_active}/{wi_devices_limit}" if show_devices and wi_devices_limit > 0 else ""
         wi_days = _format_days_left(wi_end, cur_now)
         if wi_days is not None:
-            lines.append(f"Белый интернет: {wi_days} дн. • {gb_part}")
+            lines.append(f"Белый интернет: {wi_days} дн. • {gb_part}{dev_part}")
         else:
-            lines.append(f"Белый интернет: {gb_part}")
+            lines.append(f"Белый интернет: {gb_part}{dev_part}")
 
     return "\n".join(lines)[:200]
 
@@ -1014,13 +1021,7 @@ async def serve_unified_subscription_feed(
         show_devices = _as_bool_setting(show_devices_setting, False)
 
         profile_title_base = str(profile_title).strip().replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
-        if show_devices:
-            suffix = f" [{active_hwid_count}/{effective_limit}]"
-            max_base_len = max(0, 25 - len(suffix))
-            clean_base = profile_title_base[:max_base_len].rstrip()
-            full_title = f"{clean_base}{suffix}"[:25]
-        else:
-            full_title = profile_title_base[:25]
+        full_title = profile_title_base[:25]
 
         userinfo_total = wi_total_quota if (not std_active and wi_active and wi_total_quota > 0) else 0
         b64_title = base64.b64encode(full_title.encode("utf-8")).decode("ascii")
@@ -1102,6 +1103,8 @@ async def serve_unified_subscription_feed(
         elif isinstance(raw_announce, str) and raw_announce.strip():
             announce_summary = raw_announce.strip()
         else:
+            std_devices_active = min(len(devices_list), std_limit) if std_active else 0
+            wi_devices_active = sum(1 for d in devices_list if d.get("is_bi_assigned")) if wi_active else 0
             announce_summary = _format_announce_summary(
                 std_active=std_active,
                 std_end=std_end,
@@ -1109,6 +1112,11 @@ async def serve_unified_subscription_feed(
                 wi_end=wi_end,
                 wi_available_bytes=wi_available_bytes,
                 wi_total_bytes=wi_total_quota,
+                show_devices=show_devices,
+                std_devices_active=std_devices_active,
+                std_devices_limit=std_limit,
+                wi_devices_active=wi_devices_active,
+                wi_devices_limit=wi_limit,
                 now_dt=now,
             )
         if announce_summary:
