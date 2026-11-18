@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import html
-import json
 import logging
 from pathlib import Path
 from urllib.parse import urlparse
@@ -150,58 +148,8 @@ async def miniapp_open_client_handler(request: web.Request) -> web.Response:
     ):
         return web.Response(status=400, text="Invalid subscription URL")
 
-    deep_link = f"{client}://add/{sub_url}"
-    client_label = "INCY" if client == "incy" else "Happ"
-    escaped_link = html.escape(deep_link, quote=True)
-    escaped_sub = html.escape(sub_url, quote=True)
-    js_link = json.dumps(deep_link)
-    js_sub = json.dumps(sub_url)
-
-    page = f"""<!DOCTYPE html>
-<html lang="ru">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Подключение — {client_label}</title>
-<style>
-  body {{ margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:#0d1117; color:#f0f6fc; display:flex; align-items:center; justify-content:center; min-height:100vh; padding:20px; box-sizing:border-box; }}
-  .card {{ width:100%; max-width:380px; background:#161b22; border:1px solid #30363d; border-radius:16px; padding:24px; text-align:center; }}
-  h1 {{ font-size:18px; margin:0 0 8px; }}
-  p {{ font-size:13px; color:#8b949e; margin:0 0 18px; line-height:1.45; }}
-  .btn {{ display:block; width:100%; box-sizing:border-box; padding:12px 16px; border-radius:10px; font-size:14px; font-weight:600; text-decoration:none; border:none; cursor:pointer; margin-bottom:10px; }}
-  .btn-primary {{ background:#2f81f7; color:#fff; }}
-  .btn-secondary {{ background:#21262d; color:#f0f6fc; border:1px solid #30363d; }}
-  .status {{ font-size:12px; color:#58a6ff; min-height:16px; margin-top:4px; }}
-</style>
-</head>
-<body>
-  <div class="card">
-    <h1>Открываем {client_label}…</h1>
-    <p>Если приложение не открылось автоматически, нажмите кнопку ниже или скопируйте ключ.</p>
-    <a class="btn btn-primary" href="{escaped_link}">Открыть в {client_label}</a>
-    <button type="button" class="btn btn-secondary" onclick="copyKey()">Скопировать ключ</button>
-    <div id="status" class="status" data-sub="{escaped_sub}"></div>
-  </div>
-  <script>
-    const deepLink = {js_link};
-    const subKey = {js_sub};
-    function copyKey() {{
-      if (navigator.clipboard && navigator.clipboard.writeText) {{
-        navigator.clipboard.writeText(subKey).then(() => {{
-          document.getElementById("status").textContent = "Ключ скопирован";
-        }});
-      }}
-    }}
-    setTimeout(() => {{ window.location.href = deepLink; }}, 120);
-  </script>
-</body>
-</html>"""
-    return web.Response(
-        text=page,
-        content_type="text/html",
-        charset="utf-8",
-        headers=_NO_CACHE_HEADERS,
-    )
+    sep = "&" if "?" in sub_url else "?"
+    raise web.HTTPFound(f"{sub_url}{sep}open={client}")
 
 
 def setup_miniapp_routes(app: web.Application) -> None:

@@ -1048,8 +1048,9 @@ function _renderConnectTab(body, d, reload, root) {
     body.querySelectorAll("[data-open-client]").forEach((btn) => {
         btn.addEventListener("click", () => {
             const client = btn.dataset.openClient;
-            const bridgeUrl = `${window.location.origin}/app/open-client?client=${encodeURIComponent(client)}&sub=${encodeURIComponent(subUrl)}`;
-            openExternalLink(bridgeUrl);
+            if (!subUrl) return;
+            const targetUrl = `${subUrl}${subUrl.includes("?") ? "&" : "?"}open=${encodeURIComponent(client)}`;
+            openExternalLink(targetUrl);
         });
     });
     body.querySelector("#copySubBtn").addEventListener("click", () => copyText(subUrl, "Ссылка скопирована"));
