@@ -129,11 +129,18 @@ async def miniapp_open_client_handler(request: web.Request) -> web.Response:
     if client not in {"incy", "happ"} or not sub_url:
         return web.Response(status=400, text="Invalid request")
 
+    from bot.miniapp.handlers_user import _get_subscription_domains
+
     parsed = urlparse(sub_url)
     allowed_hosts = {request.host.split(":", 1)[0].lower()}
     configured_domain = (get_settings().DOMAIN or "").strip().lower()
     if configured_domain:
         allowed_hosts.add(configured_domain)
+    for sub_dom in _get_subscription_domains():
+        if sub_dom:
+            dom_parsed = urlparse(sub_dom if "://" in sub_dom else f"https://{sub_dom}")
+            if dom_parsed.hostname:
+                allowed_hosts.add(dom_parsed.hostname.lower())
 
     if (
         parsed.scheme not in {"https", "http"}
