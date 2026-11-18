@@ -1364,25 +1364,28 @@ function _buildDevicesSectionHtml(d) {
                 }
             }
 
-            const subParts = [meta, shortHwid, formatDate(dev.last_seen_at)].filter(Boolean).join(" • ");
+            const subParts = [meta || shortHwid, formatDate(dev.last_seen_at)].filter(Boolean).join(" • ");
 
             return `
-                <div class="item-row" style="gap:10px; padding:12px; ${isBi ? "border-color:rgba(52,211,153,0.28); background:rgba(52,211,153,0.03);" : ""}">
-                    <div class="row" style="align-items:flex-start; gap:10px;">
-                        <div style="display:flex; align-items:center; gap:10px; min-width:0;">
-                            <div style="width:36px; height:36px; border-radius:10px; display:flex; align-items:center; justify-content:center; flex-shrink:0; background:${isBi ? "var(--accent-emerald-soft)" : "var(--bg-elevated)"}; color:${isBi ? "var(--accent-emerald)" : "var(--text-secondary)"}; border:1px solid ${isBi ? "rgba(52,211,153,0.24)" : "var(--border-subtle)"};">
+                <div class="item-row" style="gap:8px; padding:12px; ${isBi ? "border-color:rgba(52,211,153,0.28); background:rgba(52,211,153,0.03);" : ""}">
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+                        <div style="display:flex; align-items:center; gap:10px; flex:1; min-width:0;">
+                            <div style="width:34px; height:34px; border-radius:10px; display:flex; align-items:center; justify-content:center; flex-shrink:0; background:${isBi ? "var(--accent-emerald-soft)" : "var(--bg-elevated)"}; color:${isBi ? "var(--accent-emerald)" : "var(--text-secondary)"}; border:1px solid ${isBi ? "rgba(52,211,153,0.24)" : "var(--border-subtle)"};">
                                 ${devIcon}
                             </div>
-                            <div style="min-width:0;">
-                                <div style="font-weight:600; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(label)}</div>
-                                <div class="muted" style="font-size:11px; font-family:var(--font-mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(subParts)}</div>
+                            <div style="min-width:0; flex:1;">
+                                <div style="font-weight:600; font-size:14px; line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(label)}</div>
+                                <div class="muted" style="font-size:11px; line-height:1.3; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(subParts)}</div>
                             </div>
                         </div>
                         ${badgeHtml}
                     </div>
-                    <div class="actions-row" style="justify-content:space-between; align-items:center; gap:8px;">
-                        ${actionBtnHtml || "<span></span>"}
-                        <button type="button" class="btn btn-sm btn-danger" data-del="${escapeHtml(dev.hwid)}" data-name="${escapeHtml(label)}" style="margin-left:auto;">${_ICONS.trash} Удалить</button>
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding-top:2px;">
+                        <span class="muted" style="font-size:10px; font-family:var(--font-mono); opacity:0.75;">${escapeHtml(shortHwid)}</span>
+                        <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+                            ${actionBtnHtml}
+                            <button type="button" class="btn btn-sm btn-danger" data-del="${escapeHtml(dev.hwid)}" data-name="${escapeHtml(label)}" style="padding:5px 10px;">${_ICONS.trash} Удалить</button>
+                        </div>
                     </div>
                 </div>
             `;
