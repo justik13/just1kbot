@@ -101,13 +101,27 @@ async def _ensure_user(session, ctx) -> User:
     return user
 
 
-def _build_sub_url(token: str) -> str:
+def _get_subscription_domains() -> tuple[str, str]:
     settings = get_settings()
-    domain = (settings.SUBSCRIPTION_DOMAIN or settings.DOMAIN or "").strip().rstrip("/")
-    if domain and not domain.startswith("http"):
-        return f"https://{domain}/sub/{token}"
-    if domain:
-        return f"{domain}/sub/{token}"
+    primary = (settings.SUBSCRIPTION_DOMAIN or "").strip().rstrip("/")
+    backup = (settings.SUBSCRIPTION_BACKUP_DOMAIN or "").strip().rstrip("/")
+    if not primary or not backup:
+        dom = (settings.DOMAIN or "").strip().rstrip("/")
+        parts = dom.split(".")
+        root_dom = ".".join(parts[-2:]) if len(parts) >= 2 else dom
+        if not primary:
+            primary = f"cdn.{root_dom}" if root_dom else dom
+        if not backup:
+            backup = f"sub.{root_dom}" if root_dom else dom
+    return primary, backup
+
+
+def _build_sub_url(token: str) -> str:
+    primary_domain, _ = _get_subscription_domains()
+    if primary_domain and not primary_domain.startswith("http"):
+        return f"https://{primary_domain}/sub/{token}"
+    if primary_domain:
+        return f"{primary_domain}/sub/{token}"
     return f"/sub/{token}"
 
 
@@ -115,9 +129,7 @@ def _build_backup_sub_url(token: str) -> str | None:
     """Generate backup direct subscription URL if backup domain differs from primary CDN domain."""
     if not token:
         return None
-    settings = get_settings()
-    backup_domain = (settings.SUBSCRIPTION_BACKUP_DOMAIN or settings.DOMAIN or "").strip().rstrip("/")
-    primary_domain = (settings.SUBSCRIPTION_DOMAIN or "").strip().rstrip("/")
+    primary_domain, backup_domain = _get_subscription_domains()
     if not backup_domain or backup_domain == primary_domain:
         return None
     if not backup_domain.startswith("http"):
@@ -314,6 +326,10 @@ async def api_user_dashboard_handler(request: web.Request) -> web.Response:
         maint_val = await get_system_setting(session, "payments_maintenance_enabled", "false")
         payments_maintenance = str(maint_val).strip().lower() in ("1", "true", "yes", "on")
 
+        effective_sub_token = vless_sub.token
+        if wi_active and not std_active and wi_sub and wi_sub.token:
+            effective_sub_token = wi_sub.token
+
         return web.json_response({
             "ok": True,
             "financial_hold": bool(getattr(user, "financial_hold", False)),
@@ -328,8 +344,8 @@ async def api_user_dashboard_handler(request: web.Request) -> web.Response:
                 "bonus": int(bal.bonus_available),
                 "total": int(bal.available),
             },
-            "subscription_url": _build_sub_url(vless_sub.token),
-            "subscription_backup_url": _build_backup_sub_url(vless_sub.token),
+            "subscription_url": _build_sub_url(effective_sub_token),
+            "subscription_backup_url": _build_backup_sub_url(effective_sub_token),
             "standard": {
                 "active": std_active,
                 "expires_at": user.subscription_end.isoformat() if user.subscription_end else None,

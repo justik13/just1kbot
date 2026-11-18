@@ -257,7 +257,14 @@ class XrayNodeClient:
                 SyncResult.APPLIED,
                 None,
                 verified_epoch="epoch_mock_1",
-                verified_inbounds=["vless-direct", "vless-xhttp"],
+                verified_inbounds=[
+                    "vless-direct",
+                    "vless-xhttp",
+                    "just1k-wl-default",
+                    "just1k-wl-inbound-ru-wi",
+                    "just1k-vless-direct",
+                    "just1k-vless-wi",
+                ],
                 all_inbounds_verified=True,
                 raw_data={"status": "ok", "result": "applied"},
             )
@@ -329,7 +336,17 @@ class XrayNodeClient:
             elif "exit" in u:
                 detected_role = "exit_node"
             return True, {
-                "inbounds": ["vless-direct", "vless-xhttp"],
+                "inbounds": [
+                    "vless-direct",
+                    "vless-xhttp",
+                    "just1k-wl-default",
+                    "just1k-wl-inbound-ru-wi",
+                    "just1k-vless-direct",
+                    "just1k-vless-wi",
+                ],
+                "inventory": {
+                    cid: {"observed_state": "active"} for cid in (client_ids or [])
+                },
                 "version": "v3.0.0",
                 "role": detected_role,
             }, None
