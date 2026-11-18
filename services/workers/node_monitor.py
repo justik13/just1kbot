@@ -209,6 +209,11 @@ def reset_server_monitor_state(server_id: int, new_state: str = ServerHealthStat
     st.last_cdn_reminder_at = None
 
 
+def clear_server_monitor_state(server_id: int) -> None:
+    """Evict server monitor state from memory on server deletion."""
+    _monitor_states.pop(server_id, None)
+
+
 async def _send_admin_alert_msg(bot: Bot, text: str, reply_markup=None) -> bool:
     settings = get_settings()
     admin_ids = settings.ADMIN_IDS
@@ -270,7 +275,14 @@ async def check_node_resources_and_alerts(bot: Bot):
         servers = await get_all_servers(session)
 
     if not servers:
+        _monitor_states.clear()
         return
+
+    # Auto-prune monitor states for servers no longer present in DB
+    active_ids = {s.id for s in servers}
+    for sid in list(_monitor_states.keys()):
+        if sid not in active_ids:
+            _monitor_states.pop(sid, None)
 
     now_m = time.monotonic()
 

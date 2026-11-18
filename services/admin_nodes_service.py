@@ -555,6 +555,8 @@ async def delete_node(
 
     deleted_name = server.name
     await delete_server(session, server)
+    from services.workers.node_monitor import clear_server_monitor_state
+    clear_server_monitor_state(server_id)
     from services.topology_sync_service import sync_v2_topology_to_nodes
     await sync_v2_topology_to_nodes(session)
     await AuditService.log_action(
