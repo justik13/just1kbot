@@ -1343,7 +1343,7 @@ function _buildDevicesSectionHtml(d) {
                     badgeHtml = `<span class="chip chip-muted" style="font-size:11px; flex-shrink:0;">Стандарт</span>`;
                     if (hasMultipleDevices) {
                         actionBtnHtml = `
-                            <button type="button" class="btn btn-sm" data-prio="${escapeHtml(dev.hwid)}" style="border-color:rgba(52,211,153,0.35); color:var(--accent-emerald); background:var(--accent-emerald-soft);">
+                            <button type="button" class="btn btn-sm" data-prio="${escapeHtml(dev.hwid)}" style="flex:1; justify-content:center; border-color:rgba(52,211,153,0.35); color:var(--accent-emerald); background:var(--accent-emerald-soft);">
                                 ${_ICONS.bolt} Перенести Белый интернет
                             </button>
                         `;
@@ -1356,7 +1356,7 @@ function _buildDevicesSectionHtml(d) {
                     } else {
                         badgeHtml = `<span class="chip chip-muted" style="font-size:11px; flex-shrink:0;">Стандарт</span>`;
                         actionBtnHtml = `
-                            <button type="button" class="btn btn-sm" data-prio="${escapeHtml(dev.hwid)}" style="border-color:rgba(56,189,248,0.35); color:var(--accent-sky); background:var(--accent-sky-soft);">
+                            <button type="button" class="btn btn-sm" data-prio="${escapeHtml(dev.hwid)}" style="flex:1; justify-content:center; border-color:rgba(56,189,248,0.35); color:var(--accent-sky); background:var(--accent-sky-soft);">
                                 ${_ICONS.bolt} Сделать основным для БИ
                             </button>
                         `;
@@ -1364,28 +1364,25 @@ function _buildDevicesSectionHtml(d) {
                 }
             }
 
-            const subParts = [meta || shortHwid, formatDate(dev.last_seen_at)].filter(Boolean).join(" • ");
+            const leftMeta = meta || shortHwid;
+            const dateLabel = formatDate(dev.last_seen_at);
 
             return `
                 <div class="item-row" style="gap:8px; padding:12px; ${isBi ? "border-color:rgba(52,211,153,0.28); background:rgba(52,211,153,0.03);" : ""}">
-                    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
-                        <div style="display:flex; align-items:center; gap:10px; flex:1; min-width:0;">
-                            <div style="width:34px; height:34px; border-radius:10px; display:flex; align-items:center; justify-content:center; flex-shrink:0; background:${isBi ? "var(--accent-emerald-soft)" : "var(--bg-elevated)"}; color:${isBi ? "var(--accent-emerald)" : "var(--text-secondary)"}; border:1px solid ${isBi ? "rgba(52,211,153,0.24)" : "var(--border-subtle)"};">
-                                ${devIcon}
-                            </div>
-                            <div style="min-width:0; flex:1;">
-                                <div style="font-weight:600; font-size:14px; line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(label)}</div>
-                                <div class="muted" style="font-size:11px; line-height:1.3; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(subParts)}</div>
-                            </div>
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                        <div style="display:flex; align-items:center; gap:7px; flex:1; min-width:0;">
+                            <span style="display:inline-flex; flex-shrink:0; color:${isBi ? "var(--accent-emerald)" : "var(--text-secondary)"};">${devIcon}</span>
+                            <span style="font-weight:600; font-size:14px; line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(label)}</span>
                         </div>
                         ${badgeHtml}
                     </div>
-                    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding-top:2px;">
-                        <span class="muted" style="font-size:10px; font-family:var(--font-mono); opacity:0.75;">${escapeHtml(shortHwid)}</span>
-                        <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
-                            ${actionBtnHtml}
-                            <button type="button" class="btn btn-sm btn-danger" data-del="${escapeHtml(dev.hwid)}" data-name="${escapeHtml(label)}" style="padding:5px 10px;">${_ICONS.trash} Удалить</button>
-                        </div>
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:11px; line-height:1.3;">
+                        <span class="muted" style="min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(leftMeta)}</span>
+                        <span class="muted" style="flex-shrink:0; font-variant-numeric:tabular-nums;">${escapeHtml(dateLabel)}</span>
+                    </div>
+                    <div style="display:flex; align-items:center; justify-content:flex-end; gap:8px; padding-top:2px;">
+                        ${actionBtnHtml}
+                        <button type="button" class="btn btn-sm btn-danger" data-del="${escapeHtml(dev.hwid)}" data-name="${escapeHtml(label)}" style="flex-shrink:0; padding:5px 10px;">${_ICONS.trash} Удалить</button>
                     </div>
                 </div>
             `;
@@ -1418,12 +1415,13 @@ function _buildDevicesSectionHtml(d) {
             </div>
             ${isLimitReached ? `
                 <div class="notice-box notice-warn" style="margin:0;">
-                    <span>Все слоты (${devices.length} из ${stdLimit}) заняты — удалите старое устройство, чтобы подключить новое.</span>
+                    <span>Все слоты (${devices.length} из ${stdLimit}) заняты — удалите устройство, чтобы подключить новое.</span>
                 </div>
-            ` : ""}
-            <p class="muted" style="font-size:12px; margin:0;">
-                ${noteText}
-            </p>
+            ` : `
+                <p class="muted" style="font-size:12px; margin:0;">
+                    ${noteText}
+                </p>
+            `}
             <div style="display:flex; flex-direction:column; gap:8px; max-height:420px; overflow-y:auto; padding-right:2px;">${rowsHtml}</div>
         </section>
     `;
