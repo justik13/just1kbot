@@ -322,10 +322,16 @@ class XrayNodeClient:
     ) -> tuple[bool, dict[str, Any] | None, str | None]:
         """Query real observed runtime inventory from Xray memory."""
         if is_mock_node_url(api_url):
+            detected_role = "ru_hub"
+            u = api_url.lower()
+            if "eu" in u:
+                detected_role = "eu_hub"
+            elif "exit" in u:
+                detected_role = "exit_node"
             return True, {
                 "inbounds": ["vless-direct", "vless-xhttp"],
                 "version": "v3.0.0",
-                "role": "ru_hub",
+                "role": detected_role,
             }, None
 
         url = f"{api_url.rstrip('/')}/v1/clients/inventory"
@@ -370,10 +376,16 @@ class XrayNodeClient:
     ) -> tuple[bool, dict[str, Any] | None, str | None]:
         """Fetch v2 auto-discovery node metadata (role, modules, links, errors) via /v1/node/status."""
         if is_mock_node_url(api_url):
+            detected_role = "ru_hub"
+            u = api_url.lower()
+            if "eu" in u:
+                detected_role = "eu_hub"
+            elif "exit" in u:
+                detected_role = "exit_node"
             return True, {
                 "status": "ok",
                 "xray_running": True,
-                "role": "ru_hub",
+                "role": detected_role,
                 "modules": {
                     "vless_tls": {"enabled": True},
                     "cdn_yandex": {"enabled": True},
