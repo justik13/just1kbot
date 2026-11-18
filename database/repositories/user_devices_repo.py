@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import logging
+import time
 from typing import Any
 from uuid import uuid4
 
@@ -12,7 +14,43 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database.models import User, UserDevice
 from utils.datetime_helpers import now_utc
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_HWID_TTL_HOURS = 48
+_DAILY_REGISTRATIONS_CACHE: dict[int, dict[str, float]] = {}
+_REGISTRATION_WINDOW_SECONDS = 86400.0  # 24 hours
+
+
+def calculate_daily_churn_limit(effective_limit: int) -> int:
+    """Allowed distinct HWID registrations per rolling 24 hours.
+
+    Formula: effective_limit + max(2, round(effective_limit * 0.5))
+    - limit 1 (WI base): 1 + 2 = 3
+    - limit 2 (Standard basic): 2 + 2 = 4
+    - limit 5 (Family): 5 + 3 = 8
+    - limit 10 (Pro): 10 + 5 = 15
+    """
+    limit = max(1, int(effective_limit or 1))
+    extra = max(2, int(round(limit * 0.5)))
+    return limit + extra
+
+
+def _record_device_registration(user_id: int, hwid: str) -> None:
+    now_mono = time.monotonic()
+    user_records = _DAILY_REGISTRATIONS_CACHE.setdefault(user_id, {})
+    user_records[hwid] = now_mono
+    _cleanup_user_registrations(user_id, now_mono)
+
+
+def _cleanup_user_registrations(user_id: int, now_mono: float) -> None:
+    user_records = _DAILY_REGISTRATIONS_CACHE.get(user_id)
+    if not user_records:
+        return
+    stale = [h for h, ts in user_records.items() if (now_mono - ts) > _REGISTRATION_WINDOW_SECONDS]
+    for h in stale:
+        del user_records[h]
+    if not user_records:
+        _DAILY_REGISTRATIONS_CACHE.pop(user_id, None)
 
 
 def _extract_device_fields(device_info: dict | None) -> dict[str, str | None]:
@@ -110,23 +148,24 @@ async def register_user_device(
     *,
     ttl_hours: int = DEFAULT_HWID_TTL_HOURS,
     device_info: dict | None = None,
-) -> tuple[bool, bool, int, int]:
+) -> tuple[bool, bool, int, int, str | None]:
     """Atomically register or refresh a unified HWID device under user row lock.
 
     Returns:
-        tuple[allowed_hwid, is_new_device, active_count, effective_limit]
+        tuple[allowed_hwid, is_new_device, active_count, effective_limit, block_reason]
+        where block_reason is None, 'empty_hwid', 'user_not_found', 'slot_limit', or 'churn_limit'.
     """
     clean_hwid = str(hwid or "").strip()[:128]
     effective_limit = max(1, int(max_devices or 1))
     if not clean_hwid:
         active_count = await count_active_user_devices(session, user_id, ttl_hours=ttl_hours)
-        return False, False, active_count, effective_limit
+        return False, False, active_count, effective_limit, "empty_hwid"
 
     user = await session.scalar(
         select(User).where(User.id == user_id).with_for_update()
     )
     if user is None:
-        return False, False, 0, effective_limit
+        return False, False, 0, effective_limit, "user_not_found"
 
     now = now_utc()
     if now.tzinfo is None:
@@ -176,10 +215,30 @@ async def register_user_device(
                 if v is not None:
                     setattr(existing, k, v)
             await session.flush()
-        return True, False, len(devices), effective_limit
+        return True, False, len(devices), effective_limit, None
 
     if len(devices) >= effective_limit:
-        return False, False, len(devices), effective_limit
+        return False, False, len(devices), effective_limit, "slot_limit"
+
+    # Anti-abuse: check daily churn limit for brand-new HWIDs
+    is_admin = getattr(user, "is_admin", False)
+    if not is_admin:
+        churn_limit = calculate_daily_churn_limit(effective_limit)
+        active_24h_hwids = {
+            d.hwid
+            for d in devices
+            if d.created_at and (now - d.created_at).total_seconds() <= 86400
+        }
+        cached_hwids = set(_DAILY_REGISTRATIONS_CACHE.get(user_id, {}).keys())
+        all_24h_hwids = active_24h_hwids | cached_hwids
+        if clean_hwid not in all_24h_hwids and len(all_24h_hwids) >= churn_limit:
+            logger.warning(
+                "User %s exceeded daily device churn limit (%s in 24h, limit=%s)",
+                user_id,
+                len(all_24h_hwids),
+                churn_limit,
+            )
+            return False, False, len(devices), effective_limit, "churn_limit"
 
     dev = UserDevice(
         user_id=user_id,
@@ -195,7 +254,8 @@ async def register_user_device(
     )
     session.add(dev)
     await session.flush()
-    return True, True, len(devices) + 1, effective_limit
+    _record_device_registration(user_id, clean_hwid)
+    return True, True, len(devices) + 1, effective_limit, None
 
 
 async def delete_user_device(
@@ -220,6 +280,26 @@ async def delete_user_device(
     await session.delete(dev)
     await session.flush()
     return dev
+
+
+async def delete_all_user_devices(
+    session: AsyncSession,
+    user_id: int,
+) -> list[UserDevice]:
+    """Delete all HWID devices for user, returning the deleted device records."""
+    stmt = (
+        select(UserDevice)
+        .where(UserDevice.user_id == user_id)
+        .with_for_update()
+    )
+    rows = (await session.scalars(stmt)).all()
+    if not rows:
+        return []
+    await session.execute(
+        delete(UserDevice).where(UserDevice.user_id == user_id)
+    )
+    await session.flush()
+    return list(rows)
 
 
 async def get_user_device_by_hwid(
@@ -291,7 +371,9 @@ async def set_device_bi_priority(
 
 
 __all__ = [
+    "calculate_daily_churn_limit",
     "count_active_user_devices",
+    "delete_all_user_devices",
     "delete_user_device",
     "get_active_device_uuids",
     "get_user_device_by_hwid",

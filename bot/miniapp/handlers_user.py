@@ -65,7 +65,7 @@ from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger(__name__)
 SchemaT = TypeVar("SchemaT", bound=BaseModel)
-_DEVICE_DELETE_COOLDOWN: TTLCache[int, float] = TTLCache(maxsize=5000, ttl=300)
+_DEVICE_DELETE_COOLDOWN: TTLCache[int, float] = TTLCache(maxsize=5000, ttl=5)
 
 
 async def _parse_json_model(
@@ -675,12 +675,11 @@ async def api_user_device_delete_handler(request: web.Request) -> web.Response:
 
     last_del = _DEVICE_DELETE_COOLDOWN.get(ctx.telegram_id)
     now_mono = time.monotonic()
-    if last_del is not None and (now_mono - last_del) < 300:
-        wait_sec = max(1, int(300 - (now_mono - last_del)))
+    if last_del is not None and (now_mono - last_del) < 1.0:
         return web.json_response(
             {
                 "ok": False,
-                "error": f"Удалять устройства можно не чаще раза в 5 минут. Подождите {wait_sec} сек.",
+                "error": "Подождите секунду перед следующим действием.",
             },
             status=429,
         )
@@ -708,6 +707,56 @@ async def api_user_device_delete_handler(request: web.Request) -> web.Response:
 
         _DEVICE_DELETE_COOLDOWN[ctx.telegram_id] = now_mono
         return web.json_response({"ok": True})
+
+
+async def api_user_devices_reset_handler(request: web.Request) -> web.Response:
+    """Remove all bound HWID devices for user and deprovision all internal client UUIDs."""
+    ctx, err_resp = require_authenticated_user(request)
+    if err_resp is not None or ctx is None:
+        return err_resp  # type: ignore[return-value]
+
+    last_del = _DEVICE_DELETE_COOLDOWN.get(ctx.telegram_id)
+    now_mono = time.monotonic()
+    if last_del is not None and (now_mono - last_del) < 1.0:
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "Подождите секунду перед следующим действием.",
+            },
+            status=429,
+        )
+
+    async with session_scope() as session:
+        user = await _ensure_user(session, ctx)
+        deleted_devices = await user_devices_repo.delete_all_user_devices(session, user.id)
+        if not deleted_devices:
+            return web.json_response({"ok": True, "deleted_count": 0})
+
+        deleted_uuids = [
+            getattr(d, "device_uuid", None)
+            for d in deleted_devices
+            if getattr(d, "device_uuid", None)
+        ]
+
+        if deleted_uuids:
+            vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+            sub_id = vless_sub.id if vless_sub else None
+            sub_ver = getattr(vless_sub, "version", None) if vless_sub else None
+            if vless_sub is not None:
+                await vless_subscription_repo.add_pending_revocation_uuids(
+                    session, vless_sub.id, deleted_uuids
+                )
+
+            for u in deleted_uuids:
+                VlessSubscriptionService.deprovision_background(
+                    u,
+                    version=sub_ver,
+                    sub_id=sub_id,
+                    session=session,
+                )
+
+        _DEVICE_DELETE_COOLDOWN[ctx.telegram_id] = now_mono
+        return web.json_response({"ok": True, "deleted_count": len(deleted_devices)})
 
 
 async def api_user_device_priority_handler(request: web.Request) -> web.Response:

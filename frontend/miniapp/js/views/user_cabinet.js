@@ -6,6 +6,7 @@ import {
     formatDate,
     openExternalLink,
     openModal,
+    showConfirmModal,
     showToast,
 } from "../ui.js";
 
@@ -1366,7 +1367,7 @@ function _buildDevicesSectionHtml(d) {
                     </div>
                     <div class="actions-row">
                         ${actionBtnHtml}
-                        <button type="button" class="btn btn-sm btn-danger" data-del="${escapeHtml(dev.hwid)}">Удалить</button>
+                        <button type="button" class="btn btn-sm btn-danger" data-del="${escapeHtml(dev.hwid)}" data-name="${escapeHtml(label)}">Удалить</button>
                     </div>
                 </div>
             `;
@@ -1387,9 +1388,12 @@ function _buildDevicesSectionHtml(d) {
 
     return `
         <section class="card">
-            <div class="row">
+            <div class="row" style="align-items:center;">
                 <div class="card-title">Привязанные устройства</div>
-                <span class="chip ${isLimitReached ? "chip-warn" : "chip-muted"}">${devices.length} из ${stdLimit}</span>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    ${devices.length > 1 ? `<button type="button" class="btn btn-sm btn-danger" id="resetAllDevicesBtn" style="font-size:11px; padding:4px 8px; min-height:28px;">Сбросить все</button>` : ""}
+                    <span class="chip ${isLimitReached ? "chip-warn" : "chip-muted"}">${devices.length} из ${stdLimit}</span>
+                </div>
             </div>
             ${isLimitReached ? `
                 <div class="notice-box notice-warn" style="margin-bottom:8px;">
@@ -1399,27 +1403,62 @@ function _buildDevicesSectionHtml(d) {
             <p class="muted" style="font-size:12px;">
                 ${noteText}
             </p>
-            <div style="display:flex; flex-direction:column; gap:8px;">${rowsHtml}</div>
+            <div style="display:flex; flex-direction:column; gap:8px; max-height:420px; overflow-y:auto; padding-right:2px;">${rowsHtml}</div>
         </section>
     `;
 }
 
 function _bindDevicesEvents(container, reload) {
     container.querySelectorAll("[data-del]").forEach((btn) => {
-        btn.addEventListener("click", async () => {
-            if (!confirm("Удалить это устройство из подписки?")) return;
-            btn.disabled = true;
-            try {
-                await api.deleteDevice(btn.dataset.del);
-                showToast("Устройство удалено");
-                reload();
-            } catch (err) {
-                showToast(err.message || "Не удалось удалить устройство", "error");
-            } finally {
-                btn.disabled = false;
-            }
+        btn.addEventListener("click", () => {
+            const devName = btn.dataset.name || "это устройство";
+            showConfirmModal({
+                title: "Удалить устройство?",
+                message: `Удалить «${devName}» из подписки? Доступ к подключению на нём будет отключен.`,
+                confirmText: "Удалить",
+                cancelText: "Отмена",
+                isDestructive: true,
+                onConfirm: async () => {
+                    btn.disabled = true;
+                    try {
+                        await api.deleteDevice(btn.dataset.del);
+                        showToast("Устройство удалено");
+                        reload();
+                    } catch (err) {
+                        showToast(err.message || "Не удалось удалить устройство", "error");
+                    } finally {
+                        btn.disabled = false;
+                    }
+                },
+            });
         });
     });
+
+    const resetBtn = container.querySelector("#resetAllDevicesBtn");
+    if (resetBtn) {
+        resetBtn.addEventListener("click", () => {
+            const devCount = container.querySelectorAll("[data-del]").length;
+            showConfirmModal({
+                title: "Сбросить все устройства?",
+                message: `Отвязать все устройства (${devCount} шт.) от подписки? Доступ на них отключится, а все слоты станут свободными.`,
+                confirmText: "Сбросить все",
+                cancelText: "Отмена",
+                isDestructive: true,
+                onConfirm: async () => {
+                    resetBtn.disabled = true;
+                    try {
+                        await api.resetAllDevices();
+                        showToast("Все устройства отвязаны");
+                        reload();
+                    } catch (err) {
+                        showToast(err.message || "Не удалось сбросить устройства", "error");
+                    } finally {
+                        resetBtn.disabled = false;
+                    }
+                },
+            });
+        });
+    }
 
     container.querySelectorAll("[data-prio]").forEach((btn) => {
         btn.addEventListener("click", async () => {

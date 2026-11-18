@@ -46,6 +46,7 @@ from bot.miniapp.handlers_user import (
     api_user_dashboard_handler,
     api_user_device_delete_handler,
     api_user_device_priority_handler,
+    api_user_devices_reset_handler,
     api_user_order_check_handler,
     api_user_standard_checkout_handler,
     api_user_standard_downgrade_handler,
@@ -252,6 +253,7 @@ def setup_miniapp_routes(app: web.Application) -> None:
     app.router.add_post("/api/app/user/orders/{order_id}/check", api_user_order_check_handler)
     app.router.add_post("/api/app/user/auto-renew", api_user_auto_renew_handler)
     app.router.add_delete("/api/app/user/devices/{hwid}", api_user_device_delete_handler)
+    app.router.add_post("/api/app/user/devices/reset", api_user_devices_reset_handler)
     app.router.add_post("/api/app/user/devices/{hwid}/priority", api_user_device_priority_handler)
 
     logger.info("Registered modular Mini App routes: /app, /app/assets/*, /api/app/*")

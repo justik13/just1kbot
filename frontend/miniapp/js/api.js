@@ -220,6 +220,10 @@ export const api = {
         requestJson(`/api/app/user/devices/${encodeURIComponent(hwid)}`, {
             method: "DELETE",
         }),
+    resetAllDevices: () =>
+        requestJson("/api/app/user/devices/reset", {
+            method: "POST",
+        }),
     setDevicePriority: (hwid, priority) =>
         requestJson(`/api/app/user/devices/${encodeURIComponent(hwid)}/priority`, {
             method: "POST",

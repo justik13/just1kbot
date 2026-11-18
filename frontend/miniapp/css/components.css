@@ -304,7 +304,13 @@
 
 .btn-danger {
     color: var(--accent-red);
-    border-color: rgba(248, 113, 113, 0.3);
+    border-color: rgba(248, 113, 113, 0.35);
+}
+
+.btn-danger:hover,
+.btn-danger:active {
+    background: rgba(248, 113, 113, 0.12);
+    border-color: var(--accent-red);
 }
 
 .btn-sm {

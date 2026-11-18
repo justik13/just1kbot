@@ -149,6 +149,66 @@ export function openModal(title, bodyNode) {
     return close;
 }
 
+export function showConfirmModal({
+    title = "Подтверждение",
+    message = "",
+    confirmText = "Подтвердить",
+    cancelText = "Отмена",
+    isDestructive = false,
+    onConfirm,
+}) {
+    const box = document.createElement("div");
+    box.className = "confirm-modal-box";
+    box.style.display = "flex";
+    box.style.flexDirection = "column";
+    box.style.gap = "14px";
+
+    const p = document.createElement("p");
+    p.className = "muted";
+    p.style.lineHeight = "1.5";
+    p.style.fontSize = "13px";
+    p.style.margin = "0";
+    p.textContent = message;
+
+    const btnGroup = document.createElement("div");
+    btnGroup.className = "btn-group";
+    btnGroup.style.display = "flex";
+    btnGroup.style.justifyContent = "flex-end";
+    btnGroup.style.gap = "8px";
+
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "btn btn-sm";
+    cancelBtn.textContent = cancelText;
+
+    const okBtn = document.createElement("button");
+    okBtn.type = "button";
+    okBtn.className = `btn btn-sm ${isDestructive ? "btn-danger" : "btn-primary"}`;
+    okBtn.textContent = confirmText;
+
+    btnGroup.append(cancelBtn, okBtn);
+    box.append(p, btnGroup);
+
+    const close = openModal(title, box);
+    cancelBtn.addEventListener("click", close);
+
+    okBtn.addEventListener("click", async () => {
+        okBtn.disabled = true;
+        cancelBtn.disabled = true;
+        try {
+            if (onConfirm) await onConfirm();
+            close();
+        } catch (err) {
+            console.error("Modal confirmation error:", err);
+        } finally {
+            okBtn.disabled = false;
+            cancelBtn.disabled = false;
+        }
+    });
+
+    return close;
+}
+
 export function roleLabel(role) {
     const map = {
         ru_hub: "RU Hub",

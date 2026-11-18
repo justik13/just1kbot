@@ -69,6 +69,7 @@ VLESS_FEED_EXPIRED_TITLE = "⚠️ Подписка закончилась"
 VLESS_FEED_EXPIRED_NOTICE = "⚠️ Подписка закончилась. Продлите доступ: @{bot_username}"
 VLESS_FEED_DEVICE_LIMIT_TITLE = "⚠️ Лимит устройств"
 VLESS_FEED_DEVICE_LIMIT_NOTICE = "⚠️ Превышен лимит устройств ({active}/{limit}). Отключите старые в @{bot_username}"
+VLESS_FEED_CHURN_LIMIT_NOTICE = "⚠️ Превышен суточный лимит смены устройств ({limit} в сутки). Новое подключение будет доступно позже."
 
 LANDING_INACTIVE_BADGE_PAUSED = "Доступ приостановлен"
 LANDING_INACTIVE_TITLE_DEFAULT = "Подписка не активна"

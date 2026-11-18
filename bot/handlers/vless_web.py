@@ -691,15 +691,22 @@ async def serve_unified_subscription_feed(
 
         # 3. Unified HWID registration + priority-based BI slot assignment
         device_meta = extract_device_metadata(request.headers)
-        allowed_hwid, is_new_device, active_hwid_count, effective_limit = await user_devices_repo.register_user_device(
+        allowed_hwid, is_new_device, active_hwid_count, effective_limit, block_reason = await user_devices_repo.register_user_device(
             session, user.id, raw_hwid, max_devices, device_info=device_meta
         )
         if not allowed_hwid:
-            limit_msg = texts.VLESS_FEED_DEVICE_LIMIT_NOTICE.format(
-                active=active_hwid_count,
-                limit=effective_limit,
-                bot_username=bot_username,
-            )
+            if block_reason == "churn_limit":
+                churn_cap = user_devices_repo.calculate_daily_churn_limit(effective_limit)
+                limit_msg = texts.VLESS_FEED_CHURN_LIMIT_NOTICE.format(
+                    limit=churn_cap,
+                    bot_username=bot_username,
+                )
+            else:
+                limit_msg = texts.VLESS_FEED_DEVICE_LIMIT_NOTICE.format(
+                    active=active_hwid_count,
+                    limit=effective_limit,
+                    bot_username=bot_username,
+                )
             return _build_unified_notice_response(
                 title_text=texts.VLESS_FEED_DEVICE_LIMIT_TITLE,
                 notice_text=limit_msg,
