@@ -1414,7 +1414,7 @@ function _bindDevicesEvents(container, reload) {
             const devName = btn.dataset.name || "это устройство";
             showConfirmModal({
                 title: "Удалить устройство?",
-                message: `Удалить «${devName}» из подписки? Доступ к подключению на нём будет отключен.`,
+                message: `«${devName}» потеряет доступ к подключению. Вы сможете добавить его снова позже.`,
                 confirmText: "Удалить",
                 cancelText: "Отмена",
                 isDestructive: true,
@@ -1440,7 +1440,7 @@ function _bindDevicesEvents(container, reload) {
             const devCount = container.querySelectorAll("[data-del]").length;
             showConfirmModal({
                 title: "Сбросить все устройства?",
-                message: `Отвязать все устройства (${devCount} шт.) от подписки? Доступ на них отключится, а все слоты станут свободными.`,
+                message: `Все привязанные устройства (${devCount} шт.) потеряют доступ к подключению. Слоты станут свободными.`,
                 confirmText: "Сбросить все",
                 cancelText: "Отмена",
                 isDestructive: true,

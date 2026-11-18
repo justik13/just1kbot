@@ -116,7 +116,7 @@ export function formatBytesGb(bytes) {
     return (val / (1024 * 1024 * 1024)).toFixed(1);
 }
 
-export function openModal(title, bodyNode) {
+export function openModal(title, bodyNode, { showCloseBtn = true } = {}) {
     const backdrop = document.getElementById("modalRoot");
     if (!backdrop) return () => {};
     backdrop.innerHTML = "";
@@ -128,21 +128,27 @@ export function openModal(title, bodyNode) {
     const h = document.createElement("div");
     h.className = "card-title";
     h.textContent = title;
-    const closeBtn = document.createElement("button");
-    closeBtn.type = "button";
-    closeBtn.className = "btn btn-sm";
-    closeBtn.textContent = "Закрыть";
 
     const close = () => {
         backdrop.hidden = true;
         backdrop.innerHTML = "";
     };
-    closeBtn.addEventListener("click", close);
+
+    header.appendChild(h);
+
+    if (showCloseBtn) {
+        const closeBtn = document.createElement("button");
+        closeBtn.type = "button";
+        closeBtn.className = "btn btn-sm";
+        closeBtn.textContent = "Закрыть";
+        closeBtn.addEventListener("click", close);
+        header.appendChild(closeBtn);
+    }
+
     backdrop.addEventListener("click", (e) => {
         if (e.target === backdrop) close();
     });
 
-    header.append(h, closeBtn);
     card.append(header, bodyNode);
     backdrop.appendChild(card);
     backdrop.hidden = false;
@@ -189,7 +195,7 @@ export function showConfirmModal({
     btnGroup.append(cancelBtn, okBtn);
     box.append(p, btnGroup);
 
-    const close = openModal(title, box);
+    const close = openModal(title, box, { showCloseBtn: false });
     cancelBtn.addEventListener("click", close);
 
     okBtn.addEventListener("click", async () => {
