@@ -458,11 +458,23 @@ def downgrade() -> None:
             if col in wi_cols:
                 op.drop_column("white_internet_subscriptions", col)
         if "hub_server_id" in wi_cols and "origin_node_id" not in wi_cols:
+            if "ix_white_internet_subscriptions_hub_server_id" in wi_indexes:
+                op.drop_index(
+                    "ix_white_internet_subscriptions_hub_server_id",
+                    table_name="white_internet_subscriptions",
+                )
             op.alter_column(
                 "white_internet_subscriptions",
                 "hub_server_id",
                 new_column_name="origin_node_id",
             )
+            if "ix_white_internet_subscriptions_origin_node_id" not in wi_indexes:
+                op.create_index(
+                    "ix_white_internet_subscriptions_origin_node_id",
+                    "white_internet_subscriptions",
+                    ["origin_node_id"],
+                    unique=False,
+                )
         if "active_hwids" not in wi_cols:
             op.add_column(
                 "white_internet_subscriptions",
@@ -479,6 +491,7 @@ def downgrade() -> None:
     # Revert users
     if "users" in tables:
         user_cols = {c["name"] for c in insp.get_columns("users")}
+        user_indexes = {i["name"] for i in insp.get_indexes("users")}
         for col in ["standard_downgrade_cooldown_until", "auto_renew_enabled"]:
             if col in user_cols:
                 op.drop_column("users", col)
@@ -494,6 +507,14 @@ def downgrade() -> None:
             op.add_column("users", sa.Column("notified_grace_12h", sa.Boolean(), nullable=False, server_default=sa.text("false")))
         if "is_banned" not in user_cols:
             op.add_column("users", sa.Column("is_banned", sa.Boolean(), nullable=False, server_default=sa.text("false")))
+        if "ix_users_banned" not in user_indexes:
+            op.create_index(
+                "ix_users_banned",
+                "users",
+                ["telegram_id"],
+                unique=False,
+                postgresql_where=sa.text("(is_banned = true) AND (is_deleted = false)"),
+            )
 
     # Revert servers
     if "servers" in tables:
