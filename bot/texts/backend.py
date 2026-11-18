@@ -34,12 +34,16 @@ PAYMENT_DISPUTE_BLOCKED_NOTICE = "Операция заблокирована и
 PAYMENT_PURCHASE_SUCCESS_CARD = """🎉 <b>{operation_title}</b>
 
 Тариф: <b>{tariff_name}</b>
-Срок: {duration_days} дней
+Срок: {duration_text}
 Списано: <b>{charged} ₽</b>
 💰 Баланс: <b>{real_balance} ₽</b>
 🎁 Бонусный баланс: <b>{bonus_balance} ₽</b>"""
 PURCHASE_COMPLETED = "Тариф куплен"
-PAYMENT_OP_TITLE_CHANGE = "🔄 Смена тарифа"
+PAYMENT_OP_TITLE_CHANGE = "Смена тарифа"
+PAYMENT_OP_TITLE_RENEWAL = "Тариф продлён"
+PAYMENT_OP_TITLE_WI_BOUGHT = "Белый интернет подключён"
+PAYMENT_OP_TITLE_WI_RENEWED = "Белый интернет продлён"
+PAYMENT_OP_TITLE_WI_ADD_SLOTS = "Лимит устройств увеличен"
 TARIFF_DISPLAY_BASIC = "📱 Базовый"
 TARIFF_DISPLAY_FAMILY = "👨‍👩‍👧‍👦 Семейный"
 TARIFF_DISPLAY_PRO = "🚀 Pro"

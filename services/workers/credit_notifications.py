@@ -152,6 +152,7 @@ def _format_credit_push_text(
     *,
     device_limit: int,
     is_tariff_change: bool,
+    operation_kind: str | None = None,
     duration_days: int,
     amount_rub: int | Decimal,
     real_available: int,
@@ -165,19 +166,28 @@ def _format_credit_push_text(
                 int_snapshot_real_available=real_available
             )
         )
+    is_renewal = str(operation_kind or "").lower() in {"renew", "renewal"}
     if service_type == "white_internet":
         tariff_name = f"Белый интернет ({device_limit or 1} устр.)"
+        if duration_days <= 0:
+            operation = texts.PAYMENT_OP_TITLE_WI_ADD_SLOTS
+        elif is_renewal:
+            operation = texts.PAYMENT_OP_TITLE_WI_RENEWED
+        else:
+            operation = texts.PAYMENT_OP_TITLE_WI_BOUGHT
     else:
         tariff_name = get_tariff_display_name(device_limit or 2)
-    operation = (
-        texts.PAYMENT_OP_TITLE_CHANGE
-        if is_tariff_change or duration_days <= 0
-        else texts.PURCHASE_COMPLETED
-    )
+        if is_tariff_change:
+            operation = texts.PAYMENT_OP_TITLE_CHANGE
+        elif is_renewal:
+            operation = texts.PAYMENT_OP_TITLE_RENEWAL
+        else:
+            operation = texts.PURCHASE_COMPLETED
+    duration_text = f"{duration_days} дн." if duration_days > 0 else "до конца текущего срока"
     return texts.PAYMENT_PURCHASE_SUCCESS_CARD.format(
         operation_title=operation,
         tariff_name=tariff_name,
-        duration_days=duration_days if duration_days > 0 else 30,
+        duration_text=duration_text,
         charged=int(amount_rub),
         real_balance=real_available,
         bonus_balance=bonus_available,
@@ -200,6 +210,7 @@ async def notify_order_credited(
             order.service_type,
             device_limit=order.device_limit or 2,
             is_tariff_change=bool(meta.get("is_tariff_change")),
+            operation_kind=meta.get("operation"),
             duration_days=order.duration_days or 0,
             amount_rub=order.amount_rub or 0,
             real_available=int(balance.real_available),
@@ -241,6 +252,7 @@ async def _send_late_push(
             service_type,
             device_limit=fields["device_limit"] or 2,
             is_tariff_change=bool(fields["is_tariff_change"]),
+            operation_kind=fields.get("operation"),
             duration_days=fields["duration_days"],
             amount_rub=fields["amount_rub"],
             real_available=real_available,
@@ -430,6 +442,9 @@ async def _snapshot(order_id) -> dict | None:
                                 "device_limit": order.device_limit,
                                 "context": (order.metadata_ or {}).get(
                                     "context"
+                                ),
+                                "operation": (order.metadata_ or {}).get(
+                                    "operation"
                                 ),
                                 "is_tariff_change": bool(
                                     (order.metadata_ or {}).get(
