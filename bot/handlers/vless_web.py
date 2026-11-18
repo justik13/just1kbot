@@ -985,11 +985,11 @@ async def serve_unified_subscription_feed(
                 all_links.append(
                     _make_inline_stub(
                         texts.FEED_STUB_STD_DEVICE_LIMIT.format(limit=std_limit),
-                        "Удалите старое в боте",
+                        "Откройте в боте «Устройства»",
                     )
                 )
         elif getattr(user, "subscription_end", None) is not None and wi_active:
-            all_links.append(_make_inline_stub(texts.FEED_STUB_STD_EXPIRED, "Продлите доступ в боте"))
+            all_links.append(_make_inline_stub(texts.FEED_STUB_STD_EXPIRED, "Откройте в боте «Тарифы»"))
 
         wi_server: Server | None = None
         if wi_active and wi_sub is not None:
@@ -1024,23 +1024,23 @@ async def serve_unified_subscription_feed(
                     )
                     all_links.extend(wi_links)
                 else:
-                    all_links.append(_make_inline_stub(texts.FEED_STUB_WI_PENDING, "Обновите через 1 минуту"))
+                    all_links.append(_make_inline_stub(texts.FEED_STUB_WI_PENDING, "Нажмите ⟳ через 1 минуту"))
             else:
                 all_links.append(
                     _make_inline_stub(
                         texts.FEED_STUB_WI_DEVICE_LIMIT.format(limit=wi_limit),
-                        "Удалите старое в боте",
+                        "Откройте в боте «Устройства»",
                     )
                 )
         elif wi_sub is not None and std_active:
             if wi_is_pending:
-                all_links.append(_make_inline_stub(texts.FEED_STUB_WI_PENDING, "Обновите через 1 минуту"))
+                all_links.append(_make_inline_stub(texts.FEED_STUB_WI_PENDING, "Нажмите ⟳ через 1 минуту"))
             elif wi_is_exhausted and not wi_is_expired:
-                all_links.append(_make_inline_stub(texts.FEED_STUB_WI_EXHAUSTED, "Докупите пакет ГБ в боте"))
+                all_links.append(_make_inline_stub(texts.FEED_STUB_WI_EXHAUSTED, "Докупите ГБ в боте → «Тарифы»"))
             elif wi_is_disabled:
-                all_links.append(_make_inline_stub(texts.FEED_STUB_WI_DISABLED, "Обратитесь в поддержку"))
+                all_links.append(_make_inline_stub(texts.FEED_STUB_WI_DISABLED, "Напишите в поддержку в боте"))
             else:
-                all_links.append(_make_inline_stub(texts.FEED_STUB_WI_EXPIRED, "Продлите доступ в боте"))
+                all_links.append(_make_inline_stub(texts.FEED_STUB_WI_EXPIRED, "Продлите в боте → «Тарифы»"))
 
         no_servers_mode = False
         if not all_links:
@@ -1050,7 +1050,7 @@ async def serve_unified_subscription_feed(
                 if (wi_active and not std_active)
                 else texts.FEED_STUB_NO_LOCATIONS
             )
-            placeholder_desc = "Обновите через 1 минуту" if (wi_active and not std_active) else "Напишите в поддержку"
+            placeholder_desc = "Нажмите ⟳ через 1 минуту" if (wi_active and not std_active) else "Идут работы, нажмите ⟳ позже"
             all_links.append(_make_inline_stub(placeholder_label, placeholder_desc))
 
         payload = "\n".join(all_links)
