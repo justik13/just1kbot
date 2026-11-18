@@ -1,5 +1,5 @@
 import { api } from "../api.js";
-import { escapeHtml, healthChipInfo, openModal, roleLabel, showToast } from "../ui.js";
+import { escapeHtml, healthChipInfo, openModal, renderFlagHtml, roleLabel, showToast } from "../ui.js";
 
 function _renderModules(node) {
     const mods = node.modules || {};
@@ -98,7 +98,7 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
         <section class="card">
             <div class="row">
                 <div style="display:flex; align-items:center; gap:10px;">
-                    <span style="font-size:24px;">${escapeHtml(node.country_flag || "🌐")}</span>
+                    ${renderFlagHtml(node.country_flag || node.location_code || "🌐", 26)}
                     <div>
                         <div style="font-size:16px; font-weight:700;">${escapeHtml(node.name)}</div>
                         <div class="muted">Сервер #${node.id}</div>

@@ -73,10 +73,10 @@ function _openLocationSubModal(node, onDone) {
         const yanBadge = String(box.querySelector("input[name='wi_yandex_badge']")?.value || "").trim();
         const lines = [];
         if (stdOn) {
-            lines.push(`<div><b>Стандарт:</b> ${escapeHtml(flagVal)} ${escapeHtml(stdName)}${stdBadge ? ` <span class="muted">(${escapeHtml(stdBadge)})</span>` : ""}</div>`);
+            lines.push(`<div><b>Стандарт:</b> ${renderFlagHtml(flagVal, 16)} ${escapeHtml(stdName)}${stdBadge ? ` <span class="muted">(${escapeHtml(stdBadge)})</span>` : ""}</div>`);
         }
         if (wiOn) {
-            lines.push(`<div><b>БИ Yandex:</b> ${escapeHtml(flagVal)} ${escapeHtml(yanName)}${yanBadge ? ` <span class="muted">(${escapeHtml(yanBadge)})</span>` : ""}</div>`);
+            lines.push(`<div><b>БИ Yandex:</b> ${renderFlagHtml(flagVal, 16)} ${escapeHtml(yanName)}${yanBadge ? ` <span class="muted">(${escapeHtml(yanBadge)})</span>` : ""}</div>`);
         }
         if (!lines.length) {
             lines.push(`<div class="muted">Локация скрыта из всех подписок</div>`);
@@ -146,7 +146,7 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
             <div class="notice-box" style="flex-direction:column; align-items:flex-start; gap:3px; font-size:11px; margin-bottom:10px;">
                 <strong>Пример карточки в INCY / Happ:</strong>
                 <span><b>✦ Just1k</b> <span class="muted">(Profile-Title, автообновление 6 ч)</span></span>
-                <span>🔔 <i>Стандарт: 6 дн. • ∞ • устр. 1/2 / Белый интернет: 29 дн. • 0/50 ГБ • устр. 1/1</i> <span class="muted">(Announce)</span></span>
+                <span>🔔 <i>Стандарт: 6 дн. • ∞ • устр. 1/2</i><br><i style="padding-left:18px;">Белый интернет: 29 дн. • 0/50 ГБ • устр. 1/1</i> <span class="muted">(Announce)</span></span>
                 <span>Кнопки: <b>Поддержка</b> (Support-Url) • <b>Канал / Бот</b> (Announce-Url)</span>
             </div>
             <form id="subSettingsForm" class="field" style="gap:10px;">
@@ -162,7 +162,7 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                 </div>
                 <label class="checkbox-row">
                     <input name="profile_show_devices" type="checkbox" ${current.profile_show_devices ? "checked" : ""}>
-                    <span>Показывать счётчик устройств в Announce (раздельно по тарифам)</span>
+                    <span>Показывать счётчик устройств в Announce (при пустом поле Announce)</span>
                 </label>
                 <div class="field">
                     <label>Баннер / Анонс (Announce)</label>
