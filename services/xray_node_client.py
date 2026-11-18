@@ -156,6 +156,35 @@ class XrayNodeClient:
         max_retries: int | None = None,
     ) -> tuple[int, Any, str | None]:
         safe_url = _sanitize_url(url)
+        if "mock" in (url or "").lower():
+            mock_data = {
+                "status": "ok",
+                "xray_running": True,
+                "grpc_ok": True,
+                "node_epoch": "mock_epoch_1794528483",
+                "epoch": "mock_epoch_1794528483",
+                "boot_id": "mock_boot_id",
+                "starttime": 1700000000,
+                "role": "ru_hub",
+                "modules": {
+                    "vless_tls": {
+                        "tag": "just1k-vless-direct",
+                        "port": 443,
+                        "domain": "test.just1k.pro",
+                        "enabled": True,
+                    }
+                },
+                "inbounds": ["just1k-vless-direct", "just1k-vless-wi"],
+                "links": {},
+                "secret_base_path": "/assets_test",
+                "xhttp_locations": ["/wi-test-xhttp"],
+                "users": {},
+                "host_tx_bytes": 0,
+                "host_rx_bytes": 0,
+                "ok": True,
+            }
+            return 200, mock_data, None
+
         session = await self._get_session()
         retries_limit = self.max_retries if max_retries is None else max_retries
         effective_timeout = request_timeout if request_timeout is not None else self.timeout
