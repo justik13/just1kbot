@@ -1327,7 +1327,8 @@ function _buildDevicesSectionHtml(d) {
             const label = dev.device_name || dev.platform || "Устройство";
             const rawHwid = String(dev.hwid || "");
             const shortHwid = rawHwid.length > 14 ? `${rawHwid.slice(0, 6)}…${rawHwid.slice(-4)}` : rawHwid;
-            const meta = [dev.platform, dev.os_version].filter(Boolean).join(" · ");
+            const osText = [dev.platform, dev.os_version].filter(Boolean).join(" ");
+            const meta = [osText, dev.app_version].filter(Boolean).join(" · ");
             const isDesktop = /win|mac|linux|desktop|amd64|x86_64/i.test(`${label} ${meta}`);
             const devIcon = isDesktop ? _ICONS.desktop : _ICONS.phone;
             const isBi = Boolean(wiActive && dev.is_bi_assigned);
@@ -1363,7 +1364,7 @@ function _buildDevicesSectionHtml(d) {
                 }
             }
 
-            const subParts = [meta || shortHwid, formatDate(dev.last_seen_at)].filter(Boolean).join(" • ");
+            const subParts = [meta, shortHwid, formatDate(dev.last_seen_at)].filter(Boolean).join(" • ");
 
             return `
                 <div class="item-row" style="gap:10px; padding:12px; ${isBi ? "border-color:rgba(52,211,153,0.28); background:rgba(52,211,153,0.03);" : ""}">
@@ -1491,7 +1492,7 @@ function _bindDevicesEvents(container, reload) {
             btn.disabled = true;
             try {
                 await api.setDevicePriority(btn.dataset.prio, 10);
-                showToast("Устройство выбрано основным");
+                showToast("Приоритет обновлён — нажмите ⟳ в приложении");
                 reload();
             } catch (err) {
                 showToast(err.message || "Не удалось изменить приоритет");

@@ -58,9 +58,9 @@ def _extract_device_fields(device_info: dict | None) -> dict[str, str | None]:
         return {}
     mapping = {
         "device_name": ("device_name", "device_model", "model"),
-        "platform": ("platform", "device_os"),
+        "platform": ("platform", "device_os", "os"),
         "os_version": ("os_version", "ver_os"),
-        "app_version": ("app_version", "app_ver"),
+        "app_version": ("app_version", "app_ver", "client"),
     }
     out: dict[str, str | None] = {}
     for target, keys in mapping.items():
