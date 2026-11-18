@@ -170,12 +170,25 @@ def _sanitize_ascii_header(val: str | None, fallback: str = "", *, max_len: int 
     return ""
 
 
-def _normalize_per_app_proxy_list(raw: str | None) -> str:
-    """Normalize newline/whitespace/comma-separated app entries into a clean CSV string."""
-    if not raw or not isinstance(raw, str):
+def _normalize_per_app_proxy_list(raw: str | None, *, max_len: int = 2000) -> str:
+    """Normalize newline/whitespace/comma-separated app entries into a clean ASCII CSV string."""
+    if not raw or not isinstance(raw, str) or max_len <= 0:
         return ""
-    items = [item for item in re.split(r"[\s,]+", raw.strip()) if item]
-    return ",".join(items)
+    seen: set[str] = set()
+    selected: list[str] = []
+    total_len = 0
+    for item in re.split(r"[\s,]+", raw.strip()):
+        if not item or item in seen:
+            continue
+        if not (item.isascii() and all(32 < ord(c) < 127 for c in item)):
+            continue
+        added_len = len(item) + (1 if selected else 0)
+        if total_len + added_len > max_len:
+            break
+        seen.add(item)
+        selected.append(item)
+        total_len += added_len
+    return ",".join(selected)
 
 
 def _as_bool_setting(val: object, default: bool = False) -> bool:
