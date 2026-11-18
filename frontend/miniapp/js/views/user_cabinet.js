@@ -584,11 +584,15 @@ function _openWiPurchaseModal(d, onReload) {
             <div class="muted" style="font-size:12px;">
                 Независимая подписка на 30 дней для мобильной сети при жёстких ограничениях. Работает как отдельно, так и в дополнение к «Стандарту».
             </div>
-            ${d.devices && d.devices.length > devices ? `
+            ${d.devices && d.devices.length > devices ? (() => {
+                const sortedDevs = [...d.devices].sort((a, b) => (a.id || 0) - (b.id || 0));
+                const firstDevName = sortedDevs[0]?.device_name || sortedDevs[0]?.platform || "Устройство";
+                return `
                 <div class="notice-box notice-info" style="font-size:11px; padding:6px 10px; margin-top:4px;">
-                    <span>ℹ️ Слот будет привязан к основному устройству (${escapeHtml(d.devices[0].device_name || d.devices[0].platform || "Устройство")}). Выбрать другое можно в любой момент на вкладке подключения.</span>
+                    <span>ℹ️ Слот будет привязан к основному устройству (${escapeHtml(firstDevName)}). Выбрать другое можно в любой момент на вкладке подключения.</span>
                 </div>
-            ` : ""}
+                `;
+            })() : ""}
             <div class="field">
                 <label>Количество устройств (по 50 ГБ на слот)</label>
                 <div class="price-tile-grid">
@@ -818,6 +822,8 @@ export async function loadAndRenderUserCabinet(root) {
 function _render(root) {
     const d = _state.data;
     if (!d) return;
+    const prevGuideOpen = Boolean(root.querySelector("#connectGuide")?.open);
+    const prevScrollY = window.scrollY;
     const stdActive = Boolean(d.standard && d.standard.active);
     const wiActive = Boolean(d.wi && d.wi.active);
     const hasAny = stdActive || wiActive;
@@ -861,6 +867,14 @@ function _render(root) {
     if (_state.tab === "connect") _renderConnectTab(body, d, reload, root);
     else if (_state.tab === "tariffs") _renderTariffsTab(body, d, reload);
     else _renderProfileTab(body, d, reload);
+
+    if (prevGuideOpen) {
+        const nextGuide = root.querySelector("#connectGuide");
+        if (nextGuide) nextGuide.open = true;
+    }
+    if (prevScrollY > 0) {
+        window.scrollTo(0, prevScrollY);
+    }
 }
 
 function _buildGuideHtml(subUrl, backupSubUrl, isActive) {
@@ -1087,6 +1101,10 @@ function _renderTariffsTab(body, d, reload) {
     const stdLimit = Number(std.device_limit || 2);
     const stdMin7 = _calcStdPrice(pricing, 2, 7);
     const stdMin30 = _calcStdPrice(pricing, 2, 30);
+    const stdExpMs = std.expires_at ? new Date(std.expires_at).getTime() : 0;
+    const isStdGrace = Boolean(std.active && stdExpMs > 0 && stdExpMs < Date.now());
+    const graceEndMs = stdExpMs + (4 * 3600 * 1000);
+    const graceHoursLeft = Math.max(1, Math.ceil((graceEndMs - Date.now()) / (3600 * 1000)));
 
     const wiBase = Number(pricing.wi_base_price_rub || 250);
     const wiUsedGb = formatBytesGb(wi.traffic_used_bytes);
@@ -1121,14 +1139,14 @@ function _renderTariffsTab(body, d, reload) {
             Две независимые подписки на одну ссылку — выберите нужную или подключите обе.
         </div>
 
-        <section class="plan-card ${std.active ? "plan-active" : ""}">
+        <section class="plan-card ${std.active && !isStdGrace ? "plan-active" : ""}" ${isStdGrace ? 'style="border-color: rgba(245, 158, 11, 0.4);"' : ""}>
             <div class="row">
                 <div>
                     <div class="card-title">Стандарт</div>
                     <div class="muted" style="font-size:12px;">Для дома, Wi-Fi и повседневного использования</div>
                 </div>
-                <span class="chip ${std.active ? "chip-ok" : "chip-muted"}">
-                    ${std.active ? `до ${formatDate(std.expires_at)}` : "Не подключена"}
+                <span class="chip ${isStdGrace ? "chip-warn" : (std.active ? "chip-ok" : "chip-muted")}">
+                    ${isStdGrace ? `Льготный период (~${graceHoursLeft} ч.)` : (std.active ? `до ${formatDate(std.expires_at)}` : "Не подключена")}
                 </span>
             </div>
             <div class="plan-features">

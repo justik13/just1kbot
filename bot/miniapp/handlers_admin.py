@@ -550,6 +550,10 @@ async def api_admin_users_handler(request: web.Request) -> web.Response:
                     )
                 )
 
+        total_matching = int(
+            await session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+        )
+
         stmt = stmt.order_by(User.created_at.desc(), User.id.desc()).limit(limit).offset(offset)
         users = (await session.scalars(stmt)).all()
 
@@ -606,6 +610,9 @@ async def api_admin_users_handler(request: web.Request) -> web.Response:
                 "total_balance_rub": int(max(Decimal(0), total_balance_rub)),
             },
             "filter_counts": filter_counts,
+            "total": total_matching,
+            "offset": offset,
+            "limit": limit,
             "users": items,
         })
 

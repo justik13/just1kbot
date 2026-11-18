@@ -71,12 +71,15 @@ function _openLocationSubModal(node, onDone) {
         const stdBadge = String(box.querySelector("input[name='server_description']")?.value || "").trim();
         const yanName = String(box.querySelector("input[name='wi_yandex_name']")?.value || "").trim() || defaultYandexName;
         const yanBadge = String(box.querySelector("input[name='wi_yandex_badge']")?.value || "").trim();
+        const tfName = String(box.querySelector("input[name='wi_turboflare_name']")?.value || "").trim() || defaultTurboflareName;
+        const tfBadge = String(box.querySelector("input[name='wi_turboflare_badge']")?.value || "").trim();
         const lines = [];
         if (stdOn) {
             lines.push(`<div><b>Стандарт:</b> ${renderFlagHtml(flagVal, 16)} ${escapeHtml(stdName)}${stdBadge ? ` <span class="muted">(${escapeHtml(stdBadge)})</span>` : ""}</div>`);
         }
         if (wiOn) {
             lines.push(`<div><b>БИ Yandex:</b> ${renderFlagHtml(flagVal, 16)} ${escapeHtml(yanName)}${yanBadge ? ` <span class="muted">(${escapeHtml(yanBadge)})</span>` : ""}</div>`);
+            lines.push(`<div><b>БИ Turboflare:</b> ${renderFlagHtml(flagVal, 16)} ${escapeHtml(tfName)}${tfBadge ? ` <span class="muted">(${escapeHtml(tfBadge)})</span>` : ""}</div>`);
         }
         if (!lines.length) {
             lines.push(`<div class="muted">Локация скрыта из всех подписок</div>`);
@@ -356,8 +359,8 @@ function _nodeScopeBadges(node) {
     const hasStd = caps.includes("vless") || caps.includes("standard") || Boolean(links.standard && Object.keys(links.standard).length);
     const hasBi = caps.includes("white_internet") || Boolean(links.bi && Object.keys(links.bi).length);
     const badges = [];
-    if (hasStd) badges.push(`<span class="chip chip-muted">Standard</span>`);
-    if (hasBi) badges.push(`<span class="chip chip-info">Доп. опция</span>`);
+    if (hasStd) badges.push(`<span class="chip chip-muted">Стандарт</span>`);
+    if (hasBi) badges.push(`<span class="chip chip-info">БИ</span>`);
     return badges.join("");
 }
 

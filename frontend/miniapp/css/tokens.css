@@ -9,7 +9,7 @@
 
     --text-primary: #ffffff;
     --text-secondary: #a1a1aa;
-    --text-muted: #71717a;
+    --text-muted: #8e8e99;
 
     --accent-white: #ffffff;
     --accent-emerald: #34d399;
@@ -17,6 +17,7 @@
     --accent-sky: #38bdf8;
     --accent-sky-soft: rgba(56, 189, 248, 0.12);
     --accent-amber: #fbbf24;
+    --accent-warn: #fbbf24;
     --accent-red: #f87171;
 
     --radius-card: 16px;

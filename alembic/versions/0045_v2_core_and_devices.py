@@ -11,6 +11,7 @@ from collections.abc import Sequence
 import uuid
 
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 from alembic import op
 
 # revision identifiers, used by Alembic.
@@ -428,6 +429,7 @@ def downgrade() -> None:
     bind = op.get_bind()
     insp = sa.inspect(bind)
     tables = set(insp.get_table_names())
+    json_type = postgresql.JSONB(astext_type=sa.Text()) if bind.dialect.name == "postgresql" else sa.JSON()
 
     # Revert user_devices
     if "user_devices" in tables:
@@ -439,11 +441,17 @@ def downgrade() -> None:
         for col in ["notified_before_days", "notified_expired", "auto_renew_enabled", "device_limit", "expires_at"]:
             if col in vless_cols:
                 op.drop_column("vless_subscriptions", col)
+        if "active_hwids" not in vless_cols:
+            op.add_column(
+                "vless_subscriptions",
+                sa.Column("active_hwids", json_type, nullable=True, server_default=sa.text("'{}'")),
+            )
 
     # Revert white_internet_subscriptions
     if "white_internet_subscriptions" in tables:
         wi_cols = {c["name"] for c in insp.get_columns("white_internet_subscriptions")}
         wi_checks = {c["name"] for c in insp.get_check_constraints("white_internet_subscriptions")}
+        wi_indexes = {i["name"] for i in insp.get_indexes("white_internet_subscriptions")}
         if "ck_wi_subs_pending_device_limit" in wi_checks:
             op.drop_constraint("ck_wi_subs_pending_device_limit", "white_internet_subscriptions", type_="check")
         for col in ["pending_device_limit", "pending_from", "auto_renew_enabled"]:
@@ -455,6 +463,18 @@ def downgrade() -> None:
                 "hub_server_id",
                 new_column_name="origin_node_id",
             )
+        if "active_hwids" not in wi_cols:
+            op.add_column(
+                "white_internet_subscriptions",
+                sa.Column("active_hwids", json_type, nullable=True, server_default=sa.text("'{}'")),
+            )
+            if bind.dialect.name == "postgresql" and "ix_white_internet_subscriptions_active_hwids" not in wi_indexes:
+                op.create_index(
+                    "ix_white_internet_subscriptions_active_hwids",
+                    "white_internet_subscriptions",
+                    ["active_hwids"],
+                    postgresql_using="gin",
+                )
 
     # Revert users
     if "users" in tables:
@@ -462,6 +482,18 @@ def downgrade() -> None:
         for col in ["standard_downgrade_cooldown_until", "auto_renew_enabled"]:
             if col in user_cols:
                 op.drop_column("users", col)
+        if "device_creations_today" not in user_cols:
+            op.add_column("users", sa.Column("device_creations_today", sa.Integer(), nullable=False, server_default="0"))
+        if "last_creation_date" not in user_cols:
+            op.add_column("users", sa.Column("last_creation_date", sa.Date(), nullable=True))
+        if "archived_device_traffic" not in user_cols:
+            op.add_column("users", sa.Column("archived_device_traffic", json_type, nullable=False, server_default=sa.text("'{}'")))
+        if "last_trial_reset_at" not in user_cols:
+            op.add_column("users", sa.Column("last_trial_reset_at", sa.DateTime(timezone=True), nullable=True))
+        if "notified_grace_12h" not in user_cols:
+            op.add_column("users", sa.Column("notified_grace_12h", sa.Boolean(), nullable=False, server_default=sa.text("false")))
+        if "is_banned" not in user_cols:
+            op.add_column("users", sa.Column("is_banned", sa.Boolean(), nullable=False, server_default=sa.text("false")))
 
     # Revert servers
     if "servers" in tables:
@@ -493,3 +525,61 @@ def downgrade() -> None:
                     "ck_orders_service_type",
                     "service_type IN ('standard', 'white_internet', 'topup', 'awg')",
                 )
+
+    # Restore dropped legacy tables for full downgrade symmetry
+    if "api_operations" not in tables:
+        op.create_table(
+            "api_operations",
+            sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
+            sa.Column("operation_type", sa.String(length=32), nullable=False),
+            sa.Column("status", sa.String(length=20), nullable=False, server_default="pending"),
+            sa.Column("idempotency_key", sa.String(length=255), nullable=False, unique=True),
+            sa.Column("server_id", sa.Integer(), sa.ForeignKey("servers.id", ondelete="SET NULL"), nullable=True),
+            sa.Column("server_name_snapshot", sa.String(length=255), nullable=True),
+            sa.Column("api_url_snapshot", sa.String(length=500), nullable=True),
+            sa.Column("api_key_snapshot", sa.Text(), nullable=True),
+            sa.Column("peer_id", sa.String(length=255), nullable=True),
+            sa.Column("client_name", sa.String(length=255), nullable=True),
+            sa.Column("payload", json_type, nullable=False, server_default=sa.text("'{}'")),
+            sa.Column("attempts", sa.Integer(), nullable=False, server_default="0"),
+            sa.Column("max_attempts", sa.Integer(), nullable=False, server_default="10"),
+            sa.Column("next_attempt_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+            sa.Column("locked_at", sa.DateTime(timezone=True), nullable=True),
+            sa.Column("locked_by", sa.String(length=100), nullable=True),
+            sa.Column("last_error_code", sa.String(length=100), nullable=True),
+            sa.Column("last_error", sa.Text(), nullable=True),
+            sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+            sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+            sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
+        )
+
+    if "hub_messages" not in tables:
+        op.create_table(
+            "hub_messages",
+            sa.Column("chat_id", sa.BigInteger(), nullable=False),
+            sa.Column("message_id", sa.BigInteger(), nullable=False),
+            sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+            sa.Column("is_effect_message", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+            sa.PrimaryKeyConstraint("chat_id", "message_id"),
+        )
+        op.create_index("ix_hub_messages_chat_id", "hub_messages", ["chat_id"])
+
+    if "admin_operation_idempotency" not in tables:
+        op.create_table(
+            "admin_operation_idempotency",
+            sa.Column("op_key", sa.String(length=64), primary_key=True, nullable=False),
+            sa.Column("admin_id", sa.BigInteger(), nullable=False),
+            sa.Column("target_id", sa.BigInteger(), nullable=False),
+            sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        )
+        op.create_index("ix_admin_operation_idempotency_created_at", "admin_operation_idempotency", ["created_at"])
+
+    if "maintenance_mode" not in tables:
+        op.create_table(
+            "maintenance_mode",
+            sa.Column("id", sa.Integer(), primary_key=True, nullable=False),
+            sa.Column("is_enabled", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+            sa.Column("message", sa.Text(), nullable=True),
+            sa.Column("updated_by", sa.BigInteger(), nullable=True),
+            sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        )

@@ -150,9 +150,10 @@ async def deliver_pending_credit_notifications(bot: Bot) -> int:
 def _format_credit_push_text(
     service_type: str,
     *,
-    device_limit: int,
+    device_limit: int | None,
     is_tariff_change: bool,
     operation_kind: str | None = None,
+    traffic_bytes: int = 0,
     duration_days: int,
     amount_rub: int | Decimal,
     real_available: int,
@@ -166,18 +167,27 @@ def _format_credit_push_text(
                 int_snapshot_real_available=real_available
             )
         )
-    is_renewal = str(operation_kind or "").lower() in {"renew", "renewal"}
+    op_lower = str(operation_kind or "").lower()
+    is_renewal = op_lower in {"renew", "renewal"}
     if service_type == "white_internet":
-        tariff_name = f"Белый интернет ({device_limit or 1} устр.)"
-        if duration_days <= 0:
-            operation = texts.PAYMENT_OP_TITLE_WI_ADD_SLOTS
-        elif is_renewal:
-            operation = texts.PAYMENT_OP_TITLE_WI_RENEWED
+        if op_lower == "topup":
+            pack_gb = max(1, round((traffic_bytes or 0) / (1024**3)))
+            tariff_name = f"Белый интернет (+{pack_gb} ГБ)"
+            operation = texts.PAYMENT_OP_TITLE_WI_TRAFFIC_TOPUP
         else:
-            operation = texts.PAYMENT_OP_TITLE_WI_BOUGHT
+            tariff_name = f"Белый интернет ({device_limit or 1} устр.)"
+            if op_lower == "add_device_slot" or duration_days <= 0:
+                operation = texts.PAYMENT_OP_TITLE_WI_ADD_SLOTS
+            elif is_renewal:
+                operation = texts.PAYMENT_OP_TITLE_WI_RENEWED
+            else:
+                operation = texts.PAYMENT_OP_TITLE_WI_BOUGHT
     else:
         tariff_name = get_tariff_display_name(device_limit or 2)
-        if is_tariff_change:
+        if op_lower == "upgrade":
+            operation = texts.PAYMENT_OP_TITLE_WI_ADD_SLOTS
+            tariff_name = f"{tariff_name} ({device_limit or 2} устр.)"
+        elif is_tariff_change:
             operation = texts.PAYMENT_OP_TITLE_CHANGE
         elif is_renewal:
             operation = texts.PAYMENT_OP_TITLE_RENEWAL
@@ -208,9 +218,10 @@ async def notify_order_credited(
         meta = order.metadata_ or {}
         text = _format_credit_push_text(
             order.service_type,
-            device_limit=order.device_limit or 2,
+            device_limit=order.device_limit,
             is_tariff_change=bool(meta.get("is_tariff_change")),
             operation_kind=meta.get("operation"),
+            traffic_bytes=order.traffic_bytes or 0,
             duration_days=order.duration_days or 0,
             amount_rub=order.amount_rub or 0,
             real_available=int(balance.real_available),
@@ -229,6 +240,7 @@ async def notify_order_credited(
             getattr(user, "id", "?"),
             getattr(order, "id", "?"),
             exc,
+            exc_info=True,
         )
         return False
 
@@ -250,9 +262,10 @@ async def _send_late_push(
     try:
         text = _format_credit_push_text(
             service_type,
-            device_limit=fields["device_limit"] or 2,
+            device_limit=fields["device_limit"],
             is_tariff_change=bool(fields["is_tariff_change"]),
             operation_kind=fields.get("operation"),
+            traffic_bytes=int(fields.get("traffic_bytes") or 0),
             duration_days=fields["duration_days"],
             amount_rub=fields["amount_rub"],
             real_available=real_available,
@@ -440,6 +453,7 @@ async def _snapshot(order_id) -> dict | None:
                                 "amount_rub": order.amount_rub,
                                 "duration_days": order.duration_days,
                                 "device_limit": order.device_limit,
+                                "traffic_bytes": order.traffic_bytes or 0,
                                 "context": (order.metadata_ or {}).get(
                                     "context"
                                 ),

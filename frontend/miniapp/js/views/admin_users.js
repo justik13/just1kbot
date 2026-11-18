@@ -1,5 +1,5 @@
 import { api } from "../api.js";
-import { copyText, escapeHtml, formatDate, openModal, showToast } from "../ui.js";
+import { copyText, escapeHtml, formatDate, openModal, showConfirmModal, showToast } from "../ui.js";
 
 function _openDirectMessageModal(user) {
     const uname = user.username ? `@${user.username}` : (user.first_name || `ID ${user.telegram_id}`);
@@ -247,11 +247,11 @@ async function _openUserDetailsModal(user, onUpdated) {
         : `<div class="muted" style="font-size:12px;">Устройства не привязаны</div>`;
 
     box.innerHTML = `
-        <div class="detail-list">
+        <div class="detail-grid">
             <div class="detail-item"><span class="detail-label">Telegram ID</span><span class="mono">${details.telegram_id}</span></div>
             <div class="detail-item"><span class="detail-label">Пригласил</span><span>${escapeHtml(inviterStr)}</span></div>
             <div class="detail-item"><span class="detail-label">Стандарт до</span><span>${details.standard_end ? formatDate(details.standard_end) : "—"}</span></div>
-            <div class="detail-item"><span class="detail-label">Доп. опция до</span><span>${wi && wi.expires_at ? `${formatDate(wi.expires_at)} (${wiUsedGb} / ${wiTotalGb} ГБ)` : "—"}</span></div>
+            <div class="detail-item"><span class="detail-label">Белый интернет до</span><span>${wi && wi.expires_at ? `${formatDate(wi.expires_at)} (${wiUsedGb} / ${wiTotalGb} ГБ)` : "—"}</span></div>
         </div>
         ${details.subscription_url ? `
         <div class="field">
@@ -306,25 +306,33 @@ async function _openUserDetailsModal(user, onUpdated) {
         }
     });
 
-    box.querySelector("#detRotateTokenBtn").addEventListener("click", async (e) => {
-        if (!confirm("Перевыпустить токен подписки? Старая ссылка перестанет работать.")) return;
+    box.querySelector("#detRotateTokenBtn").addEventListener("click", (e) => {
         const b = e.currentTarget;
-        b.disabled = true;
-        try {
-            const res = await api.rotateUserToken(user.id);
-            showToast(res.message || "Токен перевыпущен");
-            close();
-            onUpdated();
-        } catch (err) {
-            showToast(err.message || "Ошибка перевыпуска");
-        } finally {
-            b.disabled = false;
-        }
+        showConfirmModal({
+            title: "Перевыпустить токен подписки?",
+            message: "Старая ссылка подключения перестанет работать. Пользователю нужно будет заново добавить подписку.",
+            confirmText: "Перевыпустить",
+            cancelText: "Отмена",
+            isDestructive: true,
+            onConfirm: async () => {
+                b.disabled = true;
+                try {
+                    const res = await api.rotateUserToken(user.id);
+                    showToast(res.message || "Токен перевыпущен");
+                    close();
+                    onUpdated();
+                } catch (err) {
+                    showToast(err.message || "Ошибка перевыпуска");
+                } finally {
+                    b.disabled = false;
+                }
+            },
+        });
     });
 }
 
 export function renderAdminUsersView(root, state) {
-    const data = state.usersData || { stats: {}, filter_counts: {}, users: [] };
+    const data = state.usersData || { stats: {}, filter_counts: {}, users: [], total: 0, offset: 0, limit: 25 };
     const stats = data.stats || {};
     const fc = data.filter_counts || {};
     const users = data.users || [];
@@ -347,7 +355,7 @@ export function renderAdminUsersView(root, state) {
             <div class="filter-pills">
                 <button type="button" class="pill-btn ${activeFilter === "all" ? "active" : ""}" data-ufilter="all">Все (${fc.total ?? stats.total_users ?? 0})</button>
                 <button type="button" class="pill-btn ${activeFilter === "active_standard" ? "active" : ""}" data-ufilter="active_standard">Стандарт (${fc.active_standard ?? stats.active_standard ?? 0})</button>
-                <button type="button" class="pill-btn ${activeFilter === "active_wi" ? "active" : ""}" data-ufilter="active_wi">Доп. опция (${fc.active_wi ?? stats.active_wi ?? 0})</button>
+                <button type="button" class="pill-btn ${activeFilter === "active_wi" ? "active" : ""}" data-ufilter="active_wi">Белый интернет (${fc.active_wi ?? stats.active_wi ?? 0})</button>
                 <button type="button" class="pill-btn ${activeFilter === "expired" ? "active" : ""}" data-ufilter="expired">Истекли (${fc.expired ?? 0})</button>
                 <button type="button" class="pill-btn ${activeFilter === "never" ? "active" : ""}" data-ufilter="never">Без подписки (${fc.never ?? 0})</button>
             </div>
@@ -356,14 +364,16 @@ export function renderAdminUsersView(root, state) {
                 <button type="submit" class="btn btn-primary btn-sm">Найти</button>
             </form>
             <div id="usersListContainer" class="nodes-list" style="display:flex; flex-direction:column; gap:8px;"></div>
+            <div id="usersPager" class="row" style="margin-top:6px;"></div>
         </section>
     `;
 
-    const reload = async (qVal, filterVal = state.usersFilter || "all") => {
+    const reload = async (qVal, filterVal = state.usersFilter || "all", offsetVal = 0) => {
         try {
             state.usersQuery = qVal;
             state.usersFilter = filterVal;
-            state.usersData = await api.listUsers(qVal, 0, 25, filterVal);
+            state.usersOffset = offsetVal;
+            state.usersData = await api.listUsers(qVal, offsetVal, 25, filterVal);
             renderAdminUsersView(root, state);
         } catch (err) {
             showToast(err.message || "Не удалось загрузить пользователей");
@@ -372,16 +382,40 @@ export function renderAdminUsersView(root, state) {
 
     root.querySelectorAll("[data-ufilter]").forEach((btn) => {
         btn.addEventListener("click", () => {
-            reload(state.usersQuery || "", btn.dataset.ufilter);
+            reload(state.usersQuery || "", btn.dataset.ufilter, 0);
         });
     });
 
-    root.querySelector("#reloadUsersBtn").addEventListener("click", () => reload(state.usersQuery || "", state.usersFilter || "all"));
+    root.querySelector("#reloadUsersBtn").addEventListener("click", () => reload(state.usersQuery || "", state.usersFilter || "all", state.usersOffset || 0));
     root.querySelector("#userSearchForm").addEventListener("submit", (e) => {
         e.preventDefault();
         const val = root.querySelector("#userSearchInput").value.trim();
-        reload(val, state.usersFilter || "all");
+        reload(val, state.usersFilter || "all", 0);
     });
+
+    const pagerEl = root.querySelector("#usersPager");
+    const totalMatching = Number(data.total ?? users.length);
+    const curOffset = Number(data.offset ?? state.usersOffset ?? 0);
+    const curLimit = Number(data.limit || 25);
+    if (totalMatching <= curLimit && curOffset === 0) {
+        pagerEl.innerHTML = `<span class="muted" style="font-size:11px;">Найдено: ${totalMatching}</span>`;
+    } else {
+        const hasPrev = curOffset > 0;
+        const hasNext = curOffset + curLimit < totalMatching;
+        pagerEl.innerHTML = `
+            <span class="muted" style="font-size:11px;">${curOffset + 1}–${Math.min(curOffset + curLimit, totalMatching)} из ${totalMatching}</span>
+            <div class="btn-group">
+                <button type="button" class="btn btn-sm" id="uPgPrev" ${hasPrev ? "" : "disabled"}>Назад</button>
+                <button type="button" class="btn btn-sm" id="uPgNext" ${hasNext ? "" : "disabled"}>Далее</button>
+            </div>
+        `;
+        if (hasPrev) {
+            pagerEl.querySelector("#uPgPrev").addEventListener("click", () => reload(state.usersQuery || "", state.usersFilter || "all", Math.max(0, curOffset - curLimit)));
+        }
+        if (hasNext) {
+            pagerEl.querySelector("#uPgNext").addEventListener("click", () => reload(state.usersQuery || "", state.usersFilter || "all", curOffset + curLimit));
+        }
+    }
 
     const listEl = root.querySelector("#usersListContainer");
     if (!users.length) {
@@ -425,13 +459,13 @@ export function renderAdminUsersView(root, state) {
             </div>
         `;
         card.querySelector("[data-details-uid]").addEventListener("click", () => {
-            _openUserDetailsModal(u, () => reload(state.usersQuery || "", state.usersFilter || "all"));
+            _openUserDetailsModal(u, () => reload(state.usersQuery || "", state.usersFilter || "all", state.usersOffset || 0));
         });
         card.querySelector("[data-msg-uid]").addEventListener("click", () => {
             _openDirectMessageModal(u);
         });
         card.querySelector("[data-manage-uid]").addEventListener("click", () => {
-            _openAdjustUserModal(u, () => reload(state.usersQuery || "", state.usersFilter || "all"));
+            _openAdjustUserModal(u, () => reload(state.usersQuery || "", state.usersFilter || "all", state.usersOffset || 0));
         });
         listEl.appendChild(card);
     });

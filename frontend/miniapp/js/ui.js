@@ -122,6 +122,8 @@ export function openModal(title, bodyNode, { showCloseBtn = true } = {}) {
     backdrop.innerHTML = "";
     const card = document.createElement("div");
     card.className = "modal-card";
+    card.setAttribute("role", "dialog");
+    card.setAttribute("aria-modal", "true");
 
     const header = document.createElement("div");
     header.className = "row";
@@ -129,7 +131,15 @@ export function openModal(title, bodyNode, { showCloseBtn = true } = {}) {
     h.className = "card-title";
     h.textContent = title;
 
+    const onKeyDown = (e) => {
+        if (e.key === "Escape") {
+            close();
+        }
+    };
+
     const close = () => {
+        document.removeEventListener("keydown", onKeyDown);
+        document.body.style.overflow = "";
         backdrop.hidden = true;
         backdrop.innerHTML = "";
     };
@@ -145,13 +155,15 @@ export function openModal(title, bodyNode, { showCloseBtn = true } = {}) {
         header.appendChild(closeBtn);
     }
 
-    backdrop.addEventListener("click", (e) => {
+    backdrop.onclick = (e) => {
         if (e.target === backdrop) close();
-    });
+    };
 
     card.append(header, bodyNode);
     backdrop.appendChild(card);
     backdrop.hidden = false;
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", onKeyDown);
     return close;
 }
 

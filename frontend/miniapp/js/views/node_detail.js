@@ -1,5 +1,5 @@
 import { api } from "../api.js";
-import { escapeHtml, healthChipInfo, openModal, renderFlagHtml, roleLabel, showToast } from "../ui.js";
+import { escapeHtml, healthChipInfo, openModal, renderFlagHtml, roleLabel, showConfirmModal, showToast } from "../ui.js";
 
 function _renderModules(node) {
     const mods = node.modules || {};
@@ -221,28 +221,43 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
         _openEditModal(node, onReload);
     });
 
-    root.querySelector("#detailDeleteBtn").addEventListener("click", async () => {
-        if (!confirm(`Удалить сервер "${node.name}" (#${node.id})?`)) return;
-        try {
-            await api.deleteNode(node.id);
-            showToast(`Сервер #${node.id} удалён`);
-            onBack();
-            await onReload();
-        } catch (err) {
-            if (err && err.status === 409) {
-                if (confirm(`${err.message}\n\nВсё равно принудительно удалить сервер?`)) {
-                    try {
-                        await api.deleteNode(node.id, true);
-                        showToast(`Сервер #${node.id} принудительно удалён`);
-                        onBack();
-                        await onReload();
-                    } catch (err2) {
-                        showToast(err2.message || "Ошибка удаления");
+    root.querySelector("#detailDeleteBtn").addEventListener("click", () => {
+        showConfirmModal({
+            title: `Удалить сервер #${node.id}?`,
+            message: `Сервер «${node.name}» будет удалён из базы.`,
+            confirmText: "Удалить",
+            cancelText: "Отмена",
+            isDestructive: true,
+            onConfirm: async () => {
+                try {
+                    await api.deleteNode(node.id);
+                    showToast(`Сервер #${node.id} удалён`);
+                    onBack();
+                    await onReload();
+                } catch (err) {
+                    if (err && err.status === 409) {
+                        showConfirmModal({
+                            title: "Принудительное удаление",
+                            message: `${err.message}\n\nВсё равно принудительно удалить сервер?`,
+                            confirmText: "Удалить принудительно",
+                            cancelText: "Отмена",
+                            isDestructive: true,
+                            onConfirm: async () => {
+                                try {
+                                    await api.deleteNode(node.id, true);
+                                    showToast(`Сервер #${node.id} принудительно удалён`);
+                                    onBack();
+                                    await onReload();
+                                } catch (err2) {
+                                    showToast(err2.message || "Ошибка удаления");
+                                }
+                            },
+                        });
+                        return;
                     }
+                    showToast(err.message || "Ошибка удаления");
                 }
-                return;
-            }
-            showToast(err.message || "Ошибка удаления");
-        }
+            },
+        });
     });
 }

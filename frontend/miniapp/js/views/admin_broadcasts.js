@@ -1,5 +1,5 @@
 import { api } from "../api.js";
-import { escapeHtml, formatDate, openModal, showToast } from "../ui.js";
+import { escapeHtml, formatDate, openModal, showConfirmModal, showToast } from "../ui.js";
 
 let _pollTimer = null;
 
@@ -30,27 +30,12 @@ function _buildAudienceOptions({ includeTest = true } = {}) {
 }
 
 function _confirmModal(title, summaryText, onConfirm) {
-    const box = document.createElement("div");
-    box.className = "field";
-    box.style.gap = "12px";
-    box.innerHTML = `
-        <p class="muted" style="line-height:1.45;">${escapeHtml(summaryText)}</p>
-        <div class="btn-group" style="justify-content:flex-end;">
-            <button type="button" class="btn btn-sm" id="cfmCancelBtn">Отмена</button>
-            <button type="button" class="btn btn-primary btn-sm" id="cfmOkBtn">Подтвердить</button>
-        </div>
-    `;
-    const close = openModal(title, box);
-    box.querySelector("#cfmCancelBtn").addEventListener("click", close);
-    const okBtn = box.querySelector("#cfmOkBtn");
-    okBtn.addEventListener("click", async () => {
-        okBtn.disabled = true;
-        try {
-            await onConfirm();
-            close();
-        } finally {
-            okBtn.disabled = false;
-        }
+    showConfirmModal({
+        title,
+        message: summaryText,
+        confirmText: "Подтвердить",
+        cancelText: "Отмена",
+        onConfirm,
     });
 }
 
@@ -268,6 +253,8 @@ export function renderAdminBroadcastsView(root, state) {
                             reason,
                             notify_users: notifyUsers,
                         });
+                        state.usersData = null;
+                        state.financesData = null;
                         showToast(res.message || "Массовое начисление запущено");
                     } catch (err) {
                         showToast(err.message || "Ошибка начисления");
@@ -294,6 +281,8 @@ export function renderAdminBroadcastsView(root, state) {
                             reason,
                             notify_users: notifyUsers,
                         });
+                        state.usersData = null;
+                        state.financesData = null;
                         showToast(res.message || "Массовое продление запущено");
                     } catch (err) {
                         showToast(err.message || "Ошибка продления");
