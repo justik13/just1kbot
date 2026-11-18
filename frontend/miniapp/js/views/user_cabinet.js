@@ -1163,7 +1163,7 @@ function _renderTariffsTab(body, d, reload) {
                 </label>
                 <div class="connect-pair">
                     <button id="stdRenewBtn" type="button" class="btn btn-primary">Продлить</button>
-                    <button id="stdDevicesBtn" type="button" class="btn">Устройства (${stdLimit})</button>
+                    <button id="stdDevicesBtn" type="button" class="btn">Лимит: ${stdLimit} устр.</button>
                 </div>
             ` : `
                 <div class="plan-meta-row">
