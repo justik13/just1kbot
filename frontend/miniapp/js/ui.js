@@ -237,3 +237,61 @@ export function healthChipInfo(node) {
     }
     return { text: "Проблема", cls: "chip-err" };
 }
+
+function _extractCountryCode(flagOrCode) {
+    const raw = String(flagOrCode || "").trim();
+    if (!raw) return "";
+    if (/^[a-zA-Z]{2}$/.test(raw)) return raw.toUpperCase();
+    const cps = Array.from(raw).map((ch) => ch.codePointAt(0) || 0);
+    if (cps.length >= 2 && cps[0] >= 0x1f1e6 && cps[0] <= 0x1f1ff && cps[1] >= 0x1f1e6 && cps[1] <= 0x1f1ff) {
+        return String.fromCharCode(65 + (cps[0] - 0x1f1e6), 65 + (cps[1] - 0x1f1e6));
+    }
+    return "";
+}
+
+export function renderFlagHtml(flagOrCode, width = 20) {
+    const code = _extractCountryCode(flagOrCode);
+    const height = Math.round((width * 15) / 21);
+    const wrap = (inner) =>
+        `<svg width="${width}" height="${height}" viewBox="0 0 21 15" aria-label="${escapeHtml(code)}" style="display:inline-block; vertical-align:-2px; border-radius:2px; flex-shrink:0; box-shadow:0 0 0 1px rgba(255,255,255,0.12);">${inner}</svg>`;
+    const hStripes = (c1, c2, c3) =>
+        wrap(
+            `<rect width="21" height="5" fill="${c1}"/><rect y="5" width="21" height="5" fill="${c2}"/><rect y="10" width="21" height="5" fill="${c3}"/>`
+        );
+    const vStripes = (c1, c2, c3) =>
+        wrap(
+            `<rect width="7" height="15" fill="${c1}"/><rect x="7" width="7" height="15" fill="${c2}"/><rect x="14" width="7" height="15" fill="${c3}"/>`
+        );
+    const svgs = {
+        DE: () => hStripes("#111", "#D80027", "#FFDA44"),
+        NL: () => hStripes("#AE1C28", "#FFF", "#21468B"),
+        RU: () => hStripes("#FFF", "#0039A6", "#D52B1E"),
+        AT: () => hStripes("#ED2939", "#FFF", "#ED2939"),
+        EE: () => hStripes("#0072CE", "#111", "#FFF"),
+        LV: () => wrap(`<rect width="21" height="6" fill="#9E3039"/><rect y="6" width="21" height="3" fill="#FFF"/><rect y="9" width="21" height="6" fill="#9E3039"/>`),
+        LT: () => hStripes("#FDB913", "#006A44", "#C1272D"),
+        ES: () => wrap(`<rect width="21" height="4" fill="#AA151B"/><rect y="4" width="21" height="7" fill="#F1BF00"/><rect y="11" width="21" height="4" fill="#AA151B"/>`),
+        PL: () => wrap(`<rect width="21" height="7.5" fill="#FFF"/><rect y="7.5" width="21" height="7.5" fill="#DC143C"/>`),
+        UA: () => wrap(`<rect width="21" height="7.5" fill="#005BBB"/><rect y="7.5" width="21" height="7.5" fill="#FFD500"/>`),
+        FR: () => vStripes("#0055A4", "#FFF", "#EF4135"),
+        IT: () => vStripes("#009246", "#FFF", "#CE2B37"),
+        FI: () => wrap(`<rect width="21" height="15" fill="#FFF"/><rect x="6" width="3" height="15" fill="#003580"/><rect y="6" width="21" height="3" fill="#003580"/>`),
+        SE: () => wrap(`<rect width="21" height="15" fill="#006AA7"/><rect x="6" width="3" height="15" fill="#FECC00"/><rect y="6" width="21" height="3" fill="#FECC00"/>`),
+        NO: () => wrap(`<rect width="21" height="15" fill="#BA0C2F"/><rect x="5" width="5" height="15" fill="#FFF"/><rect y="5" width="21" height="5" fill="#FFF"/><rect x="6" width="3" height="15" fill="#00205B"/><rect y="6" width="21" height="3" fill="#00205B"/>`),
+        DK: () => wrap(`<rect width="21" height="15" fill="#C60C30"/><rect x="6" width="3" height="15" fill="#FFF"/><rect y="6" width="21" height="3" fill="#FFF"/>`),
+        CH: () => wrap(`<rect width="21" height="15" fill="#D52B1E"/><rect x="9" y="3" width="3" height="9" fill="#FFF"/><rect x="6" y="6" width="9" height="3" fill="#FFF"/>`),
+        CZ: () => wrap(`<rect width="21" height="7.5" fill="#FFF"/><rect y="7.5" width="21" height="7.5" fill="#D7141A"/><polygon points="0,0 10.5,7.5 0,15" fill="#11457E"/>`),
+        TR: () => wrap(`<rect width="21" height="15" fill="#E30A17"/><circle cx="8.5" cy="7.5" r="3.6" fill="#FFF"/><circle cx="9.6" cy="7.5" r="2.9" fill="#E30A17"/><polygon points="12.5,7.5 14.3,6.9 13.7,8.7 13.7,6.3 14.3,8.1" fill="#FFF"/>`),
+        US: () => wrap(`<rect width="21" height="15" fill="#FFF"/><rect width="21" height="2.2" fill="#B22234"/><rect y="4.3" width="21" height="2.2" fill="#B22234"/><rect y="8.6" width="21" height="2.2" fill="#B22234"/><rect y="12.8" width="21" height="2.2" fill="#B22234"/><rect width="10" height="8" fill="#3C3B6E"/>`),
+        GB: () => wrap(`<rect width="21" height="15" fill="#012169"/><path d="M0,0 L21,15 M21,0 L0,15" stroke="#FFF" stroke-width="2.6"/><path d="M0,0 L21,15 M21,0 L0,15" stroke="#C8102E" stroke-width="1.2"/><rect x="8.5" width="4" height="15" fill="#FFF"/><rect y="5.5" width="21" height="4" fill="#FFF"/><rect x="9.3" width="2.4" height="15" fill="#C8102E"/><rect y="6.3" width="21" height="2.4" fill="#C8102E"/>`),
+        JP: () => wrap(`<rect width="21" height="15" fill="#FFF"/><circle cx="10.5" cy="7.5" r="4.2" fill="#BC002D"/>`),
+        SG: () => wrap(`<rect width="21" height="7.5" fill="#EF3340"/><rect y="7.5" width="21" height="7.5" fill="#FFF"/><circle cx="5" cy="3.8" r="2.2" fill="#FFF"/><circle cx="5.9" cy="3.8" r="1.9" fill="#EF3340"/>`),
+        KZ: () => wrap(`<rect width="21" height="15" fill="#00AFCA"/><circle cx="10.5" cy="7.5" r="3.2" fill="#FEC50C"/>`),
+        AE: () => wrap(`<rect x="5" width="16" height="5" fill="#00732F"/><rect x="5" y="5" width="16" height="5" fill="#FFF"/><rect x="5" y="10" width="16" height="5" fill="#111"/><rect width="5" height="15" fill="#FF0000"/>`),
+        CA: () => wrap(`<rect width="5" height="15" fill="#FF0000"/><rect x="5" width="11" height="15" fill="#FFF"/><rect x="16" width="5" height="15" fill="#FF0000"/><polygon points="10.5,4 12,7 14,7 12.2,8.8 12.8,11 10.5,9.6 8.2,11 8.8,8.8 7,7 9,7" fill="#FF0000"/>`),
+    };
+    if (code && svgs[code]) {
+        return svgs[code]();
+    }
+    return `<span style="font-size:${Math.max(14, width - 2)}px; line-height:1;">${escapeHtml(flagOrCode || "🌐")}</span>`;
+}

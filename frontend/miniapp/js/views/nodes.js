@@ -1,5 +1,5 @@
 import { api } from "../api.js";
-import { escapeHtml, healthChipInfo, openModal, roleLabel, showToast } from "../ui.js";
+import { escapeHtml, healthChipInfo, openModal, renderFlagHtml, roleLabel, showToast } from "../ui.js";
 
 let currentFilter = "all";
 
@@ -289,10 +289,11 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
             const inWi = Boolean(node.in_white_internet);
             const row = document.createElement("div");
             row.className = "node-card node-card-compact";
+            row.style.cursor = "pointer";
             row.innerHTML = `
                 <div class="row" style="align-items:center;">
                     <div class="node-compact-title">
-                        <span style="font-size:18px;">${escapeHtml(node.country_flag || "🌐")}</span>
+                        ${renderFlagHtml(node.country_flag || node.location_code || "🌐", 20)}
                         <span style="font-weight:600; font-size:14px;">${escapeHtml(node.vless_name || node.name)}</span>
                     </div>
                     <button type="button" class="btn btn-sm">Настроить</button>
@@ -302,7 +303,7 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                     <span class="chip ${inWi ? "chip-info" : "chip-muted"}">БИ: ${inWi ? "да" : "нет"}</span>
                 </div>
             `;
-            row.querySelector("button").addEventListener("click", () => {
+            row.addEventListener("click", () => {
                 _openLocationSubModal(node, onReloadNodes);
             });
             locListEl.appendChild(row);
@@ -465,7 +466,7 @@ export function renderNodesView(root, state, onReload, onSelectNode) {
         card.innerHTML = `
             <div class="row" style="align-items:center;">
                 <div class="node-compact-title">
-                    <span style="font-size:18px;">${escapeHtml(node.country_flag || "🌐")}</span>
+                    ${renderFlagHtml(node.country_flag || node.location_code || "🌐", 20)}
                     <span style="font-weight:600; font-size:14px;">${escapeHtml(node.name)}</span>
                     <span class="muted" style="font-size:12px;">#${node.id}</span>
                 </div>
