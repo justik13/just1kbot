@@ -887,7 +887,10 @@ function _buildGuideHtml(subUrl, backupSubUrl, isActive) {
                 </div>
                 ${isActive && subUrl ? `
                     <div class="field">
-                        <label>Основная ссылка подключения</label>
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <label style="margin:0;">Основная ссылка подключения</label>
+                            <button id="copyInlineSubBtn" type="button" class="btn btn-sm" style="padding:4px 10px; font-size:12px;">Скопировать</button>
+                        </div>
                         <div class="sub-url-box">${escapeHtml(subUrl)}</div>
                     </div>
                 ` : ""}
@@ -895,7 +898,7 @@ function _buildGuideHtml(subUrl, backupSubUrl, isActive) {
                     <div class="field" style="margin-top:8px;">
                         <div style="display:flex; justify-content:space-between; align-items:center;">
                             <label style="margin:0;">Резервная ссылка (прямая)</label>
-                            <button id="copyBackupSubBtn" type="button" class="btn btn-xs" style="padding:2px 8px; font-size:11px;">Скопировать резервную</button>
+                            <button id="copyBackupSubBtn" type="button" class="btn btn-sm" style="padding:4px 10px; font-size:12px;">Скопировать</button>
                         </div>
                         <div class="sub-url-box" style="font-size:11px; opacity:0.85;">${escapeHtml(backupSubUrl)}</div>
                         <span class="muted" style="font-size:10px; margin-top:2px;">Используйте прямое подключение, если по основной ссылке есть задержки</span>
@@ -1049,6 +1052,10 @@ function _renderConnectTab(body, d, reload, root) {
         });
     });
     body.querySelector("#copySubBtn").addEventListener("click", () => copyText(subUrl, "Ссылка скопирована"));
+    const copyInlineBtn = body.querySelector("#copyInlineSubBtn");
+    if (copyInlineBtn) {
+        copyInlineBtn.addEventListener("click", () => copyText(subUrl, "Основная ссылка скопирована"));
+    }
     const copyBackupBtn = body.querySelector("#copyBackupSubBtn");
     if (copyBackupBtn) {
         copyBackupBtn.addEventListener("click", () => copyText(backupSubUrl, "Резервная ссылка скопирована"));
@@ -1400,13 +1407,14 @@ function _buildDevicesSectionHtml(d) {
 function _bindDevicesEvents(container, reload) {
     container.querySelectorAll("[data-del]").forEach((btn) => {
         btn.addEventListener("click", async () => {
+            if (!confirm("Удалить это устройство из подписки?")) return;
             btn.disabled = true;
             try {
                 await api.deleteDevice(btn.dataset.del);
                 showToast("Устройство удалено");
                 reload();
             } catch (err) {
-                showToast(err.message || "Не удалось удалить устройство");
+                showToast(err.message || "Не удалось удалить устройство", "error");
             } finally {
                 btn.disabled = false;
             }

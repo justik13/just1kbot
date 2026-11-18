@@ -7,13 +7,31 @@ export function escapeHtml(value) {
         .replace(/'/g, "&#39;");
 }
 
+export function triggerHaptic(type = "light") {
+    try {
+        const tg = window.Telegram && window.Telegram.WebApp;
+        if (tg && tg.HapticFeedback) {
+            if (type === "success" || type === "warning" || type === "error") {
+                tg.HapticFeedback.notificationOccurred(type);
+            } else if (type === "medium" || type === "heavy" || type === "rigid" || type === "soft") {
+                tg.HapticFeedback.impactOccurred(type);
+            } else {
+                tg.HapticFeedback.impactOccurred("light");
+            }
+        }
+    } catch {
+        // Safe fallback if Telegram WebApp haptic API is unsupported
+    }
+}
+
 let _toastTimer = null;
 
-export function showToast(message) {
+export function showToast(message, type = "success") {
     const toast = document.getElementById("toastRoot");
     if (!toast) return;
     toast.textContent = String(message || "");
     toast.hidden = false;
+    triggerHaptic(type);
     if (_toastTimer) clearTimeout(_toastTimer);
     _toastTimer = setTimeout(() => {
         toast.hidden = true;
