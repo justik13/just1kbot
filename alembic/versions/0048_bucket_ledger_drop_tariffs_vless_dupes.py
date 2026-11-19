@@ -22,6 +22,7 @@ def upgrade() -> None:
         "account_ledger_entries",
         sa.Column("bucket", sa.String(length=10), nullable=False, server_default=sa.text("'real'")),
     )
+    op.execute("DROP INDEX IF EXISTS uq_account_ledger_order_debit")
 
     op.execute(
         """
