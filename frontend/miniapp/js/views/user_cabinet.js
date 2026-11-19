@@ -84,6 +84,13 @@ function _calcBalanceSplit(priceRub, bal, useBalance, minTopupRub = 20) {
     return { balUsed, cardDue };
 }
 
+function _newIdempotencyKey() {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+        return crypto.randomUUID();
+    }
+    return `idem-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 function _handlePaymentResponse(res, successMsg, onReload) {
     if (!res || !res.confirmation_url) {
         showToast(successMsg);
@@ -218,6 +225,7 @@ function _openTopupModal(minTopup, onReload) {
             form.querySelector("input[name='amount']").value = b.dataset.amt;
         });
     });
+    const idemKey = _newIdempotencyKey();
     form.addEventListener("submit", async (e) => {
         e.preventDefault();
         const amount = Number(form.querySelector("input[name='amount']").value);
@@ -228,13 +236,12 @@ function _openTopupModal(minTopup, onReload) {
         const btn = form.querySelector("button[type='submit']");
         btn.disabled = true;
         try {
-            const res = await api.topupBalance(amount);
+            const res = await api.topupBalance(amount, idemKey);
             close();
             _handlePaymentResponse(res, "Баланс пополнен", onReload);
         } catch (err) {
-            showToast(err.message || "Не удалось создать платёж");
-        } finally {
             btn.disabled = false;
+            showToast(err.message || "Не удалось создать платёж");
         }
     });
 }
@@ -401,16 +408,16 @@ function _openStandardPlanModal(d, mode, onReload) {
         });
 
         const payBtn = wrap.querySelector("#modalStdPayBtn");
+        const idemKey = _newIdempotencyKey();
         payBtn.addEventListener("click", async () => {
             payBtn.disabled = true;
             try {
-                const res = await api.checkoutStandard(devices, duration, useBalance);
+                const res = await api.checkoutStandard(devices, duration, useBalance, idemKey);
                 close();
                 _handlePaymentResponse(res, "Подписка «Стандарт» оформлена", onReload);
             } catch (err) {
-                showToast(err.message || "Ошибка оплаты");
-            } finally {
                 payBtn.disabled = false;
+                showToast(err.message || "Ошибка оплаты");
             }
         });
 
@@ -540,12 +547,13 @@ function _openStandardDevicesModal(d, onReload) {
                 renderContent();
             });
         }
+        const idemKey = _newIdempotencyKey();
         wrap.querySelector("#devApplyBtn").addEventListener("click", async () => {
             const btn = wrap.querySelector("#devApplyBtn");
             btn.disabled = true;
             try {
                 if (isUpgrade) {
-                    const res = await api.checkoutStandard(targetLimit, 30, useBalance);
+                    const res = await api.checkoutStandard(targetLimit, 30, useBalance, idemKey);
                     close();
                     _handlePaymentResponse(res, `Лимит увеличен до ${targetLimit} устр.`, onReload);
                 } else {
@@ -555,9 +563,8 @@ function _openStandardDevicesModal(d, onReload) {
                     onReload();
                 }
             } catch (err) {
-                showToast(err.message || "Не удалось изменить лимит");
-            } finally {
                 btn.disabled = false;
+                showToast(err.message || "Не удалось изменить лимит");
             }
         });
     };
@@ -681,6 +688,7 @@ function _openWiPurchaseModal(d, mode, onReload) {
         });
 
         const payBtn = wrap.querySelector("#modalWiPayBtn");
+        const idemKey = _newIdempotencyKey();
         payBtn.addEventListener("click", async () => {
             payBtn.disabled = true;
             try {
@@ -688,6 +696,7 @@ function _openWiPurchaseModal(d, mode, onReload) {
                     action: isRenew ? "renew" : "buy",
                     device_limit: devices,
                     use_balance: useBalance,
+                    idempotency_key: idemKey,
                 });
                 close();
                 _handlePaymentResponse(
@@ -696,9 +705,8 @@ function _openWiPurchaseModal(d, mode, onReload) {
                     onReload
                 );
             } catch (err) {
-                showToast(err.message || (isRenew ? "Ошибка продления" : "Ошибка подключения"));
-            } finally {
                 payBtn.disabled = false;
+                showToast(err.message || (isRenew ? "Ошибка продления" : "Ошибка подключения"));
             }
         });
     };
@@ -845,6 +853,7 @@ function _openWiManageModal(d, onReload) {
         }
 
         const payBtn = wrap.querySelector("#modalWiManagePayBtn");
+        const idemKey = _newIdempotencyKey();
         if (payBtn && selectedItem) {
             payBtn.addEventListener("click", async () => {
                 payBtn.disabled = true;
@@ -853,6 +862,7 @@ function _openWiManageModal(d, onReload) {
                         const res = await api.checkoutWi({
                             action: "add_slot",
                             use_balance: useBalance,
+                            idempotency_key: idemKey,
                         });
                         close();
                         _handlePaymentResponse(res, "Слот добавлен", onReload);
@@ -861,14 +871,14 @@ function _openWiManageModal(d, onReload) {
                             action: "topup",
                             gb: Number(selectedItem.gb),
                             use_balance: useBalance,
+                            idempotency_key: idemKey,
                         });
                         close();
                         _handlePaymentResponse(res, "Пакет трафика добавлен", onReload);
                     }
                 } catch (err) {
-                    showToast(err.message || "Ошибка оформления");
-                } finally {
                     payBtn.disabled = false;
+                    showToast(err.message || "Ошибка оформления");
                 }
             });
         }

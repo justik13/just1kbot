@@ -14,15 +14,9 @@ from utils.datetime_helpers import now_utc
 ALLOWED_USER_UPDATE_FIELDS = {
     "username",
     "first_name",
-    "subscription_end",
-    "device_limit",
     "is_bot_blocked",
     "referred_by",
     "last_payment_at",
-    "notified_3d",
-    "notified_1d",
-    "notified_2h",
-    "notified_expired",
     "notification_retry_count",
     "last_notification_attempt",
 }
@@ -124,9 +118,13 @@ async def get_user_count(session: AsyncSession) -> int:
 
 async def get_active_subscriptions_count(session: AsyncSession) -> int:
     now = now_utc()
-    stmt = select(func.count(User.id)).where(
-        User.subscription_end > now,
-        User.is_deleted.is_(False),
+    stmt = (
+        select(func.count(User.id))
+        .join(VlessSubscription, VlessSubscription.user_id == User.id)
+        .where(
+            VlessSubscription.expires_at > now,
+            User.is_deleted.is_(False),
+        )
     )
     result = await session.execute(stmt)
     return result.scalar_one()
@@ -135,6 +133,9 @@ async def get_active_subscriptions_count(session: AsyncSession) -> int:
 async def get_dashboard_stats(session: AsyncSession) -> dict:
     now = now_utc()
     current_cycle = now.strftime("%Y-%m")
+    active_std_user_ids = select(VlessSubscription.user_id).where(
+        VlessSubscription.expires_at > now,
+    )
     active_wi_sub_user_ids = select(WhiteInternetSubscription.user_id).where(
         WhiteInternetSubscription.status.in_(
             (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED)
@@ -143,14 +144,14 @@ async def get_dashboard_stats(session: AsyncSession) -> dict:
     )
     stmt = select(
         func.count(User.id).label("total"),
-        func.count(User.id).filter(User.subscription_end > now).label("active"),
+        func.count(User.id).filter(User.id.in_(active_std_user_ids)).label("active"),
         func.count(User.id)
         .filter(User.created_at > now - timedelta(hours=24))
         .label("new_24h"),
         func.coalesce(func.sum(User.total_traffic_bytes), 0).label("total_traffic_bytes"),
         func.coalesce(func.sum(User.total_wi_traffic_bytes), 0).label("total_wi_traffic_bytes"),
         func.coalesce(
-            func.avg(User.total_traffic_bytes).filter(User.subscription_end > now),
+            func.avg(User.total_traffic_bytes).filter(User.id.in_(active_std_user_ids)),
             0,
         ).label("avg_traffic_bytes_active"),
         func.coalesce(
@@ -159,7 +160,7 @@ async def get_dashboard_stats(session: AsyncSession) -> dict:
                     (User.traffic_cycle == current_cycle, User.monthly_vless_bytes),
                     else_=0,
                 )
-            ).filter(User.subscription_end > now),
+            ).filter(User.id.in_(active_std_user_ids)),
             0,
         ).label("avg_monthly_vless_bytes"),
         func.coalesce(
@@ -504,11 +505,17 @@ def get_effective_wi_active_condition(now=None):
     return User.id.in_(xray_active_subq)
 
 
+def _std_active_subq(now=None):
+    if now is None:
+        now = now_utc()
+    return select(VlessSubscription.user_id).where(VlessSubscription.expires_at > now)
+
+
 def get_effective_active_condition(now=None):
     if now is None:
         now = now_utc()
     return or_(
-        User.subscription_end > now,
+        User.id.in_(_std_active_subq(now)),
         get_effective_wi_active_condition(now),
     )
 
@@ -517,9 +524,14 @@ def get_effective_expiring_3d_condition(now=None):
     if now is None:
         now = now_utc()
     limit_3d = now + timedelta(days=3)
-    std_expiring = and_(
-        User.subscription_end > now,
-        User.subscription_end <= limit_3d,
+    std_expiring = User.id.in_(
+        select(VlessSubscription.user_id).where(
+            VlessSubscription.expires_at > now,
+            VlessSubscription.expires_at <= limit_3d,
+        )
+    )
+    std_longer = User.id.in_(
+        select(VlessSubscription.user_id).where(VlessSubscription.expires_at > limit_3d)
     )
     xray_expiring = User.id.in_(
         select(WhiteInternetSubscription.user_id).where(
@@ -546,7 +558,7 @@ def get_effective_expiring_3d_condition(now=None):
     )
     return and_(
         or_(std_expiring, xray_expiring),
-        or_(User.subscription_end.is_(None), User.subscription_end <= limit_3d),
+        ~std_longer,
         ~xray_longer,
     )
 
@@ -564,7 +576,7 @@ def get_effective_inactive_condition(now=None):
         WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
     )
     return and_(
-        or_(User.subscription_end <= now, User.subscription_end.is_(None)),
+        ~User.id.in_(_std_active_subq(now)),
         ~User.id.in_(xray_active_subq),
     )
 
@@ -573,14 +585,19 @@ def get_effective_expired_condition(now=None):
     if now is None:
         now = now_utc()
     inactive_cond = get_effective_inactive_condition(now)
-    had_std = User.subscription_end.is_not(None)
+    had_std = User.id.in_(
+        select(VlessSubscription.user_id).where(VlessSubscription.expires_at.is_not(None))
+    )
     had_xray = User.id.in_(select(WhiteInternetSubscription.user_id))
     return and_(or_(had_std, had_xray), inactive_cond)
 
 
 def get_effective_never_condition():
+    had_std = User.id.in_(
+        select(VlessSubscription.user_id).where(VlessSubscription.expires_at.is_not(None))
+    )
     return and_(
-        User.subscription_end.is_(None),
+        ~had_std,
         ~User.id.in_(select(WhiteInternetSubscription.user_id)),
     )
 
@@ -606,7 +623,7 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
             User.is_bot_blocked.is_(True)
         )
     elif filter_type in ("active_standard", "standard_active"):
-        stmt = stmt.where(User.subscription_end > now)
+        stmt = stmt.where(User.id.in_(_std_active_subq(now)))
     elif filter_type in ("active_wi", "wi_active"):
         stmt = stmt.where(get_effective_wi_active_condition(now))
     elif filter_type == "tariff" and filter_param is not None:
@@ -619,7 +636,11 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
                 return stmt.where(false())
             if not (1 <= val <= MAX_INT32):
                 return stmt.where(false())
-            stmt = stmt.where(User.device_limit == val)
+            stmt = stmt.where(
+                User.id.in_(
+                    select(VlessSubscription.user_id).where(VlessSubscription.device_limit == val)
+                )
+            )
     return stmt
 
 
@@ -646,6 +667,12 @@ async def get_filtered_users_paginated(
     stmt = _apply_user_filters(stmt, filter_type, filter_param)
 
     if filter_type == "expiring_3d":
+        std_expiry_subq = (
+            select(VlessSubscription.expires_at)
+            .where(VlessSubscription.user_id == User.id)
+            .limit(1)
+            .scalar_subquery()
+        )
         wi_expiry_subq = (
             select(WhiteInternetSubscription.expires_at)
             .where(
@@ -660,7 +687,7 @@ async def get_filtered_users_paginated(
             .limit(1)
             .scalar_subquery()
         )
-        order_clause = func.coalesce(User.subscription_end, wi_expiry_subq).asc()
+        order_clause = func.coalesce(std_expiry_subq, wi_expiry_subq).asc()
     else:
         order_clause = User.created_at.desc()
 
@@ -686,7 +713,7 @@ async def get_user_filter_counts(session: AsyncSession) -> dict[str, int]:
             get_effective_active_condition(now),
         ).label("active"),
         func.count(User.id).filter(
-            User.subscription_end > now,
+            User.id.in_(_std_active_subq(now)),
         ).label("active_standard"),
         func.count(User.id).filter(
             get_effective_wi_active_condition(now),

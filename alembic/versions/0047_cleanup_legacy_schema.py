@@ -25,6 +25,33 @@ def upgrade() -> None:
     op.execute("DROP INDEX IF EXISTS ix_account_ledger_payment_debits")
     op.drop_column("account_ledger_entries", "payment_id")
     op.drop_column("account_ledger_entries", "quote_id")
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM pg_trigger
+                WHERE tgname = 'account_ledger_append_only'
+                  AND tgrelid = 'account_ledger_entries'::regclass
+            ) THEN
+                ALTER TABLE account_ledger_entries DISABLE TRIGGER account_ledger_append_only;
+            END IF;
+
+            UPDATE account_ledger_entries
+            SET entry_type = 'admin_adjustment',
+                metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('legacy_entry_type', entry_type)
+            WHERE entry_type IN ('refund_debit', 'chargeback_debit') AND order_id IS NULL;
+
+            IF EXISTS (
+                SELECT 1 FROM pg_trigger
+                WHERE tgname = 'account_ledger_append_only'
+                  AND tgrelid = 'account_ledger_entries'::regclass
+            ) THEN
+                ALTER TABLE account_ledger_entries ENABLE TRIGGER account_ledger_append_only;
+            END IF;
+        END $$;
+        """
+    )
     op.create_check_constraint(
         "ck_account_ledger_entry_shape",
         "account_ledger_entries",

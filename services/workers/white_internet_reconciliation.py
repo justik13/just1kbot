@@ -151,7 +151,28 @@ class WhiteInternetReconciliationWorker:
                         version=target_version,
                         expected_node_epoch=target_epoch,
                         idempotency_key=f"reconcile:{sub_id}:{target_epoch}:{target_version}:{desired_active}",
+                        service="white_internet",
                     )
+
+                    # Also ensure all active UserDevice UUIDs for this user are synced on this WI hub
+                    from database.repositories import user_devices_repo
+
+                    async with sf() as dev_session:
+                        dev_uuids = await user_devices_repo.get_active_device_uuids(dev_session, user_id)
+                    for d_uuid in dev_uuids:
+                        if d_uuid and d_uuid != sub_uuid:
+                            try:
+                                await self.client.sync_client(
+                                    api_url,
+                                    api_key,
+                                    d_uuid,
+                                    is_active=desired_active,
+                                    version=target_version,
+                                    expected_node_epoch=target_epoch,
+                                    service="white_internet",
+                                )
+                            except Exception as dev_exc:
+                                logger.debug("WI reconcile device %s sync note: %s", d_uuid, dev_exc)
 
                     sync_result = resp.result if hasattr(resp, "result") else resp[0]
                     err_msg = resp.error if hasattr(resp, "error") else resp[1]

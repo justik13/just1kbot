@@ -90,7 +90,13 @@ async def apply_audience_filter(
     if target_audience == "active":
         return stmt.where(get_effective_active_condition(now))
     if target_audience == "active_standard":
-        return stmt.where(User.subscription_end > now)
+        from database.models import VlessSubscription
+
+        return stmt.where(
+            User.id.in_(
+                select(VlessSubscription.user_id).where(VlessSubscription.expires_at > now)
+            )
+        )
     if target_audience == "active_wi":
         return stmt.where(get_effective_wi_active_condition(now))
     if target_audience == "expiring_3d":

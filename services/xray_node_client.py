@@ -220,6 +220,31 @@ class XrayNodeClient:
         logger.warning("Node health check failed for %s: %s", _sanitize_url(url), err)
         return False, None, None
 
+    async def batch_sync_clients(
+        self,
+        api_url: str,
+        api_key: str,
+        clients: list[dict[str, Any]],
+        *,
+        timeout: float = 60.0,
+    ) -> tuple[bool, set[str], dict[str, str]]:
+        """Batch-sync clients via POST /v1/clients/batch-sync.
+        Returns (endpoint_supported, succeeded_uuids, failed_map).
+        """
+        url = f"{api_url.rstrip('/')}/v1/clients/batch-sync"
+        headers = self._get_headers(api_key)
+        status_code, data, err = await self._make_request(
+            "POST", url, headers, json_payload={"clients": clients}, request_timeout=timeout
+        )
+        if status_code == 404:
+            return False, set(), {}
+        if status_code == 200 and isinstance(data, dict):
+            succeeded = {str(u).lower() for u in (data.get("succeeded") or [])}
+            failed = {str(k).lower(): str(v) for k, v in (data.get("failed") or {}).items()}
+            return True, succeeded, failed
+        logger.warning("Batch sync failed on %s (status=%s): %s", _sanitize_url(url), status_code, err)
+        return True, set(), {str(c.get("uuid", "")).lower(): err or f"HTTP {status_code}" for c in clients}
+
     async def sync_client(
         self,
         api_url: str,

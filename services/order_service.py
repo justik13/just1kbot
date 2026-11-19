@@ -465,11 +465,13 @@ class OrderService:
         if target_duration_days not in STANDARD_PLANS:
             raise ValueError(f"duration_days must be one of {sorted(STANDARD_PLANS)}")
 
-        user = await session.get(User, user_id)
+        from database.repositories import vless_subscription_repo
+
+        vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user_id)
         now = now_utc()
-        sub_end = getattr(user, "subscription_end", None) if user else None
-        current_limit = (getattr(user, "device_limit", 0) or 0) if user else 0
-        cooldown_until = getattr(user, "standard_downgrade_cooldown_until", None) if user else None
+        sub_end = getattr(vless_sub, "expires_at", None) if vless_sub else None
+        current_limit = (getattr(vless_sub, "device_limit", 0) or 0) if vless_sub else 0
+        cooldown_until = getattr(vless_sub, "downgrade_cooldown_until", None) if vless_sub else None
         active_hwid_count = await count_active_user_devices(session, user_id)
 
         is_active = bool(sub_end and sub_end > now and current_limit > 0)
@@ -580,9 +582,12 @@ class OrderService:
         if not quote["can_downgrade"]:
             raise ValueError(quote["blocked_reason"] or "Downgrade not allowed")
 
+        from database.repositories import vless_subscription_repo
+
+        vless_sub, _ = await vless_subscription_repo.get_or_create_subscription(session, user_id)
         now = now_utc()
-        user.device_limit = target_device_limit
-        user.standard_downgrade_cooldown_until = now + timedelta(
+        vless_sub.device_limit = target_device_limit
+        vless_sub.downgrade_cooldown_until = now + timedelta(
             days=STANDARD_DOWNGRADE_COOLDOWN_DAYS
         )
 
@@ -599,12 +604,12 @@ class OrderService:
         from services.subscription import SubscriptionService
 
         await session.flush()
-        await SubscriptionService._sync_access_state(session, user)
+        await SubscriptionService._sync_access_state(session, user, vless_sub=vless_sub)
         return {
             "ok": True,
-            "device_limit": user.device_limit,
+            "device_limit": vless_sub.device_limit,
             "bonus_credited_rub": int(bonus_rub),
-            "cooldown_until": user.standard_downgrade_cooldown_until.isoformat(),
+            "cooldown_until": vless_sub.downgrade_cooldown_until.isoformat(),
         }
 
     @staticmethod
@@ -622,6 +627,7 @@ class OrderService:
         return_url: str | None = None,
         bot_username: str | None = None,
         allow_early_downgrade: bool = False,
+        idempotency_key: str | None = None,
     ) -> dict:
         """Unified server-side checkout supporting 100% wallet (bonuses first), mixed payment, or YooKassa."""
         # Acquire advisory lock BEFORE row lock to prevent lock-inversion deadlocks.
@@ -631,6 +637,39 @@ class OrderService:
                 text("SELECT pg_advisory_xact_lock(:key)"),
                 {"key": -user_id},
             )
+        clean_idem_key = (idempotency_key or "").strip()[:64] or None
+        if clean_idem_key:
+            existing_order = (
+                await session.execute(
+                    select(Order).where(
+                        Order.user_id == user_id,
+                        Order.idempotency_key == clean_idem_key,
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing_order is not None:
+                meta = existing_order.metadata_ or {}
+                if existing_order.payment_method == "wallet":
+                    return {
+                        "order_id": str(existing_order.id),
+                        "status": existing_order.status,
+                        "confirmation_url": None,
+                        "charged_balance": int(existing_order.amount_rub),
+                        "charged_bonus": int(meta.get("charged_bonus", 0)),
+                        "to_pay_rub": 0,
+                        "total_cost_rub": int(existing_order.amount_rub),
+                        "idempotent": True,
+                    }
+                return {
+                    "order_id": str(existing_order.id),
+                    "status": existing_order.status,
+                    "confirmation_url": existing_order.payment_url,
+                    "charged_balance": int(meta.get("wallet_debit_rub", 0)),
+                    "charged_bonus": int(meta.get("wallet_bonus_debit_rub", 0)),
+                    "to_pay_rub": int(existing_order.amount_rub),
+                    "total_cost_rub": int(meta.get("total_cost_rub", existing_order.amount_rub)),
+                    "idempotent": True,
+                }
         user = await OrderService._load_settlement_user(session, user_id)
         if user is None:
             raise ValueError("User not found")
@@ -824,6 +863,8 @@ class OrderService:
             raise AccountDebtBlockedError("Account debt prevents wallet purchases")
 
         if use_balance and bal.available >= total_cost:
+            charged_bonus = min(bal.bonus_available, total_cost)
+            order_meta["charged_bonus"] = int(charged_bonus)
             order = Order(
                 id=uuid.uuid4(),
                 user_id=user_id,
@@ -833,6 +874,7 @@ class OrderService:
                 traffic_bytes=traffic_bytes,
                 device_limit=final_devices,
                 payment_method="wallet",
+                idempotency_key=clean_idem_key,
                 status="paid",
                 description=description,
                 paid_at=now_utc(),
@@ -851,7 +893,6 @@ class OrderService:
                 )
             await FulfillmentService.fulfill_order(session, order)
             await session.flush()
-            charged_bonus = min(bal.bonus_available, total_cost)
             return {
                 "order_id": str(order.id),
                 "status": order.status,
@@ -920,20 +961,25 @@ class OrderService:
         white_internet: bool | None = None,
     ) -> dict:
         """Persist auto-renew preferences for wallet-balance renewal worker."""
+        from database.repositories import vless_subscription_repo
+
         user = await OrderService._load_settlement_user(session, user_id)
         if user is None:
             raise ValueError("User not found")
+        vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user_id)
         if standard is not None:
-            user.auto_renew_enabled = bool(standard)
+            if vless_sub is None:
+                vless_sub, _ = await vless_subscription_repo.get_or_create_subscription(session, user_id)
+            vless_sub.auto_renew_enabled = bool(standard)
             from services.subscription import SubscriptionService
 
-            await SubscriptionService._sync_access_state(session, user)
+            await SubscriptionService._sync_access_state(session, user, vless_sub=vless_sub)
         wi_sub = await get_wi_sub_by_user_id(session, user_id)
         if white_internet is not None and wi_sub is not None:
             wi_sub.auto_renew_enabled = bool(white_internet)
         await session.flush()
         return {
-            "standard": bool(user.auto_renew_enabled),
+            "standard": bool(vless_sub.auto_renew_enabled) if vless_sub else False,
             "white_internet": bool(wi_sub.auto_renew_enabled) if wi_sub else False,
         }
 

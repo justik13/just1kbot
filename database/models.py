@@ -49,29 +49,6 @@ class User(Base):
 
     __table_args__ = (
         Index(
-            "ix_users_active_subscription",
-            "subscription_end",
-            postgresql_where=text("is_deleted = false AND subscription_end IS NOT NULL"),
-        ),
-        Index(
-            "ix_users_expiring_subscription",
-            "subscription_end",
-            "telegram_id",
-            postgresql_where=text(
-                "is_deleted = false AND is_bot_blocked = false AND subscription_end IS NOT NULL "
-                "AND (notified_3d = false OR notified_1d = false OR notified_2h = false)"
-            ),
-        ),
-        Index(
-            "ix_users_expired_grace_notify",
-            "subscription_end",
-            "telegram_id",
-            postgresql_where=text(
-                "is_deleted = false AND is_bot_blocked = false AND subscription_end IS NOT NULL "
-                "AND notified_expired = false"
-            ),
-        ),
-        Index(
             "ix_users_paginated",
             "created_at",
             "id",
@@ -97,17 +74,6 @@ class User(Base):
     username: Mapped[str | None] = mapped_column(String(255), nullable=True)
     first_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    subscription_end: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    device_limit: Mapped[int] = mapped_column(Integer, default=0)
-    standard_downgrade_cooldown_until: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    auto_renew_enabled: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default=text("false")
-    )
-
     referred_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
 
     last_payment_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -130,11 +96,6 @@ class User(Base):
     )
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-
-    notified_3d: Mapped[bool] = mapped_column(Boolean, default=False)
-    notified_1d: Mapped[bool] = mapped_column(Boolean, default=False)
-    notified_2h: Mapped[bool] = mapped_column(Boolean, default=False)
-    notified_expired: Mapped[bool] = mapped_column(Boolean, default=False)
 
     total_traffic_bytes: Mapped[int] = mapped_column(
         BigInteger, default=0, server_default=text("0")
@@ -246,6 +207,13 @@ class Order(Base):
             unique=True,
             postgresql_where=text("external_id IS NOT NULL"),
         ),
+        Index(
+            "uq_orders_user_idempotency_key",
+            "user_id",
+            "idempotency_key",
+            unique=True,
+            postgresql_where=text("idempotency_key IS NOT NULL"),
+        ),
         Index("ix_orders_status", "status"),
         CheckConstraint(
             sql_enum_in("status", OrderStatus),
@@ -282,6 +250,7 @@ class Order(Base):
         String(30), nullable=False, default="yookassa", server_default=text("'yookassa'")
     )
     external_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     payment_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="pending", server_default=text("'pending'")
@@ -690,6 +659,11 @@ class VlessSubscription(Base):
             "id",
             postgresql_where=text("pending_revoked_uuids != '[]'::jsonb"),
         ),
+        Index(
+            "ix_vless_subscriptions_expires_at",
+            "expires_at",
+            postgresql_where=text("expires_at IS NOT NULL"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -707,6 +681,30 @@ class VlessSubscription(Base):
 
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=text("true")
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    device_limit: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    downgrade_cooldown_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    auto_renew_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    notified_3d: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    notified_1d: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    notified_2h: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    notified_expired: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
     )
     version: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default=text("1")

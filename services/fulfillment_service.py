@@ -30,49 +30,52 @@ class FulfillmentService:
             return
 
         if order.service_type == "standard":
+            from database.repositories import vless_subscription_repo
+
+            vless_sub, _ = await vless_subscription_repo.get_or_create_subscription(session, user.id)
             now = now_utc()
             meta = dict(order.metadata_ or {})
-            if user.subscription_end:
-                meta["previous_subscription_end"] = user.subscription_end.isoformat()
-            if getattr(user, "device_limit", None) is not None:
-                meta["previous_device_limit"] = user.device_limit
+            if vless_sub.expires_at:
+                meta["previous_subscription_end"] = vless_sub.expires_at.isoformat()
+            if getattr(vless_sub, "device_limit", None) is not None:
+                meta["previous_device_limit"] = vless_sub.device_limit
             order.metadata_ = meta
 
             is_tariff_change = bool(meta.get("is_tariff_change"))
             op = meta.get("operation")
             if op == "upgrade":
                 if order.device_limit:
-                    user.device_limit = order.device_limit
-                user.standard_downgrade_cooldown_until = now + timedelta(
+                    vless_sub.device_limit = order.device_limit
+                vless_sub.downgrade_cooldown_until = now + timedelta(
                     days=STANDARD_DOWNGRADE_COOLDOWN_DAYS
                 )
             elif is_tariff_change and order.duration_days > 0:
-                user.subscription_end = now + timedelta(days=order.duration_days)
+                vless_sub.expires_at = now + timedelta(days=order.duration_days)
                 if order.device_limit:
-                    user.device_limit = order.device_limit
+                    vless_sub.device_limit = order.device_limit
             else:
-                base = max(user.subscription_end, now) if user.subscription_end else now
+                base = max(vless_sub.expires_at, now) if vless_sub.expires_at else now
                 if order.duration_days > 0:
-                    user.subscription_end = base + timedelta(days=order.duration_days)
+                    vless_sub.expires_at = base + timedelta(days=order.duration_days)
                 if order.device_limit:
-                    user.device_limit = order.device_limit
+                    vless_sub.device_limit = order.device_limit
                 if (order.device_limit or 0) > 2:
-                    user.standard_downgrade_cooldown_until = now + timedelta(
+                    vless_sub.downgrade_cooldown_until = now + timedelta(
                         days=STANDARD_DOWNGRADE_COOLDOWN_DAYS
                     )
-            user.notified_3d = False
-            user.notified_1d = False
-            user.notified_2h = False
-            user.notified_expired = False
+            vless_sub.notified_3d = False
+            vless_sub.notified_1d = False
+            vless_sub.notified_2h = False
+            vless_sub.notified_expired = False
             user.notification_retry_count = 0
             user.last_notification_attempt = None
-            await SubscriptionService.sync_access_state(session, user)
+            await SubscriptionService._sync_access_state(session, user, vless_sub=vless_sub)
             logger.info(
                 "Fulfilled standard order %s for user %s: +%s days (until %s, tariff_change=%s)",
                 order.id,
                 user.id,
                 order.duration_days,
-                user.subscription_end,
+                vless_sub.expires_at,
                 is_tariff_change,
             )
 
@@ -146,6 +149,11 @@ class FulfillmentService:
             return
 
         if order.service_type == "standard":
+            from database.repositories import vless_subscription_repo
+
+            vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+            if not vless_sub:
+                return
             meta = dict(order.metadata_ or {})
             is_tariff_change = bool(meta.get("is_tariff_change"))
             prev_end_str = meta.get("previous_subscription_end")
@@ -153,35 +161,35 @@ class FulfillmentService:
             if op == "upgrade":
                 if "previous_device_limit" in meta:
                     try:
-                        user.device_limit = int(meta["previous_device_limit"])
+                        vless_sub.device_limit = int(meta["previous_device_limit"])
                     except (ValueError, TypeError):
                         pass
             elif is_tariff_change and prev_end_str:
                 try:
                     from datetime import datetime
                     prev_end = datetime.fromisoformat(prev_end_str)
-                    user.subscription_end = prev_end
+                    vless_sub.expires_at = prev_end
                     if "previous_device_limit" in meta:
                         try:
-                            user.device_limit = int(meta["previous_device_limit"])
+                            vless_sub.device_limit = int(meta["previous_device_limit"])
                         except (ValueError, TypeError):
                             pass
                 except Exception as exc:
                     logger.warning("Failed parsing previous_subscription_end on order %s: %s", order.id, exc)
-            elif order.duration_days > 0 and user.subscription_end:
+            elif order.duration_days > 0 and vless_sub.expires_at:
                 now = now_utc()
-                new_end = user.subscription_end - timedelta(days=order.duration_days)
+                new_end = vless_sub.expires_at - timedelta(days=order.duration_days)
                 cutoff = now - timedelta(hours=VPN_ACCESS_GRACE_HOURS + 1)
                 if new_end <= now:
-                    user.subscription_end = cutoff
+                    vless_sub.expires_at = cutoff
                 else:
-                    user.subscription_end = new_end
-            await SubscriptionService.sync_access_state(session, user)
+                    vless_sub.expires_at = new_end
+            await SubscriptionService._sync_access_state(session, user, vless_sub=vless_sub)
             logger.info(
-                "Revoked standard order %s for user %s (subscription_end=%s)",
+                "Revoked standard order %s for user %s (expires_at=%s)",
                 order.id,
                 user.id,
-                user.subscription_end,
+                vless_sub.expires_at,
             )
 
         elif order.service_type == "white_internet":

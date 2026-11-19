@@ -23,6 +23,7 @@ class Verify2FAPayload(BaseModel):
 
 class TopupPayload(BaseModel):
     amount_rub: int = Field(..., ge=20, le=50000)
+    idempotency_key: str | None = Field(default=None, max_length=64)
 
 
 class StandardQuotePayload(BaseModel):
@@ -39,6 +40,7 @@ class StandardQuotePayload(BaseModel):
 
 class StandardCheckoutPayload(StandardQuotePayload):
     use_balance: bool = True
+    idempotency_key: str | None = Field(default=None, max_length=64)
 
 
 class StandardDowngradePayload(BaseModel):
@@ -50,6 +52,7 @@ class WiCheckoutPayload(BaseModel):
     device_limit: int = Field(default=1, ge=1, le=3)
     gb: int | None = Field(default=None, ge=10, le=50)
     use_balance: bool = True
+    idempotency_key: str | None = Field(default=None, max_length=64)
 
 
 class WiDowngradePayload(BaseModel):

@@ -727,6 +727,23 @@ class WhiteInternetService:
                         )
                     confirmed = inv_ok and observed == "active" and inbounds_ok
                 if confirmed:
+                    from database.repositories import user_devices_repo
+
+                    dev_uuids = await user_devices_repo.get_active_device_uuids(session, sub.user_id)
+                    for d_uuid in dev_uuids:
+                        if d_uuid and d_uuid != sub.uuid:
+                            try:
+                                await xray_client.sync_client(
+                                    hub_node.api_url,
+                                    hub_node.api_key,
+                                    client_uuid=d_uuid,
+                                    is_active=True,
+                                    version=target_version,
+                                    expected_node_epoch=hub_node.xray_instance_epoch,
+                                    service="white_internet",
+                                )
+                            except Exception as dev_exc:
+                                logger.warning("Inline WI device sync failed for %s: %s", d_uuid, dev_exc)
                     sub.actual_version = target_version
                     if (sub.desired_version or 1) == target_version:
                         sub.status = WhiteInternetStatus.ACTIVE
@@ -783,16 +800,20 @@ class WhiteInternetService:
 
         await session.flush()
 
+        from database.repositories import user_devices_repo
+
+        dev_uuids = await user_devices_repo.get_active_device_uuids(session, user_id)
         for sub in deactivated:
             if sub.hub_server_id:
                 hub_server = await session.get(Server, sub.hub_server_id)
-                _dispatch_deprovision(
-                    hub_server,
-                    client_uuid=sub.uuid,
-                    version=sub.desired_version,
-                    context=f"deactivate sub {sub.id}",
-                    session=session,
-                )
+                for target_uuid in {sub.uuid, *dev_uuids}:
+                    _dispatch_deprovision(
+                        hub_server,
+                        client_uuid=target_uuid,
+                        version=sub.desired_version,
+                        context=f"deactivate sub {sub.id}",
+                        session=session,
+                    )
 
         logger.info(
             "White Internet subscriptions deactivated: user_id=%s, count=%s, reason=%s",
