@@ -686,6 +686,7 @@ cmd_update() {
 
     local rollback_commit=""
     rollback_commit="$(git rev-parse HEAD 2>/dev/null || true)"
+    local migrations_applied=false
 
     info "Шаг 2/6. Создание страховочного бэкапа базы данных..."
     LAST_BACKUP_FILE=""
@@ -834,6 +835,7 @@ cmd_update() {
         _rollback_services_after_db_failure "$rollback_commit" "$pre_update_backup"
         return 1
     fi
+    migrations_applied=true
 
     info "Проверка инвариантов базы данных (Invariant Integrity Audit)..."
     local db_ready=false
@@ -881,7 +883,7 @@ cmd_update() {
     fi
 
     info "Шаг 6/6. Проверка статуса здоровья сервисов (Healthcheck)..."
-    local timeout=60
+    local timeout=120
     local elapsed=0
     local update_ok=false
 
@@ -949,6 +951,27 @@ cmd_update() {
         local bot_err_logs=""
         bot_err_logs="$(docker compose logs --tail=50 bot 2>/dev/null || true)"
         echo "$bot_err_logs"
+        if [[ "$migrations_applied" == "true" ]]; then
+            echo ""
+            warn "🚨 Автоматический откат исходного кода (git reset --hard) ЗАБЛОКИРОВАН:"
+            warn "Миграции базы данных (Alembic) уже успешно применены к PostgreSQL."
+            warn "Откат кода к предыдущей версии ($rollback_commit) приведёт к несовместимости схемы БД и сбою сервиса."
+            if [[ -n "$pre_update_backup" ]] && [[ -f "$pre_update_backup" ]]; then
+                warn "Если требуется полный откат (включая БД), сначала восстановите базу данных:"
+                echo -e "${BOLD}${YELLOW}    just1kbot restore $pre_update_backup${NC}"
+                warn "И затем переключите код на предыдущий коммит:"
+                echo -e "${BOLD}${YELLOW}    git reset --hard $rollback_commit && just1kbot restart${NC}"
+            else
+                warn "Для полного восстановления рабочей базы данных выполните: just1kbot restore"
+            fi
+            print_ai_diagnostic_report \
+                "Just1kBot Update Healthcheck Failure" \
+                "Сервисы не смогли перейти в состояние Healthy, но миграции БД уже применены" \
+                "Автоматический откат кода заблокирован (защита от рассинхронизации схемы БД)" \
+                "$bot_err_logs" \
+                "1. Проверьте логи сервисов: just1kbot logs bot\n2. Исправьте ошибку запуска или выполните полный откат с восстановлением БД: just1kbot restore $pre_update_backup"
+            return 1
+        fi
         if [[ -n "$rollback_commit" ]]; then
             echo ""
             warn "🚨 Выполняем возврат исходного кода к предыдущему коммиту ($rollback_commit)..."
@@ -1080,8 +1103,10 @@ cmd_backup() {
             pg_user="$(get_env_var "POSTGRES_USER" "just1kbot")"
             pg_db="$(get_env_var "POSTGRES_DB" "just1kbot_bot")"
 
+            set +e
             docker compose exec -T db pg_dump -U "$pg_user" -d "$pg_db" 2>"$dump_err" | gzip > "$tmp_gz"
             local dump_status=("${PIPESTATUS[@]}")
+            set -e
             if [[ "${dump_status[0]}" -eq 0 ]] && [[ "${dump_status[1]}" -eq 0 ]]; then
                 if [[ -s "$tmp_gz" ]] && gzip -t "$tmp_gz" 2>/dev/null; then
                     if age -r "$age_recipient" -o "$backup_file" "$tmp_gz" 2>/dev/null; then
