@@ -88,7 +88,14 @@ async def handle_clients_inventory(request: web.Request) -> web.Response:
     for cid in target_ids:
         inv[cid] = {"observed_state": _client_states.get(cid, "active")}
 
-    role = os.getenv("MOCK_NODE_ROLE", "ru_hub")
+    node_id = request.match_info.get("node_id", "").lower()
+    if "exit" in node_id:
+        role = "exit_node"
+    elif "eu" in node_id:
+        role = "eu_hub"
+    else:
+        role = os.getenv("MOCK_NODE_ROLE", "ru_hub")
+
     return web.json_response({
         "inbounds": MANAGED_INBOUNDS,
         "inventory": inv,
@@ -109,7 +116,14 @@ async def handle_traffic_snapshot(request: web.Request) -> web.Response:
 
 
 async def handle_node_status(request: web.Request) -> web.Response:
-    role = os.getenv("MOCK_NODE_ROLE", "ru_hub")
+    node_id = request.match_info.get("node_id", "").lower()
+    if "exit" in node_id:
+        role = "exit_node"
+    elif "eu" in node_id:
+        role = "eu_hub"
+    else:
+        role = os.getenv("MOCK_NODE_ROLE", "ru_hub")
+
     return web.json_response({
         "status": "ok",
         "xray_running": True,
@@ -129,13 +143,14 @@ async def handle_node_links(request: web.Request) -> web.Response:
 
 def create_app() -> web.Application:
     app = web.Application()
-    app.router.add_get("/v1/health", handle_health)
-    app.router.add_post("/v1/clients/sync", handle_clients_sync)
-    app.router.add_get("/v1/clients/inventory", handle_clients_inventory)
-    app.router.add_post("/v1/clients/inventory", handle_clients_inventory)
-    app.router.add_get("/v1/traffic/snapshot", handle_traffic_snapshot)
-    app.router.add_get("/v1/node/status", handle_node_status)
-    app.router.add_put("/v1/node/links", handle_node_links)
+    for prefix in ("", "/{node_id}"):
+        app.router.add_get(f"{prefix}/v1/health", handle_health)
+        app.router.add_post(f"{prefix}/v1/clients/sync", handle_clients_sync)
+        app.router.add_get(f"{prefix}/v1/clients/inventory", handle_clients_inventory)
+        app.router.add_post(f"{prefix}/v1/clients/inventory", handle_clients_inventory)
+        app.router.add_get(f"{prefix}/v1/traffic/snapshot", handle_traffic_snapshot)
+        app.router.add_get(f"{prefix}/v1/node/status", handle_node_status)
+        app.router.add_put(f"{prefix}/v1/node/links", handle_node_links)
     return app
 
 
