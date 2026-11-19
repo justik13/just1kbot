@@ -1,5 +1,5 @@
 import { api } from "../api.js";
-import { escapeHtml, formatDate, showToast } from "../ui.js";
+import { escapeHtml, formatDate, showConfirmModal, showToast } from "../ui.js";
 
 function _financeStatusChip(status) {
     if (status === "paid") {
@@ -172,18 +172,29 @@ export function renderAdminFinancesView(root, state) {
 
     const toggleMaintBtn = root.querySelector("#togglePaymentsMaintBtn");
     if (toggleMaintBtn) {
-        toggleMaintBtn.addEventListener("click", async () => {
+        toggleMaintBtn.addEventListener("click", () => {
             const nextVal = !state.paymentsMaintenance;
-            toggleMaintBtn.disabled = true;
-            try {
-                const res = await api.setPaymentsMaintenance(nextVal);
-                state.paymentsMaintenance = !!res.enabled;
-                showToast(res.enabled ? "Техработы платежей включены" : "Приём платежей возобновлён");
-                renderAdminFinancesView(root, state);
-            } catch (err) {
-                showToast(err.message || "Ошибка переключения техработ");
-                toggleMaintBtn.disabled = false;
-            }
+            showConfirmModal({
+                title: nextVal ? "Приостановить приём платежей?" : "Возобновить приём платежей?",
+                message: nextVal
+                    ? "Создание новых заказов и пополнение баланса будет временно заблокировано для всех пользователей. Действующие подписки продолжат работать."
+                    : "Пользователи снова смогут оформлять подписки и пополнять баланс.",
+                confirmText: nextVal ? "Приостановить" : "Возобновить",
+                cancelText: "Отмена",
+                isDestructive: nextVal,
+                onConfirm: async () => {
+                    toggleMaintBtn.disabled = true;
+                    try {
+                        const res = await api.setPaymentsMaintenance(nextVal);
+                        state.paymentsMaintenance = !!res.enabled;
+                        showToast(res.enabled ? "Техработы платежей включены" : "Приём платежей возобновлён");
+                        renderAdminFinancesView(root, state);
+                    } catch (err) {
+                        showToast(err.message || "Ошибка переключения техработ");
+                        toggleMaintBtn.disabled = false;
+                    }
+                },
+            });
         });
     }
 

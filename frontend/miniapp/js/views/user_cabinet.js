@@ -17,14 +17,14 @@ const _state = {
 };
 
 const _ICONS = {
-    copy: `<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`,
-    bolt: `<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`,
-    share: `<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>`,
-    plus: `<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
-    phone: `<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>`,
-    desktop: `<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>`,
-    refresh: `<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>`,
-    trash: `<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>`,
+    copy: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`,
+    bolt: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`,
+    share: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>`,
+    plus: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
+    phone: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>`,
+    desktop: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>`,
+    refresh: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>`,
+    trash: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>`,
 };
 
 const _CLIENT_LINKS = {
@@ -68,14 +68,20 @@ function _calcStdPrice(pricing, devices, days) {
     return fallback[0] + Math.max(0, devices - 2) * fallback[1];
 }
 
-function _calcBalanceSplit(priceRub, bal, useBalance) {
+function _calcBalanceSplit(priceRub, bal, useBalance, minTopupRub = 20) {
     const price = Math.max(0, Number(priceRub || 0));
     if (!useBalance || price === 0) {
         return { balUsed: 0, cardDue: price };
     }
+    const minCard = Math.max(1, Number(minTopupRub || 20));
     const avail = Math.max(0, Number((bal && bal.total) || 0));
-    const balUsed = Math.min(price, avail);
-    return { balUsed, cardDue: Math.max(0, price - balUsed) };
+    let balUsed = Math.min(price, avail);
+    let cardDue = Math.max(0, price - balUsed);
+    if (balUsed > 0 && cardDue > 0 && cardDue < minCard && price >= minCard) {
+        balUsed = price - minCard;
+        cardDue = minCard;
+    }
+    return { balUsed, cardDue };
 }
 
 function _handlePaymentResponse(res, successMsg, onReload) {
@@ -279,7 +285,7 @@ function _openStandardPlanModal(d, mode, onReload) {
         const price = quote ? Number(quote.due_rub ?? basePrice) : basePrice;
         const originalPrice = quote ? Number(quote.original_price_rub ?? price) : basePrice;
         const discount = quote ? Number(quote.discount_rub || 0) : 0;
-        const split = _calcBalanceSplit(price, bal, useBalance);
+        const split = _calcBalanceSplit(price, bal, useBalance, pricing.min_topup_rub || 20);
 
         const lines = [`<div class="quote-line"><span>Тариф (${devices} устр. · ${duration} дн.)</span><strong>${originalPrice} ₽</strong></div>`];
         if (discount > 0) {
@@ -451,7 +457,7 @@ function _openStandardDevicesModal(d, onReload) {
         const isUpgrade = targetLimit > currentLimit;
         const isDowngrade = targetLimit < currentLimit;
         const price = quote ? Number(quote.due_rub || 0) : 0;
-        const split = _calcBalanceSplit(price, bal, useBalance);
+        const split = _calcBalanceSplit(price, bal, useBalance, (d.pricing && d.pricing.min_topup_rub) || 20);
         const blockedReason = quote && quote.blocked_reason ? quote.blocked_reason : null;
 
         let infoHtml = `<div class="muted">Выберите новое число устройств, отличное от текущего (${currentLimit} устр.).</div>`;
@@ -560,41 +566,69 @@ function _openStandardDevicesModal(d, onReload) {
     fetchQuote();
 }
 
-function _openWiPurchaseModal(d, onReload) {
+function _openWiPurchaseModal(d, mode, onReload) {
+    const isRenew = mode === "renew";
+    const wi = d.wi || {};
     const bal = d.balance || { real: 0, bonus: 0, total: 0 };
     const pricing = d.pricing || {};
+    const ref = d.referrals || {};
+    const minTopup = Number(pricing.min_topup_rub || 20);
     const base = Number(pricing.wi_base_price_rub || 250);
     const extra = Number(pricing.wi_extra_device_price_rub || 200);
-    let devices = 1;
+    const curLimit = Math.max(1, Number(wi.device_limit || 1));
+    const defaultDevices = isRenew
+        ? Math.max(1, Number(wi.pending_device_limit || curLimit))
+        : 1;
+    let devices = defaultDevices;
     let useBalance = true;
+
+    const welcomeDiscountEligible = Boolean(!isRenew && ref.welcome_discount_eligible);
+    const welcomeDiscountPct = Number(ref.welcome_discount_pct || 25);
 
     const wrap = document.createElement("div");
     wrap.className = "field";
     wrap.style.gap = "12px";
-    const close = openModal("Подключение · Белый интернет", wrap);
+    const close = openModal(isRenew ? "Продление · Белый интернет" : "Подключение · Белый интернет", wrap);
 
     const renderModal = () => {
-        const total = base + Math.max(0, devices - 1) * extra;
-        const split = _calcBalanceSplit(total, bal, useBalance);
+        const originalPrice = base + Math.max(0, devices - 1) * extra;
+        const discount = welcomeDiscountEligible
+            ? Math.floor((originalPrice * welcomeDiscountPct) / 100)
+            : 0;
+        const total = Math.max(1, originalPrice - discount);
+        const split = _calcBalanceSplit(total, bal, useBalance, minTopup);
+        const verb = isRenew ? "Продлить" : "Подключить";
         const ctaText = split.cardDue === 0
             ? `Оплатить с баланса (${total} ₽)`
-            : (split.balUsed > 0 ? `Подключить · доплата ${split.cardDue} ₽` : `Подключить за ${total} ₽`);
+            : (split.balUsed > 0 ? `${verb} · доплата ${split.cardDue} ₽` : `${verb} за ${total} ₽`);
 
         wrap.innerHTML = `
-            <div class="muted" style="font-size:12px;">
-                Независимая подписка на 30 дней для мобильной сети при жёстких ограничениях. Работает как отдельно, так и в дополнение к «Стандарту».
-            </div>
-            ${d.devices && d.devices.length > devices ? (() => {
-                const sortedDevs = [...d.devices].sort((a, b) => (a.id || 0) - (b.id || 0));
-                const firstDevName = sortedDevs[0]?.device_name || sortedDevs[0]?.platform || "Устройство";
-                return `
-                <div class="notice-box notice-info" style="font-size:11px; padding:6px 10px; margin-top:4px;">
-                    <span>ℹ️ Слот будет привязан к основному устройству (${escapeHtml(firstDevName)}). Выбрать другое можно в любой момент на вкладке подключения.</span>
+            ${isRenew ? `
+                <div class="notice-box">
+                    <span>Сейчас активно: <strong style="color:var(--text-primary);">${curLimit} устр.</strong></span>
+                    <span>до ${formatDate(wi.expires_at)}</span>
                 </div>
-                `;
-            })() : ""}
+                ${wi.pending_device_limit ? `
+                    <div class="notice-box notice-info" style="font-size:11px; padding:6px 10px;">
+                        <span>Запланировано снижение до ${wi.pending_device_limit} устр. Вы можете продлить на ${wi.pending_device_limit} устр. или выбрать другое число слотов ниже.</span>
+                    </div>
+                ` : ""}
+            ` : `
+                <div class="muted" style="font-size:12px;">
+                    Независимая подписка на 30 дней для мобильной сети при жёстких ограничениях. Работает как отдельно, так и в дополнение к «Стандарту».
+                </div>
+                ${d.devices && d.devices.length > devices ? (() => {
+                    const sortedDevs = [...d.devices].sort((a, b) => (a.id || 0) - (b.id || 0));
+                    const firstDevName = sortedDevs[0]?.device_name || sortedDevs[0]?.platform || "Устройство";
+                    return `
+                    <div class="notice-box notice-info" style="font-size:11px; padding:6px 10px; margin-top:4px;">
+                        <span>Слот будет привязан к основному устройству (${escapeHtml(firstDevName)}). Выбрать другое можно в любой момент на вкладке подключения.</span>
+                    </div>
+                    `;
+                })() : ""}
+            `}
             <div class="field">
-                <label>Количество устройств (по 50 ГБ на слот)</label>
+                <label>${isRenew ? "Количество слотов на новый период (+30 дн.)" : "Количество устройств (по 50 ГБ на слот)"}</label>
                 <div class="price-tile-grid">
                     ${[1, 2, 3].map((n) => {
                         const p = base + (n - 1) * extra;
@@ -615,9 +649,10 @@ function _openWiPurchaseModal(d, onReload) {
                 </span>
             </label>
             <div class="quote-box">
-                <div class="quote-line"><span>Подписка (${devices} устр. · 30 дн.)</span><strong>${total} ₽</strong></div>
+                <div class="quote-line"><span>${isRenew ? "Продление" : "Подписка"} (${devices} устр. · +30 дн.)</span><strong>${originalPrice} ₽</strong></div>
+                ${discount > 0 ? `<div class="quote-line"><span>Приветственная скидка</span><strong style="color:var(--accent-emerald);">-${discount} ₽</strong></div>` : ""}
                 ${split.balUsed > 0 ? `<div class="quote-line"><span>С баланса</span><strong>-${split.balUsed} ₽</strong></div>` : ""}
-                <div class="quote-line"><span>К оплате картой / СБП</span><strong>${split.cardDue} ₽</strong></div>
+                <div class="quote-line"><span>К оплате картой / СБП</span><strong ${split.cardDue === 0 ? 'style="color:var(--accent-emerald);"' : ""}>${split.cardDue} ₽</strong></div>
             </div>
             <button id="modalWiPayBtn" type="button" class="btn btn-primary btn-lg">${ctaText}</button>
         `;
@@ -640,14 +675,18 @@ function _openWiPurchaseModal(d, onReload) {
             payBtn.disabled = true;
             try {
                 const res = await api.checkoutWi({
-                    action: "buy",
+                    action: isRenew ? "renew" : "buy",
                     device_limit: devices,
                     use_balance: useBalance,
                 });
                 close();
-                _handlePaymentResponse(res, "Подписка «Белый интернет» подключена", onReload);
+                _handlePaymentResponse(
+                    res,
+                    isRenew ? "Подписка продлена на 30 дней" : "Подписка «Белый интернет» подключена",
+                    onReload
+                );
             } catch (err) {
-                showToast(err.message || "Ошибка подключения");
+                showToast(err.message || (isRenew ? "Ошибка продления" : "Ошибка подключения"));
             } finally {
                 payBtn.disabled = false;
             }
@@ -659,13 +698,23 @@ function _openWiPurchaseModal(d, onReload) {
 
 function _openWiManageModal(d, onReload) {
     const wi = d.wi || {};
-    const bal = d.balance || { total: 0 };
+    const bal = d.balance || { real: 0, bonus: 0, total: 0 };
     const pricing = d.pricing || {};
+    const minTopup = Number(pricing.min_topup_rub || 20);
     const wiCurLimit = Number(wi.device_limit || 1);
     const wiMaxDevices = pricing.wi_max_devices || 3;
     const wiPacks = pricing.wi_topup_packs || [];
     const wiUsedGb = formatBytesGb(wi.traffic_used_bytes);
     const wiTotalGb = formatBytesGb(wi.traffic_limit_bytes);
+    const canAddSlot = Boolean(wiCurLimit < wiMaxDevices && wi.add_slot_price_rub != null);
+    const addSlotPrice = Number(wi.add_slot_price_rub || 0);
+    const addSlotGb = Number(wi.add_slot_gb || 50);
+
+    // selectedItem: { kind: "slot" } | { kind: "pack", gb: number, price: number }
+    let selectedItem = wiPacks.length
+        ? { kind: "pack", gb: Number(wiPacks[0].gb), price: Number(wiPacks[0].price_rub) }
+        : (canAddSlot ? { kind: "slot" } : null);
+    let useBalance = true;
 
     const wrap = document.createElement("div");
     wrap.className = "field";
@@ -673,121 +722,191 @@ function _openWiManageModal(d, onReload) {
 
     const close = openModal("Слоты и трафик · Белый интернет", wrap);
 
-    wrap.innerHTML = `
-        <div class="quote-box">
-            <div class="quote-line"><span>Трафик</span><strong>${wiUsedGb} / ${wiTotalGb} ГБ</strong></div>
-            <div class="quote-line"><span>Слотов устройств</span><strong>${wiCurLimit} из ${wiMaxDevices}</strong></div>
-            <div class="quote-line"><span>Баланс аккаунта</span><strong>${bal.total} ₽</strong></div>
-        </div>
-        ${wiCurLimit < wiMaxDevices && wi.add_slot_price_rub != null ? `
-            <button id="modalWiAddSlotBtn" type="button" class="btn btn-primary btn-lg">
-                Добавить +1 слот (+50 ГБ) · ${wi.add_slot_price_rub} ₽
-            </button>
-        ` : ""}
-        ${wiPacks.length ? `
-            <div class="field">
-                <label>Дополнительный трафик</label>
-                <div class="price-tile-grid">
-                    ${wiPacks.map((p) => `
-                        <button type="button" class="price-tile" data-modal-wi-pack="${p.gb}">
-                            <span class="price-tile-top">+${p.gb} ГБ</span>
-                            <span class="price-tile-price">${p.price_rub} ₽</span>
-                        </button>
-                    `).join("")}
+    const renderModal = () => {
+        let itemLabel = "";
+        let itemPrice = 0;
+        if (selectedItem && selectedItem.kind === "slot") {
+            itemLabel = `Доп. слот (+1 устр. · +${addSlotGb} ГБ)`;
+            itemPrice = addSlotPrice;
+        } else if (selectedItem && selectedItem.kind === "pack") {
+            itemLabel = `Пакет трафика (+${selectedItem.gb} ГБ)`;
+            itemPrice = selectedItem.price;
+        }
+        const split = _calcBalanceSplit(itemPrice, bal, useBalance, minTopup);
+        const ctaText = split.cardDue === 0
+            ? `Оплатить с баланса (${itemPrice} ₽)`
+            : (split.balUsed > 0 ? `Оплатить · доплата ${split.cardDue} ₽` : `Оплатить ${itemPrice} ₽`);
+
+        wrap.innerHTML = `
+            <div class="quote-box">
+                <div class="quote-line"><span>Трафик</span><strong>${wiUsedGb} / ${wiTotalGb} ГБ</strong></div>
+                <div class="quote-line"><span>Слотов устройств</span><strong>${wiCurLimit} из ${wiMaxDevices}</strong></div>
+                <div class="quote-line"><span>Баланс аккаунта</span><strong>${bal.total} ₽</strong></div>
+            </div>
+            ${canAddSlot ? `
+                <div class="field">
+                    <label>Дополнительный слот до конца срока</label>
+                    <button id="modalWiSelectSlotBtn" type="button" class="price-tile ${selectedItem && selectedItem.kind === "slot" ? "active" : ""}" style="width:100%; flex-direction:row; justify-content:space-between; padding:11px 14px;">
+                        <span class="price-tile-top">+1 слот устройства (+${addSlotGb} ГБ)</span>
+                        <span class="price-tile-price">${addSlotPrice} ₽</span>
+                    </button>
                 </div>
-            </div>
-        ` : ""}
-        ${wi.pending_device_limit ? `
-            <div class="notice-box notice-warn">
-                <span>Снижение до ${wi.pending_device_limit} устр. с ${formatDate(wi.pending_from)}</span>
-                <button id="modalWiCancelDgBtn" type="button" class="btn btn-sm btn-danger">Отменить</button>
-            </div>
-        ` : (wiCurLimit > 1 ? `
-            <details class="guide-details">
-                <summary class="guide-summary">
-                    <span>Снизить число слотов со следующего периода</span>
-                    <span class="muted">▾</span>
-                </summary>
-                <div class="guide-body">
-                    <div class="actions-row">
-                        ${Array.from({ length: wiCurLimit - 1 }, (_, i) => i + 1).map((target) => `
-                            <button type="button" class="btn btn-sm" data-modal-wi-dg="${target}">
-                                Снизить до ${target} устр.
-                            </button>
-                        `).join("")}
+            ` : ""}
+            ${wiPacks.length ? `
+                <div class="field">
+                    <label>Дополнительный трафик</label>
+                    <div class="price-tile-grid">
+                        ${wiPacks.map((p) => {
+                            const isSel = selectedItem && selectedItem.kind === "pack" && Number(selectedItem.gb) === Number(p.gb);
+                            return `
+                                <button type="button" class="price-tile ${isSel ? "active" : ""}" data-modal-wi-pack="${p.gb}" data-modal-wi-price="${p.price_rub}">
+                                    <span class="price-tile-top">+${p.gb} ГБ</span>
+                                    <span class="price-tile-price">${p.price_rub} ₽</span>
+                                </button>
+                            `;
+                        }).join("")}
                     </div>
                 </div>
-            </details>
-        ` : "")}
-    `;
+            ` : ""}
+            ${selectedItem ? `
+                <label class="toggle-row">
+                    <span class="toggle-label">Списать с баланса (доступно ${bal.total} ₽)</span>
+                    <span class="switch">
+                        <input id="modalWiManageBalChk" type="checkbox" ${useBalance ? "checked" : ""}>
+                        <span class="switch-track"></span>
+                    </span>
+                </label>
+                <div class="quote-box">
+                    <div class="quote-line"><span>${escapeHtml(itemLabel)}</span><strong>${itemPrice} ₽</strong></div>
+                    ${split.balUsed > 0 ? `<div class="quote-line"><span>С баланса</span><strong>-${split.balUsed} ₽</strong></div>` : ""}
+                    <div class="quote-line"><span>К оплате картой / СБП</span><strong ${split.cardDue === 0 ? 'style="color:var(--accent-emerald);"' : ""}>${split.cardDue} ₽</strong></div>
+                </div>
+                <button id="modalWiManagePayBtn" type="button" class="btn btn-primary btn-lg">${ctaText}</button>
+            ` : ""}
+            ${wi.pending_device_limit ? `
+                <div class="notice-box notice-warn">
+                    <span>Снижение до ${wi.pending_device_limit} устр. с ${formatDate(wi.pending_from)}</span>
+                    <button id="modalWiCancelDgBtn" type="button" class="btn btn-sm btn-danger">Отменить</button>
+                </div>
+            ` : (wiCurLimit > 1 ? `
+                <details class="guide-details">
+                    <summary class="guide-summary">
+                        <span>Снизить число слотов со следующего периода</span>
+                        <span class="muted">▾</span>
+                    </summary>
+                    <div class="guide-body">
+                        <div class="actions-row">
+                            ${Array.from({ length: wiCurLimit - 1 }, (_, i) => i + 1).map((target) => `
+                                <button type="button" class="btn btn-sm" data-modal-wi-dg="${target}">
+                                    Снизить до ${target} устр.
+                                </button>
+                            `).join("")}
+                        </div>
+                    </div>
+                </details>
+            ` : "")}
+        `;
 
-    const addSlotBtn = wrap.querySelector("#modalWiAddSlotBtn");
-    if (addSlotBtn) {
-        addSlotBtn.addEventListener("click", async () => {
-            addSlotBtn.disabled = true;
-            try {
-                const res = await api.checkoutWi({ action: "add_slot", use_balance: true });
-                close();
-                _handlePaymentResponse(res, "Слот добавлен", onReload);
-            } catch (err) {
-                showToast(err.message || "Ошибка добавления слота");
-            } finally {
-                addSlotBtn.disabled = false;
-            }
-        });
-    }
+        const selectSlotBtn = wrap.querySelector("#modalWiSelectSlotBtn");
+        if (selectSlotBtn) {
+            selectSlotBtn.addEventListener("click", () => {
+                selectedItem = { kind: "slot" };
+                renderModal();
+            });
+        }
 
-    wrap.querySelectorAll("[data-modal-wi-pack]").forEach((b) => {
-        b.addEventListener("click", async () => {
-            const allPacks = wrap.querySelectorAll("[data-modal-wi-pack]");
-            allPacks.forEach((btn) => { btn.disabled = true; });
-            try {
-                const res = await api.checkoutWi({
-                    action: "topup",
+        wrap.querySelectorAll("[data-modal-wi-pack]").forEach((b) => {
+            b.addEventListener("click", () => {
+                selectedItem = {
+                    kind: "pack",
                     gb: Number(b.dataset.modalWiPack),
-                    use_balance: true,
+                    price: Number(b.dataset.modalWiPrice),
+                };
+                renderModal();
+            });
+        });
+
+        const balChk = wrap.querySelector("#modalWiManageBalChk");
+        if (balChk) {
+            balChk.addEventListener("change", () => {
+                useBalance = balChk.checked;
+                renderModal();
+            });
+        }
+
+        const payBtn = wrap.querySelector("#modalWiManagePayBtn");
+        if (payBtn && selectedItem) {
+            payBtn.addEventListener("click", async () => {
+                payBtn.disabled = true;
+                try {
+                    if (selectedItem.kind === "slot") {
+                        const res = await api.checkoutWi({
+                            action: "add_slot",
+                            use_balance: useBalance,
+                        });
+                        close();
+                        _handlePaymentResponse(res, "Слот добавлен", onReload);
+                    } else {
+                        const res = await api.checkoutWi({
+                            action: "topup",
+                            gb: Number(selectedItem.gb),
+                            use_balance: useBalance,
+                        });
+                        close();
+                        _handlePaymentResponse(res, "Пакет трафика добавлен", onReload);
+                    }
+                } catch (err) {
+                    showToast(err.message || "Ошибка оформления");
+                } finally {
+                    payBtn.disabled = false;
+                }
+            });
+        }
+
+        wrap.querySelectorAll("[data-modal-wi-dg]").forEach((b) => {
+            b.addEventListener("click", () => {
+                const target = Number(b.dataset.modalWiDg);
+                showConfirmModal({
+                    title: "Снизить число слотов?",
+                    message: `Со следующего периода (${formatDate(wi.expires_at)}) лимит уменьшится до ${target} устр. (${target * 50} ГБ). До конца текущего срока сохранится ${wiCurLimit} устр.`,
+                    confirmText: `Снизить до ${target} устр.`,
+                    cancelText: "Отмена",
+                    onConfirm: async () => {
+                        b.disabled = true;
+                        try {
+                            await api.scheduleWiDowngrade(target);
+                            close();
+                            showToast("Снижение запланировано на следующий период");
+                            onReload();
+                        } catch (err) {
+                            showToast(err.message || "Ошибка");
+                        } finally {
+                            b.disabled = false;
+                        }
+                    },
                 });
-                close();
-                _handlePaymentResponse(res, "Пакет трафика добавлен", onReload);
-            } catch (err) {
-                showToast(err.message || "Ошибка покупки пакета");
-                allPacks.forEach((btn) => { btn.disabled = false; });
-            }
+            });
         });
-    });
 
-    wrap.querySelectorAll("[data-modal-wi-dg]").forEach((b) => {
-        b.addEventListener("click", async () => {
-            b.disabled = true;
-            try {
-                await api.scheduleWiDowngrade(Number(b.dataset.modalWiDg));
-                close();
-                showToast("Снижение запланировано на следующий период");
-                onReload();
-            } catch (err) {
-                showToast(err.message || "Ошибка");
-            } finally {
-                b.disabled = false;
-            }
-        });
-    });
+        const cancelDgBtn = wrap.querySelector("#modalWiCancelDgBtn");
+        if (cancelDgBtn) {
+            cancelDgBtn.addEventListener("click", async () => {
+                cancelDgBtn.disabled = true;
+                try {
+                    await api.cancelWiDowngrade();
+                    close();
+                    showToast("Отложенное снижение отменено");
+                    onReload();
+                } catch (err) {
+                    showToast(err.message || "Ошибка отмены");
+                } finally {
+                    cancelDgBtn.disabled = false;
+                }
+            });
+        }
+    };
 
-    const cancelDgBtn = wrap.querySelector("#modalWiCancelDgBtn");
-    if (cancelDgBtn) {
-        cancelDgBtn.addEventListener("click", async () => {
-            cancelDgBtn.disabled = true;
-            try {
-                await api.cancelWiDowngrade();
-                close();
-                showToast("Отложенное снижение отменено");
-                onReload();
-            } catch (err) {
-                showToast(err.message || "Ошибка отмены");
-            } finally {
-                cancelDgBtn.disabled = false;
-            }
-        });
-    }
+    renderModal();
 }
 
 export async function loadAndRenderUserCabinet(root) {
@@ -855,9 +974,9 @@ function _render(root) {
 
     root.querySelectorAll("[data-utab]").forEach((b) => {
         b.addEventListener("click", () => {
+            if (_state.tab === b.dataset.utab) return;
             _state.tab = b.dataset.utab;
             _render(root);
-            loadAndRenderUserCabinet(root);
         });
     });
 
@@ -1211,7 +1330,7 @@ function _renderTariffsTab(body, d, reload) {
                         <span class="tabular">Трафик: <strong style="color:var(--text-primary);">${wiUsedGb} / ${wiTotalGb} ГБ</strong></span>
                         <span class="tabular">Слотов: <strong style="color:var(--text-primary);">${wiCurLimit} из ${wiMaxDevices}</strong></span>
                     </div>
-                    <div class="progress-track"><div class="progress-fill" style="width:${wiPct}%;"></div></div>
+                    <div class="progress-track"><div class="progress-fill" style="transform:scaleX(${(wiPct / 100).toFixed(3)});"></div></div>
                 </div>
                 <label class="toggle-row">
                     <span class="toggle-label">Автопродление с баланса</span>
@@ -1279,7 +1398,7 @@ function _renderTariffsTab(body, d, reload) {
 
     const wiBuyBtn = body.querySelector("#wiBuyBtn");
     if (wiBuyBtn) wiBuyBtn.addEventListener("click", () => {
-        if (checkCanPay()) _openWiPurchaseModal(d, reload);
+        if (checkCanPay()) _openWiPurchaseModal(d, "buy", reload);
     });
 
     const wiAuto = body.querySelector("#wiAutoRenewChk");
@@ -1297,28 +1416,16 @@ function _renderTariffsTab(body, d, reload) {
 
     const wiRenewBtn = body.querySelector("#wiRenewBtn");
     if (wiRenewBtn) {
-        wiRenewBtn.addEventListener("click", async () => {
-            if (!checkCanPay()) return;
-            if (wiRenewBtn.disabled) return;
-            wiRenewBtn.disabled = true;
-            try {
-                const res = await api.checkoutWi({
-                    action: "renew",
-                    device_limit: wiCurLimit,
-                    use_balance: true,
-                });
-                _handlePaymentResponse(res, "Подписка продлена на 30 дней", reload);
-            } catch (err) {
-                showToast(err.message || "Ошибка продления");
-            } finally {
-                wiRenewBtn.disabled = false;
-            }
+        wiRenewBtn.addEventListener("click", () => {
+            if (checkCanPay()) _openWiPurchaseModal(d, "renew", reload);
         });
     }
 
     const wiManageBtn = body.querySelector("#wiManageBtn");
     if (wiManageBtn) {
-        wiManageBtn.addEventListener("click", () => _openWiManageModal(d, reload));
+        wiManageBtn.addEventListener("click", () => {
+            if (checkCanPay()) _openWiManageModal(d, reload);
+        });
     }
 }
 
@@ -1334,7 +1441,10 @@ function _buildDevicesSectionHtml(d) {
     const isLimitReached = devices.length >= totalLimit;
     const biAssignedCount = wiActive ? devices.filter((dev) => dev.is_bi_assigned).length : 0;
     const isWiExhausted = Boolean(
-        wiActive && (wi.status === "exhausted" || (wi.traffic_limit_bytes > 0 && wi.traffic_used_bytes >= wi.traffic_limit_bytes))
+        wiActive && (
+            String(wi.status || "").toUpperCase() === "EXHAUSTED"
+            || (wi.traffic_limit_bytes > 0 && wi.traffic_used_bytes >= wi.traffic_limit_bytes)
+        )
     );
     const needBiToggles = Boolean(wiActive && (devices.length > wiLimit || biAssignedCount < devices.length));
 
@@ -1547,16 +1657,27 @@ function _bindDevicesEvents(container, d, reload) {
             if (wantEnable && activeBiDevices.length >= wiLimit) {
                 chk.checked = false;
                 if (activeBiDevices.length === 1) {
-                    chk.disabled = true;
-                    try {
-                        await api.setDevicePriority(hwid, 10, activeBiDevices[0].hwid);
-                        showToast("Слот перенесён — нажмите ⟳ в приложении");
-                        reload();
-                    } catch (err) {
-                        showToast(err.message || "Не удалось перенести слот");
-                    } finally {
-                        chk.disabled = false;
-                    }
+                    const fromDev = activeBiDevices[0];
+                    const fromLabel = fromDev.device_name || fromDev.platform || "текущего устройства";
+                    const toLabel = targetDev.device_name || targetDev.platform || "это устройство";
+                    showConfirmModal({
+                        title: "Перенести «Белый интернет»?",
+                        message: `Слот занят устройством «${fromLabel}». Перенести «Белый интернет» на «${toLabel}»?`,
+                        confirmText: "Перенести слот",
+                        cancelText: "Отмена",
+                        onConfirm: async () => {
+                            chk.disabled = true;
+                            try {
+                                await api.setDevicePriority(hwid, 10, fromDev.hwid);
+                                showToast("Слот перенесён — нажмите ⟳ в приложении");
+                                reload();
+                            } catch (err) {
+                                showToast(err.message || "Не удалось перенести слот");
+                            } finally {
+                                chk.disabled = false;
+                            }
+                        },
+                    });
                     return;
                 }
                 _openBiReplaceModal(targetDev, activeBiDevices, reload);

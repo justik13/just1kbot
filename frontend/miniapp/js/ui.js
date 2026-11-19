@@ -116,21 +116,51 @@ export function formatBytesGb(bytes) {
     return (val / (1024 * 1024 * 1024)).toFixed(1);
 }
 
+let _modalStack = [];
+let _modalTitleSeq = 0;
+
+function _focusFirstInModal(card) {
+    const focusable = card.querySelector(
+        "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])"
+    );
+    if (focusable && typeof focusable.focus === "function") {
+        focusable.focus({ preventScroll: true });
+    }
+}
+
 export function openModal(title, bodyNode, { showCloseBtn = true } = {}) {
     const backdrop = document.getElementById("modalRoot");
     if (!backdrop) return () => {};
+
+    const prevCard = backdrop.querySelector(".modal-card");
+    const prevKeyDown = backdrop._activeKeyDown || null;
+    const prevTrigger = document.activeElement;
+    if (prevCard && !backdrop.hidden) {
+        if (prevKeyDown) {
+            document.removeEventListener("keydown", prevKeyDown);
+        }
+        _modalStack.push({ card: prevCard, onKeyDown: prevKeyDown, trigger: prevTrigger });
+    } else {
+        _modalStack = [];
+    }
+
     backdrop.innerHTML = "";
     const card = document.createElement("div");
     card.className = "modal-card";
     card.setAttribute("role", "dialog");
     card.setAttribute("aria-modal", "true");
 
+    _modalTitleSeq += 1;
+    const titleId = `modalDialogTitle_${_modalTitleSeq}`;
     const header = document.createElement("div");
     header.className = "row";
     const h = document.createElement("div");
     h.className = "card-title";
+    h.id = titleId;
     h.textContent = title;
+    card.setAttribute("aria-labelledby", titleId);
 
+    let closed = false;
     const onKeyDown = (e) => {
         if (e.key === "Escape") {
             close();
@@ -138,10 +168,39 @@ export function openModal(title, bodyNode, { showCloseBtn = true } = {}) {
     };
 
     const close = () => {
+        if (closed) return;
+        closed = true;
         document.removeEventListener("keydown", onKeyDown);
+
+        if (_modalStack.length > 0 && backdrop.contains(card)) {
+            const parent = _modalStack.pop();
+            backdrop.innerHTML = "";
+            backdrop.appendChild(parent.card);
+            backdrop._activeKeyDown = parent.onKeyDown;
+            if (parent.onKeyDown) {
+                document.addEventListener("keydown", parent.onKeyDown);
+            }
+            backdrop.onclick = (e) => {
+                if (e.target === backdrop && parent.onKeyDown) {
+                    parent.onKeyDown({ key: "Escape" });
+                }
+            };
+            if (parent.trigger && parent.card.contains(parent.trigger) && typeof parent.trigger.focus === "function") {
+                parent.trigger.focus({ preventScroll: true });
+            } else {
+                _focusFirstInModal(parent.card);
+            }
+            return;
+        }
+
+        _modalStack = [];
+        backdrop._activeKeyDown = null;
         document.body.style.overflow = "";
         backdrop.hidden = true;
         backdrop.innerHTML = "";
+        if (prevTrigger && document.contains(prevTrigger) && typeof prevTrigger.focus === "function") {
+            prevTrigger.focus({ preventScroll: true });
+        }
     };
 
     header.appendChild(h);
@@ -162,8 +221,10 @@ export function openModal(title, bodyNode, { showCloseBtn = true } = {}) {
     card.append(header, bodyNode);
     backdrop.appendChild(card);
     backdrop.hidden = false;
+    backdrop._activeKeyDown = onKeyDown;
     document.body.style.overflow = "hidden";
     document.addEventListener("keydown", onKeyDown);
+    _focusFirstInModal(card);
     return close;
 }
 
@@ -214,8 +275,8 @@ export function showConfirmModal({
         okBtn.disabled = true;
         cancelBtn.disabled = true;
         try {
-            if (onConfirm) await onConfirm();
             close();
+            if (onConfirm) await onConfirm();
         } catch (err) {
             console.error("Modal confirmation error:", err);
         } finally {

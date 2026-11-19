@@ -189,18 +189,30 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
 
     root.querySelector("#detailBackBtn").addEventListener("click", onBack);
 
-    root.querySelector("#detailToggleBtn").addEventListener("click", async (e) => {
+    root.querySelector("#detailToggleBtn").addEventListener("click", (e) => {
         const b = e.currentTarget;
-        b.disabled = true;
-        try {
-            await api.toggleNode(node.id);
-            showToast(`Статус ноды #${node.id} изменён`);
-            await onReload();
-        } catch (err) {
-            showToast(err.message || "Ошибка переключения");
-        } finally {
-            b.disabled = false;
-        }
+        const willDisable = Boolean(node.is_active);
+        showConfirmModal({
+            title: willDisable ? `Выключить сервер #${node.id}?` : `Включить сервер #${node.id}?`,
+            message: willDisable
+                ? `Сервер «${node.name}» перестанет принимать новых клиентов и выдаваться в подписках.`
+                : `Сервер «${node.name}» будет включён и начнёт обслуживать трафик.`,
+            confirmText: willDisable ? "Выключить" : "Включить",
+            cancelText: "Отмена",
+            isDestructive: willDisable,
+            onConfirm: async () => {
+                b.disabled = true;
+                try {
+                    await api.toggleNode(node.id);
+                    showToast(`Статус ноды #${node.id} изменён`);
+                    await onReload();
+                } catch (err) {
+                    showToast(err.message || "Ошибка переключения");
+                } finally {
+                    b.disabled = false;
+                }
+            },
+        });
     });
 
     root.querySelector("#detailRefreshBtn").addEventListener("click", async (e) => {

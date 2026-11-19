@@ -21,8 +21,11 @@ from config.constants import (
     STANDARD_PLANS,
     WHITE_INTERNET_BASE_DURATION_DAYS,
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
+    WHITE_INTERNET_MAX_EXPIRY_DAYS,
+    WHITE_INTERNET_MAX_QUOTA_BYTES,
     WHITE_INTERNET_TOPUP_PACKS,
 )
+from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
 from config.tariffs import calculate_standard_price
 from database.models import AccountLedgerEntry, Order, Tariff, User
 from database.repositories.users_repo import (
@@ -944,35 +947,118 @@ class OrderService:
             else:
                 description = f"Доступ на {d_days} дн. ({d_limit} устр.)"
         elif service_type == "white_internet":
+            now = now_utc()
             wi_sub = await get_wi_sub_by_user_id(session, user_id)
             checked_hub_id = getattr(wi_sub, "hub_server_id", None) if wi_sub else None
             op = operation or ("renew" if wi_sub else "purchase")
-            order_meta["operation"] = op
+            if wi_sub is not None:
+                if wi_sub.status == WhiteInternetStatus.DISABLED:
+                    raise ValueError(texts.WL_SUB_DISABLED)
+                if (
+                    getattr(wi_sub, "pending_hard_delete", False)
+                    or getattr(wi_sub, "provisioning_status", None)
+                    == WhiteInternetProvisioningStatus.PENDING_DELETE
+                ):
+                    raise ValueError(texts.WL_DEACTIVATION_PENDING)
             if op == "add_device_slot":
                 if wi_sub is None:
-                    raise ValueError("No active White Internet subscription")
+                    raise ValueError(texts.WL_NO_SUB)
+                if wi_sub.status == WhiteInternetStatus.PENDING:
+                    raise ValueError(texts.WL_SUB_NOT_READY)
+                if wi_sub.status == WhiteInternetStatus.EXPIRED or (
+                    wi_sub.expires_at and wi_sub.expires_at <= now
+                ):
+                    raise ValueError(texts.WL_SUB_EXPIRED)
+                cur_wi_limit = max(1, int(getattr(wi_sub, "device_limit", 1) or 1))
+                if cur_wi_limit >= WHITE_INTERNET_MAX_DEVICE_LIMIT:
+                    raise ValueError(texts.WL_DEVICE_LIMIT_MAX_REACHED)
                 total_cost, gb_added = WhiteInternetService.calculate_wi_add_slot_quote(
-                    wi_sub.expires_at
+                    wi_sub.expires_at, now=now
                 )
-                final_devices = min(WHITE_INTERNET_MAX_DEVICE_LIMIT, (wi_sub.device_limit or 1) + 1)
+                final_devices = min(WHITE_INTERNET_MAX_DEVICE_LIMIT, cur_wi_limit + 1)
                 traffic_bytes = gb_added * (1024**3)
                 description = "Доп. устройство высокой устойчивости"
             elif op == "topup":
                 if gb is None or int(gb) not in WHITE_INTERNET_TOPUP_PACKS:
                     raise ValueError(f"Unsupported traffic pack: {gb}")
+                if wi_sub is None:
+                    raise ValueError(texts.WL_NO_SUB)
+                if wi_sub.status == WhiteInternetStatus.PENDING:
+                    raise ValueError(texts.WL_SUB_NOT_READY)
+                if wi_sub.status == WhiteInternetStatus.EXPIRED or (
+                    wi_sub.expires_at and wi_sub.expires_at <= now
+                ):
+                    raise ValueError(texts.WL_SUB_EXPIRED)
                 pack_gb = int(gb)
+                pack_bytes = pack_gb * (1024**3)
+                cur_wi_limit = max(1, int(getattr(wi_sub, "device_limit", 1) or 1))
+                max_extra_allowed = cur_wi_limit * WHITE_INTERNET_MAX_QUOTA_BYTES
+                if (getattr(wi_sub, "extra_traffic_bytes", 0) or 0) + pack_bytes > max_extra_allowed:
+                    from database.repositories import white_internet_repo
+                    current_available = await white_internet_repo.get_available_quota_bytes(
+                        session, wi_sub.id, now
+                    )
+                    raise ValueError(
+                        texts.WL_CAP_EXCEEDED.format(
+                            gb=pack_gb, available=current_available // (1024**3)
+                        )
+                    )
                 total_cost = WHITE_INTERNET_TOPUP_PACKS[pack_gb]
-                traffic_bytes = pack_gb * (1024**3)
+                traffic_bytes = pack_bytes
                 description = f"Доп. пакет трафика {pack_gb} ГБ"
             else:
-                if op == "renew" and wi_sub and wi_sub.pending_device_limit is not None:
-                    d_limit = wi_sub.pending_device_limit
+                if wi_sub is not None and op == "purchase":
+                    if (
+                        wi_sub.status
+                        in (
+                            WhiteInternetStatus.PENDING,
+                            WhiteInternetStatus.ACTIVE,
+                            WhiteInternetStatus.EXHAUSTED,
+                        )
+                        and wi_sub.expires_at
+                        and wi_sub.expires_at > now
+                    ):
+                        raise ValueError(texts.WL_ALREADY_ACTIVE)
+                    op = "renew"
+                if op == "renew":
+                    if wi_sub is None:
+                        op = "purchase"
+                    else:
+                        if wi_sub.status == WhiteInternetStatus.PENDING:
+                            raise ValueError(texts.WL_SUB_NOT_READY)
+                        base_time = (
+                            wi_sub.expires_at
+                            if (wi_sub.expires_at and wi_sub.expires_at > now)
+                            else now
+                        )
+                        if base_time + timedelta(days=WHITE_INTERNET_BASE_DURATION_DAYS) > now + timedelta(
+                            days=WHITE_INTERNET_MAX_EXPIRY_DAYS
+                        ):
+                            raise ValueError(texts.WL_RENEWAL_HORIZON_EXCEEDED)
+                if op == "renew" and wi_sub is not None:
+                    if device_limit is not None:
+                        d_limit = max(1, min(WHITE_INTERNET_MAX_DEVICE_LIMIT, int(device_limit)))
+                    elif wi_sub.pending_device_limit is not None:
+                        d_limit = max(1, min(WHITE_INTERNET_MAX_DEVICE_LIMIT, int(wi_sub.pending_device_limit)))
+                    else:
+                        d_limit = max(1, min(WHITE_INTERNET_MAX_DEVICE_LIMIT, int(wi_sub.device_limit or 1)))
                 else:
                     d_limit = max(1, min(WHITE_INTERNET_MAX_DEVICE_LIMIT, int(device_limit or 1)))
-                total_cost = get_white_internet_tier_price(d_limit)
+                base_cost = get_white_internet_tier_price(d_limit)
+                if op == "purchase" and await is_eligible_for_referral_first_discount(session, user_id):
+                    discount = (base_cost * REFERRAL_WELCOME_DISCOUNT_PERCENT).quantize(
+                        Decimal(1), rounding=ROUND_DOWN
+                    )
+                    total_cost = max(Decimal(1), base_cost - discount)
+                    order_meta["is_referral_discount"] = True
+                    order_meta["discount_rub"] = int(discount)
+                    order_meta["original_price_rub"] = int(base_cost)
+                else:
+                    total_cost = base_cost
                 final_devices = d_limit
                 final_duration = WHITE_INTERNET_BASE_DURATION_DAYS
                 description = f"Доп. опция высокой устойчивости ({d_limit} устр., 30 дн.)"
+            order_meta["operation"] = op
         else:
             raise ValueError(f"Unsupported service_type: {service_type}")
 
@@ -1070,7 +1156,7 @@ class OrderService:
         standard: bool | None = None,
         white_internet: bool | None = None,
     ) -> dict:
-        """TODO stub: persist auto-renew preferences for future wallet-balance renewal worker."""
+        """Persist auto-renew preferences for wallet-balance renewal worker."""
         user = await OrderService._load_settlement_user(session, user_id)
         if user is None:
             raise ValueError("User not found")

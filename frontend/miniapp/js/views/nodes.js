@@ -278,6 +278,28 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                     <textarea name="per_app_proxy_list" class="textarea" maxlength="2000" style="min-height:56px;" placeholder="ru.sberbankmobile,com.whatsapp">${escapeHtml(current.per_app_proxy_list || "")}</textarea>
                 </div>
 
+                <hr style="border:none; border-top:1px solid var(--border-subtle); margin:2px 0;">
+                <div class="card-title" style="font-size:13px;">Маркировка линий Белого интернета (CDN)</div>
+                <div class="muted" style="font-size:11px;">Как отображать провайдера CDN (Yandex / Turboflare) у локаций, если у самой ноды не задано кастомное имя.</div>
+                <div class="field">
+                    <label>Режим отображения CDN</label>
+                    <select name="cdn_label_mode" class="input">
+                        <option value="name" ${(current.cdn_label_mode || "name") === "name" ? "selected" : ""}>В названии локации (name)</option>
+                        <option value="badge" ${current.cdn_label_mode === "badge" ? "selected" : ""}>В бейдже локации (badge)</option>
+                        <option value="none" ${current.cdn_label_mode === "none" ? "selected" : ""}>Не добавлять (none)</option>
+                    </select>
+                </div>
+                <div class="grid-2">
+                    <div class="field">
+                        <label>Метка Yandex CDN</label>
+                        <input name="cdn_yandex_label" class="input" maxlength="32" value="${escapeHtml(current.cdn_yandex_label || "Yandex")}" placeholder="Yandex">
+                    </div>
+                    <div class="field">
+                        <label>Метка Turboflare CDN</label>
+                        <input name="cdn_turboflare_label" class="input" maxlength="32" value="${escapeHtml(current.cdn_turboflare_label || "Turboflare")}" placeholder="Turboflare">
+                    </div>
+                </div>
+
                 <button type="submit" class="btn btn-primary">Сохранить настройки</button>
             </form>
         </section>
@@ -343,6 +365,9 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                 per_app_proxy_enabled: Boolean(fd.get("per_app_proxy_enabled")),
                 per_app_proxy_mode: String(fd.get("per_app_proxy_mode") || "bypass"),
                 per_app_proxy_list: String(fd.get("per_app_proxy_list") || "").trim(),
+                cdn_label_mode: String(fd.get("cdn_label_mode") || "name"),
+                cdn_yandex_label: String(fd.get("cdn_yandex_label") || "").trim() || "Yandex",
+                cdn_turboflare_label: String(fd.get("cdn_turboflare_label") || "").trim() || "Turboflare",
             });
             showToast("Настройки подписки сохранены");
         } catch (err) {

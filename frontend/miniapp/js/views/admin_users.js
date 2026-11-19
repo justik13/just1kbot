@@ -54,11 +54,12 @@ function _openAdjustUserModal(user, onUpdated) {
             Пользователь: <b>${escapeHtml(uname)}</b> (${user.telegram_id})<br>
             Баланс сейчас: <b>${user.total_balance} ₽</b> (осн. ${user.real_balance} ₽ · бонусы ${user.bonus_balance} ₽)
         </div>
-        <div class="seg-group">
+        <div class="seg-group" style="flex-wrap:wrap;">
             <button type="button" class="seg-btn active" data-act="balance">Баланс</button>
             <button type="button" class="seg-btn" data-act="grant_standard">Стандарт</button>
             <button type="button" class="seg-btn" data-act="grant_wi">Белый интернет</button>
             <button type="button" class="seg-btn" data-act="wi_traffic">Трафик</button>
+            <button type="button" class="seg-btn" data-act="restrictions">Ограничения</button>
         </div>
 
         <div id="adjBalanceFields" class="field" style="gap:8px;">
@@ -108,6 +109,23 @@ function _openAdjustUserModal(user, onUpdated) {
             </div>
         </div>
 
+        <div id="adjRestrictionsFields" class="field" style="gap:10px;" hidden>
+            <label class="toggle-row">
+                <span class="toggle-label">Заморозка доступа и оплат (financial_hold)</span>
+                <span class="switch">
+                    <input name="financial_hold" type="checkbox" ${user.financial_hold ? "checked" : ""}>
+                    <span class="switch-track"></span>
+                </span>
+            </label>
+            <label class="toggle-row">
+                <span class="toggle-label">Блокировка внешних пополнений (topup_blocked)</span>
+                <span class="switch">
+                    <input name="topup_blocked" type="checkbox" ${user.topup_blocked ? "checked" : ""}>
+                    <span class="switch-track"></span>
+                </span>
+            </label>
+        </div>
+
         <div class="field">
             <label>Комментарий (необязательно)</label>
             <input name="note" class="input" type="text" maxlength="120" placeholder="Например: тестовое начисление">
@@ -121,6 +139,7 @@ function _openAdjustUserModal(user, onUpdated) {
     const balFields = form.querySelector("#adjBalanceFields");
     const subFields = form.querySelector("#adjSubFields");
     const trafficFields = form.querySelector("#adjTrafficFields");
+    const restrictionsFields = form.querySelector("#adjRestrictionsFields");
     const trafficSelect = form.querySelector("select[name='traffic_action']");
     const gbField = form.querySelector("#adjGbField");
     const devInput = form.querySelector("input[name='device_limit']");
@@ -137,6 +156,7 @@ function _openAdjustUserModal(user, onUpdated) {
             balFields.hidden = action !== "balance";
             subFields.hidden = action !== "grant_standard" && action !== "grant_wi";
             trafficFields.hidden = action !== "wi_traffic";
+            restrictionsFields.hidden = action !== "restrictions";
             if (action === "grant_standard") {
                 devInput.min = "2";
                 devInput.max = "10";
@@ -185,6 +205,9 @@ function _openAdjustUserModal(user, onUpdated) {
                 }
                 payload.gb = gb;
             }
+        } else if (action === "restrictions") {
+            payload.financial_hold = Boolean(form.querySelector("input[name='financial_hold']")?.checked);
+            payload.topup_blocked = Boolean(form.querySelector("input[name='topup_blocked']")?.checked);
         } else {
             const days = Number(form.querySelector("input[name='days']").value);
             const deviceLimit = Number(devInput.value);
@@ -252,6 +275,7 @@ async function _openUserDetailsModal(user, onUpdated) {
             <div class="detail-item"><span class="detail-label">Пригласил</span><span>${escapeHtml(inviterStr)}</span></div>
             <div class="detail-item"><span class="detail-label">Стандарт до</span><span>${details.standard_end ? formatDate(details.standard_end) : "—"}</span></div>
             <div class="detail-item"><span class="detail-label">Белый интернет до</span><span>${wi && wi.expires_at ? `${formatDate(wi.expires_at)} (${wiUsedGb} / ${wiTotalGb} ГБ)` : "—"}</span></div>
+            <div class="detail-item"><span class="detail-label">Ограничения</span><span>${details.financial_hold ? "Заморожен (hold)" : (details.topup_blocked ? "Блок пополнений" : "Нет")}</span></div>
         </div>
         ${details.subscription_url ? `
         <div class="field">
@@ -291,19 +315,28 @@ async function _openUserDetailsModal(user, onUpdated) {
         copyBackupBtn.addEventListener("click", () => copyText(details.subscription_backup_url, "Резервная ссылка скопирована"));
     }
 
-    box.querySelector("#detResetHwidBtn").addEventListener("click", async (e) => {
+    box.querySelector("#detResetHwidBtn").addEventListener("click", (e) => {
         const b = e.currentTarget;
-        b.disabled = true;
-        try {
-            const res = await api.resetUserDevices(user.id);
-            showToast(res.message || "Устройства сброшены");
-            close();
-            onUpdated();
-        } catch (err) {
-            showToast(err.message || "Ошибка сброса");
-        } finally {
-            b.disabled = false;
-        }
+        showConfirmModal({
+            title: "Сбросить привязку устройств?",
+            message: `Все привязанные устройства пользователя ${uname} будут отвязаны. Ему потребуется заново обновить подписку в приложении.`,
+            confirmText: "Сбросить HWID",
+            cancelText: "Отмена",
+            isDestructive: true,
+            onConfirm: async () => {
+                b.disabled = true;
+                try {
+                    const res = await api.resetUserDevices(user.id);
+                    showToast(res.message || "Устройства сброшены");
+                    close();
+                    onUpdated();
+                } catch (err) {
+                    showToast(err.message || "Ошибка сброса");
+                } finally {
+                    b.disabled = false;
+                }
+            },
+        });
     });
 
     box.querySelector("#detRotateTokenBtn").addEventListener("click", (e) => {
@@ -433,6 +466,9 @@ export function renderAdminUsersView(root, state) {
         const wiBadge = u.wi_active
             ? `<span class="chip chip-info">Белый интернет: ${u.wi_device_limit} устр.</span>`
             : `<span class="chip chip-muted">Белый интернет: нет</span>`;
+        const holdBadge = u.financial_hold
+            ? `<span class="chip chip-err">Заморожен</span>`
+            : (u.topup_blocked ? `<span class="chip chip-warn">Блок оплат</span>` : "");
 
         card.innerHTML = `
             <div class="row">
@@ -450,6 +486,7 @@ export function renderAdminUsersView(root, state) {
                 <div class="filter-pills">
                     ${stdBadge}
                     ${wiBadge}
+                    ${holdBadge}
                 </div>
                 <div class="btn-group">
                     <button type="button" class="btn btn-sm" data-details-uid="${u.id}">Детали</button>

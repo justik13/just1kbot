@@ -151,12 +151,14 @@ def _validate_audience(value: str) -> str:
 
 
 class AdminUserAdjustPayload(BaseModel):
-    action: Literal["balance", "grant_standard", "grant_wi", "wi_traffic"]
+    action: Literal["balance", "grant_standard", "grant_wi", "wi_traffic", "restrictions"]
     amount_rub: int | None = Field(default=None, ge=-100000, le=100000)
     days: int | None = Field(default=None, ge=-3650, le=3650)
     device_limit: int | None = Field(default=None, ge=1, le=20)
     traffic_action: Literal["add_gb", "reset_used", "set_base_gb"] | None = None
     gb: int | None = Field(default=None, ge=1, le=5000)
+    financial_hold: bool | None = None
+    topup_blocked: bool | None = None
     note: str | None = Field(default=None, max_length=120)
 
     @model_validator(mode="after")
@@ -174,6 +176,9 @@ class AdminUserAdjustPayload(BaseModel):
                 raise ValueError("days is required for grant_wi")
             if self.device_limit is not None and not (1 <= self.device_limit <= 3):
                 raise ValueError("device_limit must be between 1 and 3 for wi")
+        elif self.action == "restrictions":
+            if self.financial_hold is None and self.topup_blocked is None:
+                raise ValueError("financial_hold or topup_blocked is required for restrictions")
         return self
 
 

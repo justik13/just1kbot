@@ -598,6 +598,8 @@ async def api_admin_users_handler(request: web.Request) -> web.Response:
                 "wi_active": wi_active,
                 "wi_end": wi.expires_at.isoformat() if wi and wi.expires_at else None,
                 "wi_device_limit": int(wi.device_limit or 0) if wi else 0,
+                "financial_hold": bool(getattr(u, "financial_hold", False)),
+                "topup_blocked": bool(getattr(u, "topup_blocked", False)),
                 "created_at": u.created_at.isoformat() if u.created_at else None,
             })
 
@@ -845,6 +847,46 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                 })
             return web.json_response({"ok": False, "error": "Укажите traffic_action"}, status=400)
 
+        if payload.action == "restrictions":
+            locked_user = (
+                await session.execute(
+                    select(User)
+                    .where(User.id == user.id, User.is_deleted.is_(False))
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
+            if locked_user is None:
+                return web.json_response({"ok": False, "error": "Пользователь не найден"}, status=404)
+            if payload.financial_hold is not None:
+                locked_user.financial_hold = bool(payload.financial_hold)
+            if payload.topup_blocked is not None:
+                locked_user.topup_blocked = bool(payload.topup_blocked)
+            await session.flush()
+            await SubscriptionService.sync_access_state(session, locked_user)
+            await AuditService.log_action(
+                session,
+                admin_id=ctx.telegram_id,
+                action=(
+                    AdminAuditAction.PAYMENT_DISPUTE_OPENED
+                    if (locked_user.financial_hold or locked_user.topup_blocked)
+                    else AdminAuditAction.PAYMENT_DISPUTE_RESOLVED
+                ),
+                target_type="user",
+                target_id=user.id,
+                details={
+                    "financial_hold": bool(locked_user.financial_hold),
+                    "topup_blocked": bool(locked_user.topup_blocked),
+                    "note": note,
+                },
+            )
+            return web.json_response({
+                "ok": True,
+                "action": "restrictions",
+                "financial_hold": bool(locked_user.financial_hold),
+                "topup_blocked": bool(locked_user.topup_blocked),
+                "message": "Ограничения пользователя обновлены",
+            })
+
         # grant_wi
         if payload.days is None:
             return web.json_response({"ok": False, "error": "Укажите количество дней"}, status=400)
@@ -1015,6 +1057,8 @@ async def api_admin_user_details_handler(request: web.Request) -> web.Response:
                 "total_balance": int(bal.available),
                 "standard_end": user.subscription_end.isoformat() if user.subscription_end else None,
                 "standard_device_limit": int(user.device_limit or 0),
+                "financial_hold": bool(getattr(user, "financial_hold", False)),
+                "topup_blocked": bool(getattr(user, "topup_blocked", False)),
                 "subscription_url": _build_sub_url(sub_token) if sub_token else None,
                 "subscription_backup_url": _build_backup_sub_url(sub_token) if sub_token else None,
                 "wi": (

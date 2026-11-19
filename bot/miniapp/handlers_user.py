@@ -28,6 +28,7 @@ from bot.miniapp.schemas import (
 from bot.texts.backend import PRIVACY_POLICY_URL, TOS_AGREEMENT_URL
 from config.constants import (
     DEFAULT_FALLBACK_BOT_USERNAME,
+    MIN_TOPUP_RUB,
     REFERRAL_ACTIVE_MIN_TOPUP_RUB,
     REFERRAL_WELCOME_DISCOUNT_PERCENT,
     STANDARD_PLANS,
@@ -49,6 +50,7 @@ from database.repositories.system_settings_repo import get_system_setting
 from database.repositories.users_repo import (
     get_user_active_referrals_count,
     get_user_referrals_paginated,
+    is_eligible_for_referral_first_discount,
 )
 from database.repositories.vless_subscription_repo import get_or_create_subscription
 from database.repositories.white_internet_repo import (
@@ -140,10 +142,15 @@ def _build_backup_sub_url(token: str) -> str | None:
 def _calc_payment_split(amount_rub: int, real_avail: int, bonus_avail: int, use_balance: bool) -> dict[str, int]:
     if not use_balance or amount_rub <= 0:
         return {"bonus_used": 0, "real_used": 0, "card_to_pay": max(0, amount_rub)}
-    bonus_used = min(amount_rub, max(0, bonus_avail))
-    rem = amount_rub - bonus_used
-    real_used = min(rem, max(0, real_avail))
-    card_to_pay = max(0, rem - real_used)
+    min_card = int(MIN_TOPUP_RUB)
+    total_avail = max(0, bonus_avail) + max(0, real_avail)
+    total_wallet_used = min(amount_rub, total_avail)
+    card_to_pay = max(0, amount_rub - total_wallet_used)
+    if total_wallet_used > 0 and 0 < card_to_pay < min_card and amount_rub >= min_card:
+        total_wallet_used = amount_rub - min_card
+        card_to_pay = min_card
+    bonus_used = min(total_wallet_used, max(0, bonus_avail))
+    real_used = max(0, total_wallet_used - bonus_used)
     return {
         "bonus_used": bonus_used,
         "real_used": real_used,
@@ -295,10 +302,17 @@ async def api_user_dashboard_handler(request: web.Request) -> web.Response:
         wi_limit = int(wi_sub.device_limit or 1) if wi_active and wi_sub else 0
 
         add_slot_price = None
+        add_slot_gb = None
         if wi_active and wi_sub and wi_sub.device_limit < WHITE_INTERNET_MAX_DEVICE_LIMIT:
-            add_slot_price = int(
-                WhiteInternetService.calculate_wi_add_slot_price(wi_sub.expires_at, now=now)
+            raw_price, raw_gb = WhiteInternetService.calculate_wi_add_slot_quote(
+                wi_sub.expires_at, now=now
             )
+            add_slot_price = int(raw_price)
+            add_slot_gb = int(raw_gb)
+
+        welcome_discount_eligible = await is_eligible_for_referral_first_discount(
+            session, user.id
+        )
 
         devices = await user_devices_repo.list_user_devices(
             session, user.id, wi_device_limit=wi_limit
@@ -306,6 +320,7 @@ async def api_user_dashboard_handler(request: web.Request) -> web.Response:
         referrals = await _get_referral_summary(
             session, user, bot_username=_resolve_bot_username(request)
         )
+        referrals["welcome_discount_eligible"] = bool(welcome_discount_eligible)
         history_rows = await get_account_history(session, user_id=user.id, limit=30)
 
         cooldown_until = user.standard_downgrade_cooldown_until
@@ -364,6 +379,7 @@ async def api_user_dashboard_handler(request: web.Request) -> web.Response:
                 "pending_device_limit": pending_limit,
                 "pending_from": pending_from.isoformat() if pending_from else None,
                 "add_slot_price_rub": add_slot_price,
+                "add_slot_gb": add_slot_gb,
             },
             "pricing": {
                 "min_topup_rub": 20,
@@ -458,7 +474,7 @@ async def api_user_standard_downgrade_handler(request: web.Request) -> web.Respo
             )
             return web.json_response({"ok": True, **res})
     except order_service.ServiceUnavailableError as exc:
-        logger.warning("Topup unavailable for %s: %s", ctx.telegram_id, exc)
+        logger.warning("Standard downgrade unavailable for %s: %s", ctx.telegram_id, exc)
         return web.json_response({"ok": False, "error": str(exc)}, status=503)
     except Exception as exc:
         return web.json_response({"ok": False, "error": str(exc)}, status=400)
