@@ -83,7 +83,6 @@ def upgrade() -> None:
     if "account_ledger_entries" in tables:
         ledger_cols = {c["name"] for c in insp.get_columns("account_ledger_entries")}
         ledger_fks = {fk["name"] for fk in insp.get_foreign_keys("account_ledger_entries") if fk.get("name")}
-        ledger_checks = {c["name"] for c in insp.get_check_constraints("account_ledger_entries")}
         ledger_indexes = {i["name"] for i in insp.get_indexes("account_ledger_entries")}
 
         for fk_name in list(ledger_fks):
