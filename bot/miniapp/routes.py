@@ -71,6 +71,10 @@ _NO_CACHE_HEADERS = {
     "Expires": "0",
 }
 
+_ASSET_CACHE_HEADERS = {
+    "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
+}
+
 
 async def miniapp_index_handler(request: web.Request) -> web.Response:
     """Serve Mini App HTML entrypoint."""
@@ -93,10 +97,6 @@ async def miniapp_index_handler(request: web.Request) -> web.Response:
 
 async def miniapp_asset_handler(request: web.Request) -> web.Response:
     """Serve modular JS/CSS assets strictly from FRONTEND_DIR without traversal."""
-    rate_err = check_miniapp_rate_limit(request)
-    if rate_err is not None:
-        return rate_err
-
     rel_path = (request.match_info.get("asset_path") or "").lstrip("/")
     if not rel_path or ".." in rel_path.split("/"):
         return web.Response(status=404, text="Not Found")
@@ -114,7 +114,7 @@ async def miniapp_asset_handler(request: web.Request) -> web.Response:
         text=text,
         content_type=content_type,
         charset="utf-8",
-        headers=_NO_CACHE_HEADERS,
+        headers=_ASSET_CACHE_HEADERS,
     )
 
 
