@@ -576,8 +576,11 @@ function _openWiPurchaseModal(d, mode, onReload) {
     const base = Number(pricing.wi_base_price_rub || 250);
     const extra = Number(pricing.wi_extra_device_price_rub || 200);
     const curLimit = Math.max(1, Number(wi.device_limit || 1));
+    const isActivePeriod = Boolean(
+        isRenew && wi.expires_at && new Date(wi.expires_at).getTime() > Date.now()
+    );
     const defaultDevices = isRenew
-        ? Math.max(1, Number(wi.pending_device_limit || curLimit))
+        ? (isActivePeriod ? curLimit : Math.max(1, Number(wi.pending_device_limit || curLimit)))
         : 1;
     let devices = defaultDevices;
     let useBalance = true;
@@ -610,7 +613,10 @@ function _openWiPurchaseModal(d, mode, onReload) {
                 </div>
                 ${wi.pending_device_limit ? `
                     <div class="notice-box notice-info" style="font-size:11px; padding:6px 10px;">
-                        <span>Запланировано снижение до ${wi.pending_device_limit} устр. Вы можете продлить на ${wi.pending_device_limit} устр. или выбрать другое число слотов ниже.</span>
+                        <span>${isActivePeriod
+                            ? `Запланировано снижение до ${wi.pending_device_limit} устр. с ${formatDate(wi.pending_from || wi.expires_at)}. Переход произойдёт в эту дату (автопродление или продление после окончания срока). Продление сейчас на ${curLimit} устр. отменит запланированное снижение.`
+                            : `Запланировано снижение до ${wi.pending_device_limit} устр. Вы можете продлить на ${wi.pending_device_limit} устр. или выбрать другое число слотов ниже.`
+                        }</span>
                     </div>
                 ` : ""}
             ` : `
@@ -632,14 +638,18 @@ function _openWiPurchaseModal(d, mode, onReload) {
                 <div class="price-tile-grid">
                     ${[1, 2, 3].map((n) => {
                         const p = base + (n - 1) * extra;
+                        const isDisabled = isActivePeriod && n < curLimit;
                         return `
-                            <button type="button" class="price-tile ${devices === n ? "active" : ""}" data-wi-cnt="${n}">
+                            <button type="button" class="price-tile ${devices === n ? "active" : ""}" data-wi-cnt="${n}" ${isDisabled ? "disabled" : ""}>
                                 <span class="price-tile-top">${n} устр. · ${n * 50} ГБ</span>
                                 <span class="price-tile-price">${p} ₽</span>
                             </button>
                         `;
                     }).join("")}
                 </div>
+                ${isActivePeriod && curLimit > 1 ? `
+                    <div class="muted" style="font-size:11px;">Снизить число слотов со следующего периода можно в «Слоты и трафик».</div>
+                ` : ""}
             </div>
             <label class="toggle-row">
                 <span class="toggle-label">Списать с баланса (доступно ${bal.total} ₽)</span>

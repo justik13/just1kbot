@@ -621,6 +621,7 @@ class OrderService:
         use_balance: bool = True,
         return_url: str | None = None,
         bot_username: str | None = None,
+        allow_early_downgrade: bool = False,
     ) -> dict:
         """Unified server-side checkout supporting 100% wallet (bonuses first), mixed payment, or YooKassa."""
         # Acquire advisory lock BEFORE row lock to prevent lock-inversion deadlocks.
@@ -770,12 +771,22 @@ class OrderService:
                         ):
                             raise ValueError(texts.WL_RENEWAL_HORIZON_EXCEEDED)
                 if op == "renew" and wi_sub is not None:
+                    cur_limit = max(1, min(WHITE_INTERNET_MAX_DEVICE_LIMIT, int(wi_sub.device_limit or 1)))
+                    is_active_period = bool(
+                        wi_sub.expires_at is not None
+                        and wi_sub.expires_at > now
+                        and wi_sub.status != WhiteInternetStatus.EXPIRED
+                    )
                     if device_limit is not None:
                         d_limit = max(1, min(WHITE_INTERNET_MAX_DEVICE_LIMIT, int(device_limit)))
-                    elif wi_sub.pending_device_limit is not None:
+                        if is_active_period and not allow_early_downgrade and d_limit < cur_limit:
+                            raise ValueError(
+                                "Снизить число слотов можно со следующего периода в разделе «Слоты и трафик»."
+                            )
+                    elif (not is_active_period or allow_early_downgrade) and wi_sub.pending_device_limit is not None:
                         d_limit = max(1, min(WHITE_INTERNET_MAX_DEVICE_LIMIT, int(wi_sub.pending_device_limit)))
                     else:
-                        d_limit = max(1, min(WHITE_INTERNET_MAX_DEVICE_LIMIT, int(wi_sub.device_limit or 1)))
+                        d_limit = cur_limit
                 else:
                     d_limit = max(1, min(WHITE_INTERNET_MAX_DEVICE_LIMIT, int(device_limit or 1)))
                 base_cost = get_white_internet_tier_price(d_limit)

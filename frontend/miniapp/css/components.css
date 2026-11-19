@@ -1034,6 +1034,11 @@
     color: #050505;
 }
 
+.price-tile:disabled {
+    opacity: 0.42;
+    cursor: not-allowed;
+}
+
 @media (prefers-reduced-motion: reduce) {
     *,
     *::before,

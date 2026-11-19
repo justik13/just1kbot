@@ -375,6 +375,7 @@ async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
                     device_limit=eff_limit,
                     operation="renew",
                     use_balance=True,
+                    allow_early_downgrade=True,
                 )
                 if res.get("status") == "paid" and not user.is_bot_blocked:
                     await session.refresh(sub)
