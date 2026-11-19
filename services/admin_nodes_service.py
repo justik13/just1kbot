@@ -21,18 +21,18 @@ from database.repositories.servers_repo import (
     delete_server,
     derive_v2_capabilities,
     get_all_servers,
-    get_wi_hub_subscription_counts,
     get_server_by_api_url,
     get_server_by_id,
     get_server_role,
     merge_v2_extra_data,
     update_server,
 )
+from database.connection import queue_post_commit_task
 from services.audit_service import AuditService
 from services.workers.node_monitor import reset_server_monitor_state
 from services.xray_node_client import XrayNodeClient
 from utils.datetime_helpers import now_utc
-from utils.security import is_safe_url, normalize_public_domain, validate_public_fqdn
+from utils.security import is_safe_url, validate_public_fqdn
 from utils.traffic_helpers import get_server_hosting_usage
 
 logger = logging.getLogger(__name__)
@@ -185,11 +185,7 @@ async def auto_detect_node_geo(
     return "", final_flag
 
 
-def serialize_server_node(
-    server: Server,
-    *,
-    wi_subscriptions_count: int = 0,
-) -> dict[str, Any]:
+def serialize_server_node(server: Server) -> dict[str, Any]:
     """Serialize Server row into admin-safe v2 node payload (never exposes api_key)."""
     extra = server.extra_data if isinstance(server.extra_data, dict) else {}
     caps = list(server.capabilities or []) if isinstance(server.capabilities, (list, tuple, set)) else []
@@ -205,7 +201,6 @@ def serialize_server_node(
     location_code = str(extra.get("location_code") or "").strip().lower()
     if role == "exit_node" and not location_code:
         location_code = f"exit{server.id}"
-    std_sni = str(extra.get("std_sni") or "").strip().lower()
 
     return {
         "id": server.id,
@@ -219,11 +214,9 @@ def serialize_server_node(
         "health_state": server.health_state,
         "lifecycle_status": server.lifecycle_status,
         "capabilities": caps,
-        "wi_subscriptions_count": wi_subscriptions_count,
         "in_standard": in_standard,
         "in_white_internet": in_white_internet,
         "location_code": location_code,
-        "std_sni": std_sni,
         "vless_name": str(extra.get("vless_name") or "").strip(),
         "server_description": str(extra.get("server_description") or "").strip(),
         "wi_yandex_name": str(extra.get("wi_yandex_name") or "").strip(),
@@ -239,7 +232,6 @@ def serialize_server_node(
         "modules": extra.get("modules") if isinstance(extra.get("modules"), dict) else {},
         "module_errors": extra.get("module_errors") if isinstance(extra.get("module_errors"), dict) else {},
         "links": extra.get("links") if isinstance(extra.get("links"), dict) else {},
-        "sni_routes": extra.get("sni_routes") if isinstance(extra.get("sni_routes"), list) else [],
         "xhttp_locations": extra.get("xhttp_locations") if isinstance(extra.get("xhttp_locations"), list) else [],
         "inbounds": extra.get("inbounds") if isinstance(extra.get("inbounds"), list) else [],
         "traffic_limit": (
@@ -277,8 +269,7 @@ async def _probe_v2_node(
 
 async def list_nodes(session: AsyncSession) -> list[dict[str, Any]]:
     servers = await get_all_servers(session)
-    wi_counts = await get_wi_hub_subscription_counts(session)
-    return [serialize_server_node(s, wi_subscriptions_count=wi_counts.get(s.id, 0)) for s in servers]
+    return [serialize_server_node(s) for s in servers]
 
 
 async def discover_and_add_node(
@@ -427,6 +418,8 @@ async def refresh_node(
     if role == "exit_node" and not str(extra.get("location_code") or "").strip():
         extra["location_code"] = f"exit{server.id}"
 
+    if role == "exit_node" and not str(extra.get("location_code") or "").strip():
+        extra["location_code"] = f"exit{server.id}"
     updates: dict[str, Any] = {
         "capabilities": caps or list(server.capabilities or []),
         "extra_data": extra,
@@ -439,9 +432,16 @@ async def refresh_node(
             if cc_flag:
                 updates["country_flag"] = cc_flag
     if isinstance(health_data, dict) and health_data.get("status") == "ok":
-        updates["health_state"] = ServerHealthState.ONLINE
+        if server.is_active:
+            updates["health_state"] = ServerHealthState.ONLINE
         updates["last_successful_check"] = now_utc()
         updates["consecutive_fails"] = 0
+        if health_data.get("node_epoch"):
+            updates["xray_instance_epoch"] = str(health_data.get("node_epoch"))
+        if health_data.get("boot_id"):
+            updates["xray_instance_boot_id"] = str(health_data.get("boot_id"))
+        if health_data.get("starttime") is not None:
+            updates["xray_instance_starttime"] = int(health_data["starttime"])
 
     updated = await update_server(session, server, **updates)
     from services.topology_sync_service import sync_v2_topology_to_nodes
@@ -461,7 +461,6 @@ async def update_node_settings(
     api_key: str | None = None,
     in_standard: bool | None = None,
     in_white_internet: bool | None = None,
-    std_sni: str | None = None,
     vless_name: str | None = None,
     server_description: str | None = None,
     wi_yandex_name: str | None = None,
@@ -509,7 +508,6 @@ async def update_node_settings(
     extra_fields = (
         in_standard,
         in_white_internet,
-        std_sni,
         vless_name,
         server_description,
         wi_yandex_name,
@@ -518,20 +516,12 @@ async def update_node_settings(
         wi_turboflare_badge,
     )
     if any(v is not None for v in extra_fields):
-        extra = dict(server.extra_data) if isinstance(server.extra_data, dict) else {}
+        base_extra = updates.get("extra_data")
+        extra = dict(base_extra) if isinstance(base_extra, dict) else (dict(server.extra_data) if isinstance(server.extra_data, dict) else {})
         if in_standard is not None:
             extra["in_standard"] = bool(in_standard)
         if in_white_internet is not None:
             extra["in_white_internet"] = bool(in_white_internet)
-        if std_sni is not None:
-            clean_sni = std_sni.strip().lower()
-            if clean_sni:
-                norm_sni = normalize_public_domain(clean_sni, require_fqdn=True)
-                if not norm_sni:
-                    raise AdminNodeServiceError("std_sni must be a valid public FQDN", status_code=400)
-                extra["std_sni"] = norm_sni
-            else:
-                extra.pop("std_sni", None)
         for key, raw_val, max_len in (
             ("vless_name", vless_name, 120),
             ("server_description", server_description, 30),
@@ -549,11 +539,10 @@ async def update_node_settings(
         updates["extra_data"] = extra
 
     if not updates:
-        wi_counts = await get_wi_hub_subscription_counts(session)
-        return serialize_server_node(server, wi_subscriptions_count=wi_counts.get(server.id, 0))
+        return serialize_server_node(server)
 
     updated = await update_server(session, server, **updates)
-    if any(v is not None for v in (in_standard, in_white_internet, std_sni)):
+    if any(v is not None for v in (in_standard, in_white_internet)):
         from services.topology_sync_service import sync_v2_topology_to_nodes
         await sync_v2_topology_to_nodes(session)
     await AuditService.log_action(
@@ -564,8 +553,7 @@ async def update_node_settings(
         target_id=updated.id,
         details={"updated_fields": sorted(updates.keys())},
     )
-    wi_counts = await get_wi_hub_subscription_counts(session)
-    return serialize_server_node(updated, wi_subscriptions_count=wi_counts.get(updated.id, 0))
+    return serialize_server_node(updated)
 
 
 async def toggle_node(
@@ -604,6 +592,10 @@ async def toggle_node(
     )
     from services.topology_sync_service import sync_v2_topology_to_nodes
     await sync_v2_topology_to_nodes(session)
+    if target_active and get_server_role(updated) == "ru_hub":
+        from services.vless_subscription_service import VlessSubscriptionService
+        sid = updated.id
+        queue_post_commit_task(session, lambda sid=sid: VlessSubscriptionService.sync_all_active_to_server_background(sid))
     await AuditService.log_action(
         session,
         admin_id=admin_id,
@@ -612,8 +604,7 @@ async def toggle_node(
         target_id=updated.id,
         details={"is_active": target_active},
     )
-    wi_counts = await get_wi_hub_subscription_counts(session)
-    return serialize_server_node(updated, wi_subscriptions_count=wi_counts.get(updated.id, 0))
+    return serialize_server_node(updated)
 
 
 async def delete_node(
@@ -623,18 +614,10 @@ async def delete_node(
     server_id: int,
     force: bool = False,
 ) -> dict[str, Any]:
-    """Delete a server record from DB (blocking if active WI subs exist unless force=True)."""
+    """Delete a server record from DB."""
     server = await get_server_by_id(session, server_id, for_update=True)
     if server is None:
         raise AdminNodeServiceError("Node not found", status_code=404)
-
-    wi_counts = await get_wi_hub_subscription_counts(session)
-    active_wi = wi_counts.get(server_id, 0)
-    if active_wi > 0 and not force:
-        raise AdminNodeServiceError(
-            f"На сервере есть активные подписки ({active_wi} шт.). Перенесите их на другую ноду или подтвердите удаление.",
-            status_code=409,
-        )
 
     deleted_name = server.name
     await delete_server(session, server)
@@ -645,9 +628,9 @@ async def delete_node(
     await AuditService.log_action(
         session,
         admin_id=admin_id,
-        action=AdminAuditAction.SERVER_FORCE_PURGE if (force and active_wi > 0) else AdminAuditAction.DELETE_SERVER,
+        action=AdminAuditAction.DELETE_SERVER,
         target_type="server",
         target_id=server_id,
-        details={"name": deleted_name, "force": force, "active_wi": active_wi},
+        details={"name": deleted_name, "force": force},
     )
     return {"deleted_id": server_id, "name": deleted_name}

@@ -346,6 +346,17 @@ async def _traffic_sync_once(bot: Bot | None = None):
             node_epoch, node_boot_id, node_starttime, users_stats = snapshot[:4]
             if not node_epoch:
                 continue
+            users_by_service = getattr(snapshot, "users_by_service", None)
+            vless_stats = (
+                users_by_service.get("vless")
+                if isinstance(users_by_service, dict) and isinstance(users_by_service.get("vless"), dict)
+                else (users_stats if isinstance(users_stats, dict) else {})
+            )
+            wi_stats = (
+                users_by_service.get("white_internet")
+                if isinstance(users_by_service, dict) and isinstance(users_by_service.get("white_internet"), dict)
+                else (users_stats if isinstance(users_stats, dict) else {})
+            )
 
             host_tx = getattr(snapshot, "host_tx_bytes", 0) or 0
             host_rx = getattr(snapshot, "host_rx_bytes", 0) or 0
@@ -391,10 +402,11 @@ async def _traffic_sync_once(bot: Bot | None = None):
             exhausted_wi_users: list[tuple[int, bool]] = []
             warn_90p_wi_users: list[tuple[int, int, bool, int]] = []
 
-            if isinstance(users_stats, dict) and users_stats:
-                matching_uuids = [u for u in users_stats.keys() if isinstance(u, str) and u.strip()]
+            if vless_stats:
+                matching_uuids = [u for u in vless_stats.keys() if isinstance(u, str) and u.strip()]
                 if matching_uuids:
-                    # 1. Process VLESS Subscriptions
+                    # 1. Process VLESS Subscriptions (read candidates first, then per-sub atomic tx)
+                    candidate_subs = []
                     async with session_scope() as session:
                         subs_stmt = (
                             select(VlessSubscription.id, VlessSubscription.uuid, VlessSubscription.user_id)
@@ -412,39 +424,55 @@ async def _traffic_sync_once(bot: Bot | None = None):
                         )
                         candidate_subs.extend((await session.execute(dev_stmt)).all())
 
-                        for sub_id, sub_uuid, _sub_uid in candidate_subs:
-                            stats = users_stats.get(sub_uuid)
-                            if not isinstance(stats, dict):
-                                continue
-                            raw_up = stats.get("uplink", 0)
-                            raw_down = stats.get("downlink", 0)
-                            try:
-                                uplink = max(0, int(raw_up) if raw_up is not None else 0)
-                                downlink = max(0, int(raw_down) if raw_down is not None else 0)
-                            except (ValueError, TypeError):
-                                continue
-
-                            delta_total, _, _ = await vless_subscription_repo.record_vless_traffic_atomic(
-                                session=session,
-                                subscription_id=sub_id,
-                                server_id=server_id,
-                                node_epoch=str(node_epoch),
-                                raw_uplink=uplink,
-                                raw_downlink=downlink,
-                                client_uuid=sub_uuid,
-                                now=current_time,
-                            )
+                    for sub_id, sub_uuid, _sub_uid in candidate_subs:
+                        stats = vless_stats.get(sub_uuid)
+                        if not isinstance(stats, dict):
+                            continue
+                        raw_up = stats.get("uplink", 0)
+                        raw_down = stats.get("downlink", 0)
+                        try:
+                            uplink = max(0, int(raw_up) if raw_up is not None else 0)
+                            downlink = max(0, int(raw_down) if raw_down is not None else 0)
+                        except (ValueError, TypeError):
+                            continue
+                        try:
+                            async with session_scope() as session:
+                                delta_total, _, _ = await vless_subscription_repo.record_vless_traffic_atomic(
+                                    session=session,
+                                    subscription_id=sub_id,
+                                    server_id=server_id,
+                                    node_epoch=str(node_epoch),
+                                    raw_uplink=uplink,
+                                    raw_downlink=downlink,
+                                    client_uuid=sub_uuid,
+                                    now=current_time,
+                                )
                             if delta_total > 0:
                                 server_delta += delta_total
                                 if _sub_uid:
                                     affected_vless_user_ids.add(_sub_uid)
+                        except Exception as v_exc:
+                            logger.error(
+                                "Error processing VLESS traffic for sub_id=%s on server %d: %s",
+                                sub_id,
+                                server_id,
+                                v_exc,
+                                exc_info=True,
+                            )
 
-                    # 2. Process White Internet Subscriptions (aggregate sub.uuid + all user UserDevice UUIDs)
+            if wi_stats:
+                wi_matching_uuids = {u for u in wi_stats.keys() if isinstance(u, str) and u.strip()}
+                if wi_matching_uuids:
+                    # 2. Process White Internet Subscriptions across all active WI ru_hubs
                     async with session_scope() as session:
                         wi_stmt = (
                             select(WhiteInternetSubscription.id, WhiteInternetSubscription.uuid, WhiteInternetSubscription.user_id)
                             .where(
-                                WhiteInternetSubscription.hub_server_id == server_id,
+                                WhiteInternetSubscription.status.in_([
+                                    WhiteInternetStatus.ACTIVE,
+                                    WhiteInternetStatus.PENDING,
+                                    WhiteInternetStatus.EXHAUSTED,
+                                ])
                             )
                             .order_by(WhiteInternetSubscription.user_id, WhiteInternetSubscription.id)
                         )
@@ -458,7 +486,6 @@ async def _traffic_sync_once(bot: Bot | None = None):
                                 await session.execute(
                                     select(UserDevice.user_id, UserDevice.device_uuid).where(
                                         UserDevice.user_id.in_(wi_user_ids),
-                                        UserDevice.is_active.is_(True),
                                         UserDevice.device_uuid.is_not(None),
                                     )
                                 )
@@ -467,23 +494,24 @@ async def _traffic_sync_once(bot: Bot | None = None):
                                 wi_dev_map.setdefault(u_id, []).append(str(d_uuid))
 
                     for wi_sub_id, wi_sub_uuid, wi_sub_uid in candidate_wi_subs:
-                        tracked_uuids = {wi_sub_uuid, *wi_dev_map.get(wi_sub_uid, [])}
-                        uplink = 0
-                        downlink = 0
-                        has_any_stats = False
+                        tracked_uuids = [u for u in ({wi_sub_uuid, *wi_dev_map.get(wi_sub_uid, [])}) if u in wi_matching_uuids]
+                        if not tracked_uuids:
+                            continue
+
+                        per_uuid_stats: list[tuple[str, int, int]] = []
                         for t_uuid in tracked_uuids:
-                            stats = users_stats.get(t_uuid)
+                            stats = wi_stats.get(t_uuid)
                             if not isinstance(stats, dict):
                                 continue
-                            has_any_stats = True
                             raw_up = stats.get("uplink", 0)
                             raw_down = stats.get("downlink", 0)
                             try:
-                                uplink += max(0, int(raw_up) if raw_up is not None else 0)
-                                downlink += max(0, int(raw_down) if raw_down is not None else 0)
+                                up_val = max(0, int(raw_up) if raw_up is not None else 0)
+                                down_val = max(0, int(raw_down) if raw_down is not None else 0)
+                                per_uuid_stats.append((t_uuid, up_val, down_val))
                             except (ValueError, TypeError):
                                 continue
-                        if not has_any_stats:
+                        if not per_uuid_stats:
                             continue
 
                         try:
@@ -493,67 +521,25 @@ async def _traffic_sync_once(bot: Bot | None = None):
                                         select(User.id).where(User.id == wi_sub_uid).with_for_update()
                                     )
                                 sub = await white_internet_repo.get_subscription_with_lock(session, wi_sub_id)
-                                if sub is None or sub.hub_server_id != server_id:
+                                if sub is None:
                                     continue
 
-                                if sub.traffic_stats_epoch != str(node_epoch):
-                                    before_up = 0
-                                    before_down = 0
-                                elif (
-                                    uplink < (sub.last_uplink_snapshot or 0)
-                                    or downlink < (sub.last_downlink_snapshot or 0)
-                                ):
-                                    before_up = sub.last_uplink_snapshot if uplink >= (sub.last_uplink_snapshot or 0) else 0
-                                    before_down = sub.last_downlink_snapshot if downlink >= (sub.last_downlink_snapshot or 0) else 0
-                                else:
-                                    before_up = sub.last_uplink_snapshot or 0
-                                    before_down = sub.last_downlink_snapshot or 0
-
-                                delta_up = uplink - before_up
-                                delta_down = downlink - before_down
-                                delta = delta_up + delta_down
-
-                                if delta <= 0:
-                                    total_quota = (getattr(sub, "base_traffic_bytes", 0) or 0) + (
-                                        getattr(sub, "extra_traffic_bytes", 0) or 0
+                                consumed = 0
+                                became_exhausted = False
+                                for t_uuid, up_val, down_val in per_uuid_stats:
+                                    delta_part, part_exhausted = await white_internet_repo.record_wi_traffic_atomic(
+                                        session,
+                                        subscription_id=sub.id,
+                                        server_id=server_id,
+                                        client_uuid=t_uuid,
+                                        raw_uplink=up_val,
+                                        raw_downlink=down_val,
+                                        current_epoch=str(node_epoch),
                                     )
-                                    used = max(
-                                        0,
-                                        (getattr(sub, "traffic_used_bytes", 0) or 0)
-                                        - (getattr(sub, "traffic_overage_bytes", 0) or 0),
-                                    )
-                                    if (
-                                        not getattr(sub, "notified_90p", False)
-                                        and getattr(sub, "status", None) == WhiteInternetStatus.ACTIVE
-                                        and total_quota > 0
-                                        and used >= (0.90 * total_quota)
-                                    ):
-                                        warn_90p_wi_users.append(
-                                            (
-                                                sub.id,
-                                                sub.user_id,
-                                                int(getattr(sub, "desired_version", 1) or 1),
-                                            )
-                                        )
-                                    continue
+                                    consumed += delta_part
+                                    if part_exhausted:
+                                        became_exhausted = True
 
-                                (
-                                    consumed,
-                                    became_exhausted,
-                                    _available,
-                                    event,
-                                ) = await white_internet_repo.record_and_deduct_traffic_atomic(
-                                    session,
-                                    subscription_id=sub.id,
-                                    node_epoch=node_epoch,
-                                    snapshot_uplink_after=uplink,
-                                    snapshot_downlink_after=downlink,
-                                    snapshot_uplink_before=before_up,
-                                    snapshot_downlink_before=before_down,
-                                    node_boot_id=node_boot_id,
-                                    node_starttime=node_starttime,
-                                    now=current_time,
-                                )
                                 if consumed > 0 and sub.user_id:
                                     current_cycle = current_time.strftime("%Y-%m")
                                     await session.execute(
@@ -581,14 +567,28 @@ async def _traffic_sync_once(bot: Bot | None = None):
 
                                 if became_exhausted:
                                     exhausted_wi_users.append(sub.user_id)
-                                elif event == "traffic_90p":
-                                    warn_90p_wi_users.append(
-                                        (
-                                            sub.id,
-                                            sub.user_id,
-                                            int(getattr(sub, "desired_version", 1) or 1),
-                                        )
+                                else:
+                                    total_quota = (getattr(sub, "base_traffic_bytes", 0) or 0) + (
+                                        getattr(sub, "extra_traffic_bytes", 0) or 0
                                     )
+                                    used = max(
+                                        0,
+                                        (getattr(sub, "traffic_used_bytes", 0) or 0)
+                                        - (getattr(sub, "traffic_overage_bytes", 0) or 0),
+                                    )
+                                    if (
+                                        not getattr(sub, "notified_90p", False)
+                                        and getattr(sub, "status", None) == WhiteInternetStatus.ACTIVE
+                                        and total_quota > 0
+                                        and used >= (0.90 * total_quota)
+                                    ):
+                                        warn_90p_wi_users.append(
+                                            (
+                                                sub.id,
+                                                sub.user_id,
+                                                int(getattr(sub, "desired_version", 1) or 1),
+                                            )
+                                        )
                         except Exception as client_exc:
                             logger.error(
                                 "Error processing WI traffic deduction for client %s on server %d: %s",

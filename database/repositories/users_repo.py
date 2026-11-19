@@ -8,7 +8,7 @@ from config.constants import (
     REFERRAL_ACTIVE_MIN_TOPUP_RUB,
 )
 from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
-from database.models import Order, User, UserDevice, VlessSubscription, WhiteInternetSubscription
+from database.models import Order, User, VlessSubscription, WhiteInternetSubscription
 from utils.datetime_helpers import now_utc
 
 ALLOWED_USER_UPDATE_FIELDS = {
@@ -407,6 +407,20 @@ async def search_user_flexible(session: AsyncSession, query: str) -> User | None
             stmt = (
                 select(User)
                 .where(User.id == sub_user_id, User.is_deleted.is_(False))
+                .options(selectinload(User.vless_subscription))
+            )
+            return (await session.execute(stmt)).scalar_one_or_none()
+
+        from database.models import UserDevice
+        dev_user_id = await session.scalar(
+            select(UserDevice.user_id)
+            .where(UserDevice.device_uuid == query_str)
+            .limit(1)
+        )
+        if dev_user_id:
+            stmt = (
+                select(User)
+                .where(User.id == dev_user_id, User.is_deleted.is_(False))
                 .options(selectinload(User.vless_subscription))
             )
             return (await session.execute(stmt)).scalar_one_or_none()

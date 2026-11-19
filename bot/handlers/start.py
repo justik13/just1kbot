@@ -8,7 +8,7 @@ import re
 
 from aiogram import Router
 from aiogram.filters import CommandStart
-from aiogram.types import MenuButtonWebApp, Message, WebAppInfo
+from aiogram.types import CallbackQuery, MenuButtonWebApp, Message, WebAppInfo
 from cachetools import TTLCache
 
 from bot import texts
@@ -125,11 +125,9 @@ async def cmd_start(message: Message) -> None:
         logger.debug("Failed to update chat menu button for %s: %s", tg_user.id, exc)
 
     safe_name = safe(db_user.first_name or tg_user.first_name or texts.USER_HUB_START)
-    discount_line = (
-        texts.START_REFERRAL_DISCOUNT_LINE
-        if db_user.referred_by is not None and not getattr(db_user, "welcome_discount_used", False)
-        else ""
-    )
+    from database.repositories.users_repo import is_eligible_for_referral_first_discount
+    has_discount = await is_eligible_for_referral_first_discount(session, db_user.id)
+    discount_line = texts.START_REFERRAL_DISCOUNT_LINE if has_discount else ""
     kb = build_start_inline_keyboard(app_url)
     msg_text = texts.START_HUB_MESSAGE.format(name=safe_name, discount_line=discount_line)
 
@@ -139,7 +137,9 @@ async def cmd_start(message: Message) -> None:
         msg_text,
         reply_markup=kb,
     )
-    if sent and getattr(sent, "message_id", None):
+    if isinstance(sent, int):
+        _LAST_START_MESSAGES[message.chat.id] = sent
+    elif sent and getattr(sent, "message_id", None):
         _LAST_START_MESSAGES[message.chat.id] = sent.message_id
 
 
@@ -158,3 +158,23 @@ async def cmd_fallback(message: Message) -> None:
         texts.START_FALLBACK_MESSAGE,
         reply_markup=kb,
     )
+
+
+@router.callback_query()
+async def cb_legacy_fallback(callback: CallbackQuery) -> None:
+    """Handle legacy inline buttons from older bot versions gracefully."""
+    data = (callback.data or "").strip()
+    if data == "ignore":
+        await callback.answer()
+        return
+    settings = get_settings()
+    app_url = f"https://{settings.DOMAIN}/app"
+    kb = build_start_inline_keyboard(app_url)
+    await callback.answer("Меню обновлено. Откройте кабинет.", show_alert=False)
+    if callback.message:
+        await safe_send_message(
+            callback.bot,
+            callback.message.chat.id,
+            texts.START_FALLBACK_MESSAGE,
+            reply_markup=kb,
+        )

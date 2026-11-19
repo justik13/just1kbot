@@ -45,12 +45,6 @@ function _openEditModal(node, onDone) {
             <label>Новый API Токен (оставьте пустым, чтобы не менять)</label>
             <input name="api_key" class="input" type="password" maxlength="255" placeholder="••••••••">
         </div>
-        ${isExitNode ? `
-        <div class="field">
-            <label>SNI для Стандарта (опционально)</label>
-            <input name="std_sni" class="input" maxlength="253" placeholder="Авто по sni_routes на ru_hub" value="${escapeHtml(node.std_sni || "")}">
-        </div>
-        ` : ""}
         <button type="submit" class="btn btn-primary">Сохранить</button>
     `;
     const close = openModal(`Редактировать #${node.id}`, box);
@@ -70,9 +64,6 @@ function _openEditModal(node, onDone) {
             const newKey = String(fd.get("api_key") || "").trim();
             if (newKey) {
                 payload.api_key = newKey;
-            }
-            if (isExitNode) {
-                payload.std_sni = String(fd.get("std_sni") || "").trim().toLowerCase();
             }
             await api.patchNode(node.id, payload);
             showToast("Параметры обновлены");
@@ -153,10 +144,6 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
                 <div class="detail-item">
                     <span class="detail-label">Код локации</span>
                     <span class="mono">${escapeHtml(node.location_code || "—")}</span>
-                </div>
-                <div class="detail-item">
-                    <span class="detail-label">SNI для Стандарта</span>
-                    <span class="mono">${escapeHtml(node.std_sni || "авто")}</span>
                 </div>` : ""}
                 <div class="detail-item">
                     <span class="detail-label">Последняя проверка</span>

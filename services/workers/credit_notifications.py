@@ -94,8 +94,14 @@ async def credit_notifications_loop(
             )
             if shutdown_event.is_set():
                 break
-            await asyncio.sleep(WORKER_ERROR_SLEEP_INTERVAL)
-            continue
+            try:
+                await asyncio.wait_for(
+                    shutdown_event.wait(),
+                    timeout=WORKER_ERROR_SLEEP_INTERVAL,
+                )
+                break
+            except asyncio.TimeoutError:
+                continue
 
         try:
             await asyncio.wait_for(

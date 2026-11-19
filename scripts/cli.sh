@@ -218,6 +218,53 @@ check_bot_update_on_entry() {
     return 0
 }
 
+ensure_subscription_domains_caddy() {
+    local env_file="${PROJECT_DIR}/.env"
+    local conf_dir="${PROJECT_DIR}/caddy_conf.d"
+    local sub_caddy="${conf_dir}/subscriptions.caddy"
+    [[ -f "$env_file" ]] || return 0
+    mkdir -p "$conf_dir"
+
+    local main_dom sub_dom backup_dom app_port wi_prefix
+    main_dom=$(grep -E '^DOMAIN=' "$env_file" | tail -n1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d '[:space:]' || true)
+    sub_dom=$(grep -E '^SUBSCRIPTION_DOMAIN=' "$env_file" | tail -n1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d '[:space:]' || true)
+    backup_dom=$(grep -E '^SUBSCRIPTION_BACKUP_DOMAIN=' "$env_file" | tail -n1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d '[:space:]' || true)
+    app_port=$(grep -E '^YOOKASSA_WEBHOOK_PORT=' "$env_file" | tail -n1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d '[:space:]' || true)
+    wi_prefix=$(grep -E '^WHITE_INTERNET_SUB_PATH_PREFIX=' "$env_file" | tail -n1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d '[:space:]' || true)
+    app_port="${app_port:-8443}"
+    wi_prefix="${wi_prefix:-/sub/wl}"
+
+    local extra_hosts=()
+    if [[ -n "$sub_dom" && "$sub_dom" != "$main_dom" ]]; then
+        extra_hosts+=("$sub_dom")
+    fi
+    if [[ -n "$backup_dom" && "$backup_dom" != "$main_dom" && "$backup_dom" != "$sub_dom" ]]; then
+        extra_hosts+=("$backup_dom")
+    fi
+
+    if [[ ${#extra_hosts[@]} -eq 0 ]]; then
+        rm -f "$sub_caddy"
+        return 0
+    fi
+
+    {
+        for h in "${extra_hosts[@]}"; do
+            cat <<EOF
+${h} {
+	@sub path /sub* ${wi_prefix}*
+	handle @sub {
+		reverse_proxy just1kbot:${app_port}
+	}
+	handle {
+		respond 404
+	}
+}
+
+EOF
+        done
+    } > "$sub_caddy"
+}
+
 ensure_status_ingress_network() {
     local status_caddy="${PROJECT_DIR}/caddy_conf.d/status.caddy"
     if [[ ! -f "$status_caddy" ]]; then
@@ -335,7 +382,7 @@ cmd_preflight() {
     fi
 
     # 3. Обязательные переменные окружения
-    local req_vars=(BOT_TOKEN POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB DB_ENCRYPTION_KEY BACKUP_AGE_RECIPIENT SUPPORT_USERNAME YOOKASSA_SHOP_ID YOOKASSA_SECRET_KEY DOMAIN SSL_EMAIL)
+    local req_vars=(BOT_TOKEN POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB REDIS_PASSWORD DB_ENCRYPTION_KEY BACKUP_AGE_RECIPIENT SUPPORT_USERNAME YOOKASSA_SHOP_ID YOOKASSA_SECRET_KEY YOOKASSA_RETURN_URL DOMAIN SSL_EMAIL)
     for var_name in "${req_vars[@]}"; do
         local val
         val=$(grep -E "^${var_name}=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || true)
@@ -859,7 +906,14 @@ cmd_update() {
 
     if ! docker compose run --rm --no-deps bot python scripts/audit_invariants.py; then
         error "Нарушение инвариантов базы данных после применения миграций! Развёртывание прервано."
-        _rollback_services_after_db_failure "$rollback_commit" "$pre_update_backup"
+        if [ "${migrations_applied:-false}" = "true" ]; then
+            warn "Миграции базы данных уже применены — автоматический откат кода не выполняется, чтобы не запустить старый код на новой схеме."
+            if [ -n "${pre_update_backup:-}" ]; then
+                warn "Восстановите БД из резервной копии: just1kbot restore \"$pre_update_backup\" и затем откатите код."
+            fi
+        else
+            _rollback_services_after_db_failure "$rollback_commit" "$pre_update_backup"
+        fi
         return 1
     fi
 
@@ -931,6 +985,7 @@ cmd_update() {
         chmod 600 "${PROJECT_DIR}/.env" 2>/dev/null || true
         chmod 700 "${PROJECT_DIR}/backups" 2>/dev/null || true
         apply_sysctl_hardening
+        ensure_subscription_domains_caddy
         if docker inspect --format='{{.State.Status}}' just1kbot_caddy 2>/dev/null | grep -q "^running$"; then
             info "Применение актуальной конфигурации Caddy (reload)..."
             if ! docker exec just1kbot_caddy caddy reload --config /etc/caddy/Caddyfile 2>/dev/null; then

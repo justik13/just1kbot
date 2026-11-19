@@ -284,8 +284,8 @@ async def _run_mass_extend_worker(
                 if service_scope in ("standard", "all"):
                     user_row = await session.get(User, uid)
                     if user_row is not None and not user_row.is_deleted:
-                        await get_or_create_subscription(session, uid)
-                        target_limit = None if (user_row.device_limit or 0) >= 2 else 2
+                        vless_sub = await get_or_create_subscription(session, uid)
+                        target_limit = None if (vless_sub.device_limit or 0) >= 2 else 2
                         updated = await SubscriptionService.extend_subscription(
                             session,
                             tg_id,
@@ -506,7 +506,9 @@ async def list_finances(
             pass
         if clean_q.isdigit():
             num = int(clean_q)
-            conds.extend([Order.user_id == num, User.telegram_id == num])
+            conds.append(User.telegram_id == num)
+            if 0 < num <= 2_147_483_647:
+                conds.append(Order.user_id == num)
         stmt = stmt.where(or_(*conds))
         count_stmt = count_stmt.where(or_(*conds))
 
@@ -572,7 +574,9 @@ async def list_audit_logs(
         conds = [AuditLog.details.ilike(f"%{clean_q}%"), AuditLog.action.ilike(f"%{clean_q}%")]
         if clean_q.isdigit():
             num = int(clean_q)
-            conds.extend([AuditLog.admin_id == num, AuditLog.target_id == num, AuditLog.id == num])
+            conds.extend([AuditLog.admin_id == num, AuditLog.target_id == num])
+            if 0 < num <= 2_147_483_647:
+                conds.append(AuditLog.id == num)
         stmt = stmt.where(or_(*conds))
         count_stmt = count_stmt.where(or_(*conds))
 

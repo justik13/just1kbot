@@ -31,7 +31,7 @@ class YooKassaGateway(BasePaymentGateway):
     ) -> PaymentInvoice:
         resolved_return_url = return_url
         if not resolved_return_url:
-            raw_template = "https://t.me/{bot_username}"
+            raw_template = "https://t.me/{bot_username}?startapp=paid"
             try:
                 settings = get_settings()
                 raw_template = getattr(settings, "YOOKASSA_RETURN_URL", raw_template) or raw_template
@@ -44,11 +44,13 @@ class YooKassaGateway(BasePaymentGateway):
                     resolved_bot_user = getattr(settings, "BOT_USERNAME", None)
                 except Exception:
                     pass
-            if not resolved_bot_user:
-                resolved_bot_user = "bot"
-            resolved_bot_user = str(resolved_bot_user).lstrip("@")
+            if resolved_bot_user:
+                resolved_bot_user = str(resolved_bot_user).strip().lstrip("@")
             if "{bot_username}" in raw_template:
-                resolved_return_url = raw_template.format(bot_username=resolved_bot_user)
+                if resolved_bot_user:
+                    resolved_return_url = raw_template.format(bot_username=resolved_bot_user)
+                else:
+                    resolved_return_url = "https://t.me"
             else:
                 resolved_return_url = raw_template
         if not resolved_return_url:
@@ -137,10 +139,10 @@ class YooKassaGateway(BasePaymentGateway):
             external_id = obj.get("id", "")
             related_external_id = obj.get("payment_id")
             is_paid = False
-            is_refunded = True
+            is_refunded = (status == "succeeded")
         elif event == "payment.succeeded":
             external_id = obj.get("id", "")
-            is_paid = (amount_rub is not None and amount_rub > 0)
+            is_paid = (status == "succeeded" and amount_rub is not None and amount_rub > 0)
             is_refunded = False
         elif event == "payment.canceled":
             external_id = obj.get("id", "")
@@ -215,9 +217,17 @@ class YooKassaGateway(BasePaymentGateway):
             if isinstance(cancellation_details, dict)
             else None
         )
+        refunded_obj = data.get("refunded_amount") or {}
+        refunded_val = refunded_obj.get("value") if isinstance(refunded_obj, dict) else None
+        is_refunded = False
+        if refunded_val is not None:
+            try:
+                is_refunded = Decimal(str(refunded_val)) > 0
+            except (InvalidOperation, ValueError, TypeError):
+                is_refunded = False
         return PaymentStatusResult(
-            is_paid=(status == "succeeded" and amount_rub is not None and amount_rub > 0),
-            is_refunded=False,
+            is_paid=(status == "succeeded" and not is_refunded and amount_rub is not None and amount_rub > 0),
+            is_refunded=is_refunded,
             is_canceled=(status == "canceled"),
             status_str=status,
             amount_rub=amount_rub,

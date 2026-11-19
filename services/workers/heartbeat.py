@@ -30,7 +30,7 @@ async def heartbeat_loop(
     heartbeat_interval = HEARTBEAT_INTERVAL if interval is None else interval
     logger.info(f"Heartbeat worker started, file={HEARTBEAT_FILE}")
     if health_check():
-        _write_heartbeat()
+        await asyncio.to_thread(_write_heartbeat)
 
     while not shutdown_event.is_set():
         try:
@@ -40,7 +40,7 @@ async def heartbeat_loop(
             except asyncio.TimeoutError:
                 pass
             if health_check():
-                _write_heartbeat()
+                await asyncio.to_thread(_write_heartbeat)
         except asyncio.CancelledError:
             logger.info("Heartbeat worker cancelled")
             break
@@ -53,7 +53,7 @@ async def heartbeat_loop(
                 pass
 
     if health_check():
-        _write_heartbeat(final=True)
+        await asyncio.to_thread(_write_heartbeat, True)
     logger.info("Heartbeat worker stopped gracefully")
 
 

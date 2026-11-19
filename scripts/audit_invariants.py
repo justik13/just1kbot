@@ -35,7 +35,7 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.constants import VLESS_PROTOCOL, WHITE_INTERNET_CAPABILITY, XRAY_PROTOCOL
+from config.constants import VLESS_PROTOCOL, XRAY_PROTOCOL
 from config.enums import (
     AccountLedgerEntryType,
     ServerHealthState,
@@ -204,33 +204,9 @@ async def assert_inv_7_subscription_period_usage(session: AsyncSession) -> Invar
 
 
 async def assert_inv_8_origin_node_capabilities(session: AsyncSession) -> InvariantResult:
-    """Inv 8: All subscription origin/hub nodes exist and have 'white_internet' capability."""
-    subs = (await session.scalars(select(WhiteInternetSubscription))).all()
-    origin_ids = {
-        (getattr(s, "hub_server_id", None) if getattr(s, "hub_server_id", None) is not None else getattr(s, "origin_node_id", None))
-        for s in subs
-    }
-    origin_ids = {oid for oid in origin_ids if oid is not None}
-    if not origin_ids:
-        return InvariantResult(
-            8, "Origin Node Capabilities", True, "No subscription origin nodes to check"
-        )
-
-    servers = (await session.scalars(select(Server).where(Server.id.in_(origin_ids)))).all()
-    server_map = {srv.id: srv for srv in servers}
-
-    bad_nodes = []
-    for srv_id in origin_ids:
-        srv = server_map.get(srv_id)
-        if srv is None:
-            bad_nodes.append(f"Server {srv_id} missing")
-        elif WHITE_INTERNET_CAPABILITY not in (srv.capabilities or []):
-            bad_nodes.append(f"Server {srv_id} lacks 'white_internet' capability")
-
-    if bad_nodes:
-        return InvariantResult(8, "Origin Node Capabilities", False, "; ".join(bad_nodes))
+    """Inv 8: Multi-hub architecture — WI subscriptions are no longer pinned to a single hub server."""
     return InvariantResult(
-        8, "Origin Node Capabilities", True, "All origin servers have 'white_internet' capability"
+        8, "Origin Node Capabilities", True, "Multi-hub architecture: server pinning removed"
     )
 
 

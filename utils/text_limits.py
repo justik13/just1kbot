@@ -57,7 +57,8 @@ def split_text_by_lines(
                     if len(current) + len(close_tag) <= limit:
                         current += close_tag
                     else:
-                        current = current[:limit - len(close_tag)] + close_tag
+                        head = re.sub(r"<[^>]*$", "", current[:limit - len(close_tag)])
+                        current = head + close_tag
                 parts.append(current)
                 current = ""
 

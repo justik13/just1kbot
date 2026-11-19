@@ -12,8 +12,6 @@ class TokenBucketRateLimiter:
         self._parent = parent
 
     async def acquire(self) -> None:
-        if self._parent is not None:
-            await self._parent.acquire()
         while True:
             async with self._lock:
                 now = time.monotonic()
@@ -28,11 +26,13 @@ class TokenBucketRateLimiter:
 
                 if self.tokens >= 1.0:
                     self.tokens -= 1.0
-                    return
+                    break
 
                 wait_time = (1.0 - self.tokens) / self.rate
 
             await asyncio.sleep(wait_time)
+        if self._parent is not None:
+            await self._parent.acquire()
 
 
 # Shared Telegram Bot API ceiling across all workers and handlers (under 30 msg/s global limit)

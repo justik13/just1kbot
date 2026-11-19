@@ -13,13 +13,11 @@ import re
 import urllib.parse
 
 from aiohttp import web
-from sqlalchemy import select
 
 from bot import texts
 from bot.texts import get_tariff_display_name
 from config import constants
 from config.enums import (
-    ServerHealthState,
     WhiteInternetProvisioningStatus,
     WhiteInternetStatus,
 )
@@ -155,7 +153,12 @@ def _sanitize_header_url(url: str | None, fallback: str = "") -> str:
     for candidate in (url, fallback):
         if candidate and isinstance(candidate, str):
             clean = candidate.strip()
-            if clean and clean.isascii() and all(32 < ord(c) < 127 for c in clean):
+            if (
+                clean
+                and clean.startswith(("http://", "https://"))
+                and clean.isascii()
+                and all(32 < ord(c) < 127 for c in clean)
+            ):
                 return clean
     return ""
 
@@ -664,8 +667,15 @@ async def serve_unified_subscription_feed(
         std_down = max(0, int(getattr(vless_sub, "traffic_down", 0) or 0)) if vless_sub else 0
         wi_up = max(0, int(getattr(wi_sub, "traffic_uplink_bytes", 0) or 0)) if wi_sub else 0
         wi_down = max(0, int(getattr(wi_sub, "traffic_downlink_bytes", 0) or 0)) if wi_sub else 0
-        upload_bytes = std_up + wi_up
-        download_bytes = std_down + wi_down
+        if wi_active and not std_active:
+            upload_bytes = wi_up
+            download_bytes = wi_down
+        elif std_active and not wi_active:
+            upload_bytes = std_up
+            download_bytes = std_down
+        else:
+            upload_bytes = std_up + wi_up
+            download_bytes = std_down + wi_down
 
         std_ts = int(std_end.timestamp()) if std_end and hasattr(std_end, "timestamp") else 0
         wi_ts = int(wi_end.timestamp()) if wi_end and hasattr(wi_end, "timestamp") else 0
@@ -925,74 +935,80 @@ async def serve_unified_subscription_feed(
         elif vless_sub and getattr(vless_sub, "expires_at", None) is not None and wi_active:
             all_links.append(_make_inline_stub(texts.FEED_STUB_STD_EXPIRED, "Управление в кабинете"))
 
-        wi_server: Server | None = None
         if wi_active and wi_sub is not None:
             if is_bi_assigned:
-                if getattr(wi_sub, "hub_server_id", None):
-                    wi_server = await session.scalar(select(Server).where(Server.id == wi_sub.hub_server_id))
-                if wi_server and (not wi_server.is_active or wi_server.health_state != ServerHealthState.ONLINE):
-                    wi_server = None
-                is_wi_node_ready = bool(
-                    wi_server is not None
-                    and constants.WHITE_INTERNET_CAPABILITY in (wi_server.capabilities or [])
-                    and wi_sub.actual_version == wi_sub.desired_version
+                from database.repositories import servers_repo
+
+                wi_hubs = await servers_repo.get_wi_capable_ru_hubs(session)
+                ready_hubs = [
+                    hub
+                    for hub in wi_hubs
+                    if constants.WHITE_INTERNET_CAPABILITY in (hub.capabilities or [])
                     and (
-                        wi_sub.last_reconciled_node_epoch == wi_server.xray_instance_epoch
+                        (
+                            isinstance(getattr(wi_sub, "node_sync_state", None), dict)
+                            and ((wi_sub.node_sync_state.get(str(hub.id)) or {}).get("version") == wi_sub.desired_version)
+                        )
                         or (
                             getattr(wi_sub, "provisioning_status", None) == WhiteInternetProvisioningStatus.ACTIVE
                             and (getattr(wi_sub, "actual_version", 0) or 0) > 0
                         )
                     )
-                )
-                if is_wi_node_ready and wi_server is not None:
+                ]
+                if ready_hubs:
                     cdn_label_mode = str(await get_system_setting(session, "bi_cdn_label_mode", "name") or "name")
                     cdn_yandex_label = str(await get_system_setting(session, "bi_cdn_yandex_label", "Yandex") or "Yandex")
                     cdn_turboflare_label = str(await get_system_setting(session, "bi_cdn_turboflare_label", "Turboflare") or "Turboflare")
-                    wi_links = VlessSubscriptionService.generate_bi_xhttp_links(
-                        wi_sub,
-                        wi_server,
-                        exit_nodes=exit_nodes,
-                        cdn_label_mode=cdn_label_mode,
-                        cdn_yandex_label=cdn_yandex_label,
-                        cdn_turboflare_label=cdn_turboflare_label,
-                        client_uuid=device_client_uuid,
-                    )
-                    all_links.extend(wi_links)
-                    if is_new_device and device_client_uuid and wi_server.api_url and wi_server.api_key:
-                        from services.xray_node_client import get_xray_node_client
+                    for wi_server in ready_hubs:
+                        wi_links = VlessSubscriptionService.generate_bi_xhttp_links(
+                            wi_sub,
+                            wi_server,
+                            exit_nodes=exit_nodes,
+                            cdn_label_mode=cdn_label_mode,
+                            cdn_yandex_label=cdn_yandex_label,
+                            cdn_turboflare_label=cdn_turboflare_label,
+                            client_uuid=device_client_uuid,
+                        )
+                        all_links.extend(wi_links)
+                    if is_new_device and device_client_uuid and wi_hubs:
+                        wi_sub.desired_version = (getattr(wi_sub, "desired_version", 1) or 1) + 1
+                        wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+                        from services.xray_node_client import XrayNodeClient
+                        from services.vless_subscription_service import _BACKGROUND_TASKS
+
+                        targets_snapshot = [
+                            (h.api_url, h.api_key, h.xray_instance_epoch)
+                            for h in wi_hubs
+                            if h.api_url and h.api_key
+                        ]
+                        ver_snap = int(wi_sub.desired_version or 1)
 
                         async def _provision_new_wi_device(
-                            srv_url: str,
-                            srv_key: str,
+                            targets: list[tuple[str, str, str | None]],
                             dev_uuid: str,
                             ver: int,
-                            epoch: str | None,
                         ) -> None:
-                            try:
-                                await get_xray_node_client().sync_client(
-                                    srv_url,
-                                    srv_key,
-                                    client_uuid=dev_uuid,
-                                    is_active=True,
-                                    version=ver,
-                                    expected_node_epoch=epoch,
-                                    service="white_internet",
-                                )
-                            except Exception as exc:
-                                logger.warning("Background WI device provision failed for %s: %s", dev_uuid, exc)
+                            async with XrayNodeClient(timeout=5.0) as client:
+                                for srv_url, srv_key, epoch in targets:
+                                    try:
+                                        await client.sync_client(
+                                            srv_url,
+                                            srv_key,
+                                            client_uuid=dev_uuid,
+                                            is_active=True,
+                                            version=ver,
+                                            expected_node_epoch=epoch,
+                                            service="white_internet",
+                                        )
+                                    except Exception as exc:
+                                        logger.warning("Background WI device provision failed for %s: %s", dev_uuid, exc)
 
-                        _t = asyncio.create_task(
-                            _provision_new_wi_device(
-                                wi_server.api_url,
-                                wi_server.api_key,
-                                device_client_uuid,
-                                int(getattr(wi_sub, "desired_version", 1) or 1),
-                                wi_server.xray_instance_epoch,
+                        if targets_snapshot:
+                            _t = asyncio.create_task(
+                                _provision_new_wi_device(targets_snapshot, device_client_uuid, ver_snap)
                             )
-                        )
-                        from services.vless_subscription_service import _BACKGROUND_TASKS
-                        _BACKGROUND_TASKS.add(_t)
-                        _t.add_done_callback(_BACKGROUND_TASKS.discard)
+                            _BACKGROUND_TASKS.add(_t)
+                            _t.add_done_callback(_BACKGROUND_TASKS.discard)
                 else:
                     all_links.append(_make_inline_stub(texts.FEED_STUB_WI_PENDING, "Нажмите ⟳ через 1 минуту"))
             else:
@@ -1257,9 +1273,11 @@ async def vless_report_handler(request: web.Request) -> web.Response:
             tariff_name = get_tariff_display_name(dev_limit)
             total_active = await user_devices_repo.count_active_user_devices(session, user.id)
             devices_info = f"{total_active} / {dev_limit if dev_limit > 0 else '—'}"
-            is_access_active = SubscriptionService.check_vpn_access(user)
+            is_access_active = SubscriptionService.check_vpn_access(user, vless_sub=vless_sub)
             if getattr(user, "financial_hold", False):
                 sub_status = "HOLD"
+            elif wi_sub is not None and not is_access_active:
+                sub_status = str(getattr(wi_sub, "status", "EXPIRED") or "EXPIRED").upper()
             elif (vless_sub and not getattr(vless_sub, "is_active", True)) or not is_access_active:
                 sub_status = "EXPIRED"
             else:

@@ -169,6 +169,10 @@ async def is_first_topup_eligible(
             Order.status == "paid",
             Order.amount_rub >= REFERRAL_ACTIVE_MIN_TOPUP_RUB,
             or_(
+                Order.metadata_.is_(None),
+                Order.metadata_["settlement_held"].astext.is_distinct_from("true"),
+            ),
+            or_(
                 Order.service_type == "topup",
                 Order.payment_method != "wallet",
             ),
@@ -203,6 +207,10 @@ async def _has_other_qualifying_topup(
         Order.user_id == user_id,
         Order.status == "paid",
         Order.amount_rub >= REFERRAL_ACTIVE_MIN_TOPUP_RUB,
+        or_(
+            Order.metadata_.is_(None),
+            Order.metadata_["settlement_held"].astext.is_distinct_from("true"),
+        ),
         or_(
             Order.service_type == "topup",
             Order.payment_method != "wallet",

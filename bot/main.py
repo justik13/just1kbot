@@ -191,6 +191,18 @@ async def setup_bot(
     dp.message.middleware(CorrelationMiddleware())
     dp.callback_query.middleware(CorrelationMiddleware())
 
+    from aiogram import BaseMiddleware
+
+    class _PrivateChatMiddleware(BaseMiddleware):
+        async def __call__(self, handler, event, data):
+            chat = getattr(event, "chat", None) or getattr(getattr(event, "message", None), "chat", None)
+            if chat is not None and getattr(chat, "type", "private") != "private":
+                return None
+            return await handler(event, data)
+
+    dp.message.middleware(_PrivateChatMiddleware())
+    dp.callback_query.middleware(_PrivateChatMiddleware())
+
     start_router._parent_router = None
     notifications_router._parent_router = None
     dp.include_router(start_router)
@@ -287,10 +299,11 @@ _http_limiter = HttpRateLimiter()
 async def _http_rate_limit_middleware(request: web.Request, handler):
     """Process-local rate limiting for incoming HTTP webhooks and endpoints."""
     path = request.path
+    wi_prefix = (os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX") or WHITE_INTERNET_SUB_PATH_PREFIX).strip().rstrip("/") + "/"
     if (
         path in {"/health", "/webhook/yookassa", "/yookassa/webhook"}
         or path == "/app"
-        or path.startswith(("/app/", "/api/app/", "/sub/"))
+        or path.startswith(("/app/", "/api/app/", "/sub/", wi_prefix))
     ):
         return await handler(request)
     client_ip = get_trusted_client_ip(request)
@@ -394,6 +407,19 @@ async def main():
 
         await start_background_workers(bot)
         await resume_pending_broadcasts(bot)
+
+        try:
+            from aiogram.types import BotCommand, MenuButtonWebApp, WebAppInfo
+
+            await bot.set_my_commands([BotCommand(command="start", description="Открыть главное меню")])
+            await bot.set_chat_menu_button(
+                menu_button=MenuButtonWebApp(
+                    text="Кабинет",
+                    web_app=WebAppInfo(url=f"https://{settings.DOMAIN}/app"),
+                )
+            )
+        except Exception as tg_init_exc:
+            logger.warning("Failed to configure bot commands/menu button: %s", tg_init_exc)
 
         logger.info("Запуск polling...")
         polling_task = asyncio.create_task(dp.start_polling(bot, handle_signals=False))

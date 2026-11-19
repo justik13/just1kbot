@@ -146,77 +146,52 @@ class VlessSubscriptionService:
                 continue
             active_exits.append(ex)
 
+        ru_hubs.sort(key=lambda s: (int((s.extra_data or {}).get("monthly_traffic_bytes") or 0), int(s.id or 0)))
+
         seen_links: set[str] = set()
         eff_uuid = client_uuid or subscription.uuid
 
         for hub in ru_hubs:
             hub_extra = hub.extra_data if isinstance(hub.extra_data, dict) else {}
             port, fp = VlessSubscriptionService._resolve_port_and_fp(hub_extra)
-            sni_routes = VlessSubscriptionService._extract_sni_routes(hub_extra)
-            route_by_code: dict[str, str] = {}
-            for r in sni_routes:
-                b_code = r["bridge_code"]
-                route_by_code[b_code] = r["sni"]
-                if "-" in b_code:
-                    route_by_code.setdefault(b_code.split("-")[0], r["sni"])
+            domain = str(hub_extra.get("domain") or hub_extra.get("vless_domain") or "").strip().lower()
+            if not domain or not _FQDN_REGEX.match(domain):
+                continue
 
             if active_exits:
                 for ex in active_exits:
                     ex_extra = ex.extra_data if isinstance(ex.extra_data, dict) else {}
                     if ex_extra.get("in_standard") is False:
                         continue
-                    explicit_sni = str(ex_extra.get("std_sni") or "").strip().lower()
                     loc_code = str(ex_extra.get("location_code") or f"exit{ex.id}").strip().lower()
-                    target_sni = explicit_sni or route_by_code.get(loc_code, "")
-                    if not target_sni or not _FQDN_REGEX.match(target_sni):
-                        continue
                     fragment = VlessSubscriptionService._build_vless_fragment(
                         ex.country_flag,
                         ex_extra.get("vless_name") or ex.name,
                         ex_extra.get("server_description"),
                     )
+                    std_path = urllib.parse.quote(f"/std/{loc_code}", safe="")
                     link = (
-                        f"vless://{eff_uuid}@{target_sni}:{port}"
-                        f"?encryption=none&security=tls&sni={target_sni}&fp={fp}"
-                        f"&type=tcp&flow=xtls-rprx-vision#{fragment}"
-                    )
-                    if link not in seen_links:
-                        seen_links.add(link)
-                        links.append(link)
-            elif sni_routes:
-                for r in sni_routes:
-                    target_sni = r["sni"]
-                    fragment = VlessSubscriptionService._build_vless_fragment(
-                        hub.country_flag,
-                        r["bridge_code"].upper(),
-                        hub_extra.get("server_description"),
-                    )
-                    link = (
-                        f"vless://{eff_uuid}@{target_sni}:{port}"
-                        f"?encryption=none&security=tls&sni={target_sni}&fp={fp}"
-                        f"&type=tcp&flow=xtls-rprx-vision#{fragment}"
+                        f"vless://{eff_uuid}@{domain}:{port}"
+                        f"?encryption=none&security=tls&sni={domain}&fp={fp}"
+                        f"&type=xhttp&path={std_path}&mode=auto#{fragment}"
                     )
                     if link not in seen_links:
                         seen_links.add(link)
                         links.append(link)
             else:
-                domain = hub_extra.get("domain") or hub_extra.get("vless_domain")
-                if domain:
-                    domain = str(domain).strip().lower()
-                    if _FQDN_REGEX.match(domain):
-                        fragment = VlessSubscriptionService._build_vless_fragment(
-                            hub.country_flag,
-                            hub_extra.get("vless_name") or hub.name,
-                            hub_extra.get("server_description"),
-                        )
-                        link = (
-                            f"vless://{eff_uuid}@{domain}:{port}"
-                            f"?encryption=none&security=tls&sni={domain}&fp={fp}"
-                            f"&type=tcp&flow=xtls-rprx-vision#{fragment}"
-                        )
-                        if link not in seen_links:
-                            seen_links.add(link)
-                            links.append(link)
+                fragment = VlessSubscriptionService._build_vless_fragment(
+                    hub.country_flag,
+                    hub_extra.get("vless_name") or hub.name,
+                    hub_extra.get("server_description"),
+                )
+                link = (
+                    f"vless://{eff_uuid}@{domain}:{port}"
+                    f"?encryption=none&security=tls&sni={domain}&fp={fp}"
+                    f"&type=tcp&flow=xtls-rprx-vision#{fragment}"
+                )
+                if link not in seen_links:
+                    seen_links.add(link)
+                    links.append(link)
 
         return links
 
@@ -432,6 +407,7 @@ class VlessSubscriptionService:
                     path=base_path,
                     include_direct_hub=True,
                     cdn_type="cdn_yandex",
+                    client_uuid=client_uuid,
                 )
             )
         if turboflare_cdn:
@@ -442,6 +418,7 @@ class VlessSubscriptionService:
                     path=base_path,
                     include_direct_hub=True,
                     cdn_type="cdn_turboflare",
+                    client_uuid=client_uuid,
                 )
             )
         return links
@@ -511,6 +488,7 @@ class VlessSubscriptionService:
         version: int | None = None,
         sub_id: int | None = None,
         session: AsyncSession | None = None,
+        services: tuple[str, ...] = ("vless",),
     ) -> asyncio.Task | None:
         """Deprovision user UUID from nodes with post-commit dispatch if session is active."""
         async def _run() -> None:
@@ -522,7 +500,12 @@ class VlessSubscriptionService:
                     targets = cls._extract_node_targets(servers)
 
                 if targets:
-                    results = await cls._execute_deprovision_on_nodes(targets, old_uuid, version=version)
+                    results = await cls._execute_deprovision_on_nodes(
+                        targets,
+                        old_uuid,
+                        version=version,
+                        services=services,
+                    )
                     if (
                         sub_id
                         and servers
@@ -745,6 +728,7 @@ class VlessSubscriptionService:
         targets: list[tuple[int, str, str]],
         client_uuid: str,
         version: int | None = None,
+        services: tuple[str, ...] = ("vless",),
     ) -> dict[int, bool]:
         if not targets:
             return {}
@@ -754,30 +738,35 @@ class VlessSubscriptionService:
         ) -> tuple[int, bool]:
             try:
                 async with XrayNodeClient(timeout=5.0) as client:
-                    resp = await client.sync_client(
-                        api_url=api_url,
-                        api_key=api_key,
-                        client_uuid=client_uuid,
-                        is_active=False,
-                        version=version,
-                        idempotency_key=f"vless:deprov:{client_uuid}:{version}",
-                        service="vless",
-                    )
-                    verified = [
-                        ib.lower() for ib in resp.verified_inbounds if isinstance(ib, str)
-                    ] if resp.verified_inbounds else []
-                    has_vless = any("vless" in ib for ib in verified)
-                    if resp.result == "applied":
-                        return srv_id, has_vless and bool(resp.all_inbounds_verified)
-                    elif resp.result == "already_newer":
-                        actual_state = (resp.raw_data or {}).get("state")
-                        return srv_id, (
-                            has_vless
-                            and (actual_state == "disabled")
-                            and bool(resp.all_inbounds_verified)
+                    all_ok = True
+                    for svc in services:
+                        resp = await client.sync_client(
+                            api_url=api_url,
+                            api_key=api_key,
+                            client_uuid=client_uuid,
+                            is_active=False,
+                            version=version,
+                            idempotency_key=f"{svc}:deprov:{client_uuid}:{version}",
+                            service=svc,
                         )
-                    else:
-                        return srv_id, False
+                        verified = [
+                            ib.lower() for ib in resp.verified_inbounds if isinstance(ib, str)
+                        ] if resp.verified_inbounds else []
+                        inbound_ok = any("vless" in ib for ib in verified) if svc == "vless" else True
+                        if resp.result == "applied":
+                            svc_ok = inbound_ok and bool(resp.all_inbounds_verified)
+                        elif resp.result == "already_newer":
+                            actual_state = (resp.raw_data or {}).get("state")
+                            svc_ok = (
+                                inbound_ok
+                                and (actual_state == "disabled")
+                                and bool(resp.all_inbounds_verified)
+                            )
+                        else:
+                            svc_ok = False
+                        if not svc_ok:
+                            all_ok = False
+                    return srv_id, all_ok
             except Exception as exc:
                 masked_uuid = f"{client_uuid[:8]}***" if client_uuid else "unknown"
                 logger.warning(
@@ -970,7 +959,6 @@ class VlessSubscriptionService:
                         await session.execute(
                             select(UserDevice.user_id, UserDevice.device_uuid).where(
                                 UserDevice.user_id.in_(batch_user_ids),
-                                UserDevice.is_active.is_(True),
                                 UserDevice.device_uuid.is_not(None),
                             )
                         )
@@ -997,23 +985,23 @@ class VlessSubscriptionService:
             if sub_tasks:
                 from services.xray_node_client import get_xray_node_client
 
-                node_client = get_xray_node_client()
-                batch_payload = [
-                    {
-                        "uuid": cl_uuid,
-                        "email": cl_uuid,
-                        "is_active": True,
-                        "version": s_ver,
-                        "service": "vless",
-                    }
-                    for cl_uuid, s_ver, _u_id, _s_id in sub_tasks
-                ]
-                batch_supported, batch_succeeded, batch_failed = await node_client.batch_sync_clients(
-                    target[0][1], target[0][2], batch_payload
-                )
+                async with get_xray_node_client(timeout=60.0) as node_client:
+                    batch_payload = [
+                        {
+                            "uuid": cl_uuid,
+                            "email": cl_uuid,
+                            "is_active": True,
+                            "version": s_ver,
+                            "service": "vless",
+                        }
+                        for cl_uuid, s_ver, _u_id, _s_id in sub_tasks
+                    ]
+                    batch_supported, batch_succeeded, batch_failed = await node_client.batch_sync_clients(
+                        target[0][1], target[0][2], batch_payload
+                    )
 
                 succeeded_by_sub: dict[int, set[str]] = {}
-                if batch_supported:
+                if batch_supported and batch_succeeded:
                     for cl_uuid, _s_ver, _u_id, s_id in sub_tasks:
                         norm_uuid = str(cl_uuid).lower()
                         if norm_uuid in batch_succeeded and norm_uuid not in batch_failed:

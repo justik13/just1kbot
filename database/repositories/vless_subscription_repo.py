@@ -34,7 +34,7 @@ async def get_or_create_subscription(
         user_id=user_id,
         token=token,
         uuid=client_uuid,
-        is_active=True,
+        is_active=False,
         version=1,
         pending_revoked_uuids=[],
         node_traffic_snapshots={"_fresh": True},
@@ -127,16 +127,19 @@ async def rotate_token(
         raise ValueError(f"VlessSubscription {subscription_id} not found")
 
     token = secrets.token_urlsafe(32)
-    old_uuid = sub.uuid
-    new_uuid = str(uuid.uuid4())
+    old_uuid: str | None = None
+    new_uuid: str | None = None
     sub.token = token
-    sub.uuid = new_uuid
-    sub.version = (getattr(sub, "version", 1) or 1) + 1
-    sub.node_traffic_snapshots = {"_fresh": True}
-    pending = list(getattr(sub, "pending_revoked_uuids", None) or [])
-    if old_uuid and old_uuid not in pending:
-        pending.append(old_uuid)
-    sub.pending_revoked_uuids = pending
+    if reset_hwids:
+        old_uuid = sub.uuid
+        new_uuid = str(uuid.uuid4())
+        sub.uuid = new_uuid
+        sub.version = (getattr(sub, "version", 1) or 1) + 1
+        sub.node_traffic_snapshots = {"_fresh": True}
+        pending = list(getattr(sub, "pending_revoked_uuids", None) or [])
+        if old_uuid and old_uuid not in pending:
+            pending.append(old_uuid)
+        sub.pending_revoked_uuids = pending
     await session.flush()
     return token, old_uuid, new_uuid
 
@@ -318,6 +321,7 @@ async def record_vless_traffic_atomic(
     ):
         sub.traffic_up = (sub.traffic_up or 0) + delta_up
         sub.traffic_down = (sub.traffic_down or 0) + delta_down
+        snapshots.pop("_fresh", None)
         snapshots[snap_key] = {
             "epoch": str_epoch,
             "up": current_up,

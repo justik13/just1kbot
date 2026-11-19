@@ -344,7 +344,7 @@ class SubscriptionService:
 
         from database.repositories import vless_subscription_repo
 
-        vless_sub, _ = await vless_subscription_repo.get_or_create_subscription(session, user.id)
+        vless_sub = await vless_subscription_repo.get_or_create_subscription(session, user.id)
         now = now_utc()
 
         had_active_subscription = bool(
@@ -392,5 +392,13 @@ class SubscriptionService:
                 vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1
                 session.add(vless_sub)
                 VlessSubscriptionService.ensure_synced_background(user.id, is_active=vless_target_active, session=session)
+
+        if user and (user.is_deleted or user.financial_hold):
+            from services.white_internet_service import WhiteInternetService
+            await WhiteInternetService.deactivate_user_subscriptions(
+                session,
+                user.id,
+                reason="financial_hold" if user.financial_hold else "user_deleted",
+            )
 
         await session.flush()

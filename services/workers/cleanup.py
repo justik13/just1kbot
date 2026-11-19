@@ -32,7 +32,7 @@ OLD_RECORDS_INTERVAL = 86400.0
 AUDIT_LOG_RETENTION_DAYS = 180
 WEBHOOK_INBOX_RETENTION_DAYS = 30
 
-_last_heavy_cleanup: float = 0.0
+_last_heavy_cleanup: float | None = None
 _last_old_cleanup: float = 0.0
 _pending_order_backoff_cache: TTLCache[Any, float] = TTLCache(maxsize=2000, ttl=300.0)
 
@@ -57,7 +57,7 @@ async def cleanup_expired_subscriptions_loop(
     while not event.is_set():
         try:
             now = time.monotonic()
-            if now - _last_heavy_cleanup >= CLEANUP_LOOP_INTERVAL:
+            if _last_heavy_cleanup is None or (now - _last_heavy_cleanup) >= CLEANUP_LOOP_INTERVAL:
                 await _cleanup_expired_vless_network_grace()
                 await _sweep_vless_pending_revocations()
                 await _apply_due_white_internet_downgrades()
@@ -466,12 +466,12 @@ async def _reconcile_stale_pending_orders() -> None:
             )
 
     # 3. Expire orphaned pending orders without external_id (> 30 min old)
-    # and ancient pending orders (> 24 hours old) in a bounded transaction
+    # and ancient pending orders (> 24 hours old) after checking gateway if external_id exists.
     try:
         ambiguous_threshold = now - timedelta(minutes=30)
         async with session_scope() as session:
             expired_stmt = (
-                select(Order)
+                select(Order.id, Order.external_id, Order.payment_method)
                 .where(
                     Order.status == "pending",
                     or_(
@@ -484,19 +484,48 @@ async def _reconcile_stale_pending_orders() -> None:
                 )
                 .order_by(Order.created_at.asc())
                 .limit(50)
-                .with_for_update(skip_locked=True)
             )
-            expired_res = await session.execute(expired_stmt)
-            expired_orders = list(expired_res.scalars().all())
-            for exp_order in expired_orders:
-                reason = "ambiguous_creation_timeout" if exp_order.external_id is None else "order_expired_24h"
-                OrderService.mark_order_canceled(exp_order, reason=reason)
-                await OrderService.refund_reserved_mixed_debit(session, exp_order)
-                logger.info(
-                    "Reconciliation expired pending order %s (reason=%s)",
-                    exp_order.id,
-                    reason,
+            expired_candidates = list((await session.execute(expired_stmt)).all())
+
+        for exp_id, exp_ext_id, exp_pm in expired_candidates:
+            paid_status = None
+            if exp_ext_id:
+                try:
+                    gateway = get_payment_gateway(exp_pm)
+                    status_res = await gateway.check_payment_status(exp_ext_id)
+                    if status_res.is_paid:
+                        paid_status = status_res
+                except Exception as gw_exc:
+                    logger.warning(
+                        "Gateway check before expiry failed for order %s: %s; skipping expiry",
+                        exp_id,
+                        gw_exc,
+                    )
+                    continue
+
+            async with session_scope() as order_session:
+                exp_order = await order_session.scalar(
+                    select(Order).where(Order.id == exp_id).with_for_update(skip_locked=True)
                 )
+                if not exp_order or exp_order.status != "pending":
+                    continue
+                if paid_status is not None:
+                    await OrderService.mark_order_paid(
+                        order_session,
+                        exp_order.id,
+                        external_id=exp_ext_id,
+                        paid_amount_rub=paid_status.amount_rub,
+                    )
+                    logger.info("Reconciliation settled 24h+ pending order %s before expiry", exp_order.id)
+                else:
+                    reason = "ambiguous_creation_timeout" if not exp_order.external_id else "order_expired_24h"
+                    OrderService.mark_order_canceled(exp_order, reason=reason)
+                    await OrderService.refund_reserved_mixed_debit(order_session, exp_order)
+                    logger.info(
+                        "Reconciliation expired pending order %s (reason=%s)",
+                        exp_order.id,
+                        reason,
+                    )
     except Exception as exc:
         logger.error("Error expiring ancient pending orders: %s", exc)
 

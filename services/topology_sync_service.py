@@ -51,12 +51,23 @@ def _extract_ipv4(server: Server) -> str | None:
             if ip_obj.version == 4:
                 return cand
         except ValueError:
-            try:
-                resolved = socket.gethostbyname(cand)
+            pass
+    return None
+
+
+async def _extract_ipv4_async(server: Server) -> str | None:
+    ip = _extract_ipv4(server)
+    if ip:
+        return ip
+    if server.api_url:
+        try:
+            cand = str(urlsplit(server.api_url).hostname or "").strip()
+            if cand:
+                resolved = await asyncio.to_thread(socket.gethostbyname, cand)
                 if resolved:
                     return resolved
-            except Exception as exc:
-                logger.debug("DNS resolution failed for %s: %s", cand, exc)
+        except Exception as exc:
+            logger.debug("DNS resolution failed for server %s: %s", getattr(server, "id", "?"), exc)
     return None
 
 
@@ -179,6 +190,7 @@ def build_v2_topology_links(servers: list[Server]) -> dict[int, dict[str, Any]]:
             r_uid = _deterministic_route_uuid(eu.id, ex.id, eu_uid)
             routes_specs.append({
                 "code": loc_code,
+                "exit_id": str(ex.id),
                 "ingress_uuid": r_uid,
                 "route_user": f"route-{loc_code}@just1k",
                 "exit_code": loc_code,
@@ -192,10 +204,8 @@ def build_v2_topology_links(servers: list[Server]) -> dict[int, dict[str, Any]]:
 
     for rh in active_ru:
         std_bridges: list[dict[str, Any]] = []
-        std_sni_routes: list[dict[str, str]] = []
         bi_bridges: list[dict[str, Any]] = []
         bi_locations: list[dict[str, str]] = []
-        seen_std_sni: set[str] = set()
         seen_bi_locs: set[str] = set()
 
         multi_eu = len(valid_eu) > 1
@@ -214,10 +224,6 @@ def build_v2_topology_links(servers: list[Server]) -> dict[int, dict[str, Any]]:
                         "uuid": r_uid,
                         "is_default": len(std_bridges) == 0,
                     })
-                    std_sni = str(ex_extra.get("std_sni") or "").strip().lower().rstrip(".")
-                    if std_sni and "." in std_sni and std_sni not in seen_std_sni:
-                        seen_std_sni.add(std_sni)
-                        std_sni_routes.append({"sni": std_sni, "bridge_code": loc_code})
                 if bool(ex_extra.get("in_white_internet", False)):
                     bi_bridges.append({
                         "code": bridge_id,
@@ -235,7 +241,6 @@ def build_v2_topology_links(servers: list[Server]) -> dict[int, dict[str, Any]]:
         payloads[rh.id] = {
             "standard": {
                 "bridges": std_bridges,
-                "sni_routes": std_sni_routes,
             },
             "bi": {
                 "bridges": bi_bridges,
@@ -249,19 +254,25 @@ def build_v2_topology_links(servers: list[Server]) -> dict[int, dict[str, Any]]:
 async def sync_v2_topology_to_nodes(session: AsyncSession) -> dict[int, bool]:
     """Compute and push v2 links.json to all active v2 nodes via PUT /v1/node/links."""
     servers = await get_all_servers(session)
+    for srv in servers:
+        if srv.is_active and srv.health_state == ServerHealthState.ONLINE and not _extract_ipv4(srv):
+            ip_res = await _extract_ipv4_async(srv)
+            if ip_res:
+                extra = dict(srv.extra_data or {})
+                extra["ip"] = ip_res
+                srv.extra_data = extra
     payloads = build_v2_topology_links(servers)
-    if not payloads:
-        return {}
 
-    srv_by_id = {s.id: s for s in servers}
     targets: list[tuple[int, str, str, dict[str, Any]]] = []
-    for srv_id, payload in payloads.items():
-        srv = srv_by_id.get(srv_id)
-        if not srv:
+    for srv in servers:
+        if not srv.is_active or srv.health_state != ServerHealthState.ONLINE:
             continue
+        if srv.lifecycle_status not in (None, ServerLifecycleStatus.ACTIVE):
+            continue
+        payload = payloads.get(srv.id, {})
         api_url = get_server_xray_api_url(srv)
         if api_url and srv.api_key:
-            targets.append((srv_id, api_url, srv.api_key, payload))
+            targets.append((srv.id, api_url, srv.api_key, payload))
 
     if not targets:
         return {}
