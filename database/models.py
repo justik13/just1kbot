@@ -289,7 +289,7 @@ class AccountLedgerEntry(Base):
             name="ck_account_ledger_whole_nonzero_amount",
         ),
         CheckConstraint(
-            "(entry_type = 'payment_credit' AND amount > 0) OR "
+            "(entry_type = 'payment_credit' AND bucket = 'real' AND amount > 0) OR "
             "(entry_type = 'purchase_debit' AND amount < 0 AND order_id IS NOT NULL) OR "
             "(entry_type = 'refund_debit' AND amount < 0 AND order_id IS NOT NULL AND bucket = 'real') OR "
             "(entry_type = 'admin_adjustment' AND bucket = 'bonus')",
@@ -470,12 +470,6 @@ class WhiteInternetSubscription(Base):
         nullable=False,
         index=True,
     )
-    hub_server_id: Mapped[int | None] = mapped_column(
-        Integer,
-        ForeignKey("servers.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
 
     token: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
     uuid: Mapped[str] = mapped_column(String(36), unique=True, nullable=False)
@@ -524,14 +518,9 @@ class WhiteInternetSubscription(Base):
     traffic_overage_bytes: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default=text("0")
     )
-    last_uplink_snapshot: Mapped[int] = mapped_column(
-        BigInteger, nullable=False, default=0, server_default=text("0")
+    node_traffic_snapshots: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
     )
-    last_downlink_snapshot: Mapped[int] = mapped_column(
-        BigInteger, nullable=False, default=0, server_default=text("0")
-    )
-
-    traffic_stats_epoch: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     device_limit: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default=text("1")
@@ -556,7 +545,12 @@ class WhiteInternetSubscription(Base):
     actual_version: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default=text("0")
     )
-    last_reconciled_node_epoch: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    node_sync_state: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
+    pending_revoked_uuids: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
 
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -589,63 +583,6 @@ class WhiteInternetSubscription(Base):
     )
 
     user = relationship("User", foreign_keys=[user_id])
-    hub_server = relationship("Server", foreign_keys=[hub_server_id])
-
-
-class WhiteInternetOrphanCleanup(Base):
-    """Durable outbox for disabling a client UUID on a former hub server (ru_hub).
-
-    Inserted in the same transaction as a renew migration that moves a
-    subscription to a new hub server. The reconciliation worker claims pending rows
-    (FOR UPDATE SKIP LOCKED) and converges the old node to disabled, so a lost
-    fire-and-forget task or a process restart can never silently orphan an
-    active credential on the old node.
-    """
-
-    __tablename__ = "white_internet_orphan_cleanups"
-
-    __table_args__ = (
-        CheckConstraint(
-            "status IN ('pending', 'done')",
-            name="ck_white_internet_orphan_cleanups_status",
-        ),
-        Index(
-            "ix_wi_orphan_cleanups_pending",
-            "id",
-            postgresql_where=text("status = 'pending'"),
-        ),
-    )
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-
-    server_id: Mapped[int | None] = mapped_column(
-        Integer,
-        ForeignKey("servers.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
-    client_uuid: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
-    desired_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    attempts: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0, server_default=text("0")
-    )
-    status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="pending", server_default=text("'pending'")
-    )
-    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()")
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=now_utc,
-        onupdate=now_utc,
-        server_default=text("now()"),
-    )
-
-    server = relationship("Server", foreign_keys=[server_id])
 
 
 class VlessSubscription(Base):
@@ -680,7 +617,7 @@ class VlessSubscription(Base):
     uuid: Mapped[str] = mapped_column(String(36), unique=True, nullable=False, index=True)
 
     is_active: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=True, server_default=text("true")
+        Boolean, nullable=False, default=False, server_default=text("false")
     )
     expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

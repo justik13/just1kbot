@@ -32,8 +32,6 @@ from config.constants import (
     XRAY_PROTOCOL,
 )
 from config.enums import (
-    ServerHealthState,
-    ServerLifecycleStatus,
     WhiteInternetProvisioningStatus,
     WhiteInternetStatus,
 )
@@ -137,15 +135,16 @@ class WhiteInternetService:
 
     @staticmethod
     async def select_hub_node(session: AsyncSession) -> Server:
-        server = await servers_repo.allocate_wi_hub_atomic(session)
-        if server is None:
+        hubs = await servers_repo.get_wi_capable_ru_hubs(session)
+        if not hubs:
             raise RuntimeError(
                 "No healthy server with white_internet capability and available capacity is available."
             )
-        return server
+        return hubs[0]
 
-    # Backward alias
-    select_origin_node = select_hub_node
+    @staticmethod
+    async def get_hub_nodes(session: AsyncSession) -> list[Server]:
+        return await servers_repo.get_wi_capable_ru_hubs(session)
 
     @staticmethod
     def calculate_wi_add_slot_quote(
@@ -186,20 +185,22 @@ class WhiteInternetService:
         now = now_utc()
         if existing is not None:
             if existing.status == WhiteInternetStatus.DISABLED:
-                return False, texts.WL_SUB_DISABLED, existing
-            if (
+                # Previous subscription was disabled (e.g. refund/admin revoke); allow buying a fresh one
+                existing = None
+            elif (
                 getattr(existing, "provisioning_status", None)
                 == WhiteInternetProvisioningStatus.PENDING_DELETE
             ):
                 return False, texts.WL_DEACTIVATION_PENDING, existing
-            if existing.status in (
+            elif existing.status in (
                 WhiteInternetStatus.PENDING,
                 WhiteInternetStatus.ACTIVE,
                 WhiteInternetStatus.EXHAUSTED,
             ) and existing.expires_at and existing.expires_at > now:
                 return False, texts.WL_ALREADY_ACTIVE, existing
-            # Existing subscription routes to renew_subscription to preserve UUID and token
-            return await cls.renew_subscription(session, user_id)
+            else:
+                # Existing expired subscription routes to renew_subscription to preserve UUID and token
+                return await cls.renew_subscription(session, user_id, target_device_limit=device_limit)
 
         # Pre-Debit Validation: verify mandatory tariff quota BEFORE touching ledger
         if not WHITE_INTERNET_BASE_TRAFFIC_BYTES or WHITE_INTERNET_BASE_TRAFFIC_BYTES <= 0:
@@ -207,44 +208,46 @@ class WhiteInternetService:
                 "White Internet tariff missing mandatory base_quota_bytes"
             )
 
-        try:
-            hub_node = await cls.select_hub_node(session)
-        except RuntimeError as exc:
-            logger.warning("No available hub node for white internet purchase: %s", exc)
+        hub_nodes = await cls.get_hub_nodes(session)
+        if not hub_nodes:
+            logger.warning("No available hub node for white internet purchase")
             return False, texts.WL_NO_SERVERS_AVAILABLE, None
 
         clamped_devices = max(1, min(WHITE_INTERNET_MAX_DEVICE_LIMIT, int(device_limit)))
-        tier_price = get_white_internet_tier_price(clamped_devices)
         base_bytes = clamped_devices * WHITE_INTERNET_BASE_TRAFFIC_BYTES
 
         sub = await white_internet_repo.create_white_internet_subscription(
             session,
             user_id=user.id,
-            hub_server_id=hub_node.id,
             token=secrets.token_hex(32),
             uuid=str(uuid.uuid4()),
-            price_rub=tier_price,
             duration_days=WHITE_INTERNET_BASE_DURATION_DAYS,
             base_bytes=base_bytes,
             device_limit=clamped_devices,
         )
-        # Commit DB state before executing external network sync.
-        # This durably persists user debit, order, and subscription in PostgreSQL
-        # and releases all SELECT FOR UPDATE row locks (Server, User) so concurrent
-        # operations are not blocked during external network I/O.
-        # If commit fails, we fail-closed immediately WITHOUT mutating Xray.
-        await session.commit()
+        await session.flush()
 
-        await cls._try_inline_sync(
-            session, sub, hub_node, idempotency_key=f"purchase:{sub.id}:1:True"
-        )
+        from database.connection import queue_post_commit_task
+
+        sub_id = sub.id
+        target_hubs = [(h.id, h.api_url, h.api_key, h.xray_instance_epoch) for h in hub_nodes if h.api_url and h.api_key]
+
+        async def _post_commit_sync() -> None:
+            from database.connection import session_scope
+            async with session_scope() as bg_sess:
+                bg_sub = await white_internet_repo.get_subscription_by_id(bg_sess, sub_id)
+                if bg_sub is not None:
+                    await cls._try_inline_sync_multi(
+                        bg_sess, bg_sub, target_hubs, idempotency_key=f"purchase:{sub_id}:1:True"
+                    )
+
+        queue_post_commit_task(session, _post_commit_sync)
         logger.info(
-            "White Internet subscription purchased: user_id=%s, sub_id=%s, days=%s, devices=%s, node_id=%s",
+            "White Internet subscription purchased: user_id=%s, sub_id=%s, days=%s, devices=%s",
             user.id,
             sub.id,
             WHITE_INTERNET_BASE_DURATION_DAYS,
             clamped_devices,
-            hub_node.id,
         )
         return True, texts.WL_BUY_SUCCESS, sub
 
@@ -266,25 +269,6 @@ class WhiteInternetService:
         if sub.status == WhiteInternetStatus.PENDING:
             return False, texts.WL_SUB_NOT_READY, None
 
-        # Validate hub node health & availability before debiting funds
-        hub_node = await session.scalar(
-            select(Server).where(
-                Server.id == sub.hub_server_id,
-                Server.protocol.in_([XRAY_PROTOCOL, VLESS_PROTOCOL]),
-            )
-        )
-        needs_migration = (
-            not hub_node
-            or not hub_node.is_active
-            or hub_node.health_state != ServerHealthState.ONLINE
-            or hub_node.lifecycle_status != ServerLifecycleStatus.ACTIVE
-            or not (
-                (hub_node.extra_data or {}).get("xhttp_locations")
-                or (hub_node.extra_data or {}).get("cdn_domains")
-                or (hub_node.extra_data or {}).get("cdn_domain")
-            )
-        )
-        new_hub_server: Server | None = None
         if (
             getattr(sub, "provisioning_status", None)
             == WhiteInternetProvisioningStatus.PENDING_DELETE
@@ -297,12 +281,10 @@ class WhiteInternetService:
                 "White Internet tariff missing mandatory base_quota_bytes"
             )
 
-        if needs_migration:
-            try:
-                new_hub_server = await cls.select_hub_node(session)
-            except RuntimeError as exc:
-                logger.warning("No alternative hub node for white internet renewal migration: %s", exc)
-                return False, texts.WL_NO_SERVERS_AVAILABLE, None
+        hub_nodes = await cls.get_hub_nodes(session)
+        if not hub_nodes:
+            logger.warning("No available hub node for white internet renewal")
+            return False, texts.WL_NO_SERVERS_AVAILABLE, None
 
         now = now_utc()
         base_time = sub.expires_at if sub.expires_at and sub.expires_at > now else now
@@ -320,19 +302,6 @@ class WhiteInternetService:
         tier_price = get_white_internet_tier_price(sub_device_limit)
         tier_base_bytes = sub_device_limit * WHITE_INTERNET_BASE_TRAFFIC_BYTES
 
-        # Apply node migration ONLY after successful financial debit
-        old_hub_for_cleanup: Server | None = None
-        if needs_migration and new_hub_server is not None:
-            old_hub_for_cleanup = hub_node
-            sub.hub_server_id = new_hub_server.id
-            sub.actual_version = 0
-            sub.last_reconciled_node_epoch = None
-            sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_CREATE
-            await session.flush()
-            await white_internet_repo.cancel_pending_orphan_cleanups_for_client(
-                session, new_hub_server.id, sub.uuid
-            )
-
         renewed = await white_internet_repo.renew_subscription_atomic(
             session,
             subscription_id=sub.id,
@@ -342,36 +311,13 @@ class WhiteInternetService:
             target_device_limit=target_device_limit,
         )
 
-        # Durable deprovisioning of UUID on old hub node: record the cleanup
-        # in the same transaction (survives crashes/restarts), then accelerate
-        # with a best-effort background dispatch. The reconciliation worker
-        # sweeps any row the dispatch misses, so no active credential orphans.
-        if old_hub_for_cleanup:
-            await white_internet_repo.enqueue_orphan_cleanup(
-                session,
-                server_id=old_hub_for_cleanup.id,
-                client_uuid=sub.uuid,
-                desired_version=sub.desired_version + 1,
-            )
-
         await session.flush()
 
-        if old_hub_for_cleanup:
-            _dispatch_deprovision(
-                old_hub_for_cleanup,
-                client_uuid=sub.uuid,
-                version=sub.desired_version + 1,
-                context=f"renew sub {sub.id}",
-                session=session,
-            )
-
-
         logger.info(
-            "White Internet subscription renewed: user_id=%s, sub_id=%s, days=%s, node_id=%s",
+            "White Internet subscription renewed: user_id=%s, sub_id=%s, days=%s",
             user.id,
             renewed.id,
             WHITE_INTERNET_BASE_DURATION_DAYS,
-            renewed.hub_server_id,
         )
         return True, texts.WL_RENEW_SUCCESS, renewed
 
@@ -407,73 +353,20 @@ class WhiteInternetService:
         if current_limit >= WHITE_INTERNET_MAX_DEVICE_LIMIT:
             return False, texts.WL_DEVICE_LIMIT_MAX_REACHED, None
 
-        # Pre-Debit Validation: validate hub node health & availability before debiting funds
-        hub_node = await session.scalar(
-            select(Server).where(
-                Server.id == sub.hub_server_id,
-                Server.protocol.in_([XRAY_PROTOCOL, VLESS_PROTOCOL]),
-            )
-        )
-        needs_migration = (
-            not hub_node
-            or not hub_node.is_active
-            or hub_node.health_state != ServerHealthState.ONLINE
-            or hub_node.lifecycle_status != ServerLifecycleStatus.ACTIVE
-            or not (
-                (hub_node.extra_data or {}).get("xhttp_locations")
-                or (hub_node.extra_data or {}).get("cdn_domains")
-                or (hub_node.extra_data or {}).get("cdn_domain")
-            )
-        )
-        new_hub_server: Server | None = None
-        if needs_migration:
-            try:
-                new_hub_server = await cls.select_hub_node(session)
-            except RuntimeError as exc:
-                logger.warning("No healthy hub node available for device slot migration: %s", exc)
-                return False, texts.WL_NO_SERVERS_AVAILABLE, None
+        hub_nodes = await cls.get_hub_nodes(session)
+        if not hub_nodes:
+            logger.warning("No healthy hub node available for device slot")
+            return False, texts.WL_NO_SERVERS_AVAILABLE, None
 
         price, gb_added = cls.calculate_wi_add_slot_quote(sub.expires_at, now=now)
         added_bytes = extra_bytes if extra_bytes is not None else gb_added * (1024**3)
-
-        # Apply node migration ONLY after successful financial debit
-        old_hub_for_cleanup: Server | None = None
-        if needs_migration and new_hub_server is not None:
-            old_hub_for_cleanup = hub_node
-            sub.hub_server_id = new_hub_server.id
-            sub.actual_version = 0
-            sub.last_reconciled_node_epoch = None
-            sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_CREATE
-            await session.flush()
-            await white_internet_repo.cancel_pending_orphan_cleanups_for_client(
-                session, new_hub_server.id, sub.uuid
-            )
 
         updated_sub = await white_internet_repo.add_device_slot_atomic(
             session,
             subscription_id=sub.id,
             extra_bytes=added_bytes,
         )
-
-        if old_hub_for_cleanup:
-            await white_internet_repo.enqueue_orphan_cleanup(
-                session,
-                server_id=old_hub_for_cleanup.id,
-                client_uuid=sub.uuid,
-                desired_version=sub.desired_version + 1,
-            )
-
         await session.flush()
-
-        if old_hub_for_cleanup:
-            _dispatch_deprovision(
-                old_hub_for_cleanup,
-                client_uuid=sub.uuid,
-                version=sub.desired_version + 1,
-                context=f"add_device_slot sub {sub.id}",
-                session=session,
-            )
-
 
         logger.info(
             "White Internet device slot purchased: user_id=%s, sub_id=%s, new_limit=%s",
@@ -514,31 +407,10 @@ class WhiteInternetService:
         if sub.status == WhiteInternetStatus.EXPIRED or (sub.expires_at and sub.expires_at <= now):
             return False, texts.WL_SUB_EXPIRED, None
 
-        # Pre-Debit Validation: validate hub node health & availability before debiting funds
-        hub_node = await session.scalar(
-            select(Server).where(
-                Server.id == sub.hub_server_id,
-                Server.protocol.in_([XRAY_PROTOCOL, VLESS_PROTOCOL]),
-            )
-        )
-        needs_migration = (
-            not hub_node
-            or not hub_node.is_active
-            or hub_node.health_state != ServerHealthState.ONLINE
-            or hub_node.lifecycle_status != ServerLifecycleStatus.ACTIVE
-            or not (
-                (hub_node.extra_data or {}).get("xhttp_locations")
-                or (hub_node.extra_data or {}).get("cdn_domains")
-                or (hub_node.extra_data or {}).get("cdn_domain")
-            )
-        )
-        new_hub_server: Server | None = None
-        if needs_migration:
-            try:
-                new_hub_server = await cls.select_hub_node(session)
-            except RuntimeError as exc:
-                logger.warning("No healthy hub node available for topup migration: %s", exc)
-                return False, texts.WL_NO_SERVERS_AVAILABLE, None
+        hub_nodes = await cls.get_hub_nodes(session)
+        if not hub_nodes:
+            logger.warning("No healthy hub node available for topup")
+            return False, texts.WL_NO_SERVERS_AVAILABLE, None
 
         pack_bytes = pack_gb * 1024 * 1024 * 1024
         effective_devices = _effective_device_limit(sub)
@@ -553,19 +425,6 @@ class WhiteInternetService:
                 None,
             )
 
-        # Apply node migration ONLY after successful financial debit
-        old_hub_for_cleanup: Server | None = None
-        if needs_migration and new_hub_server is not None:
-            old_hub_for_cleanup = hub_node
-            sub.hub_server_id = new_hub_server.id
-            sub.actual_version = 0
-            sub.last_reconciled_node_epoch = None
-            sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_CREATE
-            await session.flush()
-            await white_internet_repo.cancel_pending_orphan_cleanups_for_client(
-                session, new_hub_server.id, sub.uuid
-            )
-
         grant = await white_internet_repo.topup_quota_atomic(
             session,
             subscription_id=sub.id,
@@ -573,24 +432,7 @@ class WhiteInternetService:
             price_rub=pack_price,
         )
 
-        if old_hub_for_cleanup:
-            await white_internet_repo.enqueue_orphan_cleanup(
-                session,
-                server_id=old_hub_for_cleanup.id,
-                client_uuid=sub.uuid,
-                desired_version=sub.desired_version + 1,
-            )
-
         await session.flush()
-
-        if old_hub_for_cleanup:
-            _dispatch_deprovision(
-                old_hub_for_cleanup,
-                client_uuid=sub.uuid,
-                version=sub.desired_version + 1,
-                context=f"topup sub {sub.id}",
-                session=session,
-            )
 
 
         logger.info(
@@ -768,6 +610,78 @@ class WhiteInternetService:
         return False
 
     @classmethod
+    async def _try_inline_sync_multi(
+        cls,
+        session: AsyncSession,
+        sub: WhiteInternetSubscription,
+        target_hubs: list[tuple[int, str, str, str | None]],
+        *,
+        idempotency_key: str,
+    ) -> bool:
+        """Best-effort inline sync across all active WI ru_hub nodes."""
+        if not target_hubs:
+            return False
+        from database.models import UserDevice
+        from sqlalchemy.orm.attributes import flag_modified
+
+        dev_rows = (
+            await session.scalars(
+                select(UserDevice.device_uuid).where(
+                    UserDevice.user_id == sub.user_id,
+                    UserDevice.device_uuid.is_not(None),
+                )
+            )
+        ).all()
+        all_uuids = list(dict.fromkeys([sub.uuid, *[str(u) for u in dev_rows if u]]))
+        target_version = sub.desired_version or 1
+        node_sync_state = dict(getattr(sub, "node_sync_state", None) or {})
+        all_ok = True
+
+        try:
+            async with XrayNodeClient(timeout=4.0) as xray_client:
+                for srv_id, api_url, api_key, node_epoch in target_hubs:
+                    hub_ok = True
+                    for c_uuid in all_uuids:
+                        try:
+                            resp = await xray_client.sync_client(
+                                api_url,
+                                api_key,
+                                client_uuid=c_uuid,
+                                is_active=True,
+                                version=target_version,
+                                expected_node_epoch=node_epoch,
+                                idempotency_key=f"{idempotency_key}:{srv_id}:{c_uuid}",
+                                service="white_internet",
+                            )
+                            sync_res = resp.result if hasattr(resp, "result") else resp[0]
+                            if sync_res not in (SyncResult.APPLIED, SyncResult.ALREADY_NEWER):
+                                hub_ok = False
+                        except Exception as exc:
+                            logger.warning("Inline WI sync failed for %s on hub %s: %s", c_uuid, srv_id, exc)
+                            hub_ok = False
+                    if hub_ok:
+                        node_sync_state[str(srv_id)] = {
+                            "version": target_version,
+                            "epoch": node_epoch or "",
+                        }
+                    else:
+                        all_ok = False
+        except Exception as exc:
+            logger.warning("Inline multi-hub WI sync error: %s", exc)
+            all_ok = False
+
+        sub.node_sync_state = node_sync_state
+        flag_modified(sub, "node_sync_state")
+        if all_ok:
+            sub.actual_version = target_version
+            if (sub.desired_version or 1) == target_version:
+                sub.status = WhiteInternetStatus.ACTIVE
+                sub.provisioning_status = WhiteInternetProvisioningStatus.ACTIVE
+            sub.last_synced_at = now_utc()
+        await session.flush()
+        return all_ok
+
+    @classmethod
     async def deactivate_user_subscriptions(
         cls,
         session: AsyncSession,
@@ -776,7 +690,7 @@ class WhiteInternetService:
         *,
         target_subscription_id: int | None = None,
     ) -> list[WhiteInternetSubscription]:
-        """Deactivate and deprovision White Internet subscriptions for a user (e.g. on ban or refund)."""
+        """Deactivate and deprovision White Internet subscriptions across ALL WI ru_hub nodes."""
         stmt = (
             select(WhiteInternetSubscription)
             .where(
@@ -800,13 +714,20 @@ class WhiteInternetService:
 
         await session.flush()
 
-        from database.repositories import user_devices_repo
+        from database.models import UserDevice
 
-        dev_uuids = await user_devices_repo.get_active_device_uuids(session, user_id)
+        dev_uuids = (
+            await session.scalars(
+                select(UserDevice.device_uuid).where(
+                    UserDevice.user_id == user_id,
+                    UserDevice.device_uuid.is_not(None),
+                )
+            )
+        ).all()
+        hubs = await servers_repo.get_wi_capable_ru_hubs(session)
         for sub in deactivated:
-            if sub.hub_server_id:
-                hub_server = await session.get(Server, sub.hub_server_id)
-                for target_uuid in {sub.uuid, *dev_uuids}:
+            for hub_server in hubs:
+                for target_uuid in {sub.uuid, *[str(u) for u in dev_uuids if u]}:
                     _dispatch_deprovision(
                         hub_server,
                         client_uuid=target_uuid,
@@ -840,24 +761,29 @@ class WhiteInternetService:
                 session, sub.id, days
             )
         except white_internet_repo.WhiteInternetError as exc:
-            await session.rollback()
             return False, str(exc), None
 
-        # Commit DB state before executing external network sync.
-        # This durably persists the extended expiration in PostgreSQL
-        # and releases the SELECT FOR UPDATE row lock so concurrent operations
-        # are not blocked during external network I/O.
-        await session.commit()
+        hub_nodes = await cls.get_hub_nodes(session)
+        if hub_nodes:
+            from database.connection import queue_post_commit_task
 
-        if sub.hub_server_id:
-            hub_node = await session.get(Server, sub.hub_server_id)
-            if hub_node and hub_node.is_active:
-                await cls._try_inline_sync(
-                    session,
-                    sub,
-                    hub_node,
-                    idempotency_key=f"admin_extend:{sub.id}:{sub.desired_version}:{days}",
-                )
+            sub_id = sub.id
+            ver = sub.desired_version
+            target_hubs = [(h.id, h.api_url, h.api_key, h.xray_instance_epoch) for h in hub_nodes if h.api_url and h.api_key]
+
+            async def _post_extend_sync() -> None:
+                from database.connection import session_scope
+                async with session_scope() as bg_sess:
+                    bg_sub = await white_internet_repo.get_subscription_by_id(bg_sess, sub_id)
+                    if bg_sub is not None:
+                        await cls._try_inline_sync_multi(
+                            bg_sess,
+                            bg_sub,
+                            target_hubs,
+                            idempotency_key=f"admin_extend:{sub_id}:{ver}:{days}",
+                        )
+
+            queue_post_commit_task(session, _post_extend_sync)
 
         return True, "ok", sub
 

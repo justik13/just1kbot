@@ -203,6 +203,8 @@ export function renderAdminFinancesView(root, state) {
     }
 
     if (typeof state.paymentsMaintenance === "undefined") {
+        const initBtn = root.querySelector("#togglePaymentsMaintBtn");
+        if (initBtn) initBtn.disabled = true;
         api.getPaymentsMaintenance().then((res) => {
             state.paymentsMaintenance = !!res.enabled;
             const badge = root.querySelector("#paymentsMaintBadge");
@@ -212,6 +214,7 @@ export function renderAdminFinancesView(root, state) {
                 badge.textContent = state.paymentsMaintenance ? "ВКЛЮЧЕНЫ (оплата заблокирована)" : "ВЫКЛЮЧЕНЫ (оплата активна)";
                 btn.className = `btn ${state.paymentsMaintenance ? "btn-secondary" : "btn-danger"}`;
                 btn.textContent = state.paymentsMaintenance ? "Включить приём платежей" : "Приостановить платежи";
+                btn.disabled = false;
             }
         }).catch(() => {});
     }

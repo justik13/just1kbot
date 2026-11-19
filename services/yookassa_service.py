@@ -103,6 +103,34 @@ class YooKassaService:
         ambiguous_on_failure: bool = False,
         timeout: aiohttp.ClientTimeout | None = None,
     ) -> YooKassaResult[dict]:
+        can_retry = (method == "GET") or bool(idempotency_key)
+        max_attempts = 3 if can_retry else 1
+        last_res: YooKassaResult[dict] | None = None
+        for attempt in range(max_attempts):
+            last_res = await cls._request_once(
+                method,
+                path,
+                payload=payload,
+                idempotency_key=idempotency_key,
+                ambiguous_on_failure=ambiguous_on_failure,
+                timeout=timeout,
+            )
+            if last_res.ok or not last_res.retryable or attempt + 1 >= max_attempts:
+                return last_res
+            await asyncio.sleep(0.5 * (2**attempt))
+        return last_res  # pragma: no cover
+
+    @classmethod
+    async def _request_once(
+        cls,
+        method: str,
+        path: str,
+        *,
+        payload: dict | None = None,
+        idempotency_key: str | None = None,
+        ambiguous_on_failure: bool = False,
+        timeout: aiohttp.ClientTimeout | None = None,
+    ) -> YooKassaResult[dict]:
         settings = get_settings()
         shop = settings.YOOKASSA_SHOP_ID
         secret = settings.YOOKASSA_SECRET_KEY

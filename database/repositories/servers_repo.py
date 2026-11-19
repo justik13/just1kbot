@@ -206,6 +206,7 @@ def merge_v2_extra_data(
 
 class ServerUpdateFields(TypedDict, total=False):
     name: str
+    role: str
     country_flag: str | None
     api_url: str
     api_key: str
@@ -240,6 +241,7 @@ HEALTH_UPDATE_FIELDS = {
     "consecutive_fails",
     "consecutive_successes",
     "last_alert_sent_state",
+    "capabilities",
     "extra_data",
 }
 
@@ -281,101 +283,27 @@ def capacity_consuming_wl_condition():
     )
 
 
-async def get_wi_hub_subscription_counts(session: AsyncSession) -> dict[int, int]:
-    # WhiteInternetSubscription counts (Xray ru_hub)
-    from database.models import WhiteInternetSubscription
-
-    wl_result = await session.execute(
-        select(WhiteInternetSubscription.hub_server_id, func.count(WhiteInternetSubscription.id))
-        .where(
-            WhiteInternetSubscription.hub_server_id.is_not(None),
-            capacity_consuming_wl_condition(),
-        )
-        .group_by(WhiteInternetSubscription.hub_server_id)
-    )
-    return {row[0]: row[1] for row in wl_result.all()}
+def _server_load_score(server: Server) -> tuple[int, int]:
+    """Return (monthly_traffic_bytes, server.id) for least-loaded ru_hub ordering."""
+    extra = server.extra_data if isinstance(server.extra_data, dict) else {}
+    try:
+        monthly = int(extra.get("monthly_traffic_bytes") or 0)
+    except (ValueError, TypeError):
+        monthly = 0
+    return (max(0, monthly), int(server.id or 0))
 
 
-get_origin_server_subscription_counts = get_wi_hub_subscription_counts
+def _is_wi_hub_eligible(server: Server) -> bool:
+    role = get_server_role(server)
+    caps = server.capabilities or []
+    return (role == "ru_hub" or role is None) and WHITE_INTERNET_CAPABILITY in caps
 
 
-def _is_wi_hub_eligible(server: Server | None) -> bool:
-    """Whether a Server row meets all hard prerequisites to host White Internet as ru_hub."""
-    if server is None:
-        return False
-    if (
-        not server.is_active
-        or server.health_state != ServerHealthState.ONLINE
-        or server.lifecycle_status != ServerLifecycleStatus.ACTIVE
-        or not (server.api_url and server.api_url.strip())
-        or not (server.api_key and server.api_key.strip())
-        or WHITE_INTERNET_CAPABILITY not in (server.capabilities or [])
-        or get_server_role(server) in ("eu_hub", "exit_node")
-    ):
-        return False
-    extra = server.extra_data or {}
-    return bool(
-        extra.get("xhttp_locations")
-        or extra.get("cdn_domains")
-        or extra.get("cdn_domain")
-    )
-
-
-async def has_available_service_capacity(
-    session: AsyncSession,
-    service_type: str,
-    *,
-    hub_server_id: int | None = None,
-    origin_node_id: int | None = None,
-) -> bool:
-    """Fast read-only check before order creation that at least one usable node exists."""
-    effective_hub_id = hub_server_id if hub_server_id is not None else origin_node_id
-    if service_type == "standard":
-        active_servers = await get_active_servers(session)
-        return any(
-            is_vless_capable_server(srv)
-            and srv.health_state in (ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION)
-            for srv in active_servers
-        )
-
-    if service_type == "white_internet":
-        if effective_hub_id is not None:
-            current_hub = await session.get(Server, effective_hub_id)
-            if _is_wi_hub_eligible(current_hub):
-                return True
-        candidates = (
-            await session.scalars(
-                select(Server)
-                .where(
-                    Server.protocol.in_([XRAY_PROTOCOL, VLESS_PROTOCOL]),
-                    Server.is_active.is_(True),
-                    Server.health_state == ServerHealthState.ONLINE,
-                    Server.lifecycle_status == ServerLifecycleStatus.ACTIVE,
-                    Server.api_url.is_not(None),
-                    Server.api_key.is_not(None),
-                )
-                .order_by(Server.id.asc())
-            )
-        ).all()
-        return any(_is_wi_hub_eligible(srv) for srv in candidates)
-
-    return True
-
-
-async def allocate_wi_hub_atomic(session: AsyncSession) -> Server | None:
-    """
-    Atomically selects and locks an available Xray ru_hub server with spare capacity.
-
-    1. Select candidate server IDs that are active, online, and lifecycle ACTIVE.
-    2. Sequentially acquire row locks (SELECT ... FOR UPDATE) on candidates.
-    3. Re-verify is_active, health_state == ONLINE, lifecycle_status == ACTIVE,
-       valid api_url / api_key, and 'white_internet' in capabilities.
-    4. Return the locked Server instance.
-    5. Return None if no eligible ru_hub server is found.
-    """
-    candidate_ids = (
+async def get_wi_capable_ru_hubs(session: AsyncSession) -> list[Server]:
+    """Return all active online ru_hub servers capable of White Internet, ordered least-loaded first."""
+    candidates = (
         await session.scalars(
-            select(Server.id)
+            select(Server)
             .where(
                 Server.protocol.in_([XRAY_PROTOCOL, VLESS_PROTOCOL]),
                 Server.is_active.is_(True),
@@ -387,18 +315,31 @@ async def allocate_wi_hub_atomic(session: AsyncSession) -> Server | None:
             .order_by(Server.id.asc())
         )
     ).all()
+    eligible = [srv for srv in candidates if _is_wi_hub_eligible(srv)]
+    eligible.sort(key=_server_load_score)
+    return eligible
 
-    for srv_id in candidate_ids:
-        server = await session.scalar(
-            select(Server)
-            .where(Server.id == srv_id, Server.protocol.in_([XRAY_PROTOCOL, VLESS_PROTOCOL]))
-            .with_for_update()
-            .execution_options(populate_existing=True)
+
+async def has_available_service_capacity(
+    session: AsyncSession,
+    service_type: str,
+    *,
+    hub_server_id: int | None = None,
+    origin_node_id: int | None = None,
+) -> bool:
+    """Fast read-only check before order creation that at least one usable node exists."""
+    if service_type == "standard":
+        active_servers = await get_active_servers(session)
+        return any(
+            is_vless_capable_server(srv)
+            and srv.health_state in (ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION)
+            for srv in active_servers
         )
-        if _is_wi_hub_eligible(server):
-            return server
 
-    return None
+    if service_type == "white_internet":
+        return bool(await get_wi_capable_ru_hubs(session))
+
+    return True
 
 
 async def get_server_by_id(
@@ -629,89 +570,4 @@ async def update_server_xray_epoch_cas(
 
     # Stale starttime within same boot
     return False, None
-
-
-async def migrate_wi_hub_subscriptions(
-    session: AsyncSession,
-    source_id: int,
-    target_id: int,
-    admin_id: int | None = None,
-) -> int:
-    """Migrate all active White Internet subscriptions from source ru_hub server to target ru_hub server.
-
-    1. Acquires row locks on source and target servers ordered by id ASC to avoid deadlocks.
-    2. Verifies target server is active, Xray protocol, and has sufficient capacity using capacity_consuming_wl_condition.
-    3. Sets source server lifecycle_status to DECOMMISSIONING.
-    4. For each subscription:
-       - Creates a WhiteInternetOrphanCleanup entry for source node (desired_version N).
-       - Updates subscription: hub_server_id = target_id, desired_version = N + 1, provisioning_status = PENDING_UPDATE.
-    """
-    if source_id == target_id:
-        raise ValueError("Source and target servers must be different.")
-
-    # 1. Lock servers in deterministic id ASC order to prevent deadlocks
-    first_id, second_id = sorted([source_id, target_id])
-    first_server = (await session.execute(
-        select(Server).where(Server.id == first_id).with_for_update()
-    )).scalar_one_or_none()
-    second_server = (await session.execute(
-        select(Server).where(Server.id == second_id).with_for_update()
-    )).scalar_one_or_none()
-
-    source_server = first_server if first_id == source_id else second_server
-    target_server = first_server if first_id == target_id else second_server
-
-    if not source_server or not target_server:
-        raise ValueError("Source or target server not found.")
-
-    if not target_server or target_server.protocol not in (XRAY_PROTOCOL, VLESS_PROTOCOL) or not target_server.is_active:
-        raise ValueError("Target server is not an active Xray node.")
-
-    if WHITE_INTERNET_CAPABILITY not in (target_server.capabilities or []):
-        raise ValueError("Target server does not have the required 'white_internet' capability.")
-
-    target_extra = target_server.extra_data or {}
-    if not (
-        target_extra.get("xhttp_locations")
-        or target_extra.get("cdn_domains")
-        or target_extra.get("cdn_domain")
-    ):
-        raise ValueError("Target server does not have White Internet endpoints configured.")
-
-    if target_server.health_state not in (ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION):
-        raise ValueError("Target server health state is not eligible for migration.")
-
-    from config.enums import WhiteInternetProvisioningStatus
-    from database.models import WhiteInternetOrphanCleanup, WhiteInternetSubscription
-
-    to_migrate_subs = list((await session.execute(
-        select(WhiteInternetSubscription).where(
-            WhiteInternetSubscription.hub_server_id == source_id,
-            capacity_consuming_wl_condition(),
-        ).with_for_update()
-    )).scalars().all())
-
-    count = len(to_migrate_subs)
-    if count == 0:
-        return 0
-
-    # 3. Mark source server as DECOMMISSIONING so it is no longer allocated to new clients
-    source_server.lifecycle_status = ServerLifecycleStatus.DECOMMISSIONING
-
-    # 4. Migrate subscriptions with version fencing and orphan outbox
-    for sub in to_migrate_subs:
-        orphan = WhiteInternetOrphanCleanup(
-            server_id=source_id,
-            client_uuid=sub.uuid,
-            desired_version=sub.desired_version,
-            status="pending",
-        )
-        session.add(orphan)
-
-        sub.hub_server_id = target_id
-        sub.desired_version += 1
-        sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
-
-    await session.flush()
-    return count
 

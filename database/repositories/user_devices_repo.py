@@ -195,10 +195,13 @@ async def register_user_device(
             )
         )
         if expired_uuids:
-            from database.repositories import vless_subscription_repo
+            from database.repositories import vless_subscription_repo, white_internet_repo
             vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user_id)
             if vless_sub is not None:
                 await vless_subscription_repo.add_pending_revocation_uuids(session, vless_sub.id, expired_uuids)
+            wi_sub = await white_internet_repo.get_subscription_by_user_id(session, user_id)
+            if wi_sub is not None:
+                await white_internet_repo.add_pending_revocation_uuids(session, wi_sub.id, expired_uuids)
 
     devices = (
         await session.scalars(
@@ -272,6 +275,7 @@ async def delete_user_device(
     clean_hwid = str(hwid or "").strip()[:128]
     if not clean_hwid:
         return None
+    await session.scalar(select(User.id).where(User.id == user_id).with_for_update())
     dev = await session.scalar(
         select(UserDevice)
         .where(
@@ -292,6 +296,7 @@ async def delete_all_user_devices(
     user_id: int,
 ) -> list[UserDevice]:
     """Delete all HWID devices for user, returning the deleted device records."""
+    await session.scalar(select(User.id).where(User.id == user_id).with_for_update())
     stmt = (
         select(UserDevice)
         .where(UserDevice.user_id == user_id)
@@ -356,11 +361,12 @@ async def set_device_bi_priority(
     clean_hwid = str(hwid or "").strip()[:128]
     if not clean_hwid:
         return False
+    await session.scalar(select(User.id).where(User.id == user_id).with_for_update())
     dev = await session.scalar(
         select(UserDevice).where(
             UserDevice.user_id == user_id,
             UserDevice.hwid == clean_hwid,
-        )
+        ).with_for_update()
     )
     if dev is None:
         return False

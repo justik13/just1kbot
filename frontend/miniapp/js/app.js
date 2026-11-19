@@ -209,6 +209,7 @@ function _openAdmin2FAGate(root) {
         _renderAdminView();
     });
     renderSecurity2FA(root, appState.security, async () => {
+        appState.security = { ...(appState.security || {}), totp_enabled: true, totp_verified: true };
         appState.twoFactorPassed = true;
         appState.mode = "admin";
         await _reloadNodesAndRender();

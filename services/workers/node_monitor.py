@@ -286,6 +286,13 @@ async def check_node_resources_and_alerts(bot: Bot):
             _monitor_states.pop(sid, None)
 
     now_m = time.monotonic()
+    topology_dirty = False
+    probe_timeout = aiohttp.ClientTimeout(
+        total=INGRESS_PROBE_TOTAL_TIMEOUT,
+        connect=INGRESS_PROBE_CONNECT_TIMEOUT,
+    )
+    probe_connector = aiohttp.TCPConnector(family=socket.AF_INET)
+    shared_probe_sess = aiohttp.ClientSession(timeout=probe_timeout, connector=probe_connector)
 
     async def _check_one(server):
         st = get_server_monitor_state(server.id, server)
@@ -482,16 +489,17 @@ async def check_node_resources_and_alerts(bot: Bot):
         if is_xray_node:
             try:
                 node_role = get_server_role(server)
-                is_wi_hub = node_role not in ("eu_hub", "exit_node") and (
+                extra_dict = server.extra_data if isinstance(getattr(server, "extra_data", None), dict) else {}
+                has_bot_proxy = bool(extra_dict.get("bot_domain")) or bool((extra_dict.get("modules") or {}).get("bot_proxy"))
+                is_wi_hub = has_bot_proxy and node_role not in ("eu_hub", "exit_node") and (
                     node_role == "ru_hub"
                     or WHITE_INTERNET_CAPABILITY in (getattr(server, "capabilities", None) or [])
-                    or bool((getattr(server, "extra_data", None) or {}).get("cdn_domain"))
-                    or bool((getattr(server, "extra_data", None) or {}).get("cdn_domains"))
+                    or bool(extra_dict.get("cdn_domain"))
+                    or bool(extra_dict.get("cdn_domains"))
                 )
                 if is_wi_hub:
-                    if isinstance(getattr(server, "extra_data", None), dict):
-                        origin_domain = server.extra_data.get("domain")
-                        cdn_domain = server.extra_data.get("cdn_domain")
+                    origin_domain = extra_dict.get("domain")
+                    cdn_domain = extra_dict.get("cdn_domain")
                     if not origin_domain and server.api_url:
                         parsed = urlsplit(server.api_url)
                         if parsed.hostname and not parsed.hostname.replace(".", "").isdigit() and parsed.hostname != "localhost":
@@ -502,27 +510,21 @@ async def check_node_resources_and_alerts(bot: Bot):
                     if cdn_domain:
                         cdn_domain = str(cdn_domain).strip()
 
-                    timeout = aiohttp.ClientTimeout(
-                        total=INGRESS_PROBE_TOTAL_TIMEOUT,
-                        connect=INGRESS_PROBE_CONNECT_TIMEOUT,
-                    )
-                    connector = aiohttp.TCPConnector(family=socket.AF_INET)
-                    async with aiohttp.ClientSession(timeout=timeout, connector=connector) as probe_sess:
-                        if origin_domain and cdn_domain and origin_domain != cdn_domain:
-                            # Dual probe: probe both Origin and CDN in parallel
-                            res_origin, res_cdn = await asyncio.gather(
-                                _probe_single_ingress_endpoint(probe_sess, origin_domain, sub_prefix),
-                                _probe_single_ingress_endpoint(probe_sess, cdn_domain, sub_prefix),
+                    if origin_domain and cdn_domain and origin_domain != cdn_domain:
+                        # Dual probe: probe both Origin and CDN in parallel
+                        res_origin, res_cdn = await asyncio.gather(
+                            _probe_single_ingress_endpoint(shared_probe_sess, origin_domain, sub_prefix),
+                            _probe_single_ingress_endpoint(shared_probe_sess, cdn_domain, sub_prefix),
+                        )
+                        origin_probe_result = res_origin
+                        cdn_probe_result = res_cdn
+                    else:
+                        target_domain = cdn_domain or origin_domain
+                        if target_domain:
+                            origin_probe_result = await _probe_single_ingress_endpoint(
+                                shared_probe_sess, target_domain, sub_prefix
                             )
-                            origin_probe_result = res_origin
-                            cdn_probe_result = res_cdn
-                        else:
-                            target_domain = cdn_domain or origin_domain
-                            if target_domain:
-                                origin_probe_result = await _probe_single_ingress_endpoint(
-                                    probe_sess, target_domain, sub_prefix
-                                )
-                                cdn_probe_result = None
+                            cdn_probe_result = None
             except Exception as outer_probe_exc:
                 logger.warning(
                     "Unexpected error preparing ingress probe for server %s: %s",
@@ -1025,15 +1027,13 @@ async def check_node_resources_and_alerts(bot: Bot):
                     extra_update["secret_base_path"] = xray_data["secret_base_path"]
                 if "sub_path_prefix" in xray_data and xray_data["sub_path_prefix"]:
                     extra_update["sub_path_prefix"] = xray_data["sub_path_prefix"]
-                if "cdn_domain" in xray_data and xray_data["cdn_domain"]:
-                    extra_update["cdn_domain"] = xray_data["cdn_domain"]
+                if "cdn_domain" in xray_data:
+                    extra_update["cdn_domain"] = xray_data["cdn_domain"] or ""
                 if "cdn_domains" in xray_data and isinstance(xray_data["cdn_domains"], dict):
                     extra_update["cdn_domains"] = xray_data["cdn_domains"]
                     tf_dom = xray_data["cdn_domains"].get("cdn_turboflare")
                     if tf_dom:
                         extra_update["turboflare_domain"] = tf_dom
-                if "sni_routes" in xray_data and isinstance(xray_data["sni_routes"], list):
-                    extra_update["sni_routes"] = xray_data["sni_routes"]
                 if "xhttp_locations" in xray_data and isinstance(xray_data["xhttp_locations"], list):
                     extra_update["xhttp_locations"] = xray_data["xhttp_locations"]
                 if "links" in xray_data and isinstance(xray_data["links"], dict):
@@ -1082,12 +1082,19 @@ async def check_node_resources_and_alerts(bot: Bot):
                     if xray_data and isinstance(xray_data, dict):
                         extra = dict(updated_srv.extra_data or {})
                         extra_changed = False
-                        for key in ("cdn_domain", "cdn_domains", "sni_routes", "xhttp_locations", "links", "secret_base_path"):
-                            if key in xray_data and xray_data[key] is not None and extra.get(key) != xray_data[key]:
-                                if key in ("cdn_domain", "secret_base_path") and not xray_data[key]:
-                                    continue
-                                extra[key] = xray_data[key]
-                                extra_changed = True
+                        for key in ("cdn_domain", "cdn_domains", "xhttp_locations", "links", "secret_base_path"):
+                            if key in xray_data:
+                                val = xray_data[key]
+                                if key == "cdn_domain":
+                                    norm_val = val or ""
+                                    if extra.get(key, "") != norm_val:
+                                        extra[key] = norm_val
+                                        extra_changed = True
+                                elif val is not None and extra.get(key) != val:
+                                    if key == "secret_base_path" and not val:
+                                        continue
+                                    extra[key] = val
+                                    extra_changed = True
                         cdn_domains = xray_data.get("cdn_domains")
                         if isinstance(cdn_domains, dict):
                             tf_dom = cdn_domains.get("cdn_turboflare")
@@ -1111,21 +1118,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                             from services.vless_subscription_service import VlessSubscriptionService
                             VlessSubscriptionService.sync_all_active_to_server_background(updated_srv.id)
 
-                    # Trigger White Internet re-convergence if epoch changed on a White Internet origin server
-                    if WHITE_INTERNET_CAPABILITY in (updated_srv.capabilities or []):
-                        if prev_epoch != updated_srv.xray_instance_epoch:
-                            from config.enums import WhiteInternetProvisioningStatus
-                            from database.models import WhiteInternetSubscription
-                            from sqlalchemy import update
-                            await session.execute(
-                                update(WhiteInternetSubscription)
-                                .where(WhiteInternetSubscription.hub_server_id == updated_srv.id)
-                                .values(
-                                    last_reconciled_node_epoch=None,
-                                    provisioning_status=WhiteInternetProvisioningStatus.PENDING_UPDATE,
-                                )
-                            )
-
             db_server, applied = await update_server_health_snapshot(
                 session,
                 server.id,
@@ -1135,6 +1127,9 @@ async def check_node_resources_and_alerts(bot: Bot):
                 new_health_state=st.health_state,
                 **update_kwargs,
             )
+            if applied and expected_health_state != st.health_state:
+                nonlocal topology_dirty
+                topology_dirty = True
             if db_server and not applied:
                 st.sync_from_db_server(db_server)
 
@@ -1167,9 +1162,20 @@ async def check_node_resources_and_alerts(bot: Bot):
 
     # Bounded parallel fan-out: one hung node must not freeze monitoring of
     # the remaining nodes in this cycle.
-    for batch_start in range(0, len(servers), CHECK_PARALLELISM):
-        batch = servers[batch_start:batch_start + CHECK_PARALLELISM]
-        await asyncio.gather(*(_check_one(s) for s in batch))
+    try:
+        for batch_start in range(0, len(servers), CHECK_PARALLELISM):
+            batch = servers[batch_start:batch_start + CHECK_PARALLELISM]
+            await asyncio.gather(*(_check_one(s) for s in batch))
+    finally:
+        await shared_probe_sess.close()
+
+    if topology_dirty:
+        try:
+            async with session_scope() as topo_session:
+                from services.topology_sync_service import sync_v2_topology_to_nodes
+                await sync_v2_topology_to_nodes(topo_session)
+        except Exception as topo_exc:
+            logger.warning("Failed to sync v2 topology after health state transition: %s", topo_exc)
 
 
 async def node_monitor_loop(bot: Bot, shutdown_event: asyncio.Event):

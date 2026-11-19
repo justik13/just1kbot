@@ -32,7 +32,7 @@ class FulfillmentService:
         if order.service_type == "standard":
             from database.repositories import vless_subscription_repo
 
-            vless_sub, _ = await vless_subscription_repo.get_or_create_subscription(session, user.id)
+            vless_sub = await vless_subscription_repo.get_or_create_subscription(session, user.id)
             now = now_utc()
             meta = dict(order.metadata_ or {})
             if vless_sub.expires_at:
@@ -41,7 +41,6 @@ class FulfillmentService:
                 meta["previous_device_limit"] = vless_sub.device_limit
             order.metadata_ = meta
 
-            is_tariff_change = bool(meta.get("is_tariff_change"))
             op = meta.get("operation")
             if op == "upgrade":
                 if order.device_limit:
@@ -49,10 +48,6 @@ class FulfillmentService:
                 vless_sub.downgrade_cooldown_until = now + timedelta(
                     days=STANDARD_DOWNGRADE_COOLDOWN_DAYS
                 )
-            elif is_tariff_change and order.duration_days > 0:
-                vless_sub.expires_at = now + timedelta(days=order.duration_days)
-                if order.device_limit:
-                    vless_sub.device_limit = order.device_limit
             else:
                 base = max(vless_sub.expires_at, now) if vless_sub.expires_at else now
                 if order.duration_days > 0:
@@ -71,12 +66,12 @@ class FulfillmentService:
             user.last_notification_attempt = None
             await SubscriptionService._sync_access_state(session, user, vless_sub=vless_sub)
             logger.info(
-                "Fulfilled standard order %s for user %s: +%s days (until %s, tariff_change=%s)",
+                "Fulfilled standard order %s for user %s: +%s days (until %s, op=%s)",
                 order.id,
                 user.id,
                 order.duration_days,
                 vless_sub.expires_at,
-                is_tariff_change,
+                op,
             )
 
         elif order.service_type == "white_internet":
@@ -85,7 +80,17 @@ class FulfillmentService:
             )
 
             sub = await get_subscription_by_user_id(session, user.id)
-            meta_op = (order.metadata_ or {}).get("operation")
+            meta = dict(order.metadata_ or {})
+            meta_op = meta.get("operation")
+            if sub and sub.expires_at:
+                meta["previous_subscription_end"] = sub.expires_at.isoformat()
+            if sub and getattr(sub, "device_limit", None) is not None:
+                meta["previous_device_limit"] = sub.device_limit
+            order.metadata_ = meta
+
+            ok = False
+            msg = ""
+            created_sub = None
             if meta_op == "add_device_slot" or (
                 order.device_limit
                 and not (order.traffic_bytes or 0)
@@ -97,8 +102,6 @@ class FulfillmentService:
                     actor_telegram_id=user.telegram_id,
                     extra_bytes=order.traffic_bytes if order.traffic_bytes else None,
                 )
-                if not ok:
-                    raise RuntimeError(f"White Internet device slot purchase failed: {msg}")
             elif meta_op == "topup" or (
                 (order.traffic_bytes or 0) > 0 and (order.duration_days or 0) == 0
             ):
@@ -109,8 +112,6 @@ class FulfillmentService:
                     pack_gb,
                     actor_telegram_id=user.telegram_id,
                 )
-                if not ok:
-                    raise RuntimeError(f"White Internet quota topup failed: {msg}")
             else:
                 if sub and sub.status in ("ACTIVE", "EXPIRED", "EXHAUSTED"):
                     ok, msg, created_sub = await WhiteInternetService.renew_subscription(
@@ -124,13 +125,41 @@ class FulfillmentService:
                         user.id,
                         device_limit=order.device_limit or 1,
                     )
-                if not ok:
-                    raise RuntimeError(f"White Internet subscription fulfillment failed: {msg}")
-                if created_sub and hasattr(created_sub, "id"):
-                    meta = dict(order.metadata_ or {})
+                if ok and created_sub and hasattr(created_sub, "id"):
                     meta["subscription_id"] = created_sub.id
                     order.metadata_ = meta
                     await session.flush()
+
+            if not ok:
+                # Compensate user balance instead of losing paid funds on business-state mismatch
+                from database.repositories import account_ledger_repo
+                from services.order_service import OrderService
+                from sqlalchemy.orm.attributes import flag_modified
+
+                await OrderService.refund_reserved_mixed_debit(session, order)
+                if order.amount_rub and order.amount_rub > 0:
+                    await account_ledger_repo.create_admin_adjustment(
+                        session,
+                        user_id=user.id,
+                        amount=order.amount_rub,
+                        bucket="real",
+                        reason=f"Компенсация заказа #{order.id}: {msg}",
+                        actor_id=0,
+                        idempotency_key=f"wi_fulfill_fallback:{order.id}",
+                        locked_user=user,
+                    )
+                meta["fulfillment_fallback"] = msg
+                meta["requires_manual_review"] = True
+                order.metadata_ = meta
+                flag_modified(order, "metadata_")
+                await session.flush()
+                logger.error(
+                    "WI fulfillment failed for paid order %s (user %s): %s; compensated to balance",
+                    order.id,
+                    user.id,
+                    msg,
+                )
+                return
             logger.info("Fulfilled White Internet order %s for user %s", order.id, user.id)
 
         elif order.service_type == "topup":
@@ -155,8 +184,6 @@ class FulfillmentService:
             if not vless_sub:
                 return
             meta = dict(order.metadata_ or {})
-            is_tariff_change = bool(meta.get("is_tariff_change"))
-            prev_end_str = meta.get("previous_subscription_end")
             op = meta.get("operation")
             if op == "upgrade":
                 if "previous_device_limit" in meta:
@@ -164,18 +191,6 @@ class FulfillmentService:
                         vless_sub.device_limit = int(meta["previous_device_limit"])
                     except (ValueError, TypeError):
                         pass
-            elif is_tariff_change and prev_end_str:
-                try:
-                    from datetime import datetime
-                    prev_end = datetime.fromisoformat(prev_end_str)
-                    vless_sub.expires_at = prev_end
-                    if "previous_device_limit" in meta:
-                        try:
-                            vless_sub.device_limit = int(meta["previous_device_limit"])
-                        except (ValueError, TypeError):
-                            pass
-                except Exception as exc:
-                    logger.warning("Failed parsing previous_subscription_end on order %s: %s", order.id, exc)
             elif order.duration_days > 0 and vless_sub.expires_at:
                 now = now_utc()
                 new_end = vless_sub.expires_at - timedelta(days=order.duration_days)

@@ -287,8 +287,9 @@ async def api_user_dashboard_handler(request: web.Request) -> web.Response:
 
         std_active = SubscriptionService.check_vpn_access(user, vless_sub=vless_sub)
         std_limit = int(getattr(vless_sub, "device_limit", 0) or 0) if vless_sub else 0
-        wi_active = bool(
+        wi_has_period = bool(
             wi_sub
+            and not user.financial_hold
             and wi_sub.status
             in (
                 WhiteInternetStatus.ACTIVE,
@@ -298,11 +299,16 @@ async def api_user_dashboard_handler(request: web.Request) -> web.Response:
             and wi_sub.expires_at
             and wi_sub.expires_at > now
         )
-        wi_limit = int(wi_sub.device_limit or 1) if wi_active and wi_sub else 0
+        wi_active = bool(
+            wi_has_period
+            and wi_sub is not None
+            and wi_sub.status == WhiteInternetStatus.ACTIVE
+        )
+        wi_limit = int(wi_sub.device_limit or 1) if wi_has_period and wi_sub else 0
 
         add_slot_price = None
         add_slot_gb = None
-        if wi_active and wi_sub and wi_sub.device_limit < WHITE_INTERNET_MAX_DEVICE_LIMIT:
+        if wi_has_period and wi_sub and wi_sub.device_limit < WHITE_INTERNET_MAX_DEVICE_LIMIT:
             raw_price, raw_gb = WhiteInternetService.calculate_wi_add_slot_quote(
                 wi_sub.expires_at, now=now
             )
@@ -381,7 +387,7 @@ async def api_user_dashboard_handler(request: web.Request) -> web.Response:
                 "add_slot_gb": add_slot_gb,
             },
             "pricing": {
-                "min_topup_rub": 20,
+                "min_topup_rub": int(MIN_TOPUP_RUB),
                 "standard_devices_min": 2,
                 "standard_devices_max": 10,
                 "standard_durations": [7, 30, 90],
@@ -738,6 +744,7 @@ async def api_user_device_delete_handler(request: web.Request) -> web.Response:
                 version=sub_ver,
                 sub_id=sub_id,
                 session=session,
+                services=("vless", "white_internet"),
             )
 
         _DEVICE_DELETE_COOLDOWN[ctx.telegram_id] = now_mono
@@ -788,6 +795,7 @@ async def api_user_devices_reset_handler(request: web.Request) -> web.Response:
                     version=sub_ver,
                     sub_id=sub_id,
                     session=session,
+                    services=("vless", "white_internet"),
                 )
 
         _DEVICE_DELETE_COOLDOWN[ctx.telegram_id] = now_mono

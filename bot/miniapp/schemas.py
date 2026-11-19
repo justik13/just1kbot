@@ -110,23 +110,12 @@ class UpdateNodePayload(BaseModel):
     api_key: str | None = Field(default=None, min_length=1, max_length=255)
     in_standard: bool | None = None
     in_white_internet: bool | None = None
-    std_sni: str | None = Field(default=None, max_length=253)
     vless_name: str | None = Field(default=None, max_length=120)
     server_description: str | None = Field(default=None, max_length=30)
     wi_yandex_name: str | None = Field(default=None, max_length=120)
     wi_yandex_badge: str | None = Field(default=None, max_length=30)
     wi_turboflare_name: str | None = Field(default=None, max_length=120)
     wi_turboflare_badge: str | None = Field(default=None, max_length=30)
-
-    @field_validator("std_sni")
-    @classmethod
-    def check_std_sni(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        clean = value.strip().lower()
-        if not clean:
-            return ""
-        return _validate_fqdn(clean)
 
 
 class ToggleNodePayload(BaseModel):

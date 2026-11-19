@@ -267,7 +267,6 @@ async def api_admin_nodes_patch_handler(request: web.Request) -> web.Response:
                 api_key=payload.api_key,
                 in_standard=payload.in_standard,
                 in_white_internet=payload.in_white_internet,
-                std_sni=payload.std_sni,
                 vless_name=payload.vless_name,
                 server_description=payload.server_description,
                 wi_yandex_name=payload.wi_yandex_name,
@@ -372,9 +371,9 @@ async def api_admin_incy_get_handler(request: web.Request) -> web.Response:
         frag_length = await get_system_setting(session, "vless_fragmentation_length", "10-30")
         frag_interval = await get_system_setting(session, "vless_fragmentation_interval", "10-30")
         no_limit_mode = await get_system_setting(session, "vless_no_limit_mode", "all")
-        dns_resolve_raw = await get_system_setting(session, "vless_dns_resolve_enabled", "false")
-        dns_resolve_domain = await get_system_setting(session, "vless_dns_resolve_domain", "")
-        dns_resolve_ip = await get_system_setting(session, "vless_dns_resolve_ip", "")
+        dns_resolve_raw = await get_system_setting(session, "vless_dns_resolve_enabled", "true")
+        dns_resolve_domain = await get_system_setting(session, "vless_dns_resolve_domain", "https://common.dot.dns.yandex.net/dns-query")
+        dns_resolve_ip = await get_system_setting(session, "vless_dns_resolve_ip", "77.88.8.8")
         per_app_raw = await get_system_setting(session, "vless_per_app_proxy_enabled", "false")
         per_app_mode = await get_system_setting(session, "vless_per_app_proxy_mode", "bypass")
         per_app_list = await get_system_setting(session, "vless_per_app_proxy_list", "")
@@ -402,9 +401,9 @@ async def api_admin_incy_get_handler(request: web.Request) -> web.Response:
                 "fragmentation_length": str(frag_length or "10-30"),
                 "fragmentation_interval": str(frag_interval or "10-30"),
                 "no_limit_mode": str(no_limit_mode or "all"),
-                "dns_resolve_enabled": _as_bool_setting(dns_resolve_raw, False),
-                "dns_resolve_domain": str(dns_resolve_domain or ""),
-                "dns_resolve_ip": str(dns_resolve_ip or ""),
+                "dns_resolve_enabled": _as_bool_setting(dns_resolve_raw, True),
+                "dns_resolve_domain": str(dns_resolve_domain or "https://common.dot.dns.yandex.net/dns-query"),
+                "dns_resolve_ip": str(dns_resolve_ip or "77.88.8.8"),
                 "per_app_proxy_enabled": _as_bool_setting(per_app_raw, False),
                 "per_app_proxy_mode": str(per_app_mode or "bypass"),
                 "per_app_proxy_list": str(per_app_list or ""),
@@ -540,12 +539,11 @@ async def api_admin_users_handler(request: web.Request) -> web.Response:
 
         if q:
             if q.isdigit():
-                stmt = stmt.where(
-                    or_(
-                        User.telegram_id == int(q),
-                        User.id == int(q),
-                    )
-                )
+                q_num = int(q)
+                id_conds = [User.telegram_id == q_num]
+                if 0 < q_num <= 2_147_483_647:
+                    id_conds.append(User.id == q_num)
+                stmt = stmt.where(or_(*id_conds))
             else:
                 pattern = f"%{q.lstrip('@')}%"
                 stmt = stmt.where(
@@ -748,7 +746,7 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                     )
                 new_end = vless_sub.expires_at - timedelta(days=abs(payload.days))
                 if new_end <= now:
-                    vless_sub.expires_at = now
+                    vless_sub.expires_at = now - timedelta(hours=constants.VPN_ACCESS_GRACE_HOURS + 1)
                 else:
                     vless_sub.expires_at = new_end
                 if payload.device_limit is not None:
@@ -965,14 +963,22 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
             })
 
         if payload.device_limit is not None and payload.device_limit != wi_sub.device_limit:
+            if not (1 <= payload.device_limit <= constants.WHITE_INTERNET_MAX_DEVICE_LIMIT):
+                return web.json_response(
+                    {"ok": False, "error": f"Лимит устройств должен быть от 1 до {constants.WHITE_INTERNET_MAX_DEVICE_LIMIT}"},
+                    status=400,
+                )
             wi_sub.device_limit = payload.device_limit
             wi_sub.base_traffic_bytes = payload.device_limit * constants.WHITE_INTERNET_BASE_TRAFFIC_BYTES
+            wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
             if (
                 wi_sub.status == WhiteInternetStatus.EXHAUSTED
                 and (wi_sub.base_traffic_bytes + (wi_sub.extra_traffic_bytes or 0))
                 > (wi_sub.traffic_used_bytes or 0)
             ):
                 wi_sub.status = WhiteInternetStatus.ACTIVE
+                wi_sub.status_reason = None
+                wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
             wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
             await session.flush()
             await AuditService.log_action(

@@ -64,6 +64,7 @@ class TrafficSnapshot(tuple):
 
     host_tx_bytes: int
     host_rx_bytes: int
+    users_by_service: dict[str, dict[str, dict[str, int]]]
 
     def __new__(
         cls,
@@ -73,10 +74,12 @@ class TrafficSnapshot(tuple):
         users: dict[str, dict[str, int]] | None,
         host_tx_bytes: int = 0,
         host_rx_bytes: int = 0,
+        users_by_service: dict[str, dict[str, dict[str, int]]] | None = None,
     ):
         obj = super().__new__(cls, (epoch, boot_id, starttime, users))
         obj.host_tx_bytes = host_tx_bytes
         obj.host_rx_bytes = host_rx_bytes
+        obj.users_by_service = users_by_service if isinstance(users_by_service, dict) else {}
         return obj
 
 
@@ -234,7 +237,7 @@ class XrayNodeClient:
         url = f"{api_url.rstrip('/')}/v1/clients/batch-sync"
         headers = self._get_headers(api_key)
         status_code, data, err = await self._make_request(
-            "POST", url, headers, json_payload={"clients": clients}, request_timeout=timeout
+            "POST", url, headers, json_data={"clients": clients}, request_timeout=timeout
         )
         if status_code == 404:
             return False, set(), {}
@@ -341,9 +344,18 @@ class XrayNodeClient:
             node_boot_id = data.get("boot_id")
             node_starttime = data.get("starttime")
             users = data.get("users", {})
+            users_by_service = data.get("users_by_service", {})
             host_tx = int(data.get("host_tx_bytes", 0) or 0)
             host_rx = int(data.get("host_rx_bytes", 0) or 0)
-            return TrafficSnapshot(node_epoch, node_boot_id, node_starttime, users, host_tx, host_rx)
+            return TrafficSnapshot(
+                node_epoch,
+                node_boot_id,
+                node_starttime,
+                users,
+                host_tx,
+                host_rx,
+                users_by_service,
+            )
         logger.error("Traffic snapshot fetch failed for %s: %s", _sanitize_url(url), err)
         return TrafficSnapshot(None, None, None, None, 0, 0)
 
@@ -384,4 +396,9 @@ class XrayNodeClient:
         if status_code == 200 and isinstance(data, dict):
             return True, data, None
         return False, None, err or f"Node links update failed with HTTP {status_code}"
+
+
+def get_xray_node_client(timeout: float = 10.0) -> XrayNodeClient:
+    """Return a fresh XrayNodeClient instance."""
+    return XrayNodeClient(timeout=timeout)
 

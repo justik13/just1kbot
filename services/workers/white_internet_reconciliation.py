@@ -1,21 +1,16 @@
-"""Reconciliation worker ensuring desired subscription state matches Xray ru_hub runtime."""
+"""Reconciliation worker ensuring White Internet subscriptions stay synced across all active WI ru_hubs."""
 
 from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-import hashlib
 import logging
-import time
 
 from aiogram import Bot
-from sqlalchemy import and_, nulls_first, or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+from sqlalchemy.orm.attributes import flag_modified
 
-from bot.texts.runtime.alerts import (
-    ALERT_WHITE_INTERNET_HUB_EXHAUSTED,
-    ALERT_WHITE_INTERNET_HUB_RESTORED,
-)
 from config.constants import VLESS_PROTOCOL, WHITE_INTERNET_CAPABILITY, XRAY_PROTOCOL
 from config.enums import (
     ServerHealthState,
@@ -23,10 +18,9 @@ from config.enums import (
     WhiteInternetProvisioningStatus,
     WhiteInternetStatus,
 )
-from config.settings import get_settings
 from database.connection import session_scope
 from database.models import Server, WhiteInternetSubscription
-from database.repositories import servers_repo, white_internet_repo
+from database.repositories import user_devices_repo, white_internet_repo
 from services.xray_node_client import SyncResult, XrayNodeClient
 from utils.datetime_helpers import now_utc
 from utils.telegram import safe_send_message
@@ -34,14 +28,12 @@ from utils.telegram import safe_send_message
 logger = logging.getLogger(__name__)
 
 RECONCILIATION_INTERVAL_SECONDS = 30.0
-BATCH_SIZE = 50
-
-
+BATCH_SIZE = 100
 DEFAULT_RECONCILIATION_CONCURRENCY = 5
 
 
 class WhiteInternetReconciliationWorker:
-    """Worker keeping White Internet subscriptions in sync with Xray nodes."""
+    """Worker keeping White Internet subscriptions in sync across all active WI ru_hubs."""
 
     def __init__(
         self,
@@ -56,32 +48,6 @@ class WhiteInternetReconciliationWorker:
         self.max_concurrency = max_concurrency
         self._semaphore = asyncio.Semaphore(self.max_concurrency)
         self._sub_locks: dict[int, asyncio.Lock] = {}
-        self._hub_exhausted_alerted: bool = False
-        self._hub_exhausted_last_sent: float | None = None
-
-    async def _send_hub_exhausted_alert(self, sub_id: int) -> None:
-        if not self.bot:
-            return
-        text = ALERT_WHITE_INTERNET_HUB_EXHAUSTED.format(sub_id=sub_id)
-        for aid in get_settings().ADMIN_IDS:
-            try:
-                await safe_send_message(
-                    self.bot, chat_id=aid, text=text, parse_mode="HTML"
-                )
-            except Exception as e:
-                logger.warning("Failed to send hub exhausted alert to admin %s: %s", aid, e)
-
-    async def _send_hub_restored_alert(self) -> None:
-        if not self.bot:
-            return
-        text = ALERT_WHITE_INTERNET_HUB_RESTORED
-        for aid in get_settings().ADMIN_IDS:
-            try:
-                await safe_send_message(
-                    self.bot, chat_id=aid, text=text, parse_mode="HTML"
-                )
-            except Exception as e:
-                logger.warning("Failed to send hub restored alert to admin %s: %s", aid, e)
 
     def _get_sub_lock(self, sub_id: int) -> asyncio.Lock:
         lock = self._sub_locks.get(sub_id)
@@ -97,10 +63,12 @@ class WhiteInternetReconciliationWorker:
             return
         try:
             from database.models import User
+
             user = await session.get(User, user_id)
             if not user or not user.telegram_id or user.is_bot_blocked:
                 return
             from bot import texts
+
             await safe_send_message(
                 self.bot,
                 chat_id=user.telegram_id,
@@ -109,40 +77,46 @@ class WhiteInternetReconciliationWorker:
                 raise_forbidden=False,
             )
         except Exception as exc:
-            logger.warning("Failed to send auto-push for user_id=%d: %s", user_id, exc)
+            logger.warning("Failed to notify user_id=%d for WI ready: %s", user_id, exc)
 
-    async def _reconcile_single_subscription(
+    @staticmethod
+    def _expected_inbound_tags(expected_xhttp: list) -> set[str]:
+        tags: set[str] = set()
+        for loc in expected_xhttp or []:
+            if isinstance(loc, dict) and loc.get("inbound_tag"):
+                tags.add(str(loc["inbound_tag"]))
+            elif isinstance(loc, dict):
+                code = loc.get("location_code") or loc.get("code")
+                if code:
+                    tags.add(f"just1k-wl-inbound-{code}")
+            elif isinstance(loc, str) and loc:
+                tags.add(f"just1k-wl-inbound-{loc}")
+        if not tags:
+            tags.add("just1k-wl-default")
+        return tags
+
+    async def _reconcile_sub_on_server(
         self,
         server_id: int,
         api_url: str,
         api_key: str,
         target_epoch: str,
+        expected_xhttp: list,
         task: dict,
+        all_server_ids: set[int],
         sf,
     ) -> bool:
         sub_id = task["sub_id"]
         sub_uuid = task["uuid"]
+        user_id = task["user_id"]
         desired_active = task["desired_active"]
         target_version = task["target_version"]
-        expected_xhttp = task.get("expected_xhttp_locations") or []
-        expected_inbound_tags = set()
-        for loc in expected_xhttp:
-            if isinstance(loc, dict) and loc.get("inbound_tag"):
-                expected_inbound_tags.add(str(loc["inbound_tag"]))
-            elif isinstance(loc, dict):
-                code = loc.get("location_code") or loc.get("code")
-                if code:
-                    expected_inbound_tags.add(f"just1k-wl-inbound-{code}")
-            elif isinstance(loc, str) and loc:
-                expected_inbound_tags.add(f"just1k-wl-inbound-{loc}")
-        if not expected_inbound_tags:
-            expected_inbound_tags.add("just1k-wl-default")
+        expected_inbound_tags = self._expected_inbound_tags(expected_xhttp)
 
         notify_user_id: int | None = None
         async with self._get_sub_lock(sub_id):
             async with self._semaphore:
                 try:
-                    # 1. External network mutation on Xray node (no ORM session held during HTTP I/O)
                     resp = await self.client.sync_client(
                         api_url,
                         api_key,
@@ -150,22 +124,13 @@ class WhiteInternetReconciliationWorker:
                         is_active=desired_active,
                         version=target_version,
                         expected_node_epoch=target_epoch,
-                        idempotency_key=f"reconcile:{sub_id}:{target_epoch}:{target_version}:{desired_active}",
+                        idempotency_key=f"reconcile:{sub_id}:{server_id}:{target_epoch}:{target_version}:{desired_active}",
                         service="white_internet",
                     )
 
-                    # Also ensure all active UserDevice UUIDs for this user are synced on this WI hub
-                    from database.repositories import user_devices_repo
-
                     dev_uuids: list[str] = []
                     async with sf() as dev_session:
-                        wi_user_id = task.get("user_id") or await dev_session.scalar(
-                            select(WhiteInternetSubscription.user_id).where(
-                                WhiteInternetSubscription.id == sub_id
-                            )
-                        )
-                        if wi_user_id:
-                            dev_uuids = await user_devices_repo.get_active_device_uuids(dev_session, wi_user_id)
+                        dev_uuids = await user_devices_repo.get_active_device_uuids(dev_session, user_id)
                     for d_uuid in dev_uuids:
                         if d_uuid and d_uuid != sub_uuid:
                             try:
@@ -199,15 +164,13 @@ class WhiteInternetReconciliationWorker:
                             return False
 
                         if sync_result == SyncResult.APPLIED and sub.desired_version == target_version:
-                            # Postcondition verification: check all required inbounds were verified
                             if verified_inbounds and not expected_inbound_tags.issubset(verified_inbounds):
                                 missing = expected_inbound_tags - verified_inbounds
                                 logger.warning(
-                                    "Inbound coverage incomplete for sub_id=%d on server %d: missing %s (verified=%s). Keeping PENDING_UPDATE.",
+                                    "WI inbound coverage incomplete for sub_id=%d on server %d: missing %s",
                                     sub_id,
                                     server_id,
                                     missing,
-                                    verified_inbounds,
                                 )
                                 sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
                                 sub.last_sync_error = f"missing_inbounds:{','.join(sorted(missing))}"
@@ -216,136 +179,156 @@ class WhiteInternetReconciliationWorker:
                                 return False
 
                             if verified_epoch != target_epoch:
-                                logger.warning(
-                                    "Epoch drift detected after mutation for sub_id=%d: verified=%s != target=%s. Keeping PENDING_UPDATE.",
-                                    sub_id,
-                                    verified_epoch,
-                                    target_epoch,
-                                )
                                 sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
                                 sub.last_sync_error = "epoch_drift_detected"
                                 sub.last_synced_at = now_utc()
                                 await lock_session.commit()
                                 return False
 
-                            sub.actual_version = target_version
-                            sub.last_reconciled_node_epoch = verified_epoch
-                            transitioned_to_active = False
-                            if sub.status == WhiteInternetStatus.PENDING and desired_active:
-                                sub.status = WhiteInternetStatus.ACTIVE
-                                sub.status_reason = None
-                                transitioned_to_active = True
-                            sub.provisioning_status = (
-                                WhiteInternetProvisioningStatus.ACTIVE
-                                if desired_active
-                                else WhiteInternetProvisioningStatus.SYNCED_INACTIVE
+                            node_state = dict(sub.node_sync_state or {}) if isinstance(sub.node_sync_state, dict) else {}
+                            node_state[str(server_id)] = {
+                                "version": target_version,
+                                "epoch": verified_epoch,
+                                "active": desired_active,
+                                "synced_at": now_utc().isoformat(),
+                            }
+                            sub.node_sync_state = node_state
+                            flag_modified(sub, "node_sync_state")
+
+                            all_synced = all(
+                                (node_state.get(str(sid)) or {}).get("version") == sub.desired_version
+                                and (node_state.get(str(sid)) or {}).get("active") is desired_active
+                                for sid in all_server_ids
                             )
+                            if all_synced:
+                                sub.actual_version = target_version
+                                sub.provisioning_status = (
+                                    WhiteInternetProvisioningStatus.ACTIVE
+                                    if desired_active
+                                    else WhiteInternetProvisioningStatus.SYNCED_INACTIVE
+                                )
+                                sub.last_sync_error = None
+                                if sub.status == WhiteInternetStatus.PENDING and desired_active:
+                                    sub.status = WhiteInternetStatus.ACTIVE
+                                    sub.status_reason = None
+                                    notify_user_id = sub.user_id
+
                             sub.last_synced_at = now_utc()
-                            sub.last_sync_error = None
                             await lock_session.commit()
-                            if transitioned_to_active:
-                                notify_user_id = sub.user_id
                             return True
-                        elif sync_result == SyncResult.ALREADY_NEWER:
-                            # Runtime inventory was already fetched before opening lock_session
+
+                        if sync_result == SyncResult.ALREADY_NEWER:
                             if inv_ok and inv_data and "inventory" in inv_data:
                                 client_inv = inv_data["inventory"].get(sub_uuid)
                                 if client_inv:
                                     observed_state = client_inv.get("observed_state")
                                     expected_state = "active" if desired_active else "disabled"
                                     if observed_state == expected_state:
-                                        logger.info(
-                                            "Runtime inventory verified for sub_id=%d on server %d: observed=%s matches desired=%s. Marking synced.",
-                                            sub_id,
-                                            server_id,
-                                            observed_state,
-                                            desired_active,
+                                        node_state = dict(sub.node_sync_state or {}) if isinstance(sub.node_sync_state, dict) else {}
+                                        node_state[str(server_id)] = {
+                                            "version": target_version,
+                                            "epoch": target_epoch,
+                                            "active": desired_active,
+                                            "synced_at": now_utc().isoformat(),
+                                        }
+                                        sub.node_sync_state = node_state
+                                        flag_modified(sub, "node_sync_state")
+
+                                        all_synced = all(
+                                            (node_state.get(str(sid)) or {}).get("version") == sub.desired_version
+                                            and (node_state.get(str(sid)) or {}).get("active") is desired_active
+                                            for sid in all_server_ids
                                         )
-                                        sub.actual_version = max(sub.actual_version or 0, target_version)
-                                        sub.last_reconciled_node_epoch = target_epoch
-                                        transitioned_to_active = False
-                                        if sub.status == WhiteInternetStatus.PENDING and desired_active:
-                                            sub.status = WhiteInternetStatus.ACTIVE
-                                            sub.status_reason = None
-                                            transitioned_to_active = True
-                                        sub.provisioning_status = (
-                                            WhiteInternetProvisioningStatus.ACTIVE
-                                            if desired_active
-                                            else WhiteInternetProvisioningStatus.SYNCED_INACTIVE
-                                        )
+                                        if all_synced:
+                                            sub.actual_version = max(sub.actual_version or 0, target_version)
+                                            sub.provisioning_status = (
+                                                WhiteInternetProvisioningStatus.ACTIVE
+                                                if desired_active
+                                                else WhiteInternetProvisioningStatus.SYNCED_INACTIVE
+                                            )
+                                            sub.last_sync_error = None
+                                            if sub.status == WhiteInternetStatus.PENDING and desired_active:
+                                                sub.status = WhiteInternetStatus.ACTIVE
+                                                sub.status_reason = None
+                                                notify_user_id = sub.user_id
+
                                         sub.last_synced_at = now_utc()
-                                        sub.last_sync_error = None
                                         await lock_session.commit()
-                                        if transitioned_to_active:
-                                            notify_user_id = sub.user_id
                                         return True
 
-                            # Observed state does not match desired state: force convergence by bumping desired_version
                             sub.desired_version = max(sub.desired_version, target_version) + 1
                             sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
                             sub.last_sync_error = f"node_already_newer_inventory_mismatch_{err_msg}"
                             sub.last_synced_at = now_utc()
-                            logger.warning(
-                                "Node reported already_newer but observed state did not match for sub_id=%d on server %d. Bumping desired_version to %d.",
-                                sub_id,
-                                server_id,
-                                sub.desired_version,
-                            )
                             await lock_session.commit()
                             return False
-                        elif sync_result == SyncResult.FENCED:
+
+                        if sync_result == SyncResult.FENCED:
                             sub.desired_version = max(sub.desired_version, target_version) + 1
                             sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
                             sub.last_sync_error = err_msg or "sync_fenced"
                             sub.last_synced_at = now_utc()
-                            logger.warning(
-                                "Sync fenced for sub_id=%d on server %d (target_version=%d). Bumped desired_version to %d: %s",
-                                sub_id,
-                                server_id,
-                                target_version,
-                                sub.desired_version,
-                                err_msg,
-                            )
                             await lock_session.commit()
                             return False
-                        elif sync_result == SyncResult.FAILED:
-                            sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
-                            sub.last_sync_error = err_msg or "sync_failed"
-                            sub.last_synced_at = now_utc()
-                            logger.error(
-                                "Sync failed for sub_id=%d on server %d: %s",
-                                sub_id,
-                                server_id,
-                                err_msg,
-                            )
-                            await lock_session.commit()
-                            return False
-                        else:
-                            sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
-                            sub.last_synced_at = now_utc()
-                            logger.warning(
-                                "Reconciliation detected version drift during sync for sub_id=%d on server %d (desired=%d != target=%d): result=%s error=%s",
-                                sub_id,
-                                server_id,
-                                sub.desired_version,
-                                target_version,
-                                sync_result,
-                                err_msg,
-                            )
-                            await lock_session.commit()
-                            return False
+
+                        sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+                        sub.last_sync_error = err_msg or "sync_failed"
+                        sub.last_synced_at = now_utc()
+                        await lock_session.commit()
+                        return False
                 finally:
                     if notify_user_id is not None:
                         try:
                             async with sf() as notify_session:
                                 await self._notify_sub_ready(notify_session, notify_user_id)
                         except Exception as exc:
-                            logger.warning(
-                                "Failed to notify user %s for sub %d after advisory unlock: %s",
-                                notify_user_id,
-                                sub_id,
-                                exc,
+                            logger.warning("Failed to notify user %s for WI sub %d: %s", notify_user_id, sub_id, exc)
+
+    async def _reconcile_pending_revocations(
+        self,
+        active_servers: list[tuple[int, str, str, str, list]],
+        sf,
+    ) -> int:
+        if not active_servers:
+            return 0
+        revoked_count = 0
+        async with sf() as sess:
+            stmt = (
+                select(WhiteInternetSubscription)
+                .where(WhiteInternetSubscription.pending_revoked_uuids.is_not(None))
+                .order_by(WhiteInternetSubscription.id.asc())
+                .limit(BATCH_SIZE)
+            )
+            subs = (await sess.execute(stmt)).scalars().all()
+            work = [
+                (s.id, [u for u in (s.pending_revoked_uuids or []) if isinstance(u, str) and u.strip()])
+                for s in subs
+                if isinstance(s.pending_revoked_uuids, list) and s.pending_revoked_uuids
+            ]
+
+        for sub_id, uuids in work:
+            for old_uuid in uuids:
+                results = []
+                for _sid, api_url, api_key, target_epoch, _ in active_servers:
+                    try:
+                        async with self._semaphore:
+                            resp = await self.client.sync_client(
+                                api_url,
+                                api_key,
+                                old_uuid,
+                                is_active=False,
+                                expected_node_epoch=target_epoch,
+                                service="white_internet",
                             )
+                            results.append(resp.result in (SyncResult.APPLIED, SyncResult.ALREADY_NEWER))
+                    except Exception:
+                        results.append(False)
+                if len(results) == len(active_servers) and all(results):
+                    async with sf() as sess:
+                        await white_internet_repo.pop_pending_revoked_uuid(sess, sub_id, old_uuid)
+                        await sess.commit()
+                    revoked_count += 1
+        return revoked_count
 
     async def run_reconciliation_cycle(self, session: AsyncSession | None = None) -> int:
         now = now_utc()
@@ -386,15 +369,11 @@ class WhiteInternetReconciliationWorker:
                 )
                 .order_by(Server.id.asc())
             )
-            res_servers = await sess.execute(stmt_servers)
-            servers = res_servers.scalars().all()
+            servers = (await sess.execute(stmt_servers)).scalars().all()
 
-            active_server_targets = []
+            active_server_targets: list[tuple[int, str, str, str, list]] = []
             for s in servers:
-                if not (
-                    getattr(s, "protocol", None) in (XRAY_PROTOCOL, VLESS_PROTOCOL)
-                    or (getattr(s, "protocol", None) is None and WHITE_INTERNET_CAPABILITY in (s.capabilities or []))
-                ) or WHITE_INTERNET_CAPABILITY not in (s.capabilities or []):
+                if WHITE_INTERNET_CAPABILITY not in (s.capabilities or []):
                     continue
                 epoch = s.xray_instance_epoch
                 if not epoch:
@@ -408,7 +387,7 @@ class WhiteInternetReconciliationWorker:
                                 s.xray_instance_starttime = h_data.get("starttime")
                             await sess.commit()
                     except Exception as e:
-                        logger.debug("Failed initializing epoch for server %d: %s", s.id, e)
+                        logger.debug("Failed initializing epoch for WI server %d: %s", s.id, e)
                 if epoch:
                     active_server_targets.append((
                         s.id,
@@ -418,305 +397,101 @@ class WhiteInternetReconciliationWorker:
                         (s.extra_data or {}).get("xhttp_locations", []),
                     ))
 
-        synced_count = 0
-        for server_id, api_url, api_key, target_epoch, xhttp_locs in active_server_targets:
-            if not target_epoch:
-                continue
-
-            sync_tasks: list[dict] = []
-            async with sf() as sess:
-                stmt_subs = (
-                    select(WhiteInternetSubscription)
-                    .where(
-                        WhiteInternetSubscription.hub_server_id == server_id,
-                        or_(
-                            WhiteInternetSubscription.actual_version
-                            != WhiteInternetSubscription.desired_version,
-                            WhiteInternetSubscription.last_reconciled_node_epoch
-                            != target_epoch,
-                            WhiteInternetSubscription.last_reconciled_node_epoch.is_(None),
-                            WhiteInternetSubscription.provisioning_status.in_([
-                                WhiteInternetProvisioningStatus.PENDING_CREATE,
-                                WhiteInternetProvisioningStatus.PENDING_UPDATE,
-                                WhiteInternetProvisioningStatus.PENDING_DELETE,
-                            ]),
-                            and_(
-                                WhiteInternetSubscription.status.in_([
-                                    WhiteInternetStatus.PENDING,
-                                    WhiteInternetStatus.ACTIVE,
-                                    WhiteInternetStatus.EXHAUSTED,
-                                ]),
-                                WhiteInternetSubscription.expires_at <= now,
-                            ),
-                        ),
-                    )
-                    .order_by(
-                        nulls_first(WhiteInternetSubscription.last_synced_at.asc()),
-                        WhiteInternetSubscription.id.asc(),
-                    )
-                    .limit(BATCH_SIZE)
-                )
-                res_subs = await sess.execute(stmt_subs)
-                pending_subs = res_subs.scalars().all()
-
-                for sub in pending_subs:
-                    if sub.expires_at is not None and sub.expires_at <= now and sub.status in (
-                        WhiteInternetStatus.PENDING,
-                        WhiteInternetStatus.ACTIVE,
-                        WhiteInternetStatus.EXHAUSTED,
-                    ):
-                        await white_internet_repo.expire_subscription_atomic(sess, sub.id)
-                        await sess.commit()
-
-                    desired_active = (
-                        sub.status in (WhiteInternetStatus.PENDING, WhiteInternetStatus.ACTIVE)
-                        and (sub.expires_at is None or sub.expires_at > now)
-                    )
-                    sync_tasks.append({
-                        "sub_id": sub.id,
-                        "uuid": sub.uuid,
-                        "desired_active": desired_active,
-                        "target_version": sub.desired_version,
-                        "expected_xhttp_locations": xhttp_locs,
-                    })
-
-            # Bounded concurrent execution outside DB transaction
-            if sync_tasks:
-                tasks = [
-                    self._reconcile_single_subscription(
-                        server_id, api_url, api_key, target_epoch, task, sf
-                    )
-                    for task in sync_tasks
-                ]
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                for r in results:
-                    if isinstance(r, Exception):
-                        logger.error("Error in parallel reconciliation task: %s", r, exc_info=r)
-                    elif r is True:
-                        synced_count += 1
-
-        synced_count += await self._sweep_orphan_cleanups(sf)
-        synced_count += await self._sweep_unallocated_subscriptions(sf)
-
-        return synced_count
-
-    async def _sweep_orphan_cleanups(self, sf) -> int:
-        """Converge former hub nodes to disabled for migrated subscriptions.
-
-        Drains the durable orphan-cleanup outbox written by renew migrations in
-        the same transaction. Fire-and-forget dispatches are only accelerators;
-        this sweep is the guarantee, so restarts can never orphan credentials.
-        """
-        swept = 0
-        try:
-            async with sf() as sess:
-                stmt = (
-                    select(white_internet_repo.WhiteInternetOrphanCleanup.id)
-                    .where(
-                        white_internet_repo.WhiteInternetOrphanCleanup.status == "pending",
-                        white_internet_repo.WhiteInternetOrphanCleanup.attempts < 20,
-                    )
-                    .order_by(white_internet_repo.WhiteInternetOrphanCleanup.id.asc())
-                    .limit(BATCH_SIZE)
-                )
-                cleanup_ids = list((await sess.execute(stmt)).scalars().all())
-        except Exception as exc:
-            logger.debug("Orphan sweep listing failed: %s", exc)
+        if not active_server_targets:
             return 0
-        for cleanup_id in cleanup_ids:
-            async with sf() as sess:
-                try:
-                    row = await sess.get(
-                        white_internet_repo.WhiteInternetOrphanCleanup,
-                        cleanup_id,
-                        with_for_update=True,
-                    )
-                    if row is None or row.status != "pending":
-                        continue
-                    server = (
-                        await sess.get(Server, row.server_id)
-                        if row.server_id is not None
-                        else None
-                    )
-                    if server is None:
-                        # Hub server row is gone (node decommissioned): the credential
-                        # dies with the node, nothing left to converge.
-                        await white_internet_repo.mark_orphan_cleanup_done(sess, row.id)
-                        await sess.commit()
-                        swept += 1
-                        continue
 
-                    # Defense against A -> B -> A ping-pong migration:
-                    # If this client is currently active/pending on this hub node,
-                    # the orphan cleanup is stale and must not deactivate the active user!
-                    reassigned_sub = await sess.scalar(
-                        select(WhiteInternetSubscription.id).where(
-                            WhiteInternetSubscription.uuid == row.client_uuid,
-                            WhiteInternetSubscription.hub_server_id == row.server_id,
-                            WhiteInternetSubscription.status.in_([
-                                WhiteInternetStatus.ACTIVE,
-                                WhiteInternetStatus.PENDING,
-                                WhiteInternetStatus.EXHAUSTED,
-                            ]),
-                        )
-                    )
-                    if isinstance(reassigned_sub, (int, str)):
-                        cred_hash = hashlib.sha256(row.client_uuid.encode()).hexdigest()[:12]
-                        logger.info(
-                            "Orphan cleanup %d cancelled: credential sha256:%s... is currently active/placed on hub %d (sub_id=%s).",
-                            row.id,
-                            cred_hash,
-                            row.server_id,
-                            reassigned_sub,
-                        )
-                        await white_internet_repo.mark_orphan_cleanup_done(sess, row.id)
-                        await sess.commit()
-                        swept += 1
-                        continue
-                    server_proto = getattr(server, "protocol", None)
-                    if not server_proto:
-                        caps = getattr(server, "capabilities", None) or []
-                        server_proto = XRAY_PROTOCOL if WHITE_INTERNET_CAPABILITY in caps else None
-                    if (
-                        server_proto not in (XRAY_PROTOCOL, VLESS_PROTOCOL)
-                        or not server.is_active
-                        or not server.api_url
-                        or not server.api_key
-                    ):
-                        # Not converged yet and not safe to call: leave pending
-                        # without burning attempts; retried on later cycles.
-                        continue
-                    async with self._semaphore:
-                        resp = await self.client.sync_client(
-                            server.api_url,
-                            server.api_key,
-                            client_uuid=row.client_uuid,
-                            is_active=False,
-                            version=row.desired_version,
-                            expected_node_epoch=server.xray_instance_epoch,
-                            idempotency_key=(
-                                f"orphan:{row.id}:{row.client_uuid}:{row.desired_version}"
-                            ),
-                        )
-                    sync_result = resp.result if hasattr(resp, "result") else resp[0]
-                    err_msg = resp.error if hasattr(resp, "error") else resp[1]
-                    if sync_result == SyncResult.APPLIED:
-                        await white_internet_repo.mark_orphan_cleanup_done(sess, row.id)
-                        await sess.commit()
-                        swept += 1
-                        cred_hash = hashlib.sha256(row.client_uuid.encode()).hexdigest()[:12]
-                        logger.info(
-                            "Swept orphan credential id=%d sha256:%s... on former hub %d.",
-                            row.id,
-                            cred_hash,
-                            server.id,
-                        )
-                    elif sync_result == SyncResult.ALREADY_NEWER:
-                        inv_ok, inv_data, _ = await self.client.get_inventory(
-                            server.api_url,
-                            server.api_key,
-                            client_ids=[row.client_uuid],
-                            service="white_internet",
-                        )
-                        observed = None
-                        if inv_ok and inv_data and "inventory" in inv_data:
-                            observed = (inv_data["inventory"].get(row.client_uuid) or {}).get(
-                                "observed_state"
-                            )
-                        if observed == "disabled":
-                            await white_internet_repo.mark_orphan_cleanup_done(sess, row.id)
-                            await sess.commit()
-                            swept += 1
-                        else:
-                            await white_internet_repo.mark_orphan_cleanup_failed(
-                                sess, row.id, f"already_newer_unconfirmed:{observed}"
-                            )
-                            await sess.commit()
-                    else:
-                        await white_internet_repo.mark_orphan_cleanup_failed(
-                            sess, row.id, err_msg or str(sync_result)
-                        )
-                        await sess.commit()
-                except Exception as exc:
-                    logger.warning(
-                        "Orphan sweep failed for cleanup %d: %s", cleanup_id, exc
-                    )
-        return swept
+        all_server_ids = {t[0] for t in active_server_targets}
 
-    async def _sweep_unallocated_subscriptions(self, sf) -> int:
-        """Allocate available ru_hub nodes to active/pending subscriptions with hub_server_id IS NULL."""
-        allocated = 0
-        try:
-            async with sf() as sess:
-                stmt = (
-                    select(WhiteInternetSubscription.id)
-                    .where(
-                        WhiteInternetSubscription.hub_server_id.is_(None),
+        async with sf() as sess:
+            stmt_subs = (
+                select(WhiteInternetSubscription)
+                .where(
+                    or_(
+                        WhiteInternetSubscription.actual_version != WhiteInternetSubscription.desired_version,
+                        WhiteInternetSubscription.provisioning_status.in_([
+                            WhiteInternetProvisioningStatus.PENDING_CREATE,
+                            WhiteInternetProvisioningStatus.PENDING_UPDATE,
+                            WhiteInternetProvisioningStatus.PENDING_DELETE,
+                        ]),
                         WhiteInternetSubscription.status.in_([
                             WhiteInternetStatus.PENDING,
                             WhiteInternetStatus.ACTIVE,
-                            WhiteInternetStatus.EXHAUSTED,
                         ]),
+                        and_(
+                            WhiteInternetSubscription.status == WhiteInternetStatus.EXHAUSTED,
+                            WhiteInternetSubscription.expires_at <= now,
+                        ),
                     )
-                    .order_by(WhiteInternetSubscription.id.asc())
-                    .limit(BATCH_SIZE)
                 )
-                res = await sess.execute(stmt)
-                unallocated_ids = list(res.scalars().all())
-        except Exception as exc:
-            logger.debug("Unallocated subscription sweep query failed: %s", exc)
-            return 0
+                .order_by(WhiteInternetSubscription.id.asc())
+                .limit(BATCH_SIZE)
+            )
+            subs = (await sess.execute(stmt_subs)).scalars().all()
 
-        for sub_id in unallocated_ids:
-            async with self._get_sub_lock(sub_id):
-                async with self._semaphore:
-                    async with sf() as sess:
-                        try:
-                            hub = await servers_repo.allocate_wi_hub_atomic(sess)
-                            if hub is None:
-                                logger.warning("No healthy hub server available for unallocated sub_id=%d", sub_id)
-                                if self.bot:
-                                    now_m = time.monotonic()
-                                    if not self._hub_exhausted_alerted or (
-                                        self._hub_exhausted_last_sent
-                                        and (now_m - self._hub_exhausted_last_sent) >= 3600.0
-                                    ):
-                                        self._hub_exhausted_alerted = True
-                                        self._hub_exhausted_last_sent = now_m
-                                        asyncio.create_task(self._send_hub_exhausted_alert(sub_id))
-                                break
+            sub_tasks: list[dict] = []
+            for sub in subs:
+                if sub.expires_at is not None and sub.expires_at <= now and sub.status in (
+                    WhiteInternetStatus.PENDING,
+                    WhiteInternetStatus.ACTIVE,
+                    WhiteInternetStatus.EXHAUSTED,
+                ):
+                    await white_internet_repo.expire_subscription_atomic(sess, sub.id)
+                    await sess.commit()
 
-                            sub = await sess.get(WhiteInternetSubscription, sub_id, with_for_update=True)
-                            if sub is None or sub.hub_server_id is not None:
-                                continue
-                            if sub.status not in (
-                                WhiteInternetStatus.PENDING,
-                                WhiteInternetStatus.ACTIVE,
-                                WhiteInternetStatus.EXHAUSTED,
-                            ):
-                                continue
+                desired_active = (
+                    sub.status in (WhiteInternetStatus.PENDING, WhiteInternetStatus.ACTIVE)
+                    and (sub.expires_at is None or sub.expires_at > now)
+                )
+                sub_tasks.append({
+                    "sub_id": sub.id,
+                    "user_id": sub.user_id,
+                    "uuid": sub.uuid,
+                    "desired_active": desired_active,
+                    "target_version": sub.desired_version,
+                    "node_sync_state": dict(sub.node_sync_state or {}) if isinstance(sub.node_sync_state, dict) else {},
+                    "actual_version": sub.actual_version,
+                })
 
-                            sub.hub_server_id = hub.id
-                            sub.desired_version += 1
-                            sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
-                            sub.last_reconciled_node_epoch = None
-                            await sess.commit()
-                            allocated += 1
-                            if self._hub_exhausted_alerted and self.bot:
-                                self._hub_exhausted_alerted = False
-                                self._hub_exhausted_last_sent = None
-                                asyncio.create_task(self._send_hub_restored_alert())
-                        except Exception as exc:
-                            logger.error("Failed to allocate hub node for sub_id=%d: %s", sub_id, exc)
-                            await sess.rollback()
-        return allocated
+        synced_count = 0
+        for server_id, api_url, api_key, target_epoch, xhttp_locs in active_server_targets:
+            per_server_tasks = []
+            for task in sub_tasks:
+                n_state = task["node_sync_state"].get(str(server_id)) or {}
+                if (
+                    n_state.get("version") != task["target_version"]
+                    or n_state.get("epoch") != target_epoch
+                    or n_state.get("active") is not task["desired_active"]
+                    or task["actual_version"] != task["target_version"]
+                ):
+                    per_server_tasks.append(
+                        self._reconcile_sub_on_server(
+                            server_id,
+                            api_url,
+                            api_key,
+                            target_epoch,
+                            xhttp_locs,
+                            task,
+                            all_server_ids,
+                            sf,
+                        )
+                    )
+            if per_server_tasks:
+                results = await asyncio.gather(*per_server_tasks, return_exceptions=True)
+                for r in results:
+                    if isinstance(r, Exception):
+                        logger.error("Error in WI reconciliation task: %s", r, exc_info=r)
+                    elif r is True:
+                        synced_count += 1
+
+        synced_count += await self._reconcile_pending_revocations(active_server_targets, sf)
+        return synced_count
 
 
 async def white_internet_reconciliation_loop(
     bot: Bot | None = None,
     shutdown_event: asyncio.Event | None = None,
 ):
-    """Background loop running reconciliation cycles."""
+    """Background loop running WI reconciliation cycles across all active WI ru_hubs."""
     event = shutdown_event or asyncio.Event()
     worker = WhiteInternetReconciliationWorker(bot=bot)
 
@@ -727,7 +502,7 @@ async def white_internet_reconciliation_loop(
             try:
                 synced = await worker.run_reconciliation_cycle()
                 if synced > 0:
-                    logger.info("Reconciled %d White Internet subscriptions.", synced)
+                    logger.info("Reconciled %d White Internet items.", synced)
             except Exception as exc:
                 logger.error("Unhandled error in White Internet reconciliation cycle: %s", exc, exc_info=True)
 

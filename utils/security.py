@@ -63,6 +63,8 @@ def is_ip_allowed(ip, *, allow_local: bool = False) -> bool:
         return False
     if ip.is_loopback or ip.is_private or ip.is_unspecified:
         return allow_local
+    if not ip.is_global:
+        return False
     return True
 
 

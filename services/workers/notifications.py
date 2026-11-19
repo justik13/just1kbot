@@ -162,9 +162,14 @@ async def subscription_notifications_loop(
             if shutdown_event.is_set():
                 break
 
-            await asyncio.sleep(WORKER_ERROR_SLEEP_INTERVAL)
-
-            continue
+            try:
+                await asyncio.wait_for(
+                    shutdown_event.wait(),
+                    timeout=WORKER_ERROR_SLEEP_INTERVAL,
+                )
+                break
+            except asyncio.TimeoutError:
+                continue
 
         try:
             await asyncio.wait_for(
@@ -263,7 +268,7 @@ async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
                 ):
                     continue
 
-                std_limit = await SubscriptionService.get_effective_device_limit(session, user)
+                std_limit = max(2, await SubscriptionService.get_effective_device_limit(session, user))
                 quote = await OrderService.quote_standard_change(session, user.id, std_limit, 30)
                 due_rub = int(quote["due_rub"])
                 bal = await get_account_balance(session, user_id=user.id)

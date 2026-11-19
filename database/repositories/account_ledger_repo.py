@@ -370,10 +370,12 @@ async def create_order_refund_debit(
     order_id: object,
     refund_id: str,
     metadata: dict | None = None,
+    allow_zero_credit: bool = False,
 ) -> tuple[AccountLedgerEntry, bool]:
     """Debit refunded real YooKassa top-up funds from the 'real' bucket."""
     if not isinstance(refund_id, str) or not refund_id.strip():
         raise ValueError("refund_id must be a non-empty string")
+    await lock_account_user(session, user_id)
     from decimal import ROUND_HALF_UP
 
     quantized_amount = Decimal(str(amount_rub)).quantize(
@@ -414,8 +416,10 @@ async def create_order_refund_debit(
     if (
         credit_total is not None
         and debited_total is not None
-        and credit_total > 0
-        and abs(debited_total) + abs(amount) > credit_total
+        and (
+            (credit_total == 0 and not allow_zero_credit)
+            or (credit_total > 0 and abs(debited_total) + abs(amount) > credit_total)
+        )
     ):
         raise AccountLedgerInvariantError("refund_debit_exceeds_credit")
 
@@ -441,9 +445,10 @@ async def create_admin_adjustment(
     idempotency_key: str,
     metadata: dict,
     cap_to_available: bool = False,
+    locked_user: User | None = None,
 ) -> tuple[AccountLedgerEntry | None, bool]:
     """Credit or debit the internal 'bonus' bucket."""
-    user = await lock_account_user(session, user_id)
+    user = locked_user or await lock_account_user(session, user_id)
     amount = Decimal(str(signed_amount))
     if (
         isinstance(signed_amount, float)

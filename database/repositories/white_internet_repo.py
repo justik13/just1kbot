@@ -6,8 +6,9 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import secrets
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from config.constants import (
     WHITE_INTERNET_BASE_DURATION_DAYS,
@@ -23,7 +24,6 @@ from config.enums import (
     WhiteInternetStatus,
 )
 from database.models import (
-    WhiteInternetOrphanCleanup,
     WhiteInternetSubscription,
 )
 from utils.datetime_helpers import now_utc
@@ -154,18 +154,12 @@ async def create_white_internet_subscription(
     session: AsyncSession,
     *,
     user_id: int,
-    hub_server_id: int | None = None,
-    origin_node_id: int | None = None,
     token: str,
     uuid: str,
-    price_rub: Decimal = WHITE_INTERNET_BASE_PRICE_RUB,
     duration_days: int = WHITE_INTERNET_BASE_DURATION_DAYS,
     base_bytes: int | None = None,
     device_limit: int = 1,
 ) -> WhiteInternetSubscription:
-    effective_hub_id = hub_server_id if hub_server_id is not None else origin_node_id
-    if effective_hub_id is None:
-        raise ValueError("hub_server_id is required")
     now = now_utc()
     expires_at = now + timedelta(days=duration_days)
     clamped_devices = max(1, min(WHITE_INTERNET_MAX_DEVICE_LIMIT, int(device_limit)))
@@ -176,7 +170,6 @@ async def create_white_internet_subscription(
     )
     subscription = WhiteInternetSubscription(
         user_id=user_id,
-        hub_server_id=effective_hub_id,
         token=token,
         uuid=uuid,
         status=WhiteInternetStatus.PENDING,
@@ -191,17 +184,15 @@ async def create_white_internet_subscription(
         traffic_uplink_bytes=0,
         traffic_downlink_bytes=0,
         traffic_overage_bytes=0,
-        last_uplink_snapshot=0,
-        last_downlink_snapshot=0,
-        traffic_stats_epoch=None,
+        node_traffic_snapshots={},
+        node_sync_state={},
+        pending_revoked_uuids=[],
         provisioning_status=WhiteInternetProvisioningStatus.PENDING_CREATE,
         desired_version=1,
         actual_version=0,
-        last_reconciled_node_epoch=None,
     )
     session.add(subscription)
     await session.flush()
-    await cancel_pending_orphan_cleanups_for_client(session, effective_hub_id, uuid)
     await session.refresh(subscription)
     return subscription
 
@@ -398,6 +389,14 @@ async def apply_due_downgrades(
         sub.base_traffic_bytes = sub.device_limit * WHITE_INTERNET_BASE_TRAFFIC_BYTES
         sub.pending_device_limit = None
         sub.pending_from = None
+        total_quota = (sub.base_traffic_bytes or 0) + (sub.extra_traffic_bytes or 0)
+        used = max(0, (sub.traffic_used_bytes or 0) - (sub.traffic_overage_bytes or 0))
+        if sub.status == WhiteInternetStatus.ACTIVE and total_quota > 0 and used >= total_quota:
+            sub.status = WhiteInternetStatus.EXHAUSTED
+            sub.status_reason = "quota_exhausted"
+            sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_DELETE
+        else:
+            sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
         sub.desired_version += 1
         applied += 1
     if applied:
@@ -527,71 +526,99 @@ async def record_and_deduct_traffic_atomic(
     return consumed_delta, became_exhausted, available_after, event
 
 
-async def enqueue_orphan_cleanup(
+async def add_pending_revocation_uuids(
     session: AsyncSession,
-    server_id: int | None,
-    client_uuid: str,
-    desired_version: int,
-) -> WhiteInternetOrphanCleanup:
-    """Durably record that a client UUID must be disabled on a former origin.
-
-    Called in the same transaction as the renew migration, so the record
-    survives any crash or restart that would lose a fire-and-forget task.
-    """
-    row = WhiteInternetOrphanCleanup(
-        server_id=server_id,
-        client_uuid=client_uuid,
-        desired_version=desired_version,
-        status="pending",
-    )
-    session.add(row)
-    await session.flush()
-    return row
-
-
-async def mark_orphan_cleanup_done(
-    session: AsyncSession,
-    cleanup_id: int,
+    subscription_id: int,
+    uuids: list[str],
 ) -> None:
-    row = await session.get(WhiteInternetOrphanCleanup, cleanup_id, with_for_update=True)
-    if row is None or row.status != "pending":
+    """Append device UUIDs to pending_revoked_uuids for multi-hub WI deprovisioning."""
+    clean_uuids = [str(u).strip().lower() for u in uuids if isinstance(u, str) and u.strip()]
+    if not clean_uuids:
         return
-    row.status = "done"
-    row.last_error = None
-    await session.flush()
-
-
-async def mark_orphan_cleanup_failed(
-    session: AsyncSession,
-    cleanup_id: int,
-    error: str,
-) -> None:
-    row = await session.get(WhiteInternetOrphanCleanup, cleanup_id, with_for_update=True)
-    if row is None or row.status != "pending":
+    sub = await get_subscription_with_lock(session, subscription_id)
+    if sub is None:
         return
-    row.attempts = (row.attempts or 0) + 1
-    row.last_error = error[:500]
-    await session.flush()
+    pending = list(getattr(sub, "pending_revoked_uuids", None) or [])
+    changed = False
+    for u in clean_uuids:
+        if u not in pending:
+            pending.append(u)
+            changed = True
+    if changed:
+        sub.pending_revoked_uuids = pending
+        flag_modified(sub, "pending_revoked_uuids")
+        await session.flush()
 
 
-async def cancel_pending_orphan_cleanups_for_client(
+async def record_wi_traffic_atomic(
     session: AsyncSession,
+    subscription_id: int,
     server_id: int,
     client_uuid: str,
-) -> int:
-    """Cancel any pending orphan cleanups for a client that has been re-placed on server_id."""
-    stmt = (
-        update(WhiteInternetOrphanCleanup)
-        .where(
-            WhiteInternetOrphanCleanup.server_id == server_id,
-            WhiteInternetOrphanCleanup.client_uuid == client_uuid,
-            WhiteInternetOrphanCleanup.status == "pending",
-        )
-        .values(status="done", last_error="Cancelled by re-placement on this origin node")
-    )
-    res = await session.execute(stmt)
+    raw_uplink: int,
+    raw_downlink: int,
+    current_epoch: str | None,
+) -> tuple[int, bool]:
+    """Record per-(server, device_uuid) WI traffic delta atomically.
+
+    Returns (total_delta_bytes, newly_exhausted).
+    """
+    sub = await get_subscription_with_lock(session, subscription_id)
+    if sub is None:
+        return 0, False
+
+    snapshots = dict(getattr(sub, "node_traffic_snapshots", None) or {})
+    snap_key = f"{server_id}:{client_uuid}"
+    prev = snapshots.get(snap_key)
+    str_epoch = str(current_epoch or "")
+    current_up = max(0, int(raw_uplink or 0))
+    current_down = max(0, int(raw_downlink or 0))
+
+    if not isinstance(prev, dict):
+        # First observation of this device on this server: initialize baseline to current counters
+        # (unless subscription was just created/reset with zero usage, in which case current IS delta).
+        delta_up = current_up if (sub.traffic_used_bytes or 0) == 0 else 0
+        delta_down = current_down if (sub.traffic_used_bytes or 0) == 0 else 0
+    elif str(prev.get("epoch") or "") != str_epoch:
+        delta_up = current_up
+        delta_down = current_down
+    else:
+        prev_up = int(prev.get("up", 0) or 0)
+        prev_down = int(prev.get("down", 0) or 0)
+        delta_up = (current_up - prev_up) if current_up >= prev_up else current_up
+        delta_down = (current_down - prev_down) if current_down >= prev_down else current_down
+
+    delta_up = max(0, delta_up)
+    delta_down = max(0, delta_down)
+    total_delta = delta_up + delta_down
+
+    if not isinstance(prev, dict) or total_delta > 0 or str(prev.get("epoch") or "") != str_epoch:
+        snapshots[snap_key] = {
+            "epoch": str_epoch,
+            "up": current_up,
+            "down": current_down,
+            "updated_at": int(now_utc().timestamp()),
+        }
+        sub.node_traffic_snapshots = snapshots
+        flag_modified(sub, "node_traffic_snapshots")
+
+    newly_exhausted = False
+    if total_delta > 0:
+        sub.traffic_uplink_bytes = (sub.traffic_uplink_bytes or 0) + delta_up
+        sub.traffic_downlink_bytes = (sub.traffic_downlink_bytes or 0) + delta_down
+        sub.traffic_used_bytes = (sub.traffic_used_bytes or 0) + total_delta
+
+        total_quota = (sub.base_traffic_bytes or 0) + (sub.extra_traffic_bytes or 0)
+        used_quota = max(0, (sub.traffic_used_bytes or 0) - (sub.traffic_overage_bytes or 0))
+        if sub.status == WhiteInternetStatus.ACTIVE and total_quota > 0 and used_quota >= total_quota:
+            sub.status = WhiteInternetStatus.EXHAUSTED
+            sub.status_reason = "quota_exhausted"
+            sub.desired_version += 1
+            sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_DELETE
+            newly_exhausted = True
+
     await session.flush()
-    return getattr(res, "rowcount", 0) or 0
+    return total_delta, newly_exhausted
 
 
 async def get_white_internet_dashboard_stats(session: AsyncSession) -> dict:
@@ -693,13 +720,14 @@ async def add_extra_traffic_atomic(
             f"Cannot add traffic to subscription in {sub.status} state"
         )
 
-    sub.extra_traffic_bytes = (sub.extra_traffic_bytes or 0) + extra_bytes
+    new_extra = (sub.extra_traffic_bytes or 0) + extra_bytes
     effective_devices = _effective_device_limit(sub)
     max_extra_allowed = effective_devices * WHITE_INTERNET_MAX_QUOTA_BYTES
-    if sub.extra_traffic_bytes > max_extra_allowed:
+    if new_extra > max_extra_allowed:
         raise WhiteInternetQuotaCapExceededError(
-            f"Extra traffic ({sub.extra_traffic_bytes} bytes) exceeds maximum allowed limit ({max_extra_allowed} bytes)"
+            f"Extra traffic ({new_extra} bytes) exceeds maximum allowed limit ({max_extra_allowed} bytes)"
         )
+    sub.extra_traffic_bytes = new_extra
     total_quota = (sub.base_traffic_bytes or 0) + sub.extra_traffic_bytes
     used = max(0, (sub.traffic_used_bytes or 0) - (sub.traffic_overage_bytes or 0))
 
@@ -835,6 +863,7 @@ async def extend_subscription_atomic(
 
     sub.expires_at = calculate_extension_end(sub.expires_at, days, now=current_time)
     sub.desired_version += 1
+    sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
     if is_new_cycle:
         sub.traffic_used_bytes = 0
         sub.traffic_overage_bytes = 0
@@ -844,7 +873,6 @@ async def extend_subscription_atomic(
         sub.notified_90p = False
         sub.status = WhiteInternetStatus.ACTIVE
         sub.status_reason = None
-        sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
 
     sub.notified_3d = False
     sub.notified_1d = False

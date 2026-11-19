@@ -19,6 +19,7 @@ from config.constants import (
     STANDARD_MAX_DEVICES,
     STANDARD_MIN_DEVICES,
     STANDARD_PLANS,
+    VPN_ACCESS_GRACE_HOURS,
     WHITE_INTERNET_BASE_DURATION_DAYS,
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
     WHITE_INTERNET_MAX_EXPIRY_DAYS,
@@ -48,7 +49,7 @@ from services.fulfillment_service import FulfillmentService
 from services.order_notifications import mark_notify_pending
 from services.referral_bonus import reverse_referral_bonus_for_topup
 from services.white_internet_service import WhiteInternetService, get_white_internet_tier_price
-from utils.datetime_helpers import now_utc
+from utils.datetime_helpers import is_permanent_subscription, is_vpn_access_expired, now_utc
 
 logger = logging.getLogger(__name__)
 
@@ -204,12 +205,14 @@ class OrderService:
         return_url: str | None = None,
         metadata: dict | None = None,
         bot_username: str | None = None,
+        idempotency_key: str | None = None,
     ) -> tuple[Order, bool]:
         """Create (or deduplicate) an external YooKassa order and obtain payment link."""
         order_meta: dict = dict(metadata) if metadata else {}
+        op_name = order_meta.get("operation")
 
         cutoff = now_utc() - timedelta(minutes=15)
-        existing = await session.scalar(
+        recent_stmt = (
             select(Order)
             .where(
                 Order.user_id == user_id,
@@ -224,10 +227,11 @@ class OrderService:
                 Order.payment_url.is_not(None),
             )
             .order_by(Order.created_at.desc())
-            .limit(1)
+            .limit(5)
         )
-        if existing and existing.payment_url:
-            return existing, False
+        for cand in (await session.execute(recent_stmt)).scalars().all():
+            if cand.payment_url and (cand.metadata_ or {}).get("operation") == op_name:
+                return cand, False
 
         order = Order(
             id=uuid.uuid4(),
@@ -238,6 +242,7 @@ class OrderService:
             traffic_bytes=traffic_bytes,
             device_limit=device_limit,
             payment_method="yookassa",
+            idempotency_key=idempotency_key,
             status="pending",
             description=description,
             metadata_=order_meta,
@@ -262,14 +267,12 @@ class OrderService:
             held_meta["payment_creation_ambiguous"] = True
             order.metadata_ = held_meta
             await session.flush()
-            await session.commit()
             raise
         except Exception as exc:
             order_id = order.id
             logger.exception(
                 "Gateway failed to create payment for order %s: %s", order_id, exc
             )
-            await session.rollback()
             raise
 
         await session.flush()
@@ -315,6 +318,9 @@ class OrderService:
     ) -> Order | None:
         """Idempotent, atomic order settlement with row-level locking."""
         order_uuid = uuid.UUID(str(order_id)) if not isinstance(order_id, uuid.UUID) else order_id
+        owner_id = await session.scalar(select(Order.user_id).where(Order.id == order_uuid))
+        if owner_id is not None:
+            await session.scalar(select(User.id).where(User.id == owner_id).with_for_update())
         order = await session.scalar(
             select(Order)
             .where(Order.id == order_uuid)
@@ -474,7 +480,11 @@ class OrderService:
         cooldown_until = getattr(vless_sub, "downgrade_cooldown_until", None) if vless_sub else None
         active_hwid_count = await count_active_user_devices(session, user_id)
 
-        is_active = bool(sub_end and sub_end > now and current_limit > 0)
+        is_active = bool(
+            sub_end
+            and not is_vpn_access_expired(sub_end, grace_hours=VPN_ACCESS_GRACE_HOURS)
+            and current_limit > 0
+        )
         if not is_active:
             base_price = Decimal(calculate_standard_price(target_device_limit, target_duration_days))
             discount = Decimal(0)
@@ -512,7 +522,8 @@ class OrderService:
             }
 
         if target_device_limit > current_limit:
-            days_left = max(1, math.ceil((sub_end - now).total_seconds() / 86400.0))
+            raw_days = max(1, math.ceil((sub_end - now).total_seconds() / 86400.0))
+            days_left = min(raw_days, 365) if is_permanent_subscription(sub_end) else raw_days
             diff_30 = calculate_standard_price(target_device_limit, 30) - calculate_standard_price(
                 max(STANDARD_MIN_DEVICES, current_limit), 30
             )
@@ -531,7 +542,8 @@ class OrderService:
             }
 
         # Downgrade: target_device_limit < current_limit
-        full_days_left = max(0, int((sub_end - now).total_seconds() // 86400))
+        is_perm = is_permanent_subscription(sub_end)
+        full_days_left = 0 if is_perm else max(0, int((sub_end - now).total_seconds() // 86400))
         blocked_reason: str | None = None
         if cooldown_until and cooldown_until > now:
             blocked_reason = f"Снижение лимита доступно после {cooldown_until.strftime('%d.%m.%Y %H:%M')}"
@@ -584,7 +596,7 @@ class OrderService:
 
         from database.repositories import vless_subscription_repo
 
-        vless_sub, _ = await vless_subscription_repo.get_or_create_subscription(session, user_id)
+        vless_sub = await vless_subscription_repo.get_or_create_subscription(session, user_id)
         now = now_utc()
         vless_sub.device_limit = target_device_limit
         vless_sub.downgrade_cooldown_until = now + timedelta(
@@ -599,6 +611,7 @@ class OrderService:
                 signed_amount=bonus_rub,
                 idempotency_key=f"std_downgrade:{user_id}:{uuid.uuid4()}",
                 metadata={"source": "standard_downgrade_cashback", "target_devices": target_device_limit},
+                locked_user=user,
             )
 
         from services.subscription import SubscriptionService
@@ -859,8 +872,8 @@ class OrderService:
                 )
 
         bal = await get_account_balance(session, user_id=user_id, for_update=True, locked_user=user)
-        if use_balance and bal.debt > 0:
-            raise AccountDebtBlockedError("Account debt prevents wallet purchases")
+        if bal.debt > 0 and service_type != "topup":
+            raise AccountDebtBlockedError("Имеется задолженность на балансе. Покупки заблокированы до погашения.")
 
         if use_balance and bal.available >= total_cost:
             charged_bonus = min(bal.bonus_available, total_cost)
@@ -932,6 +945,7 @@ class OrderService:
             return_url=return_url,
             metadata=order_meta,
             bot_username=bot_username,
+            idempotency_key=clean_idem_key,
         )
         if is_new_order and wallet_debit > 0:
             await create_order_debit(
@@ -969,7 +983,7 @@ class OrderService:
         vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user_id)
         if standard is not None:
             if vless_sub is None:
-                vless_sub, _ = await vless_subscription_repo.get_or_create_subscription(session, user_id)
+                vless_sub = await vless_subscription_repo.get_or_create_subscription(session, user_id)
             vless_sub.auto_renew_enabled = bool(standard)
             from services.subscription import SubscriptionService
 
@@ -1100,11 +1114,23 @@ class OrderService:
                 )
                 return None
 
-            refund_amount = (
-                result.amount_rub
-                if (result.amount_rub is not None and result.amount_rub > 0)
-                else order.amount_rub
-            )
+            if result.amount_rub is None or result.amount_rub <= 0:
+                logger.warning(
+                    "Refund amount missing or non-positive for order %s (got %s, ext_id=%s); flagging manual review",
+                    order.id,
+                    result.amount_rub,
+                    result.external_id,
+                )
+                order_meta = dict(order.metadata_ or {})
+                order_meta["requires_manual_review"] = True
+                order_meta["refund_amount_mismatch"] = f"Missing or invalid refund amount: {result.amount_rub}"
+                if result.external_id:
+                    order_meta["refund_external_id"] = result.external_id
+                order.metadata_ = order_meta
+                await session.flush()
+                return order
+
+            refund_amount = result.amount_rub
             if refund_amount > order.amount_rub:
                 logger.warning(
                     "Refund amount mismatch or missing for order %s: expected <= %s, got %s (ext_id=%s)",
@@ -1132,6 +1158,16 @@ class OrderService:
                 order_meta["refund_external_id"] = result.external_id
             if is_partial:
                 order_meta["partial_refund_amount_rub"] = str(refund_amount)
+                order_meta["requires_manual_review"] = True
+                order.metadata_ = order_meta
+                await session.flush()
+                logger.warning(
+                    "Partial refund %s RUB for order %s (total %s RUB): flagged for manual review without auto-revoke",
+                    refund_amount,
+                    order.id,
+                    order.amount_rub,
+                )
+                return order
             order.metadata_ = order_meta
 
             if order.service_type == "topup" or (order.metadata_ or {}).get("mixed_fallback_credited"):

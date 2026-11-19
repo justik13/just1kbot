@@ -148,7 +148,7 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
 
             order = await OrderService.process_webhook_event(session, payload)
             if not order:
-                if event == "refund.succeeded":
+                if event in ("refund.succeeded", "payment.succeeded", "payment.canceled"):
                     inbox_status = WebhookInboxStatus.PENDING.value
                 elif existing_event:
                     inbox_status = WebhookInboxStatus.DEAD.value
