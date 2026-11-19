@@ -241,7 +241,7 @@ async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
         try:
             async with session_scope() as session:
                 user = await session.scalar(
-                    select(User).where(User.id == uid).with_for_update(skip_locked=True)
+                    select(User).where(User.id == uid)
                 )
                 if (
                     user is None
@@ -258,7 +258,7 @@ async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
                 std_limit = await SubscriptionService.get_effective_device_limit(session, user)
                 quote = await OrderService.quote_standard_change(session, user.id, std_limit, 30)
                 due_rub = int(quote["due_rub"])
-                bal = await get_account_balance(session, user_id=user.id, for_update=True, locked_user=user)
+                bal = await get_account_balance(session, user_id=user.id)
                 if bal.debt > 0 or bal.available < due_rub:
                     cycle_key = user.subscription_end.strftime("%Y-%m-%d") if user.subscription_end else ""
                     cache_key = ("std", user.id)
@@ -327,7 +327,7 @@ async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
         try:
             async with session_scope() as session:
                 user = await session.scalar(
-                    select(User).where(User.id == uid).with_for_update(skip_locked=True)
+                    select(User).where(User.id == uid)
                 )
                 if user is None or user.is_deleted or user.financial_hold:
                     continue
@@ -353,7 +353,7 @@ async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
 
                 eff_limit = int(sub.pending_device_limit or sub.device_limit or 1)
                 due_rub = get_white_internet_tier_price(eff_limit)
-                bal = await get_account_balance(session, user_id=user.id, for_update=True, locked_user=user)
+                bal = await get_account_balance(session, user_id=user.id)
                 if bal.debt > 0 or bal.available < due_rub:
                     cycle_key = sub.expires_at.strftime("%Y-%m-%d") if sub.expires_at else ""
                     cache_key = ("wi", user.id)

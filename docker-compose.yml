@@ -164,6 +164,8 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    env_file:
+      - .env
     environment:
       DOMAIN: ${DOMAIN:?DOMAIN is required}
       SSL_EMAIL: ${SSL_EMAIL:?SSL_EMAIL is required}
