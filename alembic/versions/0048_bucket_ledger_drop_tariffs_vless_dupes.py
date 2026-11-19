@@ -79,7 +79,7 @@ def upgrade() -> None:
                             -rec.bonus_amt,
                             rec.currency,
                             rec.order_id,
-                            rec.idempotency_key || ':bonus',
+                            rec.idempotency_key || chr(58) || 'bonus',
                             rec.metadata,
                             rec.created_at
                         );
