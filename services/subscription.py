@@ -12,7 +12,6 @@ from config.constants import (
     VPN_ACCESS_GRACE_HOURS,
 )
 from database.models import User
-from database.repositories.tariffs_repo import get_tariff_by_id
 from database.repositories.users_repo import (
     create_user,
     get_user_by_telegram_id,
@@ -33,22 +32,11 @@ MAX_REFERRAL_CHAIN_DEPTH = 50
 class SubscriptionService:
     @staticmethod
     async def get_effective_device_limit(session: AsyncSession, user: User | None) -> int:
-        """Canonical device-limit resolution: user.device_limit first (dynamic slider), then legacy current_tariff_id, else 0.
-
-        Single source of truth used by both the payment and connection UI layers
-        (and safe to reuse by domain services).
-        """
+        """Canonical device-limit resolution from user.device_limit."""
         if user is None:
             return 0
         direct_limit = getattr(user, "device_limit", 0) or 0
-        if direct_limit > 0:
-            return int(direct_limit)
-        current_tariff_id = getattr(user, "current_tariff_id", None)
-        if current_tariff_id:
-            tariff = await get_tariff_by_id(session, current_tariff_id)
-            if tariff and getattr(tariff, "service_type", "standard") == "standard":
-                return getattr(tariff, "device_limit", 0) or 0
-        return 0
+        return int(direct_limit) if direct_limit > 0 else 0
 
     @staticmethod
     async def sync_access_state(session: AsyncSession, user: User) -> None:
@@ -312,7 +300,6 @@ class SubscriptionService:
         telegram_id: int,
         days: int,
         new_device_limit: int | None = None,
-        new_tariff_id: int | None = None,
         admin_id: int | None = None,
         reason: str | None = None,
     ) -> User | None:
@@ -376,9 +363,6 @@ class SubscriptionService:
         if new_device_limit is not None:
             user.device_limit = new_device_limit
 
-        if new_tariff_id is not None:
-            user.current_tariff_id = new_tariff_id
-
         await session.flush()
 
         await SubscriptionService._sync_access_state(session, user)
@@ -394,10 +378,6 @@ class SubscriptionService:
 
         vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
         if vless_sub:
-            vless_sub.expires_at = user.subscription_end
-            vless_sub.device_limit = user.device_limit or 2
-            vless_sub.auto_renew_enabled = bool(getattr(user, "auto_renew_enabled", False))
-            vless_sub.notified_expired = bool(getattr(user, "notified_expired", False))
             if vless_sub.is_active != vless_target_active:
                 vless_sub.is_active = vless_target_active
                 vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1

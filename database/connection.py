@@ -3,7 +3,6 @@ import logging
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -11,7 +10,6 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from config.settings import get_settings
-from database.models import Tariff
 
 logger = logging.getLogger(__name__)
 
@@ -81,29 +79,8 @@ async def init_db():
         _sessionmaker = async_sessionmaker(_engine, expire_on_commit=False)
         _engine_loop = current_loop
 
-        # Seed default tariffs and maintenance mode (migrations are executed by docker-entrypoint.sh or alembic CLI)
-        await _seed_default_data()
-
         logger.info("PostgreSQL database initialized successfully")
         return _engine, _sessionmaker
-
-
-async def _seed_default_data() -> None:
-    """Seed default tariffs after migrations."""
-    from config.tariffs import DEFAULT_TARIFFS_SEEDS
-
-    async with session_scope() as session:
-        # Seed tariffs
-        result = await session.execute(
-            select(func.count(Tariff.id)).where(Tariff.service_type == "standard")
-        )
-        if result.scalar_one() == 0:
-            for tariff in DEFAULT_TARIFFS_SEEDS:
-                tariff_data = {**tariff}
-                tariff_data.setdefault("service_type", "standard")
-                session.add(Tariff(**tariff_data, is_active=True))
-            await session.commit()
-            logger.info("Default tariffs seeded successfully.")
 
 
 async def get_session() -> AsyncSession:

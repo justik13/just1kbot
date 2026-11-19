@@ -36,11 +36,12 @@ from config.enums import (
     WhiteInternetStatus,
 )
 from database.connection import session_scope
-from database.models import AccountLedgerEntry, User, UserDevice, WhiteInternetSubscription
+from database.models import AccountLedgerEntry, Order, User, UserDevice, WhiteInternetSubscription
 from database.repositories import user_devices_repo, users_repo, vless_subscription_repo, white_internet_repo
 from database.repositories.account_ledger_repo import (
     create_admin_adjustment,
     get_account_balance,
+    get_account_balances_batch,
 )
 from database.repositories.system_settings_repo import get_system_setting, set_system_setting
 from database.repositories.vless_subscription_repo import get_or_create_subscription
@@ -569,9 +570,10 @@ async def api_admin_users_handler(request: web.Request) -> web.Response:
             ).all()
             wi_map = {w.user_id: w for w in wi_rows}
 
+        balances_map = await get_account_balances_batch(session, user_ids)
         items: list[dict] = []
         for u in users:
-            bal = await get_account_balance(session, user_id=u.id)
+            bal = balances_map[u.id]
             wi = wi_map.get(u.id)
             std_active = bool(u.subscription_end and u.subscription_end > now)
             wi_active = bool(
@@ -655,7 +657,7 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
         if payload.action == "balance":
             assert payload.amount_rub is not None
             if payload.amount_rub < 0:
-                bal_before = await get_account_balance(session, user_id=user.id)
+                bal_before = await get_account_balance(session, user_id=user.id, for_update=True)
                 if abs(payload.amount_rub) > bal_before.bonus_available:
                     return web.json_response(
                         {"ok": False, "error": "Недостаточно бонусных средств на балансе пользователя"},
@@ -865,6 +867,20 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                 locked_user.topup_blocked = bool(payload.topup_blocked)
             await session.flush()
             await SubscriptionService.sync_access_state(session, locked_user)
+            if not locked_user.financial_hold:
+                from services.order_service import OrderService
+
+                held_orders = (
+                    await session.scalars(
+                        select(Order).where(
+                            Order.user_id == locked_user.id,
+                            Order.status == "paid",
+                            Order.metadata_["settlement_held"].as_boolean().is_(True),
+                        )
+                    )
+                ).all()
+                for held_order in held_orders:
+                    await OrderService.mark_order_paid(session, held_order.id)
             await AuditService.log_action(
                 session,
                 admin_id=ctx.telegram_id,

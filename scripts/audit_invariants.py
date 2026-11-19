@@ -3,8 +3,7 @@
 """
 Comprehensive Invariant Scanner for just1kbot Subsystems.
 
-Verifies 13 critical database, domain, cryptographic, and accounting invariants:
-  1. Tariff Version Immutability & Constraint Invariant
+Verifies 12 critical database, domain, cryptographic, and accounting invariants:
   2. Server Lifecycle & Health Status Invariant
   3. White Internet Subscription State Invariant
   4. White Internet Quota Grant Conservation Invariant
@@ -41,7 +40,6 @@ from config.enums import (
     AccountLedgerEntryType,
     ServerHealthState,
     ServerLifecycleStatus,
-    ServiceType,
     WhiteInternetProvisioningStatus,
     WhiteInternetStatus,
 )
@@ -49,7 +47,6 @@ from database.connection import session_scope
 from database.models import (
     AccountLedgerEntry,
     Server,
-    Tariff,
     WhiteInternetSubscription,
 )
 
@@ -59,29 +56,6 @@ class InvariantResult(NamedTuple):
     name: str
     passed: bool
     details: str
-
-
-async def assert_inv_1_tariffs(session: AsyncSession) -> InvariantResult:
-    """Inv 1: Tariffs have valid service_type, positive duration and price."""
-    violations = await session.scalars(
-        select(Tariff).where(
-            or_(
-                ~Tariff.service_type.in_(
-                    [ServiceType.STANDARD, ServiceType.WHITE_INTERNET]
-                ),
-                Tariff.duration_days <= 0,
-                Tariff.price_rub <= 0,
-            )
-        )
-    )
-    v_list = violations.all()
-    if v_list:
-        return InvariantResult(
-            1, "Tariff Constraints", False, f"Violations found: {len(v_list)} rows"
-        )
-    return InvariantResult(
-        1, "Tariff Constraints", True, "All tariffs satisfy schema invariants"
-    )
 
 
 async def assert_inv_2_server_lifecycle(session: AsyncSession) -> InvariantResult:
@@ -262,12 +236,12 @@ async def assert_inv_8_origin_node_capabilities(session: AsyncSession) -> Invari
 
 
 async def assert_inv_10_account_balance_non_negativity(session: AsyncSession) -> InvariantResult:
-    """Inv 10: All users have non-negative net balance unless accounted by refund/chargeback debits."""
+    """Inv 10: Real and bonus buckets satisfy non-negativity (real debt only from refund_debit)."""
     refund_allowance = func.coalesce(
         func.sum(
             case(
                 (
-                    AccountLedgerEntry.entry_type.in_(("refund_debit", "chargeback_debit")),
+                    AccountLedgerEntry.entry_type == "refund_debit",
                     -AccountLedgerEntry.amount,
                 ),
                 else_=Decimal("0"),
@@ -275,16 +249,34 @@ async def assert_inv_10_account_balance_non_negativity(session: AsyncSession) ->
         ),
         Decimal("0"),
     )
-    net_balance = func.coalesce(func.sum(AccountLedgerEntry.amount), Decimal("0"))
+    real_balance = func.coalesce(
+        func.sum(
+            case(
+                (AccountLedgerEntry.bucket == "real", AccountLedgerEntry.amount),
+                else_=Decimal("0"),
+            )
+        ),
+        Decimal("0"),
+    )
+    bonus_balance = func.coalesce(
+        func.sum(
+            case(
+                (AccountLedgerEntry.bucket == "bonus", AccountLedgerEntry.amount),
+                else_=Decimal("0"),
+            )
+        ),
+        Decimal("0"),
+    )
 
     res = await session.execute(
         select(
             AccountLedgerEntry.user_id,
-            net_balance.label("net_balance"),
+            real_balance.label("real_balance"),
+            bonus_balance.label("bonus_balance"),
             refund_allowance.label("refund_allowance"),
         )
         .group_by(AccountLedgerEntry.user_id)
-        .having((net_balance + refund_allowance) < 0)
+        .having(or_((real_balance + refund_allowance) < 0, bonus_balance < 0))
     )
     violations = res.all()
     if violations:
@@ -292,24 +284,25 @@ async def assert_inv_10_account_balance_non_negativity(session: AsyncSession) ->
             10,
             "Account Balance Non-Negativity",
             False,
-            f"Violations found: {len(violations)} users with unexplained negative balance exceeding refund debits",
+            f"Violations found: {len(violations)} users with invalid negative bucket balance",
         )
     return InvariantResult(
         10,
         "Account Balance Non-Negativity",
         True,
-        "All user accounting balances are non-negative or explained by refund/chargeback debits",
+        "All user real/bonus balances are non-negative or explained by refund debits",
     )
 
 
 async def assert_inv_11_account_ledger_conservation(session: AsyncSession) -> InvariantResult:
-    """Inv 11: Account ledger entries have non-zero amounts and valid entry types."""
+    """Inv 11: Account ledger entries have non-zero amounts, valid entry types and valid buckets."""
     valid_types = [t.value for t in AccountLedgerEntryType]
     violations = await session.scalars(
         select(AccountLedgerEntry).where(
             or_(
                 AccountLedgerEntry.amount == 0,
                 ~AccountLedgerEntry.entry_type.in_(valid_types),
+                ~AccountLedgerEntry.bucket.in_(["real", "bonus"]),
             )
         )
     )
@@ -384,7 +377,6 @@ async def assert_inv_15_alembic_single_head(session: AsyncSession | None = None)
 
 
 ALL_INVARIANT_CHECKS = [
-    assert_inv_1_tariffs,
     assert_inv_2_server_lifecycle,
     assert_inv_3_white_internet_subscriptions,
     assert_inv_4_subscription_traffic_pools,

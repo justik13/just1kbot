@@ -1,14 +1,14 @@
 from datetime import timedelta
 
-from sqlalchemy import and_, case, false, func, or_, select, text, update
+from sqlalchemy import and_, case, false, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased, selectinload
+from sqlalchemy.orm import selectinload
 
 from config.constants import (
     REFERRAL_ACTIVE_MIN_TOPUP_RUB,
 )
 from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
-from database.models import Order, Tariff, User, UserDevice, VlessSubscription, WhiteInternetSubscription
+from database.models import Order, User, UserDevice, VlessSubscription, WhiteInternetSubscription
 from utils.datetime_helpers import now_utc
 
 ALLOWED_USER_UPDATE_FIELDS = {
@@ -16,7 +16,6 @@ ALLOWED_USER_UPDATE_FIELDS = {
     "first_name",
     "subscription_end",
     "device_limit",
-    "current_tariff_id",
     "is_bot_blocked",
     "referred_by",
     "last_payment_at",
@@ -620,16 +619,7 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
                 return stmt.where(false())
             if not (1 <= val <= MAX_INT32):
                 return stmt.where(false())
-            matching_tariff_ids = select(Tariff.id).where(
-                Tariff.service_type == "standard",
-                Tariff.device_limit == val,
-            )
-            stmt = stmt.where(
-                or_(
-                    User.current_tariff_id.in_(matching_tariff_ids),
-                    and_(User.current_tariff_id.is_(None), User.device_limit == val),
-                )
-            )
+            stmt = stmt.where(User.device_limit == val)
     return stmt
 
 

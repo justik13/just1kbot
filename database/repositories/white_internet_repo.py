@@ -13,7 +13,6 @@ from config.constants import (
     WHITE_INTERNET_BASE_DURATION_DAYS,
     WHITE_INTERNET_BASE_PRICE_RUB,
     WHITE_INTERNET_BASE_TRAFFIC_BYTES,
-    WHITE_INTERNET_DEVICE_RESET_COOLDOWN_SECONDS,
     WHITE_INTERNET_EXTRA_DEVICE_TRAFFIC_BYTES,
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
     WHITE_INTERNET_MAX_EXPIRY_DAYS,
@@ -279,7 +278,7 @@ async def renew_subscription_atomic(
     sub.notified_expired = False
     sub.notified_90p = False
 
-    # Reset period usage counters; DO NOT reset last_uplink_snapshot / last_downlink_snapshot / last_device_reset_at!
+    # Reset period usage counters; DO NOT reset last_uplink_snapshot / last_downlink_snapshot!
     sub.traffic_used_bytes = 0
     sub.traffic_uplink_bytes = 0
     sub.traffic_downlink_bytes = 0

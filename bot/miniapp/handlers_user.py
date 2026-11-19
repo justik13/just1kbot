@@ -246,7 +246,6 @@ def _resolve_bot_username(request: web.Request) -> str:
 _LEDGER_ENTRY_LABELS: dict[str, str] = {
     "payment_credit": "Пополнение счёта",
     "purchase_debit": "Оплата доступа",
-    "purchase_reversal": "Возврат оплаты",
     "admin_adjustment": "Начисление на счёт",
     "refund_debit": "Возврат средств",
 }
@@ -255,7 +254,7 @@ _LEDGER_ENTRY_LABELS: dict[str, str] = {
 def _serialize_ledger_entry(entry) -> dict[str, Any]:
     meta = entry.metadata_ if isinstance(entry.metadata_, dict) else {}
     raw_desc = str(meta.get("description") or "").strip()
-    source = str(meta.get("source") or "").strip()
+    source = str(meta.get("source") or meta.get("source_type") or "").strip()
     if raw_desc:
         description = raw_desc
     elif source == "referral_bonus":

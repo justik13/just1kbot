@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from urllib.parse import urlparse
 
 from aiohttp import web
 
 from bot.miniapp.auth import check_miniapp_rate_limit
-from config.settings import get_settings
 from bot.miniapp.handlers_admin import (
     api_admin_2fa_setup_handler,
     api_admin_2fa_verify_handler,

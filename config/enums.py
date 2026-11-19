@@ -9,9 +9,7 @@ from enum import StrEnum
 class AccountLedgerEntryType(StrEnum):
     PAYMENT_CREDIT = "payment_credit"
     PURCHASE_DEBIT = "purchase_debit"
-    PURCHASE_REVERSAL = "purchase_reversal"
     REFUND_DEBIT = "refund_debit"
-    CHARGEBACK_DEBIT = "chargeback_debit"
     ADMIN_ADJUSTMENT = "admin_adjustment"
 
 
@@ -116,11 +114,6 @@ class WhiteInternetProvisioningStatus(StrEnum):
     FAILED = "FAILED"
 
 
-class WhiteInternetGrantType(StrEnum):
-    BASE = "BASE"
-    TOPUP = "TOPUP"
-
-
 class OrderStatus(StrEnum):
     PENDING = "pending"
     PAID = "paid"
@@ -143,7 +136,6 @@ __all__ = [
     "ServerLifecycleStatus",
     "ServiceType",
     "WebhookInboxStatus",
-    "WhiteInternetGrantType",
     "WhiteInternetProvisioningStatus",
     "WhiteInternetStatus",
 ]

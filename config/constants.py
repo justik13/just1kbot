@@ -20,7 +20,6 @@ from config.enums import (
     ServerLifecycleStatus,
     ServiceType,
     WebhookInboxStatus,
-    WhiteInternetGrantType,
     WhiteInternetProvisioningStatus,
     WhiteInternetStatus,
 )
@@ -299,7 +298,6 @@ __all__ = [
     "VLESS_PROTOCOL",
     "VLESS_TLS_FINGERPRINT",
     "WebhookInboxStatus",
-    "WhiteInternetGrantType",
     "WhiteInternetProvisioningStatus",
     "WhiteInternetStatus",
     "WORKER_ERROR_SLEEP_INTERVAL",

@@ -108,12 +108,6 @@ class User(Base):
         Boolean, nullable=False, default=False, server_default=text("false")
     )
 
-    current_tariff_id: Mapped[int | None] = mapped_column(
-        Integer,
-        ForeignKey("tariffs.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-
     referred_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
 
     last_payment_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -161,11 +155,6 @@ class User(Base):
     orders = relationship(
         "Order",
         back_populates="user",
-    )
-
-    current_tariff = relationship(
-        "Tariff",
-        foreign_keys=[current_tariff_id],
     )
 
     vless_subscription = relationship(
@@ -245,36 +234,6 @@ class Server(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
-class Tariff(Base):
-    __tablename__ = "tariffs"
-
-    __table_args__ = (
-        UniqueConstraint(
-            "service_type",
-            "device_limit",
-            "duration_days",
-            name="uq_tariffs_service_device_duration",
-        ),
-    )
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-
-    name: Mapped[str] = mapped_column(String(100), nullable=False)
-    description: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-    service_type: Mapped[str] = mapped_column(
-        String(30), nullable=False, default="standard", server_default="standard"
-    )
-    duration_days: Mapped[int] = mapped_column(Integer, nullable=False)
-    device_limit: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
-    price_rub: Mapped[int] = mapped_column(Integer, nullable=False)
-
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    sort_order: Mapped[int] = mapped_column(Integer, default=0)
-
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-
-
 class Order(Base):
     """Clean commercial order entity for simple billing."""
 
@@ -311,9 +270,6 @@ class Order(Base):
     service_type: Mapped[str] = mapped_column(
         String(30), nullable=False, default="standard", server_default=text("'standard'")
     )
-    tariff_id: Mapped[int | None] = mapped_column(
-        ForeignKey("tariffs.id", ondelete="SET NULL"), nullable=True
-    )
     amount_rub: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     duration_days: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default=text("0")
@@ -342,16 +298,11 @@ class Order(Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     user = relationship("User", back_populates="orders", foreign_keys=[user_id])
-    tariff = relationship("Tariff", foreign_keys=[tariff_id])
     ledger_entries = relationship("AccountLedgerEntry", back_populates="order")
 
 
 class AccountLedgerEntry(Base):
-    """Append-only real-money account history.
-
-    The signed sum is the user's accounting position.  A negative position is
-    exposed as debt, never as a spendable negative balance.
-    """
+    """Append-only account history split into 'real' (YooKassa) and 'bonus' (internal) buckets."""
 
     __tablename__ = "account_ledger_entries"
     __table_args__ = (
@@ -359,22 +310,20 @@ class AccountLedgerEntry(Base):
             sql_enum_in("entry_type", AccountLedgerEntryType),
             name="ck_account_ledger_entry_type",
         ),
+        CheckConstraint(
+            "bucket IN ('real', 'bonus')",
+            name="ck_account_ledger_bucket",
+        ),
         CheckConstraint("currency = 'RUB'", name="ck_account_ledger_currency_rub"),
         CheckConstraint(
             "amount <> 0 AND amount = trunc(amount)",
             name="ck_account_ledger_whole_nonzero_amount",
         ),
         CheckConstraint(
-            "(entry_type = 'payment_credit' AND amount > 0 "
-            "AND reversal_of_id IS NULL) OR "
-            "(entry_type = 'purchase_debit' AND amount < 0 "
-            "AND order_id IS NOT NULL AND reversal_of_id IS NULL) OR "
-            "(entry_type = 'purchase_reversal' AND amount > 0 "
-            "AND order_id IS NOT NULL AND reversal_of_id IS NOT NULL) OR "
-            "(entry_type IN ('refund_debit','chargeback_debit') "
-            "AND amount < 0 AND order_id IS NOT NULL "
-            "AND reversal_of_id IS NULL) OR "
-            "(entry_type = 'admin_adjustment' AND reversal_of_id IS NULL)",
+            "(entry_type = 'payment_credit' AND amount > 0) OR "
+            "(entry_type = 'purchase_debit' AND amount < 0 AND order_id IS NOT NULL) OR "
+            "(entry_type = 'refund_debit' AND amount < 0 AND order_id IS NOT NULL AND bucket = 'real') OR "
+            "(entry_type = 'admin_adjustment' AND bucket = 'bonus')",
             name="ck_account_ledger_entry_shape",
         ),
         Index(
@@ -384,8 +333,14 @@ class AccountLedgerEntry(Base):
             "id",
         ),
         Index(
+            "ix_account_ledger_user_bucket",
+            "user_id",
+            "bucket",
+        ),
+        Index(
             "uq_account_ledger_order_debit",
             "order_id",
+            "bucket",
             unique=True,
             postgresql_where=text("entry_type='purchase_debit' AND order_id IS NOT NULL"),
         ),
@@ -394,12 +349,6 @@ class AccountLedgerEntry(Base):
             "order_id",
             unique=True,
             postgresql_where=text("entry_type='payment_credit' AND order_id IS NOT NULL"),
-        ),
-        Index(
-            "uq_account_ledger_reversal",
-            "reversal_of_id",
-            unique=True,
-            postgresql_where=text("entry_type='purchase_reversal'"),
         ),
         Index(
             "ix_account_ledger_order_id",
@@ -413,6 +362,9 @@ class AccountLedgerEntry(Base):
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     entry_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    bucket: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="real", server_default=text("'real'")
+    )
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     currency: Mapped[str] = mapped_column(
         String(3), nullable=False, default="RUB", server_default=text("'RUB'")
@@ -421,9 +373,6 @@ class AccountLedgerEntry(Base):
         UUID(as_uuid=True),
         ForeignKey("orders.id", ondelete="RESTRICT"),
         nullable=True,
-    )
-    reversal_of_id: Mapped[int | None] = mapped_column(
-        ForeignKey("account_ledger_entries.id", ondelete="RESTRICT"), nullable=True
     )
     idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False, unique=True)
     metadata_: Mapped[dict] = mapped_column(
@@ -434,41 +383,6 @@ class AccountLedgerEntry(Base):
     )
 
     order = relationship("Order", back_populates="ledger_entries", foreign_keys=[order_id])
-
-
-class AccountLedgerAllocation(Base):
-    """Append-only FIFO attribution of account credits to purchase debits."""
-
-    __tablename__ = "account_ledger_allocations"
-    __table_args__ = (
-        CheckConstraint(
-            "amount > 0 AND amount = trunc(amount)",
-            name="ck_account_allocations_whole_positive_amount",
-        ),
-        UniqueConstraint(
-            "credit_entry_id",
-            "debit_entry_id",
-            name="uq_account_allocations_credit_debit",
-        ),
-        Index("ix_account_allocations_credit", "credit_entry_id", "id"),
-        Index("ix_account_allocations_debit", "debit_entry_id", "id"),
-    )
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    user_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
-    )
-    credit_entry_id: Mapped[int] = mapped_column(
-        ForeignKey("account_ledger_entries.id", ondelete="RESTRICT"), nullable=False
-    )
-    debit_entry_id: Mapped[int] = mapped_column(
-        ForeignKey("account_ledger_entries.id", ondelete="RESTRICT"), nullable=False
-    )
-    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
-    idempotency_key: Mapped[str] = mapped_column(String(180), nullable=False, unique=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()")
-    )
 
 
 class WebhookInbox(Base):
@@ -794,19 +708,6 @@ class VlessSubscription(Base):
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=text("true")
     )
-    expires_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, index=True
-    )
-    device_limit: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=2, server_default=text("2")
-    )
-    auto_renew_enabled: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default=text("false")
-    )
-    notified_expired: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default=text("false")
-    )
-    notified_before_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     version: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default=text("1")
     )

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from decimal import Decimal, ROUND_DOWN
 import logging
 import math
@@ -27,14 +27,14 @@ from config.constants import (
 )
 from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
 from config.tariffs import calculate_standard_price
-from database.models import AccountLedgerEntry, Order, Tariff, User
+from database.models import AccountLedgerEntry, Order, User
 from database.repositories.users_repo import (
     is_eligible_for_referral_first_discount,
 )
 from database.repositories.user_devices_repo import count_active_user_devices
 from database.repositories.account_ledger_repo import (
     create_admin_adjustment,
-    create_mixed_cancel_real_refund,
+    create_mixed_cancel_refund,
     create_order_credit,
     create_order_debit,
     create_order_refund_debit,
@@ -191,360 +191,89 @@ class OrderService:
         await session.flush()
 
     @staticmethod
-    def calculate_tariff_change(
-        current_tariff: Tariff | None,
-        target_tariff: Tariff,
-        subscription_end: datetime | None,
-        now: datetime | None = None,
-    ) -> tuple[Decimal, int]:
-        """Calculate required payment in RUB and resulting days for tariff change."""
-        now = now or now_utc()
-        if not subscription_end or subscription_end <= now or not current_tariff:
-            return Decimal(target_tariff.price_rub), target_tariff.duration_days
-
-        days_left = max(
-            0,
-            math.ceil((subscription_end - now).total_seconds() / 86400.0)
-            if subscription_end > now
-            else 0,
-        )
-        if days_left <= 0:
-            return Decimal(target_tariff.price_rub), target_tariff.duration_days
-
-        c_days = float(current_tariff.duration_days) if current_tariff.duration_days > 0 else 30.0
-        c_price = float(current_tariff.price_rub) if current_tariff.price_rub > 0 else 0.0
-        t_days = float(target_tariff.duration_days) if target_tariff.duration_days > 0 else 30.0
-        t_price = float(target_tariff.price_rub) if target_tariff.price_rub > 0 else 0.0
-
-        if c_price <= 0.0 or t_price <= 0.0:
-            return Decimal(target_tariff.price_rub), target_tariff.duration_days
-
-        c_daily = c_price / c_days
-        t_daily = t_price / t_days
-
-        remaining_rub = Decimal(round(days_left * c_daily))
-        target_cost = Decimal(target_tariff.price_rub)
-
-        if remaining_rub >= target_cost:
-            # User has sufficient unspent value for at least 1 cycle of target tariff.
-            # Free switch (0 ₽ due), unspent value converts to target tariff days:
-            due_rub = Decimal("0.00")
-            if abs(c_daily - t_daily) < 1e-6:
-                # Same daily rate: exact days preserved without any rounding drift
-                resulting_days = days_left
-            else:
-                resulting_days = max(1, round(float(remaining_rub) / t_daily))
-        else:
-            # Remaining value is less than 1 cycle of target tariff.
-            # Unspent value is applied as a discount on the target tariff:
-            due_rub = max(Decimal("0.00"), target_cost - remaining_rub)
-            resulting_days = target_tariff.duration_days
-
-        return due_rub, resulting_days
-
-    @staticmethod
-    async def _resolve_order_terms(
-        session: AsyncSession,
-        *,
-        user: User | None,
-        user_id: int,
-        tariff_id: int | None,
-        amount_rub: Decimal | None,
-        duration_days: int | None,
-        device_limit: int | None,
-        description: str | None,
-        order_meta: dict,
-    ) -> tuple[Decimal | None, int | None, int | None, str | None]:
-        """Resolve price, duration, device limit and description for a tariff order.
-
-        This is the single source of truth for checkout pricing. It is shared by
-        ``create_order`` (external gateway) and ``pay_from_wallet`` (internal
-        balance) so the referral first-purchase discount and the tariff-change
-        proration can never drift between the two payment paths.
-
-        ``order_meta`` is mutated in place with the pricing annotations that the
-        order row and the fulfilment step read back.
-        """
-        if tariff_id is None:
-            return amount_rub, duration_days, device_limit, description
-
-        tariff = await session.get(Tariff, tariff_id)
-        if not tariff:
-            return amount_rub, duration_days, device_limit, description
-
-        now = now_utc()
-        current_tid = getattr(user, "current_tariff_id", None)
-        sub_end = getattr(user, "subscription_end", None)
-        is_tariff_change = bool(
-            user
-            and current_tid
-            and current_tid != tariff.id
-            and sub_end
-            and sub_end > now
-        )
-        is_renewal = bool(
-            user
-            and current_tid
-            and current_tid == tariff.id
-            and sub_end
-            and sub_end > now
-        )
-
-        if is_tariff_change:
-            order_meta["is_tariff_change"] = True
-            order_meta["operation"] = "change"
-            current_tariff = await session.get(Tariff, current_tid)
-            due_rub, resulting_days = OrderService.calculate_tariff_change(
-                current_tariff, tariff, sub_end, now=now
-            )
-            if amount_rub is None:
-                amount_rub = due_rub
-            if duration_days is None:
-                duration_days = resulting_days
-        else:
-            if is_renewal:
-                order_meta["is_renewal"] = True
-                order_meta["operation"] = "renew"
-            elif "operation" not in order_meta:
-                order_meta["operation"] = "purchase"
-            if amount_rub is None:
-                base_cost = Decimal(tariff.price_rub)
-                if await is_eligible_for_referral_first_discount(session, user_id):
-                    discount = (base_cost * REFERRAL_WELCOME_DISCOUNT_PERCENT).quantize(
-                        Decimal(1), rounding=ROUND_DOWN
-                    )
-                    amount_rub = max(Decimal(1), base_cost - discount)
-                    order_meta["is_referral_discount"] = True
-                    order_meta["discount_rub"] = int(discount)
-                    order_meta["original_price_rub"] = int(base_cost)
-                else:
-                    amount_rub = base_cost
-            if duration_days is None:
-                duration_days = tariff.duration_days
-
-        if device_limit is None:
-            device_limit = tariff.device_limit
-        if description is None:
-            description = f"{texts.CHECKOUT_DESCRIPTION_DEFAULT} ({tariff.name})"
-
-        return amount_rub, duration_days, device_limit, description
-
-    @staticmethod
-    async def create_order(
+    async def _create_yookassa_order(
         session: AsyncSession,
         *,
         user_id: int,
-        service_type: str = "standard",
-        tariff_id: int | None = None,
-        amount_rub: Decimal | None = None,
-        duration_days: int | None = None,
+        service_type: str,
+        amount_rub: Decimal,
+        duration_days: int,
         traffic_bytes: int = 0,
         device_limit: int | None = None,
-        payment_method: str = "yookassa",
-        description: str | None = None,
+        description: str,
         return_url: str | None = None,
         metadata: dict | None = None,
         bot_username: str | None = None,
-    ) -> Order:
-        """Create a new commercial order and obtain payment link if external gateway."""
-        user = await session.get(User, user_id)
+    ) -> tuple[Order, bool]:
+        """Create (or deduplicate) an external YooKassa order and obtain payment link."""
         order_meta: dict = dict(metadata) if metadata else {}
-        amount_rub, duration_days, device_limit, description = (
-            await OrderService._resolve_order_terms(
-                session,
-                user=user,
-                user_id=user_id,
-                tariff_id=tariff_id,
-                amount_rub=amount_rub,
-                duration_days=duration_days,
-                device_limit=device_limit,
-                description=description,
-                order_meta=order_meta,
+
+        cutoff = now_utc() - timedelta(minutes=15)
+        existing = await session.scalar(
+            select(Order)
+            .where(
+                Order.user_id == user_id,
+                Order.service_type == service_type,
+                Order.duration_days == duration_days,
+                Order.traffic_bytes == traffic_bytes,
+                Order.device_limit == device_limit,
+                Order.payment_method == "yookassa",
+                Order.amount_rub == amount_rub,
+                Order.status == "pending",
+                Order.created_at >= cutoff,
+                Order.payment_url.is_not(None),
             )
+            .order_by(Order.created_at.desc())
+            .limit(1)
         )
-
-        final_amount = amount_rub if amount_rub is not None else Decimal("0.00")
-        final_duration = duration_days if duration_days is not None else 0
-        final_desc = description or texts.CHECKOUT_DESCRIPTION_DEFAULT
-
-        # Lock user to serialize concurrent order creation (prevent double-clicks/races)
-        bind = session.get_bind()
-        if bind and getattr(bind, "dialect", None) and bind.dialect.name == "postgresql":
-            await session.execute(
-                text("SELECT pg_advisory_xact_lock(:key)"),
-                {"key": -user_id},
-            )
-
-        # 1. Deduplication guard for pending external orders (prevent double-clicks)
-        if payment_method != "wallet":
-            cutoff = now_utc() - timedelta(minutes=15)
-            existing = await session.scalar(
-                select(Order)
-                .where(
-                    Order.user_id == user_id,
-                    Order.service_type == service_type,
-                    Order.tariff_id == tariff_id,
-                    Order.duration_days == final_duration,
-                    Order.traffic_bytes == traffic_bytes,
-                    Order.device_limit == device_limit,
-                    Order.payment_method == payment_method,
-                    Order.amount_rub == final_amount,
-                    Order.status == "pending",
-                    Order.created_at >= cutoff,
-                    Order.payment_url.is_not(None),
-                )
-                .order_by(Order.created_at.desc())
-                .limit(1)
-            )
-            if existing and existing.payment_url:
-                return existing
+        if existing and existing.payment_url:
+            return existing, False
 
         order = Order(
             id=uuid.uuid4(),
             user_id=user_id,
             service_type=service_type,
-            tariff_id=tariff_id,
-            amount_rub=final_amount,
-            duration_days=final_duration,
+            amount_rub=amount_rub,
+            duration_days=duration_days,
             traffic_bytes=traffic_bytes,
             device_limit=device_limit,
-            payment_method=payment_method,
+            payment_method="yookassa",
             status="pending",
-            description=final_desc,
+            description=description,
             metadata_=order_meta,
-            expires_at=now_utc() + timedelta(minutes=15) if payment_method != "wallet" else None,
+            expires_at=now_utc() + timedelta(minutes=15),
         )
         session.add(order)
         await session.flush()
 
-        if payment_method != "wallet":
-            gateway = get_payment_gateway(payment_method)
-            try:
-                invoice = await gateway.create_payment_url(
-                    order_id=str(order.id),
-                    amount_rub=order.amount_rub,
-                    description=final_desc,
-                    return_url=return_url,
-                    bot_username=bot_username,
-                )
-                order.external_id = invoice.external_id
-                order.payment_url = invoice.payment_url
-            except PaymentCreationAmbiguousError:
-                # The provider may have created the payment (timeout, 5xx,
-                # unreadable response). Rolling back would destroy the
-                # order together with the only reference to it, and the
-                # incoming `payment.canceled` or `payment.succeeded` webhook
-                # would then find nothing and be retried by YooKassa for 24h.
-                # Keep the order so the webhook can still settle or cancel it.
-                held_meta = dict(order.metadata_ or {})
-                held_meta["payment_creation_ambiguous"] = True
-                order.metadata_ = held_meta
-                await session.flush()
-                # Commit here, not at the end of the request: ensure durability
-                # before handler raises and safe alert is shown to user.
-                await session.commit()
-                raise
-            except Exception as exc:
-                order_id = order.id
-                logger.exception(
-                    "Gateway failed to create payment for order %s: %s", order_id, exc
-                )
-                # NOTE: rollback() expires EVERY ORM object of this session
-                # (including the caller's User). Callers must capture
-                # user_id/telegram_id as plain ints BEFORE calling
-                # create_order() and never touch ORM attributes in except.
-                # Prod 2026-09-29: logger.exception(..., user.id) after this
-                # rollback raised MissingGreenlet and masked YooKassa TIMEOUT.
-                await session.rollback()
-                raise
-
-        await session.flush()
-        return order
-
-    @staticmethod
-    async def pay_from_wallet(
-        session: AsyncSession,
-        *,
-        user_id: int,
-        service_type: str = "standard",
-        tariff_id: int | None = None,
-        amount_rub: Decimal | None = None,
-        duration_days: int | None = None,
-        traffic_bytes: int = 0,
-        device_limit: int | None = None,
-        description: str | None = None,
-        metadata: dict | None = None,
-    ) -> Order:
-        # Acquire advisory lock then row lock to avoid lock inversion deadlock
-        bind = session.get_bind()
-        if bind and getattr(bind, "dialect", None) and bind.dialect.name == "postgresql":
-            await session.execute(
-                text("SELECT pg_advisory_xact_lock(:key)"),
-                {"key": -user_id},
-            )
-        user = await OrderService._load_settlement_user(session, user_id)
-        if user and getattr(user, "financial_hold", False):
-            raise FinancialHoldBlockedError("Financial hold active on user")
-
-        order_meta: dict = dict(metadata) if metadata else {}
-        amount_rub, duration_days, device_limit, description = (
-            await OrderService._resolve_order_terms(
-                session,
-                user=user,
-                user_id=user_id,
-                tariff_id=tariff_id,
-                amount_rub=amount_rub,
-                duration_days=duration_days,
-                device_limit=device_limit,
+        gateway = get_payment_gateway("yookassa")
+        try:
+            invoice = await gateway.create_payment_url(
+                order_id=str(order.id),
+                amount_rub=order.amount_rub,
                 description=description,
-                order_meta=order_meta,
+                return_url=return_url,
+                bot_username=bot_username,
             )
-        )
-
-        cost = amount_rub if amount_rub is not None else Decimal("0.00")
-        balance_snapshot = await get_account_balance(
-            session, user_id=user_id, for_update=True, locked_user=user
-        )
-        if balance_snapshot.debt > 0:
-            raise AccountDebtBlockedError("Account debt prevents wallet purchases")
-        if balance_snapshot.available < cost:
-            raise InsufficientBalanceError(
-                required=cost, available=balance_snapshot.available
+            order.external_id = invoice.external_id
+            order.payment_url = invoice.payment_url
+        except PaymentCreationAmbiguousError:
+            held_meta = dict(order.metadata_ or {})
+            held_meta["payment_creation_ambiguous"] = True
+            order.metadata_ = held_meta
+            await session.flush()
+            await session.commit()
+            raise
+        except Exception as exc:
+            order_id = order.id
+            logger.exception(
+                "Gateway failed to create payment for order %s: %s", order_id, exc
             )
+            await session.rollback()
+            raise
 
-        order = Order(
-            id=uuid.uuid4(),
-            user_id=user_id,
-            service_type=service_type,
-            tariff_id=tariff_id,
-            amount_rub=cost,
-            duration_days=duration_days if duration_days is not None else 0,
-            traffic_bytes=traffic_bytes,
-            device_limit=device_limit,
-            payment_method="wallet",
-            status="paid",
-            description=description or texts.CHECKOUT_DESCRIPTION_DEFAULT,
-            paid_at=now_utc(),
-            metadata_=order_meta,
-        )
-        session.add(order)
         await session.flush()
-
-        # Debit wallet ledger
-        if cost > 0:
-            await create_order_debit(
-                session,
-                user_id=user_id,
-                amount_rub=cost,
-                order_id=order.id,
-                metadata={"description": order.description},
-                locked_user=user,
-            )
-
-        # Fulfill
-        await FulfillmentService.fulfill_order(session, order)
-        await session.flush()
-        return order
+        return order, True
 
     @staticmethod
     def mark_order_canceled(order: Order, reason: str = "gateway_canceled") -> None:
@@ -565,48 +294,16 @@ class OrderService:
         meta = dict(order.metadata_ or {})
         if meta.get("mixed_debit_refunded"):
             return
-        wallet_debit_raw = meta.get("wallet_debit_rub")
-        if not wallet_debit_raw:
-            return
-        wallet_debit = Decimal(str(wallet_debit_raw))
-        if wallet_debit <= 0:
-            return
-        debit = await session.scalar(
-            select(AccountLedgerEntry).where(
-                AccountLedgerEntry.entry_type == "purchase_debit",
-                AccountLedgerEntry.order_id == order.id,
-            )
+        real_part, bonus_part = await create_mixed_cancel_refund(
+            session,
+            user_id=order.user_id,
+            order_id=order.id,
+            key_prefix="mixed_cancel",
+            source="mixed_canceled_refund",
         )
-        if debit is None:
-            return
-
-        bonus_raw = meta.get("wallet_bonus_debit_rub")
-        real_raw = meta.get("wallet_real_debit_rub")
-        if bonus_raw is not None and real_raw is not None:
-            bonus_part = min(wallet_debit, max(Decimal(0), Decimal(str(bonus_raw))))
-            real_part = max(Decimal(0), wallet_debit - bonus_part)
-        else:
-            bonus_part = Decimal(0)
-            real_part = wallet_debit
-
-        if real_part > 0:
-            await create_mixed_cancel_real_refund(
-                session,
-                user_id=order.user_id,
-                amount_rub=real_part,
-                order_id=order.id,
-                metadata={"source": "mixed_canceled_refund", "order_id": str(order.id)},
-            )
-        if bonus_part > 0:
-            await create_admin_adjustment(
-                session,
-                user_id=order.user_id,
-                signed_amount=bonus_part,
-                idempotency_key=f"mixed_cancel_bonus_refund:{order.id}",
-                metadata={"source": "mixed_canceled_bonus_refund", "order_id": str(order.id)},
-            )
-        meta["mixed_debit_refunded"] = True
-        order.metadata_ = meta
+        if real_part > 0 or bonus_part > 0:
+            meta["mixed_debit_refunded"] = True
+            order.metadata_ = meta
 
     @staticmethod
     async def mark_order_paid(
@@ -885,7 +582,6 @@ class OrderService:
 
         now = now_utc()
         user.device_limit = target_device_limit
-        user.current_tariff_id = None
         user.standard_downgrade_cooldown_until = now + timedelta(
             days=STANDARD_DOWNGRADE_COOLDOWN_DAYS
         )
@@ -927,6 +623,13 @@ class OrderService:
         bot_username: str | None = None,
     ) -> dict:
         """Unified server-side checkout supporting 100% wallet (bonuses first), mixed payment, or YooKassa."""
+        # Acquire advisory lock BEFORE row lock to prevent lock-inversion deadlocks.
+        bind = session.get_bind()
+        if bind and getattr(bind, "dialect", None) and bind.dialect.name == "postgresql":
+            await session.execute(
+                text("SELECT pg_advisory_xact_lock(:key)"),
+                {"key": -user_id},
+            )
         user = await OrderService._load_settlement_user(session, user_id)
         if user is None:
             raise ValueError("User not found")
@@ -1110,17 +813,33 @@ class OrderService:
             raise AccountDebtBlockedError("Account debt prevents wallet purchases")
 
         if use_balance and bal.available >= total_cost:
-            order = await OrderService.pay_from_wallet(
-                session,
+            order = Order(
+                id=uuid.uuid4(),
                 user_id=user_id,
                 service_type=service_type,
                 amount_rub=total_cost,
                 duration_days=final_duration,
                 traffic_bytes=traffic_bytes,
                 device_limit=final_devices,
+                payment_method="wallet",
+                status="paid",
                 description=description,
-                metadata=order_meta,
+                paid_at=now_utc(),
+                metadata_=order_meta,
             )
+            session.add(order)
+            await session.flush()
+            if total_cost > 0:
+                await create_order_debit(
+                    session,
+                    user_id=user_id,
+                    amount_rub=total_cost,
+                    order_id=order.id,
+                    metadata={"description": description},
+                    locked_user=user,
+                )
+            await FulfillmentService.fulfill_order(session, order)
+            await session.flush()
             charged_bonus = min(bal.bonus_available, total_cost)
             return {
                 "order_id": str(order.id),
@@ -1149,7 +868,7 @@ class OrderService:
             order_meta["total_cost_rub"] = int(total_cost)
             order_meta["is_mixed_payment"] = True
 
-        order = await OrderService.create_order(
+        order, is_new_order = await OrderService._create_yookassa_order(
             session,
             user_id=user_id,
             service_type=service_type,
@@ -1157,13 +876,12 @@ class OrderService:
             duration_days=final_duration,
             traffic_bytes=traffic_bytes,
             device_limit=final_devices,
-            payment_method="yookassa",
             description=description,
             return_url=return_url,
             metadata=order_meta,
             bot_username=bot_username,
         )
-        if wallet_debit > 0:
+        if is_new_order and wallet_debit > 0:
             await create_order_debit(
                 session,
                 user_id=user.id,
@@ -1388,14 +1106,21 @@ class OrderService:
                         refund_id=refund_ref,
                     )
                     balance_after = await get_account_balance(session, user_id=order.user_id)
-                    if balance_after.accounting_position < 0:
+                    if balance_after.debt > 0:
                         order_meta = dict(order.metadata_ or {})
                         order_meta["requires_manual_review"] = True
                         order_meta["negative_balance_rub"] = str(balance_after.accounting_position)
                         order_meta["refund_amount_mismatch"] = (
-                            f"Negative balance detected: {balance_after.accounting_position} RUB"
+                            f"Negative real balance detected: -{balance_after.debt} RUB"
                         )
                         order.metadata_ = order_meta
+                        debt_user = await OrderService._load_settlement_user(session, order.user_id)
+                        if debt_user is not None:
+                            debt_user.financial_hold = True
+                            debt_user.financial_block_reason = "refund_debt"
+                            from services.subscription import SubscriptionService
+
+                            await SubscriptionService.sync_access_state(session, debt_user)
                         await session.flush()
                 else:
                     logger.info(
@@ -1413,31 +1138,33 @@ class OrderService:
                         order_id=order.id,
                         refund_id=refund_ref,
                     )
-                wallet_debit_rub = (order.metadata_ or {}).get("wallet_debit_rub")
-                if wallet_debit_rub and Decimal(str(wallet_debit_rub)) > 0:
-                    await create_admin_adjustment(
+                order_meta = dict(order.metadata_ or {})
+                if not order_meta.get("mixed_debit_refunded"):
+                    real_restored, bonus_restored = await create_mixed_cancel_refund(
                         session,
                         user_id=order.user_id,
-                        signed_amount=Decimal(str(wallet_debit_rub)),
-                        idempotency_key=f"mixed_refund_wallet_restore:{order.id}:{refund_ref}",
-                        metadata={
-                            "source": "mixed_order_refund_restore",
-                            "order_id": str(order.id),
-                            "refund_id": refund_ref,
-                        },
+                        order_id=order.id,
+                        key_prefix="mixed_refund",
+                        source="mixed_order_refund_restore",
                     )
-                if not (order.metadata_ or {}).get("settlement_held"):
+                    if real_restored > 0 or bonus_restored > 0:
+                        order_meta["mixed_debit_refunded"] = True
+                if not order_meta.get("settlement_held") and not order_meta.get("benefits_revoked"):
                     await FulfillmentService.revoke_order(session, order)
+                    order_meta["benefits_revoked"] = True
                     logger.info(
-                        "Order %s fully refunded (%s RUB) and revoked",
+                        "Order %s refunded (%s RUB) and revoked",
                         order.id,
                         order.amount_rub,
                     )
                 else:
                     logger.info(
-                        "Order %s fully refunded but benefits were withheld (settlement_held); skipping revocation",
+                        "Order %s refunded; skipping revocation (settlement_held=%s, benefits_revoked=%s)",
                         order.id,
+                        bool(order_meta.get("settlement_held")),
+                        bool(order_meta.get("benefits_revoked")),
                     )
+                order.metadata_ = order_meta
             await session.flush()
             return order
         logger.info(

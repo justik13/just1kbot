@@ -25,7 +25,6 @@ from config.enums import (
 from database.connection import session_scope
 from database.models import Server
 from database.repositories import (
-    tariffs_repo,
     user_devices_repo,
     users_repo,
     vless_subscription_repo,
@@ -347,19 +346,9 @@ async def _resolve_clean_tariff_name(
     total_device_limit: int | None = None,
 ) -> str:
     """Resolve human-readable tariff name for user, sanitized for headers and UI display."""
-    tariff_name = None
-    if getattr(user, "current_tariff_id", None):
-        user_tariff = await tariffs_repo.get_tariff_by_id(session, user.current_tariff_id)
-        if (
-            user_tariff
-            and getattr(user_tariff, "name", None)
-            and (getattr(user_tariff, "service_type", None) or "standard") == "standard"
-        ):
-            tariff_name = user_tariff.name
-    if not tariff_name:
-        if total_device_limit is None:
-            total_device_limit = await SubscriptionService.get_effective_device_limit(session, user)
-        tariff_name = get_tariff_display_name(total_device_limit)
+    if total_device_limit is None:
+        total_device_limit = await SubscriptionService.get_effective_device_limit(session, user)
+    tariff_name = get_tariff_display_name(total_device_limit)
     return re.sub(r"^[^\w\u0400-\u04ffa-zA-Z0-9]+", "", str(tariff_name)).strip()[:40]
 
 

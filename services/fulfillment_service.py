@@ -34,8 +34,6 @@ class FulfillmentService:
             meta = dict(order.metadata_ or {})
             if user.subscription_end:
                 meta["previous_subscription_end"] = user.subscription_end.isoformat()
-            if user.current_tariff_id:
-                meta["previous_tariff_id"] = user.current_tariff_id
             if getattr(user, "device_limit", None) is not None:
                 meta["previous_device_limit"] = user.device_limit
             order.metadata_ = meta
@@ -45,10 +43,6 @@ class FulfillmentService:
             if op == "upgrade":
                 if order.device_limit:
                     user.device_limit = order.device_limit
-                if order.tariff_id:
-                    user.current_tariff_id = order.tariff_id
-                elif order.device_limit:
-                    user.current_tariff_id = None
                 user.standard_downgrade_cooldown_until = now + timedelta(
                     days=STANDARD_DOWNGRADE_COOLDOWN_DAYS
                 )
@@ -56,20 +50,12 @@ class FulfillmentService:
                 user.subscription_end = now + timedelta(days=order.duration_days)
                 if order.device_limit:
                     user.device_limit = order.device_limit
-                if order.tariff_id:
-                    user.current_tariff_id = order.tariff_id
-                elif order.device_limit:
-                    user.current_tariff_id = None
             else:
                 base = max(user.subscription_end, now) if user.subscription_end else now
                 if order.duration_days > 0:
                     user.subscription_end = base + timedelta(days=order.duration_days)
                 if order.device_limit:
                     user.device_limit = order.device_limit
-                if order.tariff_id:
-                    user.current_tariff_id = order.tariff_id
-                elif order.device_limit:
-                    user.current_tariff_id = None
                 if (order.device_limit or 0) > 2:
                     user.standard_downgrade_cooldown_until = now + timedelta(
                         days=STANDARD_DOWNGRADE_COOLDOWN_DAYS
@@ -170,17 +156,11 @@ class FulfillmentService:
                         user.device_limit = int(meta["previous_device_limit"])
                     except (ValueError, TypeError):
                         pass
-                prev_tariff = meta.get("previous_tariff_id")
-                if prev_tariff:
-                    user.current_tariff_id = prev_tariff
             elif is_tariff_change and prev_end_str:
                 try:
                     from datetime import datetime
                     prev_end = datetime.fromisoformat(prev_end_str)
                     user.subscription_end = prev_end
-                    prev_tariff = meta.get("previous_tariff_id")
-                    if prev_tariff:
-                        user.current_tariff_id = prev_tariff
                     if "previous_device_limit" in meta:
                         try:
                             user.device_limit = int(meta["previous_device_limit"])

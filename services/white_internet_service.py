@@ -26,7 +26,6 @@ from config.constants import (
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
     WHITE_INTERNET_MAX_EXPIRY_DAYS,
     WHITE_INTERNET_MAX_QUOTA_BYTES,
-    WHITE_INTERNET_SERVICE_TYPE,
     WHITE_INTERNET_TLS_FINGERPRINT,
     WHITE_INTERNET_TOPUP_PACKS,
     VLESS_PROTOCOL,
@@ -38,7 +37,7 @@ from config.enums import (
     WhiteInternetProvisioningStatus,
     WhiteInternetStatus,
 )
-from database.models import Server, User, WhiteInternetSubscription
+from database.models import Server, WhiteInternetSubscription
 from database.repositories import servers_repo, white_internet_repo
 from database.repositories.account_ledger_repo import lock_checkout_user
 from services.xray_node_client import SyncResult, XrayNodeClient, _sanitize_url
@@ -407,8 +406,6 @@ class WhiteInternetService:
         current_limit = _effective_device_limit(sub)
         if current_limit >= WHITE_INTERNET_MAX_DEVICE_LIMIT:
             return False, texts.WL_DEVICE_LIMIT_MAX_REACHED, None
-
-        new_device_limit = current_limit + 1
 
         # Pre-Debit Validation: validate hub node health & availability before debiting funds
         hub_node = await session.scalar(
