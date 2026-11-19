@@ -33,6 +33,7 @@ from services.workers.node_monitor import reset_server_monitor_state
 from services.xray_node_client import XrayNodeClient
 from utils.datetime_helpers import now_utc
 from utils.security import is_safe_url, normalize_public_domain
+from utils.traffic_helpers import get_server_hosting_usage
 
 logger = logging.getLogger(__name__)
 
@@ -221,7 +222,15 @@ def serialize_server_node(
         "sni_routes": extra.get("sni_routes") if isinstance(extra.get("sni_routes"), list) else [],
         "xhttp_locations": extra.get("xhttp_locations") if isinstance(extra.get("xhttp_locations"), list) else [],
         "inbounds": extra.get("inbounds") if isinstance(extra.get("inbounds"), list) else [],
-        "traffic_limit": extra.get("traffic_limit") if isinstance(extra.get("traffic_limit"), dict) else None,
+        "traffic_limit": (
+            {
+                "used_bytes": usage.host_bytes,
+                "limit_bytes": usage.limit_gb * (1024 ** 3) if usage.limit_gb > 0 else 0,
+                "pct": round(usage.pct, 1),
+            }
+            if (usage := get_server_hosting_usage(extra)) and (usage.host_bytes > 0 or usage.limit_gb > 0)
+            else None
+        ),
         "last_successful_check": (
             server.last_successful_check.isoformat() if server.last_successful_check else None
         ),

@@ -6,39 +6,6 @@ All domain statuses, entry types, and operation kinds are defined here as standa
 from enum import StrEnum
 
 
-class PaymentProviderStatus(StrEnum):
-    NOT_CREATED = "not_created"
-    CREATING = "creating"
-    PENDING = "pending"
-    WAITING_FOR_CAPTURE = "waiting_for_capture"
-    SUCCEEDED = "succeeded"
-    CANCELED = "canceled"
-    REFUNDED = "refunded"
-    UNKNOWN = "unknown"
-    MANUAL_REVIEW = "manual_review"
-
-
-class PaymentFulfillmentStatus(StrEnum):
-    NOT_READY = "not_ready"
-    PROCESSING = "processing"
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
-    REVERSED = "reversed"
-    MANUAL_REVIEW = "manual_review"
-
-
-class PaymentCheckoutStatus(StrEnum):
-    ACTIVE = "active"
-    ABANDONED = "abandoned"
-
-
-class PaymentReconciliationStatus(StrEnum):
-    OK = "ok"
-    REQUIRED = "required"
-    MISMATCH = "mismatch"
-    MANUAL_REVIEW = "manual_review"
-
-
 class AccountLedgerEntryType(StrEnum):
     PAYMENT_CREDIT = "payment_credit"
     PURCHASE_DEBIT = "purchase_debit"
@@ -94,6 +61,7 @@ class AdminAuditAction(StrEnum):
     EDIT_TARIFF = "EDIT_TARIFF"
     EXTEND = "EXTEND"
     GRANT = "GRANT"
+    INCY_SETTINGS_UPDATED = "INCY_SETTINGS_UPDATED"
     MANUAL_GRANT = "MANUAL_GRANT"
     MASS_BONUS_GRANTED = "MASS_BONUS_GRANTED"
     MASS_SUB_EXTEND = "MASS_SUB_EXTEND"
@@ -171,10 +139,6 @@ __all__ = [
     "AdminAuditAction",
     "OrderStatus",
     "OrderServiceType",
-    "PaymentCheckoutStatus",
-    "PaymentFulfillmentStatus",
-    "PaymentProviderStatus",
-    "PaymentReconciliationStatus",
     "ServerHealthState",
     "ServerLifecycleStatus",
     "ServiceType",

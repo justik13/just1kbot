@@ -38,18 +38,9 @@ from config.enums import (
     WhiteInternetProvisioningStatus,
     WhiteInternetStatus,
 )
-from database.models import Order, Server, Tariff, User, WhiteInternetSubscription
+from database.models import Server, User, WhiteInternetSubscription
 from database.repositories import servers_repo, white_internet_repo
-from database.repositories.account_ledger_repo import (
-    AccountLedgerConflictError,
-    AccountLedgerError,
-    AccountLedgerInvariantError,
-    InsufficientAccountBalanceError,
-    create_order_debit,
-    get_account_balance,
-    lock_checkout_user,
-    whole_rubles,
-)
+from database.repositories.account_ledger_repo import lock_checkout_user
 from services.xray_node_client import SyncResult, XrayNodeClient, _sanitize_url
 from utils.admin import is_admin
 from utils.datetime_helpers import now_utc
@@ -146,42 +137,6 @@ class WhiteInternetService:
     """Service managing the White Internet product lifecycle."""
 
     @staticmethod
-    async def get_or_create_white_internet_tariff(
-        session: AsyncSession,
-        *,
-        price_rub: Decimal = WHITE_INTERNET_BASE_PRICE_RUB,
-        duration_days: int = WHITE_INTERNET_BASE_DURATION_DAYS,
-    ) -> Tariff:
-        stmt = (
-            select(Tariff)
-            .where(
-                Tariff.service_type == WHITE_INTERNET_SERVICE_TYPE,
-                Tariff.duration_days == duration_days,
-                Tariff.device_limit == 1,
-            )
-            .limit(1)
-        )
-        res = await session.execute(stmt)
-        tariff = res.scalar_one_or_none()
-        if tariff is not None:
-            if not tariff.is_active:
-                tariff.is_active = True
-                await session.flush()
-            return tariff
-        tariff = Tariff(
-            name=texts.WL_DEFAULT_TARIFF_NAME,
-            service_type=WHITE_INTERNET_SERVICE_TYPE,
-            device_limit=1,
-            duration_days=duration_days,
-            price_rub=int(price_rub),
-            is_active=True,
-            sort_order=100,
-        )
-        session.add(tariff)
-        await session.flush()
-        return tariff
-
-    @staticmethod
     async def select_hub_node(session: AsyncSession) -> Server:
         server = await servers_repo.allocate_wi_hub_atomic(session)
         if server is None:
@@ -192,96 +147,6 @@ class WhiteInternetService:
 
     # Backward alias
     select_origin_node = select_hub_node
-
-    @classmethod
-    async def _checkout_wallet_order(
-        cls,
-        session: AsyncSession,
-        *,
-        user: User,
-        service_type: str,
-        tariff_id: int | None,
-        amount_due: object,
-        duration_days: int,
-        traffic_bytes: int = 0,
-        device_limit: int | None = None,
-        operation: str,
-        order_metadata: dict | None = None,
-        insufficient_text: str = "",
-        **extra_message_kwargs,
-    ) -> tuple[Order | None, tuple[bool, str, None] | None]:
-        """Create a pending wallet order, debit FIFO, mark paid. Single checkout seam.
-
-        Returns ``(order, None)`` on success and ``(order, (False, message,
-        None))`` on wallet failure. Mirrors the retired quote checkout
-        contract (15-minute TTL, bonus-first debit, identical failure
-        messages) without quote machinery.
-        """
-        if getattr(user, "financial_hold", False) is True:
-            return None, (False, texts.PAYMENT_DISPUTE_BLOCKED_NOTICE, None)
-        if getattr(user, "topup_blocked", False) is True:
-            return None, (False, texts.TOPUP_ERROR_BLOCKED, None)
-
-        now = now_utc()
-        amount = whole_rubles(amount_due, allow_zero=True)
-        order = Order(
-            id=uuid.uuid4(),
-            user_id=user.id,
-            service_type=service_type,
-            tariff_id=tariff_id,
-            amount_rub=amount,
-            duration_days=duration_days,
-            traffic_bytes=traffic_bytes,
-            device_limit=device_limit,
-            payment_method="wallet",
-            status="pending",
-            expires_at=now + timedelta(minutes=15),
-            metadata_={"operation": operation, **(order_metadata or {})},
-        )
-        session.add(order)
-        await session.flush()
-        if amount == 0:
-            order.status = "paid"
-            order.paid_at = now_utc()
-            await session.flush()
-            return order, None
-        try:
-            await create_order_debit(
-                session,
-                user_id=user.id,
-                amount_rub=amount,
-                order_id=order.id,
-                metadata={"operation": operation},
-            )
-        except InsufficientAccountBalanceError:
-            from services.order_service import OrderService
-
-            OrderService.mark_order_canceled(order, reason="insufficient_balance")
-            await session.flush()
-            balance_snap = await get_account_balance(session, user_id=user.id)
-            # Coerce once: shortage arithmetic must not depend on the input type.
-            return order, (
-                False,
-                insufficient_text.format(
-                    price=int(amount),
-                    balance=balance_snap.available,
-                    shortage=max(amount - balance_snap.available, Decimal(0)),
-                    **extra_message_kwargs,
-                ),
-                None,
-            )
-        except (AccountLedgerInvariantError, AccountLedgerConflictError):
-            raise
-        except AccountLedgerError as exc:
-            from services.order_service import OrderService
-
-            OrderService.mark_order_canceled(order, reason="ledger_error")
-            await session.flush()
-            return order, (False, f"{texts.WL_DEBIT_FAILED}: {exc}", None)
-        order.status = "paid"
-        order.paid_at = now_utc()
-        await session.flush()
-        return order, None
 
     @staticmethod
     def calculate_wi_add_slot_quote(
@@ -313,7 +178,6 @@ class WhiteInternetService:
         cls,
         session: AsyncSession,
         user_id: int,
-        debit_balance: bool = True,
         device_limit: int = 1,
     ):
         user = await lock_checkout_user(session, user_id)
@@ -325,8 +189,7 @@ class WhiteInternetService:
             if existing.status == WhiteInternetStatus.DISABLED:
                 return False, texts.WL_SUB_DISABLED, existing
             if (
-                getattr(existing, "pending_hard_delete", False)
-                or getattr(existing, "provisioning_status", None)
+                getattr(existing, "provisioning_status", None)
                 == WhiteInternetProvisioningStatus.PENDING_DELETE
             ):
                 return False, texts.WL_DEACTIVATION_PENDING, existing
@@ -337,11 +200,7 @@ class WhiteInternetService:
             ) and existing.expires_at and existing.expires_at > now:
                 return False, texts.WL_ALREADY_ACTIVE, existing
             # Existing subscription routes to renew_subscription to preserve UUID and token
-            return await cls.renew_subscription(
-                session, user_id, debit_balance=debit_balance
-            )
-
-        tariff = await cls.get_or_create_white_internet_tariff(session)
+            return await cls.renew_subscription(session, user_id)
 
         # Pre-Debit Validation: verify mandatory tariff quota BEFORE touching ledger
         if not WHITE_INTERNET_BASE_TRAFFIC_BYTES or WHITE_INTERNET_BASE_TRAFFIC_BYTES <= 0:
@@ -356,25 +215,8 @@ class WhiteInternetService:
             return False, texts.WL_NO_SERVERS_AVAILABLE, None
 
         clamped_devices = max(1, min(WHITE_INTERNET_MAX_DEVICE_LIMIT, int(device_limit)))
-        tier_price = get_white_internet_tier_price(
-            clamped_devices, base_price=Decimal(tariff.price_rub)
-        )
+        tier_price = get_white_internet_tier_price(clamped_devices)
         base_bytes = clamped_devices * WHITE_INTERNET_BASE_TRAFFIC_BYTES
-
-        if debit_balance:
-            _, checkout_failure = await cls._checkout_wallet_order(
-                session,
-                user=user,
-                service_type=WHITE_INTERNET_SERVICE_TYPE,
-                tariff_id=tariff.id,
-                amount_due=tier_price,
-                duration_days=tariff.duration_days,
-                device_limit=clamped_devices,
-                operation="purchase",
-                insufficient_text=texts.WL_INSUFFICIENT_BALANCE_BUY,
-            )
-            if checkout_failure is not None:
-                return checkout_failure
 
         sub = await white_internet_repo.create_white_internet_subscription(
             session,
@@ -383,7 +225,7 @@ class WhiteInternetService:
             token=secrets.token_hex(32),
             uuid=str(uuid.uuid4()),
             price_rub=tier_price,
-            duration_days=tariff.duration_days,
+            duration_days=WHITE_INTERNET_BASE_DURATION_DAYS,
             base_bytes=base_bytes,
             device_limit=clamped_devices,
         )
@@ -401,7 +243,7 @@ class WhiteInternetService:
             "White Internet subscription purchased: user_id=%s, sub_id=%s, days=%s, devices=%s, node_id=%s",
             user.id,
             sub.id,
-            tariff.duration_days,
+            WHITE_INTERNET_BASE_DURATION_DAYS,
             clamped_devices,
             hub_node.id,
         )
@@ -412,7 +254,6 @@ class WhiteInternetService:
         cls,
         session: AsyncSession,
         user_id: int,
-        debit_balance: bool = True,
         target_device_limit: int | None = None,
     ):
         user = await lock_checkout_user(session, user_id)
@@ -446,13 +287,10 @@ class WhiteInternetService:
         )
         new_hub_server: Server | None = None
         if (
-            getattr(sub, "pending_hard_delete", False)
-            or getattr(sub, "provisioning_status", None)
+            getattr(sub, "provisioning_status", None)
             == WhiteInternetProvisioningStatus.PENDING_DELETE
         ):
             return False, texts.WL_DEACTIVATION_PENDING, None
-
-        tariff = await cls.get_or_create_white_internet_tariff(session)
 
         # Pre-Debit Validation: verify mandatory tariff quota BEFORE touching ledger
         if not WHITE_INTERNET_BASE_TRAFFIC_BYTES or WHITE_INTERNET_BASE_TRAFFIC_BYTES <= 0:
@@ -469,7 +307,7 @@ class WhiteInternetService:
 
         now = now_utc()
         base_time = sub.expires_at if sub.expires_at and sub.expires_at > now else now
-        if base_time + timedelta(days=tariff.duration_days) > now + timedelta(
+        if base_time + timedelta(days=WHITE_INTERNET_BASE_DURATION_DAYS) > now + timedelta(
             days=WHITE_INTERNET_MAX_EXPIRY_DAYS
         ):
             return False, texts.WL_RENEWAL_HORIZON_EXCEEDED, None
@@ -480,23 +318,8 @@ class WhiteInternetService:
             sub_device_limit = sub.pending_device_limit
         else:
             sub_device_limit = max(1, getattr(sub, "device_limit", 1) or 1)
-        tier_price = get_white_internet_tier_price(sub_device_limit, base_price=Decimal(tariff.price_rub))
+        tier_price = get_white_internet_tier_price(sub_device_limit)
         tier_base_bytes = sub_device_limit * WHITE_INTERNET_BASE_TRAFFIC_BYTES
-
-        if debit_balance:
-            _, checkout_failure = await cls._checkout_wallet_order(
-                session,
-                user=user,
-                service_type=WHITE_INTERNET_SERVICE_TYPE,
-                tariff_id=tariff.id,
-                amount_due=tier_price,
-                duration_days=tariff.duration_days,
-                device_limit=sub_device_limit,
-                operation="renew",
-                insufficient_text=texts.WL_INSUFFICIENT_BALANCE_RENEW,
-            )
-            if checkout_failure is not None:
-                return checkout_failure
 
         # Apply node migration ONLY after successful financial debit
         old_hub_for_cleanup: Server | None = None
@@ -515,7 +338,7 @@ class WhiteInternetService:
             session,
             subscription_id=sub.id,
             price_rub=tier_price,
-            duration_days=tariff.duration_days,
+            duration_days=WHITE_INTERNET_BASE_DURATION_DAYS,
             base_bytes=tier_base_bytes,
             target_device_limit=target_device_limit,
         )
@@ -548,7 +371,7 @@ class WhiteInternetService:
             "White Internet subscription renewed: user_id=%s, sub_id=%s, days=%s, node_id=%s",
             user.id,
             renewed.id,
-            tariff.duration_days,
+            WHITE_INTERNET_BASE_DURATION_DAYS,
             renewed.hub_server_id,
         )
         return True, texts.WL_RENEW_SUCCESS, renewed
@@ -559,7 +382,6 @@ class WhiteInternetService:
         session: AsyncSession,
         user_id: int,
         actor_telegram_id: int | None = None,
-        debit_balance: bool = True,
         extra_bytes: int | None = None,
     ) -> tuple[bool, str, WhiteInternetSubscription | None]:
         user = await lock_checkout_user(session, user_id)
@@ -616,24 +438,6 @@ class WhiteInternetService:
 
         price, gb_added = cls.calculate_wi_add_slot_quote(sub.expires_at, now=now)
         added_bytes = extra_bytes if extra_bytes is not None else gb_added * (1024**3)
-        tariff = await cls.get_or_create_white_internet_tariff(session)
-
-        if debit_balance:
-            _, checkout_failure = await cls._checkout_wallet_order(
-                session,
-                user=user,
-                service_type=WHITE_INTERNET_SERVICE_TYPE,
-                tariff_id=tariff.id,
-                amount_due=price,
-                duration_days=0,
-                traffic_bytes=added_bytes,
-                device_limit=new_device_limit,
-                operation="add_device_slot",
-                insufficient_text=texts.WL_INSUFFICIENT_BALANCE_ADD_DEVICE,
-                gb=int(gb_added),
-            )
-            if checkout_failure is not None:
-                return checkout_failure
 
         # Apply node migration ONLY after successful financial debit
         old_hub_for_cleanup: Server | None = None
@@ -689,7 +493,6 @@ class WhiteInternetService:
         user_id: int,
         pack_gb: int,
         actor_telegram_id: int | None = None,
-        debit_balance: bool = True,
     ):
         if pack_gb not in WHITE_INTERNET_TOPUP_PACKS:
             return False, texts.WL_INVALID_TOPUP_PACK.format(gb=pack_gb), None
@@ -752,25 +555,6 @@ class WhiteInternetService:
                 texts.WL_CAP_EXCEEDED.format(gb=pack_gb, available=current_available // (1024**3)),
                 None,
             )
-
-        tariff = await cls.get_or_create_white_internet_tariff(session)
-
-        if debit_balance:
-            _, checkout_failure = await cls._checkout_wallet_order(
-                session,
-                user=user,
-                service_type=WHITE_INTERNET_SERVICE_TYPE,
-                tariff_id=tariff.id,
-                amount_due=pack_price,
-                duration_days=0,
-                traffic_bytes=pack_bytes,
-                device_limit=_effective_device_limit(sub),
-                operation="topup",
-                insufficient_text=texts.WL_INSUFFICIENT_BALANCE_TOPUP,
-                gb=pack_gb,
-            )
-            if checkout_failure is not None:
-                return checkout_failure
 
         # Apply node migration ONLY after successful financial debit
         old_hub_for_cleanup: Server | None = None

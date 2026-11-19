@@ -195,8 +195,6 @@ async def _insert_or_get_entry(
         "entry_type": values["entry_type"],
         "amount": values["amount"],
         "currency": values["currency"],
-        "payment_id": values.get("payment_id"),
-        "quote_id": values.get("quote_id"),
         "order_id": values.get("order_id"),
         "reversal_of_id": values.get("reversal_of_id"),
         "idempotency_key": values["idempotency_key"],
@@ -239,8 +237,6 @@ async def create_order_debit(
         "entry_type": "purchase_debit",
         "amount": amount,
         "currency": "RUB",
-        "payment_id": None,
-        "quote_id": None,
         "order_id": order_id,
         "reversal_of_id": None,
         "idempotency_key": f"order_debit:{order_id}",
@@ -275,8 +271,6 @@ async def create_order_credit(
         "entry_type": "payment_credit",
         "amount": amount,
         "currency": "RUB",
-        "payment_id": None,
-        "quote_id": None,
         "order_id": order_id,
         "reversal_of_id": None,
         "idempotency_key": f"order_credit:{order_id}",
@@ -289,6 +283,36 @@ async def create_order_credit(
             (AccountLedgerEntry.entry_type == "payment_credit")
             & (AccountLedgerEntry.order_id == order_id)
         ),
+    )
+
+
+async def create_mixed_cancel_real_refund(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    amount_rub: Decimal,
+    order_id: object,
+    metadata: dict | None = None,
+) -> tuple[AccountLedgerEntry, bool]:
+    """Refund the real-balance portion of a canceled mixed-payment order without
+    colliding with the ``order_credit:{order_id}`` slot reserved for gateway/fallback credits.
+    """
+    amount = abs(whole_rubles(amount_rub))
+    idempotency_key = f"mixed_cancel_real_refund:{order_id}"
+    values = {
+        "user_id": user_id,
+        "entry_type": "payment_credit",
+        "amount": amount,
+        "currency": "RUB",
+        "order_id": None,
+        "reversal_of_id": None,
+        "idempotency_key": idempotency_key,
+        "metadata_": metadata or {},
+    }
+    return await _insert_or_get_entry(
+        session,
+        values=values,
+        economic_lookup=AccountLedgerEntry.idempotency_key == idempotency_key,
     )
 
 
@@ -362,8 +386,6 @@ async def create_order_refund_debit(
         "entry_type": "refund_debit",
         "amount": amount,
         "currency": "RUB",
-        "payment_id": None,
-        "quote_id": None,
         "order_id": order_id,
         "reversal_of_id": None,
         "idempotency_key": idempotency_key,
@@ -397,8 +419,6 @@ async def create_admin_adjustment(
         "entry_type": "admin_adjustment",
         "amount": amount.quantize(Decimal("1.00")),
         "currency": "RUB",
-        "payment_id": None,
-        "quote_id": None,
         "reversal_of_id": None,
         "idempotency_key": idempotency_key,
         "metadata_": dict(metadata),
@@ -423,7 +443,6 @@ async def _batch_credit_capacities(
 
     credit_ids = [c.id for c in credits]
     order_ids = [c.order_id for c in credits if c.order_id is not None]
-    payment_ids = [c.payment_id for c in credits if c.payment_id is not None]
 
     allocations = (
         await session.scalars(
@@ -441,38 +460,27 @@ async def _batch_credit_capacities(
         )
 
     refund_by_order: dict[object, Decimal] = {}
-    refund_by_payment: dict[int, Decimal] = {}
 
-    if order_ids or payment_ids:
-        conds = []
-        if order_ids:
-            conds.append(AccountLedgerEntry.order_id.in_(order_ids))
-        if payment_ids:
-            conds.append(AccountLedgerEntry.payment_id.in_(payment_ids))
+    if order_ids:
         rows = (
             await session.execute(
                 select(
                     AccountLedgerEntry.order_id,
-                    AccountLedgerEntry.payment_id,
                     func.coalesce(func.sum(AccountLedgerEntry.amount), 0),
                 )
                 .where(
                     AccountLedgerEntry.entry_type.in_(
                         ("refund_debit", "chargeback_debit")
                     ),
-                    or_(*conds),
+                    AccountLedgerEntry.order_id.in_(order_ids),
                 )
-                .group_by(AccountLedgerEntry.order_id, AccountLedgerEntry.payment_id)
+                .group_by(AccountLedgerEntry.order_id)
             )
         ).all()
-        for o_id, p_id, sum_amt in rows:
+        for o_id, sum_amt in rows:
             if o_id is not None:
                 refund_by_order[o_id] = (
                     refund_by_order.get(o_id, ZERO) + abs(Decimal(sum_amt))
-                )
-            if p_id is not None:
-                refund_by_payment[p_id] = (
-                    refund_by_payment.get(p_id, ZERO) + abs(Decimal(sum_amt))
                 )
 
     capacities: dict[int, Decimal] = {}
@@ -481,8 +489,6 @@ async def _batch_credit_capacities(
         ext_debit = ZERO
         if credit.order_id is not None:
             ext_debit += refund_by_order.get(credit.order_id, ZERO)
-        if credit.payment_id is not None:
-            ext_debit += refund_by_payment.get(credit.payment_id, ZERO)
         capacities[credit.id] = Decimal(credit.amount) - used - ext_debit
 
     return capacities

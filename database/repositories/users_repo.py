@@ -8,7 +8,7 @@ from config.constants import (
     REFERRAL_ACTIVE_MIN_TOPUP_RUB,
 )
 from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
-from database.models import Order, Payment, Tariff, User, UserDevice, VlessSubscription, WhiteInternetSubscription
+from database.models import Order, Tariff, User, UserDevice, VlessSubscription, WhiteInternetSubscription
 from utils.datetime_helpers import now_utc
 
 ALLOWED_USER_UPDATE_FIELDS = {
@@ -26,7 +26,6 @@ ALLOWED_USER_UPDATE_FIELDS = {
     "notified_expired",
     "notification_retry_count",
     "last_notification_attempt",
-    "show_in_leaderboard",
 }
 
 
@@ -262,18 +261,7 @@ def _referral_paid_activity_condition(referral) -> object:
         )
         .exists()
     )
-    real_topup = (
-        select(Payment.id)
-        .where(
-            Payment.user_id == referral.id,
-            Payment.provider_status == "succeeded",
-            Payment.fulfillment_status == "succeeded",
-            Payment.credited_at.is_not(None),
-            Payment.amount >= REFERRAL_ACTIVE_MIN_TOPUP_RUB,
-        )
-        .exists()
-    )
-    return or_(qualifying_order, real_topup)
+    return qualifying_order
 
 
 async def get_user_active_referrals_count(
@@ -295,66 +283,6 @@ async def get_user_active_referrals_count(
     )
     result = await session.scalar(stmt)
     return int(result or 0)
-
-
-async def get_referral_leaderboard(
-    session: AsyncSession, limit: int = 5
-) -> list[tuple[int, int]]:
-    """Return top referrers by count of active referred users [(telegram_id, active_count), ...]."""
-    limit = max(1, min(limit, 100))
-    referrer = aliased(User)
-    referral = aliased(User)
-
-    stmt = (
-        select(referrer.telegram_id, func.count(referral.id).label("active_count"))
-        .join(referral, referral.referred_by == referrer.telegram_id)
-        .where(
-            referrer.is_deleted.is_(False),
-            referral.is_deleted.is_(False),
-            _referral_paid_activity_condition(referral),
-        )
-        .group_by(referrer.telegram_id)
-        .order_by(text("active_count DESC"), referrer.telegram_id.asc())
-        .limit(limit)
-    )
-    rows = (await session.execute(stmt)).all()
-    return [(int(row[0]), int(row[1])) for row in rows]
-
-
-async def get_user_referral_rank(
-    session: AsyncSession, telegram_id: int
-) -> tuple[int | None, int]:
-    """Return (rank, active_count) for the user. Rank is 1-indexed, or None if active_count == 0."""
-    active_count = await get_user_active_referrals_count(session, telegram_id)
-    if active_count == 0:
-        return None, 0
-
-    referrer = aliased(User)
-    referral = aliased(User)
-
-    subq = (
-        select(
-            referrer.telegram_id.label("tid"),
-            func.count(referral.id).label("cnt"),
-        )
-        .join(referral, referral.referred_by == referrer.telegram_id)
-        .where(
-            referrer.is_deleted.is_(False),
-            referral.is_deleted.is_(False),
-            _referral_paid_activity_condition(referral),
-        )
-        .group_by(referrer.telegram_id)
-        .subquery()
-    )
-
-    rank_stmt = select(func.count(subq.c.tid)).where(
-        or_(
-            subq.c.cnt > active_count,
-            and_(subq.c.cnt == active_count, subq.c.tid < telegram_id),
-        )
-    )
-    higher_count = (await session.scalar(rank_stmt)) or 0
-    return int(higher_count + 1), active_count
 
 
 async def is_eligible_for_referral_first_discount(
@@ -386,22 +314,7 @@ async def is_eligible_for_referral_first_discount(
         if paid_orders is not None:
             return False
         paid_orders = 0
-    if int(paid_orders) > 0:
-        return False
-
-    paid_payments = await session.scalar(
-        select(func.count(Payment.id)).where(
-            Payment.user_id == user_id,
-            Payment.credited_at.is_not(None),
-            Payment.fulfillment_status == "succeeded",
-            Payment.amount > 0,
-        )
-    )
-    if not isinstance(paid_payments, (int, float)):
-        if paid_payments is not None:
-            return False
-        paid_payments = 0
-    return int(paid_payments) == 0
+    return int(paid_orders) == 0
 
 
 async def mark_user_bot_blocked(session: AsyncSession, telegram_id: int) -> None:
@@ -423,16 +336,6 @@ async def mark_user_bot_unblocked(session: AsyncSession, telegram_id: int) -> bo
     )
     await session.flush()
     return result.rowcount > 0
-
-
-async def count_users_with_tariff(session: AsyncSession, tariff_id: int) -> int:
-    if not isinstance(tariff_id, int) or tariff_id < 1 or tariff_id > MAX_INT32:
-        return 0
-    stmt = select(func.count(User.id)).where(
-        User.current_tariff_id == tariff_id, User.is_deleted.is_(False)
-    )
-    result = await session.execute(stmt)
-    return result.scalar_one() or 0
 
 
 async def get_user_by_username(session: AsyncSession, username: str) -> User | None:
@@ -554,7 +457,7 @@ async def search_user_flexible(session: AsyncSession, query: str) -> User | None
             )
             return (await session.execute(stmt)).scalar_one_or_none()
 
-    # 5. Order external_id or Payment ID (external_id)
+    # 5. Order external_id
     order_user_id = await session.scalar(
         select(Order.user_id)
         .where(Order.external_id == query_str)
@@ -564,19 +467,6 @@ async def search_user_flexible(session: AsyncSession, query: str) -> User | None
         stmt = (
             select(User)
             .where(User.id == order_user_id, User.is_deleted.is_(False))
-            .options(selectinload(User.vless_subscription))
-        )
-        return (await session.execute(stmt)).scalar_one_or_none()
-
-    payment_user_id = await session.scalar(
-        select(Payment.user_id)
-        .where(Payment.external_id == query_str)
-        .limit(1)
-    )
-    if payment_user_id:
-        stmt = (
-            select(User)
-            .where(User.id == payment_user_id, User.is_deleted.is_(False))
             .options(selectinload(User.vless_subscription))
         )
         return (await session.execute(stmt)).scalar_one_or_none()

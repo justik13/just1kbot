@@ -174,9 +174,23 @@ class SubscriptionService:
                 if isinstance(locked_user, User):
                     user = locked_user
                 if user.referred_by is None:
-                    from database.repositories.payments_repo import has_successful_topup
+                    from sqlalchemy import func, or_
+                    from database.models import Order
 
-                    has_paid = await has_successful_topup(session, user_id=user.id)
+                    order_count = await session.scalar(
+                        select(func.count(Order.id)).where(
+                            Order.user_id == user.id,
+                            or_(
+                                Order.status.in_(["paid", "refunded"]),
+                                Order.paid_at.is_not(None),
+                            ),
+                            or_(
+                                Order.service_type == "topup",
+                                Order.payment_method != "wallet",
+                            ),
+                        )
+                    )
+                    has_paid = (order_count or 0) > 0
                     if not has_paid:
                         is_valid = await SubscriptionService._validate_referral(
                             session,
@@ -384,7 +398,6 @@ class SubscriptionService:
             vless_sub.device_limit = user.device_limit or 2
             vless_sub.auto_renew_enabled = bool(getattr(user, "auto_renew_enabled", False))
             vless_sub.notified_expired = bool(getattr(user, "notified_expired", False))
-            vless_sub.notified_before_days = getattr(user, "notified_before_days", None)
             if vless_sub.is_active != vless_target_active:
                 vless_sub.is_active = vless_target_active
                 vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1

@@ -31,10 +31,6 @@ from config.enums import (
     AccountLedgerEntryType,
     OrderStatus,
     OrderServiceType,
-    PaymentCheckoutStatus,
-    PaymentFulfillmentStatus,
-    PaymentProviderStatus,
-    PaymentReconciliationStatus,
     ServerHealthState,
     ServerLifecycleStatus,
     WebhookInboxStatus,
@@ -161,14 +157,6 @@ class User(Base):
     traffic_cycle: Mapped[str | None] = mapped_column(
         String(7), nullable=True
     )
-    show_in_leaderboard: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default=text("false")
-    )
-
-    payments = relationship(
-        "Payment",
-        back_populates="user",
-    )
 
     orders = relationship(
         "Order",
@@ -287,165 +275,6 @@ class Tariff(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
-class Payment(Base):
-    """YooKassa balance top-up tracked through provider and account-ledger state."""
-
-    __tablename__ = "payments"
-
-    __table_args__ = (
-        Index(
-            "uq_payments_external_id_not_null",
-            "external_id",
-            unique=True,
-            postgresql_where=text("external_id IS NOT NULL"),
-        ),
-        Index(
-            "uq_payments_public_order_id_not_null",
-            "public_order_id",
-            unique=True,
-            postgresql_where=text("public_order_id IS NOT NULL"),
-        ),
-        Index(
-            "uq_payments_provider_idempotency_key_not_null",
-            "provider_idempotency_key",
-            unique=True,
-            postgresql_where=text("provider_idempotency_key IS NOT NULL"),
-        ),
-        Index(
-            "uq_payments_visible_topup_user",
-            "user_id",
-            unique=True,
-            postgresql_where=text(
-                "ui_visible=true AND checkout_status='active' "
-                "AND provider_status NOT IN ('succeeded','canceled','refunded')"
-            ),
-        ),
-        Index("ix_payments_user_created", "user_id", "created_at"),
-        Index(
-            "ix_payments_attention",
-            "created_at",
-            postgresql_where=text(
-                "reconciliation_status IN ('required','mismatch','manual_review')"
-            ),
-        ),
-        Index(
-            "ix_payments_referral_bonus_unprocessed",
-            "created_at",
-            postgresql_where=text(
-                "provider_status = 'succeeded' "
-                "AND fulfillment_status = 'succeeded' "
-                "AND NOT (COALESCE(topup_context, '{}'::jsonb) @> '{\"referral_bonus_processed\": true}'::jsonb)"
-            ),
-        ),
-        Index(
-            "ix_payments_recovery_pending",
-            "created_at",
-            postgresql_where=text(
-                "external_id IS NOT NULL AND provider_status IN ('creating', 'pending', 'waiting_for_capture', 'unknown')"
-            ),
-        ),
-        Index(
-            "ix_payments_recovery_unfulfilled",
-            "created_at",
-            postgresql_where=text(
-                "provider_status = 'succeeded' AND provider_confirmed_at IS NOT NULL AND fulfillment_status NOT IN ('succeeded', 'reversed', 'manual_review')"
-            ),
-        ),
-        Index(
-            "ix_payments_auto_fulfill_retry",
-            "created_at",
-            postgresql_where=text(
-                "provider_status = 'succeeded' "
-                "AND provider_confirmed_at IS NOT NULL "
-                "AND fulfillment_status = 'succeeded' "
-                "AND topup_context ? 'auto_fulfill_action' "
-                "AND topup_context->>'auto_fulfill_status' = 'failed'"
-            ),
-        ),
-        CheckConstraint(
-            sql_enum_in("provider_status", PaymentProviderStatus),
-            name="ck_payments_provider_status",
-        ),
-        CheckConstraint(
-            sql_enum_in("fulfillment_status", PaymentFulfillmentStatus),
-            name="ck_payments_fulfillment_status",
-        ),
-        CheckConstraint(
-            sql_enum_in("reconciliation_status", PaymentReconciliationStatus),
-            name="ck_payments_reconciliation_status",
-        ),
-        CheckConstraint(
-            sql_enum_in("checkout_status", PaymentCheckoutStatus),
-            name="ck_payments_checkout_status",
-        ),
-        CheckConstraint(
-            "currency = 'RUB' AND amount > 0 AND amount = trunc(amount)",
-            name="ck_payments_topup_money",
-        ),
-    )
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(
-        Integer,
-        ForeignKey("users.id", ondelete="RESTRICT"),
-        nullable=False,
-        index=True,
-    )
-    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
-    currency: Mapped[str] = mapped_column(
-        String(3), nullable=False, default="RUB", server_default=text("'RUB'")
-    )
-    public_order_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    provider_idempotency_key: Mapped[str] = mapped_column(String(64), nullable=False)
-    provider_status: Mapped[str] = mapped_column(
-        String(30), nullable=False, default="creating", server_default=text("'creating'")
-    )
-    fulfillment_status: Mapped[str] = mapped_column(
-        String(30), nullable=False, default="not_ready", server_default=text("'not_ready'")
-    )
-    reconciliation_status: Mapped[str] = mapped_column(
-        String(30), nullable=False, default="ok", server_default=text("'ok'")
-    )
-    checkout_status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="active", server_default=text("'active'")
-    )
-    ui_visible: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=True, server_default=text("true")
-    )
-    user_cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    manual_review_reason: Mapped[str | None] = mapped_column(String(255))
-    topup_context: Mapped[dict] = mapped_column(
-        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()")
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=now_utc,
-        onupdate=now_utc,
-        server_default=text("now()"),
-    )
-    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    provider_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    credited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    credit_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    payment_url_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    fulfilled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    last_reconciled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    provider_last_error_code: Mapped[str | None] = mapped_column(String(100))
-    provider_last_error: Mapped[str | None] = mapped_column(Text)
-    fulfillment_last_error_code: Mapped[str | None] = mapped_column(String(100))
-    fulfillment_last_error: Mapped[str | None] = mapped_column(Text)
-    external_id: Mapped[str | None] = mapped_column(String(255), index=True)
-    payment_url: Mapped[str | None] = mapped_column(String(1000))
-    payment_method: Mapped[str | None] = mapped_column(String(50))
-
-    user = relationship("User", back_populates="payments")
-
-
 class Order(Base):
     """Clean commercial order entity for simple billing."""
 
@@ -537,19 +366,15 @@ class AccountLedgerEntry(Base):
         ),
         CheckConstraint(
             "(entry_type = 'payment_credit' AND amount > 0 "
-            "AND (payment_id IS NOT NULL OR order_id IS NOT NULL) AND quote_id IS NULL "
             "AND reversal_of_id IS NULL) OR "
             "(entry_type = 'purchase_debit' AND amount < 0 "
-            "AND payment_id IS NULL AND (quote_id IS NOT NULL OR order_id IS NOT NULL) "
-            "AND reversal_of_id IS NULL) OR "
+            "AND order_id IS NOT NULL AND reversal_of_id IS NULL) OR "
             "(entry_type = 'purchase_reversal' AND amount > 0 "
-            "AND payment_id IS NULL AND (quote_id IS NOT NULL OR order_id IS NOT NULL) "
-            "AND reversal_of_id IS NOT NULL) OR "
+            "AND order_id IS NOT NULL AND reversal_of_id IS NOT NULL) OR "
             "(entry_type IN ('refund_debit','chargeback_debit') "
-            "AND amount < 0 AND (payment_id IS NOT NULL OR order_id IS NOT NULL) "
-            "AND quote_id IS NULL AND reversal_of_id IS NULL) OR "
-            "(entry_type = 'admin_adjustment' AND payment_id IS NULL "
-            "AND quote_id IS NULL AND reversal_of_id IS NULL)",
+            "AND amount < 0 AND order_id IS NOT NULL "
+            "AND reversal_of_id IS NULL) OR "
+            "(entry_type = 'admin_adjustment' AND reversal_of_id IS NULL)",
             name="ck_account_ledger_entry_shape",
         ),
         Index(
@@ -557,18 +382,6 @@ class AccountLedgerEntry(Base):
             "user_id",
             "created_at",
             "id",
-        ),
-        Index(
-            "uq_account_ledger_payment_credit",
-            "payment_id",
-            unique=True,
-            postgresql_where=text("entry_type='payment_credit' AND payment_id IS NOT NULL"),
-        ),
-        Index(
-            "uq_account_ledger_purchase_debit",
-            "quote_id",
-            unique=True,
-            postgresql_where=text("entry_type='purchase_debit' AND quote_id IS NOT NULL"),
         ),
         Index(
             "uq_account_ledger_order_debit",
@@ -589,11 +402,6 @@ class AccountLedgerEntry(Base):
             postgresql_where=text("entry_type='purchase_reversal'"),
         ),
         Index(
-            "ix_account_ledger_payment_debits",
-            "payment_id",
-            postgresql_where=text("entry_type IN ('refund_debit','chargeback_debit')"),
-        ),
-        Index(
             "ix_account_ledger_order_id",
             "order_id",
             postgresql_where=text("order_id IS NOT NULL"),
@@ -609,10 +417,6 @@ class AccountLedgerEntry(Base):
     currency: Mapped[str] = mapped_column(
         String(3), nullable=False, default="RUB", server_default=text("'RUB'")
     )
-    payment_id: Mapped[int | None] = mapped_column(
-        ForeignKey("payments.id", ondelete="RESTRICT"), nullable=True
-    )
-    quote_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     order_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("orders.id", ondelete="RESTRICT"),
@@ -673,15 +477,6 @@ class WebhookInbox(Base):
         UniqueConstraint("provider", "event_key", name="uq_webhook_inbox_provider_event_key"),
         CheckConstraint(sql_enum_in("status", WebhookInboxStatus), name="ck_webhook_inbox_status"),
         Index(
-            "ix_webhook_inbox_claim",
-            "next_attempt_at",
-            "id",
-            postgresql_where=text("status IN ('pending','retry')"),
-        ),
-        Index(
-            "ix_webhook_inbox_lease", "locked_at", postgresql_where=text("status = 'processing'")
-        ),
-        Index(
             "ix_webhook_inbox_retention",
             "received_at",
             "id",
@@ -699,15 +494,7 @@ class WebhookInbox(Base):
     status: Mapped[str] = mapped_column(
         String(20), default="pending", server_default=text("'pending'")
     )
-    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
-    max_attempts: Mapped[int] = mapped_column(Integer, default=30, server_default=text("30"))
-    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    locked_by: Mapped[str | None] = mapped_column(String(100))
-    last_error_code: Mapped[str | None] = mapped_column(String(100))
-    last_error: Mapped[str | None] = mapped_column(Text)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class AuditLog(Base):
@@ -789,11 +576,6 @@ class WhiteInternetSubscription(Base):
             postgresql_where=text(
                 "status IN ('ACTIVE', 'EXHAUSTED', 'EXPIRED') AND (notified_3d = false OR notified_1d = false OR notified_2h = false OR notified_expired = false)"
             ),
-        ),
-        Index(
-            "ix_wi_subscriptions_pending_hard_delete",
-            "id",
-            postgresql_where=text("pending_hard_delete IS TRUE"),
         ),
     )
 
@@ -878,12 +660,6 @@ class WhiteInternetSubscription(Base):
     auto_renew_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
-    last_device_reset_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    is_trial: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default=text("false")
-    )
 
     provisioning_status: Mapped[str] = mapped_column(
         String(30),
@@ -901,14 +677,6 @@ class WhiteInternetSubscription(Base):
 
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-    # Two-phase trial reset: True means the row must be hard-deleted by the
-    # reconciliation worker only after the node confirms the client disabled
-    # (SYNCED_INACTIVE with matching versions). Never delete rows that still
-    # have an unconfirmed presence on the node — that would orphan credentials.
-    pending_hard_delete: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default=text("false")
-    )
 
     notified_3d: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")

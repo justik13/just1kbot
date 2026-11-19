@@ -447,7 +447,7 @@ async def _reconcile_stale_pending_orders() -> None:
                         order,
                         reason=status_res.cancellation_reason or "gateway_canceled",
                     )
-                    await OrderService.refund_reserved_mixed_debit(session, order)
+                    await OrderService.refund_reserved_mixed_debit(order_session, order)
                     _pending_order_backoff_cache.pop(order_id, None)
                     logger.info(
                         "Reconciliation canceled stale pending order %s (reason=%s)",

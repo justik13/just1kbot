@@ -97,20 +97,6 @@ async def get_subscription_by_user_id(
     return result.scalar_one_or_none()
 
 
-async def has_user_any_subscription(
-    session: AsyncSession, user_id: int
-) -> bool:
-    """Check if user has ever had any White Internet subscription."""
-    if not isinstance(user_id, int) or user_id < 1 or user_id > 2_147_483_647:
-        return False
-    stmt = (
-        select(WhiteInternetSubscription.id)
-        .where(WhiteInternetSubscription.user_id == user_id)
-        .limit(1)
-    )
-    return await session.scalar(stmt) is not None
-
-
 async def get_subscription_by_id(
     session: AsyncSession, subscription_id: int
 ) -> WhiteInternetSubscription | None:
@@ -201,7 +187,6 @@ async def create_white_internet_subscription(
         base_traffic_bytes=effective_base_bytes,
         extra_traffic_bytes=0,
         device_limit=clamped_devices,
-        is_trial=False,
         notified_3d=False,
         traffic_used_bytes=0,
         traffic_uplink_bytes=0,
@@ -281,7 +266,6 @@ async def renew_subscription_atomic(
     max_extra_allowed = max(0, effective_devices * WHITE_INTERNET_MAX_QUOTA_BYTES)
     new_extra = min(extra_rollover, max_extra_allowed) if is_grace_valid else 0
 
-    sub.is_trial = False
     sub.base_traffic_bytes = new_base_bytes
     sub.extra_traffic_bytes = new_extra
     sub.expires_at = new_expires_at
@@ -463,52 +447,6 @@ async def topup_quota_atomic(
     return pack_bytes
 
 
-async def deduct_traffic_atomic(
-    session: AsyncSession,
-    *,
-    subscription_id: int,
-    delta_bytes: int,
-    delta_uplink: int = 0,
-    delta_downlink: int = 0,
-    now: datetime | None = None,
-) -> tuple[int, bool, int]:
-    if delta_bytes <= 0:
-        return 0, False, 0
-    now = now or now_utc()
-    sub = await get_subscription_with_lock(session, subscription_id)
-    if sub is None:
-        raise WhiteInternetSubscriptionNotFoundError(f"Subscription {subscription_id} not found")
-
-    total_quota = (sub.base_traffic_bytes or 0) + (sub.extra_traffic_bytes or 0)
-    used_before = max(0, (sub.traffic_used_bytes or 0) - (sub.traffic_overage_bytes or 0))
-    available_before = max(0, total_quota - used_before)
-
-    if sub.status in (WhiteInternetStatus.DISABLED, WhiteInternetStatus.EXPIRED):
-        overage = delta_bytes
-        consumed = 0
-    else:
-        consumed = min(delta_bytes, available_before)
-        overage = max(0, delta_bytes - available_before)
-
-    sub.traffic_used_bytes = (sub.traffic_used_bytes or 0) + delta_bytes
-    sub.traffic_overage_bytes = (sub.traffic_overage_bytes or 0) + overage
-    sub.traffic_uplink_bytes = (sub.traffic_uplink_bytes or 0) + max(0, delta_uplink)
-    sub.traffic_downlink_bytes = (sub.traffic_downlink_bytes or 0) + max(0, delta_downlink)
-
-    used_after = max(0, (sub.traffic_used_bytes or 0) - (sub.traffic_overage_bytes or 0))
-    available_after = max(0, total_quota - used_after)
-    became_exhausted = False
-    if available_after == 0 and sub.status == WhiteInternetStatus.ACTIVE:
-        sub.status = WhiteInternetStatus.EXHAUSTED
-        sub.status_reason = "quota_exhausted"
-        sub.desired_version += 1
-        sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
-        became_exhausted = True
-
-    await session.flush()
-    return consumed, became_exhausted, overage
-
-
 async def record_and_deduct_traffic_atomic(
     session: AsyncSession,
     subscription_id: int,
@@ -588,37 +526,6 @@ async def record_and_deduct_traffic_atomic(
 
     await session.flush()
     return consumed_delta, became_exhausted, available_after, event
-
-
-async def finalize_hard_delete_subscription(
-    session: AsyncSession,
-    subscription_id: int,
-) -> bool:
-    """Hard-delete a reset subscription only after node-confirmed disable.
-
-    Returns True when the row was deleted. Returns False (fail-closed, row kept)
-    unless ALL hold: pending_hard_delete flag, DISABLED status, SYNCED_INACTIVE
-    provisioning with matching versions (node confirmed the client disabled),
-    or the origin server is gone entirely (origin_node_id NULL — nothing left
-    to clean on any node).
-    """
-    sub = await get_subscription_with_lock(session, subscription_id)
-    if sub is None:
-        return False
-    if not sub.pending_hard_delete:
-        return False
-    if sub.status != WhiteInternetStatus.DISABLED:
-        return False
-    node_confirmed = (
-        sub.provisioning_status == WhiteInternetProvisioningStatus.SYNCED_INACTIVE
-        and (sub.actual_version or 0) == (sub.desired_version or 0)
-    )
-    hub_gone = sub.hub_server_id is None
-    if not (node_confirmed or hub_gone):
-        return False
-    await session.delete(sub)
-    await session.flush()
-    return True
 
 
 async def enqueue_orphan_cleanup(
@@ -706,44 +613,6 @@ async def get_white_internet_dashboard_stats(session: AsyncSession) -> dict:
     }
 
 
-async def reset_active_hwids_atomic(
-    session: AsyncSession,
-    subscription_id: int,
-    cooldown_seconds: int = WHITE_INTERNET_DEVICE_RESET_COOLDOWN_SECONDS,
-    now: datetime | None = None,
-) -> bool:
-    """Atomically updates last_device_reset_at for a subscription under row-level lock.
-
-    Raises WhiteInternetResetCooldownError if cooldown period has not elapsed.
-    """
-    sub = await session.get(
-        WhiteInternetSubscription,
-        subscription_id,
-        with_for_update=True,
-    )
-    if sub is None:
-        return False
-
-    now = now or now_utc()
-    if now.tzinfo is None:
-        now = now.replace(tzinfo=timezone.utc)
-    last_reset = getattr(sub, "last_device_reset_at", None)
-    if isinstance(last_reset, datetime):
-        if last_reset.tzinfo is None:
-            last_reset = last_reset.replace(tzinfo=timezone.utc)
-        elapsed = (now - last_reset).total_seconds()
-        if elapsed < cooldown_seconds:
-            remaining = int(cooldown_seconds - elapsed)
-            raise WhiteInternetResetCooldownError(
-                f"Device reset cooldown is active. Wait {remaining} seconds.",
-                remaining_seconds=remaining,
-            )
-
-    sub.last_device_reset_at = now
-    await session.flush()
-    return True
-
-
 async def reset_subscription_token_atomic(
     session: AsyncSession,
     subscription_id: int,
@@ -766,8 +635,6 @@ async def reset_subscription_token_atomic(
 
     token = new_token or secrets.token_hex(32)
     sub.token = token
-    if reset_hwids:
-        sub.last_device_reset_at = now or now_utc()
     await session.flush()
     return token
 

@@ -516,7 +516,7 @@ async def api_admin_users_handler(request: web.Request) -> web.Response:
 
     async with session_scope() as session:
         filter_counts = await users_repo.get_user_filter_counts(session)
-        total_users = filter_counts.get("total", 0)
+        total_users = filter_counts.get("all", 0)
         active_standard = filter_counts.get("active_standard", 0)
         active_wi = filter_counts.get("active_wi", 0)
         total_balance_rub = Decimal(
@@ -743,13 +743,15 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                 )
                 if new_end <= now:
                     vless_sub = await vless_subscription_repo.get_subscription_by_user_id(
-                        session, user.id, for_update=True
+                        session, user.id
                     )
                     if vless_sub is not None:
-                        old_uuid = str(vless_sub.uuid)
                         vless_sub.is_active = False
+                        vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1
                         await session.flush()
-                        VlessSubscriptionService.deprovision_background(old_uuid, session=session)
+                        VlessSubscriptionService.ensure_synced_background(
+                            user.id, is_active=False, session=session
+                        )
                 return web.json_response({
                     "ok": True,
                     "action": "grant_standard",
@@ -900,7 +902,6 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
             ok, msg, created = await WhiteInternetService.purchase_subscription(
                 session,
                 user.id,
-                debit_balance=False,
                 device_limit=payload.device_limit or 1,
             )
             if not ok:
@@ -933,6 +934,13 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
 
         if payload.device_limit is not None and payload.device_limit != wi_sub.device_limit:
             wi_sub.device_limit = payload.device_limit
+            wi_sub.base_traffic_bytes = payload.device_limit * constants.WHITE_INTERNET_BASE_TRAFFIC_BYTES
+            if (
+                wi_sub.status == WhiteInternetStatus.EXHAUSTED
+                and (wi_sub.base_traffic_bytes + (wi_sub.extra_traffic_bytes or 0))
+                > (wi_sub.traffic_used_bytes or 0)
+            ):
+                wi_sub.status = WhiteInternetStatus.ACTIVE
             wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
             await session.flush()
             await AuditService.log_action(
@@ -1107,11 +1115,8 @@ async def api_admin_user_devices_reset_handler(request: web.Request) -> web.Resp
             return web.json_response({"ok": False, "error": "Пользователь не найден"}, status=404)
 
         vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
-        wi_sub = await get_subscription_by_user_id(session, user.id)
         if vless_sub is not None:
             await vless_subscription_repo.reset_hwids(session, vless_sub.id)
-        if wi_sub is not None:
-            await white_internet_repo.reset_active_hwids_atomic(session, wi_sub.id, cooldown_seconds=0)
 
         existing_devs = (await session.scalars(select(UserDevice).where(UserDevice.user_id == user.id))).all()
         dev_uuids = [d.device_uuid for d in existing_devs if getattr(d, "device_uuid", None)]
@@ -1450,8 +1455,8 @@ async def api_admin_payments_maintenance_post_handler(request: web.Request) -> w
             admin_id=ctx.telegram_id,
             action=AdminAuditAction.TOGGLE_MAINTENANCE,
             target_type="system_setting",
-            target_id="payments_maintenance_enabled",
-            details={"enabled": payload.enabled},
+            target_id=None,
+            details={"key": "payments_maintenance_enabled", "enabled": payload.enabled},
         )
 
     logger.info("Payments maintenance mode toggled to %s by admin %s", payload.enabled, ctx.telegram_id)

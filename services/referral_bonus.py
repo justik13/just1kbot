@@ -161,16 +161,8 @@ async def is_first_topup_eligible(
 
     from sqlalchemy import func
 
-    from database.models import Order, Payment
+    from database.models import Order
 
-    count = await session.scalar(
-        select(func.count(Payment.id)).where(
-            Payment.user_id == user_id,
-            Payment.credited_at.is_not(None),
-            Payment.fulfillment_status == "succeeded",
-            Payment.amount >= REFERRAL_ACTIVE_MIN_TOPUP_RUB,
-        )
-    )
     order_count = await session.scalar(
         select(func.count(Order.id)).where(
             Order.user_id == user_id,
@@ -182,7 +174,7 @@ async def is_first_topup_eligible(
             ),
         )
     )
-    return (count or 0) == 0 and (order_count or 0) == 0
+    return (order_count or 0) == 0
 
 
 async def _has_other_qualifying_topup(
@@ -205,7 +197,7 @@ async def _has_other_qualifying_topup(
     purchase (payment_method != 'wallet').  Wallet-funded non-topup orders are
     intentionally excluded because they may represent gifted balance.
     """
-    from database.models import Order, Payment
+    from database.models import Order
 
     order_conds = [
         Order.user_id == user_id,
@@ -230,22 +222,7 @@ async def _has_other_qualifying_topup(
     other_order = await session.scalar(
         select(Order.id).where(*order_conds).limit(1)
     )
-    if other_order is not None:
-        return True
-
-    payment_conds = [
-        Payment.user_id == user_id,
-        Payment.provider_status == "succeeded",
-        Payment.fulfillment_status == "succeeded",
-        Payment.credited_at.is_not(None),
-        Payment.amount >= REFERRAL_ACTIVE_MIN_TOPUP_RUB,
-    ]
-    if exclude_payment_id is not None:
-        payment_conds.append(Payment.id != exclude_payment_id)
-    other_payment = await session.scalar(
-        select(Payment.id).where(*payment_conds).limit(1)
-    )
-    return other_payment is not None
+    return other_order is not None
 
 
 async def grant_referral_bonus_for_topup(

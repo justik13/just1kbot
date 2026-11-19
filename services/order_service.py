@@ -34,6 +34,7 @@ from database.repositories.users_repo import (
 from database.repositories.user_devices_repo import count_active_user_devices
 from database.repositories.account_ledger_repo import (
     create_admin_adjustment,
+    create_mixed_cancel_real_refund,
     create_order_credit,
     create_order_debit,
     create_order_refund_debit,
@@ -149,7 +150,19 @@ class OrderService:
                         AccountLedgerEntry.order_id == order.id,
                     )
                 )
-                if existing_debit is None:
+                if (order.metadata_ or {}).get("mixed_debit_refunded"):
+                    mixed_fallback = True
+                    await create_order_credit(
+                        session,
+                        user_id=order.user_id,
+                        amount_rub=order.amount_rub,
+                        order_id=order.id,
+                        metadata={"source": "mixed_fallback_topup"},
+                    )
+                    fb_meta = dict(order.metadata_ or {})
+                    fb_meta["mixed_fallback_credited"] = True
+                    order.metadata_ = fb_meta
+                elif existing_debit is None:
                     bal = await get_account_balance(session, user_id=order.user_id, for_update=True)
                     if bal.debt == 0 and bal.available >= wallet_debit:
                         await create_order_debit(
@@ -549,7 +562,10 @@ class OrderService:
     @staticmethod
     async def refund_reserved_mixed_debit(session: AsyncSession, order: Order) -> None:
         """Refund reserved wallet debit for canceled or expired mixed payment orders."""
-        wallet_debit_raw = (order.metadata_ or {}).get("wallet_debit_rub")
+        meta = dict(order.metadata_ or {})
+        if meta.get("mixed_debit_refunded"):
+            return
+        wallet_debit_raw = meta.get("wallet_debit_rub")
         if not wallet_debit_raw:
             return
         wallet_debit = Decimal(str(wallet_debit_raw))
@@ -563,21 +579,34 @@ class OrderService:
         )
         if debit is None:
             return
-        refund_key = f"mixed_cancel_refund:{order.id}"
-        existing_refund = await session.scalar(
-            select(AccountLedgerEntry).where(
-                AccountLedgerEntry.idempotency_key == refund_key,
+
+        bonus_raw = meta.get("wallet_bonus_debit_rub")
+        real_raw = meta.get("wallet_real_debit_rub")
+        if bonus_raw is not None and real_raw is not None:
+            bonus_part = min(wallet_debit, max(Decimal(0), Decimal(str(bonus_raw))))
+            real_part = max(Decimal(0), wallet_debit - bonus_part)
+        else:
+            bonus_part = Decimal(0)
+            real_part = wallet_debit
+
+        if real_part > 0:
+            await create_mixed_cancel_real_refund(
+                session,
+                user_id=order.user_id,
+                amount_rub=real_part,
+                order_id=order.id,
+                metadata={"source": "mixed_canceled_refund", "order_id": str(order.id)},
             )
-        )
-        if existing_refund is not None:
-            return
-        await create_order_credit(
-            session,
-            user_id=order.user_id,
-            amount_rub=wallet_debit,
-            order_id=order.id,
-            metadata={"source": "mixed_canceled_refund", "order_id": str(order.id)},
-        )
+        if bonus_part > 0:
+            await create_admin_adjustment(
+                session,
+                user_id=order.user_id,
+                signed_amount=bonus_part,
+                idempotency_key=f"mixed_cancel_bonus_refund:{order.id}",
+                metadata={"source": "mixed_canceled_bonus_refund", "order_id": str(order.id)},
+            )
+        meta["mixed_debit_refunded"] = True
+        order.metadata_ = meta
 
     @staticmethod
     async def mark_order_paid(
@@ -871,7 +900,10 @@ class OrderService:
                 metadata={"source": "standard_downgrade_cashback", "target_devices": target_device_limit},
             )
 
+        from services.subscription import SubscriptionService
+
         await session.flush()
+        await SubscriptionService._sync_access_state(session, user)
         return {
             "ok": True,
             "device_limit": user.device_limit,
@@ -955,8 +987,7 @@ class OrderService:
                 if wi_sub.status == WhiteInternetStatus.DISABLED:
                     raise ValueError(texts.WL_SUB_DISABLED)
                 if (
-                    getattr(wi_sub, "pending_hard_delete", False)
-                    or getattr(wi_sub, "provisioning_status", None)
+                    getattr(wi_sub, "provisioning_status", None)
                     == WhiteInternetProvisioningStatus.PENDING_DELETE
                 ):
                     raise ValueError(texts.WL_DEACTIVATION_PENDING)
@@ -1109,8 +1140,12 @@ class OrderService:
         if wallet_debit > 0 and 0 < to_pay < MIN_TOPUP_RUB and total_cost >= MIN_TOPUP_RUB:
             wallet_debit = total_cost - MIN_TOPUP_RUB
             to_pay = MIN_TOPUP_RUB
+        charged_bonus = min(bal.bonus_available, wallet_debit) if wallet_debit > 0 else Decimal(0)
+        charged_real = wallet_debit - charged_bonus
         if wallet_debit > 0:
             order_meta["wallet_debit_rub"] = int(wallet_debit)
+            order_meta["wallet_bonus_debit_rub"] = int(charged_bonus)
+            order_meta["wallet_real_debit_rub"] = int(charged_real)
             order_meta["total_cost_rub"] = int(total_cost)
             order_meta["is_mixed_payment"] = True
 
@@ -1137,7 +1172,6 @@ class OrderService:
                 metadata={"description": f"Резерв смешанной оплаты: {order.description}"},
                 locked_user=user,
             )
-        charged_bonus = min(bal.bonus_available, wallet_debit) if wallet_debit > 0 else Decimal(0)
         return {
             "order_id": str(order.id),
             "status": order.status,
@@ -1162,6 +1196,9 @@ class OrderService:
             raise ValueError("User not found")
         if standard is not None:
             user.auto_renew_enabled = bool(standard)
+            from services.subscription import SubscriptionService
+
+            await SubscriptionService._sync_access_state(session, user)
         wi_sub = await get_wi_sub_by_user_id(session, user_id)
         if white_internet is not None and wi_sub is not None:
             wi_sub.auto_renew_enabled = bool(white_internet)

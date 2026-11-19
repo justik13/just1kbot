@@ -656,6 +656,7 @@ async def api_user_order_check_handler(request: web.Request) -> web.Response:
                         locked,
                         reason=status_res.cancellation_reason or "gateway_canceled",
                     )
+                    await order_service.OrderService.refund_reserved_mixed_debit(session, locked)
                     final_status = locked.status
             else:
                 final_status = locked.status
@@ -726,9 +727,9 @@ async def api_user_device_delete_handler(request: web.Request) -> web.Response:
         if deleted_uuid:
             vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
             sub_id = vless_sub.id if vless_sub else None
-            sub_ver = getattr(vless_sub, "version", None) if vless_sub else None
             if vless_sub is not None:
                 await vless_subscription_repo.add_pending_revocation_uuids(session, vless_sub.id, [deleted_uuid])
+            sub_ver = getattr(vless_sub, "version", None) if vless_sub else None
 
             VlessSubscriptionService.deprovision_background(
                 deleted_uuid,
@@ -773,11 +774,11 @@ async def api_user_devices_reset_handler(request: web.Request) -> web.Response:
         if deleted_uuids:
             vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
             sub_id = vless_sub.id if vless_sub else None
-            sub_ver = getattr(vless_sub, "version", None) if vless_sub else None
             if vless_sub is not None:
                 await vless_subscription_repo.add_pending_revocation_uuids(
                     session, vless_sub.id, deleted_uuids
                 )
+            sub_ver = getattr(vless_sub, "version", None) if vless_sub else None
 
             for u in deleted_uuids:
                 VlessSubscriptionService.deprovision_background(

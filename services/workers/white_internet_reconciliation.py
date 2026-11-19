@@ -467,7 +467,6 @@ class WhiteInternetReconciliationWorker:
                     elif r is True:
                         synced_count += 1
 
-        synced_count += await self._finalize_hard_deletes(sf)
         synced_count += await self._sweep_orphan_cleanups(sf)
         synced_count += await self._sweep_unallocated_subscriptions(sf)
 
@@ -615,47 +614,6 @@ class WhiteInternetReconciliationWorker:
                         "Orphan sweep failed for cleanup %d: %s", cleanup_id, exc
                     )
         return swept
-
-    async def _finalize_hard_deletes(self, sf) -> int:
-        """Delete reset rows only after the node confirmed the client disabled.
-
-        Two-phase trial reset (see WhiteInternetService.reset_user_trial):
-        rows stay DISABLED+PENDING_DELETE until the node converges to
-        SYNCED_INACTIVE, then the row is removed so a fresh trial can be issued.
-        Deleting earlier would orphan an active credential on the node.
-        """
-        finalized = 0
-        try:
-            async with sf() as sess:
-                stmt = (
-                    select(WhiteInternetSubscription.id)
-                    .where(
-                        WhiteInternetSubscription.pending_hard_delete.is_(True),
-                        WhiteInternetSubscription.status == WhiteInternetStatus.DISABLED,
-                    )
-                    .order_by(WhiteInternetSubscription.id.asc())
-                    .limit(BATCH_SIZE)
-                )
-                sub_ids = list((await sess.execute(stmt)).scalars().all())
-        except Exception as exc:
-            logger.debug("Hard-delete finalizer listing failed: %s", exc)
-            return 0
-        for sub_id in sub_ids:
-            async with sf() as sess:
-                try:
-                    if await white_internet_repo.finalize_hard_delete_subscription(sess, sub_id):
-                        await sess.commit()
-                        finalized += 1
-                        logger.info(
-                            "Finalized two-phase trial reset: deleted subscription %d "
-                            "after node-confirmed disable.",
-                            sub_id,
-                        )
-                except Exception as exc:
-                    logger.warning(
-                        "Hard-delete finalizer failed for subscription %d: %s", sub_id, exc
-                    )
-        return finalized
 
     async def _sweep_unallocated_subscriptions(self, sf) -> int:
         """Allocate available ru_hub nodes to active/pending subscriptions with hub_server_id IS NULL."""

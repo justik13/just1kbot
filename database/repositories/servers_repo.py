@@ -664,7 +664,7 @@ async def migrate_wi_hub_subscriptions(
     if not source_server or not target_server:
         raise ValueError("Source or target server not found.")
 
-    if target_server.protocol != XRAY_PROTOCOL or not target_server.is_active:
+    if not target_server or target_server.protocol not in (XRAY_PROTOCOL, VLESS_PROTOCOL) or not target_server.is_active:
         raise ValueError("Target server is not an active Xray node.")
 
     if WHITE_INTERNET_CAPABILITY not in (target_server.capabilities or []):

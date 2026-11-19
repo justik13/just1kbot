@@ -120,43 +120,10 @@ async def miniapp_asset_handler(request: web.Request) -> web.Response:
     )
 
 
-async def miniapp_open_client_handler(request: web.Request) -> web.Response:
-    """Serve an external-browser bridge page to launch incy:// or happ:// without crashing WebView."""
-    client = (request.query.get("client") or "").strip().lower()
-    sub_url = (request.query.get("sub") or "").strip()
-    if client not in {"incy", "happ"} or not sub_url:
-        return web.Response(status=400, text="Invalid request")
-
-    from bot.miniapp.handlers_user import _get_subscription_domains
-
-    parsed = urlparse(sub_url)
-    allowed_hosts = {request.host.split(":", 1)[0].lower()}
-    configured_domain = (get_settings().DOMAIN or "").strip().lower()
-    if configured_domain:
-        allowed_hosts.add(configured_domain)
-    for sub_dom in _get_subscription_domains():
-        if sub_dom:
-            dom_parsed = urlparse(sub_dom if "://" in sub_dom else f"https://{sub_dom}")
-            if dom_parsed.hostname:
-                allowed_hosts.add(dom_parsed.hostname.lower())
-
-    if (
-        parsed.scheme not in {"https", "http"}
-        or not parsed.hostname
-        or parsed.hostname.lower() not in allowed_hosts
-        or not parsed.path.startswith("/sub/")
-    ):
-        return web.Response(status=400, text="Invalid subscription URL")
-
-    sep = "&" if "?" in sub_url else "?"
-    raise web.HTTPFound(f"{sub_url}{sep}open={client}")
-
-
 def setup_miniapp_routes(app: web.Application) -> None:
     """Register Mini App frontend shell, modular static assets, user and admin JSON APIs."""
     app.router.add_get("/app", miniapp_index_handler)
     app.router.add_get("/app/", miniapp_index_handler)
-    app.router.add_get("/app/open-client", miniapp_open_client_handler)
     app.router.add_get("/app/assets/{asset_path:.+}", miniapp_asset_handler)
 
     app.router.add_get("/api/app/me", api_me_handler)

@@ -106,7 +106,6 @@ class FulfillmentService:
                     session,
                     user.id,
                     actor_telegram_id=user.telegram_id,
-                    debit_balance=False,
                     extra_bytes=order.traffic_bytes if order.traffic_bytes else None,
                 )
                 if not ok:
@@ -120,7 +119,6 @@ class FulfillmentService:
                     user.id,
                     pack_gb,
                     actor_telegram_id=user.telegram_id,
-                    debit_balance=False,
                 )
                 if not ok:
                     raise RuntimeError(f"White Internet quota topup failed: {msg}")
@@ -129,14 +127,12 @@ class FulfillmentService:
                     ok, msg, created_sub = await WhiteInternetService.renew_subscription(
                         session,
                         user.id,
-                        debit_balance=False,
                         target_device_limit=order.device_limit,
                     )
                 else:
                     ok, msg, created_sub = await WhiteInternetService.purchase_subscription(
                         session,
                         user.id,
-                        debit_balance=False,
                         device_limit=order.device_limit or 1,
                     )
                 if not ok:
