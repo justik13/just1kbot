@@ -867,7 +867,7 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                 locked_user.topup_blocked = bool(payload.topup_blocked)
             await session.flush()
             await SubscriptionService.sync_access_state(session, locked_user)
-            if not locked_user.financial_hold or not locked_user.topup_blocked:
+            if not locked_user.financial_hold and not locked_user.topup_blocked:
                 from services.order_service import OrderService
 
                 held_orders = (

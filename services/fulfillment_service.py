@@ -247,6 +247,34 @@ class FulfillmentService:
                     )
                 return
 
+            if meta_op == "renew" or (order.duration_days and order.duration_days > 0):
+                from database.repositories.white_internet_repo import (
+                    get_subscription_by_user_id,
+                )
+
+                sub = await get_subscription_by_user_id(session, user.id)
+                if sub and sub.expires_at:
+                    now = now_utc()
+                    new_expires = sub.expires_at - timedelta(days=order.duration_days)
+                    if new_expires <= now:
+                        await WhiteInternetService.deactivate_user_subscriptions(
+                            session,
+                            user.id,
+                            reason="order_refunded",
+                            target_subscription_id=target_sub_id,
+                        )
+                    else:
+                        sub.expires_at = new_expires
+                        sub.desired_version = (sub.desired_version or 0) + 1
+                        await session.flush()
+                        logger.info(
+                            "Revoked White Internet renewal order %s for user %s (expires_at rolled back to %s)",
+                            order.id,
+                            user.id,
+                            sub.expires_at,
+                        )
+                    return
+
             await WhiteInternetService.deactivate_user_subscriptions(
                 session,
                 user.id,

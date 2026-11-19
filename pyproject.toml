@@ -24,6 +24,5 @@ ignore = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
 pythonpath = ["."]
 norecursedirs = [".git", ".pytest_cache", "scripts"]

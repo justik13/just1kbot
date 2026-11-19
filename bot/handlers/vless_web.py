@@ -918,11 +918,11 @@ async def serve_unified_subscription_feed(
                 all_links.append(
                     _make_inline_stub(
                         texts.FEED_STUB_STD_DEVICE_LIMIT.format(limit=std_limit),
-                        "Откройте в боте «Устройства»",
+                        "Управление в кабинете",
                     )
                 )
         elif getattr(user, "subscription_end", None) is not None and wi_active:
-            all_links.append(_make_inline_stub(texts.FEED_STUB_STD_EXPIRED, "Откройте в боте «Тарифы»"))
+            all_links.append(_make_inline_stub(texts.FEED_STUB_STD_EXPIRED, "Управление в кабинете"))
 
         wi_server: Server | None = None
         if wi_active and wi_sub is not None:
@@ -962,18 +962,18 @@ async def serve_unified_subscription_feed(
                 all_links.append(
                     _make_inline_stub(
                         texts.FEED_STUB_WI_DEVICE_LIMIT.format(limit=wi_limit),
-                        "Откройте в боте «Устройства»",
+                        "Управление в кабинете",
                     )
                 )
         elif wi_sub is not None and std_active:
             if wi_is_pending:
                 all_links.append(_make_inline_stub(texts.FEED_STUB_WI_PENDING, "Нажмите ⟳ через 1 минуту"))
             elif wi_is_exhausted and not wi_is_expired:
-                all_links.append(_make_inline_stub(texts.FEED_STUB_WI_EXHAUSTED, "Докупите ГБ в боте → «Тарифы»"))
+                all_links.append(_make_inline_stub(texts.FEED_STUB_WI_EXHAUSTED, "Докупите ГБ в кабинете"))
             elif wi_is_disabled:
-                all_links.append(_make_inline_stub(texts.FEED_STUB_WI_DISABLED, "Напишите в поддержку в боте"))
+                all_links.append(_make_inline_stub(texts.FEED_STUB_WI_DISABLED, "Поддержка в кабинете"))
             else:
-                all_links.append(_make_inline_stub(texts.FEED_STUB_WI_EXPIRED, "Продлите в боте → «Тарифы»"))
+                all_links.append(_make_inline_stub(texts.FEED_STUB_WI_EXPIRED, "Продлите в кабинете"))
 
         no_servers_mode = False
         if not all_links:
