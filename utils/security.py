@@ -45,7 +45,7 @@ def _host_is_localish(hostname: str) -> bool:
     h = (hostname or "").lower().strip().strip("[]")
     if not h:
         return False
-    if h in _LOCAL_HOSTNAMES:
+    if h in _LOCAL_HOSTNAMES or h.endswith(".internal") or h.endswith(".local") or "." not in h:
         return True
     try:
         ip = ipaddress.ip_address(h)

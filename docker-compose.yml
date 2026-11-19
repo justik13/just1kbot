@@ -127,6 +127,7 @@ services:
       WEBHOOK_HOST: "0.0.0.0"
       POSTGRES_HOST: "db"
       REDIS_HOST: "redis"
+      ALLOW_LOCAL_HTTP: ${ALLOW_LOCAL_HTTP:-false}
       JUST1KBOT_HEARTBEAT_FILE: "/tmp/heartbeat"
     cap_drop:
       - ALL
