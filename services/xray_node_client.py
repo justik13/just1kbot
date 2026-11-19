@@ -23,14 +23,6 @@ def _sanitize_url(url: str) -> str:
     return re.sub(r"/v1/clients/[a-fA-F0-9-]+", "/v1/clients/[MASKED]", url)
 
 
-def is_mock_node_url(api_url: str | None) -> bool:
-    """Return True if node API URL points to an in-memory test stub."""
-    if not api_url:
-        return False
-    u = api_url.strip().lower()
-    return u.startswith("mock://") or "mock" in u
-
-
 class SyncResult(str, enum.Enum):
     APPLIED = "applied"
     ALREADY_NEWER = "already_newer"
@@ -212,18 +204,6 @@ class XrayNodeClient:
         self, api_url: str, api_key: str, timeout: float | None = None
     ) -> tuple[bool, str | None, dict[str, Any] | None]:
         """Check node health fail-closed: must have status=ok, xray_running=True, grpc_ok=True."""
-        if is_mock_node_url(api_url):
-            return True, "epoch_mock_1", {
-                "status": "ok",
-                "xray_running": True,
-                "grpc_ok": True,
-                "node_epoch": "epoch_mock_1",
-                "version": "v3.0.0",
-                "secret_base_path": "/assets_test",
-                "boot_id": "mock_boot",
-                "starttime": 1700000000,
-            }
-
         url = f"{api_url.rstrip('/')}/v1/health"
         headers = self._get_headers(api_key)
         status_code, data, err = await self._make_request("GET", url, headers, request_timeout=timeout)
@@ -252,24 +232,6 @@ class XrayNodeClient:
         service: str | None = None,
     ) -> SyncResponse:
         """Synchronize a client with two-phase epoch fencing, durable idempotency, and verified inbounds."""
-        if is_mock_node_url(api_url):
-            return SyncResponse(
-                SyncResult.APPLIED,
-                None,
-                verified_epoch="epoch_mock_1",
-                verified_inbounds=[
-                    "vless-direct",
-                    "vless-xhttp",
-                    "just1k-wl-default",
-                    "just1k-wl-inbound-ru-wi",
-                    "just1k-wl-inbound-de",
-                    "just1k-vless-direct",
-                    "just1k-vless-wi",
-                ],
-                all_inbounds_verified=True,
-                raw_data={"status": "ok", "result": "applied"},
-            )
-
         url = f"{api_url.rstrip('/')}/v1/clients/sync"
         headers = self._get_headers(api_key)
         payload: dict[str, Any] = {
@@ -329,30 +291,6 @@ class XrayNodeClient:
         service: str | None = None,
     ) -> tuple[bool, dict[str, Any] | None, str | None]:
         """Query real observed runtime inventory from Xray memory."""
-        if is_mock_node_url(api_url):
-            detected_role = "ru_hub"
-            u = api_url.lower()
-            if "eu" in u:
-                detected_role = "eu_hub"
-            elif "exit" in u:
-                detected_role = "exit_node"
-            return True, {
-                "inbounds": [
-                    "vless-direct",
-                    "vless-xhttp",
-                    "just1k-wl-default",
-                    "just1k-wl-inbound-ru-wi",
-                    "just1k-wl-inbound-de",
-                    "just1k-vless-direct",
-                    "just1k-vless-wi",
-                ],
-                "inventory": {
-                    cid: {"observed_state": "active"} for cid in (client_ids or [])
-                },
-                "version": "v3.0.0",
-                "role": detected_role,
-            }, None
-
         url = f"{api_url.rstrip('/')}/v1/clients/inventory"
         headers = self._get_headers(api_key)
         payload: dict[str, Any] = {}
@@ -370,9 +308,6 @@ class XrayNodeClient:
         self, api_url: str, api_key: str
     ) -> TrafficSnapshot:
         """Fetch normalized traffic snapshot across all configured inbounds."""
-        if is_mock_node_url(api_url):
-            return TrafficSnapshot("epoch_mock_1", "mock_boot", 1700000000, {}, 0, 0)
-
         url = f"{api_url.rstrip('/')}/v1/traffic/snapshot"
         headers = self._get_headers(api_key)
         status_code, data, err = await self._make_request("GET", url, headers)
@@ -394,24 +329,6 @@ class XrayNodeClient:
         timeout: float | None = None,
     ) -> tuple[bool, dict[str, Any] | None, str | None]:
         """Fetch v2 auto-discovery node metadata (role, modules, links, errors) via /v1/node/status."""
-        if is_mock_node_url(api_url):
-            detected_role = "ru_hub"
-            u = api_url.lower()
-            if "eu" in u:
-                detected_role = "eu_hub"
-            elif "exit" in u:
-                detected_role = "exit_node"
-            return True, {
-                "status": "ok",
-                "xray_running": True,
-                "role": detected_role,
-                "modules": {
-                    "vless_tls": {"enabled": True},
-                    "cdn_yandex": {"enabled": True},
-                },
-                "links": {},
-            }, None
-
         url = f"{api_url.rstrip('/')}/v1/node/status"
         headers = self._get_headers(api_key)
         status_code, data, err = await self._make_request(
@@ -429,9 +346,6 @@ class XrayNodeClient:
         timeout: float = 10.0,
     ) -> tuple[bool, dict[str, Any] | None, str | None]:
         """Push auto-orchestrated v2 topology links.json to a node via PUT /v1/node/links."""
-        if is_mock_node_url(api_url):
-            return True, {"status": "ok"}, None
-
         url = f"{api_url.rstrip('/')}/v1/node/links"
         headers = self._get_headers(api_key)
         status_code, data, err = await self._make_request(

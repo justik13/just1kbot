@@ -62,7 +62,6 @@ from database.repositories.servers_repo import (
 from utils.datetime_helpers import now_utc
 from utils.telegram import safe, safe_send_message
 from utils.traffic_helpers import get_server_hosting_usage
-from services.xray_node_client import is_mock_node_url
 
 logger = logging.getLogger(__name__)
 
@@ -479,7 +478,7 @@ async def check_node_resources_and_alerts(bot: Bot):
         if not sub_prefix.startswith("/"):
             sub_prefix = f"/{sub_prefix}"
 
-        if is_xray_node and not is_mock_node_url(server.api_url):
+        if is_xray_node:
             try:
                 node_role = get_server_role(server)
                 is_wi_hub = node_role not in ("eu_hub", "exit_node") and (

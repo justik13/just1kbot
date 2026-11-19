@@ -209,6 +209,22 @@ services:
       db:
         condition: service_healthy
 
+  mock_node:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: just1knode_mock
+    profiles: ["mock"]
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - backend_net
+    command: ["python", "scripts/mock_node_server.py", "--host", "0.0.0.0", "--port", "8444"]
+    environment:
+      PYTHONUNBUFFERED: "1"
+    ports:
+      - "127.0.0.1:8444:8444"
+
 volumes:
   postgres_data:
   redis_data:
