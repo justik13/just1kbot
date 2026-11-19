@@ -253,7 +253,11 @@ ensure_subscription_domains_caddy() {
 ${h} {
 	@sub path /sub* ${wi_prefix}*
 	handle @sub {
-		reverse_proxy just1kbot:${app_port}
+		header X-Frame-Options "DENY"
+		log_skip
+		reverse_proxy bot:8080 {
+			header_up X-Real-IP {remote_host}
+		}
 	}
 	handle {
 		respond 404

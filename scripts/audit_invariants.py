@@ -136,8 +136,8 @@ async def assert_inv_5_subscription_counter_monotonicity(session: AsyncSession) 
     violations = await session.scalars(
         select(WhiteInternetSubscription).where(
             or_(
-                WhiteInternetSubscription.last_uplink_snapshot < 0,
-                WhiteInternetSubscription.last_downlink_snapshot < 0,
+                WhiteInternetSubscription.traffic_uplink_bytes < 0,
+                WhiteInternetSubscription.traffic_downlink_bytes < 0,
                 WhiteInternetSubscription.traffic_used_bytes < 0,
             )
         )

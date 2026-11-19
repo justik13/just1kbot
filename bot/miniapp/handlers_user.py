@@ -112,7 +112,7 @@ def _get_subscription_domains() -> tuple[str, str]:
         parts = dom.split(".")
         root_dom = ".".join(parts[-2:]) if len(parts) >= 2 else dom
         if not primary:
-            primary = f"cdn.{root_dom}" if root_dom else dom
+            primary = dom
         if not backup:
             backup = f"sub.{root_dom}" if root_dom else dom
     return primary, backup
