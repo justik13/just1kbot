@@ -10,7 +10,7 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0048_bucket_ledger_drop_tariffs_vless_dupes"
+revision = "0048_bucket_ledger_cleanup"
 down_revision = "0047_cleanup_legacy_schema"
 branch_labels = None
 depends_on = None
