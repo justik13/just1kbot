@@ -6,6 +6,7 @@ import asyncio
 import ipaddress
 import logging
 import re
+import socket
 import uuid
 from typing import Any
 from urllib.parse import urlsplit
@@ -50,14 +51,31 @@ def _extract_ipv4(server: Server) -> str | None:
             if ip_obj.version == 4:
                 return cand
         except ValueError:
-            continue
+            try:
+                resolved = socket.gethostbyname(cand)
+                if resolved:
+                    return resolved
+            except Exception as exc:
+                logger.debug("DNS resolution failed for %s: %s", cand, exc)
     return None
 
 
 def _extract_domain(server: Server) -> str | None:
     extra = server.extra_data if isinstance(server.extra_data, dict) else {}
     dom = str(extra.get("domain") or "").strip().lower().rstrip(".")
-    return dom if dom and "." in dom else None
+    if dom and "." in dom:
+        return dom
+    if server.api_url:
+        try:
+            host = str(urlsplit(server.api_url).hostname or "").strip().lower().rstrip(".")
+            if host and "." in host:
+                try:
+                    ipaddress.ip_address(host)
+                except ValueError:
+                    return host
+        except Exception:
+            pass
+    return None
 
 
 def _extract_bridge_uuid(server: Server) -> str | None:

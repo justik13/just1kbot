@@ -32,7 +32,7 @@ from services.audit_service import AuditService
 from services.workers.node_monitor import reset_server_monitor_state
 from services.xray_node_client import XrayNodeClient
 from utils.datetime_helpers import now_utc
-from utils.security import is_safe_url, normalize_public_domain
+from utils.security import is_safe_url, normalize_public_domain, validate_public_fqdn
 from utils.traffic_helpers import get_server_hosting_usage
 
 logger = logging.getLogger(__name__)
@@ -52,6 +52,19 @@ def _normalize_api_url(raw_url: str) -> str:
     parsed = urlparse(clean)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise AdminNodeServiceError("Invalid api_url format", status_code=400)
+    try:
+        ipaddress.ip_address(parsed.hostname)
+        raise AdminNodeServiceError(
+            "Добавление узла разрешено исключительно по доменному имени (FQDN). Прямые IP-адреса запрещены.",
+            status_code=400,
+        )
+    except ValueError:
+        pass
+    if not validate_public_fqdn(parsed.hostname):
+        raise AdminNodeServiceError(
+            "Добавление узла разрешено исключительно по доменному имени (FQDN). Прямые IP-адреса запрещены.",
+            status_code=400,
+        )
     return clean
 
 
@@ -120,6 +133,25 @@ async def _fetch_ip_geo_info(ip: str) -> dict[str, str]:
     return {}
 
 
+async def _resolve_hostname_ipv4(hostname: str) -> str:
+    """Resolve hostname or domain to an IPv4 string, or empty string on failure."""
+    if not hostname:
+        return ""
+    try:
+        ip = ipaddress.ip_address(hostname)
+        return hostname if ip.version == 4 else ""
+    except ValueError:
+        pass
+    try:
+        loop = asyncio.get_running_loop()
+        addr_info = await loop.getaddrinfo(hostname, None, family=socket.AF_INET)
+        if addr_info and addr_info[0] and addr_info[0][4]:
+            return str(addr_info[0][4][0])
+    except Exception as exc:
+        logger.debug("Could not resolve hostname %s to IPv4: %s", hostname, exc)
+    return ""
+
+
 async def auto_detect_node_geo(
     api_url: str,
     status_data: dict[str, Any] | None = None,
@@ -138,19 +170,7 @@ async def auto_detect_node_geo(
 
     hostname = urlparse(api_url).hostname or ""
     if hostname:
-        resolved_ip = ""
-        try:
-            ipaddress.ip_address(hostname)
-            resolved_ip = hostname
-        except ValueError:
-            try:
-                loop = asyncio.get_running_loop()
-                addr_info = await loop.getaddrinfo(hostname, None, family=socket.AF_INET)
-                if addr_info and addr_info[0] and addr_info[0][4]:
-                    resolved_ip = addr_info[0][4][0]
-            except Exception as exc:
-                logger.debug("Could not resolve hostname %s to IP: %s", hostname, exc)
-
+        resolved_ip = await _resolve_hostname_ipv4(hostname)
         if resolved_ip:
             geo = await _fetch_ip_geo_info(resolved_ip)
             country = geo.get("country") or ""
@@ -225,10 +245,10 @@ def serialize_server_node(
         "traffic_limit": (
             {
                 "used_bytes": usage.host_bytes,
-                "limit_bytes": usage.limit_gb * (1024 ** 3) if usage.limit_gb > 0 else 0,
+                "limit_bytes": usage.limit_gb * (1024 ** 3) if usage.limit_gb and usage.limit_gb > 0 else 0,
                 "pct": round(usage.pct, 1),
             }
-            if (usage := get_server_hosting_usage(extra)) and (usage.host_bytes > 0 or usage.limit_gb > 0)
+            if (usage := get_server_hosting_usage(extra)) and (usage.host_bytes > 0 or (usage.limit_gb and usage.limit_gb > 0))
             else None
         ),
         "last_successful_check": (
@@ -299,6 +319,10 @@ async def discover_and_add_node(
         status_data,
         health_data,
     )
+    hostname = urlparse(clean_url).hostname or ""
+    resolved_ip = await _resolve_hostname_ipv4(hostname) if hostname else ""
+    if resolved_ip:
+        extra["ip"] = resolved_ip
     role = str(extra.get("role") or "").strip().lower()
     if role not in V2_NODE_ROLES:
         raise AdminNodeServiceError(
@@ -394,6 +418,11 @@ async def refresh_node(
 
     caps = derive_v2_capabilities(status_data, health_data)
     extra = merge_v2_extra_data(extra_cur, status_data, health_data)
+    if server.api_url:
+        host = urlparse(server.api_url).hostname or ""
+        resolved = await _resolve_hostname_ipv4(host) if host else ""
+        if resolved:
+            extra["ip"] = resolved
     role = extra.get("role")
     if role == "exit_node" and not str(extra.get("location_code") or "").strip():
         extra["location_code"] = f"exit{server.id}"
@@ -465,6 +494,12 @@ async def update_node_settings(
         if existing is not None and existing.id != server_id:
             raise AdminNodeServiceError("Node with this api_url already exists", status_code=409)
         updates["api_url"] = clean_url
+        host = urlparse(clean_url).hostname or ""
+        resolved = await _resolve_hostname_ipv4(host) if host else ""
+        if resolved:
+            extra_for_ip = updates.get("extra_data") or (dict(server.extra_data) if isinstance(server.extra_data, dict) else {})
+            extra_for_ip["ip"] = resolved
+            updates["extra_data"] = extra_for_ip
     if api_key is not None:
         clean_key = api_key.strip()
         if not clean_key:
