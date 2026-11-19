@@ -1077,7 +1077,7 @@ class OrderService:
                 order_meta["partial_refund_amount_rub"] = str(refund_amount)
             order.metadata_ = order_meta
 
-            if order.service_type == "topup":
+            if order.service_type == "topup" or (order.metadata_ or {}).get("mixed_fallback_credited"):
                 has_credit = bool(
                     await session.scalar(
                         select(func.count(AccountLedgerEntry.id)).where(

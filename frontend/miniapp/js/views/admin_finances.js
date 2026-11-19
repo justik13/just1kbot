@@ -11,6 +11,9 @@ function _financeStatusChip(status) {
     if (status === "refunded") {
         return `<span class="chip chip-warn">Возврат</span>`;
     }
+    if (status === "partially_refunded") {
+        return `<span class="chip chip-warn">Част. возврат</span>`;
+    }
     if (status === "canceled") {
         return `<span class="chip chip-muted">Отменён</span>`;
     }
@@ -116,6 +119,7 @@ export function renderAdminFinancesView(root, state) {
                         <option value="pending" ${state.finStatus === "pending" ? "selected" : ""}>Ожидает</option>
                         <option value="canceled" ${state.finStatus === "canceled" ? "selected" : ""}>Отменён</option>
                         <option value="refunded" ${state.finStatus === "refunded" ? "selected" : ""}>Возврат</option>
+                        <option value="partially_refunded" ${state.finStatus === "partially_refunded" ? "selected" : ""}>Част. возврат</option>
                     </select>
                     <button type="submit" class="btn btn-primary btn-sm">Найти</button>
                 </form>

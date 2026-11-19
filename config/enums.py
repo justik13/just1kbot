@@ -117,6 +117,7 @@ class WhiteInternetProvisioningStatus(StrEnum):
 class OrderStatus(StrEnum):
     PENDING = "pending"
     PAID = "paid"
+    PARTIALLY_REFUNDED = "partially_refunded"
     REFUNDED = "refunded"
     CANCELED = "canceled"
 
