@@ -285,8 +285,8 @@ async def api_user_dashboard_handler(request: web.Request) -> web.Response:
         vless_sub = await get_or_create_subscription(session, user.id)
         wi_sub = await get_subscription_by_user_id(session, user.id)
 
-        std_active = SubscriptionService.check_vpn_access(user)
-        std_limit = await SubscriptionService.get_effective_device_limit(session, user)
+        std_active = SubscriptionService.check_vpn_access(user, vless_sub=vless_sub)
+        std_limit = int(getattr(vless_sub, "device_limit", 0) or 0) if vless_sub else 0
         wi_active = bool(
             wi_sub
             and wi_sub.status
@@ -322,7 +322,7 @@ async def api_user_dashboard_handler(request: web.Request) -> web.Response:
         referrals["welcome_discount_eligible"] = bool(welcome_discount_eligible)
         history_rows = await get_account_history(session, user_id=user.id, limit=30)
 
-        cooldown_until = user.standard_downgrade_cooldown_until
+        cooldown_until = getattr(vless_sub, "downgrade_cooldown_until", None) if vless_sub else None
         pending_limit = wi_sub.pending_device_limit if wi_sub else None
         pending_from = wi_sub.pending_from if wi_sub else None
         raw_support = (get_settings().SUPPORT_USERNAME or "").strip()
@@ -362,9 +362,9 @@ async def api_user_dashboard_handler(request: web.Request) -> web.Response:
             "subscription_backup_url": _build_backup_sub_url(effective_sub_token),
             "standard": {
                 "active": std_active,
-                "expires_at": user.subscription_end.isoformat() if user.subscription_end else None,
+                "expires_at": vless_sub.expires_at.isoformat() if vless_sub and vless_sub.expires_at else None,
                 "device_limit": int(std_limit),
-                "auto_renew_enabled": bool(user.auto_renew_enabled),
+                "auto_renew_enabled": bool(getattr(vless_sub, "auto_renew_enabled", False)) if vless_sub else False,
                 "downgrade_cooldown_until": cooldown_until.isoformat() if cooldown_until else None,
             },
             "wi": {
@@ -445,6 +445,7 @@ async def api_user_standard_checkout_handler(request: web.Request) -> web.Respon
                 duration_days=payload.duration_days,
                 use_balance=payload.use_balance,
                 bot_username=_resolve_bot_username(request),
+                idempotency_key=payload.idempotency_key,
             )
             return web.json_response({"ok": True, **res})
     except order_service.ServiceUnavailableError as exc:
@@ -507,6 +508,7 @@ async def api_user_wi_checkout_handler(request: web.Request) -> web.Response:
                 gb=payload.gb,
                 use_balance=payload.use_balance,
                 bot_username=_resolve_bot_username(request),
+                idempotency_key=payload.idempotency_key,
             )
             return web.json_response({"ok": True, **res})
     except order_service.ServiceUnavailableError as exc:
@@ -571,6 +573,7 @@ async def api_user_topup_handler(request: web.Request) -> web.Response:
                 amount_rub=Decimal(payload.amount_rub),
                 use_balance=False,
                 bot_username=_resolve_bot_username(request),
+                idempotency_key=payload.idempotency_key,
             )
             return web.json_response({"ok": True, **res})
     except order_service.ServiceUnavailableError as exc:

@@ -121,14 +121,14 @@ async def _cleanup_expired_vless_network_grace() -> None:
                     User.is_deleted.is_(False),
                     or_(
                         and_(
-                            User.subscription_end.is_not(None),
-                            User.subscription_end < threshold,
+                            VlessSubscription.expires_at.is_not(None),
+                            VlessSubscription.expires_at < threshold,
                         ),
                         User.financial_hold.is_(True),
                     ),
                     VlessSubscription.is_active.is_(True),
                 )
-                .order_by(User.subscription_end.asc().nullslast())
+                .order_by(VlessSubscription.expires_at.asc().nullslast())
                 .limit(50)
             )
             result = await session.execute(stmt)
@@ -143,13 +143,16 @@ async def _cleanup_expired_vless_network_grace() -> None:
                     user = await session.get(User, user_id, with_for_update=True)
                     if not user or user.is_deleted:
                         continue
+                    from database.repositories import vless_subscription_repo
                     from utils.datetime_helpers import is_permanent_subscription
 
-                    if user.subscription_end and is_permanent_subscription(user.subscription_end):
+                    vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+                    sub_end = vless_sub.expires_at if vless_sub else None
+                    if sub_end and is_permanent_subscription(sub_end):
                         continue
-                    if not user.financial_hold and (not user.subscription_end or user.subscription_end >= threshold):
+                    if not user.financial_hold and (not sub_end or sub_end >= threshold):
                         continue
-                    await SubscriptionService.sync_access_state(session, user)
+                    await SubscriptionService._sync_access_state(session, user, vless_sub=vless_sub)
                     logger.info("VLESS network grace/hold deactivation applied for user_id=%s", user_id)
             except Exception as e:
                 logger.warning("VLESS network grace deactivation failed for user_id=%s: %s", user_id, e)

@@ -439,28 +439,51 @@ async def _traffic_sync_once(bot: Bot | None = None):
                                 if _sub_uid:
                                     affected_vless_user_ids.add(_sub_uid)
 
-                    # 2. Process White Internet Subscriptions
+                    # 2. Process White Internet Subscriptions (aggregate sub.uuid + all user UserDevice UUIDs)
                     async with session_scope() as session:
                         wi_stmt = (
                             select(WhiteInternetSubscription.id, WhiteInternetSubscription.uuid, WhiteInternetSubscription.user_id)
                             .where(
-                                WhiteInternetSubscription.uuid.in_(matching_uuids),
                                 WhiteInternetSubscription.hub_server_id == server_id,
                             )
                             .order_by(WhiteInternetSubscription.user_id, WhiteInternetSubscription.id)
                         )
                         candidate_wi_subs = list((await session.execute(wi_stmt)).all())
+                        wi_user_ids = [uid for _sid, _suuid, uid in candidate_wi_subs if uid]
+                        wi_dev_map: dict[int, list[str]] = {}
+                        if wi_user_ids:
+                            from database.models import UserDevice
+
+                            wi_dev_rows = (
+                                await session.execute(
+                                    select(UserDevice.user_id, UserDevice.device_uuid).where(
+                                        UserDevice.user_id.in_(wi_user_ids),
+                                        UserDevice.is_active.is_(True),
+                                        UserDevice.device_uuid.is_not(None),
+                                    )
+                                )
+                            ).all()
+                            for u_id, d_uuid in wi_dev_rows:
+                                wi_dev_map.setdefault(u_id, []).append(str(d_uuid))
 
                     for wi_sub_id, wi_sub_uuid, wi_sub_uid in candidate_wi_subs:
-                        stats = users_stats.get(wi_sub_uuid)
-                        if not isinstance(stats, dict):
-                            continue
-                        raw_up = stats.get("uplink", 0)
-                        raw_down = stats.get("downlink", 0)
-                        try:
-                            uplink = max(0, int(raw_up) if raw_up is not None else 0)
-                            downlink = max(0, int(raw_down) if raw_down is not None else 0)
-                        except (ValueError, TypeError):
+                        tracked_uuids = {wi_sub_uuid, *wi_dev_map.get(wi_sub_uid, [])}
+                        uplink = 0
+                        downlink = 0
+                        has_any_stats = False
+                        for t_uuid in tracked_uuids:
+                            stats = users_stats.get(t_uuid)
+                            if not isinstance(stats, dict):
+                                continue
+                            has_any_stats = True
+                            raw_up = stats.get("uplink", 0)
+                            raw_down = stats.get("downlink", 0)
+                            try:
+                                uplink += max(0, int(raw_up) if raw_up is not None else 0)
+                                downlink += max(0, int(raw_down) if raw_down is not None else 0)
+                            except (ValueError, TypeError):
+                                continue
+                        if not has_any_stats:
                             continue
 
                         try:

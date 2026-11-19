@@ -1,5 +1,6 @@
 import logging
 from datetime import timedelta
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -32,10 +33,15 @@ MAX_REFERRAL_CHAIN_DEPTH = 50
 class SubscriptionService:
     @staticmethod
     async def get_effective_device_limit(session: AsyncSession, user: User | None) -> int:
-        """Canonical device-limit resolution from user.device_limit."""
+        """Canonical device-limit resolution from VlessSubscription.device_limit."""
         if user is None:
             return 0
-        direct_limit = getattr(user, "device_limit", 0) or 0
+        from database.repositories import vless_subscription_repo
+
+        vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+        if not vless_sub:
+            return 0
+        direct_limit = getattr(vless_sub, "device_limit", 0) or 0
         return int(direct_limit) if direct_limit > 0 else 0
 
     @staticmethod
@@ -43,19 +49,25 @@ class SubscriptionService:
         await SubscriptionService._sync_access_state(session, user)
 
     @staticmethod
-    def check_vpn_access(user: User | None) -> bool:
-        if not user or user.is_deleted or user.financial_hold or not user.subscription_end:
+    def check_vpn_access(user: User | None, vless_sub: Any = None) -> bool:
+        if not user or user.is_deleted or user.financial_hold:
             return False
-        return not is_vpn_access_expired(user.subscription_end, grace_hours=VPN_ACCESS_GRACE_HOURS)
+        sub = vless_sub if vless_sub is not None else getattr(user, "vless_subscription", None)
+        if not sub or not sub.expires_at:
+            return False
+        return not is_vpn_access_expired(sub.expires_at, grace_hours=VPN_ACCESS_GRACE_HOURS)
 
     @staticmethod
     async def check_access(session: AsyncSession, telegram_id: int) -> bool:
+        from database.repositories import vless_subscription_repo
+
         user = await get_user_by_telegram_id(session, telegram_id)
-
-        if not user or user.is_deleted or user.financial_hold or not user.subscription_end:
+        if not user or user.is_deleted or user.financial_hold:
             return False
-
-        return not is_expired(user.subscription_end)
+        vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+        if not vless_sub or not vless_sub.expires_at:
+            return False
+        return not is_expired(vless_sub.expires_at)
 
     @staticmethod
     async def _validate_referral(
@@ -330,53 +342,50 @@ class SubscriptionService:
                     f"{new_device_limit} limit. User must reset devices first."
                 )
 
+        from database.repositories import vless_subscription_repo
+
+        vless_sub, _ = await vless_subscription_repo.get_or_create_subscription(session, user.id)
         now = now_utc()
 
         had_active_subscription = bool(
-            user.subscription_end and user.subscription_end > now
+            vless_sub.expires_at and vless_sub.expires_at > now
         )
 
-        # Продуктовая логика:
-        # - продление всегда добавляет дни к текущему концу подписки;
-        # - если подписка неактивна, отсчёт начинается с текущего момента;
-        # - смена тарифа/лимита применяется сразу;
-        # - даунгрейд запрещён выше по коду.
         if days == 0:
-            new_end = user.subscription_end
+            new_end = vless_sub.expires_at
         else:
-            base_end = user.subscription_end if had_active_subscription else now
+            base_end = vless_sub.expires_at if had_active_subscription else now
 
             if days >= PERMANENT_SUBSCRIPTION_DAYS:
                 new_end = PERMANENT_END_DATE
             else:
                 new_end = base_end + timedelta(days=days)
 
-        user.subscription_end = new_end
-
-        user.notified_3d = False
-        user.notified_1d = False
-        user.notified_2h = False
-        user.notified_expired = False
+        vless_sub.expires_at = new_end
+        vless_sub.notified_3d = False
+        vless_sub.notified_1d = False
+        vless_sub.notified_2h = False
+        vless_sub.notified_expired = False
         user.notification_retry_count = 0
         user.last_notification_attempt = None
 
         if new_device_limit is not None:
-            user.device_limit = new_device_limit
+            vless_sub.device_limit = new_device_limit
 
         await session.flush()
 
-        await SubscriptionService._sync_access_state(session, user)
+        await SubscriptionService._sync_access_state(session, user, vless_sub=vless_sub)
 
         return user
 
     @staticmethod
-    async def _sync_access_state(session: AsyncSession, user: User) -> None:
+    async def _sync_access_state(session: AsyncSession, user: User, vless_sub: Any = None) -> None:
         from database.repositories import vless_subscription_repo
         from services.vless_subscription_service import VlessSubscriptionService
 
-        vless_target_active = SubscriptionService.check_vpn_access(user)
-
-        vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+        if vless_sub is None:
+            vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+        vless_target_active = SubscriptionService.check_vpn_access(user, vless_sub=vless_sub)
         if vless_sub:
             if vless_sub.is_active != vless_target_active:
                 vless_sub.is_active = vless_target_active

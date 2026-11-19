@@ -36,7 +36,7 @@ from config.enums import (
     WhiteInternetStatus,
 )
 from database.connection import session_scope
-from database.models import AccountLedgerEntry, Order, User, UserDevice, WhiteInternetSubscription
+from database.models import AccountLedgerEntry, Order, User, UserDevice, VlessSubscription, WhiteInternetSubscription
 from database.repositories import user_devices_repo, users_repo, vless_subscription_repo, white_internet_repo
 from database.repositories.account_ledger_repo import (
     create_admin_adjustment,
@@ -526,7 +526,11 @@ async def api_admin_users_handler(request: web.Request) -> web.Response:
 
         stmt = select(User).where(User.is_deleted.is_(False))
         if flt == "active_standard":
-            stmt = stmt.where(User.subscription_end.is_not(None), User.subscription_end > now)
+            stmt = stmt.where(
+                User.id.in_(
+                    select(VlessSubscription.user_id).where(VlessSubscription.expires_at > now)
+                )
+            )
         elif flt == "active_wi":
             stmt = stmt.where(users_repo.get_effective_wi_active_condition(now))
         elif flt == "expired":
@@ -560,6 +564,7 @@ async def api_admin_users_handler(request: web.Request) -> web.Response:
 
         user_ids = [u.id for u in users]
         wi_map: dict[int, WhiteInternetSubscription] = {}
+        vless_map: dict[int, VlessSubscription] = {}
         if user_ids:
             wi_rows = (
                 await session.scalars(
@@ -569,13 +574,24 @@ async def api_admin_users_handler(request: web.Request) -> web.Response:
                 )
             ).all()
             wi_map = {w.user_id: w for w in wi_rows}
+            vless_rows = (
+                await session.scalars(
+                    select(VlessSubscription).where(
+                        VlessSubscription.user_id.in_(user_ids)
+                    )
+                )
+            ).all()
+            vless_map = {v.user_id: v for v in vless_rows}
 
         balances_map = await get_account_balances_batch(session, user_ids)
         items: list[dict] = []
         for u in users:
             bal = balances_map[u.id]
             wi = wi_map.get(u.id)
-            std_active = bool(u.subscription_end and u.subscription_end > now)
+            vless = vless_map.get(u.id)
+            std_end = vless.expires_at if vless else None
+            std_limit = int(vless.device_limit or 0) if vless else 0
+            std_active = bool(std_end and std_end > now)
             wi_active = bool(
                 wi
                 and wi.status in (
@@ -595,8 +611,8 @@ async def api_admin_users_handler(request: web.Request) -> web.Response:
                 "bonus_balance": int(bal.bonus_available),
                 "total_balance": int(bal.available),
                 "standard_active": std_active,
-                "standard_end": u.subscription_end.isoformat() if u.subscription_end else None,
-                "standard_device_limit": int(u.device_limit or 0),
+                "standard_end": std_end.isoformat() if std_end else None,
+                "standard_device_limit": std_limit,
                 "wi_active": wi_active,
                 "wi_end": wi.expires_at.isoformat() if wi and wi.expires_at else None,
                 "wi_device_limit": int(wi.device_limit or 0) if wi else 0,
@@ -721,19 +737,22 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                 ).scalar_one_or_none()
                 if locked_user is None:
                     return web.json_response({"ok": False, "error": "Пользователь не найден"}, status=404)
+                vless_sub = await vless_subscription_repo.get_subscription_by_user_id(
+                    session, user.id
+                )
                 now = now_utc()
-                if not locked_user.subscription_end or locked_user.subscription_end <= now:
+                if not vless_sub or not vless_sub.expires_at or vless_sub.expires_at <= now:
                     return web.json_response(
                         {"ok": False, "error": "У пользователя нет активной подписки «Стандарт»"},
                         status=400,
                     )
-                new_end = locked_user.subscription_end - timedelta(days=abs(payload.days))
+                new_end = vless_sub.expires_at - timedelta(days=abs(payload.days))
                 if new_end <= now:
-                    locked_user.subscription_end = now
+                    vless_sub.expires_at = now
                 else:
-                    locked_user.subscription_end = new_end
+                    vless_sub.expires_at = new_end
                 if payload.device_limit is not None:
-                    locked_user.device_limit = payload.device_limit
+                    vless_sub.device_limit = payload.device_limit
                 await session.flush()
                 await AuditService.log_action(
                     session,
@@ -744,27 +763,23 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                     details={"service": "standard", "days": payload.days, "note": note},
                 )
                 if new_end <= now:
-                    vless_sub = await vless_subscription_repo.get_subscription_by_user_id(
-                        session, user.id
+                    vless_sub.is_active = False
+                    vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1
+                    await session.flush()
+                    VlessSubscriptionService.ensure_synced_background(
+                        user.id, is_active=False, session=session
                     )
-                    if vless_sub is not None:
-                        vless_sub.is_active = False
-                        vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1
-                        await session.flush()
-                        VlessSubscriptionService.ensure_synced_background(
-                            user.id, is_active=False, session=session
-                        )
                 return web.json_response({
                     "ok": True,
                     "action": "grant_standard",
-                    "standard_end": locked_user.subscription_end.isoformat() if locked_user.subscription_end else None,
-                    "standard_device_limit": int(locked_user.device_limit or 0),
+                    "standard_end": vless_sub.expires_at.isoformat() if vless_sub.expires_at else None,
+                    "standard_device_limit": int(vless_sub.device_limit or 0),
                     "message": f"Подписка «Стандарт» сокращена на {abs(payload.days)} дн.",
                 })
 
-            target_limit = payload.device_limit or (
-                user.device_limit if (user.device_limit or 0) >= 2 else 2
-            )
+            cur_vless = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+            cur_limit = int(getattr(cur_vless, "device_limit", 0) or 0) if cur_vless else 0
+            target_limit = payload.device_limit or (cur_limit if cur_limit >= 2 else 2)
             try:
                 updated_user = await SubscriptionService.extend_subscription(
                     session,
@@ -778,6 +793,7 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                 return web.json_response({"ok": False, "error": str(exc)}, status=400)
             if updated_user is None:
                 return web.json_response({"ok": False, "error": "Пользователь не найден"}, status=404)
+            updated_vless = await vless_subscription_repo.get_subscription_by_user_id(session, updated_user.id)
             msg_done = (
                 "Лимит устройств «Стандарт» обновлён"
                 if payload.days == 0
@@ -786,8 +802,8 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
             return web.json_response({
                 "ok": True,
                 "action": "grant_standard",
-                "standard_end": updated_user.subscription_end.isoformat() if updated_user.subscription_end else None,
-                "standard_device_limit": int(updated_user.device_limit or 0),
+                "standard_end": updated_vless.expires_at.isoformat() if updated_vless and updated_vless.expires_at else None,
+                "standard_device_limit": int(updated_vless.device_limit or 0) if updated_vless else 0,
                 "message": msg_done,
             })
 
@@ -1079,8 +1095,8 @@ async def api_admin_user_details_handler(request: web.Request) -> web.Response:
                 "real_balance": int(bal.real_available),
                 "bonus_balance": int(bal.bonus_available),
                 "total_balance": int(bal.available),
-                "standard_end": user.subscription_end.isoformat() if user.subscription_end else None,
-                "standard_device_limit": int(user.device_limit or 0),
+                "standard_end": vless_sub.expires_at.isoformat() if vless_sub and vless_sub.expires_at else None,
+                "standard_device_limit": int(vless_sub.device_limit or 0) if vless_sub else 0,
                 "financial_hold": bool(getattr(user, "financial_hold", False)),
                 "topup_blocked": bool(getattr(user, "topup_blocked", False)),
                 "subscription_url": _build_sub_url(sub_token) if sub_token else None,
@@ -1138,6 +1154,8 @@ async def api_admin_user_devices_reset_handler(request: web.Request) -> web.Resp
         dev_uuids = [d.device_uuid for d in existing_devs if getattr(d, "device_uuid", None)]
         if vless_sub is not None and dev_uuids:
             await vless_subscription_repo.add_pending_revocation_uuids(session, vless_sub.id, dev_uuids)
+        sub_ver = getattr(vless_sub, "version", None) if vless_sub else None
+        sub_id = vless_sub.id if vless_sub else None
 
         await session.execute(
             delete(UserDevice).where(UserDevice.user_id == user.id)
@@ -1150,6 +1168,8 @@ async def api_admin_user_devices_reset_handler(request: web.Request) -> web.Resp
             target_id=user.id,
         )
 
+    for u_uuid in dev_uuids:
+        VlessSubscriptionService.deprovision_background(u_uuid, version=sub_ver, sub_id=sub_id)
     if vless_sub is not None:
         VlessSubscriptionService.ensure_synced_background(user.id)
     return web.json_response({"ok": True, "message": "Привязки устройств сброшены"})

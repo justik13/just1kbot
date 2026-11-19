@@ -33,7 +33,7 @@ from config.constants import (
     WORKER_ERROR_SLEEP_INTERVAL,
 )
 from database.connection import session_scope
-from database.models import User
+from database.models import User, VlessSubscription
 from utils.datetime_helpers import is_permanent_subscription, now_utc
 from utils.formatters import format_tg_time
 from utils.rate_limiter import global_send_limiter
@@ -80,10 +80,11 @@ def _format_countdown(delta: timedelta) -> str:
 def _maybe_reset_retry_on_type_change(
     user: User,
     notification_type: str,
+    vless_sub: VlessSubscription | None = None,
 ) -> None:
     last_type = _last_notification_type.get(user.id)
     if last_type is None:
-        last_type = _infer_last_notification_type(user)
+        last_type = _infer_last_notification_type(vless_sub)
 
     if last_type and last_type != notification_type:
         user.notification_retry_count = 0
@@ -92,14 +93,16 @@ def _maybe_reset_retry_on_type_change(
     _last_notification_type[user.id] = notification_type
 
 
-def _infer_last_notification_type(user: User) -> str | None:
-    if user.notified_expired:
+def _infer_last_notification_type(vless_sub: VlessSubscription | None) -> str | None:
+    if vless_sub is None:
+        return None
+    if vless_sub.notified_expired:
         return "expired"
-    if user.notified_2h:
+    if vless_sub.notified_2h:
         return "2h"
-    if user.notified_1d:
+    if vless_sub.notified_1d:
         return "1d"
-    if user.notified_3d:
+    if vless_sub.notified_3d:
         return "3d"
     return None
 
@@ -220,15 +223,16 @@ async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
             (
                 await session.execute(
                     select(User.id)
+                    .join(VlessSubscription, VlessSubscription.user_id == User.id)
                     .where(
-                        User.auto_renew_enabled.is_(True),
+                        VlessSubscription.auto_renew_enabled.is_(True),
                         User.is_deleted.is_(False),
                         User.financial_hold.is_(False),
-                        User.subscription_end.is_not(None),
-                        User.subscription_end >= window_start,
-                        User.subscription_end <= window_end,
+                        VlessSubscription.expires_at.is_not(None),
+                        VlessSubscription.expires_at >= window_start,
+                        VlessSubscription.expires_at <= window_end,
                     )
-                    .order_by(User.subscription_end.asc())
+                    .order_by(VlessSubscription.expires_at.asc())
                     .limit(200)
                 )
             ).scalars().all()
@@ -243,15 +247,19 @@ async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
                 user = await session.scalar(
                     select(User).where(User.id == uid)
                 )
+                vless_sub = await session.scalar(
+                    select(VlessSubscription).where(VlessSubscription.user_id == uid)
+                )
                 if (
                     user is None
-                    or not user.auto_renew_enabled
+                    or vless_sub is None
+                    or not vless_sub.auto_renew_enabled
                     or user.is_deleted
                     or user.financial_hold
-                    or not user.subscription_end
-                    or is_permanent_subscription(user.subscription_end)
-                    or user.subscription_end < window_start
-                    or user.subscription_end > window_end
+                    or not vless_sub.expires_at
+                    or is_permanent_subscription(vless_sub.expires_at)
+                    or vless_sub.expires_at < window_start
+                    or vless_sub.expires_at > window_end
                 ):
                     continue
 
@@ -260,7 +268,7 @@ async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
                 due_rub = int(quote["due_rub"])
                 bal = await get_account_balance(session, user_id=user.id)
                 if bal.debt > 0 or bal.available < due_rub:
-                    cycle_key = user.subscription_end.strftime("%Y-%m-%d") if user.subscription_end else ""
+                    cycle_key = vless_sub.expires_at.strftime("%Y-%m-%d") if vless_sub.expires_at else ""
                     cache_key = ("std", user.id)
                     if _autorenew_fail_notified.get(cache_key) != cycle_key and not user.is_bot_blocked:
                         _autorenew_fail_notified[cache_key] = cycle_key
@@ -282,12 +290,12 @@ async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
                     use_balance=True,
                 )
                 if res.get("status") == "paid" and not user.is_bot_blocked:
-                    await session.refresh(user)
+                    await session.refresh(vless_sub)
                     push_tg_id = user.telegram_id
                     push_text = NOTIFY_STANDARD_AUTORENEWED.format(
                         amount=res.get("charged_balance", due_rub),
                         devices=std_limit,
-                        date=format_tg_time(user.subscription_end) if user.subscription_end else "",
+                        date=format_tg_time(vless_sub.expires_at) if vless_sub.expires_at else "",
                     )
         except Exception as exc:
             logger.warning("Standard auto-renew failed for user_id=%s: %s", uid, exc)
@@ -400,18 +408,19 @@ async def _send_pre_expiry_notifications(
     async with session_scope() as session:
         stmt = (
             select(User.id)
+            .join(VlessSubscription, VlessSubscription.user_id == User.id)
             .where(
-                User.subscription_end > current_time,
-                User.subscription_end <= current_time + timedelta(days=3),
+                VlessSubscription.expires_at > current_time,
+                VlessSubscription.expires_at <= current_time + timedelta(days=3),
                 User.is_bot_blocked.is_(False),
                 User.is_deleted.is_(False),
                 or_(
-                    User.notified_3d.is_(False),
-                    User.notified_1d.is_(False),
-                    User.notified_2h.is_(False),
+                    VlessSubscription.notified_3d.is_(False),
+                    VlessSubscription.notified_1d.is_(False),
+                    VlessSubscription.notified_2h.is_(False),
                 ),
             )
-            .order_by(User.subscription_end.asc())
+            .order_by(VlessSubscription.expires_at.asc())
             .limit(500)
         )
 
@@ -433,13 +442,19 @@ async def _send_pre_expiry_notifications(
                 if user is None:
                     continue
 
+                vless_sub = await session.scalar(
+                    select(VlessSubscription).where(VlessSubscription.user_id == uid).with_for_update(skip_locked=True)
+                )
+                if vless_sub is None:
+                    continue
+
                 if user.is_bot_blocked or user.is_deleted:
                     continue
 
-                if not user.subscription_end or user.subscription_end <= current_time:
+                if not vless_sub.expires_at or vless_sub.expires_at <= current_time:
                     continue
 
-                if user.subscription_end > current_time + timedelta(days=3):
+                if vless_sub.expires_at > current_time + timedelta(days=3):
                     continue
 
                 retry_count = user.notification_retry_count or 0
@@ -466,20 +481,20 @@ async def _send_pre_expiry_notifications(
                     if time_since_last < backoff_delay:
                         continue
 
-                time_left = user.subscription_end - current_time
+                time_left = vless_sub.expires_at - current_time
 
                 msg = None
                 notification_type = None
 
-                if time_left <= timedelta(hours=2) and not user.notified_2h:
+                if time_left <= timedelta(hours=2) and not vless_sub.notified_2h:
                     msg = NOTIFY_2H
                     notification_type = "2h"
 
-                elif time_left <= timedelta(days=1) and not user.notified_1d:
+                elif time_left <= timedelta(days=1) and not vless_sub.notified_1d:
                     msg = NOTIFY_1D
                     notification_type = "1d"
 
-                elif time_left <= timedelta(days=3) and not user.notified_3d:
+                elif time_left <= timedelta(days=3) and not vless_sub.notified_3d:
                     msg = NOTIFY_3D
                     notification_type = "3d"
 
@@ -489,6 +504,7 @@ async def _send_pre_expiry_notifications(
                 _maybe_reset_retry_on_type_change(
                     user,
                     notification_type,
+                    vless_sub=vless_sub,
                 )
 
                 retry_count = user.notification_retry_count or 0
@@ -510,16 +526,16 @@ async def _send_pre_expiry_notifications(
                     await session.flush()
 
                     if notification_type == "2h":
-                        user.notified_2h = True
-                        user.notified_1d = True
-                        user.notified_3d = True
+                        vless_sub.notified_2h = True
+                        vless_sub.notified_1d = True
+                        vless_sub.notified_3d = True
 
                     elif notification_type == "1d":
-                        user.notified_1d = True
-                        user.notified_3d = True
+                        vless_sub.notified_1d = True
+                        vless_sub.notified_3d = True
 
                     elif notification_type == "3d":
-                        user.notified_3d = True
+                        vless_sub.notified_3d = True
 
                 except TelegramForbiddenError:
                     user.is_bot_blocked = True
@@ -545,15 +561,16 @@ async def _send_post_expiry_notifications(
     async with session_scope() as session:
         stmt = (
             select(User.id)
+            .join(VlessSubscription, VlessSubscription.user_id == User.id)
             .where(
-                User.subscription_end.is_not(None),
-                User.subscription_end < current_time,
-                User.subscription_end > expiry_lookback,
+                VlessSubscription.expires_at.is_not(None),
+                VlessSubscription.expires_at < current_time,
+                VlessSubscription.expires_at > expiry_lookback,
                 User.is_bot_blocked.is_(False),
                 User.is_deleted.is_(False),
-                User.notified_expired.is_(False),
+                VlessSubscription.notified_expired.is_(False),
             )
-            .order_by(User.subscription_end.asc())
+            .order_by(VlessSubscription.expires_at.asc())
             .limit(500)
         )
 
@@ -575,10 +592,13 @@ async def _send_post_expiry_notifications(
                 if user is None:
                     continue
 
-                if not user.subscription_end or user.subscription_end >= current_time:
+                vless_sub = await session.scalar(
+                    select(VlessSubscription).where(VlessSubscription.user_id == uid).with_for_update(skip_locked=True)
+                )
+                if vless_sub is None or not vless_sub.expires_at or vless_sub.expires_at >= current_time:
                     continue
 
-                if user.is_bot_blocked or user.is_deleted or user.notified_expired:
+                if user.is_bot_blocked or user.is_deleted or vless_sub.notified_expired:
                     continue
 
                 retry_count = user.notification_retry_count or 0
@@ -607,6 +627,7 @@ async def _send_post_expiry_notifications(
                 _maybe_reset_retry_on_type_change(
                     user,
                     "expired",
+                    vless_sub=vless_sub,
                 )
 
                 retry_count = user.notification_retry_count or 0
@@ -625,7 +646,7 @@ async def _send_post_expiry_notifications(
 
                     user.notification_retry_count = 0
                     user.last_notification_attempt = current_time
-                    user.notified_expired = True
+                    vless_sub.notified_expired = True
                     await session.flush()
 
                 except TelegramForbiddenError:

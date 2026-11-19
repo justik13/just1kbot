@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import functools
 import html
@@ -232,9 +233,9 @@ async def _load_subscription_ui_settings(session) -> dict[str, object]:
         "fragmentation_length": str(await get_system_setting(session, "vless_fragmentation_length", "10-30") or "10-30").strip(),
         "fragmentation_interval": str(await get_system_setting(session, "vless_fragmentation_interval", "10-30") or "10-30").strip(),
         "no_limit_mode": no_limit_mode,
-        "dns_resolve_enabled": _as_bool_setting(await get_system_setting(session, "vless_dns_resolve_enabled", "false"), False),
-        "dns_resolve_domain": str(await get_system_setting(session, "vless_dns_resolve_domain", "") or "").strip(),
-        "dns_resolve_ip": str(await get_system_setting(session, "vless_dns_resolve_ip", "") or "").strip(),
+        "dns_resolve_enabled": _as_bool_setting(await get_system_setting(session, "vless_dns_resolve_enabled", "true"), True),
+        "dns_resolve_domain": str(await get_system_setting(session, "vless_dns_resolve_domain", "https://common.dot.dns.yandex.net/dns-query") or "https://common.dot.dns.yandex.net/dns-query").strip(),
+        "dns_resolve_ip": str(await get_system_setting(session, "vless_dns_resolve_ip", "77.88.8.8") or "77.88.8.8").strip(),
         "per_app_proxy_enabled": _as_bool_setting(await get_system_setting(session, "vless_per_app_proxy_enabled", "false"), False),
         "per_app_proxy_mode": per_app_mode,
         "per_app_proxy_list": str(await get_system_setting(session, "vless_per_app_proxy_list", "") or "").strip(),
@@ -622,7 +623,7 @@ async def serve_unified_subscription_feed(
             wi_sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
 
         is_financial_hold = bool(getattr(user, "financial_hold", False))
-        is_std_access = SubscriptionService.check_vpn_access(user)
+        is_std_access = SubscriptionService.check_vpn_access(user, vless_sub=vless_sub)
         if vless_sub and vless_sub.is_active and (is_financial_hold or not is_std_access):
             vless_sub.is_active = False
             vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1
@@ -630,7 +631,7 @@ async def serve_unified_subscription_feed(
             VlessSubscriptionService.ensure_synced_background(user.id, session=session)
 
         std_active = bool(vless_sub and vless_sub.is_active and not is_financial_hold and is_std_access)
-        std_end = getattr(user, "subscription_end", None) if std_active else None
+        std_end = getattr(vless_sub, "expires_at", None) if (std_active and vless_sub) else None
 
         wi_total_quota = 0
         wi_available_bytes = 0
@@ -743,8 +744,8 @@ async def serve_unified_subscription_feed(
                 return web.Response(status=200, text=html_body, headers=landing_headers)
 
             fallback_exp_ts = 0
-            if getattr(user, "subscription_end", None):
-                fallback_exp_ts = max(fallback_exp_ts, int(user.subscription_end.timestamp()))
+            if vless_sub and getattr(vless_sub, "expires_at", None):
+                fallback_exp_ts = max(fallback_exp_ts, int(vless_sub.expires_at.timestamp()))
             if wi_sub and getattr(wi_sub, "expires_at", None):
                 fallback_exp_ts = max(fallback_exp_ts, int(wi_sub.expires_at.timestamp()))
 
@@ -921,7 +922,7 @@ async def serve_unified_subscription_feed(
                         "Управление в кабинете",
                     )
                 )
-        elif getattr(user, "subscription_end", None) is not None and wi_active:
+        elif vless_sub and getattr(vless_sub, "expires_at", None) is not None and wi_active:
             all_links.append(_make_inline_stub(texts.FEED_STUB_STD_EXPIRED, "Управление в кабинете"))
 
         wi_server: Server | None = None
@@ -954,8 +955,44 @@ async def serve_unified_subscription_feed(
                         cdn_label_mode=cdn_label_mode,
                         cdn_yandex_label=cdn_yandex_label,
                         cdn_turboflare_label=cdn_turboflare_label,
+                        client_uuid=device_client_uuid,
                     )
                     all_links.extend(wi_links)
+                    if is_new_device and device_client_uuid and wi_server.api_url and wi_server.api_key:
+                        from services.xray_node_client import get_xray_node_client
+
+                        async def _provision_new_wi_device(
+                            srv_url: str,
+                            srv_key: str,
+                            dev_uuid: str,
+                            ver: int,
+                            epoch: str | None,
+                        ) -> None:
+                            try:
+                                await get_xray_node_client().sync_client(
+                                    srv_url,
+                                    srv_key,
+                                    client_uuid=dev_uuid,
+                                    is_active=True,
+                                    version=ver,
+                                    expected_node_epoch=epoch,
+                                    service="white_internet",
+                                )
+                            except Exception as exc:
+                                logger.warning("Background WI device provision failed for %s: %s", dev_uuid, exc)
+
+                        _t = asyncio.create_task(
+                            _provision_new_wi_device(
+                                wi_server.api_url,
+                                wi_server.api_key,
+                                device_client_uuid,
+                                int(getattr(wi_sub, "desired_version", 1) or 1),
+                                wi_server.xray_instance_epoch,
+                            )
+                        )
+                        from services.vless_subscription_service import _BACKGROUND_TASKS
+                        _BACKGROUND_TASKS.add(_t)
+                        _t.add_done_callback(_BACKGROUND_TASKS.discard)
                 else:
                     all_links.append(_make_inline_stub(texts.FEED_STUB_WI_PENDING, "Нажмите ⟳ через 1 минуту"))
             else:
@@ -1045,12 +1082,11 @@ async def serve_unified_subscription_feed(
             )
 
         if ui_settings.get("dns_resolve_enabled"):
-            response_headers["Server-Address-Resolve-Enable"] = "1"
             dns_dom = _sanitize_ascii_header(str(ui_settings.get("dns_resolve_domain") or ""), max_len=253)
             dns_ip = _sanitize_ascii_header(str(ui_settings.get("dns_resolve_ip") or ""), max_len=64)
-            if dns_dom:
+            if dns_dom and dns_ip:
+                response_headers["Server-Address-Resolve-Enable"] = "1"
                 response_headers["Server-Address-Resolve-Dns-Domain"] = dns_dom
-            if dns_ip:
                 response_headers["Server-Address-Resolve-Dns-Ip"] = dns_ip
 
         if ui_settings.get("per_app_proxy_enabled"):

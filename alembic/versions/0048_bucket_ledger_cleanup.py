@@ -42,6 +42,18 @@ def upgrade() -> None:
             SET bucket = 'bonus'
             WHERE entry_type = 'admin_adjustment';
 
+            UPDATE account_ledger_entries
+            SET entry_type = CASE
+                    WHEN entry_type = 'chargeback_debit' AND order_id IS NOT NULL THEN 'refund_debit'
+                    ELSE 'admin_adjustment'
+                END,
+                bucket = CASE
+                    WHEN entry_type = 'chargeback_debit' AND order_id IS NOT NULL THEN 'real'
+                    ELSE 'bonus'
+                END,
+                metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('legacy_entry_type', entry_type)
+            WHERE entry_type IN ('purchase_reversal', 'chargeback_debit');
+
             IF to_regclass('public.account_ledger_allocations') IS NOT NULL THEN
                 FOR rec IN
                     SELECT

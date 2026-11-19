@@ -174,13 +174,14 @@ export const api = {
             method: "POST",
             body: JSON.stringify({ device_limit: deviceLimit, duration_days: durationDays }),
         }),
-    checkoutStandard: (deviceLimit, durationDays, useBalance = true) =>
+    checkoutStandard: (deviceLimit, durationDays, useBalance = true, idempotencyKey = null) =>
         requestJson("/api/app/user/standard/checkout", {
             method: "POST",
             body: JSON.stringify({
                 device_limit: deviceLimit,
                 duration_days: durationDays,
                 use_balance: useBalance,
+                ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
             }),
         }),
     downgradeStandard: (targetDeviceLimit) =>
@@ -202,10 +203,13 @@ export const api = {
         requestJson("/api/app/user/wi/downgrade", {
             method: "DELETE",
         }),
-    topupBalance: (amountRub) =>
+    topupBalance: (amountRub, idempotencyKey = null) =>
         requestJson("/api/app/user/topup", {
             method: "POST",
-            body: JSON.stringify({ amount_rub: amountRub }),
+            body: JSON.stringify({
+                amount_rub: amountRub,
+                ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
+            }),
         }),
     checkOrderStatus: (orderId) =>
         requestJson(`/api/app/user/orders/${encodeURIComponent(orderId)}/check`, {
