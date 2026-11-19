@@ -54,6 +54,7 @@ from database.repositories.servers_repo import (
     get_server_xray_api_url,
     is_v2_node_server,
     is_vless_capable_server,
+    is_vless_sync_target_server,
     is_white_internet_hub_server,
     update_server,
     update_server_health_snapshot,
@@ -1103,8 +1104,8 @@ async def check_node_resources_and_alerts(bot: Bot):
                             server.extra_data = extra
                             await session.flush()
 
-                    # Trigger VLESS re-provisioning only if epoch changed or is unsynced on a VLESS capable server
-                    if is_vless_capable_server(updated_srv):
+                    # Trigger VLESS re-provisioning only if epoch changed or is unsynced on a VLESS sync target server (ru_hub)
+                    if is_vless_sync_target_server(updated_srv):
                         cur_synced = (dict(updated_srv.extra_data or {})).get("vless_synced_epoch")
                         if prev_epoch != updated_srv.xray_instance_epoch or cur_synced != updated_srv.xray_instance_epoch:
                             from services.vless_subscription_service import VlessSubscriptionService

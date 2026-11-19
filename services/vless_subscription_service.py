@@ -898,9 +898,12 @@ class VlessSubscriptionService:
 
     @classmethod
     async def sync_all_active_to_server(cls, server_id: int) -> int:
-        """Provisions all active VLESS subscriptions onto a newly added/updated node."""
+        """Provisions all active VLESS subscriptions onto a newly added/updated node.
+        
+        Only targets ru_hub servers that host individual user VLESS client credentials.
+        """
         from database.connection import session_scope
-        from database.repositories.servers_repo import is_vless_capable_server
+        from database.repositories.servers_repo import is_vless_sync_target_server
         from services.subscription import SubscriptionService
 
         srv_id = int(server_id)
@@ -913,7 +916,7 @@ class VlessSubscriptionService:
         try:
             async with session_scope() as session:
                 server = await session.get(Server, srv_id)
-                if not server or not server.is_active or not is_vless_capable_server(server):
+                if not server or not server.is_active or not is_vless_sync_target_server(server):
                     return 0
                 target = cls._extract_node_targets([server])
                 if not target:
