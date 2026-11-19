@@ -119,6 +119,7 @@ async def handle_node_status(request: web.Request) -> web.Response:
             "cdn_yandex": {"enabled": True},
         },
         "links": {},
+        "xhttp_locations": [{"cdn": "cdn_yandex", "path": "/wi-test-xhttp", "location_code": "de"}],
     })
 
 
