@@ -219,7 +219,7 @@ services:
     logging: *default-logging
     networks:
       - backend_net
-    command: ["python", "scripts/mock_node_server.py", "--host", "0.0.0.0", "--port", "8444"]
+    entrypoint: ["python", "scripts/mock_node_server.py", "--host", "0.0.0.0", "--port", "8444"]
     environment:
       PYTHONUNBUFFERED: "1"
     ports:
