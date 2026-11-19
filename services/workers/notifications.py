@@ -672,7 +672,7 @@ async def _send_white_internet_notifications(
         return
 
     from config.enums import WhiteInternetStatus
-    from database.models import User, VlessSubscription, WhiteInternetSubscription
+    from database.models import User, WhiteInternetSubscription
     from utils.formatters import format_tg_time
     from bot.texts.runtime.notifications import (
         NOTIFY_WI_1D,

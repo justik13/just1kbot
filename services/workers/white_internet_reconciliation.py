@@ -157,8 +157,15 @@ class WhiteInternetReconciliationWorker:
                     # Also ensure all active UserDevice UUIDs for this user are synced on this WI hub
                     from database.repositories import user_devices_repo
 
+                    dev_uuids: list[str] = []
                     async with sf() as dev_session:
-                        dev_uuids = await user_devices_repo.get_active_device_uuids(dev_session, user_id)
+                        wi_user_id = task.get("user_id") or await dev_session.scalar(
+                            select(WhiteInternetSubscription.user_id).where(
+                                WhiteInternetSubscription.id == sub_id
+                            )
+                        )
+                        if wi_user_id:
+                            dev_uuids = await user_devices_repo.get_active_device_uuids(dev_session, wi_user_id)
                     for d_uuid in dev_uuids:
                         if d_uuid and d_uuid != sub_uuid:
                             try:

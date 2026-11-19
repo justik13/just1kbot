@@ -36,7 +36,7 @@ from config.enums import (
     WhiteInternetStatus,
 )
 from database.connection import session_scope
-from database.models import AccountLedgerEntry, Order, User, UserDevice, WhiteInternetSubscription
+from database.models import AccountLedgerEntry, Order, User, UserDevice, VlessSubscription, WhiteInternetSubscription
 from database.repositories import user_devices_repo, users_repo, vless_subscription_repo, white_internet_repo
 from database.repositories.account_ledger_repo import (
     create_admin_adjustment,

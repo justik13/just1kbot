@@ -452,6 +452,8 @@ async def _traffic_sync_once(bot: Bot | None = None):
                         wi_user_ids = [uid for _sid, _suuid, uid in candidate_wi_subs if uid]
                         wi_dev_map: dict[int, list[str]] = {}
                         if wi_user_ids:
+                            from database.models import UserDevice
+
                             wi_dev_rows = (
                                 await session.execute(
                                     select(UserDevice.user_id, UserDevice.device_uuid).where(
