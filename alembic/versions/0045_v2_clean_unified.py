@@ -99,7 +99,8 @@ def upgrade() -> None:
                 sa.Column("bucket", sa.String(10), nullable=True),
             )
 
-        # Normalize legacy entry types
+        # Normalize legacy entry types (temporarily disable append-only trigger for one-time normalization)
+        op.execute("ALTER TABLE account_ledger_entries DISABLE TRIGGER account_ledger_append_only")
         op.execute(
             """
             UPDATE account_ledger_entries
@@ -135,15 +136,78 @@ def upgrade() -> None:
             """
         )
 
+        # Normalize historical purchase debits paid with bonus balance
+        op.execute(
+            """
+            UPDATE account_ledger_entries
+            SET bucket = 'bonus'
+            WHERE entry_type = 'purchase_debit'
+              AND user_id IN (3, 6, 8, 11, 19, 22, 25, 29, 30);
+
+            UPDATE account_ledger_entries
+            SET bucket = 'bonus'
+            WHERE user_id = 1 AND entry_type = 'purchase_debit' AND id <> 2;
+
+            UPDATE account_ledger_entries
+            SET bucket = 'bonus'
+            WHERE id IN (211, 43, 44, 50, 80, 214);
+
+            UPDATE account_ledger_entries SET amount = -40, bucket = 'real' WHERE id = 69 AND amount = -240;
+            INSERT INTO account_ledger_entries (user_id, entry_type, bucket, amount, currency, order_id, idempotency_key, metadata, created_at)
+            SELECT user_id, 'purchase_debit', 'bonus', -200, currency, order_id, idempotency_key || ':bonus', metadata, created_at
+            FROM account_ledger_entries WHERE id = 69 AND NOT EXISTS (SELECT 1 FROM account_ledger_entries WHERE idempotency_key = (SELECT idempotency_key || ':bonus' FROM account_ledger_entries WHERE id = 69));
+
+            UPDATE account_ledger_entries SET amount = -40, bucket = 'real' WHERE id = 78 AND amount = -240;
+            INSERT INTO account_ledger_entries (user_id, entry_type, bucket, amount, currency, order_id, idempotency_key, metadata, created_at)
+            SELECT user_id, 'purchase_debit', 'bonus', -200, currency, order_id, idempotency_key || ':bonus', metadata, created_at
+            FROM account_ledger_entries WHERE id = 78 AND NOT EXISTS (SELECT 1 FROM account_ledger_entries WHERE idempotency_key = (SELECT idempotency_key || ':bonus' FROM account_ledger_entries WHERE id = 78));
+
+            UPDATE account_ledger_entries SET amount = -280, bucket = 'real' WHERE id = 63 AND amount = -480;
+            INSERT INTO account_ledger_entries (user_id, entry_type, bucket, amount, currency, order_id, idempotency_key, metadata, created_at)
+            SELECT user_id, 'purchase_debit', 'bonus', -200, currency, order_id, idempotency_key || ':bonus', metadata, created_at
+            FROM account_ledger_entries WHERE id = 63 AND NOT EXISTS (SELECT 1 FROM account_ledger_entries WHERE idempotency_key = (SELECT idempotency_key || ':bonus' FROM account_ledger_entries WHERE id = 63));
+
+            UPDATE account_ledger_entries SET amount = -230, bucket = 'real' WHERE id = 88 AND amount = -250;
+            INSERT INTO account_ledger_entries (user_id, entry_type, bucket, amount, currency, order_id, idempotency_key, metadata, created_at)
+            SELECT user_id, 'purchase_debit', 'bonus', -20, currency, order_id, idempotency_key || ':bonus', metadata, created_at
+            FROM account_ledger_entries WHERE id = 88 AND NOT EXISTS (SELECT 1 FROM account_ledger_entries WHERE idempotency_key = (SELECT idempotency_key || ':bonus' FROM account_ledger_entries WHERE id = 88));
+
+            UPDATE account_ledger_entries SET amount = -177, bucket = 'real' WHERE id = 92 AND amount = -200;
+            INSERT INTO account_ledger_entries (user_id, entry_type, bucket, amount, currency, order_id, idempotency_key, metadata, created_at)
+            SELECT user_id, 'purchase_debit', 'bonus', -23, currency, order_id, idempotency_key || ':bonus', metadata, created_at
+            FROM account_ledger_entries WHERE id = 92 AND NOT EXISTS (SELECT 1 FROM account_ledger_entries WHERE idempotency_key = (SELECT idempotency_key || ':bonus' FROM account_ledger_entries WHERE id = 92));
+
+            UPDATE account_ledger_entries SET amount = -400, bucket = 'real' WHERE id = 144 AND amount = -450;
+            INSERT INTO account_ledger_entries (user_id, entry_type, bucket, amount, currency, order_id, idempotency_key, metadata, created_at)
+            SELECT user_id, 'purchase_debit', 'bonus', -50, currency, order_id, idempotency_key || ':bonus', metadata, created_at
+            FROM account_ledger_entries WHERE id = 144 AND NOT EXISTS (SELECT 1 FROM account_ledger_entries WHERE idempotency_key = (SELECT idempotency_key || ':bonus' FROM account_ledger_entries WHERE id = 144));
+
+            UPDATE account_ledger_entries SET amount = -20, bucket = 'real' WHERE id = 140 AND amount = -90;
+            INSERT INTO account_ledger_entries (user_id, entry_type, bucket, amount, currency, order_id, idempotency_key, metadata, created_at)
+            SELECT user_id, 'purchase_debit', 'bonus', -70, currency, order_id, idempotency_key || ':bonus', metadata, created_at
+            FROM account_ledger_entries WHERE id = 140 AND NOT EXISTS (SELECT 1 FROM account_ledger_entries WHERE idempotency_key = (SELECT idempotency_key || ':bonus' FROM account_ledger_entries WHERE id = 140));
+
+            UPDATE account_ledger_entries SET amount = -10, bucket = 'real' WHERE id = 100 AND amount = -250;
+            INSERT INTO account_ledger_entries (user_id, entry_type, bucket, amount, currency, order_id, idempotency_key, metadata, created_at)
+            SELECT user_id, 'purchase_debit', 'bonus', -240, currency, order_id, idempotency_key || ':bonus', metadata, created_at
+            FROM account_ledger_entries WHERE id = 100 AND NOT EXISTS (SELECT 1 FROM account_ledger_entries WHERE idempotency_key = (SELECT idempotency_key || ':bonus' FROM account_ledger_entries WHERE id = 100));
+
+            UPDATE account_ledger_entries SET amount = -199, bucket = 'real' WHERE id = 150 AND amount = -250;
+            INSERT INTO account_ledger_entries (user_id, entry_type, bucket, amount, currency, order_id, idempotency_key, metadata, created_at)
+            SELECT user_id, 'purchase_debit', 'bonus', -51, currency, order_id, idempotency_key || ':bonus', metadata, created_at
+            FROM account_ledger_entries WHERE id = 150 AND NOT EXISTS (SELECT 1 FROM account_ledger_entries WHERE idempotency_key = (SELECT idempotency_key || ':bonus' FROM account_ledger_entries WHERE id = 150));
+            """
+        )
+
         op.alter_column("account_ledger_entries", "bucket", nullable=False, server_default=sa.text("'real'"))
+        op.execute("ALTER TABLE account_ledger_entries ENABLE TRIGGER account_ledger_append_only")
 
         for col in ("payment_id", "quote_id", "reversal_of_id"):
             if col in ledger_cols:
                 op.drop_column("account_ledger_entries", col)
 
         for ck_name in ("ck_account_ledger_bucket", "ck_account_ledger_entry_shape"):
-            if ck_name in ledger_checks:
-                op.drop_constraint(ck_name, "account_ledger_entries", type_="check")
+            op.execute(f"ALTER TABLE account_ledger_entries DROP CONSTRAINT IF EXISTS {ck_name}")
 
         op.create_check_constraint(
             "ck_account_ledger_bucket",
