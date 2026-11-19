@@ -1355,13 +1355,26 @@ function _buildDevicesSectionHtml(d) {
             const leftMeta = meta || shortHwid;
             const dateLabel = formatDate(dev.last_seen_at);
 
-            let biActionHtml = "";
+            let biRowHtml = "";
             if (wiActive && hasMultipleDevices) {
-                biActionHtml = isBi
-                    ? `<button type="button" class="btn btn-sm" data-bi-btn="${escapeHtml(dev.hwid)}" data-bi-state="on" data-name="${escapeHtml(label)}" title="Отключить Белый интернет" style="min-height:28px; padding:4px 9px; font-size:11px; font-weight:600; border-radius:999px; border-color:rgba(52,211,153,0.35); color:var(--accent-emerald); background:var(--accent-emerald-soft);">${_ICONS.bolt} БИ</button>`
-                    : `<button type="button" class="btn btn-sm" data-bi-btn="${escapeHtml(dev.hwid)}" data-bi-state="off" data-name="${escapeHtml(label)}" title="Включить Белый интернет" style="min-height:28px; padding:4px 9px; font-size:11px; font-weight:500; border-radius:999px; border-color:var(--border-subtle); color:var(--text-muted); background:transparent;">${_ICONS.bolt} БИ</button>`;
+                biRowHtml = `
+                    <label style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding-top:7px; margin-top:2px; border-top:1px solid var(--border-subtle); cursor:pointer;">
+                        <span style="font-size:12px; font-weight:500; color:${isBi ? "var(--text-primary)" : "var(--text-secondary)"};">
+                            Белый интернет
+                        </span>
+                        <span class="switch" style="transform:scale(0.86); transform-origin:right center;">
+                            <input type="checkbox" data-bi-toggle="${escapeHtml(dev.hwid)}" data-name="${escapeHtml(label)}" ${isBi ? "checked" : ""}>
+                            <span class="switch-track"></span>
+                        </span>
+                    </label>
+                `;
             } else if (wiActive) {
-                biActionHtml = `<span class="chip chip-ok" style="font-size:11px; flex-shrink:0;">БИ</span>`;
+                biRowHtml = `
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding-top:7px; margin-top:2px; border-top:1px solid var(--border-subtle);">
+                        <span style="font-size:12px; font-weight:500; color:var(--text-secondary);">Белый интернет</span>
+                        <span class="chip chip-ok" style="font-size:11px;">Активен</span>
+                    </div>
+                `;
             }
 
             return `
@@ -1371,27 +1384,16 @@ function _buildDevicesSectionHtml(d) {
                             <span style="display:inline-flex; flex-shrink:0; color:${isBi ? "var(--accent-emerald)" : "var(--text-secondary)"};">${devIcon}</span>
                             <span style="font-weight:600; font-size:14px; line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(label)}</span>
                         </div>
-                        <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
-                            ${biActionHtml}
-                            <button type="button" class="btn btn-sm btn-danger" data-del="${escapeHtml(dev.hwid)}" data-name="${escapeHtml(label)}" aria-label="Удалить ${escapeHtml(label)}" title="Удалить" style="flex-shrink:0; padding:4px 8px; min-height:28px;">${_ICONS.trash}</button>
-                        </div>
+                        <button type="button" class="btn btn-sm btn-danger" data-del="${escapeHtml(dev.hwid)}" data-name="${escapeHtml(label)}" aria-label="Удалить ${escapeHtml(label)}" title="Удалить" style="flex-shrink:0; padding:4px 8px; min-height:28px;">${_ICONS.trash}</button>
                     </div>
                     <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:11px; line-height:1.3;">
                         <span class="muted" style="min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(leftMeta)}</span>
                         <span class="muted" style="flex-shrink:0; font-variant-numeric:tabular-nums;">${escapeHtml(dateLabel)}</span>
                     </div>
+                    ${biRowHtml}
                 </div>
             `;
         }).join("");
-
-    let noteText = "";
-    if (wiActive && devices.length > 1) {
-        noteText = "Нажмите «⚡ БИ» на устройстве, чтобы включить, отключить или перенести слот.";
-    } else if (wiActive) {
-        noteText = "Все подключённые устройства получают доступ ко всем активным тарифам.";
-    } else {
-        noteText = "Устройства добавляются автоматически при обновлении подписки в INCY или Happ.";
-    }
 
     return `
         <section class="card" style="gap:10px;">
@@ -1399,7 +1401,7 @@ function _buildDevicesSectionHtml(d) {
                 <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; min-width:0;">
                     <div class="card-title" style="margin:0;">Устройства</div>
                     <span class="chip ${isLimitReached ? "chip-warn" : "chip-muted"}">${devices.length} из ${stdLimit}</span>
-                    ${wiActive ? `<span class="chip chip-ok" style="font-size:11px;">БИ: ${biAssignedCount}/${wiLimit}</span>` : ""}
+                    ${wiActive ? `<span class="chip chip-ok" style="font-size:11px;">Белый интернет: ${biAssignedCount} из ${wiLimit}</span>` : ""}
                 </div>
                 <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
                     <button type="button" class="btn btn-sm" id="refreshDevicesBtn" aria-label="Обновить" title="Обновить" style="padding:6px 10px; min-height:32px;">${_ICONS.refresh}</button>
@@ -1411,9 +1413,6 @@ function _buildDevicesSectionHtml(d) {
                     <span>Все слоты (${devices.length} из ${stdLimit}) заняты — удалите устройство, чтобы подключить новое.</span>
                 </div>
             ` : ""}
-            <p class="muted" style="font-size:12px; margin:0;">
-                ${noteText}
-            </p>
             <div style="display:flex; flex-direction:column; gap:8px;">${rowsHtml}</div>
         </section>
     `;
@@ -1531,16 +1530,16 @@ function _bindDevicesEvents(container, d, reload) {
     const wiLimit = Number((d?.wi && d.wi.device_limit) || 1);
     const activeBiDevices = devices.filter((dev) => dev.is_bi_assigned);
 
-    container.querySelectorAll("[data-bi-btn]").forEach((btn) => {
-        btn.addEventListener("click", async () => {
-            const hwid = btn.dataset.biBtn;
-            const isCurrentlyOn = btn.dataset.biState === "on";
-            const wantEnable = !isCurrentlyOn;
-            const targetDev = devices.find((dev) => dev.hwid === hwid) || { hwid, device_name: btn.dataset.name };
+    container.querySelectorAll("[data-bi-toggle]").forEach((chk) => {
+        chk.addEventListener("change", async () => {
+            const hwid = chk.dataset.biToggle;
+            const wantEnable = chk.checked;
+            const targetDev = devices.find((dev) => dev.hwid === hwid) || { hwid, device_name: chk.dataset.name };
 
             if (wantEnable && activeBiDevices.length >= wiLimit) {
+                chk.checked = false;
                 if (activeBiDevices.length === 1) {
-                    btn.disabled = true;
+                    chk.disabled = true;
                     try {
                         await api.setDevicePriority(hwid, 10, activeBiDevices[0].hwid);
                         showToast("Слот перенесён — нажмите ⟳ в приложении");
@@ -1548,7 +1547,7 @@ function _bindDevicesEvents(container, d, reload) {
                     } catch (err) {
                         showToast(err.message || "Не удалось перенести слот");
                     } finally {
-                        btn.disabled = false;
+                        chk.disabled = false;
                     }
                     return;
                 }
@@ -1556,7 +1555,7 @@ function _bindDevicesEvents(container, d, reload) {
                 return;
             }
 
-            btn.disabled = true;
+            chk.disabled = true;
             try {
                 await api.setDevicePriority(hwid, wantEnable ? 10 : -1);
                 showToast(
@@ -1566,9 +1565,10 @@ function _bindDevicesEvents(container, d, reload) {
                 );
                 reload();
             } catch (err) {
+                chk.checked = !wantEnable;
                 showToast(err.message || "Не удалось изменить статус слота");
             } finally {
-                btn.disabled = false;
+                chk.disabled = false;
             }
         });
     });
