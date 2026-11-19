@@ -1324,13 +1324,19 @@ function _renderTariffsTab(body, d, reload) {
 
 function _buildDevicesSectionHtml(d) {
     const devices = [...(d.devices || [])].sort((a, b) => (a.id || 0) - (b.id || 0));
+    const std = d.standard || {};
+    const stdActive = Boolean(std && std.active);
     const wi = d.wi || {};
     const wiActive = Boolean(wi && wi.active);
     const wiLimit = Number(wi.device_limit || 1);
-    const stdLimit = Number((d.standard && d.standard.device_limit) || 2);
-    const isLimitReached = devices.length >= stdLimit;
-    const hasMultipleDevices = devices.length >= 2;
+    const stdLimit = Number(std.device_limit || 2);
+    const totalLimit = Math.max(stdActive ? stdLimit : 0, wiActive ? wiLimit : 0, 1);
+    const isLimitReached = devices.length >= totalLimit;
     const biAssignedCount = wiActive ? devices.filter((dev) => dev.is_bi_assigned).length : 0;
+    const isWiExhausted = Boolean(
+        wiActive && (wi.status === "exhausted" || (wi.traffic_limit_bytes > 0 && wi.traffic_used_bytes >= wi.traffic_limit_bytes))
+    );
+    const needBiToggles = Boolean(wiActive && (devices.length > wiLimit || biAssignedCount < devices.length));
 
     const rowsHtml = !devices.length
         ? `
@@ -1356,7 +1362,7 @@ function _buildDevicesSectionHtml(d) {
             const dateLabel = formatDate(dev.last_seen_at);
 
             let biRowHtml = "";
-            if (wiActive && hasMultipleDevices) {
+            if (needBiToggles) {
                 biRowHtml = `
                     <label style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding-top:7px; margin-top:2px; border-top:1px solid var(--border-subtle); cursor:pointer;">
                         <span style="font-size:12px; font-weight:500; color:${isBi ? "var(--text-primary)" : "var(--text-secondary)"};">
@@ -1368,17 +1374,10 @@ function _buildDevicesSectionHtml(d) {
                         </span>
                     </label>
                 `;
-            } else if (wiActive) {
-                biRowHtml = `
-                    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding-top:7px; margin-top:2px; border-top:1px solid var(--border-subtle);">
-                        <span style="font-size:12px; font-weight:500; color:var(--text-secondary);">Белый интернет</span>
-                        <span class="chip chip-ok" style="font-size:11px;">Активен</span>
-                    </div>
-                `;
             }
 
             return `
-                <div class="item-row" style="gap:5px; padding:10px 12px; ${isBi ? "border-color:rgba(52,211,153,0.22);" : ""}">
+                <div class="item-row" style="gap:5px; padding:10px 12px; ${isBi && needBiToggles ? "border-color:rgba(52,211,153,0.22);" : ""}">
                     <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
                         <div style="display:flex; align-items:center; gap:7px; flex:1; min-width:0;">
                             <span style="display:inline-flex; flex-shrink:0; color:${isBi ? "var(--accent-emerald)" : "var(--text-secondary)"};">${devIcon}</span>
@@ -1395,13 +1394,22 @@ function _buildDevicesSectionHtml(d) {
             `;
         }).join("");
 
+    let wiHeaderChipHtml = "";
+    if (wiActive) {
+        if (isWiExhausted) {
+            wiHeaderChipHtml = `<span class="chip chip-warn" style="font-size:11px;">Белый интернет: 0 ГБ</span>`;
+        } else if (stdActive || totalLimit !== wiLimit) {
+            wiHeaderChipHtml = `<span class="chip chip-ok" style="font-size:11px;">Белый интернет: ${biAssignedCount} из ${wiLimit}</span>`;
+        }
+    }
+
     return `
         <section class="card" style="gap:10px;">
             <div class="row" style="align-items:center; gap:8px;">
                 <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; min-width:0;">
                     <div class="card-title" style="margin:0;">Устройства</div>
-                    <span class="chip ${isLimitReached ? "chip-warn" : "chip-muted"}">${devices.length} из ${stdLimit}</span>
-                    ${wiActive ? `<span class="chip chip-ok" style="font-size:11px;">Белый интернет: ${biAssignedCount} из ${wiLimit}</span>` : ""}
+                    <span class="chip ${isLimitReached ? "chip-warn" : "chip-muted"}">${devices.length} из ${totalLimit}</span>
+                    ${wiHeaderChipHtml}
                 </div>
                 <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
                     <button type="button" class="btn btn-sm" id="refreshDevicesBtn" aria-label="Обновить" title="Обновить" style="padding:6px 10px; min-height:32px;">${_ICONS.refresh}</button>
@@ -1410,7 +1418,7 @@ function _buildDevicesSectionHtml(d) {
             </div>
             ${isLimitReached ? `
                 <div class="notice-box notice-warn" style="margin:0;">
-                    <span>Все слоты (${devices.length} из ${stdLimit}) заняты — удалите устройство, чтобы подключить новое.</span>
+                    <span>Все слоты (${devices.length} из ${totalLimit}) заняты — удалите устройство, чтобы подключить новое.</span>
                 </div>
             ` : ""}
             <div style="display:flex; flex-direction:column; gap:8px;">${rowsHtml}</div>
