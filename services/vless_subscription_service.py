@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import urllib.parse
+import uuid
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -181,8 +182,12 @@ class VlessSubscriptionService:
                     )
                     explicit_sni = str(ex_extra.get("std_sni") or "").strip().lower()
                     target_sni = explicit_sni or route_by_code.get(loc_code, "") or domain
+                    try:
+                        loc_uuid = str(uuid.uuid5(uuid.UUID(eff_uuid), loc_code))
+                    except Exception:
+                        loc_uuid = eff_uuid
                     link = (
-                        f"vless://{eff_uuid}@{domain}:{port}"
+                        f"vless://{loc_uuid}@{domain}:{port}"
                         f"?encryption=none&security=tls&sni={target_sni}&alpn=http/1.1&fp={fp}"
                         f"&type=tcp&flow=xtls-rprx-vision#{fragment}"
                     )
@@ -507,17 +512,34 @@ class VlessSubscriptionService:
             from database.connection import session_scope
             try:
                 targets = []
+                uuids_to_deprov = [old_uuid]
                 async with session_scope() as scoped_session:
                     servers = await cls.get_revocation_target_servers(scoped_session)
                     targets = cls._extract_node_targets(servers)
+                    exit_nodes = await cls.get_eligible_exit_nodes(scoped_session)
+                    try:
+                        base_u = uuid.UUID(old_uuid)
+                        for ex in exit_nodes:
+                            ex_extra = ex.extra_data if isinstance(ex.extra_data, dict) else {}
+                            if ex_extra.get("in_standard") is False:
+                                continue
+                            lc = str(ex_extra.get("location_code") or f"exit{ex.id}").strip().lower()
+                            if lc:
+                                uuids_to_deprov.append(str(uuid.uuid5(base_u, lc)))
+                    except Exception:
+                        pass
 
                 if targets:
-                    results = await cls._execute_deprovision_on_nodes(
-                        targets,
-                        old_uuid,
-                        version=version,
-                        services=services,
-                    )
+                    results = {}
+                    for u in uuids_to_deprov:
+                        res = await cls._execute_deprovision_on_nodes(
+                            targets,
+                            u,
+                            version=version,
+                            services=services,
+                        )
+                        for s_id, ok in res.items():
+                            results[s_id] = results.get(s_id, True) and ok
                     if (
                         sub_id
                         and servers
@@ -656,9 +678,10 @@ class VlessSubscriptionService:
         version: int | None = None,
         user_id: int | None = None,
         sub_id: int | None = None,
+        email: str | None = None,
     ) -> dict[int, bool]:
         results, _ = await VlessSubscriptionService._execute_sync_to_nodes_with_status(
-            targets, client_uuid, desired_active, version=version, user_id=user_id, sub_id=sub_id
+            targets, client_uuid, desired_active, version=version, user_id=user_id, sub_id=sub_id, email=email
         )
         return results
 
@@ -670,6 +693,7 @@ class VlessSubscriptionService:
         version: int | None = None,
         user_id: int | None = None,
         sub_id: int | None = None,
+        email: str | None = None,
     ) -> tuple[dict[int, bool], bool]:
         if not targets:
             return {}, False
@@ -686,8 +710,9 @@ class VlessSubscriptionService:
                         client_uuid=client_uuid,
                         is_active=desired_active,
                         version=version,
-                        idempotency_key=f"vless:{sub_id or user_id or 'anon'}:{client_uuid}:{version}:{desired_active}",
+                        idempotency_key=f"vless:{sub_id or user_id or 'anon'}:{client_uuid}:{version}:{desired_active}:{email or ''}",
                         service="vless",
+                        email=email,
                     )
                     verified = [
                         ib.lower() for ib in resp.verified_inbounds if isinstance(ib, str)
@@ -834,12 +859,32 @@ class VlessSubscriptionService:
         dev_uuids = await user_devices_repo.get_active_device_uuids(session, user_id)
         all_sync_uuids = set(dev_uuids)
 
+        exit_nodes = await VlessSubscriptionService.get_eligible_exit_nodes(session)
+        loc_codes: list[str] = []
+        for ex in exit_nodes:
+            ex_extra = ex.extra_data if isinstance(ex.extra_data, dict) else {}
+            if ex_extra.get("in_standard") is False:
+                continue
+            lc = str(ex_extra.get("location_code") or f"exit{ex.id}").strip().lower()
+            if lc and lc not in loc_codes:
+                loc_codes.append(lc)
+
+        sync_items: list[tuple[str, str]] = []
+        for cl_uuid in all_sync_uuids:
+            sync_items.append((cl_uuid, f"{cl_uuid}:std"))
+            try:
+                base_u = uuid.UUID(cl_uuid)
+                for lc in loc_codes:
+                    sync_items.append((str(uuid.uuid5(base_u, lc)), f"{cl_uuid}:{lc}:std"))
+            except Exception:
+                pass
+
         results: dict[int, bool] = {t[0]: True for t in targets}
         needs_version_bump = False
         all_items_ok = True
-        for cl_uuid in all_sync_uuids:
+        for target_uuid, target_email in sync_items:
             res_item, bump_item = await VlessSubscriptionService._execute_sync_to_nodes_with_status(
-                targets, cl_uuid, desired_active, version=sub_version, user_id=user_id, sub_id=sub.id
+                targets, target_uuid, desired_active, version=sub_version, user_id=user_id, sub_id=sub.id, email=target_email
             )
             for srv_id, ok in res_item.items():
                 if not ok:
@@ -861,9 +906,9 @@ class VlessSubscriptionService:
                 sub_version = sub.version
             all_items_ok = True
             results = {t[0]: True for t in targets}
-            for cl_uuid in all_sync_uuids:
+            for target_uuid, target_email in sync_items:
                 res_item, _ = await VlessSubscriptionService._execute_sync_to_nodes_with_status(
-                    targets, cl_uuid, desired_active, version=sub_version, user_id=user_id, sub_id=sub.id
+                    targets, target_uuid, desired_active, version=sub_version, user_id=user_id, sub_id=sub.id, email=target_email
                 )
                 for srv_id, ok in res_item.items():
                     if not ok:
@@ -977,9 +1022,19 @@ class VlessSubscriptionService:
                     for u_id, d_uuid in dev_rows:
                         user_devices_map.setdefault(u_id, []).append(str(d_uuid))
 
+            exit_nodes = await cls.get_eligible_exit_nodes(session)
+            loc_codes: list[str] = []
+            for ex in exit_nodes:
+                ex_extra = ex.extra_data if isinstance(ex.extra_data, dict) else {}
+                if ex_extra.get("in_standard") is False:
+                    continue
+                lc = str(ex_extra.get("location_code") or f"exit{ex.id}").strip().lower()
+                if lc and lc not in loc_codes:
+                    loc_codes.append(lc)
+
             total_eligible = 0
             has_failures = False
-            sub_tasks: list[tuple[str, int, int, int]] = []
+            sub_tasks: list[tuple[str, str, int, int, int]] = []
             sub_devices: dict[int, set[str]] = {}
 
             for sub, user in rows:
@@ -988,70 +1043,82 @@ class VlessSubscriptionService:
                 total_eligible += 1
                 sub_ver = getattr(sub, "version", 1) or 1
                 all_sub_uuids = set(user_devices_map.get(user.id, []))
-                sub_devices[sub.id] = all_sub_uuids
+                expected_for_sub: set[str] = set()
                 for cl_uuid in all_sub_uuids:
-                    sub_tasks.append((cl_uuid, sub_ver, user.id, sub.id))
+                    sub_tasks.append((cl_uuid, f"{cl_uuid}:std", sub_ver, user.id, sub.id))
+                    expected_for_sub.add(cl_uuid)
+                    try:
+                        base_u = uuid.UUID(cl_uuid)
+                        for lc in loc_codes:
+                            loc_u = str(uuid.uuid5(base_u, lc))
+                            sub_tasks.append((loc_u, f"{cl_uuid}:{lc}:std", sub_ver, user.id, sub.id))
+                            expected_for_sub.add(loc_u)
+                    except Exception:
+                        pass
+                sub_devices[sub.id] = expected_for_sub
 
+            succeeded_by_sub: dict[int, set[str]] = {}
             if sub_tasks:
                 from services.xray_node_client import get_xray_node_client
 
                 async with get_xray_node_client(timeout=60.0) as node_client:
                     batch_payload = [
                         {
-                            "uuid": cl_uuid,
-                            "email": cl_uuid,
+                            "uuid": target_uuid,
+                            "email": target_email,
                             "is_active": True,
                             "version": s_ver,
                             "service": "vless",
                         }
-                        for cl_uuid, s_ver, _u_id, _s_id in sub_tasks
+                        for target_uuid, target_email, s_ver, _u_id, _s_id in sub_tasks
                     ]
                     batch_supported, batch_succeeded, batch_failed = await node_client.batch_sync_clients(
                         target[0][1], target[0][2], batch_payload
                     )
 
-                succeeded_by_sub: dict[int, set[str]] = {}
                 if batch_supported and batch_succeeded:
-                    for cl_uuid, _s_ver, _u_id, s_id in sub_tasks:
-                        norm_uuid = str(cl_uuid).lower()
+                    for target_uuid, _target_email, _s_ver, _u_id, s_id in sub_tasks:
+                        norm_uuid = str(target_uuid).lower()
                         if norm_uuid in batch_succeeded and norm_uuid not in batch_failed:
-                            succeeded_by_sub.setdefault(s_id, set()).add(cl_uuid)
+                            succeeded_by_sub.setdefault(s_id, set()).add(target_uuid)
                         else:
                             has_failures = True
                 else:
                     sem = asyncio.Semaphore(20)
 
-                    async def _sync_single(cl_uuid: str, s_ver: int, u_id: int, s_id: int) -> tuple[int, str, bool]:
+                    async def _sync_single(
+                        target_uuid: str, target_email: str, s_ver: int, u_id: int, s_id: int
+                    ) -> tuple[int, str, bool]:
                         async with sem:
                             try:
-                                res_map = await cls._execute_sync_to_nodes(
-                                    target, cl_uuid, True, version=s_ver, user_id=u_id, sub_id=s_id
+                                res_map, _ = await cls._execute_sync_to_nodes_with_status(
+                                    target, target_uuid, True, version=s_ver, user_id=u_id, sub_id=s_id, email=target_email
                                 )
-                                return s_id, cl_uuid, (res_map.get(srv_id) is True)
+                                return s_id, target_uuid, (res_map.get(srv_id) is True)
                             except Exception as e:
                                 logger.warning(
-                                    "Failed to provision cl_uuid=%s for user_id=%s on server %s: %s",
-                                    cl_uuid,
+                                    "Failed to provision target_uuid=%s for user_id=%s on server %s: %s",
+                                    target_uuid,
                                     u_id,
                                     srv_id,
                                     e,
                                 )
-                                return s_id, cl_uuid, False
+                                return s_id, target_uuid, False
 
                     results = await asyncio.gather(*[_sync_single(*t) for t in sub_tasks], return_exceptions=True)
                     for res in results:
                         if isinstance(res, Exception):
                             has_failures = True
                             continue
-                        s_id, cl_uuid, ok = res
+                        s_id, target_uuid, ok = res
                         if ok:
-                            succeeded_by_sub.setdefault(s_id, set()).add(cl_uuid)
+                            succeeded_by_sub.setdefault(s_id, set()).add(target_uuid)
                         else:
                             has_failures = True
 
-                for sub_id, exp_uuids in sub_devices.items():
-                    if succeeded_by_sub.get(sub_id) == exp_uuids:
-                        synced_count += 1
+            for sub_id, exp_uuids in sub_devices.items():
+                if succeeded_by_sub.get(sub_id, set()) == exp_uuids:
+                    synced_count += 1
 
             # Record synchronized epoch in server extra_data ONLY if all eligible subscriptions succeeded without failures
             if not has_failures and synced_count == total_eligible:

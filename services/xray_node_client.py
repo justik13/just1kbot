@@ -258,6 +258,7 @@ class XrayNodeClient:
         expected_node_epoch: str | None = None,
         idempotency_key: str | None = None,
         service: str | None = None,
+        email: str | None = None,
     ) -> SyncResponse:
         """Synchronize a client with two-phase epoch fencing, durable idempotency, and verified inbounds."""
         url = f"{api_url.rstrip('/')}/v1/clients/sync"
@@ -274,6 +275,8 @@ class XrayNodeClient:
             payload["idempotency_key"] = idempotency_key
         if service is not None:
             payload["service"] = service
+        if email is not None:
+            payload["email"] = email
 
         status_code, data, err = await self._make_request("POST", url, headers, json_data=payload)
         if status_code in (200, 201) and isinstance(data, dict):
