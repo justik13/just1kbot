@@ -155,8 +155,7 @@ class VlessSubscriptionService:
 
         selected_hubs: list[Server] = []
         if ru_hubs:
-            hub_idx = int(hashlib.md5(eff_uuid.encode()).hexdigest(), 16) % len(ru_hubs)
-            selected_hubs = [ru_hubs[hub_idx]]
+            selected_hubs = [ru_hubs[0]]
 
         for hub in selected_hubs:
             hub_extra = hub.extra_data if isinstance(hub.extra_data, dict) else {}
@@ -164,6 +163,8 @@ class VlessSubscriptionService:
             domain = str(hub_extra.get("domain") or hub_extra.get("vless_domain") or "").strip().lower()
             if not domain or not _FQDN_REGEX.match(domain):
                 continue
+            sni_routes = VlessSubscriptionService._extract_sni_routes(hub_extra)
+            route_by_code = {r["bridge_code"]: r["sni"] for r in sni_routes}
 
             if active_exits:
                 for ex in active_exits:
@@ -176,9 +177,11 @@ class VlessSubscriptionService:
                         ex_extra.get("vless_name") or ex.name,
                         ex_extra.get("server_description"),
                     )
+                    explicit_sni = str(ex_extra.get("std_sni") or "").strip().lower()
+                    target_sni = explicit_sni or route_by_code.get(loc_code, "") or domain
                     link = (
                         f"vless://{eff_uuid}@{domain}:{port}"
-                        f"?encryption=none&security=tls&sni={domain}&alpn=http/1.1&fp={fp}"
+                        f"?encryption=none&security=tls&sni={target_sni}&alpn=http/1.1&fp={fp}"
                         f"&type=tcp&flow=xtls-rprx-vision#{fragment}"
                     )
                     if link not in seen_links:
