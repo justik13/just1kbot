@@ -758,7 +758,7 @@ function _openWiManageModal(d, onReload) {
         wrap.innerHTML = `
             <div class="quote-box">
                 <div class="quote-line"><span>Трафик</span><strong>${wiUsedGb} / ${wiTotalGb} ГБ</strong></div>
-                <div class="quote-line"><span>Слотов устройств</span><strong>${wiCurLimit} из ${wiMaxDevices}</strong></div>
+                <div class="quote-line"><span>Слотов устройств</span><strong>${wiCurLimit}</strong></div>
                 <div class="quote-line"><span>Баланс аккаунта</span><strong>${bal.total} ₽</strong></div>
             </div>
             ${canAddSlot ? `
@@ -1348,7 +1348,7 @@ function _renderTariffsTab(body, d, reload) {
                 <div class="field">
                     <div class="row muted" style="font-size:12px;">
                         <span class="tabular">Трафик: <strong style="color:var(--text-primary);">${wiUsedGb} / ${wiTotalGb} ГБ</strong></span>
-                        <span class="tabular">Слотов: <strong style="color:var(--text-primary);">${wiCurLimit} из ${wiMaxDevices}</strong></span>
+                        <span class="tabular">Слотов: <strong style="color:var(--text-primary);">${wiCurLimit}</strong></span>
                     </div>
                     <div class="progress-track"><div class="progress-fill" style="transform:scaleX(${(wiPct / 100).toFixed(3)});"></div></div>
                 </div>
