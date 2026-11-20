@@ -1162,13 +1162,13 @@ function _renderConnectTab(body, d, reload, root) {
         if (isStdGrace) {
             pills.push(`<span class="chip chip-warn">Стандарт · Льготный период (~${graceHoursLeft} ч.)</span>`);
         } else {
-            pills.push(`<span class="chip chip-ok">Стандарт · ${Number(std.device_limit || 2)} устр. · до ${formatDate(std.expires_at)}</span>`);
+            pills.push(`<span class="chip chip-standard">Стандарт · ${Number(std.device_limit || 2)} устр. · до ${formatDate(std.expires_at)}</span>`);
         }
     }
     if (wi.active) {
         const usedGb = formatBytesGb(wi.traffic_used_bytes);
         const totalGb = formatBytesGb(wi.traffic_limit_bytes);
-        pills.push(`<span class="chip chip-info">Белый интернет · ${Number(wi.device_limit || 1)} устр. · ${usedGb}/${totalGb} ГБ · до ${formatDate(wi.expires_at)}</span>`);
+        pills.push(`<span class="chip chip-wi">Белый интернет · ${Number(wi.device_limit || 1)} устр. · ${usedGb}/${totalGb} ГБ · до ${formatDate(wi.expires_at)}</span>`);
     }
 
     body.innerHTML = `
@@ -1325,7 +1325,7 @@ function _renderTariffsTab(body, d, reload) {
             `}
         </section>
 
-        <section class="plan-card plan-featured ${wi.active ? "plan-active" : ""}">
+        <section class="plan-card plan-wi ${wi.active ? "plan-active" : ""}">
             <div class="row">
                 <div>
                     <div class="card-title">Белый интернет</div>
@@ -1335,9 +1335,9 @@ function _renderTariffsTab(body, d, reload) {
                     wi.status === "EXHAUSTED"
                         ? "chip-warn"
                         : wi.status === "PENDING"
-                            ? "chip-info"
+                            ? "chip-wi"
                             : wi.active
-                                ? "chip-info"
+                                ? "chip-wi"
                                 : "chip-muted"
                 }">
                     ${
@@ -1511,7 +1511,7 @@ function _buildDevicesSectionHtml(d) {
                         <span style="font-size:12px; font-weight:500; color:${isBi ? "var(--text-primary)" : "var(--text-secondary)"};">
                             Белый интернет
                         </span>
-                        <span class="switch" style="transform:scale(0.86); transform-origin:right center;">
+                        <span class="switch switch-wi" style="transform:scale(0.86); transform-origin:right center;">
                             <input type="checkbox" data-bi-toggle="${escapeHtml(dev.hwid)}" data-name="${escapeHtml(label)}" ${isBi ? "checked" : ""}>
                             <span class="switch-track"></span>
                         </span>
@@ -1523,7 +1523,7 @@ function _buildDevicesSectionHtml(d) {
                 <div class="device-row ${isBi && needBiToggles ? "device-bi-active" : ""}">
                     <div class="device-header">
                         <div class="device-name-wrap">
-                            <span style="display:inline-flex; flex-shrink:0; color:${isBi ? "var(--accent-emerald)" : "var(--text-secondary)"};">${devIcon}</span>
+                            <span style="display:inline-flex; flex-shrink:0; color:${isBi ? "var(--accent-white)" : "var(--text-secondary)"};">${devIcon}</span>
                             <span class="device-name">${escapeHtml(label)}</span>
                         </div>
                         <button type="button" class="btn btn-icon btn-danger" data-del="${escapeHtml(dev.hwid)}" data-name="${escapeHtml(label)}" aria-label="Удалить ${escapeHtml(label)}" title="Удалить">${_ICONS.trash}</button>
@@ -1542,7 +1542,7 @@ function _buildDevicesSectionHtml(d) {
         if (isWiExhausted) {
             wiHeaderChipHtml = `<span class="chip chip-warn">Белый интернет: 0 ГБ</span>`;
         } else if (stdActive || totalLimit !== wiLimit) {
-            wiHeaderChipHtml = `<span class="chip chip-ok">Белый интернет: ${biAssignedCount} из ${wiLimit}</span>`;
+            wiHeaderChipHtml = `<span class="chip chip-wi">Белый интернет: ${biAssignedCount} из ${wiLimit}</span>`;
         }
     }
 
@@ -1587,12 +1587,12 @@ function _openBiReplaceModal(targetDev, activeBiDevices, onReplaced) {
                 const osText = [dev.platform, dev.os_version].filter(Boolean).join(" ");
                 const meta = [osText, dev.app_version].filter(Boolean).join(" · ");
                 return `
-                    <button type="button" class="item-row" data-replace-from="${escapeHtml(dev.hwid)}" style="text-align:left; cursor:pointer; align-items:center; flex-direction:row; justify-content:space-between; gap:10px; padding:10px 12px; border-color:rgba(52,211,153,0.28);">
+                    <button type="button" class="item-row" data-replace-from="${escapeHtml(dev.hwid)}" style="text-align:left; cursor:pointer; align-items:center; flex-direction:row; justify-content:space-between; gap:10px; padding:10px 12px; border-color:rgba(255,255,255,0.25);">
                         <div style="min-width:0; flex:1;">
                             <div style="font-weight:600; font-size:13px; color:var(--text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(label)}</div>
                             ${meta ? `<div class="muted" style="font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(meta)}</div>` : ""}
                         </div>
-                        <span class="chip chip-ok" style="flex-shrink:0;">Забрать слот →</span>
+                        <span class="chip chip-wi" style="flex-shrink:0;">Забрать слот →</span>
                     </button>
                 `;
             }).join("")}
@@ -1827,11 +1827,11 @@ function _renderProfileTab(body, d, reload) {
                         ${leaderboard.map((item, idx) => {
                             const medal = idx === 0 ? "🥇" : idx === 1 ? "🥈" : idx === 2 ? "🥉" : `#${item.rank}`;
                             return `
-                                <div class="item-row" style="${item.is_you ? "border:1px solid rgba(56,189,248,0.3); background:rgba(56,189,248,0.06);" : ""}">
+                                <div class="item-row ${item.is_you ? "is-current-user" : ""}">
                                     <div class="row">
                                         <span style="font-size:13px; font-weight:500;">
                                             ${medal} ${escapeHtml(item.label)}
-                                            ${item.is_you ? `<span class="chip chip-ok" style="font-size:10px; padding:1px 5px; margin-left:4px;">Вы</span>` : ""}
+                                            ${item.is_you ? `<span class="chip chip-standard" style="font-size:10px; padding:1px 6px; margin-left:4px;">Вы</span>` : ""}
                                         </span>
                                         <span class="muted" style="font-size:12px;">${item.count} активных</span>
                                     </div>

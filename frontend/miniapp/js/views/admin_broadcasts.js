@@ -41,7 +41,7 @@ function _confirmModal(title, summaryText, onConfirm) {
 
 function _statusChip(status) {
     if (status === "completed") return `<span class="chip chip-ok">Завершена</span>`;
-    if (status === "in_progress") return `<span class="chip chip-info">В процессе</span>`;
+    if (status === "in_progress") return `<span class="chip chip-warn">В процессе</span>`;
     if (status === "cancelled") return `<span class="chip chip-warn">Остановлена</span>`;
     return `<span class="chip chip-err">Ошибка</span>`;
 }
@@ -57,7 +57,7 @@ export function renderAdminBroadcastsView(root, state) {
         <section class="card">
             <div class="row">
                 <div class="card-title">Рассылка в Telegram</div>
-                <span class="chip chip-info">HTML · фото URL</span>
+                <span class="chip chip-muted">HTML · фото URL</span>
             </div>
             <form id="broadcastForm" class="field" style="gap:10px;">
                 <div class="field">

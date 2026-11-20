@@ -308,7 +308,7 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                 </div>
                 <div class="filter-pills" style="margin-top:4px;">
                     <span class="chip ${inStd ? "chip-ok" : "chip-muted"}">Стандарт: ${inStd ? "да" : "нет"}</span>
-                    <span class="chip ${inWi ? "chip-info" : "chip-muted"}">БИ: ${inWi ? "да" : "нет"}</span>
+                    <span class="chip ${inWi ? "chip-wi" : "chip-muted"}">БИ: ${inWi ? "да" : "нет"}</span>
                 </div>
             `;
             row.addEventListener("click", () => {
@@ -366,7 +366,7 @@ function _nodeScopeBadges(node) {
     const hasBi = caps.includes("white_internet") || Boolean(links.bi && Object.keys(links.bi).length);
     const badges = [];
     if (hasStd) badges.push(`<span class="chip chip-muted">Стандарт</span>`);
-    if (hasBi) badges.push(`<span class="chip chip-info">БИ</span>`);
+    if (hasBi) badges.push(`<span class="chip chip-wi">БИ</span>`);
     return badges.join("");
 }
 
@@ -480,7 +480,7 @@ export function renderNodesView(root, state, onReload, onSelectNode) {
                     <span class="muted" style="font-size:12px;">#${node.id}</span>
                 </div>
                 <div class="row" style="gap:6px; align-items:center;">
-                    <span class="chip chip-info">${escapeHtml(roleLabel(node.role))}</span>
+                    <span class="chip chip-muted">${escapeHtml(roleLabel(node.role))}</span>
                     <span class="chip ${health.cls}">${escapeHtml(health.text)}</span>
                     <span class="node-chevron">›</span>
                 </div>

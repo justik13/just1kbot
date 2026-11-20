@@ -96,7 +96,7 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
                     </div>
                 </div>
                 <div class="row" style="gap:6px;">
-                    <span class="chip chip-info">${escapeHtml(roleLabel(node.role))}</span>
+                    <span class="chip chip-muted">${escapeHtml(roleLabel(node.role))}</span>
                     <span class="chip ${health.cls}">${escapeHtml(health.text)}</span>
                 </div>
             </div>

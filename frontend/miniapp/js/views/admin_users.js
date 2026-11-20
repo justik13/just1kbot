@@ -464,7 +464,7 @@ export function renderAdminUsersView(root, state) {
             ? `<span class="chip chip-ok">Стандарт: ${u.standard_device_limit} устр.</span>`
             : `<span class="chip chip-muted">Стандарт: нет</span>`;
         const wiBadge = u.wi_active
-            ? `<span class="chip chip-info">Белый интернет: ${u.wi_device_limit} устр.</span>`
+            ? `<span class="chip chip-wi">Белый интернет: ${u.wi_device_limit} устр.</span>`
             : `<span class="chip chip-muted">Белый интернет: нет</span>`;
         const holdBadge = u.financial_hold
             ? `<span class="chip chip-err">Заморожен</span>`

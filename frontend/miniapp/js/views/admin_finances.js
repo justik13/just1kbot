@@ -6,7 +6,7 @@ function _financeStatusChip(status) {
         return `<span class="chip chip-ok">Оплачен</span>`;
     }
     if (status === "pending") {
-        return `<span class="chip chip-info">Ожидает</span>`;
+        return `<span class="chip chip-warn">Ожидает</span>`;
     }
     if (status === "refunded") {
         return `<span class="chip chip-warn">Возврат</span>`;
@@ -299,7 +299,7 @@ function _renderAuditRows(container, items) {
             : "—";
         row.innerHTML = `
             <div class="row">
-                <span class="chip chip-info">${escapeHtml(item.action)}</span>
+                <span class="chip chip-muted">${escapeHtml(item.action)}</span>
                 <span class="muted" style="font-size:11px;">${formatDate(item.created_at)}</span>
             </div>
             <div class="row muted" style="font-size:11px;">

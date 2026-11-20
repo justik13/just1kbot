@@ -81,7 +81,7 @@ export function renderSecurity2FA(root, securityMeta, onVerified) {
         <section class="card">
             <div class="row">
                 <div class="card-title">Подтверждение входа</div>
-                <span class="chip chip-info">TOTP 2FA</span>
+                <span class="chip chip-muted">TOTP 2FA</span>
             </div>
             <p class="muted">
                 Введите 6-значный код из приложения-аутентификатора.

@@ -1,12 +1,12 @@
-import { api } from "./api.js?v=2.6.3";
-import { escapeHtml, showToast } from "./ui.js?v=2.6.3";
-import { renderSecurity2FA } from "./views/security_2fa.js?v=2.6.3";
-import { renderNodesView, renderSubscriptionSettingsView } from "./views/nodes.js?v=2.6.3";
-import { renderNodeDetailView } from "./views/node_detail.js?v=2.6.3";
-import { renderAdminUsersView } from "./views/admin_users.js?v=2.6.3";
-import { clearBroadcastPollTimer, renderAdminBroadcastsView } from "./views/admin_broadcasts.js?v=2.6.3";
-import { renderAdminFinancesView } from "./views/admin_finances.js?v=2.6.3";
-import { loadAndRenderUserCabinet } from "./views/user_cabinet.js?v=2.6.3";
+import { api } from "./api.js?v=2.6.4";
+import { escapeHtml, showToast } from "./ui.js?v=2.6.4";
+import { renderSecurity2FA } from "./views/security_2fa.js?v=2.6.4";
+import { renderNodesView, renderSubscriptionSettingsView } from "./views/nodes.js?v=2.6.4";
+import { renderNodeDetailView } from "./views/node_detail.js?v=2.6.4";
+import { renderAdminUsersView } from "./views/admin_users.js?v=2.6.4";
+import { clearBroadcastPollTimer, renderAdminBroadcastsView } from "./views/admin_broadcasts.js?v=2.6.4";
+import { renderAdminFinancesView } from "./views/admin_finances.js?v=2.6.4";
+import { loadAndRenderUserCabinet } from "./views/user_cabinet.js?v=2.6.4";
 
 const appState = {
     user: null,
@@ -67,7 +67,7 @@ function _updateTelegramBackButton(onBack) {
 function _renderErrorCard(root, title, desc) {
     root.innerHTML = `
         <section class="card card-center">
-            <span class="chip chip-info">Доступ</span>
+            <span class="chip chip-muted">Доступ</span>
             <div class="card-title">${escapeHtml(title)}</div>
             <p class="muted">${escapeHtml(desc)}</p>
         </section>
