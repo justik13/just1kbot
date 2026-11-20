@@ -205,7 +205,13 @@ check_bot_update_on_entry() {
     origin_url=$(git -C "$PROJECT_DIR" remote get-url origin 2>/dev/null || echo "")
     [[ -n "$origin_url" ]] || return 0
 
-    branch="main"
+    local env_branch=""
+    if [[ -f "${PROJECT_DIR}/.env" ]]; then
+        env_branch=$(grep -E '^JUST1KBOT_BRANCH=' "${PROJECT_DIR}/.env" | tail -n1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d '[:space:]' || true)
+    fi
+    branch=$(git -C "$PROJECT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+    [[ "$branch" == "HEAD" || -z "$branch" ]] && branch="main"
+    branch="${JUST1KBOT_BRANCH:-${env_branch:-$branch}}"
     local_sha=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "")
     [[ "$local_sha" =~ ^[0-9a-f]{40}$ ]] || return 0
 
@@ -704,35 +710,29 @@ cmd_update() {
         fi
     fi
 
+    local env_branch=""
+    if [[ -f "${PROJECT_DIR}/.env" ]]; then
+        env_branch=$(grep -E '^JUST1KBOT_BRANCH=' "${PROJECT_DIR}/.env" | tail -n1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d '[:space:]' || true)
+    fi
+    local target_branch="${JUST1KBOT_BRANCH:-${env_branch:-}}"
+
     local current_branch
     current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
     if [[ "$current_branch" == "HEAD" ]] || [[ -z "$current_branch" ]]; then
-        warn "Обнаружено состояние detached HEAD. Переключаемся на основную ветку main..."
-        if ! git checkout main 2>/dev/null; then
-            error "Не удалось переключиться на ветку main из detached HEAD."
+        local checkout_branch="${target_branch:-main}"
+        warn "Обнаружено состояние detached HEAD. Переключаемся на ветку $checkout_branch..."
+        if ! git checkout "$checkout_branch" 2>/dev/null; then
+            error "Не удалось переключиться на ветку $checkout_branch из detached HEAD."
             return 1
         fi
-        current_branch="main"
-    elif [[ "$current_branch" != "main" ]]; then
-        warn "⚠️ Текущая ветка '$current_branch' отличается от основной production-ветки 'main'!"
-        warn "Production обязан работать на ветке main для обеспечения стабильности."
-        local switch_to_main="y"
-        if [[ -t 0 ]]; then
-            if ! read -r -t 60 -p "Переключиться на ветку main перед обновлением? (Y/n): " switch_to_main; then
-                echo ""
-                switch_to_main="y"
-            fi
+        current_branch="$checkout_branch"
+    elif [[ -n "$target_branch" && "$current_branch" != "$target_branch" ]]; then
+        info "Переключаемся на целевую ветку $target_branch (задана в конфигурации)..."
+        if ! git checkout "$target_branch" 2>/dev/null; then
+            error "Не удалось переключиться на ветку $target_branch! Проверьте git status."
+            return 1
         fi
-        if [[ ! "$switch_to_main" =~ ^[Nn]$ ]]; then
-            info "Переключаемся на ветку main..."
-            if ! git checkout main 2>/dev/null; then
-                error "Не удалось переключиться на ветку main! Проверьте git status."
-                return 1
-            fi
-            current_branch="main"
-        else
-            warn "Продолжаем обновление на ветке '$current_branch' по запросу администратора."
-        fi
+        current_branch="$target_branch"
     fi
 
     local rollback_commit=""
