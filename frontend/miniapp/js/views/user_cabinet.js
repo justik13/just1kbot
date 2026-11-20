@@ -763,13 +763,17 @@ function _openWiManageModal(d, onReload) {
             </div>
             ${canAddSlot ? `
                 <div class="field">
-                    <label>Дополнительный слот до конца срока</label>
+                    <label>Дополнительный слот (до ${wiMaxDevices} слотов в тарифе)</label>
                     <button id="modalWiSelectSlotBtn" type="button" class="price-tile ${selectedItem && selectedItem.kind === "slot" ? "active" : ""}" style="width:100%; flex-direction:row; justify-content:space-between; padding:11px 14px;">
                         <span class="price-tile-top">+1 слот устройства (+${addSlotGb} ГБ)</span>
                         <span class="price-tile-price">${addSlotPrice} ₽</span>
                     </button>
                 </div>
-            ` : ""}
+            ` : (wiCurLimit >= wiMaxDevices ? `
+                <div class="notice-box notice-info" style="font-size:12px; margin-top:2px;">
+                    <span>Достигнут максимум тарифа (${wiMaxDevices} слота). Больше слотов добавить нельзя.</span>
+                </div>
+            ` : "")}
             ${wiPacks.length ? `
                 <div class="field">
                     <label>Дополнительный трафик</label>
@@ -1538,7 +1542,7 @@ function _buildDevicesSectionHtml(d) {
             <div class="row" style="align-items:center; gap:8px;">
                 <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; min-width:0;">
                     <div class="card-title" style="margin:0;">Устройства</div>
-                    <span class="chip ${isLimitReached ? "chip-warn" : "chip-muted"}">${devices.length} из ${totalLimit}</span>
+                    <span class="chip ${isLimitReached ? "chip-warn" : "chip-muted"}">Подключено: ${devices.length} из ${totalLimit}</span>
                     ${wiHeaderChipHtml}
                 </div>
                 <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">

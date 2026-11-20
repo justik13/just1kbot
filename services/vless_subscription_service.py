@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import logging
 import os
 import re
@@ -50,6 +51,7 @@ class VlessSubscriptionService:
     ) -> str:
         clean_flag = (flag or "🌐").strip()
         clean_name = str(raw_name or "")
+        clean_name = re.sub(r"(?i)\s*\bexit\b", "", clean_name)
         for ch in ("?", "&", "\r", "\n"):
             clean_name = clean_name.replace(ch, " ")
         clean_name = clean_name.strip()
@@ -151,7 +153,12 @@ class VlessSubscriptionService:
         seen_links: set[str] = set()
         eff_uuid = client_uuid or subscription.uuid
 
-        for hub in ru_hubs:
+        selected_hubs: list[Server] = []
+        if ru_hubs:
+            hub_idx = int(hashlib.md5(eff_uuid.encode()).hexdigest(), 16) % len(ru_hubs)
+            selected_hubs = [ru_hubs[hub_idx]]
+
+        for hub in selected_hubs:
             hub_extra = hub.extra_data if isinstance(hub.extra_data, dict) else {}
             port, fp = VlessSubscriptionService._resolve_port_and_fp(hub_extra)
             domain = str(hub_extra.get("domain") or hub_extra.get("vless_domain") or "").strip().lower()
@@ -251,6 +258,7 @@ class VlessSubscriptionService:
                         continue
                     flag = (ex.country_flag or "🌐").strip()
                     raw_name = str(ex_extra.get("vless_name") or ex.name or loc_code).strip()
+                    raw_name = re.sub(r"(?i)\s*\bexit\b", "", raw_name)
                     for ch in ("?", "&", "\r", "\n"):
                         raw_name = raw_name.replace(ch, " ")
                     raw_name = raw_name.strip()

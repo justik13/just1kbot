@@ -959,6 +959,7 @@ async def serve_unified_subscription_feed(
                     cdn_label_mode = str(await get_system_setting(session, "bi_cdn_label_mode", "name") or "name")
                     cdn_yandex_label = str(await get_system_setting(session, "bi_cdn_yandex_label", "Yandex") or "Yandex")
                     cdn_turboflare_label = str(await get_system_setting(session, "bi_cdn_turboflare_label", "Turboflare") or "Turboflare")
+                    seen_bi_fragments: set[str] = set()
                     for wi_server in ready_hubs:
                         wi_links = VlessSubscriptionService.generate_bi_xhttp_links(
                             wi_sub,
@@ -969,7 +970,11 @@ async def serve_unified_subscription_feed(
                             cdn_turboflare_label=cdn_turboflare_label,
                             client_uuid=device_client_uuid,
                         )
-                        all_links.extend(wi_links)
+                        for lk in wi_links:
+                            frag = lk.split("#", 1)[-1] if "#" in lk else lk
+                            if frag not in seen_bi_fragments:
+                                seen_bi_fragments.add(frag)
+                                all_links.append(lk)
                     if is_new_device and device_client_uuid and wi_hubs:
                         wi_sub.desired_version = (getattr(wi_sub, "desired_version", 1) or 1) + 1
                         wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE

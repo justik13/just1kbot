@@ -128,5 +128,5 @@ def test_generate_vless_links_standard_tcp_vision():
     assert "security=tls" in link
     assert "alpn=http/1.1" in link
     assert "sni=ruhub.just1k.pro" in link
-    assert "#%F0%9F%87%AA%F0%9F%87%AA%20%D0%AD%D1%81%D1%82%D0%BE%D0%BD%D0%B8%D1%8F%20Exit" in link
+    assert "#%F0%9F%87%AA%F0%9F%87%AA%20%D0%AD%D1%81%D1%82%D0%BE%D0%BD%D0%B8%D1%8F" in link
 
