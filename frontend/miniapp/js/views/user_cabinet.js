@@ -1066,8 +1066,8 @@ function _buildGuideHtml(subUrl, backupSubUrl, isActive) {
                         <span class="muted" style="font-size:10px; margin-top:2px;">Используйте прямое подключение, если по основной ссылке есть задержки</span>
                     </div>
                 ` : ""}
-                <div class="notice-box" style="flex-direction:column; align-items:flex-start; gap:6px; font-size:12px;">
-                    <strong>Частые вопросы</strong>
+                <div class="troubleshoot-box" style="margin-top:6px;">
+                    <div class="troubleshoot-title">Частые вопросы</div>
                     <span>• Российские банки, Госуслуги и локальные сервисы работают напрямую — выключать приложение не нужно.</span>
                     <span>• После добавления подписки используйте кнопку «Подключить» на главном экране или включите автообновление в приложении.</span>
                     <span>• При смене устройства старое можно удалить в списке устройств ниже — ссылка подключения при этом останется прежней.</span>
@@ -1200,10 +1200,10 @@ function _renderConnectTab(body, d, reload, root) {
                     <button id="copySubBtn" type="button" class="btn btn-sm">${_ICONS.copy} Копировать ссылку</button>
                 </div>
             </div>
-            <div class="notice-box" style="flex-direction:column; align-items:flex-start; gap:6px; font-size:12px; margin-top:10px;">
-                <div style="display:flex; align-items:center; gap:6px;">
+            <div class="troubleshoot-box">
+                <div class="troubleshoot-title">
                     <span class="status-dot" style="width:6px; height:6px; background:var(--accent-sky);"></span>
-                    <strong style="color:var(--text-primary);">Если не открываются сайты:</strong>
+                    <span>Если не открываются сайты:</span>
                 </div>
                 <span>• Выберите другую локацию в списке приложения</span>
                 <span>• Обновите подписку (потяните список серверов вниз или нажмите ⟳)</span>
@@ -1325,7 +1325,7 @@ function _renderTariffsTab(body, d, reload) {
             `}
         </section>
 
-        <section class="plan-card ${wi.active ? "plan-active" : ""}">
+        <section class="plan-card plan-featured ${wi.active ? "plan-active" : ""}">
             <div class="row">
                 <div>
                     <div class="card-title">Белый интернет</div>
@@ -1507,7 +1507,7 @@ function _buildDevicesSectionHtml(d) {
             let biRowHtml = "";
             if (needBiToggles) {
                 biRowHtml = `
-                    <label style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding-top:7px; margin-top:2px; border-top:1px solid var(--border-subtle); cursor:pointer;">
+                    <label class="device-bi-row">
                         <span style="font-size:12px; font-weight:500; color:${isBi ? "var(--text-primary)" : "var(--text-secondary)"};">
                             Белый интернет
                         </span>
@@ -1520,15 +1520,15 @@ function _buildDevicesSectionHtml(d) {
             }
 
             return `
-                <div class="item-row" style="gap:5px; padding:10px 12px; ${isBi && needBiToggles ? "border-color:rgba(52,211,153,0.22);" : ""}">
-                    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
-                        <div style="display:flex; align-items:center; gap:7px; flex:1; min-width:0;">
+                <div class="device-row ${isBi && needBiToggles ? "device-bi-active" : ""}">
+                    <div class="device-header">
+                        <div class="device-name-wrap">
                             <span style="display:inline-flex; flex-shrink:0; color:${isBi ? "var(--accent-emerald)" : "var(--text-secondary)"};">${devIcon}</span>
-                            <span style="font-weight:600; font-size:14px; line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(label)}</span>
+                            <span class="device-name">${escapeHtml(label)}</span>
                         </div>
-                        <button type="button" class="btn btn-sm btn-danger" data-del="${escapeHtml(dev.hwid)}" data-name="${escapeHtml(label)}" aria-label="Удалить ${escapeHtml(label)}" title="Удалить" style="flex-shrink:0; padding:4px 8px; min-height:28px;">${_ICONS.trash}</button>
+                        <button type="button" class="btn btn-icon btn-danger" data-del="${escapeHtml(dev.hwid)}" data-name="${escapeHtml(label)}" aria-label="Удалить ${escapeHtml(label)}" title="Удалить">${_ICONS.trash}</button>
                     </div>
-                    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:11px; line-height:1.3;">
+                    <div class="device-meta-row">
                         <span class="muted" style="min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(leftMeta)}</span>
                         <span class="muted" style="flex-shrink:0; font-variant-numeric:tabular-nums;">${escapeHtml(dateLabel)}</span>
                     </div>
@@ -1540,9 +1540,9 @@ function _buildDevicesSectionHtml(d) {
     let wiHeaderChipHtml = "";
     if (wiActive) {
         if (isWiExhausted) {
-            wiHeaderChipHtml = `<span class="chip chip-warn" style="font-size:11px;">Белый интернет: 0 ГБ</span>`;
+            wiHeaderChipHtml = `<span class="chip chip-warn">Белый интернет: 0 ГБ</span>`;
         } else if (stdActive || totalLimit !== wiLimit) {
-            wiHeaderChipHtml = `<span class="chip chip-ok" style="font-size:11px;">Белый интернет: ${biAssignedCount} из ${wiLimit}</span>`;
+            wiHeaderChipHtml = `<span class="chip chip-ok">Белый интернет: ${biAssignedCount} из ${wiLimit}</span>`;
         }
     }
 
@@ -1555,8 +1555,8 @@ function _buildDevicesSectionHtml(d) {
                     ${wiHeaderChipHtml}
                 </div>
                 <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
-                    <button type="button" class="btn btn-sm" id="refreshDevicesBtn" aria-label="Обновить" title="Обновить" style="padding:6px 10px; min-height:32px;">${_ICONS.refresh}</button>
-                    ${devices.length > 1 ? `<button type="button" class="btn btn-sm btn-danger" id="resetAllDevicesBtn" style="font-size:12px; padding:6px 10px; min-height:32px;">Сбросить</button>` : ""}
+                    <button type="button" class="btn btn-icon" id="refreshDevicesBtn" aria-label="Обновить" title="Обновить">${_ICONS.refresh}</button>
+                    ${devices.length > 1 ? `<button type="button" class="btn btn-sm btn-danger" id="resetAllDevicesBtn">Сбросить</button>` : ""}
                 </div>
             </div>
             ${isLimitReached ? `
@@ -1772,7 +1772,7 @@ function _renderProfileTab(body, d, reload) {
             <div class="stat-box"><div class="stat-val">${ref.invited_count ?? 0}</div><div class="stat-lbl">Приглашено</div></div>
             <div class="stat-box"><div class="stat-val">${ref.active_count ?? 0}</div><div class="stat-lbl">Активных</div></div>
             <div class="stat-box"><div class="stat-val">${ref.rate_pct ?? 15}%</div><div class="stat-lbl">Ставка</div></div>
-            <div class="stat-box"><div class="stat-val">${bal.bonus ?? 0} ₽</div><div class="stat-lbl">Бонусы</div></div>
+            <div class="stat-box stat-lead"><div class="stat-val">${bal.bonus ?? 0} ₽</div><div class="stat-lbl">Бонусы</div></div>
         </section>
 
         <section class="card">
