@@ -660,7 +660,7 @@ function _openWiPurchaseModal(d, mode, onReload) {
             </div>
             <label class="toggle-row">
                 <span class="toggle-label">Списать с баланса (доступно ${bal.total} ₽)</span>
-                <span class="switch">
+                <span class="switch switch-wi">
                     <input id="modalWiBalChk" type="checkbox" ${useBalance ? "checked" : ""}>
                     <span class="switch-track"></span>
                 </span>
@@ -793,7 +793,7 @@ function _openWiManageModal(d, onReload) {
             ${selectedItem ? `
                 <label class="toggle-row">
                     <span class="toggle-label">Списать с баланса (доступно ${bal.total} ₽)</span>
-                    <span class="switch">
+                    <span class="switch switch-wi">
                         <input id="modalWiManageBalChk" type="checkbox" ${useBalance ? "checked" : ""}>
                         <span class="switch-track"></span>
                     </span>
@@ -1202,7 +1202,7 @@ function _renderConnectTab(body, d, reload, root) {
             </div>
             <div class="troubleshoot-box">
                 <div class="troubleshoot-title">
-                    <span class="status-dot" style="width:6px; height:6px; background:var(--accent-sky);"></span>
+                    <span class="status-dot warn" style="width:6px; height:6px;"></span>
                     <span>Если не открываются сайты:</span>
                 </div>
                 <span>• Выберите другую локацию в списке приложения</span>
@@ -1284,7 +1284,7 @@ function _renderTariffsTab(body, d, reload) {
                 <div class="balance-value">${bal.total} ₽</div>
                 <div class="balance-sub">Основной: ${bal.real} ₽ · Бонусы: ${bal.bonus} ₽</div>
             </div>
-            <button id="topupBtn" type="button" class="btn btn-primary btn-sm">${_ICONS.plus} Пополнить</button>
+            <button id="topupBtn" type="button" class="btn btn-secondary btn-sm">${_ICONS.plus} Пополнить</button>
         </section>
 
         <div class="muted" style="font-size:12px; padding:0 2px;">
@@ -1367,7 +1367,7 @@ function _renderTariffsTab(body, d, reload) {
                 </div>
                 <label class="toggle-row">
                     <span class="toggle-label">Автопродление с баланса</span>
-                    <span class="switch">
+                    <span class="switch switch-wi">
                         <input id="wiAutoRenewChk" type="checkbox" ${wi.auto_renew_enabled ? "checked" : ""}>
                         <span class="switch-track"></span>
                     </span>
@@ -1548,16 +1548,16 @@ function _buildDevicesSectionHtml(d) {
 
     return `
         <section class="card" style="gap:10px;">
-            <div class="row" style="align-items:center; gap:8px;">
-                <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; min-width:0;">
-                    <div class="card-title" style="margin:0;">Устройства</div>
-                    <span class="chip ${isLimitReached ? "chip-warn" : "chip-muted"}">Подключено: ${devices.length} из ${totalLimit}</span>
-                    ${wiHeaderChipHtml}
-                </div>
+            <div class="devices-header-row">
+                <div class="card-title" style="margin:0;">Устройства</div>
                 <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
                     <button type="button" class="btn btn-icon" id="refreshDevicesBtn" aria-label="Обновить" title="Обновить">${_ICONS.refresh}</button>
                     ${devices.length > 1 ? `<button type="button" class="btn btn-sm btn-danger" id="resetAllDevicesBtn">Сбросить</button>` : ""}
                 </div>
+            </div>
+            <div class="devices-chips-row">
+                <span class="chip ${isLimitReached ? "chip-warn" : "chip-muted"}">Подключено: ${devices.length} из ${totalLimit}</span>
+                ${wiHeaderChipHtml}
             </div>
             ${isLimitReached ? `
                 <div class="notice-box notice-warn" style="margin:0;">
@@ -1765,7 +1765,7 @@ function _renderProfileTab(body, d, reload) {
                 <div class="balance-value">${bal.total} ₽</div>
                 <div class="balance-sub">Основной: ${bal.real} ₽ · Бонусы: ${bal.bonus} ₽</div>
             </div>
-            <button id="profileTopupBtn" type="button" class="btn btn-primary btn-sm">${_ICONS.plus} Пополнить</button>
+            <button id="profileTopupBtn" type="button" class="btn btn-secondary btn-sm">${_ICONS.plus} Пополнить</button>
         </section>
 
         <section class="stats-strip">

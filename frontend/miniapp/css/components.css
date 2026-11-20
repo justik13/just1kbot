@@ -644,6 +644,20 @@
     gap: 6px;
 }
 
+.devices-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.devices-chips-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
 .device-row {
     background: var(--bg-elevated);
     border: 1px solid var(--border-subtle);
@@ -1100,6 +1114,11 @@
     background: radial-gradient(ellipse at top, rgba(255, 255, 255, 0.04), transparent 70%), var(--bg-surface);
 }
 
+.plan-wi .progress-fill {
+    background: var(--accent-white);
+    box-shadow: 0 0 8px rgba(255, 255, 255, 0.4);
+}
+
 .item-row.is-current-user {
     border-color: rgba(255, 255, 255, 0.25);
     background: rgba(255, 255, 255, 0.04);
@@ -1199,13 +1218,15 @@
 }
 
 .price-tile.active {
-    background: var(--accent-white);
-    border-color: var(--accent-white);
-    color: #050505;
+    background: rgba(255, 255, 255, 0.10);
+    border-color: rgba(255, 255, 255, 0.50);
+    color: var(--text-primary);
+    box-shadow: 0 0 12px rgba(255, 255, 255, 0.10);
 }
 
 .price-tile.active .price-tile-price {
-    color: #050505;
+    color: #ffffff;
+    font-weight: 700;
 }
 
 .price-tile:disabled {
