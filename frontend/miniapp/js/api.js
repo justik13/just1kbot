@@ -123,7 +123,7 @@ export const api = {
             method: "POST",
             body: JSON.stringify({ text }),
         }),
-    listBroadcasts: () => requestJson("/api/app/admin/broadcasts"),
+    listBroadcasts: (offset = 0, limit = 15) => requestJson(`/api/app/admin/broadcasts?offset=${encodeURIComponent(offset)}&limit=${encodeURIComponent(limit)}`),
     previewBroadcast: (targetAudience) =>
         requestJson("/api/app/admin/broadcasts/preview", {
             method: "POST",

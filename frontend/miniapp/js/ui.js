@@ -368,3 +368,61 @@ export function renderFlagHtml(flagOrCode, width = 20) {
     }
     return `<span style="font-size:${Math.max(14, width - 2)}px; line-height:1;">${escapeHtml(flagOrCode || "🌐")}</span>`;
 }
+
+export function renderPagination({
+    container,
+    total = 0,
+    offset = 0,
+    limit = 25,
+    onPage,
+    scrollTarget = null,
+    entityName = "записей",
+}) {
+    if (!container) return;
+    const curTotal = Math.max(0, Number(total) || 0);
+    const curOffset = Math.max(0, Number(offset) || 0);
+    const curLimit = Math.max(1, Number(limit) || 25);
+    const currentPage = Math.floor(curOffset / curLimit) + 1;
+    const totalPages = Math.max(1, Math.ceil(curTotal / curLimit));
+
+    if (curTotal <= curLimit && curOffset === 0) {
+        container.innerHTML = `<span class="pagination-info">Всего: ${curTotal} ${escapeHtml(entityName)}</span>`;
+        return;
+    }
+
+    const hasPrev = curOffset > 0;
+    const hasNext = curOffset + curLimit < curTotal;
+    const startIdx = curOffset + 1;
+    const endIdx = Math.min(curOffset + curLimit, curTotal);
+
+    container.className = "pagination-bar";
+    container.innerHTML = `
+        <span class="pagination-info">${startIdx}–${endIdx} из ${curTotal} · Стр. ${currentPage}/${totalPages}</span>
+        <div class="pagination-controls">
+            <button type="button" class="btn btn-sm" data-pg="prev" ${hasPrev ? "" : "disabled"}>← Назад</button>
+            <button type="button" class="btn btn-sm" data-pg="next" ${hasNext ? "" : "disabled"}>Далее →</button>
+        </div>
+    `;
+
+    const prevBtn = container.querySelector('[data-pg="prev"]');
+    if (prevBtn && hasPrev) {
+        prevBtn.addEventListener("click", () => {
+            const nextOffset = Math.max(0, curOffset - curLimit);
+            onPage(nextOffset);
+            if (scrollTarget) {
+                scrollTarget.scrollIntoView({ behavior: "smooth", block: "start" });
+            }
+        });
+    }
+
+    const nextBtn = container.querySelector('[data-pg="next"]');
+    if (nextBtn && hasNext) {
+        nextBtn.addEventListener("click", () => {
+            const nextOffset = curOffset + curLimit;
+            onPage(nextOffset);
+            if (scrollTarget) {
+                scrollTarget.scrollIntoView({ behavior: "smooth", block: "start" });
+            }
+        });
+    }
+}

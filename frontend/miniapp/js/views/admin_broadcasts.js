@@ -1,5 +1,5 @@
 import { api } from "../api.js";
-import { escapeHtml, formatDate, openModal, showConfirmModal, showToast } from "../ui.js";
+import { escapeHtml, formatDate, openModal, renderPagination, showConfirmModal, showToast } from "../ui.js";
 
 let _pollTimer = null;
 
@@ -142,19 +142,26 @@ export function renderAdminBroadcastsView(root, state) {
                 <div class="card-title">История рассылок</div>
                 <button id="reloadBcBtn" type="button" class="btn btn-sm">Обновить</button>
             </div>
+            <div id="bcPagerTop"></div>
             <div id="bcListContainer" style="display:flex; flex-direction:column; gap:8px;"></div>
+            <div id="bcPagerBottom"></div>
         </section>
     `;
 
-    const reloadBroadcasts = async (silent = false) => {
+    const reloadBroadcasts = async (silent = false, offset = state.broadcastsOffset || 0) => {
         try {
-            const res = await api.listBroadcasts();
+            state.broadcastsOffset = offset;
+            const res = await api.listBroadcasts(offset, 15);
             state.broadcastsData = res.broadcasts || [];
+            state.broadcastsTotal = res.total || 0;
+            state.broadcastsOffset = res.offset || 0;
+            state.broadcastsLimit = res.limit || 15;
             if (state.adminTab === "broadcasts" && state.mode === "admin") {
                 _renderHistoryList(root.querySelector("#bcListContainer"), state, reloadBroadcasts);
+                _renderBcPagination(root, state, reloadBroadcasts);
                 const hasRunning = state.broadcastsData.some((b) => b.status === "in_progress");
                 if (hasRunning && _pollTimer === null) {
-                    _pollTimer = setInterval(() => reloadBroadcasts(true), 4000);
+                    _pollTimer = setInterval(() => reloadBroadcasts(true, state.broadcastsOffset || 0), 4000);
                 } else if (!hasRunning) {
                     clearBroadcastPollTimer();
                 }
@@ -164,7 +171,7 @@ export function renderAdminBroadcastsView(root, state) {
         }
     };
 
-    root.querySelector("#reloadBcBtn").addEventListener("click", () => reloadBroadcasts(false));
+    root.querySelector("#reloadBcBtn").addEventListener("click", () => reloadBroadcasts(false, state.broadcastsOffset || 0));
 
     root.querySelector("#bcPreviewBtn").addEventListener("click", async () => {
         const audience = root.querySelector("#bcAudienceSelect").value;
@@ -293,9 +300,33 @@ export function renderAdminBroadcastsView(root, state) {
     });
 
     _renderHistoryList(root.querySelector("#bcListContainer"), state, reloadBroadcasts);
+    _renderBcPagination(root, state, reloadBroadcasts);
     if (broadcasts.some((b) => b.status === "in_progress")) {
-        _pollTimer = setInterval(() => reloadBroadcasts(true), 4000);
+        _pollTimer = setInterval(() => reloadBroadcasts(true, state.broadcastsOffset || 0), 4000);
     }
+}
+
+function _renderBcPagination(root, state, reloadBroadcasts) {
+    const listEl = root.querySelector("#bcListContainer");
+    const onPage = (newOffset) => reloadBroadcasts(false, newOffset);
+    renderPagination({
+        container: root.querySelector("#bcPagerTop"),
+        total: state.broadcastsTotal || 0,
+        offset: state.broadcastsOffset || 0,
+        limit: state.broadcastsLimit || 15,
+        onPage,
+        scrollTarget: listEl,
+        entityName: "рассылок",
+    });
+    renderPagination({
+        container: root.querySelector("#bcPagerBottom"),
+        total: state.broadcastsTotal || 0,
+        offset: state.broadcastsOffset || 0,
+        limit: state.broadcastsLimit || 15,
+        onPage,
+        scrollTarget: listEl,
+        entityName: "рассылок",
+    });
 }
 
 function _renderHistoryList(container, state, reloadBroadcasts) {

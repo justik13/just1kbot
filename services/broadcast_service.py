@@ -454,14 +454,16 @@ async def cancel_broadcast(
     return serialize_broadcast(bp)
 
 
-async def list_broadcasts(session: AsyncSession, limit: int = 20) -> list[dict[str, Any]]:
+async def list_broadcasts(session: AsyncSession, limit: int = 20, offset: int = 0) -> tuple[list[dict[str, Any]], int]:
+    total = await session.scalar(select(func.count(BroadcastProgress.id))) or 0
     stmt = (
         select(BroadcastProgress)
         .order_by(desc(BroadcastProgress.id))
+        .offset(max(0, offset))
         .limit(max(1, min(limit, 50)))
     )
     rows = (await session.scalars(stmt)).all()
-    return [serialize_broadcast(row) for row in rows]
+    return [serialize_broadcast(row) for row in rows], int(total)
 
 
 async def resume_pending_broadcasts(bot: Bot) -> None:

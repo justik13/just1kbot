@@ -1,5 +1,5 @@
 import { api } from "../api.js";
-import { copyText, escapeHtml, formatDate, openModal, showConfirmModal, showToast } from "../ui.js";
+import { copyText, escapeHtml, formatDate, openModal, renderPagination, showConfirmModal, showToast } from "../ui.js";
 
 function _openDirectMessageModal(user) {
     const uname = user.username ? `@${user.username}` : (user.first_name || `ID ${user.telegram_id}`);
@@ -396,8 +396,9 @@ export function renderAdminUsersView(root, state) {
                 <input id="userSearchInput" class="input" type="search" value="${escapeHtml(query)}" placeholder="Telegram ID, @username или имя">
                 <button type="submit" class="btn btn-primary btn-sm">Найти</button>
             </form>
+            <div id="usersPagerTop"></div>
             <div id="usersListContainer" class="nodes-list" style="display:flex; flex-direction:column; gap:8px;"></div>
-            <div id="usersPager" class="row" style="margin-top:6px;"></div>
+            <div id="usersPagerBottom"></div>
         </section>
     `;
 
@@ -426,29 +427,28 @@ export function renderAdminUsersView(root, state) {
         reload(val, state.usersFilter || "all", 0);
     });
 
-    const pagerEl = root.querySelector("#usersPager");
-    const totalMatching = Number(data.total ?? users.length);
-    const curOffset = Number(data.offset ?? state.usersOffset ?? 0);
-    const curLimit = Number(data.limit || 25);
-    if (totalMatching <= curLimit && curOffset === 0) {
-        pagerEl.innerHTML = `<span class="muted" style="font-size:11px;">Найдено: ${totalMatching}</span>`;
-    } else {
-        const hasPrev = curOffset > 0;
-        const hasNext = curOffset + curLimit < totalMatching;
-        pagerEl.innerHTML = `
-            <span class="muted" style="font-size:11px;">${curOffset + 1}–${Math.min(curOffset + curLimit, totalMatching)} из ${totalMatching}</span>
-            <div class="btn-group">
-                <button type="button" class="btn btn-sm" id="uPgPrev" ${hasPrev ? "" : "disabled"}>Назад</button>
-                <button type="button" class="btn btn-sm" id="uPgNext" ${hasNext ? "" : "disabled"}>Далее</button>
-            </div>
-        `;
-        if (hasPrev) {
-            pagerEl.querySelector("#uPgPrev").addEventListener("click", () => reload(state.usersQuery || "", state.usersFilter || "all", Math.max(0, curOffset - curLimit)));
-        }
-        if (hasNext) {
-            pagerEl.querySelector("#uPgNext").addEventListener("click", () => reload(state.usersQuery || "", state.usersFilter || "all", curOffset + curLimit));
-        }
-    }
+    const searchFormEl = root.querySelector("#userSearchForm");
+    const onUserPage = (newOffset) => reload(state.usersQuery || "", state.usersFilter || "all", newOffset);
+
+    renderPagination({
+        container: root.querySelector("#usersPagerTop"),
+        total: Number(data.total ?? users.length),
+        offset: Number(data.offset ?? state.usersOffset ?? 0),
+        limit: Number(data.limit || 25),
+        onPage: onUserPage,
+        scrollTarget: searchFormEl,
+        entityName: "пользователей",
+    });
+
+    renderPagination({
+        container: root.querySelector("#usersPagerBottom"),
+        total: Number(data.total ?? users.length),
+        offset: Number(data.offset ?? state.usersOffset ?? 0),
+        limit: Number(data.limit || 25),
+        onPage: onUserPage,
+        scrollTarget: searchFormEl,
+        entityName: "пользователей",
+    });
 
     const listEl = root.querySelector("#usersListContainer");
     if (!users.length) {

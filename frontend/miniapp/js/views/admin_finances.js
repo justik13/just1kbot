@@ -1,5 +1,5 @@
 import { api } from "../api.js";
-import { escapeHtml, formatDate, showConfirmModal, showToast } from "../ui.js";
+import { escapeHtml, formatDate, renderPagination, showConfirmModal, showToast } from "../ui.js";
 
 function _financeStatusChip(status) {
     if (status === "paid") {
@@ -106,7 +106,9 @@ export function renderAdminFinancesView(root, state) {
                         </div>
                     </div>
                 </form>
+                <div id="finPagerTop"></div>
                 <div id="finListContainer" style="display:flex; flex-direction:column; gap:8px;"></div>
+                <div id="finPagerBottom"></div>
             `
                     : `
                 <form id="finFilterForm" class="row" style="flex-wrap:nowrap;">
@@ -123,10 +125,11 @@ export function renderAdminFinancesView(root, state) {
                     </select>
                     <button type="submit" class="btn btn-primary btn-sm">Найти</button>
                 </form>
+                <div id="finPagerTop"></div>
                 <div id="finListContainer" style="display:flex; flex-direction:column; gap:8px;"></div>
+                <div id="finPagerBottom"></div>
             `
             }
-            <div class="row" id="finPagerRow"></div>
         </section>
     `;
 
@@ -231,7 +234,7 @@ export function renderAdminFinancesView(root, state) {
             await loadAudit(0);
         });
         _renderAuditRows(root.querySelector("#finListContainer"), auditData.items || []);
-        _renderPager(root.querySelector("#finPagerRow"), auditData, loadAudit);
+        _renderPager(root, auditData, loadAudit, "событий");
     } else {
         root.querySelector("#finFilterForm").addEventListener("submit", async (e) => {
             e.preventDefault();
@@ -244,7 +247,7 @@ export function renderAdminFinancesView(root, state) {
             await loadFinances(0);
         });
         _renderFinanceRows(root.querySelector("#finListContainer"), finData.items || []);
-        _renderPager(root.querySelector("#finPagerRow"), finData, loadFinances);
+        _renderPager(root, finData, loadFinances, "заказов");
     }
 }
 
@@ -315,27 +318,24 @@ function _renderAuditRows(container, items) {
     });
 }
 
-function _renderPager(pagerEl, data, onPage) {
-    const total = data.total || 0;
-    const offset = data.offset || 0;
-    const limit = data.limit || 25;
-    if (total <= limit && offset === 0) {
-        pagerEl.innerHTML = `<span class="muted" style="font-size:11px;">Всего: ${total}</span>`;
-        return;
-    }
-    const hasPrev = offset > 0;
-    const hasNext = offset + limit < total;
-    pagerEl.innerHTML = `
-        <span class="muted" style="font-size:11px;">${offset + 1}–${Math.min(offset + limit, total)} из ${total}</span>
-        <div class="btn-group">
-            <button type="button" class="btn btn-sm" id="pgPrev" ${hasPrev ? "" : "disabled"}>Назад</button>
-            <button type="button" class="btn btn-sm" id="pgNext" ${hasNext ? "" : "disabled"}>Далее</button>
-        </div>
-    `;
-    if (hasPrev) {
-        pagerEl.querySelector("#pgPrev").addEventListener("click", () => onPage(Math.max(0, offset - limit)));
-    }
-    if (hasNext) {
-        pagerEl.querySelector("#pgNext").addEventListener("click", () => onPage(offset + limit));
-    }
+function _renderPager(root, data, onPage, entityName = "записей") {
+    const listEl = root.querySelector("#finListContainer");
+    renderPagination({
+        container: root.querySelector("#finPagerTop"),
+        total: data.total || 0,
+        offset: data.offset || 0,
+        limit: data.limit || 25,
+        onPage,
+        scrollTarget: listEl,
+        entityName,
+    });
+    renderPagination({
+        container: root.querySelector("#finPagerBottom"),
+        total: data.total || 0,
+        offset: data.offset || 0,
+        limit: data.limit || 25,
+        onPage,
+        scrollTarget: listEl,
+        entityName,
+    });
 }

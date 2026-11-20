@@ -1277,9 +1277,24 @@ async def api_admin_broadcasts_list_handler(request: web.Request) -> web.Respons
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
+    try:
+        limit = min(50, max(1, int(request.query.get("limit", "15"))))
+    except ValueError:
+        limit = 15
+    try:
+        offset = max(0, int(request.query.get("offset", "0")))
+    except ValueError:
+        offset = 0
+
     async with session_scope() as session:
-        items = await broadcast_service.list_broadcasts(session, limit=25)
-    return web.json_response({"ok": True, "broadcasts": items})
+        items, total = await broadcast_service.list_broadcasts(session, limit=limit, offset=offset)
+    return web.json_response({
+        "ok": True,
+        "broadcasts": items,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+    })
 
 
 async def api_admin_broadcast_preview_handler(request: web.Request) -> web.Response:
