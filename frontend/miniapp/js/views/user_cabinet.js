@@ -1748,6 +1748,14 @@ function _renderProfileTab(body, d, reload) {
     const invitedUsers = ref.invited_users || [];
     const leaderboard = ref.leaderboard || [];
 
+    const _formatFriendsCount = (n) => {
+        const rem10 = n % 10;
+        const rem100 = n % 100;
+        if (rem10 === 1 && rem100 !== 11) return `${n} активный друг`;
+        if (rem10 >= 2 && rem10 <= 4 && (rem100 < 10 || rem100 >= 20)) return `${n} активных друга`;
+        return `${n} активных друзей`;
+    };
+
     body.innerHTML = `
         ${d.financial_hold ? `
             <div class="notice-box notice-warn" style="margin-bottom:8px;">
@@ -1771,7 +1779,7 @@ function _renderProfileTab(body, d, reload) {
         <section class="stats-strip">
             <div class="stat-box"><div class="stat-val">${ref.invited_count ?? 0}</div><div class="stat-lbl">Приглашено</div></div>
             <div class="stat-box"><div class="stat-val">${ref.active_count ?? 0}</div><div class="stat-lbl">Активных</div></div>
-            <div class="stat-box"><div class="stat-val">${ref.rate_pct ?? 15}%</div><div class="stat-lbl">Ставка</div></div>
+            <div class="stat-box"><div class="stat-val">${ref.rate_pct ?? 15}%</div><div class="stat-lbl">Ваш %</div></div>
             <div class="stat-box stat-lead"><div class="stat-val">${bal.bonus ?? 0} ₽</div><div class="stat-lbl">Бонусы</div></div>
         </section>
 
@@ -1790,10 +1798,10 @@ function _renderProfileTab(body, d, reload) {
             </p>
             ${ref.needed_for_next ? `
                 <div class="notice-box">
-                    <span>До уровня <b>${escapeHtml(ref.next_tier_name)}</b> (${ref.next_rate_pct}%): осталось ${ref.needed_for_next} активных</span>
+                    <span>До уровня <b>${escapeHtml(ref.next_tier_name)}</b> (${ref.next_rate_pct}%): ещё ${_formatFriendsCount(ref.needed_for_next)}</span>
                 </div>
             ` : ""}
-            <div class="sub-url-box">${escapeHtml(ref.link || "")}</div>
+            <div id="refLinkBox" class="sub-url-box clickable" title="Нажмите, чтобы скопировать">${escapeHtml(ref.link || "")}</div>
             <div class="connect-pair">
                 <button id="shareRefBtn" type="button" class="btn btn-primary">${_ICONS.share} Пригласить</button>
                 <button id="copyRefBtn" type="button" class="btn">${_ICONS.copy} Копировать</button>
@@ -1852,7 +1860,7 @@ function _renderProfileTab(body, d, reload) {
             <div class="card-title">Поддержка и документы</div>
             <div style="display:flex; flex-direction:column; gap:8px;">
                 ${sup.tg_proxy_url ? `<button id="tgProxyBtn" type="button" class="btn btn-secondary">🚀 Прокси для Telegram</button>` : ""}
-                ${sup.support_url ? `<button id="supportContactBtn" type="button" class="btn btn-primary">Написать в поддержку</button>` : ""}
+                ${sup.support_url ? `<button id="supportContactBtn" type="button" class="btn btn-secondary">💬 Написать в поддержку</button>` : ""}
                 <div class="connect-pair">
                     ${sup.tos_url ? `<button id="tosLinkBtn" type="button" class="btn btn-sm">Соглашение</button>` : ""}
                     ${sup.privacy_url ? `<button id="privacyLinkBtn" type="button" class="btn btn-sm">Конфиденциальность</button>` : ""}
@@ -1879,6 +1887,7 @@ function _renderProfileTab(body, d, reload) {
     });
     body.querySelector("#shareRefBtn").addEventListener("click", () => openExternalLink(shareUrl));
     body.querySelector("#copyRefBtn").addEventListener("click", () => copyText(ref.link, "Ссылка скопирована"));
+    body.querySelector("#refLinkBox")?.addEventListener("click", () => copyText(ref.link, "Ссылка скопирована"));
     const supBtn = body.querySelector("#supportContactBtn");
     if (supBtn && sup.support_url) supBtn.addEventListener("click", () => openExternalLink(sup.support_url));
     const tgProxyBtn = body.querySelector("#tgProxyBtn");

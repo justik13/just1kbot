@@ -634,6 +634,17 @@
     word-break: break-all;
 }
 
+.sub-url-box.clickable {
+    cursor: pointer;
+    user-select: all;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.sub-url-box.clickable:active {
+    background: var(--bg-hover);
+    border-color: var(--border-focus);
+}
+
 .item-row {
     background: var(--bg-elevated);
     border: 1px solid var(--border-subtle);
