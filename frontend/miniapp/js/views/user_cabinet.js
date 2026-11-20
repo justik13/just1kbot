@@ -1067,7 +1067,7 @@ function _buildGuideHtml(subUrl, backupSubUrl, isActive) {
                     </div>
                 ` : ""}
                 <div class="notice-box" style="flex-direction:column; align-items:flex-start; gap:6px; font-size:12px;">
-                    <strong>Раздельное туннелирование и частые вопросы</strong>
+                    <strong>Частые вопросы</strong>
                     <span>• Российские банки, Госуслуги и локальные сервисы работают напрямую — выключать приложение не нужно.</span>
                     <span>• После добавления подписки используйте кнопку «Подключить» на главном экране или включите автообновление в приложении.</span>
                     <span>• При смене устройства старое можно удалить в списке устройств ниже — ссылка подключения при этом останется прежней.</span>
@@ -1199,6 +1199,15 @@ function _renderConnectTab(body, d, reload, root) {
                     `}
                     <button id="copySubBtn" type="button" class="btn btn-sm">${_ICONS.copy} Копировать ссылку</button>
                 </div>
+            </div>
+            <div class="notice-box" style="flex-direction:column; align-items:flex-start; gap:6px; font-size:12px; margin-top:10px;">
+                <div style="display:flex; align-items:center; gap:6px;">
+                    <span class="status-dot" style="width:6px; height:6px; background:var(--accent-sky);"></span>
+                    <strong style="color:var(--text-primary);">Если не открываются сайты:</strong>
+                </div>
+                <span>• Выберите другую локацию в списке приложения</span>
+                <span>• Обновите подписку (потяните список серверов вниз или нажмите ⟳)</span>
+                <span>• Напишите в поддержку, если ничего не изменилось</span>
             </div>
             ${_buildGuideHtml(subUrl, backupSubUrl, true)}
         </section>
