@@ -186,6 +186,11 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                         <input name="web_page_url" class="input" maxlength="500" value="${escapeHtml(current.web_page_url || "")}" placeholder="По умолчанию ссылка на бота">
                     </div>
                 </div>
+                <div class="field">
+                    <label>Ссылка на прокси для Telegram (MTProto Proxy URL)</label>
+                    <input name="mtproto_proxy_url" class="input" maxlength="500" value="${escapeHtml(current.mtproto_proxy_url || "")}" placeholder="https://t.me/proxy?server=...&port=...&secret=...">
+                    <div class="muted" style="font-size:11px;">Кнопка быстрого подключения прокси в боте и личном кабинете. Оставьте пустым, чтобы скрыть.</div>
+                </div>
 
                 <hr style="border:none; border-top:1px solid var(--border-subtle); margin:2px 0;">
                 <div class="card-title" style="font-size:13px;">Поведение и сортировка</div>
@@ -329,6 +334,7 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                 announce_url: String(fd.get("announce_url") || "").trim(),
                 support_url: String(fd.get("support_url") || "").trim(),
                 web_page_url: String(fd.get("web_page_url") || "").trim(),
+                mtproto_proxy_url: String(fd.get("mtproto_proxy_url") || "").trim(),
                 sort_order: String(fd.get("sort_order") || "none"),
                 no_limit_mode: String(fd.get("no_limit_mode") || "all"),
                 hide_url: Boolean(fd.get("hide_url")),

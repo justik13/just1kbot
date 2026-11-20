@@ -380,6 +380,7 @@ async def api_admin_incy_get_handler(request: web.Request) -> web.Response:
         cdn_label_mode = await get_system_setting(session, "bi_cdn_label_mode", "name")
         cdn_yandex_label = await get_system_setting(session, "bi_cdn_yandex_label", "Yandex")
         cdn_turboflare_label = await get_system_setting(session, "bi_cdn_turboflare_label", "Turboflare")
+        mtproto_proxy_url = await get_system_setting(session, "mtproto_proxy_url", "")
 
     interval_val = int(interval_raw) if str(interval_raw or "").strip().isdigit() else int(default_interval)
     return web.json_response(
@@ -410,6 +411,7 @@ async def api_admin_incy_get_handler(request: web.Request) -> web.Response:
                 "cdn_label_mode": str(cdn_label_mode or "name"),
                 "cdn_yandex_label": str(cdn_yandex_label or "Yandex"),
                 "cdn_turboflare_label": str(cdn_turboflare_label or "Turboflare"),
+                "mtproto_proxy_url": str(mtproto_proxy_url or ""),
             },
         }
     )
@@ -445,6 +447,7 @@ async def api_admin_incy_put_handler(request: web.Request) -> web.Response:
             ("cdn_label_mode", "bi_cdn_label_mode", "name"),
             ("cdn_yandex_label", "bi_cdn_yandex_label", "Yandex"),
             ("cdn_turboflare_label", "bi_cdn_turboflare_label", "Turboflare"),
+            ("mtproto_proxy_url", "mtproto_proxy_url", ""),
         )
         for field_name, setting_key, default_val in str_fields:
             raw_val = getattr(payload, field_name)

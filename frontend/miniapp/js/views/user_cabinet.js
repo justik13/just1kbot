@@ -1746,6 +1746,7 @@ function _renderProfileTab(body, d, reload) {
     const items = d.history || [];
     const sup = d.support || {};
     const invitedUsers = ref.invited_users || [];
+    const leaderboard = ref.leaderboard || [];
 
     body.innerHTML = `
         ${d.financial_hold ? `
@@ -1816,11 +1817,41 @@ function _renderProfileTab(body, d, reload) {
                     </div>
                 </details>
             ` : ""}
+            ${leaderboard.length ? `
+                <details class="guide-details" style="margin-top:6px;">
+                    <summary class="guide-summary">
+                        <span>Рейтинг лидеров ${ref.user_rank ? `(Ваше место: #${ref.user_rank})` : ""}</span>
+                        <span class="muted" style="font-size:11px;">▾</span>
+                    </summary>
+                    <div class="guide-body" style="gap:6px;">
+                        ${leaderboard.map((item, idx) => {
+                            const medal = idx === 0 ? "🥇" : idx === 1 ? "🥈" : idx === 2 ? "🥉" : `#${item.rank}`;
+                            return `
+                                <div class="item-row" style="${item.is_you ? "border:1px solid rgba(56,189,248,0.3); background:rgba(56,189,248,0.06);" : ""}">
+                                    <div class="row">
+                                        <span style="font-size:13px; font-weight:500;">
+                                            ${medal} ${escapeHtml(item.label)}
+                                            ${item.is_you ? `<span class="chip chip-ok" style="font-size:10px; padding:1px 5px; margin-left:4px;">Вы</span>` : ""}
+                                        </span>
+                                        <span class="muted" style="font-size:12px;">${item.count} активных</span>
+                                    </div>
+                                </div>
+                            `;
+                        }).join("")}
+                        ${ref.user_rank && !leaderboard.some((l) => l.is_you) ? `
+                            <div class="notice-box" style="margin-top:4px;">
+                                <span>Ваше место в рейтинге: <b>#${ref.user_rank}</b> (${ref.active_count ?? 0} активных)</span>
+                            </div>
+                        ` : ""}
+                    </div>
+                </details>
+            ` : ""}
         </section>
 
         <section class="card">
             <div class="card-title">Поддержка и документы</div>
             <div style="display:flex; flex-direction:column; gap:8px;">
+                ${sup.tg_proxy_url ? `<button id="tgProxyBtn" type="button" class="btn btn-secondary">🚀 Прокси для Telegram</button>` : ""}
                 ${sup.support_url ? `<button id="supportContactBtn" type="button" class="btn btn-primary">Написать в поддержку</button>` : ""}
                 <div class="connect-pair">
                     ${sup.tos_url ? `<button id="tosLinkBtn" type="button" class="btn btn-sm">Соглашение</button>` : ""}
@@ -1850,6 +1881,8 @@ function _renderProfileTab(body, d, reload) {
     body.querySelector("#copyRefBtn").addEventListener("click", () => copyText(ref.link, "Ссылка скопирована"));
     const supBtn = body.querySelector("#supportContactBtn");
     if (supBtn && sup.support_url) supBtn.addEventListener("click", () => openExternalLink(sup.support_url));
+    const tgProxyBtn = body.querySelector("#tgProxyBtn");
+    if (tgProxyBtn && sup.tg_proxy_url) tgProxyBtn.addEventListener("click", () => openExternalLink(sup.tg_proxy_url));
     const tosBtn = body.querySelector("#tosLinkBtn");
     if (tosBtn && sup.tos_url) tosBtn.addEventListener("click", () => openExternalLink(sup.tos_url));
     const privBtn = body.querySelector("#privacyLinkBtn");
@@ -1860,18 +1893,49 @@ function _renderProfileTab(body, d, reload) {
         list.innerHTML = `<div class="muted" style="text-align:center; padding:18px;">Операций пока нет</div>`;
         return;
     }
-    items.forEach((op) => {
-        const row = document.createElement("div");
-        row.className = "item-row";
-        const sign = op.amount_rub > 0 ? "+" : "";
-        const cls = op.amount_rub > 0 ? "amount-pos" : "amount-neg";
-        row.innerHTML = `
-            <div class="row">
-                <span style="font-weight:500;">${escapeHtml(op.description)}</span>
-                <span class="${cls}">${sign}${op.amount_rub} ₽</span>
-            </div>
-            <div class="muted" style="font-size:11px;">${formatDate(op.created_at)}</div>
-        `;
-        list.appendChild(row);
-    });
+
+    const renderHistory = () => {
+        list.innerHTML = "";
+        const visibleLimit = _state.historyLimit || 5;
+        const visibleItems = items.slice(0, visibleLimit);
+        visibleItems.forEach((op) => {
+            const row = document.createElement("div");
+            row.className = "item-row";
+            const sign = op.amount_rub > 0 ? "+" : "";
+            const cls = op.amount_rub > 0 ? "amount-pos" : "amount-neg";
+            row.innerHTML = `
+                <div class="row">
+                    <span style="font-weight:500;">${escapeHtml(op.description)}</span>
+                    <span class="${cls}">${sign}${op.amount_rub} ₽</span>
+                </div>
+                <div class="muted" style="font-size:11px;">${formatDate(op.created_at)}</div>
+            `;
+            list.appendChild(row);
+        });
+
+        if (items.length > visibleLimit) {
+            const showMoreBtn = document.createElement("button");
+            showMoreBtn.type = "button";
+            showMoreBtn.className = "btn btn-secondary btn-sm";
+            showMoreBtn.style.cssText = "margin-top:6px; width:100%;";
+            showMoreBtn.textContent = `Показать ещё (осталось ${items.length - visibleLimit})`;
+            showMoreBtn.addEventListener("click", () => {
+                _state.historyLimit = visibleLimit + 10;
+                renderHistory();
+            });
+            list.appendChild(showMoreBtn);
+        } else if (items.length > 5 && visibleLimit > 5) {
+            const collapseBtn = document.createElement("button");
+            collapseBtn.type = "button";
+            collapseBtn.className = "btn btn-sm";
+            collapseBtn.style.cssText = "margin-top:6px; width:100%; color:var(--text-muted);";
+            collapseBtn.textContent = "Свернуть список";
+            collapseBtn.addEventListener("click", () => {
+                _state.historyLimit = 5;
+                renderHistory();
+            });
+            list.appendChild(collapseBtn);
+        }
+    };
+    renderHistory();
 }

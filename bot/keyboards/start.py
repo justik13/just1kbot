@@ -11,15 +11,23 @@ from aiogram.types import (
 from bot import texts
 
 
-def build_start_inline_keyboard(miniapp_url: str) -> InlineKeyboardMarkup:
-    """Fallback inline keyboard with Mini App Connect button."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
+def build_start_inline_keyboard(miniapp_url: str, mtproto_url: str | None = None) -> InlineKeyboardMarkup:
+    """Inline keyboard with Mini App Connect button and optional MTProto proxy button."""
+    rows = [
+        [
+            InlineKeyboardButton(
+                text=texts.BTN_MINIAPP_CONNECT,
+                web_app=WebAppInfo(url=miniapp_url),
+            )
+        ]
+    ]
+    if mtproto_url and str(mtproto_url).strip():
+        rows.append(
             [
                 InlineKeyboardButton(
-                    text=texts.BTN_MINIAPP_CONNECT,
-                    web_app=WebAppInfo(url=miniapp_url),
+                    text="🚀 Прокси для Telegram",
+                    url=str(mtproto_url).strip(),
                 )
             ]
-        ]
-    )
+        )
+    return InlineKeyboardMarkup(inline_keyboard=rows)

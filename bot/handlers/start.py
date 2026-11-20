@@ -68,6 +68,8 @@ async def cmd_start(message: Message) -> None:
             command_args = parts[1]
     ref_id = parse_referral_id(command_args)
 
+    has_discount = False
+    mtproto_url = None
     try:
         async with session_scope() as session:
             db_user = await SubscriptionService.process_onboarding(
@@ -77,6 +79,13 @@ async def cmd_start(message: Message) -> None:
                 tg_user.first_name,
                 ref_id=ref_id,
             )
+            if db_user is not None:
+                from database.repositories.users_repo import is_eligible_for_referral_first_discount
+                has_discount = await is_eligible_for_referral_first_discount(session, db_user.id)
+                from database.repositories.system_settings_repo import get_system_setting
+                raw_proxy = await get_system_setting(session, "mtproto_proxy_url", "")
+                if raw_proxy and str(raw_proxy).strip():
+                    mtproto_url = str(raw_proxy).strip()
     except Exception as exc:
         logger.error("Failed onboarding in /start for user %s: %s", tg_user.id, exc)
         await safe_send_message(message.bot, message.chat.id, texts.START_TECHNICAL_ERROR)
@@ -125,10 +134,8 @@ async def cmd_start(message: Message) -> None:
         logger.debug("Failed to update chat menu button for %s: %s", tg_user.id, exc)
 
     safe_name = safe(db_user.first_name or tg_user.first_name or texts.USER_HUB_START)
-    from database.repositories.users_repo import is_eligible_for_referral_first_discount
-    has_discount = await is_eligible_for_referral_first_discount(session, db_user.id)
     discount_line = texts.START_REFERRAL_DISCOUNT_LINE if has_discount else ""
-    kb = build_start_inline_keyboard(app_url)
+    kb = build_start_inline_keyboard(app_url, mtproto_url=mtproto_url)
     msg_text = texts.START_HUB_MESSAGE.format(name=safe_name, discount_line=discount_line)
 
     sent = await safe_send_message(

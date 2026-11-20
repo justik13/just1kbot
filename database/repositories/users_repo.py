@@ -1,8 +1,8 @@
 from datetime import timedelta
 
-from sqlalchemy import and_, case, false, func, or_, select, update
+from sqlalchemy import and_, case, false, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import aliased, selectinload
 
 from config.constants import (
     REFERRAL_ACTIVE_MIN_TOPUP_RUB,
@@ -283,6 +283,66 @@ async def get_user_active_referrals_count(
     )
     result = await session.scalar(stmt)
     return int(result or 0)
+
+
+async def get_referral_leaderboard(
+    session: AsyncSession, limit: int = 5
+) -> list[tuple[int, int]]:
+    """Return top referrers by count of active referred users [(telegram_id, active_count), ...]."""
+    limit = max(1, min(limit, 50))
+    referrer = aliased(User)
+    referral = aliased(User)
+
+    stmt = (
+        select(referrer.telegram_id, func.count(func.distinct(referral.id)).label("active_count"))
+        .join(referral, referral.referred_by == referrer.telegram_id)
+        .where(
+            referrer.is_deleted.is_(False),
+            referral.is_deleted.is_(False),
+            _referral_paid_activity_condition(referral),
+        )
+        .group_by(referrer.telegram_id)
+        .order_by(text("active_count DESC"), referrer.telegram_id.asc())
+        .limit(limit)
+    )
+    rows = (await session.execute(stmt)).all()
+    return [(int(row[0]), int(row[1])) for row in rows]
+
+
+async def get_user_referral_rank(
+    session: AsyncSession, telegram_id: int
+) -> tuple[int | None, int]:
+    """Return (rank, active_count) for the user. Rank is 1-indexed, or None if active_count == 0."""
+    active_count = await get_user_active_referrals_count(session, telegram_id)
+    if active_count == 0:
+        return None, 0
+
+    referrer = aliased(User)
+    referral = aliased(User)
+
+    subq = (
+        select(
+            referrer.telegram_id.label("tid"),
+            func.count(func.distinct(referral.id)).label("cnt"),
+        )
+        .join(referral, referral.referred_by == referrer.telegram_id)
+        .where(
+            referrer.is_deleted.is_(False),
+            referral.is_deleted.is_(False),
+            _referral_paid_activity_condition(referral),
+        )
+        .group_by(referrer.telegram_id)
+        .subquery()
+    )
+
+    rank_stmt = select(func.count(subq.c.tid)).where(
+        or_(
+            subq.c.cnt > active_count,
+            and_(subq.c.cnt == active_count, subq.c.tid < telegram_id),
+        )
+    )
+    higher_count = (await session.scalar(rank_stmt)) or 0
+    return int(higher_count + 1), active_count
 
 
 async def is_eligible_for_referral_first_discount(

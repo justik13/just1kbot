@@ -48,7 +48,9 @@ from database.repositories.account_ledger_repo import (
 )
 from database.repositories.system_settings_repo import get_system_setting
 from database.repositories.users_repo import (
+    get_referral_leaderboard,
     get_user_active_referrals_count,
+    get_user_referral_rank,
     get_user_referrals_paginated,
     is_eligible_for_referral_first_discount,
 )
@@ -221,6 +223,18 @@ async def _get_referral_summary(
         for r in invited_rows
     ]
 
+    top_leaders = await get_referral_leaderboard(session, limit=5)
+    user_rank, _ = await get_user_referral_rank(session, user.telegram_id)
+    leaderboard = [
+        {
+            "rank": idx,
+            "label": f"ID ****{str(leader_tg)[-4:]}",
+            "count": count,
+            "is_you": leader_tg == user.telegram_id,
+        }
+        for idx, (leader_tg, count) in enumerate(top_leaders, start=1)
+    ]
+
     return {
         "link": f"https://t.me/{resolved_bot}?start=ref_{user.telegram_id}",
         "invited_count": invited_count,
@@ -234,6 +248,8 @@ async def _get_referral_summary(
         "welcome_discount_pct": int(REFERRAL_WELCOME_DISCOUNT_PERCENT * 100),
         "invited_by": invited_by_label,
         "invited_users": invited_users,
+        "leaderboard": leaderboard,
+        "user_rank": user_rank,
     }
 
 
@@ -346,6 +362,9 @@ async def api_user_dashboard_handler(request: web.Request) -> web.Response:
         maint_val = await get_system_setting(session, "payments_maintenance_enabled", "false")
         payments_maintenance = str(maint_val).strip().lower() in ("1", "true", "yes", "on")
 
+        raw_mtproto = await get_system_setting(session, "mtproto_proxy_url", "")
+        tg_proxy_url = str(raw_mtproto).strip() if raw_mtproto and str(raw_mtproto).strip() else None
+
         effective_sub_token = vless_sub.token
         if wi_active and not std_active and wi_sub and wi_sub.token:
             effective_sub_token = wi_sub.token
@@ -358,6 +377,7 @@ async def api_user_dashboard_handler(request: web.Request) -> web.Response:
                 "support_url": support_url,
                 "tos_url": TOS_AGREEMENT_URL,
                 "privacy_url": PRIVACY_POLICY_URL,
+                "tg_proxy_url": tg_proxy_url,
             },
             "balance": {
                 "real": int(bal.real_available),

@@ -1,12 +1,12 @@
-import { api } from "./api.js";
-import { escapeHtml, showToast } from "./ui.js";
-import { renderSecurity2FA } from "./views/security_2fa.js";
-import { renderNodesView, renderSubscriptionSettingsView } from "./views/nodes.js";
-import { renderNodeDetailView } from "./views/node_detail.js";
-import { renderAdminUsersView } from "./views/admin_users.js";
-import { clearBroadcastPollTimer, renderAdminBroadcastsView } from "./views/admin_broadcasts.js";
-import { renderAdminFinancesView } from "./views/admin_finances.js";
-import { loadAndRenderUserCabinet } from "./views/user_cabinet.js";
+import { api } from "./api.js?v=2.6.0";
+import { escapeHtml, showToast } from "./ui.js?v=2.6.0";
+import { renderSecurity2FA } from "./views/security_2fa.js?v=2.6.0";
+import { renderNodesView, renderSubscriptionSettingsView } from "./views/nodes.js?v=2.6.0";
+import { renderNodeDetailView } from "./views/node_detail.js?v=2.6.0";
+import { renderAdminUsersView } from "./views/admin_users.js?v=2.6.0";
+import { clearBroadcastPollTimer, renderAdminBroadcastsView } from "./views/admin_broadcasts.js?v=2.6.0";
+import { renderAdminFinancesView } from "./views/admin_finances.js?v=2.6.0";
+import { loadAndRenderUserCabinet } from "./views/user_cabinet.js?v=2.6.0";
 
 const appState = {
     user: null,

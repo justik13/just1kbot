@@ -101,6 +101,7 @@ class IncyGlobalSettingsPayload(BaseModel):
     cdn_label_mode: Literal["badge", "name", "none"] | None = None
     cdn_yandex_label: str | None = Field(default=None, max_length=32)
     cdn_turboflare_label: str | None = Field(default=None, max_length=32)
+    mtproto_proxy_url: str | None = Field(default=None, max_length=500)
 
 
 class UpdateNodePayload(BaseModel):

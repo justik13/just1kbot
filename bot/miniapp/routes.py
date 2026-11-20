@@ -72,7 +72,9 @@ _NO_CACHE_HEADERS = {
 }
 
 _ASSET_CACHE_HEADERS = {
-    "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
+    "Cache-Control": "no-cache, must-revalidate",
+    "Pragma": "no-cache",
+    "Expires": "0",
 }
 
 
