@@ -1180,6 +1180,14 @@ async def check_node_resources_and_alerts(bot: Bot):
 
 async def node_monitor_loop(bot: Bot, shutdown_event: asyncio.Event):
     logger.info("Starting node_monitor_loop background worker...")
+    try:
+        async with session_scope() as init_session:
+            from services.topology_sync_service import sync_v2_topology_to_nodes
+            await sync_v2_topology_to_nodes(init_session)
+            logger.info("Initial v2 topology sync to all nodes completed on worker startup.")
+    except Exception as init_topo_exc:
+        logger.warning("Initial v2 topology sync on worker startup failed: %s", init_topo_exc)
+
     while not shutdown_event.is_set():
         try:
             await check_node_resources_and_alerts(bot)
