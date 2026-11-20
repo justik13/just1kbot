@@ -169,11 +169,10 @@ class VlessSubscriptionService:
                         ex_extra.get("vless_name") or ex.name,
                         ex_extra.get("server_description"),
                     )
-                    std_path = urllib.parse.quote(f"/std/{loc_code}", safe="")
                     link = (
                         f"vless://{eff_uuid}@{domain}:{port}"
-                        f"?encryption=none&security=tls&sni={domain}&fp={fp}"
-                        f"&type=xhttp&path={std_path}&mode=auto#{fragment}"
+                        f"?encryption=none&security=tls&sni={domain}&alpn=http/1.1&fp={fp}"
+                        f"&type=tcp&flow=xtls-rprx-vision#{fragment}"
                     )
                     if link not in seen_links:
                         seen_links.add(link)

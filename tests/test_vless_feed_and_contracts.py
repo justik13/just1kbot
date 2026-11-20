@@ -90,3 +90,43 @@ def test_security_is_ip_allowed():
     # Public IP
     pub_ip = ipaddress.ip_address("1.1.1.1")
     assert is_ip_allowed(pub_ip)
+
+
+def test_generate_vless_links_standard_tcp_vision():
+    from database.models import Server, VlessSubscription
+    from config.enums import ServerHealthState, ServerLifecycleStatus
+    from services.vless_subscription_service import VlessSubscriptionService
+
+    sub = VlessSubscription(uuid="11111111-2222-3333-4444-555555555555")
+    ru_hub = Server(
+        id=23,
+        name="Россия Hub",
+        is_active=True,
+        health_state=ServerHealthState.ONLINE,
+        lifecycle_status=ServerLifecycleStatus.ACTIVE,
+        role="ru_hub",
+        capabilities=["ru_hub", "vless"],
+        extra_data={"domain": "ruhub.just1k.pro", "vless_port": 443},
+    )
+    ee_exit = Server(
+        id=26,
+        name="Эстония Exit",
+        country_flag="🇪🇪",
+        is_active=True,
+        health_state=ServerHealthState.ONLINE,
+        lifecycle_status=ServerLifecycleStatus.ACTIVE,
+        role="exit_node",
+        capabilities=["exit_node"],
+        extra_data={"location_code": "ee", "vless_name": "Эстония Exit"},
+    )
+
+    links = VlessSubscriptionService.generate_vless_links(sub, [ru_hub], [ee_exit])
+    assert len(links) == 1
+    link = links[0]
+    assert "type=tcp" in link
+    assert "flow=xtls-rprx-vision" in link
+    assert "security=tls" in link
+    assert "alpn=http/1.1" in link
+    assert "sni=ruhub.just1k.pro" in link
+    assert "#%F0%9F%87%AA%F0%9F%87%AA%20%D0%AD%D1%81%D1%82%D0%BE%D0%BD%D0%B8%D1%8F%20Exit" in link
+
