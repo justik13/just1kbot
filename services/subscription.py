@@ -1,5 +1,6 @@
 import logging
 from datetime import timedelta
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -12,13 +13,11 @@ from config.constants import (
     VPN_ACCESS_GRACE_HOURS,
 )
 from database.models import User
-from database.repositories.tariffs_repo import get_tariff_by_id
 from database.repositories.users_repo import (
     create_user,
     get_user_by_telegram_id,
     get_user_by_telegram_id_any,
 )
-from services.user_cache import invalidate_user_cache
 from utils.datetime_helpers import (
     is_expired,
     is_vpn_access_expired,
@@ -34,38 +33,41 @@ MAX_REFERRAL_CHAIN_DEPTH = 50
 class SubscriptionService:
     @staticmethod
     async def get_effective_device_limit(session: AsyncSession, user: User | None) -> int:
-        """Canonical device-limit resolution: current tariff first, then user override, else 0.
-
-        Single source of truth used by both the payment and connection UI layers
-        (and safe to reuse by domain services).
-        """
+        """Canonical device-limit resolution from VlessSubscription.device_limit."""
         if user is None:
             return 0
-        current_tariff_id = getattr(user, "current_tariff_id", None)
-        if current_tariff_id:
-            tariff = await get_tariff_by_id(session, current_tariff_id)
-            if tariff and getattr(tariff, "service_type", "standard") in ("standard", "awg"):
-                return getattr(tariff, "device_limit", 0) or 0
-        return getattr(user, "device_limit", 0) or 0
+        from database.repositories import vless_subscription_repo
+
+        vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+        if not vless_sub:
+            return 0
+        direct_limit = getattr(vless_sub, "device_limit", 0) or 0
+        return int(direct_limit) if direct_limit > 0 else 0
 
     @staticmethod
     async def sync_access_state(session: AsyncSession, user: User) -> None:
         await SubscriptionService._sync_access_state(session, user)
 
     @staticmethod
-    def check_vpn_access(user: User | None) -> bool:
-        if not user or user.is_deleted or user.is_banned or user.financial_hold or not user.subscription_end:
+    def check_vpn_access(user: User | None, vless_sub: Any = None) -> bool:
+        if not user or user.is_deleted or user.financial_hold:
             return False
-        return not is_vpn_access_expired(user.subscription_end, grace_hours=VPN_ACCESS_GRACE_HOURS)
+        sub = vless_sub if vless_sub is not None else getattr(user, "vless_subscription", None)
+        if not sub or not sub.expires_at:
+            return False
+        return not is_vpn_access_expired(sub.expires_at, grace_hours=VPN_ACCESS_GRACE_HOURS)
 
     @staticmethod
     async def check_access(session: AsyncSession, telegram_id: int) -> bool:
+        from database.repositories import vless_subscription_repo
+
         user = await get_user_by_telegram_id(session, telegram_id)
-
-        if not user or user.is_deleted or user.is_banned or user.financial_hold or not user.subscription_end:
+        if not user or user.is_deleted or user.financial_hold:
             return False
-
-        return not is_expired(user.subscription_end)
+        vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+        if not vless_sub or not vless_sub.expires_at:
+            return False
+        return not is_expired(vless_sub.expires_at)
 
     @staticmethod
     async def _validate_referral(
@@ -132,7 +134,6 @@ class SubscriptionService:
             user.is_bot_blocked = False
 
             await session.flush()
-            invalidate_user_cache(telegram_id)
 
             from services.audit_service import AuditService
             await AuditService.log_action(
@@ -173,9 +174,23 @@ class SubscriptionService:
                 if isinstance(locked_user, User):
                     user = locked_user
                 if user.referred_by is None:
-                    from database.repositories.payments_repo import has_successful_topup
+                    from sqlalchemy import func, or_
+                    from database.models import Order
 
-                    has_paid = await has_successful_topup(session, user_id=user.id)
+                    order_count = await session.scalar(
+                        select(func.count(Order.id)).where(
+                            Order.user_id == user.id,
+                            or_(
+                                Order.status.in_(["paid", "refunded"]),
+                                Order.paid_at.is_not(None),
+                            ),
+                            or_(
+                                Order.service_type == "topup",
+                                Order.payment_method != "wallet",
+                            ),
+                        )
+                    )
+                    has_paid = (order_count or 0) > 0
                     if not has_paid:
                         is_valid = await SubscriptionService._validate_referral(
                             session,
@@ -211,7 +226,6 @@ class SubscriptionService:
 
             if changed:
                 await session.flush()
-                invalidate_user_cache(telegram_id)
 
             return user
 
@@ -290,8 +304,6 @@ class SubscriptionService:
                 },
             )
 
-        invalidate_user_cache(telegram_id)
-
         return user
 
     @staticmethod
@@ -300,7 +312,6 @@ class SubscriptionService:
         telegram_id: int,
         days: int,
         new_device_limit: int | None = None,
-        new_tariff_id: int | None = None,
         admin_id: int | None = None,
         reason: str | None = None,
     ) -> User | None:
@@ -322,131 +333,72 @@ class SubscriptionService:
             return None
 
         if new_device_limit is not None:
-            from database.repositories import vless_subscription_repo
-            vless_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
-            total_count = vless_count
+            from database.repositories import user_devices_repo
+            total_count = await user_devices_repo.count_active_user_devices(session, user.id)
 
             if total_count > new_device_limit:
                 raise ValueError(
                     f"Cannot downgrade: {total_count} devices > "
-                    f"{new_device_limit} limit. User must delete devices first."
+                    f"{new_device_limit} limit. User must reset devices first."
                 )
 
+        from database.repositories import vless_subscription_repo
+
+        vless_sub = await vless_subscription_repo.get_or_create_subscription(session, user.id)
         now = now_utc()
 
         had_active_subscription = bool(
-            user.subscription_end and user.subscription_end > now
+            vless_sub.expires_at and vless_sub.expires_at > now
         )
 
-        # Продуктовая логика:
-        # - продление всегда добавляет дни к текущему концу подписки;
-        # - если подписка неактивна, отсчёт начинается с текущего момента;
-        # - смена тарифа/лимита применяется сразу;
-        # - даунгрейд запрещён выше по коду.
         if days == 0:
-            new_end = user.subscription_end
+            new_end = vless_sub.expires_at
         else:
-            base_end = user.subscription_end if had_active_subscription else now
+            base_end = vless_sub.expires_at if had_active_subscription else now
 
             if days >= PERMANENT_SUBSCRIPTION_DAYS:
                 new_end = PERMANENT_END_DATE
             else:
                 new_end = base_end + timedelta(days=days)
 
-        user.subscription_end = new_end
-
-        user.notified_3d = False
-        user.notified_1d = False
-        user.notified_2h = False
-        user.notified_expired = False
-        user.notified_grace_12h = False
+        vless_sub.expires_at = new_end
+        vless_sub.notified_3d = False
+        vless_sub.notified_1d = False
+        vless_sub.notified_2h = False
+        vless_sub.notified_expired = False
         user.notification_retry_count = 0
         user.last_notification_attempt = None
 
         if new_device_limit is not None:
-            old_device_limit = user.device_limit or 0
-            user.device_limit = new_device_limit
-
-            if new_device_limit > old_device_limit:
-                # P0-2: НЕ сбрасываем device_creations_today при апгрейде
-                # Сброс происходит только в ночном cleanup-воркере по календарю UTC.
-                # Это предотвращает абюз: юзер не может создать 25 устройств,
-                # апгрейднуться и создать еще 25, обойдя суточный лимит.
-                logger.info(
-                    "extend_subscription: user %s upgraded from %s to %s devices. "
-                    "Daily creations counter NOT reset (abuse prevention).",
-                    telegram_id,
-                    old_device_limit,
-                    new_device_limit,
-                )
-
-        if new_tariff_id is not None:
-            user.current_tariff_id = new_tariff_id
+            vless_sub.device_limit = new_device_limit
 
         await session.flush()
 
-        invalidate_user_cache(telegram_id)
-
-        await SubscriptionService._sync_access_state(session, user)
+        await SubscriptionService._sync_access_state(session, user, vless_sub=vless_sub)
 
         return user
 
     @staticmethod
-    async def replace_subscription(
-        session: AsyncSession,
-        user: User,
-        *,
-        subscription_end,
-        device_limit: int,
-        tariff_id: int,
-    ) -> User:
-        """Replace active coverage after an exact paid-value conversion.
-
-        The caller owns the checkout/User lock and the surrounding financial
-        transaction.  Only durable API operations are queued here; no HTTP is
-        performed.
-        """
-        if subscription_end.tzinfo is None or subscription_end.utcoffset() is None:
-            raise ValueError("subscription_end must be timezone-aware")
-        if subscription_end <= now_utc():
-            raise ValueError("converted subscription must remain active")
-        from database.repositories import vless_subscription_repo
-        vless_count = await vless_subscription_repo.get_active_hwid_count(session, user.id)
-        total_count = vless_count
-        if total_count > device_limit:
-            raise ValueError(
-                f"Cannot downgrade: {total_count} devices > "
-                f"{device_limit} limit. User must delete devices first."
-            )
-        user.subscription_end = subscription_end
-        user.device_limit = device_limit
-        user.current_tariff_id = tariff_id
-        user.notified_3d = False
-        user.notified_1d = False
-        user.notified_2h = False
-        user.notified_expired = False
-        user.notified_grace_12h = False
-        user.notification_retry_count = 0
-        user.last_notification_attempt = None
-        # P0-2: НЕ сбрасываем device_creations_today при замене тарифа.
-        # Сброс только в ночном cleanup-воркере (защита от амьюза суточного лимита).
-        await session.flush()
-        invalidate_user_cache(user.telegram_id)
-        await SubscriptionService._sync_access_state(session, user)
-        return user
-
-    @staticmethod
-    async def _sync_access_state(session: AsyncSession, user: User) -> None:
+    async def _sync_access_state(session: AsyncSession, user: User, vless_sub: Any = None) -> None:
         from database.repositories import vless_subscription_repo
         from services.vless_subscription_service import VlessSubscriptionService
 
-        vless_target_active = SubscriptionService.check_vpn_access(user)
+        if vless_sub is None:
+            vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+        vless_target_active = SubscriptionService.check_vpn_access(user, vless_sub=vless_sub)
+        if vless_sub:
+            if vless_sub.is_active != vless_target_active:
+                vless_sub.is_active = vless_target_active
+                vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1
+                session.add(vless_sub)
+                VlessSubscriptionService.ensure_synced_background(user.id, is_active=vless_target_active, session=session)
 
-        vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
-        if vless_sub and vless_sub.is_active != vless_target_active:
-            vless_sub.is_active = vless_target_active
-            vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1
-            session.add(vless_sub)
-            VlessSubscriptionService.ensure_synced_background(user.id, is_active=vless_target_active, session=session)
+        if user and (user.is_deleted or user.financial_hold):
+            from services.white_internet_service import WhiteInternetService
+            await WhiteInternetService.deactivate_user_subscriptions(
+                session,
+                user.id,
+                reason="financial_hold" if user.financial_hold else "user_deleted",
+            )
 
         await session.flush()

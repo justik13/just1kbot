@@ -1,6 +1,6 @@
 [project]
 name = "just1kbot"
-version = "2.5.0"
+version = "3.0.0"
 description = "Modular subscription access platform"
 requires-python = ">=3.12"
 
@@ -24,6 +24,5 @@ ignore = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
 pythonpath = ["."]
 norecursedirs = [".git", ".pytest_cache", "scripts"]

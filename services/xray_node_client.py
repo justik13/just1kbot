@@ -1,4 +1,4 @@
-"""HTTP REST Client for interacting with the Origin server's xray-api daemon."""
+"""HTTP REST Client for interacting with the Just1kNode v2 (ru_hub, eu_hub, exit_node) xray-api daemon."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from typing import Any
 import aiohttp
 
 from utils.logging_security import sanitize_short
+from utils.security import SafeResolver, allow_local_networks
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,7 @@ class TrafficSnapshot(tuple):
 
     host_tx_bytes: int
     host_rx_bytes: int
+    users_by_service: dict[str, dict[str, dict[str, int]]]
 
     def __new__(
         cls,
@@ -72,25 +74,31 @@ class TrafficSnapshot(tuple):
         users: dict[str, dict[str, int]] | None,
         host_tx_bytes: int = 0,
         host_rx_bytes: int = 0,
+        users_by_service: dict[str, dict[str, dict[str, int]]] | None = None,
     ):
         obj = super().__new__(cls, (epoch, boot_id, starttime, users))
         obj.host_tx_bytes = host_tx_bytes
         obj.host_rx_bytes = host_rx_bytes
+        obj.users_by_service = users_by_service if isinstance(users_by_service, dict) else {}
         return obj
-
-
-class XrayNodeClientError(RuntimeError):
-    """Base exception for Xray Node API errors."""
-    pass
 
 
 class XrayNodeClient:
     """Client for node-level Xray API management (port 8444/tcp)."""
 
-    def __init__(self, timeout: float = 10.0, max_retries: int = 2, ca_file: str | None = None):
+    def __init__(
+        self,
+        timeout: float = 10.0,
+        max_retries: int = 2,
+        ca_file: str | None = None,
+        allow_insecure_tls: bool = True,
+        use_safe_resolver: bool = True,
+    ):
         self.timeout = timeout
         self.max_retries = max_retries
         self.ca_file = ca_file or os.getenv("XRAY_NODE_CA_FILE")
+        self.allow_insecure_tls = allow_insecure_tls
+        self.use_safe_resolver = use_safe_resolver
         self._session: aiohttp.ClientSession | None = None
 
     async def __aenter__(self) -> XrayNodeClient:
@@ -113,16 +121,26 @@ class XrayNodeClient:
         }
 
     def _ssl_context(self) -> ssl.SSLContext:
-        """Create a verified TLS context; custom CA is supported for node certificates."""
-        return ssl.create_default_context(cafile=self.ca_file)
+        """Create TLS context: allow self-signed node certs by default unless CA file pinned."""
+        ctx = ssl.create_default_context(cafile=self.ca_file)
+        if self.allow_insecure_tls and not self.ca_file:
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+        return ctx
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
+            resolver = (
+                SafeResolver(allow_local=allow_local_networks())
+                if self.use_safe_resolver
+                else None
+            )
             connector = aiohttp.TCPConnector(
                 limit=50,
                 ttl_dns_cache=300,
                 enable_cleanup_closed=True,
                 ssl=self._ssl_context(),
+                resolver=resolver,
             )
             client_timeout = aiohttp.ClientTimeout(total=self.timeout)
             self._session = aiohttp.ClientSession(
@@ -205,6 +223,31 @@ class XrayNodeClient:
         logger.warning("Node health check failed for %s: %s", _sanitize_url(url), err)
         return False, None, None
 
+    async def batch_sync_clients(
+        self,
+        api_url: str,
+        api_key: str,
+        clients: list[dict[str, Any]],
+        *,
+        timeout: float = 60.0,
+    ) -> tuple[bool, set[str], dict[str, str]]:
+        """Batch-sync clients via POST /v1/clients/batch-sync.
+        Returns (endpoint_supported, succeeded_uuids, failed_map).
+        """
+        url = f"{api_url.rstrip('/')}/v1/clients/batch-sync"
+        headers = self._get_headers(api_key)
+        status_code, data, err = await self._make_request(
+            "POST", url, headers, json_data={"clients": clients}, request_timeout=timeout
+        )
+        if status_code == 404:
+            return False, set(), {}
+        if status_code == 200 and isinstance(data, dict):
+            succeeded = {str(u).lower() for u in (data.get("succeeded") or [])}
+            failed = {str(k).lower(): str(v) for k, v in (data.get("failed") or {}).items()}
+            return True, succeeded, failed
+        logger.warning("Batch sync failed on %s (status=%s): %s", _sanitize_url(url), status_code, err)
+        return True, set(), {str(c.get("uuid", "")).lower(): err or f"HTTP {status_code}" for c in clients}
+
     async def sync_client(
         self,
         api_url: str,
@@ -215,6 +258,7 @@ class XrayNodeClient:
         expected_node_epoch: str | None = None,
         idempotency_key: str | None = None,
         service: str | None = None,
+        email: str | None = None,
     ) -> SyncResponse:
         """Synchronize a client with two-phase epoch fencing, durable idempotency, and verified inbounds."""
         url = f"{api_url.rstrip('/')}/v1/clients/sync"
@@ -231,6 +275,8 @@ class XrayNodeClient:
             payload["idempotency_key"] = idempotency_key
         if service is not None:
             payload["service"] = service
+        if email is not None:
+            payload["email"] = email
 
         status_code, data, err = await self._make_request("POST", url, headers, json_data=payload)
         if status_code in (200, 201) and isinstance(data, dict):
@@ -289,31 +335,6 @@ class XrayNodeClient:
             return True, data, None
         return False, None, err
 
-    async def remove_client(
-        self,
-        api_url: str,
-        api_key: str,
-        client_uuid: str,
-        version: int | None = None,
-    ) -> tuple[SyncResult, str | None]:
-        """Remove a client from all inbounds on the node with version fencing."""
-        url = f"{api_url.rstrip('/')}/v1/clients/{client_uuid}"
-        if version is not None:
-            url = f"{url}?version={version}"
-        headers = self._get_headers(api_key)
-        status_code, data, err = await self._make_request("DELETE", url, headers)
-        if status_code in (200, 204):
-            if isinstance(data, dict):
-                res_str = data.get("result", "applied")
-                if res_str == "already_newer":
-                    return SyncResult.ALREADY_NEWER, None
-                if res_str == "fenced":
-                    return SyncResult.FENCED, "Request was fenced by node version"
-            return SyncResult.APPLIED, None
-        if status_code in (409, 412):
-            return SyncResult.FENCED, err or "Version fenced"
-        return SyncResult.FAILED, err or f"Delete failed with HTTP {status_code}"
-
     async def get_traffic_snapshot(
         self, api_url: str, api_key: str
     ) -> TrafficSnapshot:
@@ -326,50 +347,61 @@ class XrayNodeClient:
             node_boot_id = data.get("boot_id")
             node_starttime = data.get("starttime")
             users = data.get("users", {})
+            users_by_service = data.get("users_by_service", {})
             host_tx = int(data.get("host_tx_bytes", 0) or 0)
             host_rx = int(data.get("host_rx_bytes", 0) or 0)
-            return TrafficSnapshot(node_epoch, node_boot_id, node_starttime, users, host_tx, host_rx)
+            return TrafficSnapshot(
+                node_epoch,
+                node_boot_id,
+                node_starttime,
+                users,
+                host_tx,
+                host_rx,
+                users_by_service,
+            )
         logger.error("Traffic snapshot fetch failed for %s: %s", _sanitize_url(url), err)
         return TrafficSnapshot(None, None, None, None, 0, 0)
 
-    async def get_relays_health(
+    async def get_node_status(
         self,
         api_url: str,
         api_key: str,
-        timeout: float = 5.0,
-        retries: int = 2,
+        timeout: float | None = None,
     ) -> tuple[bool, dict[str, Any] | None, str | None]:
-        """Fetch real-time health status of all relay nodes connected through Origin."""
-        url = f"{api_url.rstrip('/')}/v1/relays/health?timeout={timeout}&retries={retries}"
+        """Fetch v2 auto-discovery node metadata (role, modules, links, errors) via /v1/node/status."""
+        url = f"{api_url.rstrip('/')}/v1/node/status"
         headers = self._get_headers(api_key)
-        # Node probe takes up to: (retries + 1) * timeout + retries * 0.5s.
-        # Add a 4.0s network/TLS handshake buffer and run with max_retries=0 (node already retried internally).
-        needed_timeout = max(10.0, (retries + 1) * timeout + retries * 0.5 + 4.0)
         status_code, data, err = await self._make_request(
-            "GET", url, headers, request_timeout=needed_timeout, max_retries=0
+            "GET", url, headers, request_timeout=timeout
         )
         if status_code == 200 and isinstance(data, dict):
             return True, data, None
-        return False, None, err or f"Relays health check failed with HTTP {status_code}"
+        return False, None, err or f"Node status failed with HTTP {status_code}"
 
-    async def deploy_certificate(
+    async def update_node_links(
         self,
         api_url: str,
         api_key: str,
-        domain: str,
-        fullchain_pem: str,
-        privkey_pem: str,
-    ) -> tuple[bool, str | None]:
-        """Deploy or rotate TLS certificates (e.g. DNS-01 wildcard) to the node."""
-        url = f"{api_url.rstrip('/')}/v1/system/certificate"
+        links_payload: dict[str, Any],
+        timeout: float = 10.0,
+    ) -> tuple[bool, dict[str, Any] | None, str | None]:
+        """Push auto-orchestrated v2 topology links.json to a node via PUT /v1/node/links."""
+        url = f"{api_url.rstrip('/')}/v1/node/links"
         headers = self._get_headers(api_key)
-        payload = {
-            "domain": domain,
-            "fullchain_pem": fullchain_pem,
-            "privkey_pem": privkey_pem,
-        }
-        status_code, data, err = await self._make_request("POST", url, headers, json_data=payload)
-        if status_code in (200, 201):
-            return True, None
-        return False, err or f"Certificate deployment failed with HTTP {status_code}"
+        status_code, data, err = await self._make_request(
+            "PUT",
+            url,
+            headers,
+            json_data=links_payload,
+            request_timeout=timeout,
+            max_retries=1,
+        )
+        if status_code == 200 and isinstance(data, dict):
+            return True, data, None
+        return False, None, err or f"Node links update failed with HTTP {status_code}"
+
+
+def get_xray_node_client(timeout: float = 10.0) -> XrayNodeClient:
+    """Return a fresh XrayNodeClient instance."""
+    return XrayNodeClient(timeout=timeout)
 

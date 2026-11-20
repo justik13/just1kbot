@@ -15,9 +15,9 @@ from urllib.parse import urlsplit
 import aiohttp
 from aiogram import Bot
 from sqlalchemy import func, select
+from sqlalchemy.orm.attributes import flag_modified
 
-from bot.keyboards.notifications import get_node_monitor_alert_keyboard
-from bot.texts.common.status import TIME_HOURS_LEFT
+from bot.texts.backend import TIME_HOURS_LEFT
 from bot.texts.runtime.alerts import (
     ALERT_CDN_INGRESS_PROBLEM,
     ALERT_CDN_INGRESS_PROBLEM_REMINDER,
@@ -26,10 +26,10 @@ from bot.texts.runtime.alerts import (
     ALERT_INGRESS_PROBLEM,
     ALERT_INGRESS_PROBLEM_REMINDER,
     ALERT_INGRESS_RESTORED,
-    ALERT_RELAY_TSPU_PROBLEM,
-    ALERT_RELAY_TSPU_PROBLEM_REMINDER,
-    ALERT_RELAY_TSPU_RESTORED,
     ALERT_SERVER_DISK_CRITICAL,
+    ALERT_SERVER_HOSTING_TRAFFIC_CRITICAL,
+    ALERT_SERVER_HOSTING_TRAFFIC_RESTORED,
+    ALERT_SERVER_HOSTING_TRAFFIC_WARN,
     ALERT_SERVER_OUTAGE_REMINDER,
     ALERT_SERVER_PROBLEM,
     ALERT_SERVER_RESTORED,
@@ -40,25 +40,29 @@ from bot.texts.runtime.notifications import (
 )
 from config.constants import (
     ServerHealthState,
+    WHITE_INTERNET_CAPABILITY,
     WHITE_INTERNET_SUB_PATH_PREFIX,
 )
 from config.settings import get_settings
 from database.connection import session_scope
 from database.models import Server
 from database.repositories.servers_repo import (
+    derive_v2_capabilities,
     get_all_servers,
     get_server_by_id,
+    get_server_role,
     get_server_xray_api_url,
+    is_v2_node_server,
     is_vless_capable_server,
-    is_white_internet_origin_server,
+    is_vless_sync_target_server,
+    is_white_internet_hub_server,
     update_server,
     update_server_health_snapshot,
     update_server_xray_epoch_cas,
 )
 from utils.datetime_helpers import now_utc
 from utils.telegram import safe, safe_send_message
-
-_build_alert_keyboard = get_node_monitor_alert_keyboard
+from utils.traffic_helpers import get_server_hosting_usage
 
 logger = logging.getLogger(__name__)
 
@@ -69,10 +73,6 @@ DISK_ALERT_COOLDOWN_SECONDS = 3600.0  # 1 час между повторными
 REQUIRED_INGRESS_FAILS = 3  # Требуется 3 цикла сбоя подряд (>= 3 мин) перед отправкой алерта
 REQUIRED_CDN_FAILS = 5  # Требуется 5 циклов сбоя подряд (~5 мин) для фильтрации трансграничного шума
 REQUIRED_INGRESS_SUCCESSES = 2  # Требуется 2 цикла успеха подряд для подтверждения восстановления
-REQUIRED_RELAY_FAILS = 15  # Требуется 15 циклов сбоя подряд (15 минут) для подтверждения аварии
-REQUIRED_RELAY_SUCCESSES = 3  # Требуется 3 цикла успеха подряд (3 минуты) для подтверждения восстановления
-RELAY_PROBE_TIMEOUT = 8.0  # Таймаут TCP-подключения к релею на одну попытку (запас на ретрансмиссию)
-RELAY_PROBE_RETRIES = 2  # Количество повторных попыток на Origin перед фиксацией сбоя
 INGRESS_RETRY_DELAY = 1.5  # Базовая задержка перед повторным запросом зонда при ошибке/таймауте
 INGRESS_PROBE_TOTAL_TIMEOUT = 30.0  # Максимальное время синтетического ingress-зонда
 INGRESS_PROBE_CONNECT_TIMEOUT = 25.0  # Запас на трансграничный TLS handshake при пиках нагрузки
@@ -116,7 +116,6 @@ class ServerMonitorState:
         self.consecutive_cdn_successes: int = 0
         self.cdn_problem_started_at: float | None = None
         self.last_cdn_reminder_at: float | None = None
-        self.relays_probe_state: dict[str, dict[str, Any]] = {}
 
     def sync_from_db_server(self, db_server: Server):
         if db_server:
@@ -149,13 +148,6 @@ class ServerMonitorState:
                     self.cdn_problem_started_at = now_m - diff
                 else:
                     self.cdn_problem_started_at = None
-                if isinstance(db_server.extra_data.get("relays_probe_state"), dict):
-                    self.relays_probe_state = {
-                        k: dict(v) if isinstance(v, dict) else v
-                        for k, v in db_server.extra_data["relays_probe_state"].items()
-                    }
-                else:
-                    self.relays_probe_state = {}
             else:
                 self.ingress_problem = False
                 self.consecutive_ingress_fails = 0
@@ -167,7 +159,6 @@ class ServerMonitorState:
                 self.consecutive_cdn_successes = 0
                 self.cdn_problem_started_at = None
                 self.last_cdn_reminder_at = None
-                self.relays_probe_state = {}
 
             if db_server.problem_started_at:
                 now_m = time.monotonic()
@@ -197,10 +188,6 @@ def get_server_monitor_state(server_id: int, server: Server | None = None) -> Se
     return _monitor_states[server_id]
 
 
-def clear_server_monitor_state(server_id: int) -> None:
-    _monitor_states.pop(server_id, None)
-
-
 def reset_server_monitor_state(server_id: int, new_state: str = ServerHealthState.ONLINE) -> None:
     st = get_server_monitor_state(server_id)
     st.health_state = new_state
@@ -221,11 +208,11 @@ def reset_server_monitor_state(server_id: int, new_state: str = ServerHealthStat
     st.consecutive_cdn_successes = 0
     st.cdn_problem_started_at = None
     st.last_cdn_reminder_at = None
-    st.relays_probe_state = {}
 
 
-def clear_monitor_states():
-    _monitor_states.clear()
+def clear_server_monitor_state(server_id: int) -> None:
+    """Evict server monitor state from memory on server deletion."""
+    _monitor_states.pop(server_id, None)
 
 
 async def _send_admin_alert_msg(bot: Bot, text: str, reply_markup=None) -> bool:
@@ -289,17 +276,98 @@ async def check_node_resources_and_alerts(bot: Bot):
         servers = await get_all_servers(session)
 
     if not servers:
+        _monitor_states.clear()
         return
 
+    # Auto-prune monitor states for servers no longer present in DB
+    active_ids = {s.id for s in servers}
+    for sid in list(_monitor_states.keys()):
+        if sid not in active_ids:
+            _monitor_states.pop(sid, None)
+
     now_m = time.monotonic()
+    topology_dirty = False
+    probe_timeout = aiohttp.ClientTimeout(
+        total=INGRESS_PROBE_TOTAL_TIMEOUT,
+        connect=INGRESS_PROBE_CONNECT_TIMEOUT,
+    )
+    probe_connector = aiohttp.TCPConnector(family=socket.AF_INET)
+    shared_probe_sess = aiohttp.ClientSession(timeout=probe_timeout, connector=probe_connector)
 
     async def _check_one(server):
         st = get_server_monitor_state(server.id, server)
 
-        # 1. Если сервер отключён администратором вручную — фиксируем статус и пропускаем
+        # 1. Если сервер отключён — проверяем причину; при HOSTING_TRAFFIC_LIMIT и новом цикле (< 90%) включаем обратно
         if not server.is_active:
-            st.health_state = ServerHealthState.MANUAL_DISABLED
-            return
+            if getattr(server, "disabled_reason", None) == "HOSTING_TRAFFIC_LIMIT":
+                extra = dict(server.extra_data or {})
+                usage = get_server_hosting_usage(extra)
+                alert_cycle = extra.get("hosting_alert_cycle")
+                if (
+                    usage.limit_gb is not None
+                    and alert_cycle
+                    and usage.current_cycle != alert_cycle
+                    and usage.pct < 90.0
+                ):
+                    re_enabled = False
+                    async with session_scope() as session:
+                        fresh = await get_server_by_id(session, server.id, for_update=True)
+                        if (
+                            fresh
+                            and not fresh.is_active
+                            and getattr(fresh, "disabled_reason", None) == "HOSTING_TRAFFIC_LIMIT"
+                        ):
+                            fresh_extra = dict(fresh.extra_data or {})
+                            fresh_usage = get_server_hosting_usage(fresh_extra)
+                            fresh_alert_cycle = fresh_extra.get("hosting_alert_cycle")
+                            if (
+                                fresh_usage.limit_gb is not None
+                                and fresh_alert_cycle
+                                and fresh_usage.current_cycle != fresh_alert_cycle
+                                and fresh_usage.pct < 90.0
+                            ):
+                                fresh_extra["hosting_alert_level"] = 80 if fresh_usage.pct >= 80.0 else 0
+                                fresh_extra["hosting_alert_cycle"] = fresh_usage.current_cycle
+                                await update_server(
+                                    session,
+                                    fresh,
+                                    is_active=True,
+                                    disabled_reason=None,
+                                    disabled_at=None,
+                                    health_state=ServerHealthState.ONLINE,
+                                    consecutive_fails=0,
+                                    consecutive_successes=0,
+                                    problem_started_at=None,
+                                    next_check_at=None,
+                                    last_alert_sent_state=None,
+                                    extra_data=fresh_extra,
+                                )
+                                server.is_active = True
+                                server.disabled_reason = None
+                                server.disabled_at = None
+                                server.health_state = ServerHealthState.ONLINE
+                                server.extra_data = fresh_extra
+                                reset_server_monitor_state(server.id, ServerHealthState.ONLINE)
+                                st = get_server_monitor_state(server.id, server)
+                                re_enabled = True
+                    if re_enabled:
+                        try:
+                            await _send_admin_alert_msg(
+                                bot,
+                                ALERT_SERVER_HOSTING_TRAFFIC_RESTORED.format(
+                                    server_name=safe(server.name),
+                                    cycle=usage.current_cycle,
+                                ),
+                            )
+                        except Exception as exc:
+                            logger.error(
+                                "Failed to deliver hosting traffic recovery alert for server %d: %s",
+                                server.id,
+                                exc,
+                            )
+            if not server.is_active:
+                st.health_state = ServerHealthState.MANUAL_DISABLED
+                return
 
         # Если сервер был отключён, а теперь активен — переводим в ONLINE
         if st.health_state == ServerHealthState.MANUAL_DISABLED:
@@ -325,7 +393,11 @@ async def check_node_resources_and_alerts(bot: Bot):
         if not isinstance(caps, (list, tuple, set)):
             caps = []
 
-        has_xray = is_vless_capable_server(server) or is_white_internet_origin_server(server)
+        has_xray = (
+            is_vless_capable_server(server)
+            or is_white_internet_hub_server(server)
+            or is_v2_node_server(server)
+        )
 
         if not has_xray:
             logger.warning(
@@ -340,7 +412,7 @@ async def check_node_resources_and_alerts(bot: Bot):
         is_healthy = False
         xray_epoch = None
         xray_data = None
-        relays_probe_result: list[dict] | None = None
+        node_status_data: dict[str, Any] | None = None
         xray_ok = True
 
         if has_xray:
@@ -356,37 +428,35 @@ async def check_node_resources_and_alerts(bot: Bot):
                     )
                     xray_ok = False
                 else:
-                    async with XrayNodeClient(timeout=10.0) as xray_client:
+                    async with XrayNodeClient(
+                        timeout=10.0,
+                    ) as xray_client:
                         xray_ok, xray_epoch, xray_data = await xray_client.check_health(
                             xray_url, server.api_key
                         )
                         if (
                             xray_ok
-                            and ("xray_origin" in caps or bool((getattr(server, "extra_data", None) or {}).get("relays")))
-                            and hasattr(xray_client, "get_relays_health")
+                            and get_server_role(server) == "ru_hub"
+                            and hasattr(xray_client, "get_node_status")
                         ):
                             try:
-                                r_ok, r_data, r_err = await xray_client.get_relays_health(
-                                    xray_url,
-                                    server.api_key,
-                                    timeout=RELAY_PROBE_TIMEOUT,
-                                    retries=RELAY_PROBE_RETRIES,
+                                st_ok, st_data, _ = await xray_client.get_node_status(
+                                    xray_url, server.api_key
                                 )
-                                if r_ok and isinstance(r_data, dict):
-                                    relays_probe_result = r_data.get("relays")
-                                else:
-                                    logger.warning(
-                                        "Relays health check failed for Origin %s (%s): %s",
-                                        server.id,
-                                        server.name,
-                                        r_err or "Unknown error",
-                                    )
-                            except Exception as r_exc:
-                                logger.warning(
-                                    "Relays health probe exception for Origin %s (%s): %s",
+                                if st_ok and isinstance(st_data, dict):
+                                    node_status_data = st_data
+                                    if isinstance(xray_data, dict):
+                                        if isinstance(st_data.get("sni_routes"), list):
+                                            xray_data["sni_routes"] = st_data["sni_routes"]
+                                        if isinstance(st_data.get("xhttp_locations"), list) and "xhttp_locations" not in xray_data:
+                                            xray_data["xhttp_locations"] = st_data["xhttp_locations"]
+                                        if isinstance(st_data.get("links"), dict):
+                                            xray_data["links"] = st_data["links"]
+                            except Exception as st_exc:
+                                logger.debug(
+                                    "Node status sync skipped for ru_hub %s: %s",
                                     server.id,
-                                    server.name,
-                                    r_exc,
+                                    st_exc,
                                 )
             except Exception as exc:
                 logger.warning(
@@ -400,9 +470,8 @@ async def check_node_resources_and_alerts(bot: Bot):
         else:
             is_healthy = False
 
-        # 4b. Изолированная синтетическая проверка Ingress (публичный CDN / Nginx Origin)
-        # Строгое расцепление (AGENTS.md §9.7): сбои на синтетическом эндпоинте не аффектят статус ядра
-        # и выполняются независимо от того, успешен ли был core healthcheck.
+        # 4b. Изолированная синтетическая проверка Ingress (публичный CDN / Nginx шлюза)
+        # Сбои на синтетическом эндпоинте не аффектят статус ядра и выполняются независимо.
         origin_probe_result: tuple[bool, str] | None = None
         cdn_probe_result: tuple[bool, str] | None = None
         origin_domain: str | None = None
@@ -419,15 +488,18 @@ async def check_node_resources_and_alerts(bot: Bot):
 
         if is_xray_node:
             try:
-                is_origin = (
-                    "xray_origin" in (getattr(server, "capabilities", None) or [])
-                    or bool((getattr(server, "extra_data", None) or {}).get("relays"))
-                    or bool((getattr(server, "extra_data", None) or {}).get("cdn_domain"))
+                node_role = get_server_role(server)
+                extra_dict = server.extra_data if isinstance(getattr(server, "extra_data", None), dict) else {}
+                has_bot_proxy = bool(extra_dict.get("bot_domain")) or bool((extra_dict.get("modules") or {}).get("bot_proxy"))
+                is_wi_hub = has_bot_proxy and node_role not in ("eu_hub", "exit_node") and (
+                    node_role == "ru_hub"
+                    or WHITE_INTERNET_CAPABILITY in (getattr(server, "capabilities", None) or [])
+                    or bool(extra_dict.get("cdn_domain"))
+                    or bool(extra_dict.get("cdn_domains"))
                 )
-                if is_origin:
-                    if isinstance(getattr(server, "extra_data", None), dict):
-                        origin_domain = server.extra_data.get("domain")
-                        cdn_domain = server.extra_data.get("cdn_domain")
+                if is_wi_hub:
+                    origin_domain = extra_dict.get("domain")
+                    cdn_domain = extra_dict.get("cdn_domain")
                     if not origin_domain and server.api_url:
                         parsed = urlsplit(server.api_url)
                         if parsed.hostname and not parsed.hostname.replace(".", "").isdigit() and parsed.hostname != "localhost":
@@ -438,27 +510,21 @@ async def check_node_resources_and_alerts(bot: Bot):
                     if cdn_domain:
                         cdn_domain = str(cdn_domain).strip()
 
-                    timeout = aiohttp.ClientTimeout(
-                        total=INGRESS_PROBE_TOTAL_TIMEOUT,
-                        connect=INGRESS_PROBE_CONNECT_TIMEOUT,
-                    )
-                    connector = aiohttp.TCPConnector(family=socket.AF_INET)
-                    async with aiohttp.ClientSession(timeout=timeout, connector=connector) as probe_sess:
-                        if origin_domain and cdn_domain and origin_domain != cdn_domain:
-                            # Dual probe: probe both Origin and CDN in parallel
-                            res_origin, res_cdn = await asyncio.gather(
-                                _probe_single_ingress_endpoint(probe_sess, origin_domain, sub_prefix),
-                                _probe_single_ingress_endpoint(probe_sess, cdn_domain, sub_prefix),
+                    if origin_domain and cdn_domain and origin_domain != cdn_domain:
+                        # Dual probe: probe both Origin and CDN in parallel
+                        res_origin, res_cdn = await asyncio.gather(
+                            _probe_single_ingress_endpoint(shared_probe_sess, origin_domain, sub_prefix),
+                            _probe_single_ingress_endpoint(shared_probe_sess, cdn_domain, sub_prefix),
+                        )
+                        origin_probe_result = res_origin
+                        cdn_probe_result = res_cdn
+                    else:
+                        target_domain = cdn_domain or origin_domain
+                        if target_domain:
+                            origin_probe_result = await _probe_single_ingress_endpoint(
+                                shared_probe_sess, target_domain, sub_prefix
                             )
-                            origin_probe_result = res_origin
-                            cdn_probe_result = res_cdn
-                        else:
-                            target_domain = cdn_domain or origin_domain
-                            if target_domain:
-                                origin_probe_result = await _probe_single_ingress_endpoint(
-                                    probe_sess, target_domain, sub_prefix
-                                )
-                                cdn_probe_result = None
+                            cdn_probe_result = None
             except Exception as outer_probe_exc:
                 logger.warning(
                     "Unexpected error preparing ingress probe for server %s: %s",
@@ -467,10 +533,9 @@ async def check_node_resources_and_alerts(bot: Bot):
 
         alerts_to_send: list[dict] = []
         ingress_alerts_to_send: list[tuple[str, str, object, bool]] = []
-        relay_alerts_to_send: list[tuple[str, str, object, bool]] = []
 
-        # Decoupled ingress and relays alert evaluation and delivery (independent of core server CAS / health state)
-        if origin_probe_result is not None or relays_probe_result is not None:
+        # Decoupled ingress alert evaluation and delivery (independent of core server CAS / health state)
+        if origin_probe_result is not None:
             lock_key = 8_000_000_000 + int(server.id)
 
             async with session_scope() as session:
@@ -553,7 +618,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                                         status_or_err=safe(origin_detail),
                                         endpoint=safe(f"{sub_prefix}/ping"),
                                     ),
-                                    get_node_monitor_alert_keyboard(server.id).as_markup(),
                                     True,
                                 ))
                             elif has_ingress_problem:
@@ -570,7 +634,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                                             endpoint=safe(f"{sub_prefix}/ping"),
                                             hours_text=_format_outage_duration(outage_dur),
                                         ),
-                                        get_node_monitor_alert_keyboard(server.id).as_markup(),
                                         True,
                                     ))
                                     st.last_ingress_reminder_at = now_m
@@ -599,7 +662,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                                         domain=safe(active_origin_domain),
                                         endpoint=safe(f"{sub_prefix}/ping"),
                                     ),
-                                    get_node_monitor_alert_keyboard(server.id).as_markup(),
                                     False,
                                 ))
 
@@ -632,7 +694,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                                                 domain=safe(cdn_domain),
                                                 endpoint=safe(f"{sub_prefix}/ping"),
                                             ),
-                                            get_node_monitor_alert_keyboard(server.id).as_markup(),
                                             False,
                                         ))
                                 else:
@@ -670,7 +731,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                                                 status_or_err=safe(cdn_detail),
                                                 endpoint=safe(f"{sub_prefix}/ping"),
                                             ),
-                                            get_node_monitor_alert_keyboard(server.id).as_markup(),
                                             True,
                                         ))
                                     elif has_cdn_problem:
@@ -687,160 +747,9 @@ async def check_node_resources_and_alerts(bot: Bot):
                                                     endpoint=safe(f"{sub_prefix}/ping"),
                                                     hours_text=_format_outage_duration(outage_dur),
                                                 ),
-                                                get_node_monitor_alert_keyboard(server.id).as_markup(),
                                                 True,
                                             ))
                                             st.last_cdn_reminder_at = now_m
-
-                    # 3. Evaluate Origin Relays Health (TSPU check from inside Russia)
-                    if relays_probe_result is not None and isinstance(relays_probe_result, list):
-                        db_relays_state = dict(db_extra.get("relays_probe_state") or {})
-                        # Map IP/domain/name to server ID from current servers batch for direct button links
-                        ip_to_srv_id = {}
-                        for srv in servers:
-                            srv_extra = getattr(srv, "extra_data", None) or {}
-                            if isinstance(srv_extra, dict):
-                                if srv_extra.get("ip"):
-                                    ip_to_srv_id[str(srv_extra["ip"]).strip().lower()] = srv.id
-                                if srv_extra.get("domain"):
-                                    ip_to_srv_id[str(srv_extra["domain"]).strip().lower()] = srv.id
-                            if getattr(srv, "api_url", None):
-                                try:
-                                    parsed_host = urlsplit(srv.api_url).hostname
-                                    if parsed_host:
-                                        ip_to_srv_id[parsed_host.strip().lower()] = srv.id
-                                except Exception:
-                                    pass
-                            if getattr(srv, "name", None):
-                                clean_srv_name = srv.name.strip().lower()
-                                ip_to_srv_id[clean_srv_name] = srv.id
-                                srv_words = clean_srv_name.split()
-                                if len(srv_words) > 1:
-                                    ip_to_srv_id[" ".join(srv_words[1:])] = srv.id
-
-                        for r in relays_probe_result:
-                            relay_ip = str(r.get("ip") or "").strip()
-                            relay_port = r.get("port") or 10443
-                            relay_name = str(r.get("name") or r.get("code") or relay_ip).strip()
-                            is_relay_ok = bool(r.get("healthy"))
-                            relay_err = str(r.get("error") or "Timeout / Unreachable").strip()
-                            rtt_ms = r.get("rtt_ms") or 0.0
-                            relay_key = f"{relay_ip}:{relay_port}" if relay_ip else relay_name
-
-                            r_state = st.relays_probe_state.setdefault(relay_key, {
-                                "consecutive_fails": 0,
-                                "consecutive_successes": 0,
-                                "is_problem": False,
-                            })
-                            if relay_key in db_relays_state and isinstance(db_relays_state[relay_key], dict):
-                                db_r = db_relays_state[relay_key]
-                                r_state["is_problem"] = bool(r_state.get("is_problem", False)) or bool(db_r.get("is_problem", False))
-                                if "consecutive_fails" in db_r and not r_state.get("consecutive_fails"):
-                                    r_state["consecutive_fails"] = int(db_r.get("consecutive_fails") or 0)
-                                if "consecutive_successes" in db_r and not r_state.get("consecutive_successes"):
-                                    r_state["consecutive_successes"] = int(db_r.get("consecutive_successes") or 0)
-                                if "problem_started_at" in db_r and "problem_started_at" not in r_state:
-                                    r_state["problem_started_at"] = db_r.get("problem_started_at")
-                                if "last_reminder_at" in db_r and "last_reminder_at" not in r_state:
-                                    r_state["last_reminder_at"] = db_r.get("last_reminder_at")
-
-                            has_relay_problem = bool(r_state.get("is_problem", False))
-                            clean_relay_name = relay_name.strip().lower()
-                            relay_words = clean_relay_name.split()
-                            target_srv_id = (
-                                ip_to_srv_id.get(relay_ip.lower())
-                                or ip_to_srv_id.get(clean_relay_name)
-                                or (ip_to_srv_id.get(" ".join(relay_words[1:])) if len(relay_words) > 1 else None)
-                                or server.id
-                            )
-
-                            if not is_relay_ok:
-                                r_state["consecutive_fails"] = min(
-                                    int(r_state.get("consecutive_fails", 0)) + 1,
-                                    REQUIRED_RELAY_FAILS + 1,
-                                )
-                                r_state["consecutive_successes"] = 0
-                                if r_state["consecutive_fails"] >= REQUIRED_RELAY_FAILS:
-                                    now_ts = time.time()
-                                    if not has_relay_problem:
-                                        r_state["is_problem"] = True
-                                        r_state["problem_started_at"] = now_ts
-                                        r_state["last_reminder_at"] = now_ts
-                                        relay_alerts_to_send.append((
-                                            relay_key,
-                                            ALERT_RELAY_TSPU_PROBLEM.format(
-                                                relay_name=safe(relay_name),
-                                                relay_ip=safe(relay_ip),
-                                                relay_port=relay_port,
-                                                origin_name=safe(server.name),
-                                                origin_id=server.id,
-                                                status_or_err=safe(relay_err),
-                                            ),
-                                            get_node_monitor_alert_keyboard(target_srv_id).as_markup(),
-                                            True,
-                                        ))
-                                    elif has_relay_problem:
-                                        last_rem = r_state.get("last_reminder_at")
-                                        if last_rem is None:
-                                            r_state["last_reminder_at"] = now_ts
-                                        elif (now_ts - float(last_rem)) >= OUTAGE_REMINDER_INTERVAL_SECONDS:
-                                            started_at = float(r_state.get("problem_started_at") or (now_ts - OUTAGE_REMINDER_INTERVAL_SECONDS))
-                                            outage_dur = max(0.0, now_ts - started_at)
-                                            relay_alerts_to_send.append((
-                                                relay_key,
-                                                ALERT_RELAY_TSPU_PROBLEM_REMINDER.format(
-                                                    relay_name=safe(relay_name),
-                                                    relay_ip=safe(relay_ip),
-                                                    relay_port=relay_port,
-                                                    origin_name=safe(server.name),
-                                                    origin_id=server.id,
-                                                    hours_text=_format_outage_duration(outage_dur),
-                                                ),
-                                                get_node_monitor_alert_keyboard(target_srv_id).as_markup(),
-                                                True,
-                                            ))
-                                            r_state["last_reminder_at"] = now_ts
-                            else:
-                                r_state["consecutive_successes"] = min(
-                                    int(r_state.get("consecutive_successes", 0)) + 1,
-                                    REQUIRED_RELAY_SUCCESSES + 1,
-                                )
-                                r_state["consecutive_fails"] = 0
-                                if r_state["consecutive_successes"] >= REQUIRED_RELAY_SUCCESSES:
-                                    if has_relay_problem:
-                                        r_state["is_problem"] = False
-                                        r_state.pop("problem_started_at", None)
-                                        r_state.pop("last_reminder_at", None)
-                                        relay_alerts_to_send.append((
-                                            relay_key,
-                                            ALERT_RELAY_TSPU_RESTORED.format(
-                                                relay_name=safe(relay_name),
-                                                relay_ip=safe(relay_ip),
-                                                relay_port=relay_port,
-                                                origin_name=safe(server.name),
-                                                origin_id=server.id,
-                                                rtt_ms=round(rtt_ms, 1),
-                                            ),
-                                            get_node_monitor_alert_keyboard(target_srv_id).as_markup(),
-                                            False,
-                                        ))
-
-                        # Prune dead relay entries that are no longer configured on Origin
-                        current_keys = {
-                            f"{str(r.get('ip') or '').strip()}:{r.get('port') or 10443}" if str(r.get("ip") or "").strip()
-                            else str(r.get("name") or r.get("code") or "").strip()
-                            for r in relays_probe_result
-                        }
-                        for stale_key in list(st.relays_probe_state.keys()):
-                            if stale_key not in current_keys:
-                                st.relays_probe_state.pop(stale_key, None)
-
-                        if db_relays_state != st.relays_probe_state:
-                            db_extra["relays_probe_state"] = {
-                                k: dict(v) if isinstance(v, dict) else v
-                                for k, v in st.relays_probe_state.items()
-                            }
-                            extra_changed = True
 
                     if extra_changed and fresh_server:
                         merged_extra = dict(fresh_server.extra_data or {})
@@ -848,13 +757,12 @@ async def check_node_resources_and_alerts(bot: Bot):
                         await update_server(session, fresh_server, extra_data=merged_extra)
 
             # Decoupled alert dispatch outside DB transaction and advisory lock
-            for alert_kind, alert_text, alert_kb, is_problem in ingress_alerts_to_send:
+            for alert_kind, alert_text, is_problem in ingress_alerts_to_send:
                 sent_ok = False
                 try:
                     sent_ok = await _send_admin_alert_msg(
                         bot,
                         alert_text,
-                        reply_markup=alert_kb,
                     )
                 except Exception as e:
                     logger.error("Failed to deliver %s alert for server %d: %s", alert_kind, server.id, e)
@@ -879,45 +787,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                                     cur_extra.pop("cdn_problem_started_at", None)
                             await update_server(session, fresh, extra_data=cur_extra)
 
-            # Decoupled relay alert dispatch outside DB transaction and advisory lock
-            for relay_key, alert_text, alert_kb, is_problem in relay_alerts_to_send:
-                sent_ok = False
-                try:
-                    sent_ok = await _send_admin_alert_msg(
-                        bot,
-                        alert_text,
-                        reply_markup=alert_kb,
-                    )
-                except Exception as e:
-                    logger.error("Failed to deliver relay alert for %s on Origin %d: %s", relay_key, server.id, e)
-                if sent_ok:
-                    if relay_key in st.relays_probe_state:
-                        st.relays_probe_state[relay_key]["is_problem"] = is_problem
-                    async with session_scope() as session:
-                        fresh = await get_server_by_id(session, server.id, for_update=True)
-                        if fresh:
-                            cur_extra = dict(fresh.extra_data or {})
-                            cur_relays_state = dict(cur_extra.get("relays_probe_state") or {})
-                            if relay_key in cur_relays_state:
-                                cur_relays_state[relay_key]["is_problem"] = is_problem
-                            else:
-                                cur_relays_state[relay_key] = {"is_problem": is_problem}
-                            cur_extra["relays_probe_state"] = cur_relays_state
-                            await update_server(session, fresh, extra_data=cur_extra)
-                else:
-                    rollback_val = not is_problem
-                    if relay_key in st.relays_probe_state:
-                        st.relays_probe_state[relay_key]["is_problem"] = rollback_val
-                    async with session_scope() as session:
-                        fresh = await get_server_by_id(session, server.id, for_update=True)
-                        if fresh:
-                            cur_extra = dict(fresh.extra_data or {})
-                            cur_relays_state = dict(cur_extra.get("relays_probe_state") or {})
-                            if relay_key in cur_relays_state:
-                                cur_relays_state[relay_key]["is_problem"] = rollback_val
-                                cur_extra["relays_probe_state"] = cur_relays_state
-                                await update_server(session, fresh, extra_data=cur_extra)
-
         if is_healthy:
             if st.health_state == ServerHealthState.WAITING_CONFIRMATION:
                 # Восстановление после кратковременной ошибки (FAIL #1)
@@ -939,7 +808,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                             server_name=safe(server.name),
                             server_id=server.id,
                         ),
-                        "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
                         "target_alert_state": ServerHealthState.ONLINE,
                     })
 
@@ -947,11 +815,15 @@ async def check_node_resources_and_alerts(bot: Bot):
                 disk_percent = None
                 if is_xray_node and xray_data and isinstance(xray_data, dict):
                     try:
-                        disk_usage = xray_data.get("disk_usage", {})
-                        if isinstance(disk_usage, dict):
-                            raw_dp = disk_usage.get("used_percent")
-                            if raw_dp is not None and isinstance(raw_dp, (int, float)):
-                                disk_percent = float(raw_dp)
+                        sys_load = xray_data.get("system_load")
+                        if isinstance(sys_load, dict) and sys_load.get("disk_percent") is not None:
+                            disk_percent = float(sys_load["disk_percent"])
+                        else:
+                            disk_usage = xray_data.get("disk_usage", {})
+                            if isinstance(disk_usage, dict):
+                                raw_dp = disk_usage.get("used_percent")
+                                if raw_dp is not None and isinstance(raw_dp, (int, float)):
+                                    disk_percent = float(raw_dp)
                     except Exception as exc:
                         logger.warning("Error reading disk usage for Xray server %s: %s", server.id, exc)
 
@@ -968,11 +840,106 @@ async def check_node_resources_and_alerts(bot: Bot):
                                     server_id=server.id,
                                     disk_percent=disk_percent,
                                 ),
-                                "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
                             })
                             st.disk_alert_last_sent = now_m
                     elif disk_percent <= 80.0:
                         st.disk_alert_last_sent = None
+
+                # Проверка лимита хостинга (hosting_limit_gb)
+                extra = dict(server.extra_data or {})
+                usage = get_server_hosting_usage(extra)
+                if usage.limit_gb is not None:
+                    limit_gb = usage.limit_gb
+                    current_cycle = usage.current_cycle
+                    pct = usage.pct
+                    used_gb = usage.host_gb
+                    used_gb_fmt = f"{int(round(used_gb))}" if abs(used_gb - round(used_gb)) < 0.05 else f"{used_gb:.1f}"
+
+                    alert_cycle = extra.get("hosting_alert_cycle")
+                    alert_level = int(extra.get("hosting_alert_level", 0) or 0)
+                    if alert_cycle != current_cycle:
+                        alert_cycle = current_cycle
+                        alert_level = 0
+
+                    hosting_alert_to_send = None
+                    new_alert_level = alert_level
+                    should_disable = False
+
+                    if pct >= 90.0 and alert_level < 90:
+                        should_disable = True
+                        new_alert_level = 90
+                        hosting_alert_to_send = {
+                            "text": ALERT_SERVER_HOSTING_TRAFFIC_CRITICAL.format(
+                                server_name=safe(server.name),
+                                used_gb=used_gb_fmt,
+                                limit_gb=limit_gb,
+                            ),
+                        }
+                    elif pct >= 80.0 and alert_level < 80:
+                        new_alert_level = 80
+                        hosting_alert_to_send = {
+                            "text": ALERT_SERVER_HOSTING_TRAFFIC_WARN.format(
+                                server_name=safe(server.name),
+                                used_gb=used_gb_fmt,
+                                limit_gb=limit_gb,
+                            ),
+                        }
+                    elif pct < 80.0 and alert_level > 0:
+                        new_alert_level = 0
+
+                    # Decoupled immediate alert delivery: critical alerts must not be dropped when server is auto-disabled
+                    if hosting_alert_to_send:
+                        sent_ok = False
+                        try:
+                            sent_ok = await _send_admin_alert_msg(
+                                bot,
+                                hosting_alert_to_send["text"],
+                            )
+                        except Exception as e:
+                            logger.error("Failed to deliver hosting traffic alert for server %d: %s", server.id, e)
+
+                        if not sent_ok:
+                            # Delivery failed; retain current alert_level so next tick retries
+                            new_alert_level = alert_level
+
+                    if new_alert_level != alert_level or should_disable or alert_cycle != extra.get("hosting_alert_cycle"):
+                        extra["hosting_alert_level"] = new_alert_level
+                        extra["hosting_alert_cycle"] = current_cycle
+                        server.extra_data = extra
+                        if should_disable:
+                            server.is_active = False
+                            server.disabled_reason = "HOSTING_TRAFFIC_LIMIT"
+                            st.health_state = ServerHealthState.MANUAL_DISABLED
+                            st.consecutive_fails = 0
+                            st.consecutive_successes = 0
+                            st.problem_started_at = None
+                            st.next_check_at = None
+                            st.last_alert_sent_state = None
+
+                        async with session_scope() as session:
+                            fresh = await get_server_by_id(session, server.id, for_update=True)
+                            if fresh:
+                                fresh_extra = dict(fresh.extra_data or {})
+                                fresh_extra["hosting_alert_level"] = new_alert_level
+                                fresh_extra["hosting_alert_cycle"] = current_cycle
+                                if should_disable:
+                                    fresh.is_active = False
+                                    await update_server(
+                                        session,
+                                        fresh,
+                                        is_active=False,
+                                        disabled_reason="HOSTING_TRAFFIC_LIMIT",
+                                        disabled_at=now_utc(),
+                                        health_state=ServerHealthState.MANUAL_DISABLED,
+                                        consecutive_fails=0,
+                                        consecutive_successes=0,
+                                        problem_started_at=None,
+                                        next_check_at=None,
+                                        last_alert_sent_state=None,
+                                        extra_data=fresh_extra,
+                                    )
+                                else:
+                                    await update_server(session, fresh, extra_data=fresh_extra)
 
             elif st.health_state == ServerHealthState.PROBLEM:
                 st.consecutive_fails = 0
@@ -989,7 +956,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                             server_name=safe(server.name),
                             server_id=server.id,
                         ),
-                        "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
                         "target_alert_state": ServerHealthState.ONLINE,
                     })
 
@@ -1015,7 +981,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                         server_name=safe(server.name),
                         server_id=server.id,
                     ),
-                    "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
                     "target_alert_state": ServerHealthState.PROBLEM,
                 })
 
@@ -1032,7 +997,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                             server_name=safe(server.name),
                             server_id=server.id,
                         ),
-                        "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
                         "target_alert_state": ServerHealthState.PROBLEM,
                     })
                 else:
@@ -1047,7 +1011,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 server_id=server.id,
                                 hours_text=_format_outage_duration(outage_dur),
                             ),
-                            "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
                             "is_reminder": True,
                         })
                         st.last_core_reminder_at = now_m
@@ -1064,14 +1027,27 @@ async def check_node_resources_and_alerts(bot: Bot):
             update_kwargs["last_successful_check"] = now_utc()
             if is_xray_node and xray_data:
                 extra_update = {}
-                if "relays" in xray_data and not xray_data.get("relays_error"):
-                    extra_update["relays"] = xray_data["relays"]
                 if "secret_base_path" in xray_data:
                     extra_update["secret_base_path"] = xray_data["secret_base_path"]
                 if "sub_path_prefix" in xray_data and xray_data["sub_path_prefix"]:
                     extra_update["sub_path_prefix"] = xray_data["sub_path_prefix"]
+                if "cdn_domain" in xray_data:
+                    extra_update["cdn_domain"] = xray_data["cdn_domain"] or ""
+                if "cdn_domains" in xray_data and isinstance(xray_data["cdn_domains"], dict):
+                    extra_update["cdn_domains"] = xray_data["cdn_domains"]
+                    tf_dom = xray_data["cdn_domains"].get("cdn_turboflare")
+                    if tf_dom:
+                        extra_update["turboflare_domain"] = tf_dom
+                if "xhttp_locations" in xray_data and isinstance(xray_data["xhttp_locations"], list):
+                    extra_update["xhttp_locations"] = xray_data["xhttp_locations"]
+                if "links" in xray_data and isinstance(xray_data["links"], dict):
+                    extra_update["links"] = xray_data["links"]
                 if extra_update:
                     update_kwargs["extra_data"] = extra_update
+                if xray_data.get("role") or xray_data.get("capabilities"):
+                    derived_caps = derive_v2_capabilities(node_status_data, xray_data)
+                    if derived_caps and sorted(derived_caps) != sorted(server.capabilities or []):
+                        update_kwargs["capabilities"] = derived_caps
 
             if st.health_state == ServerHealthState.ONLINE:
                 update_kwargs["problem_started_at"] = None
@@ -1106,23 +1082,45 @@ async def check_node_resources_and_alerts(bot: Bot):
                     server.xray_instance_boot_id = updated_srv.xray_instance_boot_id
                     server.xray_instance_starttime = updated_srv.xray_instance_starttime
 
-                    # Синхронизация динамических метаданных (релеи, cdn_domain) при изменениях на ноде
+                    # Синхронизация динамических метаданных (cdn_domain, cdn_domains, xhttp_locations) при изменениях на ноде
                     if xray_data and isinstance(xray_data, dict):
                         extra = dict(updated_srv.extra_data or {})
                         extra_changed = False
-                        for key in ("cdn_domain", "relays", "secret_base_path"):
-                            if key == "relays" and xray_data.get("relays_error"):
-                                continue
-                            if key in xray_data and xray_data[key] and extra.get(key) != xray_data[key]:
-                                extra[key] = xray_data[key]
+                        for key in ("cdn_domain", "cdn_domains", "xhttp_locations", "links", "secret_base_path", "system_load"):
+                            if key in xray_data:
+                                val = xray_data[key]
+                                if key == "cdn_domain":
+                                    norm_val = val or ""
+                                    if extra.get(key, "") != norm_val:
+                                        extra[key] = norm_val
+                                        extra_changed = True
+                                elif key == "system_load":
+                                    if isinstance(val, dict) and extra.get("system_load") != val:
+                                        extra["system_load"] = val
+                                        extra_changed = True
+                                elif val is not None and extra.get(key) != val:
+                                    if key == "secret_base_path" and not val:
+                                        continue
+                                    extra[key] = val
+                                    extra_changed = True
+                        cdn_domains = xray_data.get("cdn_domains")
+                        if isinstance(cdn_domains, dict):
+                            tf_dom = cdn_domains.get("cdn_turboflare")
+                            if tf_dom:
+                                if extra.get("turboflare_domain") != tf_dom:
+                                    extra["turboflare_domain"] = tf_dom
+                                    extra_changed = True
+                            elif "turboflare_domain" in extra:
+                                extra.pop("turboflare_domain", None)
                                 extra_changed = True
                         if extra_changed:
                             updated_srv.extra_data = extra
+                            flag_modified(updated_srv, "extra_data")
                             server.extra_data = extra
                             await session.flush()
 
-                    # Trigger VLESS re-provisioning only if epoch changed or is unsynced on a VLESS capable server
-                    if is_vless_capable_server(updated_srv):
+                    # Trigger VLESS re-provisioning only if epoch changed or is unsynced on a VLESS sync target server (ru_hub)
+                    if is_vless_sync_target_server(updated_srv):
                         cur_synced = (dict(updated_srv.extra_data or {})).get("vless_synced_epoch")
                         if prev_epoch != updated_srv.xray_instance_epoch or cur_synced != updated_srv.xray_instance_epoch:
                             from services.vless_subscription_service import VlessSubscriptionService
@@ -1137,6 +1135,9 @@ async def check_node_resources_and_alerts(bot: Bot):
                 new_health_state=st.health_state,
                 **update_kwargs,
             )
+            if applied and expected_health_state != st.health_state:
+                nonlocal topology_dirty
+                topology_dirty = True
             if db_server and not applied:
                 st.sync_from_db_server(db_server)
 
@@ -1149,7 +1150,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                     sent_ok = await _send_admin_alert_msg(
                         bot,
                         alert_to_send["text"],
-                        reply_markup=alert_to_send.get("reply_markup"),
                     )
                 except Exception as e:
                     logger.error("Failed to deliver node monitor alert: %s", e)
@@ -1170,13 +1170,32 @@ async def check_node_resources_and_alerts(bot: Bot):
 
     # Bounded parallel fan-out: one hung node must not freeze monitoring of
     # the remaining nodes in this cycle.
-    for batch_start in range(0, len(servers), CHECK_PARALLELISM):
-        batch = servers[batch_start:batch_start + CHECK_PARALLELISM]
-        await asyncio.gather(*(_check_one(s) for s in batch))
+    try:
+        for batch_start in range(0, len(servers), CHECK_PARALLELISM):
+            batch = servers[batch_start:batch_start + CHECK_PARALLELISM]
+            await asyncio.gather(*(_check_one(s) for s in batch))
+    finally:
+        await shared_probe_sess.close()
+
+    if topology_dirty:
+        try:
+            async with session_scope() as topo_session:
+                from services.topology_sync_service import sync_v2_topology_to_nodes
+                await sync_v2_topology_to_nodes(topo_session)
+        except Exception as topo_exc:
+            logger.warning("Failed to sync v2 topology after health state transition: %s", topo_exc)
 
 
 async def node_monitor_loop(bot: Bot, shutdown_event: asyncio.Event):
     logger.info("Starting node_monitor_loop background worker...")
+    try:
+        async with session_scope() as init_session:
+            from services.topology_sync_service import sync_v2_topology_to_nodes
+            await sync_v2_topology_to_nodes(init_session)
+            logger.info("Initial v2 topology sync to all nodes completed on worker startup.")
+    except Exception as init_topo_exc:
+        logger.warning("Initial v2 topology sync on worker startup failed: %s", init_topo_exc)
+
     while not shutdown_event.is_set():
         try:
             await check_node_resources_and_alerts(bot)

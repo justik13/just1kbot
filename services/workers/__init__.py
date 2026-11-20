@@ -7,8 +7,6 @@ from dataclasses import asdict, dataclass
 
 import aiohttp
 from aiogram import Bot
-from aiogram.utils.keyboard import InlineKeyboardBuilder
-from bot.texts.common.buttons import BTN_DISMISS_ALERT
 from bot.texts.runtime.alerts import (
     ALERT_TITLE_CRITICAL_STOP,
     ALERT_TITLE_WORKER_COOLDOWN,
@@ -19,14 +17,13 @@ from bot.texts.runtime.alerts import (
 from config.settings import get_settings
 from utils.telegram import safe_send_message
 
-from .cleanup import cleanup_dangling_peers_loop
+from .cleanup import cleanup_expired_subscriptions_loop
 from .credit_notifications import credit_notifications_loop
 from .heartbeat import heartbeat_loop
 from .node_monitor import node_monitor_loop
 from .notifications import subscription_notifications_loop
 from .traffic import traffic_sync_loop
 from .white_internet_reconciliation import white_internet_reconciliation_loop
-from .white_internet_traffic import white_internet_traffic_loop
 
 
 class _ExpectedNodeMonitorNetworkWarningFilter(logging.Filter):
@@ -97,13 +94,12 @@ _ALERT_SHUTDOWN_GRACE = 1.0
 
 
 def _traffic(bot): return traffic_sync_loop(bot, shutdown_event)
-def _cleanup(bot): return cleanup_dangling_peers_loop(bot, shutdown_event)
+def _cleanup(bot): return cleanup_expired_subscriptions_loop(shutdown_event)
 def _notifications(bot): return subscription_notifications_loop(bot, shutdown_event)
 def _credit_notifications(bot): return credit_notifications_loop(bot, shutdown_event)
 def _heartbeat(bot): return heartbeat_loop(shutdown_event, heartbeat_allowed)
 def _node_monitor(bot): return node_monitor_loop(bot, shutdown_event)
 def _white_internet_reconciliation(bot): return white_internet_reconciliation_loop(bot, shutdown_event)
-def _white_internet_traffic(bot): return white_internet_traffic_loop(bot, shutdown_event)
 
 
 WORKERS: tuple[WorkerDefinition, ...] = (
@@ -114,7 +110,6 @@ WORKERS: tuple[WorkerDefinition, ...] = (
     WorkerDefinition("heartbeat", _heartbeat, False),
     WorkerDefinition("node_monitor", _node_monitor, False),
     WorkerDefinition("white_internet_reconciliation", _white_internet_reconciliation, True),
-    WorkerDefinition("white_internet_traffic", _white_internet_traffic, True),
 )
 
 
@@ -160,13 +155,6 @@ async def _send_alert(bot: Bot, title: str, worker: str,
         failure_count=failure_count,
         error_type=error_type,
     )
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text=BTN_DISMISS_ALERT,
-        callback_data="admin_dismiss_alert:general",
-    )
-    builder.adjust(1)
-    reply_markup = builder.as_markup()
     try:
         for admin_id in get_settings().ADMIN_IDS:
             try:
@@ -174,7 +162,6 @@ async def _send_alert(bot: Bot, title: str, worker: str,
                     bot,
                     admin_id,
                     message,
-                    reply_markup=reply_markup,
                     parse_mode="HTML",
                 )
             except Exception:
@@ -254,8 +241,7 @@ async def _supervise_workers(bot: Bot, *, check_interval: float | None = None,
                 continue
 
             if health.state == "backoff":
-                # P2 #9 (audit): backoff is a timestamp, never an inline await,
-                # so one flapping worker cannot delay supervision of the rest.
+                # Backoff is a timestamp, never an inline await, so one flapping worker cannot delay others.
                 if health.next_restart_at is not None and now < health.next_restart_at:
                     continue
                 health.next_restart_at = None
@@ -362,5 +348,31 @@ async def stop_background_workers(*, alert_grace_timeout: float | None = None) -
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
     _alert_tasks.clear()
+
+    # Drain auxiliary background tasks (sync, deprovision, post-commit tasks)
+    extra_tasks: list[asyncio.Task] = []
+    try:
+        from services.vless_subscription_service import _BACKGROUND_TASKS as vless_bg
+        extra_tasks.extend(list(vless_bg))
+    except Exception:
+        pass
+    try:
+        from services.white_internet_service import _BACKGROUND_TASKS as wi_bg
+        extra_tasks.extend(list(wi_bg))
+    except Exception:
+        pass
+    try:
+        from database.connection import _post_commit_background_tasks as pc_bg
+        extra_tasks.extend(list(pc_bg))
+    except Exception:
+        pass
+
+    if extra_tasks:
+        _, pending = await asyncio.wait(extra_tasks, timeout=3.0)
+        for t in pending:
+            t.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
     _supervisor_healthy = False
     logger.info("Background workers stopped")

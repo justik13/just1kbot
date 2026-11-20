@@ -3,8 +3,7 @@
 """
 Comprehensive Invariant Scanner for just1kbot Subsystems.
 
-Verifies 13 critical database, domain, cryptographic, and accounting invariants:
-  1. Tariff Version Immutability & Constraint Invariant
+Verifies 12 critical database, domain, cryptographic, and accounting invariants:
   2. Server Lifecycle & Health Status Invariant
   3. White Internet Subscription State Invariant
   4. White Internet Quota Grant Conservation Invariant
@@ -14,7 +13,7 @@ Verifies 13 critical database, domain, cryptographic, and accounting invariants:
   8. Origin Node Capability & Existence Invariant
  10. Account Balance Non-Negativity Invariant
  11. Account Ledger Entry Conservation Invariant
- 13. VPN Profile Protocol Invariant (Exclusively AWG)
+ 13. VPN Server Protocol Invariant (Strictly VLESS/Xray)
  14. Origin Server Capacity Non-Breach Invariant
  15. Alembic Migration Single Head Invariant
 """
@@ -36,12 +35,11 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.constants import AMNEZIA_PROTOCOLS, VLESS_PROTOCOL, XRAY_PROTOCOL
+from config.constants import VLESS_PROTOCOL, XRAY_PROTOCOL
 from config.enums import (
     AccountLedgerEntryType,
     ServerHealthState,
     ServerLifecycleStatus,
-    ServiceType,
     WhiteInternetProvisioningStatus,
     WhiteInternetStatus,
 )
@@ -49,10 +47,8 @@ from database.connection import session_scope
 from database.models import (
     AccountLedgerEntry,
     Server,
-    Tariff,
     WhiteInternetSubscription,
 )
-from database.repositories.servers_repo import capacity_consuming_wl_condition
 
 
 class InvariantResult(NamedTuple):
@@ -60,29 +56,6 @@ class InvariantResult(NamedTuple):
     name: str
     passed: bool
     details: str
-
-
-async def assert_inv_1_tariffs(session: AsyncSession) -> InvariantResult:
-    """Inv 1: Tariffs have valid service_type, positive duration and price."""
-    violations = await session.scalars(
-        select(Tariff).where(
-            or_(
-                ~Tariff.service_type.in_(
-                    [ServiceType.STANDARD, ServiceType.WHITE_INTERNET, ServiceType.AWG]
-                ),
-                Tariff.duration_days <= 0,
-                Tariff.price_rub <= 0,
-            )
-        )
-    )
-    v_list = violations.all()
-    if v_list:
-        return InvariantResult(
-            1, "Tariff Constraints", False, f"Violations found: {len(v_list)} rows"
-        )
-    return InvariantResult(
-        1, "Tariff Constraints", True, "All tariffs satisfy schema invariants"
-    )
 
 
 async def assert_inv_2_server_lifecycle(session: AsyncSession) -> InvariantResult:
@@ -163,8 +136,8 @@ async def assert_inv_5_subscription_counter_monotonicity(session: AsyncSession) 
     violations = await session.scalars(
         select(WhiteInternetSubscription).where(
             or_(
-                WhiteInternetSubscription.last_uplink_snapshot < 0,
-                WhiteInternetSubscription.last_downlink_snapshot < 0,
+                WhiteInternetSubscription.traffic_uplink_bytes < 0,
+                WhiteInternetSubscription.traffic_downlink_bytes < 0,
                 WhiteInternetSubscription.traffic_used_bytes < 0,
             )
         )
@@ -231,40 +204,20 @@ async def assert_inv_7_subscription_period_usage(session: AsyncSession) -> Invar
 
 
 async def assert_inv_8_origin_node_capabilities(session: AsyncSession) -> InvariantResult:
-    """Inv 8: All subscription origin nodes exist and have 'xray_origin' capability."""
-    subs = (await session.scalars(select(WhiteInternetSubscription))).all()
-    origin_ids = {s.origin_node_id for s in subs if s.origin_node_id is not None}
-    if not origin_ids:
-        return InvariantResult(
-            8, "Origin Node Capabilities", True, "No subscription origin nodes to check"
-        )
-
-    servers = (await session.scalars(select(Server).where(Server.id.in_(origin_ids)))).all()
-    server_map = {srv.id: srv for srv in servers}
-
-    bad_nodes = []
-    for srv_id in origin_ids:
-        srv = server_map.get(srv_id)
-        if srv is None:
-            bad_nodes.append(f"Server {srv_id} missing")
-        elif "xray_origin" not in (srv.capabilities or []):
-            bad_nodes.append(f"Server {srv_id} lacks 'xray_origin' capability")
-
-    if bad_nodes:
-        return InvariantResult(8, "Origin Node Capabilities", False, "; ".join(bad_nodes))
+    """Inv 8: Multi-hub architecture — WI subscriptions are no longer pinned to a single hub server."""
     return InvariantResult(
-        8, "Origin Node Capabilities", True, "All origin servers have 'xray_origin' capability"
+        8, "Origin Node Capabilities", True, "Multi-hub architecture: server pinning removed"
     )
 
 
 
 async def assert_inv_10_account_balance_non_negativity(session: AsyncSession) -> InvariantResult:
-    """Inv 10: All users have non-negative net balance unless accounted by refund/chargeback debits."""
+    """Inv 10: Real and bonus buckets satisfy non-negativity (real debt only from refund_debit)."""
     refund_allowance = func.coalesce(
         func.sum(
             case(
                 (
-                    AccountLedgerEntry.entry_type.in_(("refund_debit", "chargeback_debit")),
+                    AccountLedgerEntry.entry_type == "refund_debit",
                     -AccountLedgerEntry.amount,
                 ),
                 else_=Decimal("0"),
@@ -272,16 +225,34 @@ async def assert_inv_10_account_balance_non_negativity(session: AsyncSession) ->
         ),
         Decimal("0"),
     )
-    net_balance = func.coalesce(func.sum(AccountLedgerEntry.amount), Decimal("0"))
+    real_balance = func.coalesce(
+        func.sum(
+            case(
+                (AccountLedgerEntry.bucket == "real", AccountLedgerEntry.amount),
+                else_=Decimal("0"),
+            )
+        ),
+        Decimal("0"),
+    )
+    bonus_balance = func.coalesce(
+        func.sum(
+            case(
+                (AccountLedgerEntry.bucket == "bonus", AccountLedgerEntry.amount),
+                else_=Decimal("0"),
+            )
+        ),
+        Decimal("0"),
+    )
 
     res = await session.execute(
         select(
             AccountLedgerEntry.user_id,
-            net_balance.label("net_balance"),
+            real_balance.label("real_balance"),
+            bonus_balance.label("bonus_balance"),
             refund_allowance.label("refund_allowance"),
         )
         .group_by(AccountLedgerEntry.user_id)
-        .having((net_balance + refund_allowance) < 0)
+        .having(or_((real_balance + refund_allowance) < 0, bonus_balance < 0))
     )
     violations = res.all()
     if violations:
@@ -289,24 +260,25 @@ async def assert_inv_10_account_balance_non_negativity(session: AsyncSession) ->
             10,
             "Account Balance Non-Negativity",
             False,
-            f"Violations found: {len(violations)} users with unexplained negative balance exceeding refund debits",
+            f"Violations found: {len(violations)} users with invalid negative bucket balance",
         )
     return InvariantResult(
         10,
         "Account Balance Non-Negativity",
         True,
-        "All user accounting balances are non-negative or explained by refund/chargeback debits",
+        "All user real/bonus balances are non-negative or explained by refund debits",
     )
 
 
 async def assert_inv_11_account_ledger_conservation(session: AsyncSession) -> InvariantResult:
-    """Inv 11: Account ledger entries have non-zero amounts and valid entry types."""
+    """Inv 11: Account ledger entries have non-zero amounts, valid entry types and valid buckets."""
     valid_types = [t.value for t in AccountLedgerEntryType]
     violations = await session.scalars(
         select(AccountLedgerEntry).where(
             or_(
                 AccountLedgerEntry.amount == 0,
                 ~AccountLedgerEntry.entry_type.in_(valid_types),
+                ~AccountLedgerEntry.bucket.in_(["real", "bonus"]),
             )
         )
     )
@@ -321,59 +293,35 @@ async def assert_inv_11_account_ledger_conservation(session: AsyncSession) -> In
 
 
 async def assert_inv_13_vpn_protocol(session: AsyncSession) -> InvariantResult:
-    """Inv 13: All VPN servers use AWG, Xray, or VLESS protocol (pure WireGuard 'wg' is strictly rejected)."""
+    """Inv 13: All VPN servers strictly use VLESS or Xray protocol (AWG/wireguard strictly rejected)."""
     violations = await session.scalars(
         select(Server).where(
-            Server.protocol.notin_(list(AMNEZIA_PROTOCOLS) + [XRAY_PROTOCOL, VLESS_PROTOCOL])
-            | (Server.protocol == "wg")
+            or_(
+                Server.protocol.is_(None),
+                Server.protocol.notin_([VLESS_PROTOCOL, XRAY_PROTOCOL]),
+            )
         )
     )
     v_list = violations.all()
     if v_list:
         return InvariantResult(
             13,
-            "VPN Server Protocol (AWG/Xray)",
+            "VPN Server Protocol (VLESS/Xray)",
             False,
             f"Violations: {len(v_list)} invalid protocol servers",
         )
     return InvariantResult(
         13,
-        "VPN Server Protocol (AWG/Xray)",
+        "VPN Server Protocol (VLESS/Xray)",
         True,
-        "All servers strictly use AmneziaWG (amneziawg2/3/3.1), Xray (xray), or VLESS (vless)",
+        "All servers strictly use VLESS (vless) or Xray (xray)",
     )
 
 
 async def assert_inv_14_origin_server_capacity(session: AsyncSession) -> InvariantResult:
-    """Inv 14: Origin servers do not exceed max_clients for capacity-consuming subscriptions."""
-    servers = (
-        await session.scalars(
-            select(Server).where(
-                Server.is_active.is_(True),
-                Server.lifecycle_status == ServerLifecycleStatus.ACTIVE,
-            )
-        )
-    ).all()
-    origin_servers = [s for s in servers if "xray_origin" in (s.capabilities or [])]
-
-    breaches = []
-    for srv in origin_servers:
-        active_count = (
-            await session.scalar(
-                select(func.count(WhiteInternetSubscription.id)).where(
-                    WhiteInternetSubscription.origin_node_id == srv.id,
-                    capacity_consuming_wl_condition(),
-                )
-            )
-            or 0
-        )
-        if active_count > srv.max_clients:
-            breaches.append(f"Server {srv.id} ({srv.name}): {active_count}/{srv.max_clients}")
-
-    if breaches:
-        return InvariantResult(14, "Origin Server Capacity", False, "; ".join(breaches))
+    """Inv 14: Origin server capacity (deprecated - legacy max_clients constraint removed)."""
     return InvariantResult(
-        14, "Origin Server Capacity", True, "All origin servers operate within max_clients capacity"
+        14, "Origin Server Capacity", True, "Legacy max_clients constraint removed"
     )
 
 
@@ -405,7 +353,6 @@ async def assert_inv_15_alembic_single_head(session: AsyncSession | None = None)
 
 
 ALL_INVARIANT_CHECKS = [
-    assert_inv_1_tariffs,
     assert_inv_2_server_lifecycle,
     assert_inv_3_white_internet_subscriptions,
     assert_inv_4_subscription_traffic_pools,

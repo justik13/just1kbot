@@ -65,8 +65,13 @@ def extract_device_metadata(headers: Mapping[str, Any] | Any | None = None) -> d
     client = parse_client_from_user_agent(str(ua))
     if client:
         meta["client"] = client[:64]
+        meta["app_version"] = client[:64]
 
     clean_ua = re.sub(r"[\r\n]", " ", str(ua)).strip()[:64]
+    if clean_os:
+        meta["platform"] = clean_os[:64]
+    if clean_ver:
+        meta["os_version"] = clean_ver[:64]
     if clean_os and clean_ver:
         meta["os"] = f"{clean_os} {clean_ver}"[:32]
     elif clean_os:

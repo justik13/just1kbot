@@ -6,25 +6,43 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from config.constants import (
-    AMNEZIA_PROTOCOL,
-    AMNEZIA_PROTOCOLS,
     VLESS_PROTOCOL,
-    XRAY_ORIGIN_CAPABILITY,
+    WHITE_INTERNET_CAPABILITY,
     XRAY_PROTOCOL,
 )
 from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.models import Server
-from services.slots_cache import get_cached_peer_count
 
-CAPACITY_CONSUMING_STATUSES = (
-    "pending_create",
-    "active",
-    "pending_update",
-    "update_failed",
-    "deleting",
-    "delete_failed",
-    "create_cleanup_pending",
-)
+V2_NODE_ROLES = ("ru_hub", "eu_hub", "exit_node")
+
+
+def get_server_role(server) -> str | None:
+    """Extract normalized v2 node role from Server.role / extra_data / capabilities."""
+    if not server:
+        return None
+    direct_role = getattr(server, "role", None)
+    if isinstance(direct_role, str):
+        direct_role = direct_role.strip().lower()
+        if direct_role in V2_NODE_ROLES:
+            return direct_role
+    extra = getattr(server, "extra_data", None)
+    if isinstance(extra, dict):
+        role = str(extra.get("role") or "").strip().lower()
+        if role in V2_NODE_ROLES:
+            return role
+    caps = getattr(server, "capabilities", None) or []
+    if isinstance(caps, (list, tuple, set)):
+        for role in V2_NODE_ROLES:
+            if role in caps:
+                return role
+        if "bridge_hub" in caps:
+            return "eu_hub"
+    return None
+
+
+def is_v2_node_server(server) -> bool:
+    """Return True if server has an identified v2 modular role."""
+    return get_server_role(server) in V2_NODE_ROLES
 
 
 def is_vless_capable_server(server) -> bool:
@@ -42,51 +60,157 @@ def is_vless_capable_server(server) -> bool:
     return "vless" in caps or "xray_vless" in caps or proto == VLESS_PROTOCOL
 
 
-def is_white_internet_origin_server(server) -> bool:
-    """Whether a server is an origin server for White Internet contour."""
+def is_vless_sync_target_server(server) -> bool:
+    """Whether a server hosts individual user VLESS client credentials.
+
+    In v2 topology, end-user VLESS credentials are authenticated strictly on ru_hub
+    (where TLS is terminated and SNI routes are matched).
+    eu_hub and exit_node communicate strictly over shared inter-hub bridge UUIDs
+    and never host individual user credentials.
+    """
     if not server:
+        return False
+    return get_server_role(server) == "ru_hub" and is_vless_capable_server(server)
+
+
+def is_white_internet_hub_server(server) -> bool:
+    """Whether a server is a ru_hub gateway for White Internet contour."""
+    if not server:
+        return False
+    if get_server_role(server) in ("eu_hub", "exit_node"):
         return False
     caps = getattr(server, "capabilities", None) or []
     if not isinstance(caps, (list, tuple, set)):
         caps = []
     raw_proto = getattr(server, "protocol", None)
     proto = raw_proto.strip().lower() if isinstance(raw_proto, str) else ""
-    if proto in AMNEZIA_PROTOCOLS:
-        return False
-    if XRAY_ORIGIN_CAPABILITY in caps:
+    if WHITE_INTERNET_CAPABILITY in caps:
         return True
     return proto == XRAY_PROTOCOL and not is_vless_capable_server(server)
 
 
-def is_awg_capable_server(server) -> bool:
-    """Legacy compatibility stub: AmneziaWG is fully decommissioned."""
-    return False
-
-
-def is_pure_vless_server(server) -> bool:
-    """Whether a server is a pure direct VLESS server (not White Internet Origin)."""
-    return is_vless_capable_server(server) and not is_white_internet_origin_server(server)
-
-
 def get_server_xray_api_url(server) -> str | None:
     """Return explicit Xray API URL for the server."""
-    proto = str(getattr(server, "protocol", "") or "").lower()
-    caps = getattr(server, "capabilities", None) or []
     extra = getattr(server, "extra_data", None) if isinstance(getattr(server, "extra_data", None), dict) else {}
+    return extra.get("xray_api_url") or getattr(server, "api_url", None)
 
-    if proto in AMNEZIA_PROTOCOLS or "awg" in caps:
-        return extra.get("xray_api_url")
 
-    return getattr(server, "api_url", None) or extra.get("xray_api_url")
+def derive_v2_capabilities(
+    status_data: dict | None = None,
+    health_data: dict | None = None,
+) -> list[str]:
+    """Derive canonical Server.capabilities list from v2 node /status and /health responses."""
+    caps: list[str] = []
+
+    def _add(cap: str) -> None:
+        if cap and cap not in caps:
+            caps.append(cap)
+
+    status_d = status_data if isinstance(status_data, dict) else {}
+    health_d = health_data if isinstance(health_data, dict) else {}
+    role = str(status_d.get("role") or health_d.get("role") or "").strip().lower()
+    if role in V2_NODE_ROLES:
+        _add(role)
+
+    for raw_cap in (health_d.get("capabilities") or []):
+        if isinstance(raw_cap, str) and raw_cap.strip():
+            _add(raw_cap.strip().lower())
+
+    for svc in (health_d.get("services") or []):
+        if isinstance(svc, str) and svc.strip():
+            s = svc.strip().lower()
+            _add(s)
+            if s == "vless":
+                _add("xray_vless")
+
+    modules = status_d.get("modules") or health_d.get("modules") or {}
+    if isinstance(modules, dict):
+        vless_mod = modules.get("vless_tls")
+        if isinstance(vless_mod, dict) and vless_mod.get("enabled"):
+            _add("vless")
+            _add("xray_vless")
+        xhttp_mod = modules.get("vless_xhttp")
+        if isinstance(xhttp_mod, dict) and xhttp_mod.get("enabled"):
+            _add(WHITE_INTERNET_CAPABILITY)
+
+    if role == "eu_hub":
+        _add("bridge_hub")
+    elif role == "exit_node":
+        _add("exit_node")
+
+    return caps
+
+
+def merge_v2_extra_data(
+    existing_extra: dict | None,
+    status_data: dict | None = None,
+    health_data: dict | None = None,
+) -> dict:
+    """Merge v2 auto-discovery metadata into Server.extra_data cleanly without losing monitor state."""
+    merged = dict(existing_extra) if isinstance(existing_extra, dict) else {}
+    status_d = status_data if isinstance(status_data, dict) else {}
+    health_d = health_data if isinstance(health_data, dict) else {}
+
+    def _pick(key: str, default=None):
+        val = status_d.get(key)
+        if val is None:
+            val = health_d.get(key)
+        return default if val is None else val
+
+    role = str(_pick("role", merged.get("role") or "unconfigured")).strip().lower()
+    merged["role"] = role
+    for key in (
+        "country_code",
+        "domain",
+        "cdn_domain",
+        "cdn_domains",
+        "sub_path_prefix",
+        "secret_base_path",
+        "bridge_uuid",
+        "modules",
+        "module_errors",
+        "sni_routes",
+        "xhttp_locations",
+        "inbounds",
+        "traffic_limit",
+    ):
+        val = _pick(key)
+        if val is not None:
+            merged[key] = val
+
+    raw_loc_code = _pick("location_code")
+    if isinstance(raw_loc_code, str) and raw_loc_code.strip():
+        import re
+        clean_loc = re.sub(r"[^a-z0-9_-]+", "", raw_loc_code.strip().lower())[:32]
+        if clean_loc:
+            merged["location_code"] = clean_loc
+
+    cdn_domains = merged.get("cdn_domains")
+    if isinstance(cdn_domains, dict):
+        tf_dom = cdn_domains.get("cdn_turboflare")
+        if tf_dom:
+            merged["turboflare_domain"] = tf_dom
+        else:
+            merged.pop("turboflare_domain", None)
+
+    node_links = _pick("links")
+    if isinstance(node_links, dict):
+        merged["links"] = node_links
+        if "sni_routes" not in merged or not isinstance(merged.get("sni_routes"), list):
+            std_sec = node_links.get("standard")
+            if isinstance(std_sec, dict) and isinstance(std_sec.get("sni_routes"), list):
+                merged["sni_routes"] = std_sec["sni_routes"]
+
+    return merged
 
 
 class ServerUpdateFields(TypedDict, total=False):
     name: str
+    role: str
     country_flag: str | None
     api_url: str
     api_key: str
     protocol: str
-    max_clients: int
     is_active: bool
     disabled_reason: str | None
     disabled_at: datetime | None
@@ -117,6 +241,7 @@ HEALTH_UPDATE_FIELDS = {
     "consecutive_fails",
     "consecutive_successes",
     "last_alert_sent_state",
+    "capabilities",
     "extra_data",
 }
 
@@ -158,89 +283,41 @@ def capacity_consuming_wl_condition():
     )
 
 
-async def get_server_peer_counts(session: AsyncSession) -> dict[int, int]:
-    # WhiteInternetSubscription counts (Xray Origin)
-    from database.models import WhiteInternetSubscription
+def get_server_load_score(server: Server) -> float:
+    """Return real-time hardware load percentage (0.0..100.0) based on CPU and RAM telemetry.
 
-    wl_result = await session.execute(
-        select(WhiteInternetSubscription.origin_node_id, func.count(WhiteInternetSubscription.id))
-        .where(
-            WhiteInternetSubscription.origin_node_id.is_not(None),
-            capacity_consuming_wl_condition(),
-        )
-        .group_by(WhiteInternetSubscription.origin_node_id)
-    )
-    return {row[0]: row[1] for row in wl_result.all()}
-
-
-def is_server_allocatable(server: Server | None, protocol: str = VLESS_PROTOCOL) -> bool:
-    """Return True if server is valid, active, matching protocol, and healthy for allocation/migration."""
-    if not server:
-        return False
-    caps = getattr(server, "capabilities", None) or []
-    server_proto = getattr(server, "protocol", None)
-    if server_proto is not None:
-        if server_proto != protocol and protocol not in caps:
-            return False
-    if getattr(server, "is_active", True) is False:
-        return False
-    health = getattr(server, "health_state", None)
-    if health in (
-        ServerHealthState.MANUAL_DISABLED,
-        ServerHealthState.PROBLEM,
-    ):
-        return False
-    lifecycle = getattr(server, "lifecycle_status", None)
-    if lifecycle in (
-        ServerLifecycleStatus.DECOMMISSIONING,
-        ServerLifecycleStatus.DECOMMISSIONED,
-        ServerLifecycleStatus.ARCHIVED,
-    ):
-        return False
-    caps = getattr(server, "capabilities", None) or []
-    if protocol in AMNEZIA_PROTOCOLS and "xray_origin" in caps:
-        return False
-    return True
-
-
-async def get_available_servers(session: AsyncSession) -> list[Server]:
-    servers = await get_active_servers(session)
-    if not servers:
-        return []
-
-    # Filter servers for AWG allocation using canonical is_server_allocatable predicate
-    awg_servers = [s for s in servers if is_server_allocatable(s, AMNEZIA_PROTOCOL)]
-    if not awg_servers:
-        return []
-
-    db_counts = await get_server_peer_counts(session)
-    available: list[Server] = []
-    for server in awg_servers:
-        cached_count = get_cached_peer_count(server.id)
-        db_count = db_counts.get(server.id, 0)
-        effective_count = max(cached_count, db_count) if cached_count is not None else db_count
-        if effective_count < server.max_clients:
-            available.append(server)
-    return available
-
-
-async def allocate_origin_server_atomic(session: AsyncSession) -> Server | None:
+    Weighted: 70% CPU (TLS encryption and I/O overhead) + 30% RAM.
     """
-    Atomically selects and locks an available Xray origin server with spare capacity.
+    extra = server.extra_data if isinstance(server.extra_data, dict) else {}
+    sys_load = extra.get("system_load")
+    if isinstance(sys_load, dict):
+        try:
+            cpu = float(sys_load.get("cpu_percent") or 0.0)
+            ram = float(sys_load.get("ram_percent") or 0.0)
+            return round(max(0.0, min(100.0, cpu * 0.7 + ram * 0.3)), 1)
+        except (ValueError, TypeError):
+            pass
+    return 0.0
 
-    1. Select candidate server IDs that are active, online, and lifecycle ACTIVE.
-    2. Sequentially acquire row locks (SELECT ... FOR UPDATE) on candidates.
-    3. Re-verify is_active, health_state == ONLINE, lifecycle_status == ACTIVE,
-       valid api_url / api_key, and 'xray_origin' in capabilities.
-    4. Count capacity-consuming White Internet subscriptions on that origin node.
-    5. Return the locked Server instance if active consumers < max_clients.
-    6. Return None if no origin server has available capacity.
-    """
-    candidate_ids = (
+
+def _server_load_score(server: Server) -> tuple[float, int]:
+    """Sort key for servers: lower load score first, server.id tie-breaker."""
+    return (get_server_load_score(server), int(server.id or 0))
+
+
+def _is_wi_hub_eligible(server: Server) -> bool:
+    role = get_server_role(server)
+    caps = server.capabilities or []
+    return (role == "ru_hub" or role is None) and WHITE_INTERNET_CAPABILITY in caps
+
+
+async def get_wi_capable_ru_hubs(session: AsyncSession) -> list[Server]:
+    """Return all active online ru_hub servers capable of White Internet, ordered least-loaded first."""
+    candidates = (
         await session.scalars(
-            select(Server.id)
+            select(Server)
             .where(
-                Server.protocol == XRAY_PROTOCOL,
+                Server.protocol.in_([XRAY_PROTOCOL, VLESS_PROTOCOL]),
                 Server.is_active.is_(True),
                 Server.health_state == ServerHealthState.ONLINE,
                 Server.lifecycle_status == ServerLifecycleStatus.ACTIVE,
@@ -250,45 +327,31 @@ async def allocate_origin_server_atomic(session: AsyncSession) -> Server | None:
             .order_by(Server.id.asc())
         )
     ).all()
+    eligible = [srv for srv in candidates if _is_wi_hub_eligible(srv)]
+    eligible.sort(key=_server_load_score)
+    return eligible
 
-    for srv_id in candidate_ids:
-        server = await session.scalar(
-            select(Server)
-            .where(Server.id == srv_id, Server.protocol == XRAY_PROTOCOL)
-            .with_for_update()
-            .execution_options(populate_existing=True)
+
+async def has_available_service_capacity(
+    session: AsyncSession,
+    service_type: str,
+    *,
+    hub_server_id: int | None = None,
+    origin_node_id: int | None = None,
+) -> bool:
+    """Fast read-only check before order creation that at least one usable node exists."""
+    if service_type == "standard":
+        active_servers = await get_active_servers(session)
+        return any(
+            is_vless_capable_server(srv)
+            and srv.health_state in (ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION)
+            for srv in active_servers
         )
-        if server is None:
-            continue
-        if (
-            not server.is_active
-            or server.health_state != ServerHealthState.ONLINE
-            or server.lifecycle_status != ServerLifecycleStatus.ACTIVE
-            or not (server.api_url and server.api_url.strip())
-            or not (server.api_key and server.api_key.strip())
-            or "xray_origin" not in (server.capabilities or [])
-        ):
-            continue
 
-        relays = (server.extra_data or {}).get("relays", [])
-        if not relays or len(relays) == 0:
-            continue
+    if service_type == "white_internet":
+        return bool(await get_wi_capable_ru_hubs(session))
 
-        from database.models import WhiteInternetSubscription
-
-        active_count = (
-            await session.scalar(
-                select(func.count(WhiteInternetSubscription.id)).where(
-                    WhiteInternetSubscription.origin_node_id == server.id,
-                    capacity_consuming_wl_condition(),
-                )
-            )
-            or 0
-        )
-        if active_count < server.max_clients:
-            return server
-
-    return None
+    return True
 
 
 async def get_server_by_id(
@@ -311,22 +374,30 @@ async def create_server(
     name: str,
     api_url: str,
     api_key: str,
+    role: str = "ru_hub",
     country_flag: str = None,
     protocol: str = VLESS_PROTOCOL,
-    max_clients: int = 50,
     capabilities: list[str] | None = None,
     lifecycle_status: str | ServerLifecycleStatus = ServerLifecycleStatus.ACTIVE,
+    extra_data: dict | None = None,
+    is_active: bool | None = None,
 ) -> Server:
+    effective_is_active = (
+        is_active
+        if is_active is not None
+        else (str(lifecycle_status) == ServerLifecycleStatus.ACTIVE)
+    )
     server = Server(
         name=name,
+        role=role,
         api_url=api_url,
         api_key=api_key,
         country_flag=country_flag,
         protocol=protocol,
-        max_clients=max_clients,
         capabilities=capabilities or [],
         lifecycle_status=str(lifecycle_status),
-        is_active=(str(lifecycle_status) == ServerLifecycleStatus.ACTIVE),
+        is_active=effective_is_active,
+        extra_data=extra_data if isinstance(extra_data, dict) else {},
     )
     session.add(server)
     await session.flush()
@@ -421,10 +492,6 @@ async def delete_server(session: AsyncSession, server: Server) -> None:
     await session.flush()
 
 
-async def get_total_free_ips(session: AsyncSession) -> int:
-    return 0
-
-
 async def get_server_count(session: AsyncSession) -> int:
     result = await session.execute(select(func.count(Server.id)))
     return result.scalar_one()
@@ -445,10 +512,6 @@ async def get_servers_paginated(
 async def get_server_by_api_url(session: AsyncSession, api_url: str) -> Server | None:
     result = await session.execute(select(Server).where(Server.api_url == api_url))
     return result.scalar_one_or_none()
-
-
-async def delete_profiles_by_server_id(session: AsyncSession, server_id: int) -> int:
-    return 0
 
 
 async def update_server_xray_epoch_cas(
@@ -520,97 +583,3 @@ async def update_server_xray_epoch_cas(
     # Stale starttime within same boot
     return False, None
 
-
-async def migrate_origin_subscriptions(
-    session: AsyncSession,
-    source_id: int,
-    target_id: int,
-    admin_id: int | None = None,
-) -> int:
-    """Migrate all active White Internet subscriptions from source origin server to target origin server.
-
-    1. Acquires row locks on source and target servers ordered by id ASC to avoid deadlocks.
-    2. Verifies target server is active, Xray protocol, and has sufficient capacity using capacity_consuming_wl_condition.
-    3. Sets source server lifecycle_status to DECOMMISSIONING.
-    4. For each subscription:
-       - Creates a WhiteInternetOrphanCleanup entry for source node (desired_version N).
-       - Updates subscription: origin_node_id = target_id, desired_version = N + 1, provisioning_status = PENDING_UPDATE.
-    """
-    if source_id == target_id:
-        raise ValueError("Source and target servers must be different.")
-
-    # 1. Lock servers in deterministic id ASC order to prevent deadlocks
-    first_id, second_id = sorted([source_id, target_id])
-    first_server = (await session.execute(
-        select(Server).where(Server.id == first_id).with_for_update()
-    )).scalar_one_or_none()
-    second_server = (await session.execute(
-        select(Server).where(Server.id == second_id).with_for_update()
-    )).scalar_one_or_none()
-
-    source_server = first_server if first_id == source_id else second_server
-    target_server = first_server if first_id == target_id else second_server
-
-    if not source_server or not target_server:
-        raise ValueError("Source or target server not found.")
-
-    if target_server.protocol != XRAY_PROTOCOL or not target_server.is_active:
-        raise ValueError("Target server is not an active Xray node.")
-
-    if XRAY_ORIGIN_CAPABILITY not in (target_server.capabilities or []):
-        raise ValueError("Target server does not have the required 'xray_origin' capability.")
-
-    relays = (target_server.extra_data or {}).get("relays", [])
-    if not relays or len(relays) == 0:
-        raise ValueError("Target server does not have relays configured.")
-
-    if target_server.health_state not in (ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION):
-        raise ValueError("Target server health state is not eligible for migration.")
-
-    from config.enums import WhiteInternetProvisioningStatus
-    from database.models import WhiteInternetOrphanCleanup, WhiteInternetSubscription
-
-    # 2. Check capacity under lock
-    target_active = (await session.scalar(
-        select(func.count(WhiteInternetSubscription.id)).where(
-            WhiteInternetSubscription.origin_node_id == target_id,
-            capacity_consuming_wl_condition(),
-        )
-    )) or 0
-
-    to_migrate_subs = list((await session.execute(
-        select(WhiteInternetSubscription).where(
-            WhiteInternetSubscription.origin_node_id == source_id,
-            capacity_consuming_wl_condition(),
-        ).with_for_update()
-    )).scalars().all())
-
-    count = len(to_migrate_subs)
-    if count == 0:
-        return 0
-
-    if target_active + count > target_server.max_clients:
-        free_slots = max(0, target_server.max_clients - target_active)
-        raise ValueError(
-            f"Недостаточно мест на целевом сервере: свободно {free_slots}, требуется {count}."
-        )
-
-    # 3. Mark source server as DECOMMISSIONING so it is no longer allocated to new clients
-    source_server.lifecycle_status = ServerLifecycleStatus.DECOMMISSIONING
-
-    # 4. Migrate subscriptions with version fencing and orphan outbox
-    for sub in to_migrate_subs:
-        orphan = WhiteInternetOrphanCleanup(
-            server_id=source_id,
-            client_uuid=sub.uuid,
-            desired_version=sub.desired_version,
-            status="pending",
-        )
-        session.add(orphan)
-
-        sub.origin_node_id = target_id
-        sub.desired_version += 1
-        sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
-
-    await session.flush()
-    return count

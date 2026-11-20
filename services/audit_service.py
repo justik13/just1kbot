@@ -1,4 +1,3 @@
-import inspect
 import json
 import logging
 from typing import Any
@@ -22,20 +21,11 @@ class AuditService:
         details: Any = None,
     ):
         """Universal audit logger supporting string and dictionary details."""
-        in_tx_fn = getattr(session, "in_transaction", None)
-        if callable(in_tx_fn):
-            in_tx = in_tx_fn()
-            if inspect.isawaitable(in_tx):
-                in_tx = await in_tx
-            if in_tx:
-                # Flush pending business changes BEFORE entering the silent audit try-block
-                # so that business constraint violations bubble up to the caller and aren't
-                # swallowed as "audit failures", which would leave the transaction poisoned.
-                flush_fn = getattr(session, "flush", None)
-                if callable(flush_fn):
-                    flush_res = flush_fn()
-                    if inspect.isawaitable(flush_res):
-                        await flush_res
+        if hasattr(session, "in_transaction") and session.in_transaction():
+            # Flush pending business changes BEFORE entering the silent audit try-block
+            # so that business constraint violations bubble up to the caller and aren't
+            # swallowed as "audit failures", which would leave the transaction poisoned.
+            await session.flush()
 
         try:
             formatted_details = None
@@ -60,22 +50,17 @@ class AuditService:
             else:
                 action_val = str(action)
 
-            begin_nested_fn = getattr(session, "begin_nested", None)
-            if callable(begin_nested_fn):
-                nested = begin_nested_fn()
-                if inspect.isawaitable(nested):
-                    nested = await nested
-                if hasattr(nested, "__aenter__"):
-                    async with nested:
-                        await create_audit_log(
-                            session=session,
-                            admin_id=admin_id,
-                            action=action_val,
-                            target_type=normalized_target_type,
-                            target_id=target_id,
-                            details=formatted_details,
-                        )
-                    return
+            if hasattr(session, "begin_nested"):
+                async with session.begin_nested():
+                    await create_audit_log(
+                        session=session,
+                        admin_id=admin_id,
+                        action=action_val,
+                        target_type=normalized_target_type,
+                        target_id=target_id,
+                        details=formatted_details,
+                    )
+                return
 
             await create_audit_log(
                 session=session,

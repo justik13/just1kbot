@@ -2,11 +2,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
-from pathlib import Path
 
-from alembic.command import upgrade
-from alembic.config import Config
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -14,7 +10,6 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from config.settings import get_settings
-from database.models import Tariff
 
 logger = logging.getLogger(__name__)
 
@@ -74,9 +69,9 @@ async def init_db():
         _engine = create_async_engine(
             settings.DATABASE_URL,
             echo=False,
-            pool_size=10,
-            max_overflow=10,
-            pool_timeout=30,
+            pool_size=20,
+            max_overflow=15,
+            pool_timeout=20,
             pool_pre_ping=True,
             pool_recycle=1800,
             connect_args=_asyncpg_connect_args(),
@@ -84,71 +79,8 @@ async def init_db():
         _sessionmaker = async_sessionmaker(_engine, expire_on_commit=False)
         _engine_loop = current_loop
 
-        # Seed default tariffs and maintenance mode (migrations are executed by docker-entrypoint.sh or alembic CLI)
-        await _seed_default_data()
-
         logger.info("PostgreSQL database initialized successfully")
         return _engine, _sessionmaker
-
-
-async def _run_alembic_migrations(database_url: str) -> None:
-    """Run Alembic migrations on the database and seed default data."""
-    try:
-        alembic_cfg = Config(str(Path(__file__).parent.parent / "alembic.ini"))
-        # ConfigParser (used internally by Alembic Config) treats '%' as
-        # interpolation syntax. URL-encoded database passwords legitimately
-        # contain '%' (for example %40 for '@'), so escape percent signs before
-        # passing the URL into Alembic. ConfigParser restores them when the
-        # option is read back by Alembic.
-        alembic_cfg.set_main_option(
-            "sqlalchemy.url",
-            database_url.replace("%", "%%"),
-        )
-
-        # env.py uses asyncio.run(). Running Alembic in a worker thread avoids
-        # nesting that event loop inside the bot's already-running loop. It also
-        # keeps migrations on the configured asyncpg driver, so startup does not
-        # require an undeclared psycopg2 dependency.
-        await asyncio.to_thread(upgrade, alembic_cfg, "head")
-        logger.info("Alembic migrations completed successfully.")
-
-        await _seed_default_data()
-
-    except Exception as e:
-        logger.error("Failed to run Alembic migrations: %s", e, exc_info=True)
-        raise
-
-
-async def _seed_default_data() -> None:
-    """Seed default tariffs and maintenance mode after migrations."""
-    from config.tariffs import DEFAULT_TARIFFS_SEEDS
-    from database.models import DEFAULT_MAINTENANCE_MESSAGE, MaintenanceMode
-
-    async with session_scope() as session:
-        # Seed tariffs
-        result = await session.execute(
-            select(func.count(Tariff.id)).where(Tariff.service_type == "standard")
-        )
-        if result.scalar_one() == 0:
-            for tariff in DEFAULT_TARIFFS_SEEDS:
-                tariff_data = {**tariff}
-                tariff_data.setdefault("service_type", "standard")
-                session.add(Tariff(**tariff_data, is_active=True))
-            await session.commit()
-            logger.info("Default tariffs seeded successfully.")
-
-        # Seed maintenance mode
-        result = await session.execute(select(func.count(MaintenanceMode.id)))
-        if result.scalar_one() == 0:
-            session.add(
-                MaintenanceMode(
-                    id=1,
-                    is_enabled=False,
-                    message=DEFAULT_MAINTENANCE_MESSAGE,
-                )
-            )
-            await session.commit()
-            logger.info("Maintenance mode singleton seeded.")
 
 
 async def get_session() -> AsyncSession:

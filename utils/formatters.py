@@ -24,10 +24,6 @@ def format_traffic(bytes_value: int) -> str:
         return f"{size:.1f} {units[unit_index]}"
 
 
-def format_datetime(dt: datetime | None) -> str:
-    return format_datetime_msk(dt, "%d.%m.%Y %H:%M")
-
-
 def format_tg_time(
     dt: datetime | date | None,
     format_spec: str = "dt",
@@ -61,3 +57,21 @@ def format_tg_time(
         if clean_spec:
             return f'<tg-time unix="{unix_ts}" format="{clean_spec}">{escaped_fallback}</tg-time>'
     return f'<tg-time unix="{unix_ts}">{escaped_fallback}</tg-time>'
+
+
+def pluralize(count: int, forms: tuple[str, str, str]) -> str:
+    """Russian noun pluralization: forms = (one, few, many)."""
+    n = abs(count) % 100
+    n1 = n % 10
+    if 11 <= n <= 19:
+        return forms[2]
+    if n1 == 1:
+        return forms[0]
+    if 2 <= n1 <= 4:
+        return forms[1]
+    return forms[2]
+
+
+def format_plural(count: int, forms: tuple[str, str, str]) -> str:
+    """Format count with pluralized noun, e.g. '1 день', '2 дня', '5 дней'."""
+    return f"{count} {pluralize(count, forms)}"

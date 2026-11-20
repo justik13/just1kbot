@@ -1,6 +1,4 @@
-import inspect
 
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import AuditLog
@@ -22,31 +20,10 @@ async def create_audit_log(
         target_id=target_id,
         details=details
     )
-    res = session.add(log)
-    if inspect.isawaitable(res):
-        await res
+    session.add(log)
     await session.flush()
     await session.refresh(log)
     return log
-
-
-async def get_recent_audit_logs(session: AsyncSession, limit: int = 10) -> list[AuditLog]:
-    stmt = select(AuditLog).order_by(AuditLog.created_at.desc()).limit(limit)
-    result = await session.execute(stmt)
-    return list(result.scalars().all())
-
-
-async def get_all_audit_logs_paginated(
-    session: AsyncSession, offset: int = 0, limit: int = 10
-) -> list[AuditLog]:
-    stmt = select(AuditLog).order_by(AuditLog.created_at.desc()).offset(offset).limit(limit)
-    result = await session.execute(stmt)
-    return list(result.scalars().all())
-
-
-async def get_total_audit_logs_count(session: AsyncSession) -> int:
-    stmt = select(func.count(AuditLog.id))
-    return int(await session.scalar(stmt) or 0)
 
 
 async def clear_audit_logs(
@@ -111,60 +88,3 @@ async def clear_audit_logs(
                 break
         await asyncio.sleep(0.01)
     return total_deleted
-
-
-
-async def get_user_audit_logs(
-    session: AsyncSession,
-    user_id: int,
-    telegram_id: int | None = None,
-    offset: int = 0,
-    limit: int = 10,
-) -> list[AuditLog]:
-    from sqlalchemy import or_
-
-    conditions = [func.lower(AuditLog.target_type) == "user"]
-    if telegram_id is not None and telegram_id != user_id:
-        conditions.append(
-            or_(
-                AuditLog.target_id == user_id,
-                AuditLog.target_id == telegram_id,
-            )
-        )
-    else:
-        conditions.append(AuditLog.target_id == user_id)
-
-    stmt = (
-        select(AuditLog)
-        .where(*conditions)
-        .order_by(AuditLog.created_at.desc())
-        .offset(offset)
-        .limit(limit)
-    )
-    result = await session.execute(stmt)
-    return list(result.scalars().all())
-
-
-async def get_user_audit_logs_count(
-    session: AsyncSession,
-    user_id: int,
-    telegram_id: int | None = None,
-) -> int:
-    from sqlalchemy import or_
-
-    conditions = [func.lower(AuditLog.target_type) == "user"]
-    if telegram_id is not None and telegram_id != user_id:
-        conditions.append(
-            or_(
-                AuditLog.target_id == user_id,
-                AuditLog.target_id == telegram_id,
-            )
-        )
-    else:
-        conditions.append(AuditLog.target_id == user_id)
-
-    stmt = (
-        select(func.count(AuditLog.id))
-        .where(*conditions)
-    )
-    return int(await session.scalar(stmt) or 0)

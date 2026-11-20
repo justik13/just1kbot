@@ -1,42 +1,24 @@
 from datetime import timedelta
-import inspect
 
-from sqlalchemy import and_, case, cast, false, func, or_, select, String, text, update
+from sqlalchemy import and_, case, false, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
 from config.constants import (
-    PERMANENT_END_DATE,
-    PERMANENT_SUBSCRIPTION_DAYS,
     REFERRAL_ACTIVE_MIN_TOPUP_RUB,
-    VLESS_PROTOCOL,
-    XRAY_PROTOCOL,
 )
 from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
-from database.models import Order, Payment, Server, Tariff, User, VlessSubscription, WhiteInternetSubscription
+from database.models import Order, User, VlessSubscription, WhiteInternetSubscription
 from utils.datetime_helpers import now_utc
 
 ALLOWED_USER_UPDATE_FIELDS = {
     "username",
     "first_name",
-    "subscription_end",
-    "device_limit",
-    "current_tariff_id",
-    "is_banned",
     "is_bot_blocked",
     "referred_by",
-    "device_creations_today",
-    "last_creation_date",
     "last_payment_at",
-    "notified_3d",
-    "notified_1d",
-    "notified_2h",
-    "notified_expired",
-    "notified_grace_12h",
     "notification_retry_count",
     "last_notification_attempt",
-    "last_trial_reset_at",
-    "show_in_leaderboard",
 }
 
 
@@ -96,13 +78,7 @@ async def get_user_by_id(
         return None
     stmt = select(User).where(User.id == user_id)
     result = await session.execute(stmt)
-    scalar_fn = getattr(result, "scalar_one_or_none", None)
-    if callable(scalar_fn):
-        res = scalar_fn()
-        if inspect.isawaitable(res):
-            res = await res
-        return res
-    return None
+    return result.scalar_one_or_none()
 
 
 async def create_user(
@@ -134,25 +110,6 @@ async def update_user(session: AsyncSession, user: User, **kwargs) -> User:
     return user
 
 
-async def extend_subscription(session: AsyncSession, user: User, days: int) -> User:
-    # Lock the row so concurrent read-modify-write extensions cannot lose
-    # updates. Safe to call with an already-locked user (same transaction).
-    locked_user = await session.scalar(select(User).where(User.id == user.id).with_for_update())
-    target_user = locked_user if locked_user is not None else user
-    now = now_utc()
-    if target_user.subscription_end and target_user.subscription_end > now:
-        current_end = target_user.subscription_end
-    else:
-        current_end = now
-
-    if days >= PERMANENT_SUBSCRIPTION_DAYS:
-        new_end = PERMANENT_END_DATE
-    else:
-        new_end = current_end + timedelta(days=days)
-
-    return await update_user(session, target_user, subscription_end=new_end)
-
-
 async def get_user_count(session: AsyncSession) -> int:
     stmt = select(func.count(User.id)).where(User.is_deleted.is_(False))
     result = await session.execute(stmt)
@@ -161,9 +118,13 @@ async def get_user_count(session: AsyncSession) -> int:
 
 async def get_active_subscriptions_count(session: AsyncSession) -> int:
     now = now_utc()
-    stmt = select(func.count(User.id)).where(
-        User.subscription_end > now,
-        User.is_deleted.is_(False),
+    stmt = (
+        select(func.count(User.id))
+        .join(VlessSubscription, VlessSubscription.user_id == User.id)
+        .where(
+            VlessSubscription.expires_at > now,
+            User.is_deleted.is_(False),
+        )
     )
     result = await session.execute(stmt)
     return result.scalar_one()
@@ -172,6 +133,9 @@ async def get_active_subscriptions_count(session: AsyncSession) -> int:
 async def get_dashboard_stats(session: AsyncSession) -> dict:
     now = now_utc()
     current_cycle = now.strftime("%Y-%m")
+    active_std_user_ids = select(VlessSubscription.user_id).where(
+        VlessSubscription.expires_at > now,
+    )
     active_wi_sub_user_ids = select(WhiteInternetSubscription.user_id).where(
         WhiteInternetSubscription.status.in_(
             (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED)
@@ -180,14 +144,14 @@ async def get_dashboard_stats(session: AsyncSession) -> dict:
     )
     stmt = select(
         func.count(User.id).label("total"),
-        func.count(User.id).filter(User.subscription_end > now).label("active"),
+        func.count(User.id).filter(User.id.in_(active_std_user_ids)).label("active"),
         func.count(User.id)
         .filter(User.created_at > now - timedelta(hours=24))
         .label("new_24h"),
         func.coalesce(func.sum(User.total_traffic_bytes), 0).label("total_traffic_bytes"),
         func.coalesce(func.sum(User.total_wi_traffic_bytes), 0).label("total_wi_traffic_bytes"),
         func.coalesce(
-            func.avg(User.total_traffic_bytes).filter(User.subscription_end > now),
+            func.avg(User.total_traffic_bytes).filter(User.id.in_(active_std_user_ids)),
             0,
         ).label("avg_traffic_bytes_active"),
         func.coalesce(
@@ -196,7 +160,7 @@ async def get_dashboard_stats(session: AsyncSession) -> dict:
                     (User.traffic_cycle == current_cycle, User.monthly_vless_bytes),
                     else_=0,
                 )
-            ).filter(User.subscription_end > now),
+            ).filter(User.id.in_(active_std_user_ids)),
             0,
         ).label("avg_monthly_vless_bytes"),
         func.coalesce(
@@ -223,7 +187,6 @@ async def get_dashboard_stats(session: AsyncSession) -> dict:
         "total_traffic_bytes": int(row.total_traffic_bytes or 0),
         "total_wi_traffic_bytes": int(row.total_wi_traffic_bytes or 0),
         "avg_traffic_bytes_active": int(row.avg_traffic_bytes_active or 0),
-        "avg_monthly_awg_bytes": 0,
         "avg_monthly_vless_bytes": int(row.avg_monthly_vless_bytes or 0),
         "avg_monthly_wi_bytes": int(row.avg_monthly_wi_bytes or 0),
     }
@@ -298,18 +261,7 @@ def _referral_paid_activity_condition(referral) -> object:
         )
         .exists()
     )
-    real_topup = (
-        select(Payment.id)
-        .where(
-            Payment.user_id == referral.id,
-            Payment.provider_status == "succeeded",
-            Payment.fulfillment_status == "succeeded",
-            Payment.credited_at.is_not(None),
-            Payment.amount >= REFERRAL_ACTIVE_MIN_TOPUP_RUB,
-        )
-        .exists()
-    )
-    return or_(qualifying_order, real_topup)
+    return qualifying_order
 
 
 async def get_user_active_referrals_count(
@@ -337,12 +289,12 @@ async def get_referral_leaderboard(
     session: AsyncSession, limit: int = 5
 ) -> list[tuple[int, int]]:
     """Return top referrers by count of active referred users [(telegram_id, active_count), ...]."""
-    limit = max(1, min(limit, 100))
+    limit = max(1, min(limit, 50))
     referrer = aliased(User)
     referral = aliased(User)
 
     stmt = (
-        select(referrer.telegram_id, func.count(referral.id).label("active_count"))
+        select(referrer.telegram_id, func.count(func.distinct(referral.id)).label("active_count"))
         .join(referral, referral.referred_by == referrer.telegram_id)
         .where(
             referrer.is_deleted.is_(False),
@@ -371,7 +323,7 @@ async def get_user_referral_rank(
     subq = (
         select(
             referrer.telegram_id.label("tid"),
-            func.count(referral.id).label("cnt"),
+            func.count(func.distinct(referral.id)).label("cnt"),
         )
         .join(referral, referral.referred_by == referrer.telegram_id)
         .where(
@@ -415,29 +367,14 @@ async def is_eligible_for_referral_first_discount(
             Order.user_id == user_id,
             Order.status == "paid",
             Order.amount_rub > 0,
-            Order.service_type != "topup",
+            Order.service_type.in_(("standard", "white_internet")),
         )
     )
     if not isinstance(paid_orders, (int, float)):
         if paid_orders is not None:
             return False
         paid_orders = 0
-    if int(paid_orders) > 0:
-        return False
-
-    paid_payments = await session.scalar(
-        select(func.count(Payment.id)).where(
-            Payment.user_id == user_id,
-            Payment.credited_at.is_not(None),
-            Payment.fulfillment_status == "succeeded",
-            Payment.amount > 0,
-        )
-    )
-    if not isinstance(paid_payments, (int, float)):
-        if paid_payments is not None:
-            return False
-        paid_payments = 0
-    return int(paid_payments) == 0
+    return int(paid_orders) == 0
 
 
 async def mark_user_bot_blocked(session: AsyncSession, telegram_id: int) -> None:
@@ -459,16 +396,6 @@ async def mark_user_bot_unblocked(session: AsyncSession, telegram_id: int) -> bo
     )
     await session.flush()
     return result.rowcount > 0
-
-
-async def count_users_with_tariff(session: AsyncSession, tariff_id: int) -> int:
-    if not isinstance(tariff_id, int) or tariff_id < 1 or tariff_id > MAX_INT32:
-        return 0
-    stmt = select(func.count(User.id)).where(
-        User.current_tariff_id == tariff_id, User.is_deleted.is_(False)
-    )
-    result = await session.execute(stmt)
-    return result.scalar_one() or 0
 
 
 async def get_user_by_username(session: AsyncSession, username: str) -> User | None:
@@ -544,6 +471,20 @@ async def search_user_flexible(session: AsyncSession, query: str) -> User | None
             )
             return (await session.execute(stmt)).scalar_one_or_none()
 
+        from database.models import UserDevice
+        dev_user_id = await session.scalar(
+            select(UserDevice.user_id)
+            .where(UserDevice.device_uuid == query_str)
+            .limit(1)
+        )
+        if dev_user_id:
+            stmt = (
+                select(User)
+                .where(User.id == dev_user_id, User.is_deleted.is_(False))
+                .options(selectinload(User.vless_subscription))
+            )
+            return (await session.execute(stmt)).scalar_one_or_none()
+
         try:
             import uuid
             order_uuid = uuid.UUID(query_str)
@@ -590,7 +531,7 @@ async def search_user_flexible(session: AsyncSession, query: str) -> User | None
             )
             return (await session.execute(stmt)).scalar_one_or_none()
 
-    # 5. Order external_id or Payment ID (external_id)
+    # 5. Order external_id
     order_user_id = await session.scalar(
         select(Order.user_id)
         .where(Order.external_id == query_str)
@@ -604,43 +545,17 @@ async def search_user_flexible(session: AsyncSession, query: str) -> User | None
         )
         return (await session.execute(stmt)).scalar_one_or_none()
 
-    payment_user_id = await session.scalar(
-        select(Payment.user_id)
-        .where(Payment.external_id == query_str)
-        .limit(1)
-    )
-    if payment_user_id:
-        stmt = (
-            select(User)
-            .where(User.id == payment_user_id, User.is_deleted.is_(False))
-            .options(selectinload(User.vless_subscription))
-        )
-        return (await session.execute(stmt)).scalar_one_or_none()
-
-    # 6. HWID lookup (GIN index on active_hwids)
+    # 6. HWID lookup (authoritative user_devices registry)
     if len(query_str) >= 8:
-        vless_hwid_user_id = await session.scalar(
-            select(VlessSubscription.user_id)
-            .where(VlessSubscription.active_hwids.has_key(query_str))
+        device_user_id = await session.scalar(
+            select(UserDevice.user_id)
+            .where(UserDevice.hwid == query_str)
             .limit(1)
         )
-        if vless_hwid_user_id:
+        if device_user_id:
             stmt = (
                 select(User)
-                .where(User.id == vless_hwid_user_id, User.is_deleted.is_(False))
-                .options(selectinload(User.vless_subscription))
-            )
-            return (await session.execute(stmt)).scalar_one_or_none()
-
-        hwid_user_id = await session.scalar(
-            select(WhiteInternetSubscription.user_id)
-            .where(WhiteInternetSubscription.active_hwids.has_key(query_str))
-            .limit(1)
-        )
-        if hwid_user_id:
-            stmt = (
-                select(User)
-                .where(User.id == hwid_user_id, User.is_deleted.is_(False))
+                .where(User.id == device_user_id, User.is_deleted.is_(False))
                 .options(selectinload(User.vless_subscription))
             )
             return (await session.execute(stmt)).scalar_one_or_none()
@@ -648,7 +563,8 @@ async def search_user_flexible(session: AsyncSession, query: str) -> User | None
     return None
 
 
-def get_effective_active_condition(now=None):
+def get_effective_wi_active_condition(now=None):
+    """Condition matching users with an active White Internet subscription."""
     if now is None:
         now = now_utc()
     xray_active_subq = select(WhiteInternetSubscription.user_id).where(
@@ -660,9 +576,21 @@ def get_effective_active_condition(now=None):
         WhiteInternetSubscription.expires_at > now,
         WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
     )
+    return User.id.in_(xray_active_subq)
+
+
+def _std_active_subq(now=None):
+    if now is None:
+        now = now_utc()
+    return select(VlessSubscription.user_id).where(VlessSubscription.expires_at > now)
+
+
+def get_effective_active_condition(now=None):
+    if now is None:
+        now = now_utc()
     return or_(
-        User.subscription_end > now,
-        User.id.in_(xray_active_subq),
+        User.id.in_(_std_active_subq(now)),
+        get_effective_wi_active_condition(now),
     )
 
 
@@ -670,9 +598,14 @@ def get_effective_expiring_3d_condition(now=None):
     if now is None:
         now = now_utc()
     limit_3d = now + timedelta(days=3)
-    awg_expiring = and_(
-        User.subscription_end > now,
-        User.subscription_end <= limit_3d,
+    std_expiring = User.id.in_(
+        select(VlessSubscription.user_id).where(
+            VlessSubscription.expires_at > now,
+            VlessSubscription.expires_at <= limit_3d,
+        )
+    )
+    std_longer = User.id.in_(
+        select(VlessSubscription.user_id).where(VlessSubscription.expires_at > limit_3d)
     )
     xray_expiring = User.id.in_(
         select(WhiteInternetSubscription.user_id).where(
@@ -698,8 +631,8 @@ def get_effective_expiring_3d_condition(now=None):
         )
     )
     return and_(
-        or_(awg_expiring, xray_expiring),
-        or_(User.subscription_end.is_(None), User.subscription_end <= limit_3d),
+        or_(std_expiring, xray_expiring),
+        ~std_longer,
         ~xray_longer,
     )
 
@@ -717,7 +650,7 @@ def get_effective_inactive_condition(now=None):
         WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
     )
     return and_(
-        or_(User.subscription_end <= now, User.subscription_end.is_(None)),
+        ~User.id.in_(_std_active_subq(now)),
         ~User.id.in_(xray_active_subq),
     )
 
@@ -726,14 +659,19 @@ def get_effective_expired_condition(now=None):
     if now is None:
         now = now_utc()
     inactive_cond = get_effective_inactive_condition(now)
-    had_awg = User.subscription_end.is_not(None)
+    had_std = User.id.in_(
+        select(VlessSubscription.user_id).where(VlessSubscription.expires_at.is_not(None))
+    )
     had_xray = User.id.in_(select(WhiteInternetSubscription.user_id))
-    return and_(or_(had_awg, had_xray), inactive_cond)
+    return and_(or_(had_std, had_xray), inactive_cond)
 
 
 def get_effective_never_condition():
+    had_std = User.id.in_(
+        select(VlessSubscription.user_id).where(VlessSubscription.expires_at.is_not(None))
+    )
     return and_(
-        User.subscription_end.is_(None),
+        ~had_std,
         ~User.id.in_(select(WhiteInternetSubscription.user_id)),
     )
 
@@ -756,94 +694,15 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
         stmt = stmt.where(get_effective_never_condition())
     elif filter_type in ("banned", "problem"):
         stmt = stmt.where(
-            (User.is_banned.is_(True)) | (User.is_bot_blocked.is_(True))
+            User.is_bot_blocked.is_(True)
         )
-    elif filter_type == "server" and filter_param is not None:
-        try:
-            target_server_id = int(filter_param)
-        except (ValueError, TypeError):
-            return stmt.where(false())
-        if not (1 <= target_server_id <= MAX_INT32):
-            return stmt.where(false())
-
-        server_proto_subq = select(Server.protocol).where(Server.id == target_server_id).scalar_subquery()
-        server_caps_subq = select(cast(Server.capabilities, String)).where(Server.id == target_server_id).scalar_subquery()
-
-        is_vless_capable = (
-            (server_proto_subq == VLESS_PROTOCOL)
-            | server_caps_subq.like('%"vless"%')
-            | server_caps_subq.like('%"xray_vless"%')
-        )
-        vless_cond = and_(
-            is_vless_capable,
-            User.vless_subscription.has(
-                (VlessSubscription.is_active.is_(True))
-                & (VlessSubscription.active_hwids.is_not(None))
-                & (cast(VlessSubscription.active_hwids, String) != "{}")
-            ),
-        )
-
-        xray_cond = and_(
-            (
-                (server_proto_subq == XRAY_PROTOCOL)
-                | server_caps_subq.like('%"xray_origin"%')
-            ),
-            User.id.in_(
-                select(WhiteInternetSubscription.user_id).where(
-                    WhiteInternetSubscription.origin_node_id == target_server_id,
-                    WhiteInternetSubscription.status.in_([
-                        WhiteInternetStatus.ACTIVE,
-                        WhiteInternetStatus.PENDING,
-                        WhiteInternetStatus.EXHAUSTED,
-                    ]),
-                    WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
-                )
-            ),
-        )
-        stmt = stmt.where(or_(vless_cond, xray_cond))
-    elif filter_type == "country" and filter_param:
-        country_str = str(filter_param)
-        vless_country_exists = select(Server.id).where(
-            Server.country_flag == country_str,
-            (
-                (Server.protocol == VLESS_PROTOCOL)
-                | cast(Server.capabilities, String).like('%"vless"%')
-                | cast(Server.capabilities, String).like('%"xray_vless"%')
-            ),
-        ).exists()
-        vless_country_cond = and_(
-            vless_country_exists,
-            User.vless_subscription.has(
-                (VlessSubscription.is_active.is_(True))
-                & (VlessSubscription.active_hwids.is_not(None))
-                & (cast(VlessSubscription.active_hwids, String) != "{}")
-            ),
-        )
-        xray_country_users_subq = select(WhiteInternetSubscription.user_id).where(
-            WhiteInternetSubscription.origin_node.has(Server.country_flag == country_str),
-            WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
-        )
-        stmt = stmt.where(
-            or_(
-                vless_country_cond,
-                User.id.in_(xray_country_users_subq),
-            )
-        )
+    elif filter_type in ("active_standard", "standard_active"):
+        stmt = stmt.where(User.id.in_(_std_active_subq(now)))
+    elif filter_type in ("active_wi", "wi_active"):
+        stmt = stmt.where(get_effective_wi_active_condition(now))
     elif filter_type == "tariff" and filter_param is not None:
         if filter_param == "white_internet":
-            stmt = stmt.where(
-                User.id.in_(
-                    select(WhiteInternetSubscription.user_id).where(
-                        WhiteInternetSubscription.status.in_([
-                            WhiteInternetStatus.ACTIVE,
-                            WhiteInternetStatus.PENDING,
-                            WhiteInternetStatus.EXHAUSTED,
-                        ]),
-                        WhiteInternetSubscription.expires_at > now,
-                        WhiteInternetSubscription.provisioning_status != WhiteInternetProvisioningStatus.PENDING_DELETE,
-                    )
-                )
-            )
+            stmt = stmt.where(get_effective_wi_active_condition(now))
         else:
             try:
                 val = int(filter_param)
@@ -851,14 +710,9 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
                 return stmt.where(false())
             if not (1 <= val <= MAX_INT32):
                 return stmt.where(false())
-            matching_tariff_ids = select(Tariff.id).where(
-                Tariff.service_type == "standard",
-                Tariff.device_limit == val,
-            )
             stmt = stmt.where(
-                or_(
-                    User.current_tariff_id.in_(matching_tariff_ids),
-                    and_(User.current_tariff_id.is_(None), User.device_limit == val),
+                User.id.in_(
+                    select(VlessSubscription.user_id).where(VlessSubscription.device_limit == val)
                 )
             )
     return stmt
@@ -887,6 +741,12 @@ async def get_filtered_users_paginated(
     stmt = _apply_user_filters(stmt, filter_type, filter_param)
 
     if filter_type == "expiring_3d":
+        std_expiry_subq = (
+            select(VlessSubscription.expires_at)
+            .where(VlessSubscription.user_id == User.id)
+            .limit(1)
+            .scalar_subquery()
+        )
         wi_expiry_subq = (
             select(WhiteInternetSubscription.expires_at)
             .where(
@@ -901,7 +761,7 @@ async def get_filtered_users_paginated(
             .limit(1)
             .scalar_subquery()
         )
-        order_clause = func.coalesce(User.subscription_end, wi_expiry_subq).asc()
+        order_clause = func.coalesce(std_expiry_subq, wi_expiry_subq).asc()
     else:
         order_clause = User.created_at.desc()
 
@@ -927,13 +787,22 @@ async def get_user_filter_counts(session: AsyncSession) -> dict[str, int]:
             get_effective_active_condition(now),
         ).label("active"),
         func.count(User.id).filter(
+            User.id.in_(_std_active_subq(now)),
+        ).label("active_standard"),
+        func.count(User.id).filter(
+            get_effective_wi_active_condition(now),
+        ).label("active_wi"),
+        func.count(User.id).filter(
             get_effective_expiring_3d_condition(now),
         ).label("expiring_3d"),
         func.count(User.id).filter(
             get_effective_expired_condition(now),
         ).label("expired"),
         func.count(User.id).filter(
-            (User.is_banned.is_(True)) | (User.is_bot_blocked.is_(True))
+            get_effective_never_condition(),
+        ).label("never"),
+        func.count(User.id).filter(
+            User.is_bot_blocked.is_(True)
         ).label("banned"),
     ).where(User.is_deleted.is_(False))
     result = (await session.execute(stmt)).one()
@@ -941,8 +810,11 @@ async def get_user_filter_counts(session: AsyncSession) -> dict[str, int]:
         "all": int(result.total or 0),
         "new_7d": int(result.new_7d or 0),
         "active": int(result.active or 0),
+        "active_standard": int(result.active_standard or 0),
+        "active_wi": int(result.active_wi or 0),
         "expiring_3d": int(result.expiring_3d or 0),
         "expired": int(result.expired or 0),
+        "never": int(result.never or 0),
         "banned": int(result.banned or 0),
     }
 

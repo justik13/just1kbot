@@ -32,10 +32,10 @@ from cachetools import TTLCache
 from sqlalchemy import func, or_, select
 
 from bot import texts
-from bot.formatters import get_tariff_display_name
-from bot.keyboards import get_payment_success_keyboard
-from bot.keyboards.notifications import get_referral_bonus_keyboard
-from bot.keyboards.payment import get_topup_credit_keyboard
+from bot.keyboards.notifications import (
+    get_referral_bonus_keyboard,
+)
+from bot.texts import get_tariff_display_name
 from config.constants import WORKER_ERROR_SLEEP_INTERVAL
 from database.connection import session_scope
 from database.models import AccountLedgerEntry, Order, User
@@ -94,8 +94,14 @@ async def credit_notifications_loop(
             )
             if shutdown_event.is_set():
                 break
-            await asyncio.sleep(WORKER_ERROR_SLEEP_INTERVAL)
-            continue
+            try:
+                await asyncio.wait_for(
+                    shutdown_event.wait(),
+                    timeout=WORKER_ERROR_SLEEP_INTERVAL,
+                )
+                break
+            except asyncio.TimeoutError:
+                continue
 
         try:
             await asyncio.wait_for(
@@ -147,6 +153,104 @@ async def deliver_pending_credit_notifications(bot: Bot) -> int:
     return delivered
 
 
+def _format_credit_push_text(
+    service_type: str,
+    *,
+    device_limit: int | None,
+    is_tariff_change: bool,
+    operation_kind: str | None = None,
+    traffic_bytes: int = 0,
+    duration_days: int,
+    amount_rub: int | Decimal,
+    real_available: int,
+    bonus_available: int,
+) -> str:
+    """Build push notification text for a credited topup or tariff order."""
+    if service_type == "topup":
+        return (
+            f"{texts.TOPUP_CREDITED_NOTICE}\n\n"
+            + texts.BALANCE_BALANCE.format(
+                int_snapshot_real_available=real_available
+            )
+        )
+    op_lower = str(operation_kind or "").lower()
+    is_renewal = op_lower in {"renew", "renewal"}
+    if service_type == "white_internet":
+        if op_lower == "topup":
+            pack_gb = max(1, round((traffic_bytes or 0) / (1024**3)))
+            tariff_name = f"Белый интернет (+{pack_gb} ГБ)"
+            operation = texts.PAYMENT_OP_TITLE_WI_TRAFFIC_TOPUP
+        else:
+            tariff_name = f"Белый интернет ({device_limit or 1} устр.)"
+            if op_lower == "add_device_slot" or duration_days <= 0:
+                operation = texts.PAYMENT_OP_TITLE_WI_ADD_SLOTS
+            elif is_renewal:
+                operation = texts.PAYMENT_OP_TITLE_WI_RENEWED
+            else:
+                operation = texts.PAYMENT_OP_TITLE_WI_BOUGHT
+    else:
+        tariff_name = get_tariff_display_name(device_limit or 2)
+        if op_lower == "upgrade":
+            operation = texts.PAYMENT_OP_TITLE_WI_ADD_SLOTS
+            tariff_name = f"{tariff_name} ({device_limit or 2} устр.)"
+        elif is_tariff_change:
+            operation = texts.PAYMENT_OP_TITLE_CHANGE
+        elif is_renewal:
+            operation = texts.PAYMENT_OP_TITLE_RENEWAL
+        else:
+            operation = texts.PURCHASE_COMPLETED
+    duration_text = f"{duration_days} дн." if duration_days > 0 else "до конца текущего срока"
+    return texts.PAYMENT_PURCHASE_SUCCESS_CARD.format(
+        operation_title=operation,
+        tariff_name=tariff_name,
+        duration_text=duration_text,
+        charged=int(amount_rub),
+        real_balance=real_available,
+        bonus_balance=bonus_available,
+    )
+
+
+async def notify_order_credited(
+    bot,
+    session,
+    order: Order,
+    user: User | None,
+) -> bool:
+    """Send immediate credit push notification from payment webhook."""
+    try:
+        if not user or not user.telegram_id:
+            return False
+        balance = await get_account_balance(session, user_id=user.id)
+        meta = order.metadata_ or {}
+        text = _format_credit_push_text(
+            order.service_type,
+            device_limit=order.device_limit,
+            is_tariff_change=bool(meta.get("is_tariff_change")),
+            operation_kind=meta.get("operation"),
+            traffic_bytes=order.traffic_bytes or 0,
+            duration_days=order.duration_days or 0,
+            amount_rub=order.amount_rub or 0,
+            real_available=int(balance.real_available),
+            bonus_available=int(balance.bonus_available),
+        )
+        sent_id = await safe_send_message(
+            bot,
+            user.telegram_id,
+            text,
+            message_effect_id=EFFECT_CONFETTI,
+        )
+        return sent_id is not None
+    except Exception as exc:
+        logger.warning(
+            "Could not notify user %s of credited order %s: %s",
+            getattr(user, "id", "?"),
+            getattr(order, "id", "?"),
+            exc,
+            exc_info=True,
+        )
+        return False
+
+
 async def _send_late_push(
     bot: Bot,
     service_type: str,
@@ -158,46 +262,25 @@ async def _send_late_push(
     """Compact proactive push for a credited order (no DB access).
 
     Uses only the worker-allowed presentation adapters (``bot.texts``,
-    ``bot.keyboards``) plus ``utils.telegram`` delivery — the full hub
-    screens stay on the request path (webhook / order_check).
+    ``bot.keyboards``) plus ``utils.telegram`` delivery.
     Returns True only when Telegram accepted the message.
     """
     try:
-        if service_type == "topup":
-            keyboard = (
-                get_topup_credit_keyboard(fields["context"])
-                if fields["context"]
-                else None
-            )
-            text = (
-                f"{texts.TOPUP_CREDITED_NOTICE}\n\n"
-                + texts.BALANCE_BALANCE.format(
-                    int_snapshot_real_available=real_available
-                )
-            )
-        else:
-            # Same tier label as the request path (credit_notify.py):
-            # two pushes for one order must never name the tariff differently.
-            tariff_name = get_tariff_display_name(fields["device_limit"] or 2)
-            operation = (
-                texts.PAYMENT_OP_TITLE_CHANGE
-                if fields["is_tariff_change"]
-                else texts.PURCHASE_COMPLETED
-            )
-            text = texts.PAYMENT_PURCHASE_SUCCESS_CARD.format(
-                operation_title=operation,
-                tariff_name=tariff_name,
-                duration_days=fields["duration_days"],
-                charged=int(fields["amount_rub"]),
-                real_balance=real_available,
-                bonus_balance=bonus_available,
-            )
-            keyboard = get_payment_success_keyboard()
+        text = _format_credit_push_text(
+            service_type,
+            device_limit=fields["device_limit"],
+            is_tariff_change=bool(fields["is_tariff_change"]),
+            operation_kind=fields.get("operation"),
+            traffic_bytes=int(fields.get("traffic_bytes") or 0),
+            duration_days=fields["duration_days"],
+            amount_rub=fields["amount_rub"],
+            real_available=real_available,
+            bonus_available=bonus_available,
+        )
         sent_id = await safe_send_message(
             bot,
             telegram_id,
             text,
-            reply_markup=keyboard,
             message_effect_id=EFFECT_CONFETTI,
             raise_forbidden=True,
         )
@@ -341,8 +424,7 @@ async def _snapshot(order_id) -> dict | None:
                     )
                     if not has_credit:
                         logger.warning(
-                            "Credit-notify skips order %s: paid topup but no "
-                            "payment_credit (pre-flight 3B owns this anomaly)",
+                            "Credit-notify skips order %s: paid topup without payment_credit",
                             order.id,
                         )
                         owner = {"kind": "anomaly"}
@@ -377,8 +459,12 @@ async def _snapshot(order_id) -> dict | None:
                                 "amount_rub": order.amount_rub,
                                 "duration_days": order.duration_days,
                                 "device_limit": order.device_limit,
+                                "traffic_bytes": order.traffic_bytes or 0,
                                 "context": (order.metadata_ or {}).get(
                                     "context"
+                                ),
+                                "operation": (order.metadata_ or {}).get(
+                                    "operation"
                                 ),
                                 "is_tariff_change": bool(
                                     (order.metadata_ or {}).get(

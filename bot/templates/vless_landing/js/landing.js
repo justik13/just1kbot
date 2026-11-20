@@ -28,6 +28,14 @@
             }
         }
 
+        const openClientParam = (new URLSearchParams(window.location.search).get("open") || "").toLowerCase();
+        if (openClientParam === "happ" || openClientParam === "incy") {
+            updateActiveClient(openClientParam);
+            setTimeout(function() {
+                window.location.href = openClientParam + "://add/" + subUrl;
+            }, 250);
+        }
+
         let activePlatform = "ios";
 
         function switchPlatformTab(platform) {

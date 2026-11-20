@@ -148,7 +148,7 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
 
             order = await OrderService.process_webhook_event(session, payload)
             if not order:
-                if event == "refund.succeeded":
+                if event in ("refund.succeeded", "payment.succeeded", "payment.canceled"):
                     inbox_status = WebhookInboxStatus.PENDING.value
                 elif existing_event:
                     inbox_status = WebhookInboxStatus.DEAD.value
@@ -165,11 +165,25 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                 await session.flush()
 
             admin_alert_info = None
+            refund_alert_info = None
             if order and (order.metadata_ or {}).get("requires_manual_review"):
                 admin_alert_info = {
                     "order_id": order.id,
                     "amount_rub": order.amount_rub,
                     "mismatch": (order.metadata_ or {}).get("refund_amount_mismatch", "—"),
+                }
+            elif (
+                event == "refund.succeeded"
+                and order is not None
+                and inbox_status == WebhookInboxStatus.SUCCEEDED.value
+            ):
+                order_meta = order.metadata_ or {}
+                refund_alert_info = {
+                    "order_id": order.id,
+                    "user_id": order.user_id,
+                    "service_type": order.service_type,
+                    "status": order.status,
+                    "amount_rub": order_meta.get("partial_refund_amount_rub") or order.amount_rub,
                 }
 
             if existing_event:
@@ -203,8 +217,8 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
             n_order_id, n_user_id = notify_order_info
             try:
                 from database.models import Order, User
-                from bot.handlers.payment.credit_notify import notify_order_credited
                 from services.order_notifications import mark_notified
+                from services.workers.credit_notifications import notify_order_credited
 
                 async with session_scope() as notify_session:
                     loaded_order = await notify_session.get(Order, n_order_id)
@@ -251,6 +265,36 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                         logger.warning("Failed to send manual review alert to admin %s: %s", aid, exc)
             except Exception as exc:
                 logger.warning("[%s] Failed to send admin alerts: %s", request_id, exc)
+        if refund_alert_info:
+            try:
+                from config.settings import get_settings
+                from utils.telegram import safe_send_message
+
+                service_labels = {
+                    "standard": "Стандарт",
+                    "white_internet": "Белый интернет",
+                    "topup": "Пополнение",
+                }
+                status_label = (
+                    "Частичный возврат"
+                    if refund_alert_info["status"] == "partially_refunded"
+                    else "Полный возврат"
+                )
+                refund_text = (
+                    "💸 <b>Возврат ЮKassa</b>\n"
+                    f"Заказ: <code>{refund_alert_info['order_id']}</code>\n"
+                    f"Пользователь ID: <code>{refund_alert_info['user_id']}</code>\n"
+                    f"Услуга: {service_labels.get(refund_alert_info['service_type'], refund_alert_info['service_type'])}\n"
+                    f"Сумма: {refund_alert_info['amount_rub']} ₽ ({status_label})\n"
+                    "Доступ и баланс обновлены автоматически."
+                )
+                for aid in get_settings().ADMIN_IDS:
+                    try:
+                        await safe_send_message(bot, aid, refund_text, parse_mode="HTML")
+                    except Exception as exc:
+                        logger.warning("Failed to send refund notice to admin %s: %s", aid, exc)
+            except Exception as exc:
+                logger.warning("[%s] Failed to send refund admin notice: %s", request_id, exc)
     if inbox_status == WebhookInboxStatus.PENDING.value:
         return web.Response(status=503, text="order_pending_retry")
     return web.Response(status=200, text="OK")
@@ -378,3 +422,7 @@ def setup_webhook_routes(app: web.Application):
     # Register standard VLESS subscription feed routes
     from bot.handlers.vless_web import setup_vless_web_routes
     setup_vless_web_routes(app)
+
+    # Register Telegram Mini App frontend and admin API routes
+    from bot.miniapp import setup_miniapp_routes
+    setup_miniapp_routes(app)
