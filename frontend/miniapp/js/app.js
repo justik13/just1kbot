@@ -1,12 +1,12 @@
-import { api } from "./api.js?v=2.6.2";
-import { escapeHtml, showToast } from "./ui.js?v=2.6.2";
-import { renderSecurity2FA } from "./views/security_2fa.js?v=2.6.2";
-import { renderNodesView, renderSubscriptionSettingsView } from "./views/nodes.js?v=2.6.2";
-import { renderNodeDetailView } from "./views/node_detail.js?v=2.6.2";
-import { renderAdminUsersView } from "./views/admin_users.js?v=2.6.2";
-import { clearBroadcastPollTimer, renderAdminBroadcastsView } from "./views/admin_broadcasts.js?v=2.6.2";
-import { renderAdminFinancesView } from "./views/admin_finances.js?v=2.6.2";
-import { loadAndRenderUserCabinet } from "./views/user_cabinet.js?v=2.6.2";
+import { api } from "./api.js?v=2.6.3";
+import { escapeHtml, showToast } from "./ui.js?v=2.6.3";
+import { renderSecurity2FA } from "./views/security_2fa.js?v=2.6.3";
+import { renderNodesView, renderSubscriptionSettingsView } from "./views/nodes.js?v=2.6.3";
+import { renderNodeDetailView } from "./views/node_detail.js?v=2.6.3";
+import { renderAdminUsersView } from "./views/admin_users.js?v=2.6.3";
+import { clearBroadcastPollTimer, renderAdminBroadcastsView } from "./views/admin_broadcasts.js?v=2.6.3";
+import { renderAdminFinancesView } from "./views/admin_finances.js?v=2.6.3";
+import { loadAndRenderUserCabinet } from "./views/user_cabinet.js?v=2.6.3";
 
 const appState = {
     user: null,
@@ -138,7 +138,7 @@ function _renderAdminView() {
             appState.selectedNodeId = null;
             if (appState.adminTab === "users" && !appState.usersData) {
                 try {
-                    appState.usersData = await api.listUsers(appState.usersQuery || "");
+                    appState.usersData = await api.listUsers(appState.usersQuery || "", appState.usersOffset || 0, 10, appState.usersFilter || "all");
                 } catch (err) {
                     showToast(err.message || "Не удалось загрузить пользователей");
                 }

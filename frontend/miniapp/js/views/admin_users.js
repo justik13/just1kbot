@@ -365,7 +365,7 @@ async function _openUserDetailsModal(user, onUpdated) {
 }
 
 export function renderAdminUsersView(root, state) {
-    const data = state.usersData || { stats: {}, filter_counts: {}, users: [], total: 0, offset: 0, limit: 25 };
+    const data = state.usersData || { stats: {}, filter_counts: {}, users: [], total: 0, offset: 0, limit: 10 };
     const stats = data.stats || {};
     const fc = data.filter_counts || {};
     const users = data.users || [];
@@ -407,7 +407,7 @@ export function renderAdminUsersView(root, state) {
             state.usersQuery = qVal;
             state.usersFilter = filterVal;
             state.usersOffset = offsetVal;
-            state.usersData = await api.listUsers(qVal, offsetVal, 25, filterVal);
+            state.usersData = await api.listUsers(qVal, offsetVal, 10, filterVal);
             renderAdminUsersView(root, state);
         } catch (err) {
             showToast(err.message || "Не удалось загрузить пользователей");
@@ -434,7 +434,7 @@ export function renderAdminUsersView(root, state) {
         container: root.querySelector("#usersPagerTop"),
         total: Number(data.total ?? users.length),
         offset: Number(data.offset ?? state.usersOffset ?? 0),
-        limit: Number(data.limit || 25),
+        limit: Number(data.limit || 10),
         onPage: onUserPage,
         scrollTarget: searchFormEl,
         entityName: "пользователей",
@@ -444,7 +444,7 @@ export function renderAdminUsersView(root, state) {
         container: root.querySelector("#usersPagerBottom"),
         total: Number(data.total ?? users.length),
         offset: Number(data.offset ?? state.usersOffset ?? 0),
-        limit: Number(data.limit || 25),
+        limit: Number(data.limit || 10),
         onPage: onUserPage,
         scrollTarget: searchFormEl,
         entityName: "пользователей",

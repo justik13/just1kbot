@@ -99,7 +99,7 @@ export const api = {
         requestJson(`/api/app/admin/nodes/${id}${force ? "?force=true" : ""}`, {
             method: "DELETE",
         }),
-    listUsers: (q = "", offset = 0, limit = 25, filter = "all") =>
+    listUsers: (q = "", offset = 0, limit = 10, filter = "all") =>
         requestJson(
             `/api/app/admin/users?q=${encodeURIComponent(q)}&offset=${offset}&limit=${limit}&filter=${encodeURIComponent(filter || "all")}`
         ),

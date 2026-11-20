@@ -507,9 +507,9 @@ async def api_admin_users_handler(request: web.Request) -> web.Response:
     q = (request.query.get("q") or "").strip()
     flt = (request.query.get("filter") or "all").strip()
     try:
-        limit = min(50, max(1, int(request.query.get("limit", "25"))))
+        limit = min(50, max(1, int(request.query.get("limit", "10"))))
     except ValueError:
-        limit = 25
+        limit = 10
     try:
         offset = max(0, int(request.query.get("offset", "0")))
     except ValueError:
