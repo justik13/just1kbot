@@ -130,3 +130,70 @@ def test_generate_vless_links_standard_tcp_vision():
     assert "sni=ruhub.just1k.pro" in link
     assert "#%F0%9F%87%AA%F0%9F%87%AA%20%D0%AD%D1%81%D1%82%D0%BE%D0%BD%D0%B8%D1%8F" in link
 
+
+def test_get_server_load_score_and_dynamic_bypass():
+    from config.enums import ServerHealthState, ServerLifecycleStatus
+    from database.models import Server, VlessSubscription
+    from database.repositories.servers_repo import get_server_load_score
+    from services.vless_subscription_service import VlessSubscriptionService
+
+    s_empty = Server(id=1, name="Hub Empty", extra_data={})
+    assert get_server_load_score(s_empty) == 0.0
+
+    s_loaded = Server(
+        id=2,
+        name="Hub Loaded",
+        extra_data={"system_load": {"cpu_percent": 60.0, "ram_percent": 40.0}},
+    )
+    # 60 * 0.7 + 40 * 0.3 = 42.0 + 12.0 = 54.0
+    assert get_server_load_score(s_loaded) == 54.0
+
+    # Overload bypass test
+    s_overloaded = Server(
+        id=10,
+        name="Overloaded Hub",
+        is_active=True,
+        health_state=ServerHealthState.ONLINE,
+        lifecycle_status=ServerLifecycleStatus.ACTIVE,
+        role="ru_hub",
+        capabilities=["ru_hub", "vless"],
+        extra_data={
+            "domain": "badhub.just1k.pro",
+            "vless_port": 443,
+            "system_load": {"cpu_percent": 95.0, "ram_percent": 90.0},
+        },
+    )
+    s_healthy = Server(
+        id=20,
+        name="Healthy Hub",
+        is_active=True,
+        health_state=ServerHealthState.ONLINE,
+        lifecycle_status=ServerLifecycleStatus.ACTIVE,
+        role="ru_hub",
+        capabilities=["ru_hub", "vless"],
+        extra_data={
+            "domain": "goodhub.just1k.pro",
+            "vless_port": 443,
+            "system_load": {"cpu_percent": 15.0, "ram_percent": 25.0},
+        },
+    )
+    ee_exit = Server(
+        id=30,
+        name="Exit Node",
+        country_flag="🇩🇪",
+        is_active=True,
+        health_state=ServerHealthState.ONLINE,
+        lifecycle_status=ServerLifecycleStatus.ACTIVE,
+        role="exit_node",
+        capabilities=["exit_node"],
+        extra_data={"location_code": "de", "vless_name": "Germany Exit"},
+    )
+
+    sub = VlessSubscription(uuid="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+    links = VlessSubscriptionService.generate_vless_links(sub, [s_overloaded, s_healthy], [ee_exit])
+    assert len(links) == 1
+    # Must choose healthy hub instead of overloaded hub
+    assert "goodhub.just1k.pro" in links[0]
+    assert "badhub.just1k.pro" not in links[0]
+
+

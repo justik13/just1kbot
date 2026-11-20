@@ -283,14 +283,26 @@ def capacity_consuming_wl_condition():
     )
 
 
-def _server_load_score(server: Server) -> tuple[int, int]:
-    """Return (monthly_traffic_bytes, server.id) for least-loaded ru_hub ordering."""
+def get_server_load_score(server: Server) -> float:
+    """Return real-time hardware load percentage (0.0..100.0) based on CPU and RAM telemetry.
+
+    Weighted: 70% CPU (TLS encryption and I/O overhead) + 30% RAM.
+    """
     extra = server.extra_data if isinstance(server.extra_data, dict) else {}
-    try:
-        monthly = int(extra.get("monthly_traffic_bytes") or 0)
-    except (ValueError, TypeError):
-        monthly = 0
-    return (max(0, monthly), int(server.id or 0))
+    sys_load = extra.get("system_load")
+    if isinstance(sys_load, dict):
+        try:
+            cpu = float(sys_load.get("cpu_percent") or 0.0)
+            ram = float(sys_load.get("ram_percent") or 0.0)
+            return round(max(0.0, min(100.0, cpu * 0.7 + ram * 0.3)), 1)
+        except (ValueError, TypeError):
+            pass
+    return 0.0
+
+
+def _server_load_score(server: Server) -> tuple[float, int]:
+    """Sort key for servers: lower load score first, server.id tie-breaker."""
+    return (get_server_load_score(server), int(server.id or 0))
 
 
 def _is_wi_hub_eligible(server: Server) -> bool:

@@ -132,8 +132,8 @@ def build_v2_topology_links(servers: list[Server]) -> dict[int, dict[str, Any]]:
         elif role == "exit_node":
             active_exit.append(srv)
 
-    active_ru.sort(key=lambda s: (int((s.extra_data or {}).get("monthly_traffic_bytes") or 0), int(s.id or 0)))
-    active_eu.sort(key=lambda s: (int((s.extra_data or {}).get("monthly_traffic_bytes") or 0), int(s.id or 0)))
+    active_ru.sort(key=lambda s: int(s.id or 0))
+    active_eu.sort(key=lambda s: int(s.id or 0))
 
     ru_ips = [ip for ip in (_extract_ipv4(s) for s in active_ru) if ip]
     eu_ips = [ip for ip in (_extract_ipv4(s) for s in active_eu) if ip]

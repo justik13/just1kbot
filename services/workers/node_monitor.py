@@ -815,11 +815,15 @@ async def check_node_resources_and_alerts(bot: Bot):
                 disk_percent = None
                 if is_xray_node and xray_data and isinstance(xray_data, dict):
                     try:
-                        disk_usage = xray_data.get("disk_usage", {})
-                        if isinstance(disk_usage, dict):
-                            raw_dp = disk_usage.get("used_percent")
-                            if raw_dp is not None and isinstance(raw_dp, (int, float)):
-                                disk_percent = float(raw_dp)
+                        sys_load = xray_data.get("system_load")
+                        if isinstance(sys_load, dict) and sys_load.get("disk_percent") is not None:
+                            disk_percent = float(sys_load["disk_percent"])
+                        else:
+                            disk_usage = xray_data.get("disk_usage", {})
+                            if isinstance(disk_usage, dict):
+                                raw_dp = disk_usage.get("used_percent")
+                                if raw_dp is not None and isinstance(raw_dp, (int, float)):
+                                    disk_percent = float(raw_dp)
                     except Exception as exc:
                         logger.warning("Error reading disk usage for Xray server %s: %s", server.id, exc)
 
@@ -1082,13 +1086,17 @@ async def check_node_resources_and_alerts(bot: Bot):
                     if xray_data and isinstance(xray_data, dict):
                         extra = dict(updated_srv.extra_data or {})
                         extra_changed = False
-                        for key in ("cdn_domain", "cdn_domains", "xhttp_locations", "links", "secret_base_path"):
+                        for key in ("cdn_domain", "cdn_domains", "xhttp_locations", "links", "secret_base_path", "system_load"):
                             if key in xray_data:
                                 val = xray_data[key]
                                 if key == "cdn_domain":
                                     norm_val = val or ""
                                     if extra.get(key, "") != norm_val:
                                         extra[key] = norm_val
+                                        extra_changed = True
+                                elif key == "system_load":
+                                    if isinstance(val, dict) and extra.get("system_load") != val:
+                                        extra["system_load"] = val
                                         extra_changed = True
                                 elif val is not None and extra.get(key) != val:
                                     if key == "secret_base_path" and not val:

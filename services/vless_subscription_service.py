@@ -22,7 +22,7 @@ from config.constants import (
 from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.models import Server, User, VlessSubscription, WhiteInternetSubscription
 from database.repositories import vless_subscription_repo
-from database.repositories.servers_repo import get_server_role
+from database.repositories.servers_repo import get_server_load_score, get_server_role
 from services.xray_node_client import XrayNodeClient
 from utils.datetime_helpers import now_utc
 from utils.security import normalize_public_domain
@@ -148,14 +148,16 @@ class VlessSubscriptionService:
                 continue
             active_exits.append(ex)
 
-        ru_hubs.sort(key=lambda s: (int((s.extra_data or {}).get("monthly_traffic_bytes") or 0), int(s.id or 0)))
-
         seen_links: set[str] = set()
         eff_uuid = client_uuid or subscription.uuid
 
         selected_hubs: list[Server] = []
         if ru_hubs:
-            selected_hubs = [ru_hubs[0]]
+            # Bypass overloaded hubs (>=85% CPU/RAM load) if at least one healthy hub exists
+            healthy_hubs = [s for s in ru_hubs if get_server_load_score(s) < 85.0] or ru_hubs
+            # Consistent hashing per user UUID to prevent herding and jitter
+            hub_idx = int(hashlib.md5(eff_uuid.encode()).hexdigest(), 16) % len(healthy_hubs)
+            selected_hubs = [healthy_hubs[hub_idx]]
 
         for hub in selected_hubs:
             hub_extra = hub.extra_data if isinstance(hub.extra_data, dict) else {}
