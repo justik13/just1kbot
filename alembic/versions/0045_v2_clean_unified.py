@@ -22,12 +22,8 @@ def upgrade() -> None:
     insp = sa.inspect(bind)
     tables = set(insp.get_table_names())
 
-    # 1. Drop legacy tables superseded by v2 architecture
-    op.execute("DROP TRIGGER IF EXISTS account_allocations_append_only ON account_ledger_allocations")
-    op.execute("DROP TRIGGER IF EXISTS account_allocation_validate ON account_ledger_allocations")
-    op.execute("DROP FUNCTION IF EXISTS validate_account_allocation() CASCADE")
+    # 1. Drop legacy tables superseded by v2 architecture (account_ledger_allocations preserved until step 3)
     for legacy_tbl in (
-        "account_ledger_allocations",
         "white_internet_orphan_cleanups",
         "api_operations",
         "hub_messages",
@@ -135,71 +131,53 @@ def upgrade() -> None:
             """
         )
 
-        # Normalize historical purchase debits paid with bonus balance
+        # Normalize historical purchase debits paid with bonus balance cleanly without hardcoded IDs:
+        # 1. If legacy account_ledger_allocations exists, use it to accurately flag bonus debits
+        if "account_ledger_allocations" in tables:
+            op.execute(
+                """
+                UPDATE account_ledger_entries e
+                SET bucket = 'bonus'
+                FROM account_ledger_allocations a
+                JOIN account_ledger_entries c ON a.credit_entry_id = c.id
+                WHERE a.debit_entry_id = e.id
+                  AND c.entry_type = 'admin_adjustment'
+                  AND e.entry_type = 'purchase_debit'
+                """
+            )
+
+        # 2. Universal balance conservation: if any user's real balance is negative and positive
+        # bonus credits exist, shift purchase debits to 'bonus' bucket to guarantee non-negativity.
         op.execute(
             """
-            UPDATE account_ledger_entries
+            WITH user_balances AS (
+                SELECT
+                    user_id,
+                    COALESCE(SUM(CASE WHEN bucket = 'real' THEN amount ELSE 0 END), 0) AS real_bal,
+                    COALESCE(SUM(CASE WHEN bucket = 'bonus' THEN amount ELSE 0 END), 0) AS bonus_bal
+                FROM account_ledger_entries
+                GROUP BY user_id
+                HAVING COALESCE(SUM(CASE WHEN bucket = 'real' THEN amount ELSE 0 END), 0) < 0
+                   AND COALESCE(SUM(CASE WHEN bucket = 'bonus' THEN amount ELSE 0 END), 0) > 0
+            )
+            UPDATE account_ledger_entries e
             SET bucket = 'bonus'
-            WHERE entry_type = 'purchase_debit'
-              AND user_id IN (3, 6, 8, 11, 19, 22, 25, 29, 30);
-
-            UPDATE account_ledger_entries
-            SET bucket = 'bonus'
-            WHERE user_id = 1 AND entry_type = 'purchase_debit' AND id <> 2;
-
-            UPDATE account_ledger_entries
-            SET bucket = 'bonus'
-            WHERE id IN (211, 43, 44, 50, 80, 214);
-
-            UPDATE account_ledger_entries SET amount = -40, bucket = 'real' WHERE id = 69 AND amount = -240;
-            INSERT INTO account_ledger_entries (user_id, entry_type, bucket, amount, currency, order_id, idempotency_key, metadata, created_at)
-            SELECT user_id, 'purchase_debit', 'bonus', -200, currency, order_id, idempotency_key || ':bonus', metadata, created_at
-            FROM account_ledger_entries WHERE id = 69 AND NOT EXISTS (SELECT 1 FROM account_ledger_entries WHERE idempotency_key = (SELECT idempotency_key || ':bonus' FROM account_ledger_entries WHERE id = 69));
-
-            UPDATE account_ledger_entries SET amount = -40, bucket = 'real' WHERE id = 78 AND amount = -240;
-            INSERT INTO account_ledger_entries (user_id, entry_type, bucket, amount, currency, order_id, idempotency_key, metadata, created_at)
-            SELECT user_id, 'purchase_debit', 'bonus', -200, currency, order_id, idempotency_key || ':bonus', metadata, created_at
-            FROM account_ledger_entries WHERE id = 78 AND NOT EXISTS (SELECT 1 FROM account_ledger_entries WHERE idempotency_key = (SELECT idempotency_key || ':bonus' FROM account_ledger_entries WHERE id = 78));
-
-            UPDATE account_ledger_entries SET amount = -280, bucket = 'real' WHERE id = 63 AND amount = -480;
-            INSERT INTO account_ledger_entries (user_id, entry_type, bucket, amount, currency, order_id, idempotency_key, metadata, created_at)
-            SELECT user_id, 'purchase_debit', 'bonus', -200, currency, order_id, idempotency_key || ':bonus', metadata, created_at
-            FROM account_ledger_entries WHERE id = 63 AND NOT EXISTS (SELECT 1 FROM account_ledger_entries WHERE idempotency_key = (SELECT idempotency_key || ':bonus' FROM account_ledger_entries WHERE id = 63));
-
-            UPDATE account_ledger_entries SET amount = -230, bucket = 'real' WHERE id = 88 AND amount = -250;
-            INSERT INTO account_ledger_entries (user_id, entry_type, bucket, amount, currency, order_id, idempotency_key, metadata, created_at)
-            SELECT user_id, 'purchase_debit', 'bonus', -20, currency, order_id, idempotency_key || ':bonus', metadata, created_at
-            FROM account_ledger_entries WHERE id = 88 AND NOT EXISTS (SELECT 1 FROM account_ledger_entries WHERE idempotency_key = (SELECT idempotency_key || ':bonus' FROM account_ledger_entries WHERE id = 88));
-
-            UPDATE account_ledger_entries SET amount = -177, bucket = 'real' WHERE id = 92 AND amount = -200;
-            INSERT INTO account_ledger_entries (user_id, entry_type, bucket, amount, currency, order_id, idempotency_key, metadata, created_at)
-            SELECT user_id, 'purchase_debit', 'bonus', -23, currency, order_id, idempotency_key || ':bonus', metadata, created_at
-            FROM account_ledger_entries WHERE id = 92 AND NOT EXISTS (SELECT 1 FROM account_ledger_entries WHERE idempotency_key = (SELECT idempotency_key || ':bonus' FROM account_ledger_entries WHERE id = 92));
-
-            UPDATE account_ledger_entries SET amount = -400, bucket = 'real' WHERE id = 144 AND amount = -450;
-            INSERT INTO account_ledger_entries (user_id, entry_type, bucket, amount, currency, order_id, idempotency_key, metadata, created_at)
-            SELECT user_id, 'purchase_debit', 'bonus', -50, currency, order_id, idempotency_key || ':bonus', metadata, created_at
-            FROM account_ledger_entries WHERE id = 144 AND NOT EXISTS (SELECT 1 FROM account_ledger_entries WHERE idempotency_key = (SELECT idempotency_key || ':bonus' FROM account_ledger_entries WHERE id = 144));
-
-            UPDATE account_ledger_entries SET amount = -20, bucket = 'real' WHERE id = 140 AND amount = -90;
-            INSERT INTO account_ledger_entries (user_id, entry_type, bucket, amount, currency, order_id, idempotency_key, metadata, created_at)
-            SELECT user_id, 'purchase_debit', 'bonus', -70, currency, order_id, idempotency_key || ':bonus', metadata, created_at
-            FROM account_ledger_entries WHERE id = 140 AND NOT EXISTS (SELECT 1 FROM account_ledger_entries WHERE idempotency_key = (SELECT idempotency_key || ':bonus' FROM account_ledger_entries WHERE id = 140));
-
-            UPDATE account_ledger_entries SET amount = -10, bucket = 'real' WHERE id = 100 AND amount = -250;
-            INSERT INTO account_ledger_entries (user_id, entry_type, bucket, amount, currency, order_id, idempotency_key, metadata, created_at)
-            SELECT user_id, 'purchase_debit', 'bonus', -240, currency, order_id, idempotency_key || ':bonus', metadata, created_at
-            FROM account_ledger_entries WHERE id = 100 AND NOT EXISTS (SELECT 1 FROM account_ledger_entries WHERE idempotency_key = (SELECT idempotency_key || ':bonus' FROM account_ledger_entries WHERE id = 100));
-
-            UPDATE account_ledger_entries SET amount = -199, bucket = 'real' WHERE id = 150 AND amount = -250;
-            INSERT INTO account_ledger_entries (user_id, entry_type, bucket, amount, currency, order_id, idempotency_key, metadata, created_at)
-            SELECT user_id, 'purchase_debit', 'bonus', -51, currency, order_id, idempotency_key || ':bonus', metadata, created_at
-            FROM account_ledger_entries WHERE id = 150 AND NOT EXISTS (SELECT 1 FROM account_ledger_entries WHERE idempotency_key = (SELECT idempotency_key || ':bonus' FROM account_ledger_entries WHERE id = 150));
+            FROM user_balances ub
+            WHERE e.user_id = ub.user_id
+              AND e.entry_type = 'purchase_debit'
+              AND e.bucket = 'real'
             """
         )
 
         op.alter_column("account_ledger_entries", "bucket", nullable=False, server_default=sa.text("'real'"))
         op.execute("ALTER TABLE account_ledger_entries ENABLE TRIGGER account_ledger_append_only")
+
+        # Now drop legacy account_ledger_allocations after clean data migration
+        if "account_ledger_allocations" in tables:
+            op.execute("DROP TRIGGER IF EXISTS account_allocations_append_only ON account_ledger_allocations")
+            op.execute("DROP TRIGGER IF EXISTS account_allocation_validate ON account_ledger_allocations")
+            op.execute("DROP FUNCTION IF EXISTS validate_account_allocation() CASCADE")
+            op.execute("DROP TABLE IF EXISTS account_ledger_allocations CASCADE")
 
         for col in ("payment_id", "quote_id", "reversal_of_id"):
             if col in ledger_cols:
@@ -245,6 +223,13 @@ def upgrade() -> None:
             )
         if "ix_servers_role" not in srv_indexes:
             op.create_index("ix_servers_role", "servers", ["role"])
+        srv_checks = {c["name"] for c in insp.get_check_constraints("servers")}
+        if "ck_servers_role" not in srv_checks:
+            op.create_check_constraint(
+                "ck_servers_role",
+                "servers",
+                "role IN ('ru_hub', 'eu_hub', 'exit_node')",
+            )
 
     # 5. VlessSubscriptions SSOT + backfill from users (preserving 4h grace)
     if "vless_subscriptions" in tables:
@@ -415,10 +400,12 @@ def upgrade() -> None:
             sa.Column("user_id", sa.Integer(), nullable=False),
             sa.Column("hwid", sa.String(128), nullable=False),
             sa.Column("device_uuid", sa.String(36), nullable=False),
-            sa.Column("device_name", sa.String(255), nullable=True),
+            sa.Column("device_name", sa.String(128), nullable=True),
             sa.Column("platform", sa.String(64), nullable=True),
-            sa.Column("client_app", sa.String(64), nullable=True),
+            sa.Column("os_version", sa.String(64), nullable=True),
+            sa.Column("app_version", sa.String(64), nullable=True),
             sa.Column("bi_priority", sa.Integer(), nullable=False, server_default=sa.text("0")),
+            sa.Column("first_seen_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
             sa.Column("last_seen_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
             sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
@@ -427,6 +414,34 @@ def upgrade() -> None:
             sa.UniqueConstraint("device_uuid", name="uq_user_devices_device_uuid"),
         )
         op.create_index("ix_user_devices_user_id", "user_devices", ["user_id"])
+        op.create_index(
+            "ix_user_devices_user_priority",
+            "user_devices",
+            ["user_id", "bi_priority", "first_seen_at"],
+        )
+    else:
+        dev_cols = {c["name"] for c in insp.get_columns("user_devices")}
+        dev_indexes = {i["name"] for i in insp.get_indexes("user_devices")}
+        if "os_version" not in dev_cols:
+            op.add_column("user_devices", sa.Column("os_version", sa.String(64), nullable=True))
+        if "app_version" not in dev_cols:
+            op.add_column("user_devices", sa.Column("app_version", sa.String(64), nullable=True))
+        if "first_seen_at" not in dev_cols:
+            op.add_column(
+                "user_devices",
+                sa.Column(
+                    "first_seen_at",
+                    sa.DateTime(timezone=True),
+                    nullable=False,
+                    server_default=sa.text("now()"),
+                ),
+            )
+        if "ix_user_devices_user_priority" not in dev_indexes:
+            op.create_index(
+                "ix_user_devices_user_priority",
+                "user_devices",
+                ["user_id", "bi_priority", "first_seen_at"],
+            )
 
     # 9. Webhook inbox legacy queue columns
     if "webhook_inbox" in tables:

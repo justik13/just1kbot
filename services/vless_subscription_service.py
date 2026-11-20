@@ -828,7 +828,6 @@ class VlessSubscriptionService:
         from database.repositories import user_devices_repo
         dev_uuids = await user_devices_repo.get_active_device_uuids(session, user_id)
         all_sync_uuids = set(dev_uuids)
-        all_sync_uuids.add(sub.uuid)
 
         results: dict[int, bool] = {t[0]: True for t in targets}
         needs_version_bump = False
@@ -984,7 +983,6 @@ class VlessSubscriptionService:
                 total_eligible += 1
                 sub_ver = getattr(sub, "version", 1) or 1
                 all_sub_uuids = set(user_devices_map.get(user.id, []))
-                all_sub_uuids.add(sub.uuid)
                 sub_devices[sub.id] = all_sub_uuids
                 for cl_uuid in all_sub_uuids:
                     sub_tasks.append((cl_uuid, sub_ver, user.id, sub.id))

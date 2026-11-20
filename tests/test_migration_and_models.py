@@ -55,6 +55,9 @@ def test_models_orm_columns_and_defaults():
     assert "hwid" in dev_cols
     assert "device_uuid" in dev_cols
     assert "bi_priority" in dev_cols
+    assert "first_seen_at" in dev_cols
+    assert "os_version" in dev_cols
+    assert "app_version" in dev_cols
 
     # Verify Server schema
     server_cols = {c.name for c in Server.__table__.columns}
