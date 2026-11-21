@@ -3,7 +3,6 @@ import logging
 from typing import Any
 
 from aiogram import Bot
-from aiogram.exceptions import TelegramForbiddenError
 from bot import texts
 from bot.keyboards.notifications import (
     get_traffic_alert_keyboard,
@@ -37,7 +36,7 @@ from database.repositories.servers_repo import (
 from services.xray_node_client import XrayNodeClient
 from utils.datetime_helpers import now_utc
 from utils.rate_limiter import global_send_limiter
-from utils.telegram import safe, safe_send_message
+from utils.telegram import is_terminal_telegram_error, safe, safe_send_message
 from utils.traffic_helpers import accumulate_server_traffic_extra
 
 logger = logging.getLogger(__name__)
@@ -220,14 +219,14 @@ async def _send_wi_exhausted_alerts(bot: Bot | None, exhausted_users: list[int])
                     raise_forbidden=True,
                 )
                 break
-            except TelegramForbiddenError:
-                logger.info("User %d blocked bot; marking blocked in database", uid)
-                async with session_scope() as session:
-                    await session.execute(
-                        update(User).where(User.id == uid).values(is_bot_blocked=True)
-                    )
-                break
             except Exception as exc:
+                if is_terminal_telegram_error(exc):
+                    logger.info("User %d blocked bot or terminal error (%s); marking blocked in database", uid, exc)
+                    async with session_scope() as session:
+                        await session.execute(
+                            update(User).where(User.id == uid).values(is_bot_blocked=True)
+                        )
+                    break
                 if attempt == 2:
                     logger.warning("Failed to send quota exhaustion alert to user %d: %s", uid, exc)
                 else:
@@ -274,22 +273,23 @@ async def _send_wi_90p_alerts(bot: Bot | None, warn_users: list[tuple[int, int, 
                     )
                     .values(notified_90p=True)
                 )
-        except TelegramForbiddenError:
-            logger.info("User %d blocked bot; marking blocked in database", uid)
-            async with session_scope() as session:
-                await session.execute(
-                    update(User).where(User.id == uid).values(is_bot_blocked=True)
-                )
-                await session.execute(
-                    update(WhiteInternetSubscription)
-                    .where(
-                        WhiteInternetSubscription.id == sub_id,
-                        WhiteInternetSubscription.desired_version == expected_version,
-                    )
-                    .values(notified_90p=True)
-                )
         except Exception as exc:
-            logger.warning("Failed to send 90%% traffic warning alert to user %d: %s", uid, exc)
+            if is_terminal_telegram_error(exc):
+                logger.info("User %d blocked bot or terminal error (%s); marking blocked in database", uid, exc)
+                async with session_scope() as session:
+                    await session.execute(
+                        update(User).where(User.id == uid).values(is_bot_blocked=True)
+                    )
+                    await session.execute(
+                        update(WhiteInternetSubscription)
+                        .where(
+                            WhiteInternetSubscription.id == sub_id,
+                            WhiteInternetSubscription.desired_version == expected_version,
+                        )
+                        .values(notified_90p=True)
+                    )
+            else:
+                logger.warning("Failed to send 90%% traffic warning alert to user %d: %s", uid, exc)
 
 
 async def _traffic_sync_once(bot: Bot | None = None):

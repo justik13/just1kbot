@@ -27,7 +27,6 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Literal
 
 from aiogram import Bot
-from aiogram.exceptions import TelegramForbiddenError
 from cachetools import TTLCache
 from sqlalchemy import func, or_, select
 
@@ -49,7 +48,7 @@ from services.order_notifications import (
     mark_referrer_notified,
 )
 from utils.datetime_helpers import now_utc
-from utils.telegram import EFFECT_CONFETTI, EFFECT_FIRE, safe_send_message
+from utils.telegram import EFFECT_CONFETTI, EFFECT_FIRE, is_terminal_telegram_error, safe_send_message
 
 logger = logging.getLogger(__name__)
 
@@ -285,9 +284,9 @@ async def _send_late_push(
             raise_forbidden=True,
         )
         return sent_id is not None
-    except TelegramForbiddenError:
-        return "forbidden"
     except Exception as exc:
+        if is_terminal_telegram_error(exc):
+            return "forbidden"
         logger.warning("Credit-notify send failed: %s", exc)
         return False
 
@@ -337,9 +336,9 @@ async def _send_referrer_push(bot: Bot, referrer: dict) -> NotifyResult:
         )
 
         return sent_id is not None
-    except TelegramForbiddenError:
-        return "forbidden"
     except Exception as exc:
+        if is_terminal_telegram_error(exc):
+            return "forbidden"
         logger.warning("Credit-notify referrer send failed: %s", exc)
         return False
 
