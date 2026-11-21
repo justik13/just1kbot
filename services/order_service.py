@@ -877,18 +877,30 @@ class OrderService:
 
         if use_balance and bal.available >= total_cost:
             if clean_idem_key is None:
-                recent_paid_order = (
+                recent_candidates = (
                     await session.execute(
                         select(Order).where(
                             Order.user_id == user_id,
                             Order.service_type == service_type,
+                            Order.amount_rub == total_cost,
+                            Order.duration_days == final_duration,
+                            Order.traffic_bytes == traffic_bytes,
                             Order.device_limit == final_devices,
                             Order.payment_method == "wallet",
                             Order.status == "paid",
                             Order.paid_at >= now_utc() - timedelta(seconds=15),
                         ).order_by(Order.paid_at.desc())
                     )
-                ).scalars().first()
+                ).scalars().all()
+                target_op = order_meta.get("operation")
+                recent_paid_order = next(
+                    (
+                        o
+                        for o in recent_candidates
+                        if (o.metadata_ or {}).get("operation") == target_op
+                    ),
+                    None,
+                )
                 if recent_paid_order is not None:
                     meta = recent_paid_order.metadata_ or {}
                     return {
@@ -919,9 +931,9 @@ class OrderService:
                 paid_at=now_utc(),
                 metadata_=order_meta,
             )
-            session.add(order)
             try:
                 async with session.begin_nested():
+                    session.add(order)
                     await session.flush()
             except IntegrityError:
                 if clean_idem_key:
