@@ -70,6 +70,24 @@ async def _send_with_resilience(op, *, chat_id: int, context: str = "send"):
         raise
 
 
+def is_terminal_telegram_error(exc: Exception) -> bool:
+    """Return True if exception indicates the recipient chat/account no longer exists or blocked the bot."""
+    if isinstance(exc, TelegramForbiddenError):
+        return True
+    if isinstance(exc, TelegramBadRequest):
+        err = str(exc).lower()
+        return any(
+            phrase in err
+            for phrase in (
+                "chat not found",
+                "user not found",
+                "bot was blocked",
+                "user is deactivated",
+            )
+        )
+    return False
+
+
 def _is_message_effect_error(exc: Exception) -> bool:
     """Return True if TelegramBadRequest was caused by an unsupported or invalid message_effect_id."""
     err = str(exc).lower()

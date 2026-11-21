@@ -3,7 +3,6 @@ import logging
 from datetime import datetime, timedelta
 
 from aiogram import Bot
-from aiogram.exceptions import TelegramForbiddenError
 from aiogram.types import InlineKeyboardMarkup
 from cachetools import TTLCache
 from sqlalchemy import or_, select, update
@@ -37,7 +36,7 @@ from database.models import User, VlessSubscription
 from utils.datetime_helpers import is_permanent_subscription, now_utc
 from utils.formatters import format_tg_time
 from utils.rate_limiter import global_send_limiter
-from utils.telegram import safe_send_message
+from utils.telegram import is_terminal_telegram_error, safe_send_message
 
 logger = logging.getLogger(__name__)
 
@@ -201,13 +200,14 @@ async def _send_autorenew_notice(
             parse_mode="HTML",
             raise_forbidden=True,
         )
-    except TelegramForbiddenError:
-        async with session_scope() as session:
-            u = await session.scalar(select(User).where(User.telegram_id == telegram_id))
-            if u:
-                u.is_bot_blocked = True
     except Exception as exc:
-        logger.warning("Failed to send auto-renew notice to %s: %s", telegram_id, exc)
+        if is_terminal_telegram_error(exc):
+            async with session_scope() as session:
+                u = await session.scalar(select(User).where(User.telegram_id == telegram_id))
+                if u:
+                    u.is_bot_blocked = True
+        else:
+            logger.warning("Failed to send auto-renew notice to %s: %s", telegram_id, exc)
 
 
 async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
@@ -542,19 +542,21 @@ async def _send_pre_expiry_notifications(
                     elif notification_type == "3d":
                         vless_sub.notified_3d = True
 
-                except TelegramForbiddenError:
-                    user.is_bot_blocked = True
-
                 except Exception as e:
-                    user.notification_retry_count = retry_count + 1
-                    user.last_notification_attempt = current_time
-                    await session.flush()
+                    if is_terminal_telegram_error(e):
+                        logger.info("Marking user %s as blocked (terminal telegram error: %s)", user.telegram_id, e)
+                        user.is_bot_blocked = True
+                        await session.flush()
+                    else:
+                        user.notification_retry_count = retry_count + 1
+                        user.last_notification_attempt = current_time
+                        await session.flush()
 
-                    logger.warning(
-                        "Failed to send pre-expiry notification to %s: %s",
-                        user.telegram_id,
-                        e,
-                    )
+                        logger.warning(
+                            "Failed to send pre-expiry notification to %s: %s",
+                            user.telegram_id,
+                            e,
+                        )
 
 
 async def _send_post_expiry_notifications(
@@ -654,19 +656,21 @@ async def _send_post_expiry_notifications(
                     vless_sub.notified_expired = True
                     await session.flush()
 
-                except TelegramForbiddenError:
-                    user.is_bot_blocked = True
-
                 except Exception as e:
-                    user.notification_retry_count = retry_count + 1
-                    user.last_notification_attempt = current_time
-                    await session.flush()
+                    if is_terminal_telegram_error(e):
+                        logger.info("Marking user %s as blocked (terminal telegram error: %s)", user.telegram_id, e)
+                        user.is_bot_blocked = True
+                        await session.flush()
+                    else:
+                        user.notification_retry_count = retry_count + 1
+                        user.last_notification_attempt = current_time
+                        await session.flush()
 
-                    logger.warning(
-                        "Failed to send post-expiry notification to %s: %s",
-                        user.telegram_id,
-                        e,
-                    )
+                        logger.warning(
+                            "Failed to send post-expiry notification to %s: %s",
+                            user.telegram_id,
+                            e,
+                        )
 
 
 async def _send_white_internet_notifications(
@@ -851,12 +855,14 @@ async def _send_white_internet_notifications(
                     elif notify_type == "3d":
                         sub.notified_3d = True
                     await session.flush()
-                except TelegramForbiddenError:
-                    user.is_bot_blocked = True
-                    await session.flush()
                 except Exception as e:
-                    logger.warning(
-                        "Failed to send WI notification to %s: %s",
-                        user.telegram_id,
-                        e,
-                    )
+                    if is_terminal_telegram_error(e):
+                        logger.info("Marking user %s as blocked (terminal telegram error: %s)", user.telegram_id, e)
+                        user.is_bot_blocked = True
+                        await session.flush()
+                    else:
+                        logger.warning(
+                            "Failed to send WI notification to %s: %s",
+                            user.telegram_id,
+                            e,
+                        )

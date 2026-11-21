@@ -12,6 +12,7 @@ from config.constants import (
 )
 from database.connection import session_scope
 from database.models import (
+    DeviceRegistrationEvent,
     Order,
     User,
     VlessSubscription,
@@ -348,11 +349,18 @@ async def _cleanup_old_records():
         WebhookInbox.received_at < threshold_webhooks,
     )
 
-    if deleted_logs > 0 or webhooks_deleted > 0:
+    threshold_device_events = current_time - timedelta(hours=24)
+    device_events_deleted = await _batch_delete_matching(
+        DeviceRegistrationEvent,
+        DeviceRegistrationEvent.created_at < threshold_device_events,
+    )
+
+    if deleted_logs > 0 or webhooks_deleted > 0 or device_events_deleted > 0:
         logger.info(
-            "Cleanup: %s old audit logs, %s old webhooks deleted",
+            "Cleanup: %s old audit logs, %s old webhooks, %s old device events deleted",
             deleted_logs,
             webhooks_deleted,
+            device_events_deleted,
         )
 
 
