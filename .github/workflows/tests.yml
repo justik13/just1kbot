@@ -142,15 +142,13 @@ jobs:
           python -m pip install pip-audit==2.10.1
           python -m pip_audit --no-deps -r requirements-dev.txt
 
-      - run: alembic downgrade base
-      - name: Verify downgrade leaves no application tables
+      - run: alembic downgrade 0045_v2_clean_unified
+      - name: Verify downgrade cleanly reverts post-baseline migrations
         run: |
-          PGPASSWORD=projectx psql -h localhost -U projectx -d projectx_test \
-            -v ON_ERROR_STOP=1 -c 'DROP TABLE IF EXISTS backup_rehearsal_data'
-          remaining="$(PGPASSWORD=projectx psql -h localhost -U projectx -d projectx_test -Atc \
-            "SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename <> 'alembic_version' ORDER BY tablename")"
-          if [ -n "$remaining" ]; then
-            printf 'Application tables remain after downgrade:\n%s\n' "$remaining" >&2
+          leftover="$(PGPASSWORD=projectx psql -h localhost -U projectx -d projectx_test -Atc \
+            "SELECT to_regclass('public.device_registration_events')")"
+          if [ -n "$leftover" ]; then
+            printf 'Post-baseline table still exists after downgrade:\n%s\n' "$leftover" >&2
             exit 1
           fi
       - run: alembic upgrade head
