@@ -32,6 +32,15 @@ logger = logging.getLogger(__name__)
 
 _BACKGROUND_TASKS: set[asyncio.Task] = set()
 
+
+async def cancel_vless_background_tasks() -> None:
+    """Cancel and drain in-flight VLESS background synchronization tasks."""
+    tasks = list(_BACKGROUND_TASKS)
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
 _FQDN_REGEX = re.compile(
     r"^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$"
 )
@@ -361,7 +370,7 @@ class VlessSubscriptionService:
                         eff_badges[r["code"]] = cdn_label[:30]
 
                 links.extend(
-                    WhiteInternetService.generate_vless_links(
+                    WhiteInternetService.generate_xhttp_links(
                         subscription,
                         cdn_domain=loc_cdn,
                         path=base_path,
@@ -376,7 +385,7 @@ class VlessSubscriptionService:
 
             for cdn_type, loc_cdn, hub_path in direct_hub_entries:
                 links.extend(
-                    WhiteInternetService.generate_vless_links(
+                    WhiteInternetService.generate_xhttp_links(
                         subscription,
                         cdn_domain=loc_cdn,
                         path=base_path,
@@ -390,7 +399,7 @@ class VlessSubscriptionService:
             if not links and not has_exit_filter:
                 if default_cdn:
                     links.extend(
-                        WhiteInternetService.generate_vless_links(
+                        WhiteInternetService.generate_xhttp_links(
                             subscription,
                             cdn_domain=default_cdn,
                             path=base_path,
@@ -401,7 +410,7 @@ class VlessSubscriptionService:
                     )
                 if turboflare_cdn:
                     links.extend(
-                        WhiteInternetService.generate_vless_links(
+                        WhiteInternetService.generate_xhttp_links(
                             subscription,
                             cdn_domain=turboflare_cdn,
                             path=base_path,
@@ -418,7 +427,7 @@ class VlessSubscriptionService:
         links = []
         if default_cdn:
             links.extend(
-                WhiteInternetService.generate_vless_links(
+                WhiteInternetService.generate_xhttp_links(
                     subscription,
                     cdn_domain=default_cdn,
                     path=base_path,
@@ -429,7 +438,7 @@ class VlessSubscriptionService:
             )
         if turboflare_cdn:
             links.extend(
-                WhiteInternetService.generate_vless_links(
+                WhiteInternetService.generate_xhttp_links(
                     subscription,
                     cdn_domain=turboflare_cdn,
                     path=base_path,
@@ -1022,7 +1031,7 @@ class VlessSubscriptionService:
                     for u_id, d_uuid in dev_rows:
                         user_devices_map.setdefault(u_id, []).append(str(d_uuid))
 
-            exit_nodes = await cls.get_eligible_exit_nodes(session)
+                exit_nodes = await cls.get_eligible_exit_nodes(session)
             loc_codes: list[str] = []
             for ex in exit_nodes:
                 ex_extra = ex.extra_data if isinstance(ex.extra_data, dict) else {}

@@ -936,19 +936,10 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                 session,
                 user.id,
                 device_limit=payload.device_limit or 1,
+                duration_days=payload.days,
             )
             if not ok:
                 return web.json_response({"ok": False, "error": msg}, status=400)
-            if payload.days > 30 and created is not None:
-                ok_ext, msg_ext, created_ext = await WhiteInternetService.extend_subscription(
-                    session, user.id, payload.days - 30
-                )
-                if not ok_ext:
-                    return web.json_response({"ok": False, "error": msg_ext}, status=400)
-                created = created_ext
-            elif payload.days < 30 and created is not None:
-                created.expires_at = now_utc() + timedelta(days=payload.days)
-                await session.flush()
             await AuditService.log_action(
                 session,
                 admin_id=ctx.telegram_id,
@@ -1156,6 +1147,7 @@ async def api_admin_user_devices_reset_handler(request: web.Request) -> web.Resp
             return web.json_response({"ok": False, "error": "Пользователь не найден"}, status=404)
 
         vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+        wi_sub = await get_subscription_by_user_id(session, user.id)
         if vless_sub is not None:
             await vless_subscription_repo.reset_hwids(session, vless_sub.id)
 
@@ -1163,6 +1155,8 @@ async def api_admin_user_devices_reset_handler(request: web.Request) -> web.Resp
         dev_uuids = [d.device_uuid for d in existing_devs if getattr(d, "device_uuid", None)]
         if vless_sub is not None and dev_uuids:
             await vless_subscription_repo.add_pending_revocation_uuids(session, vless_sub.id, dev_uuids)
+        if wi_sub is not None and dev_uuids:
+            await white_internet_repo.add_pending_revocation_uuids(session, wi_sub.id, dev_uuids)
         sub_ver = getattr(vless_sub, "version", None) if vless_sub else None
         sub_id = vless_sub.id if vless_sub else None
 
@@ -1178,7 +1172,9 @@ async def api_admin_user_devices_reset_handler(request: web.Request) -> web.Resp
         )
 
     for u_uuid in dev_uuids:
-        VlessSubscriptionService.deprovision_background(u_uuid, version=sub_ver, sub_id=sub_id)
+        VlessSubscriptionService.deprovision_background(
+            u_uuid, version=sub_ver, sub_id=sub_id, services=("vless", "white_internet")
+        )
     if vless_sub is not None:
         VlessSubscriptionService.ensure_synced_background(user.id)
     return web.json_response({"ok": True, "message": "Привязки устройств сброшены"})
@@ -1215,6 +1211,16 @@ async def api_admin_user_token_rotate_handler(request: web.Request) -> web.Respo
         dev_uuids = [d.device_uuid for d in existing_devs if getattr(d, "device_uuid", None)]
         if vless_sub is not None and dev_uuids:
             await vless_subscription_repo.add_pending_revocation_uuids(session, vless_sub.id, dev_uuids)
+        if wi_sub is not None and dev_uuids:
+            await white_internet_repo.add_pending_revocation_uuids(session, wi_sub.id, dev_uuids)
+        for dev_uuid in dev_uuids:
+            VlessSubscriptionService.deprovision_background(
+                dev_uuid,
+                version=getattr(vless_sub, "version", None) if vless_sub else None,
+                sub_id=vless_sub.id if vless_sub else None,
+                session=session,
+                services=("vless", "white_internet"),
+            )
 
         await session.execute(
             delete(UserDevice).where(UserDevice.user_id == user.id)

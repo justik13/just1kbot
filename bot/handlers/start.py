@@ -22,6 +22,15 @@ from utils.telegram import EFFECT_LIKE, safe, safe_send_message
 router = Router()
 logger = logging.getLogger(__name__)
 _background_tasks: set[asyncio.Task] = set()
+
+
+async def cancel_start_background_tasks() -> None:
+    """Cancel and drain in-flight start onboarding tasks."""
+    tasks = list(_background_tasks)
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
 _LAST_START_MESSAGES: TTLCache[int, int] = TTLCache(maxsize=10000, ttl=172800)
 
 

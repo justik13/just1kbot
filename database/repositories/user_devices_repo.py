@@ -8,6 +8,7 @@ import time
 from typing import Any
 from uuid import uuid4
 
+from cachetools import TTLCache
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,7 +18,9 @@ from utils.datetime_helpers import now_utc
 logger = logging.getLogger(__name__)
 
 DEFAULT_HWID_TTL_HOURS = 48
-_DAILY_REGISTRATIONS_CACHE: dict[int, dict[str, float]] = {}
+_DAILY_REGISTRATIONS_CACHE: TTLCache[tuple[int, str], float] = TTLCache(
+    maxsize=10000, ttl=86400.0
+)
 _REGISTRATION_WINDOW_SECONDS = 86400.0  # 24 hours
 
 
@@ -36,21 +39,11 @@ def calculate_daily_churn_limit(effective_limit: int) -> int:
 
 
 def _record_device_registration(user_id: int, hwid: str) -> None:
-    now_mono = time.monotonic()
-    user_records = _DAILY_REGISTRATIONS_CACHE.setdefault(user_id, {})
-    user_records[hwid] = now_mono
-    _cleanup_user_registrations(user_id, now_mono)
+    _DAILY_REGISTRATIONS_CACHE[(user_id, hwid)] = time.monotonic()
 
 
 def _cleanup_user_registrations(user_id: int, now_mono: float) -> None:
-    user_records = _DAILY_REGISTRATIONS_CACHE.get(user_id)
-    if not user_records:
-        return
-    stale = [h for h, ts in user_records.items() if (now_mono - ts) > _REGISTRATION_WINDOW_SECONDS]
-    for h in stale:
-        del user_records[h]
-    if not user_records:
-        _DAILY_REGISTRATIONS_CACHE.pop(user_id, None)
+    pass
 
 
 def _extract_device_fields(device_info: dict | None) -> dict[str, str | None]:
@@ -237,7 +230,7 @@ async def register_user_device(
             for d in devices
             if d.created_at and (now - d.created_at).total_seconds() <= 86400
         }
-        cached_hwids = set(_DAILY_REGISTRATIONS_CACHE.get(user_id, {}).keys())
+        cached_hwids = {h for (u, h) in _DAILY_REGISTRATIONS_CACHE.keys() if u == user_id}
         all_24h_hwids = active_24h_hwids | cached_hwids
         if clean_hwid not in all_24h_hwids and len(all_24h_hwids) >= churn_limit:
             logger.warning(

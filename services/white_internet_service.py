@@ -177,6 +177,7 @@ class WhiteInternetService:
         session: AsyncSession,
         user_id: int,
         device_limit: int = 1,
+        duration_days: int = WHITE_INTERNET_BASE_DURATION_DAYS,
     ):
         user = await lock_checkout_user(session, user_id)
         if user is None:
@@ -221,7 +222,7 @@ class WhiteInternetService:
             user_id=user.id,
             token=secrets.token_hex(32),
             uuid=str(uuid.uuid4()),
-            duration_days=WHITE_INTERNET_BASE_DURATION_DAYS,
+            duration_days=duration_days,
             base_bytes=base_bytes,
             device_limit=clamped_devices,
         )
@@ -853,7 +854,7 @@ class WhiteInternetService:
         return quoted_tag
 
     @staticmethod
-    def generate_vless_links(
+    def generate_xhttp_links(
         subscription: WhiteInternetSubscription,
         cdn_domain: str,
         port: int = 443,
@@ -976,3 +977,6 @@ class WhiteInternetService:
                 links.append(link)
 
         return links
+
+    # Backward compatibility alias
+    generate_vless_links = generate_xhttp_links

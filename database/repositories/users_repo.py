@@ -39,23 +39,6 @@ async def get_user_by_telegram_id(
     return result.scalar_one_or_none()
 
 
-async def get_users_by_telegram_ids(
-    session: AsyncSession, telegram_ids: list[int]
-) -> dict[int, User]:
-    if not telegram_ids:
-        return {}
-    valid_ids = [tid for tid in telegram_ids if isinstance(tid, int) and 1 <= tid <= MAX_INT64]
-    if not valid_ids:
-        return {}
-    stmt = select(User).where(
-        User.telegram_id.in_(valid_ids),
-        User.is_deleted.is_(False),
-    )
-    result = await session.execute(stmt)
-    users = result.scalars().all()
-    return {u.telegram_id: u for u in users}
-
-
 async def get_user_by_telegram_id_any(
     session: AsyncSession, telegram_id: int
 ) -> User | None:
@@ -108,12 +91,6 @@ async def update_user(session: AsyncSession, user: User, **kwargs) -> User:
     await session.flush()
     await session.refresh(user)
     return user
-
-
-async def get_user_count(session: AsyncSession) -> int:
-    stmt = select(func.count(User.id)).where(User.is_deleted.is_(False))
-    result = await session.execute(stmt)
-    return result.scalar_one()
 
 
 async def get_active_subscriptions_count(session: AsyncSession) -> int:

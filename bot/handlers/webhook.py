@@ -303,12 +303,18 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
 _healthcheck_cache: tuple[float, int, str] | None = None
 _HEALTHCHECK_CACHE_TTL = 5.0  # seconds
 _healthcheck_lock: asyncio.Lock | None = None
+_healthcheck_lock_loop: asyncio.AbstractEventLoop | None = None
 
 
 def _get_healthcheck_lock() -> asyncio.Lock:
-    global _healthcheck_lock
-    if _healthcheck_lock is None:
+    global _healthcheck_lock, _healthcheck_lock_loop
+    try:
+        current_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        current_loop = None
+    if _healthcheck_lock is None or _healthcheck_lock_loop is not current_loop:
         _healthcheck_lock = asyncio.Lock()
+        _healthcheck_lock_loop = current_loop
     return _healthcheck_lock
 
 
