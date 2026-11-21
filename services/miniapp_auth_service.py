@@ -15,6 +15,7 @@ import time
 from typing import Any
 from urllib.parse import parse_qsl, quote
 
+from cachetools import TTLCache
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.settings import get_settings
@@ -32,7 +33,9 @@ ATTEMPT_WINDOW_SECONDS = 300
 LOCKOUT_SECONDS = 300
 
 # In-memory per-admin TOTP brute-force tracker: admin_id -> (fail_count, window_start, locked_until)
-_2fa_failures: dict[int, tuple[int, float, float]] = {}
+_2fa_failures: TTLCache[int, tuple[int, float, float]] = TTLCache(
+    maxsize=2000, ttl=max(ATTEMPT_WINDOW_SECONDS, LOCKOUT_SECONDS) * 2
+)
 
 
 @dataclass(frozen=True)

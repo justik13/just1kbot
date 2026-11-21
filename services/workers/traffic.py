@@ -3,7 +3,7 @@ import logging
 from typing import Any
 
 from aiogram import Bot
-from aiogram.exceptions import TelegramForbiddenError
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from bot import texts
 from bot.keyboards.notifications import (
     get_traffic_alert_keyboard,
@@ -187,6 +187,25 @@ async def _send_quota_alert(
             _quota_alerted.pop(cache_key, None)
 
 
+def _is_terminal_telegram_error(exc: Exception) -> bool:
+    """Return True if exception indicates the recipient chat or account no longer exists or blocked the bot."""
+    if isinstance(exc, TelegramForbiddenError):
+        return True
+    if isinstance(exc, TelegramBadRequest):
+        err = str(exc).lower()
+        return any(
+            phrase in err
+            for phrase in (
+                "chat not found",
+                "user not found",
+                "bot was blocked",
+                "deactivated",
+                "user is deactivated",
+            )
+        )
+    return False
+
+
 async def _send_wi_exhausted_alerts(bot: Bot | None, exhausted_users: list[int]):
     if not bot or not exhausted_users:
         return
@@ -211,14 +230,14 @@ async def _send_wi_exhausted_alerts(bot: Bot | None, exhausted_users: list[int])
                     raise_forbidden=True,
                 )
                 break
-            except TelegramForbiddenError:
-                logger.info("User %d blocked bot; marking blocked in database", uid)
-                async with session_scope() as session:
-                    await session.execute(
-                        update(User).where(User.id == uid).values(is_bot_blocked=True)
-                    )
-                break
             except Exception as exc:
+                if _is_terminal_telegram_error(exc):
+                    logger.info("User %d blocked bot or terminal error (%s); marking blocked in database", uid, exc)
+                    async with session_scope() as session:
+                        await session.execute(
+                            update(User).where(User.id == uid).values(is_bot_blocked=True)
+                        )
+                    break
                 if attempt == 2:
                     logger.warning("Failed to send quota exhaustion alert to user %d: %s", uid, exc)
                 else:
@@ -265,22 +284,23 @@ async def _send_wi_90p_alerts(bot: Bot | None, warn_users: list[tuple[int, int, 
                     )
                     .values(notified_90p=True)
                 )
-        except TelegramForbiddenError:
-            logger.info("User %d blocked bot; marking blocked in database", uid)
-            async with session_scope() as session:
-                await session.execute(
-                    update(User).where(User.id == uid).values(is_bot_blocked=True)
-                )
-                await session.execute(
-                    update(WhiteInternetSubscription)
-                    .where(
-                        WhiteInternetSubscription.id == sub_id,
-                        WhiteInternetSubscription.desired_version == expected_version,
-                    )
-                    .values(notified_90p=True)
-                )
         except Exception as exc:
-            logger.warning("Failed to send 90%% traffic warning alert to user %d: %s", uid, exc)
+            if _is_terminal_telegram_error(exc):
+                logger.info("User %d blocked bot or terminal error (%s); marking blocked in database", uid, exc)
+                async with session_scope() as session:
+                    await session.execute(
+                        update(User).where(User.id == uid).values(is_bot_blocked=True)
+                    )
+                    await session.execute(
+                        update(WhiteInternetSubscription)
+                        .where(
+                            WhiteInternetSubscription.id == sub_id,
+                            WhiteInternetSubscription.desired_version == expected_version,
+                        )
+                        .values(notified_90p=True)
+                    )
+            else:
+                logger.warning("Failed to send 90%% traffic warning alert to user %d: %s", uid, exc)
 
 
 async def _traffic_sync_once(bot: Bot | None = None):
