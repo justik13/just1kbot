@@ -725,6 +725,27 @@ class UserDevice(Base):
     user = relationship("User", foreign_keys=[user_id])
 
 
+class DeviceRegistrationEvent(Base):
+    """Rolling 24-hour HWID registration history for daily churn-limit enforcement."""
+
+    __tablename__ = "device_registration_events"
+
+    __table_args__ = (
+        Index("ix_device_reg_events_user_created", "user_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    hwid: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()")
+    )
+
+
 class BroadcastProgress(Base):
     __tablename__ = "broadcast_progress"
 
