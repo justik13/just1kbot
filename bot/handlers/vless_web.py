@@ -593,6 +593,8 @@ async def serve_unified_subscription_feed(
     if raw_hwid and not HWID_PATTERN.match(raw_hwid):
         headers = dict(common_headers)
         headers["x-hwid-required"] = "true"
+        headers["x-hwid-not-supported"] = "true"
+        headers["x-hwid-active"] = "true"
         return web.Response(status=400, text="Invalid HWID format", headers=headers)
 
     now = now_utc()
@@ -825,6 +827,8 @@ async def serve_unified_subscription_feed(
 
             headers = dict(common_headers)
             headers["x-hwid-required"] = "true"
+            headers["x-hwid-not-supported"] = "true"
+            headers["x-hwid-active"] = "true"
             return web.Response(status=403, text="HWID required", headers=headers)
 
         # 3. Unified HWID registration + priority-based BI slot assignment
