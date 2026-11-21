@@ -111,13 +111,7 @@ async def miniapp_asset_handler(request: web.Request) -> web.Response:
     if not content_type:
         return web.Response(status=404, text="Not Found")
 
-    text = target.read_text(encoding="utf-8")
-    return web.Response(
-        text=text,
-        content_type=content_type,
-        charset="utf-8",
-        headers=_ASSET_CACHE_HEADERS,
-    )
+    return web.FileResponse(target, headers=_ASSET_CACHE_HEADERS)
 
 
 def setup_miniapp_routes(app: web.Application) -> None:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import functools
 import html
@@ -980,7 +979,6 @@ async def serve_unified_subscription_feed(
                         wi_sub.desired_version = (getattr(wi_sub, "desired_version", 1) or 1) + 1
                         wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
                         from services.xray_node_client import XrayNodeClient
-                        from services.vless_subscription_service import _BACKGROUND_TASKS
 
                         targets_snapshot = [
                             (h.api_url, h.api_key, h.xray_instance_epoch)
@@ -1009,12 +1007,13 @@ async def serve_unified_subscription_feed(
                                     except Exception as exc:
                                         logger.warning("Background WI device provision failed for %s: %s", dev_uuid, exc)
 
-                        if targets_snapshot:
-                            _t = asyncio.create_task(
-                                _provision_new_wi_device(targets_snapshot, device_client_uuid, ver_snap)
+                        if targets_snapshot and device_client_uuid:
+                            from database.connection import queue_post_commit_task
+
+                            queue_post_commit_task(
+                                session,
+                                lambda: _provision_new_wi_device(targets_snapshot, device_client_uuid, ver_snap),
                             )
-                            _BACKGROUND_TASKS.add(_t)
-                            _t.add_done_callback(_BACKGROUND_TASKS.discard)
                 else:
                     all_links.append(_make_inline_stub(texts.FEED_STUB_WI_PENDING, "Нажмите ⟳ через 1 минуту"))
             else:

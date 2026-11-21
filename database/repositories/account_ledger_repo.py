@@ -7,6 +7,7 @@ from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import AccountLedgerEntry, User
@@ -172,12 +173,18 @@ async def _insert_or_get_entry(
     values: dict,
     economic_lookup=None,
 ) -> tuple[AccountLedgerEntry, bool]:
-    entry_id = await session.scalar(
-        insert(AccountLedgerEntry)
-        .values(**values)
-        .on_conflict_do_nothing()
-        .returning(AccountLedgerEntry.id)
-    )
+    entry_id = None
+    try:
+        async with session.begin_nested():
+            entry_id = await session.scalar(
+                insert(AccountLedgerEntry)
+                .values(**values)
+                .on_conflict_do_nothing()
+                .returning(AccountLedgerEntry.id)
+            )
+    except IntegrityError:
+        entry_id = None
+
     if entry_id is not None:
         return await session.get(AccountLedgerEntry, entry_id), True
     lookup_cond = AccountLedgerEntry.idempotency_key == values["idempotency_key"]

@@ -18,9 +18,6 @@ from config.constants import (
 )
 from config.enums import AdminAuditAction
 from database.models import AccountLedgerEntry, User
-from database.repositories.account_ledger_repo import (
-    get_account_balance,
-)
 
 _logger = logging.getLogger(__name__)
 
@@ -523,24 +520,3 @@ async def reverse_referral_bonus_for_topup(
     await session.flush()
     return total_reversed
 
-
-async def get_referral_bonus_balance(
-    session: AsyncSession,
-    *,
-    user_id: int,
-) -> Decimal:
-    """Return available referral bonus balance capped by user's available bonus funds."""
-    from sqlalchemy import func
-
-    balance = await get_account_balance(session, user_id=user_id)
-    if balance.debt > 0 or balance.bonus_available <= 0:
-        return Decimal(0)
-    net_referral = await session.scalar(
-        select(func.coalesce(func.sum(AccountLedgerEntry.amount), 0)).where(
-            AccountLedgerEntry.user_id == user_id,
-            AccountLedgerEntry.entry_type == "admin_adjustment",
-            AccountLedgerEntry.metadata_["source_type"].astext == REFERRAL_BONUS_SOURCE,
-        )
-    )
-    remaining = max(Decimal(0), Decimal(str(net_referral or 0)))
-    return min(remaining, balance.bonus_available)

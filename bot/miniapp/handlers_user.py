@@ -41,7 +41,11 @@ from config.enums import WhiteInternetStatus
 from config.settings import get_settings
 from database.connection import session_scope
 from database.models import Order, User
-from database.repositories import user_devices_repo, vless_subscription_repo
+from database.repositories import (
+    user_devices_repo,
+    vless_subscription_repo,
+    white_internet_repo,
+)
 from database.repositories.account_ledger_repo import (
     get_account_balance,
     get_account_history,
@@ -55,9 +59,7 @@ from database.repositories.users_repo import (
     is_eligible_for_referral_first_discount,
 )
 from database.repositories.vless_subscription_repo import get_or_create_subscription
-from database.repositories.white_internet_repo import (
-    get_subscription_by_user_id,
-)
+from database.repositories.white_internet_repo import get_subscription_by_user_id
 from integrations.payment_gateways.factory import get_payment_gateway
 from services import order_service
 from services.order_service import OrderService
@@ -759,6 +761,10 @@ async def api_user_device_delete_handler(request: web.Request) -> web.Response:
                 await vless_subscription_repo.add_pending_revocation_uuids(session, vless_sub.id, [deleted_uuid])
             sub_ver = getattr(vless_sub, "version", None) if vless_sub else None
 
+            wi_sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
+            if wi_sub is not None:
+                await white_internet_repo.add_pending_revocation_uuids(session, wi_sub.id, [deleted_uuid])
+
             VlessSubscriptionService.deprovision_background(
                 deleted_uuid,
                 version=sub_ver,
@@ -808,6 +814,12 @@ async def api_user_devices_reset_handler(request: web.Request) -> web.Response:
                     session, vless_sub.id, deleted_uuids
                 )
             sub_ver = getattr(vless_sub, "version", None) if vless_sub else None
+
+            wi_sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
+            if wi_sub is not None:
+                await white_internet_repo.add_pending_revocation_uuids(
+                    session, wi_sub.id, deleted_uuids
+                )
 
             for u in deleted_uuids:
                 VlessSubscriptionService.deprovision_background(

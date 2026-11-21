@@ -1,5 +1,4 @@
-import time
-
+from cachetools import TTLCache
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,8 +7,8 @@ from database.connection import queue_post_commit_task
 from database.models import SystemSetting
 from utils.datetime_helpers import now_utc
 
-_SETTINGS_CACHE: dict[str, tuple[str | None, float]] = {}
 CACHE_TTL_SECONDS = 60.0
+_SETTINGS_CACHE: TTLCache[str, str | None] = TTLCache(maxsize=1000, ttl=CACHE_TTL_SECONDS)
 
 
 async def get_system_setting(
@@ -17,11 +16,9 @@ async def get_system_setting(
     key: str,
     default: str | None = None,
 ) -> str | None:
-    now = time.monotonic()
     if key in _SETTINGS_CACHE:
-        val, cached_at = _SETTINGS_CACHE[key]
-        if now - cached_at < CACHE_TTL_SECONDS:
-            return val if val is not None else default
+        val = _SETTINGS_CACHE[key]
+        return val if val is not None else default
 
     stmt = select(SystemSetting.value).where(SystemSetting.key == key)
     res = await session.execute(stmt)
@@ -30,7 +27,7 @@ async def get_system_setting(
     if val is not None and not isinstance(val, str):
         val = None
 
-    _SETTINGS_CACHE[key] = (val, now)
+    _SETTINGS_CACHE[key] = val
     return val if val is not None else default
 
 

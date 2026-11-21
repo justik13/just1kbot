@@ -362,6 +362,11 @@ async def stop_background_workers(*, alert_grace_timeout: float | None = None) -
     except Exception:
         pass
     try:
+        from services.workers.traffic import _background_tasks as traffic_bg
+        extra_tasks.extend(list(traffic_bg))
+    except Exception:
+        pass
+    try:
         from database.connection import _post_commit_background_tasks as pc_bg
         extra_tasks.extend(list(pc_bg))
     except Exception:

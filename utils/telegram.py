@@ -9,6 +9,7 @@ from aiogram.exceptions import (
     TelegramForbiddenError,
     TelegramNetworkError,
     TelegramRetryAfter,
+    TelegramServerError,
 )
 from aiogram.types import (
     CallbackQuery,
@@ -51,7 +52,8 @@ async def _send_with_resilience(op, *, chat_id: int, context: str = "send"):
     try:
         return await op()
     except TelegramRetryAfter as e:
-        await asyncio.sleep(float(e.retry_after) + 0.5)
+        wait_seconds = min(float(e.retry_after), 30.0)
+        await asyncio.sleep(wait_seconds + 0.5)
         return await op()
     except TelegramNetworkError as exc:
         logger.warning(
@@ -339,6 +341,9 @@ async def safe_send_message(
         logger.info("Cannot send message: bot was blocked by chat %s", chat_id)
         if raise_forbidden:
             raise
+        return None
+    except (TelegramNetworkError, TelegramServerError, asyncio.TimeoutError) as net_err:
+        logger.warning("Network or server flap sending message to chat %s: %s", chat_id, net_err)
         return None
 
     return sent_id

@@ -9,6 +9,7 @@ import math
 import uuid
 
 from sqlalchemy import func, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
@@ -654,10 +655,12 @@ class OrderService:
         if clean_idem_key:
             existing_order = (
                 await session.execute(
-                    select(Order).where(
+                    select(Order)
+                    .where(
                         Order.user_id == user_id,
                         Order.idempotency_key == clean_idem_key,
                     )
+                    .with_for_update()
                 )
             ).scalar_one_or_none()
             if existing_order is not None:
@@ -703,7 +706,6 @@ class OrderService:
         final_duration = 0
         final_devices = device_limit
         description = texts.CHECKOUT_DESCRIPTION_DEFAULT
-        checked_hub_id: int | None = None
 
         if service_type == "topup":
             if getattr(user, "topup_blocked", False):
@@ -737,7 +739,6 @@ class OrderService:
         elif service_type == "white_internet":
             now = now_utc()
             wi_sub = await get_wi_sub_by_user_id(session, user_id)
-            checked_hub_id = getattr(wi_sub, "hub_server_id", None) if wi_sub else None
             op = operation or ("renew" if wi_sub else "purchase")
             if wi_sub is not None:
                 if wi_sub.status == WhiteInternetStatus.DISABLED:
@@ -863,7 +864,6 @@ class OrderService:
             has_capacity = await has_available_service_capacity(
                 session,
                 service_type,
-                hub_server_id=checked_hub_id,
             )
             if not has_capacity:
                 raise ServiceUnavailableError(
@@ -876,6 +876,44 @@ class OrderService:
             raise AccountDebtBlockedError("Имеется задолженность на балансе. Покупки заблокированы до погашения.")
 
         if use_balance and bal.available >= total_cost:
+            if clean_idem_key is None:
+                recent_candidates = (
+                    await session.execute(
+                        select(Order).where(
+                            Order.user_id == user_id,
+                            Order.service_type == service_type,
+                            Order.amount_rub == total_cost,
+                            Order.duration_days == final_duration,
+                            Order.traffic_bytes == traffic_bytes,
+                            Order.device_limit == final_devices,
+                            Order.payment_method == "wallet",
+                            Order.status == "paid",
+                            Order.paid_at >= now_utc() - timedelta(seconds=15),
+                        ).order_by(Order.paid_at.desc())
+                    )
+                ).scalars().all()
+                target_op = order_meta.get("operation")
+                recent_paid_order = next(
+                    (
+                        o
+                        for o in recent_candidates
+                        if (o.metadata_ or {}).get("operation") == target_op
+                    ),
+                    None,
+                )
+                if recent_paid_order is not None:
+                    meta = recent_paid_order.metadata_ or {}
+                    return {
+                        "order_id": str(recent_paid_order.id),
+                        "status": recent_paid_order.status,
+                        "confirmation_url": None,
+                        "charged_balance": int(recent_paid_order.amount_rub),
+                        "charged_bonus": int(meta.get("charged_bonus", 0)),
+                        "to_pay_rub": 0,
+                        "total_cost_rub": int(recent_paid_order.amount_rub),
+                        "idempotent": True,
+                    }
+
             charged_bonus = min(bal.bonus_available, total_cost)
             order_meta["charged_bonus"] = int(charged_bonus)
             order = Order(
@@ -893,8 +931,33 @@ class OrderService:
                 paid_at=now_utc(),
                 metadata_=order_meta,
             )
-            session.add(order)
-            await session.flush()
+            try:
+                async with session.begin_nested():
+                    session.add(order)
+                    await session.flush()
+            except IntegrityError:
+                if clean_idem_key:
+                    existing = (
+                        await session.execute(
+                            select(Order).where(
+                                Order.user_id == user_id,
+                                Order.idempotency_key == clean_idem_key,
+                            )
+                        )
+                    ).scalar_one_or_none()
+                    if existing is not None:
+                        meta = existing.metadata_ or {}
+                        return {
+                            "order_id": str(existing.id),
+                            "status": existing.status,
+                            "confirmation_url": None,
+                            "charged_balance": int(existing.amount_rub),
+                            "charged_bonus": int(meta.get("charged_bonus", 0)),
+                            "to_pay_rub": 0,
+                            "total_cost_rub": int(existing.amount_rub),
+                            "idempotent": True,
+                        }
+                raise
             if total_cost > 0:
                 await create_order_debit(
                     session,

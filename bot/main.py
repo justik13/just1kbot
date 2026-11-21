@@ -467,6 +467,17 @@ async def main():
         except Exception as e:
             logger.error("Error stopping workers: %s", e)
 
+        try:
+            from bot.handlers.start import cancel_start_background_tasks
+            from services.vless_subscription_service import cancel_vless_background_tasks
+            from services.workers.traffic import cancel_traffic_background_tasks
+
+            await cancel_vless_background_tasks()
+            await cancel_traffic_background_tasks()
+            await cancel_start_background_tasks()
+        except Exception as e:
+            logger.error("Error cancelling in-flight background tasks: %s", e)
+
         logger.info("Cleaning up resources...")
 
         if webhook_runner is not None:

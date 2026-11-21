@@ -57,6 +57,15 @@ def _start_background_task(coro) -> asyncio.Task:
     return task
 
 
+async def cancel_traffic_background_tasks() -> None:
+    """Cancel and drain in-flight traffic background alert tasks."""
+    tasks = list(_background_tasks)
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
 async def traffic_sync_loop(
     bot_or_shutdown: Bot | asyncio.Event | None = None,
     shutdown_event: asyncio.Event | None = None,

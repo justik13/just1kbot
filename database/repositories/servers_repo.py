@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import TypedDict
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -263,26 +263,6 @@ async def get_active_servers(session: AsyncSession) -> list[Server]:
     return result.scalars().all()
 
 
-def capacity_consuming_wl_condition():
-    """A White Internet subscription consumes server capacity if it is active,
-    exhausted, pending, or in a transitional provisioning lifecycle state."""
-    from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
-    from database.models import WhiteInternetSubscription
-
-    return or_(
-        WhiteInternetSubscription.status.in_([
-            WhiteInternetStatus.PENDING,
-            WhiteInternetStatus.ACTIVE,
-            WhiteInternetStatus.EXHAUSTED,
-        ]),
-        WhiteInternetSubscription.provisioning_status.in_([
-            WhiteInternetProvisioningStatus.PENDING_CREATE,
-            WhiteInternetProvisioningStatus.PENDING_UPDATE,
-            WhiteInternetProvisioningStatus.PENDING_DELETE,
-        ]),
-    )
-
-
 def get_server_load_score(server: Server) -> float:
     """Return real-time hardware load percentage (0.0..100.0) based on CPU and RAM telemetry.
 
@@ -335,9 +315,6 @@ async def get_wi_capable_ru_hubs(session: AsyncSession) -> list[Server]:
 async def has_available_service_capacity(
     session: AsyncSession,
     service_type: str,
-    *,
-    hub_server_id: int | None = None,
-    origin_node_id: int | None = None,
 ) -> bool:
     """Fast read-only check before order creation that at least one usable node exists."""
     if service_type == "standard":
@@ -490,23 +467,6 @@ async def update_server_health_snapshot(
 async def delete_server(session: AsyncSession, server: Server) -> None:
     await session.delete(server)
     await session.flush()
-
-
-async def get_server_count(session: AsyncSession) -> int:
-    result = await session.execute(select(func.count(Server.id)))
-    return result.scalar_one()
-
-
-async def get_servers_paginated(
-    session: AsyncSession,
-    page: int = 1,
-    per_page: int = 10,
-) -> list[Server]:
-    offset = (page - 1) * per_page
-    result = await session.execute(
-        select(Server).order_by(Server.name).offset(offset).limit(per_page)
-    )
-    return result.scalars().all()
 
 
 async def get_server_by_api_url(session: AsyncSession, api_url: str) -> Server | None:

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import secrets
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -621,24 +621,6 @@ async def record_wi_traffic_atomic(
     return total_delta, newly_exhausted
 
 
-async def get_white_internet_dashboard_stats(session: AsyncSession) -> dict:
-    """Return dashboard metrics for White Internet (active subscriptions, total traffic)."""
-    now = now_utc()
-    stmt = select(
-        func.count(WhiteInternetSubscription.id).filter(
-            WhiteInternetSubscription.status == WhiteInternetStatus.ACTIVE,
-            WhiteInternetSubscription.expires_at > now,
-        ).label("active_count"),
-        func.coalesce(func.sum(WhiteInternetSubscription.traffic_used_bytes), 0).label("total_traffic_bytes"),
-    )
-    result = await session.execute(stmt)
-    row = result.one()
-    return {
-        "active_count": row.active_count or 0,
-        "total_traffic_bytes": int(row.total_traffic_bytes or 0),
-    }
-
-
 async def reset_subscription_token_atomic(
     session: AsyncSession,
     subscription_id: int,
@@ -785,32 +767,6 @@ async def set_base_traffic_quota_atomic(
     if total_quota > 0 and used < 0.90 * total_quota:
         sub.notified_90p = False
 
-    await session.flush()
-    return sub
-
-
-async def set_device_limit_atomic(
-    session: AsyncSession,
-    subscription_id: int,
-    limit: int,
-) -> WhiteInternetSubscription:
-    """Updates device limit and applies LRU truncation to active_hwids under row lock."""
-    if limit < 1 or limit > WHITE_INTERNET_MAX_DEVICE_LIMIT:
-        raise WhiteInternetDeviceLimitExceededError(
-            f"Device limit must be between 1 and {WHITE_INTERNET_MAX_DEVICE_LIMIT}"
-        )
-    sub = await session.get(
-        WhiteInternetSubscription,
-        subscription_id,
-        with_for_update=True,
-    )
-    if sub is None:
-        raise WhiteInternetSubscriptionNotFoundError(f"Subscription {subscription_id} not found")
-
-    sub.device_limit = limit
-    max_extra_allowed = limit * WHITE_INTERNET_MAX_QUOTA_BYTES
-    if (sub.extra_traffic_bytes or 0) > max_extra_allowed:
-        sub.extra_traffic_bytes = max_extra_allowed
     await session.flush()
     return sub
 
