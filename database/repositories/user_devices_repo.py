@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta, timezone
 import logging
 from typing import Any
 from uuid import uuid4
@@ -14,8 +14,6 @@ from database.models import DeviceRegistrationEvent, User, UserDevice
 from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_HWID_TTL_HOURS = 48
 
 
 def calculate_daily_churn_limit(effective_limit: int) -> int:
@@ -57,11 +55,8 @@ async def list_user_devices(
     user_id: int,
     *,
     wi_device_limit: int = 0,
-    ttl_hours: int = DEFAULT_HWID_TTL_HOURS,
-    now: datetime | None = None,
 ) -> list[dict[str, Any]]:
     """Return bound devices ordered by BI priority (manual desc, then FIFO first_seen_at asc)."""
-    _ = ttl_hours, now
     stmt = (
         select(UserDevice)
         .where(UserDevice.user_id == user_id)
@@ -101,12 +96,8 @@ async def list_user_devices(
 async def count_active_user_devices(
     session: AsyncSession,
     user_id: int,
-    *,
-    ttl_hours: int = DEFAULT_HWID_TTL_HOURS,
-    now: datetime | None = None,
 ) -> int:
     """Count bound devices for user."""
-    _ = ttl_hours, now
     stmt = select(func.count(UserDevice.id)).where(UserDevice.user_id == user_id)
     return int(await session.scalar(stmt) or 0)
 
@@ -117,7 +108,6 @@ async def register_user_device(
     hwid: str,
     max_devices: int,
     *,
-    ttl_hours: int = DEFAULT_HWID_TTL_HOURS,
     device_info: dict | None = None,
 ) -> tuple[bool, bool, int, int, str | None]:
     """Atomically register or refresh a unified HWID device under user row lock.
@@ -126,7 +116,6 @@ async def register_user_device(
         tuple[allowed_hwid, is_new_device, active_count, effective_limit, block_reason]
         where block_reason is None, 'empty_hwid', 'user_not_found', 'slot_limit', or 'churn_limit'.
     """
-    _ = ttl_hours
     clean_hwid = str(hwid or "").strip()[:128]
     effective_limit = max(1, int(max_devices or 1))
     if not clean_hwid:
@@ -215,13 +204,14 @@ async def register_user_device(
         last_seen_at=now,
     )
     session.add(dev)
-    session.add(
-        DeviceRegistrationEvent(
-            user_id=user_id,
-            hwid=clean_hwid,
-            created_at=now,
+    if clean_hwid not in recent_event_hwids:
+        session.add(
+            DeviceRegistrationEvent(
+                user_id=user_id,
+                hwid=clean_hwid,
+                created_at=now,
+            )
         )
-    )
     await session.flush()
     return True, True, len(devices) + 1, effective_limit, None
 
@@ -292,12 +282,8 @@ async def get_user_device_by_hwid(
 async def get_active_device_uuids(
     session: AsyncSession,
     user_id: int,
-    *,
-    ttl_hours: int = DEFAULT_HWID_TTL_HOURS,
-    now: datetime | None = None,
 ) -> list[str]:
     """Return all bound device UUIDs for user."""
-    _ = ttl_hours, now
     stmt = select(UserDevice.device_uuid).where(UserDevice.user_id == user_id)
     rows = (await session.scalars(stmt)).all()
     return [u for u in rows if isinstance(u, str) and u.strip()]
