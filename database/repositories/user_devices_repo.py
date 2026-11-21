@@ -57,8 +57,6 @@ def _cleanup_user_registrations(user_id: int, now_mono: float) -> None:
         del user_records[h]
     if not user_records:
         _DAILY_REGISTRATIONS_CACHE.pop(user_id, None)
-    else:
-        _DAILY_REGISTRATIONS_CACHE[user_id] = user_records
 
 
 def _extract_device_fields(device_info: dict | None) -> dict[str, str | None]:
@@ -245,6 +243,7 @@ async def register_user_device(
             for d in devices
             if d.created_at and (now - d.created_at).total_seconds() <= 86400
         }
+        _cleanup_user_registrations(user_id, time.monotonic())
         cached_hwids = set(_DAILY_REGISTRATIONS_CACHE.get(user_id, {}).keys())
         all_24h_hwids = active_24h_hwids | cached_hwids
         if clean_hwid not in all_24h_hwids and len(all_24h_hwids) >= churn_limit:

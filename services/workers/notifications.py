@@ -3,7 +3,6 @@ import logging
 from datetime import datetime, timedelta
 
 from aiogram import Bot
-from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import InlineKeyboardMarkup
 from cachetools import TTLCache
 from sqlalchemy import or_, select, update
@@ -37,7 +36,7 @@ from database.models import User, VlessSubscription
 from utils.datetime_helpers import is_permanent_subscription, now_utc
 from utils.formatters import format_tg_time
 from utils.rate_limiter import global_send_limiter
-from utils.telegram import safe_send_message
+from utils.telegram import is_terminal_telegram_error, safe_send_message
 
 logger = logging.getLogger(__name__)
 
@@ -185,25 +184,6 @@ async def subscription_notifications_loop(
     logger.info("Notifications worker stopped gracefully")
 
 
-def _is_terminal_telegram_error(exc: Exception) -> bool:
-    """Return True if exception indicates the recipient chat or account no longer exists or blocked the bot."""
-    if isinstance(exc, TelegramForbiddenError):
-        return True
-    if isinstance(exc, TelegramBadRequest):
-        err = str(exc).lower()
-        return any(
-            phrase in err
-            for phrase in (
-                "chat not found",
-                "user not found",
-                "bot was blocked",
-                "deactivated",
-                "user is deactivated",
-            )
-        )
-    return False
-
-
 async def _send_autorenew_notice(
     bot: Bot,
     telegram_id: int,
@@ -221,7 +201,7 @@ async def _send_autorenew_notice(
             raise_forbidden=True,
         )
     except Exception as exc:
-        if _is_terminal_telegram_error(exc):
+        if is_terminal_telegram_error(exc):
             async with session_scope() as session:
                 u = await session.scalar(select(User).where(User.telegram_id == telegram_id))
                 if u:
@@ -563,7 +543,7 @@ async def _send_pre_expiry_notifications(
                         vless_sub.notified_3d = True
 
                 except Exception as e:
-                    if _is_terminal_telegram_error(e):
+                    if is_terminal_telegram_error(e):
                         logger.info("Marking user %s as blocked (terminal telegram error: %s)", user.telegram_id, e)
                         user.is_bot_blocked = True
                         await session.flush()
@@ -677,7 +657,7 @@ async def _send_post_expiry_notifications(
                     await session.flush()
 
                 except Exception as e:
-                    if _is_terminal_telegram_error(e):
+                    if is_terminal_telegram_error(e):
                         logger.info("Marking user %s as blocked (terminal telegram error: %s)", user.telegram_id, e)
                         user.is_bot_blocked = True
                         await session.flush()
@@ -876,7 +856,7 @@ async def _send_white_internet_notifications(
                         sub.notified_3d = True
                     await session.flush()
                 except Exception as e:
-                    if _is_terminal_telegram_error(e):
+                    if is_terminal_telegram_error(e):
                         logger.info("Marking user %s as blocked (terminal telegram error: %s)", user.telegram_id, e)
                         user.is_bot_blocked = True
                         await session.flush()
