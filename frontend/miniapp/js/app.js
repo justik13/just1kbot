@@ -1,12 +1,12 @@
-import { api } from "./api.js?v=2.7.2";
-import { escapeHtml, showToast } from "./ui.js?v=2.7.2";
-import { renderSecurity2FA } from "./views/security_2fa.js?v=2.7.2";
-import { renderNodesView, renderSubscriptionSettingsView } from "./views/nodes.js?v=2.7.2";
-import { renderNodeDetailView } from "./views/node_detail.js?v=2.7.2";
-import { renderAdminUsersView } from "./views/admin_users.js?v=2.7.2";
-import { clearBroadcastPollTimer, renderAdminBroadcastsView } from "./views/admin_broadcasts.js?v=2.7.2";
-import { renderAdminFinancesView } from "./views/admin_finances.js?v=2.7.2";
-import { loadAndRenderUserCabinet } from "./views/user_cabinet.js?v=2.7.2";
+import { api } from "./api.js?v=2.7.3";
+import { escapeHtml, showToast } from "./ui.js?v=2.7.3";
+import { renderSecurity2FA } from "./views/security_2fa.js?v=2.7.3";
+import { renderNodesView, renderSubscriptionSettingsView } from "./views/nodes.js?v=2.7.3";
+import { renderNodeDetailView } from "./views/node_detail.js?v=2.7.3";
+import { renderAdminUsersView } from "./views/admin_users.js?v=2.7.3";
+import { clearBroadcastPollTimer, renderAdminBroadcastsView } from "./views/admin_broadcasts.js?v=2.7.3";
+import { renderAdminFinancesView } from "./views/admin_finances.js?v=2.7.3";
+import { loadAndRenderUserCabinet } from "./views/user_cabinet.js?v=2.7.3";
 
 const appState = {
     user: null,
