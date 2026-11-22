@@ -14,6 +14,7 @@ const _state = {
     tab: null,
     platform: _detectPlatform(),
     data: null,
+    avatarFailed: false,
 };
 
 const _ICONS = {
@@ -984,10 +985,22 @@ function _getProfileMeta(d) {
 }
 
 function _renderAvatarInner(meta) {
-    if (meta.photoUrl) {
-        return `<img class="avatar-img" src="${escapeHtml(meta.photoUrl)}" data-fallback="${escapeHtml(meta.initial)}" alt="${escapeHtml(meta.initial)}" onerror="this.replaceWith(document.createTextNode(this.dataset.fallback || 'J'))">`;
+    const fallback = `<span>${escapeHtml(meta.initial)}</span>`;
+    if (meta.photoUrl && !_state.avatarFailed) {
+        return `${fallback}<img class="avatar-img" src="${escapeHtml(meta.photoUrl)}" alt="">`;
     }
-    return escapeHtml(meta.initial);
+    return fallback;
+}
+
+function _bindAvatarImg(container, key) {
+    const img = container && container.querySelector("img.avatar-img");
+    if (!img) return;
+    img.addEventListener("load", () => img.classList.add("is-loaded"));
+    img.addEventListener("error", () => {
+        _state.avatarFailed = true;
+        img.remove();
+        if (container.dataset) container.dataset.renderedKey = key;
+    });
 }
 
 function _syncTopbarProfile(d, root) {
@@ -998,7 +1011,12 @@ function _syncTopbarProfile(d, root) {
 
     const bal = d.balance || { total: 0 };
     const meta = _getProfileMeta(d);
-    if (avatarEl) avatarEl.innerHTML = _renderAvatarInner(meta);
+    const avatarKey = meta.photoUrl && !_state.avatarFailed ? meta.photoUrl : meta.initial;
+    if (avatarEl && avatarEl.dataset.renderedKey !== avatarKey) {
+        avatarEl.dataset.renderedKey = avatarKey;
+        avatarEl.innerHTML = _renderAvatarInner(meta);
+        _bindAvatarImg(avatarEl, meta.initial);
+    }
     if (balEl) balEl.textContent = `${bal.total ?? 0} ₽`;
     pill.classList.toggle("active", _state.tab === "profile");
 
@@ -1075,10 +1093,10 @@ function _buildGuideHtml(subUrl, backupSubUrl, isActive) {
     const clients = _CLIENT_LINKS[_state.platform] || _CLIENT_LINKS.ios;
 
     return `
-        <details class="guide-details" id="connectGuide">
+        <details class="guide-details guide-details-prominent" id="connectGuide">
             <summary class="guide-summary">
-                <span>${isActive ? "Как подключить на этом устройстве" : "Установить приложение заранее"}</span>
-                <span class="muted" style="font-size:11px;">${platformLabels[_state.platform] || "iOS"} ▾</span>
+                <span>Как подключить</span>
+                <span class="chip" style="padding:2px 8px;">${platformLabels[_state.platform] || "iOS"} ▾</span>
             </summary>
             <div class="guide-body">
                 <div class="filter-pills">
@@ -1315,16 +1333,17 @@ function _renderConnectTab(body, d, reload, root) {
                 ` : ""}
             </div>
 
+            ${_buildGuideHtml(subUrl, backupSubUrl, true)}
+
             <div class="troubleshoot-box" style="margin-top:0;">
                 <div class="troubleshoot-title">
                     <span class="status-dot warn" style="width:6px; height:6px;"></span>
-                    <span>Если не открываются сайты:</span>
+                    <span>Если нет подключения:</span>
                 </div>
                 <span>• Выберите другую локацию в списке приложения</span>
                 <span>• Обновите подписку (потяните список серверов вниз или нажмите ⟳)</span>
                 <span>• Напишите в поддержку, если ничего не изменилось</span>
             </div>
-            ${_buildGuideHtml(subUrl, backupSubUrl, true)}
         </section>
 
         ${_buildDevicesSectionHtml(d)}
@@ -2024,7 +2043,7 @@ function _renderProfileTab(body, d, reload) {
     body.innerHTML = `
         <section class="hero-title-group">
             <div style="display:flex; align-items:center; gap:12px;">
-                <span class="avatar-circle avatar-lg">${_renderAvatarInner(meta)}</span>
+                <span id="profileLargeAvatar" class="avatar-circle avatar-lg">${_renderAvatarInner(meta)}</span>
                 <div>
                     <h1 class="hero-headline-lg" style="font-size:20px;">${escapeHtml(meta.displayName)}</h1>
                     <span class="mono-badge">${escapeHtml([meta.username, meta.userId ? `ID ${meta.userId}` : ""].filter(Boolean).join(" · ") || "Профиль")}</span>
@@ -2058,6 +2077,8 @@ function _renderProfileTab(body, d, reload) {
             <div id="historyList"></div>
         </section>
     `;
+
+    _bindAvatarImg(body.querySelector("#profileLargeAvatar"), meta.initial);
 
     body.querySelector("#profileTopupBtn").addEventListener("click", () => {
         if (d.financial_hold) {
