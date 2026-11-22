@@ -44,6 +44,99 @@ class SubscriptionService:
         return int(direct_limit) if direct_limit > 0 else 0
 
     @staticmethod
+    async def get_device_slot_usage(
+        session: AsyncSession,
+        user: User,
+        *,
+        vless_sub: Any = None,
+        wi_sub: Any = None,
+        now: Any = None,
+    ) -> dict[str, Any]:
+        """Compute active device slot usage independently for Standard and White Internet."""
+        from config.constants import WhiteInternetStatus
+        from database.repositories import (
+            user_devices_repo,
+            vless_subscription_repo,
+            white_internet_repo,
+        )
+
+        ref_now = now or now_utc()
+        if vless_sub is None:
+            vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+        if wi_sub is None:
+            wi_sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
+
+        is_hold = bool(getattr(user, "financial_hold", False))
+        std_active = bool(
+            vless_sub
+            and getattr(vless_sub, "is_active", False)
+            and not is_hold
+            and SubscriptionService.check_vpn_access(user, vless_sub=vless_sub)
+        )
+        std_limit = int(getattr(vless_sub, "device_limit", 0) or 0) if (std_active and vless_sub) else 0
+
+        wi_has_period = bool(
+            wi_sub is not None
+            and not is_hold
+            and getattr(wi_sub, "status", None)
+            in (
+                WhiteInternetStatus.ACTIVE,
+                WhiteInternetStatus.PENDING,
+                WhiteInternetStatus.EXHAUSTED,
+            )
+            and getattr(wi_sub, "expires_at", None)
+            and wi_sub.expires_at > ref_now
+        )
+        wi_slot_limit = (
+            max(1, int(getattr(wi_sub, "device_limit", 1) or 1))
+            if (wi_has_period and wi_sub)
+            else 0
+        )
+
+        devices = await user_devices_repo.list_user_devices(
+            session,
+            user.id,
+            wi_device_limit=wi_slot_limit,
+            std_device_limit=std_limit,
+        )
+        return {
+            "devices": devices,
+            "total_devices": len(devices),
+            "std_assigned_count": sum(1 for d in devices if d.get("is_std_assigned")),
+            "bi_assigned_count": sum(1 for d in devices if d.get("is_bi_assigned")),
+            "std_active": std_active,
+            "std_limit": std_limit,
+            "wi_has_period": wi_has_period,
+            "wi_slot_limit": wi_slot_limit,
+            "total_limit": (std_limit + wi_slot_limit) if (std_active or wi_has_period) else 0,
+        }
+
+    @staticmethod
+    def check_standard_limit_fits(
+        usage: dict[str, Any],
+        target_std_limit: int,
+    ) -> tuple[bool, str | None]:
+        """Validate that a target Standard device limit fits current Standard assignments and total cap."""
+        std_assigned = int(usage.get("std_assigned_count") or 0)
+        total_devices = int(usage.get("total_devices") or 0)
+        wi_slot_limit = int(usage.get("wi_slot_limit") or 0)
+        new_total_limit = int(target_std_limit) + wi_slot_limit
+
+        if std_assigned > target_std_limit:
+            return (
+                False,
+                f"На тарифе «Стандарт» занято устройств ({std_assigned}) больше нового лимита ({target_std_limit}). "
+                "Отключите слот «Стандарт» на лишнем устройстве или удалите его.",
+            )
+        if total_devices > new_total_limit:
+            return (
+                False,
+                f"Привязано устройств ({total_devices}) больше нового общего лимита ({new_total_limit}). "
+                "Удалите лишние устройства.",
+            )
+        return True, None
+
+    @staticmethod
     async def sync_access_state(session: AsyncSession, user: User) -> None:
         await SubscriptionService._sync_access_state(session, user)
 
@@ -320,14 +413,12 @@ class SubscriptionService:
             return None
 
         if new_device_limit is not None:
-            from database.repositories import user_devices_repo
-            total_count = await user_devices_repo.count_active_user_devices(session, user.id)
-
-            if total_count > new_device_limit:
-                raise ValueError(
-                    f"Cannot downgrade: {total_count} devices > "
-                    f"{new_device_limit} limit. User must reset devices first."
-                )
+            slot_usage = await SubscriptionService.get_device_slot_usage(session, user)
+            fits, reason = SubscriptionService.check_standard_limit_fits(
+                slot_usage, new_device_limit
+            )
+            if not fits:
+                raise ValueError(reason or "Cannot downgrade device limit.")
 
         from database.repositories import vless_subscription_repo
 

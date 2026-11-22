@@ -37,7 +37,7 @@ from config.enums import (
 )
 from database.connection import session_scope
 from database.models import AccountLedgerEntry, Order, User, UserDevice, VlessSubscription, WhiteInternetSubscription
-from database.repositories import user_devices_repo, users_repo, vless_subscription_repo, white_internet_repo
+from database.repositories import users_repo, vless_subscription_repo, white_internet_repo
 from database.repositories.account_ledger_repo import (
     create_admin_adjustment,
     get_account_balance,
@@ -767,17 +767,17 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                         status=400,
                     )
                 if payload.device_limit is not None:
-                    from database.repositories import user_devices_repo
-
-                    active_devs = await user_devices_repo.count_active_user_devices(session, user.id)
-                    if active_devs > payload.device_limit:
+                    slot_usage = await SubscriptionService.get_device_slot_usage(
+                        session, locked_user, vless_sub=vless_sub, now=now
+                    )
+                    fits, limit_reason = SubscriptionService.check_standard_limit_fits(
+                        slot_usage, payload.device_limit
+                    )
+                    if not fits:
                         return web.json_response(
                             {
                                 "ok": False,
-                                "error": (
-                                    f"Нельзя снизить лимит до {payload.device_limit}: "
-                                    f"привязано устройств ({active_devs}). Сначала сбросьте устройства."
-                                ),
+                                "error": limit_reason or f"Нельзя снизить лимит до {payload.device_limit}.",
                             },
                             status=400,
                         )
@@ -1192,12 +1192,10 @@ async def api_admin_user_details_handler(request: web.Request) -> web.Response:
         bal = await get_account_balance(session, user_id=user.id)
         vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
         wi_sub = await get_subscription_by_user_id(session, user.id)
-        devices = await user_devices_repo.list_user_devices(
-            session,
-            user.id,
-            wi_device_limit=int(wi_sub.device_limit or 0) if wi_sub else 0,
-            std_device_limit=int(vless_sub.device_limit or 0) if vless_sub else 0,
+        slot_usage = await SubscriptionService.get_device_slot_usage(
+            session, user, vless_sub=vless_sub, wi_sub=wi_sub
         )
+        devices = slot_usage["devices"]
 
         inviter = None
         if user.referred_by:

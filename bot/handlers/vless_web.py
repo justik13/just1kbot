@@ -1282,7 +1282,7 @@ async def vless_report_handler(request: web.Request) -> web.Response:
 
     try:
         async with session_scope() as session:
-            from database.repositories import user_devices_repo, white_internet_repo
+            from database.repositories import white_internet_repo
 
             vless_sub = await vless_subscription_repo.get_subscription_by_token(session, token)
             wi_sub = None
@@ -1307,8 +1307,20 @@ async def vless_report_handler(request: web.Request) -> web.Response:
             user_info = f"ID: <code>{user.telegram_id}</code> ({user_tag})"
             dev_limit = await SubscriptionService.get_effective_device_limit(session, user)
             tariff_name = get_tariff_display_name(dev_limit)
-            total_active = await user_devices_repo.count_active_user_devices(session, user.id)
-            devices_info = f"{total_active} / {dev_limit if dev_limit > 0 else '—'}"
+            slot_usage = await SubscriptionService.get_device_slot_usage(
+                session, user, vless_sub=vless_sub, wi_sub=wi_sub
+            )
+            total_active = int(slot_usage["total_devices"])
+            total_limit = int(slot_usage["total_limit"])
+            if slot_usage["std_active"] and slot_usage["wi_has_period"]:
+                devices_info = (
+                    f"{total_active} / {total_limit} "
+                    f"(Стандарт: {slot_usage['std_assigned_count']}/{slot_usage['std_limit']}, "
+                    f"БИ: {slot_usage['bi_assigned_count']}/{slot_usage['wi_slot_limit']})"
+                )
+            else:
+                eff_limit = total_limit if total_limit > 0 else dev_limit
+                devices_info = f"{total_active} / {eff_limit if eff_limit > 0 else '—'}"
             is_access_active = SubscriptionService.check_vpn_access(user, vless_sub=vless_sub)
             if getattr(user, "financial_hold", False):
                 sub_status = "HOLD"

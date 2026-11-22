@@ -509,7 +509,8 @@ function _openStandardDevicesModal(d, onReload) {
             `;
         } else if (isDowngrade && quote) {
             const tooManyDevices = Boolean(
-                blockedReason && blockedReason.includes("устройств") && Number(quote.active_hwid_count || 0) > targetLimit
+                quote.blocked_by_devices
+                || (blockedReason && blockedReason.includes("устройств") && Number(quote.active_hwid_count || 0) > targetLimit)
             );
             infoHtml = blockedReason
                 ? `<div class="notice-box notice-warn" style="flex-direction:column; align-items:flex-start; gap:8px;">

@@ -589,7 +589,19 @@ class OrderService:
         sub_end = getattr(vless_sub, "expires_at", None) if vless_sub else None
         current_limit = (getattr(vless_sub, "device_limit", 0) or 0) if vless_sub else 0
         cooldown_until = getattr(vless_sub, "downgrade_cooldown_until", None) if vless_sub else None
-        active_hwid_count = await count_active_user_devices(session, user_id)
+        user_obj = await session.get(User, user_id)
+        if user_obj is not None:
+            from services.subscription import SubscriptionService
+
+            slot_usage = await SubscriptionService.get_device_slot_usage(
+                session, user_obj, vless_sub=vless_sub, now=now
+            )
+            active_hwid_count = int(slot_usage["total_devices"])
+            std_assigned_count = int(slot_usage["std_assigned_count"])
+        else:
+            slot_usage = None
+            active_hwid_count = await count_active_user_devices(session, user_id)
+            std_assigned_count = active_hwid_count
 
         is_active = bool(
             sub_end is not None
@@ -662,19 +674,29 @@ class OrderService:
             }
 
         # Downgrade: target_device_limit < current_limit
-        user_obj = await session.get(User, user_id)
         is_perm = is_permanent_subscription(sub_end)
         full_days_left = 0 if is_perm else max(0, int((sub_end - now).total_seconds() // 86400))
         blocked_reason: str | None = None
+        blocked_by_devices = False
         if getattr(user_obj, "financial_hold", False):
             blocked_reason = "На аккаунте действует финансовое ограничение. Обратитесь в поддержку."
         elif cooldown_until and cooldown_until > now:
             blocked_reason = f"Снижение лимита доступно после {cooldown_until.strftime('%d.%m.%Y %H:%M')}"
+        elif slot_usage is not None:
+            from services.subscription import SubscriptionService
+
+            fits, limit_reason = SubscriptionService.check_standard_limit_fits(
+                slot_usage, target_device_limit
+            )
+            if not fits:
+                blocked_reason = limit_reason
+                blocked_by_devices = True
         elif active_hwid_count > target_device_limit:
             blocked_reason = (
                 f"Активных устройств ({active_hwid_count}) больше нового лимита ({target_device_limit}). "
                 "Удалите лишние устройства."
             )
+            blocked_by_devices = True
 
         paid_cap_rub, discount_ratio = await OrderService._get_standard_downgrade_cap(session, user_id)
         if paid_cap_rub > 0 and full_days_left > 0:
@@ -698,8 +720,10 @@ class OrderService:
             "days_left": full_days_left,
             "can_downgrade": blocked_reason is None,
             "blocked_reason": blocked_reason,
+            "blocked_by_devices": blocked_by_devices,
             "cooldown_until": cooldown_until.isoformat() if cooldown_until else None,
             "active_hwid_count": active_hwid_count,
+            "std_assigned_count": std_assigned_count,
         }
 
     @staticmethod

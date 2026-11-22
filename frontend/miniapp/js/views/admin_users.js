@@ -261,16 +261,27 @@ async function _openUserDetailsModal(user, onUpdated) {
     const wiUsedGb = wi ? ((wi.traffic_used_bytes || 0) / (1024 ** 3)).toFixed(2) : "0";
     const devicesHtml = (details.devices || []).length
         ? details.devices
-              .map(
-                  (d) => `
+              .map((d) => {
+                  const slotChips = [];
+                  if (d.is_std_assigned) {
+                      slotChips.push(`<span class="chip chip-ok">Стандарт</span>`);
+                  }
+                  if (d.is_bi_assigned) {
+                      slotChips.push(`<span class="chip chip-wi">Белый интернет</span>`);
+                  }
+                  if (!slotChips.length) {
+                      slotChips.push(`<span class="chip chip-muted">Без слота</span>`);
+                  }
+                  return `
             <div class="item-row" style="padding:8px;">
                 <div class="row">
                     <span style="font-weight:600; font-size:12px;">${escapeHtml(d.device_model || d.platform || "Устройство")}</span>
                     <span class="muted" style="font-size:11px;">${d.last_seen_at ? formatDate(d.last_seen_at) : "—"}</span>
                 </div>
                 <div class="mono muted" style="font-size:11px; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(d.hwid)}</div>
-            </div>`
-              )
+                <div class="row" style="gap:6px; justify-content:flex-start; margin-top:4px;">${slotChips.join("")}</div>
+            </div>`;
+              })
               .join("")
         : `<div class="muted" style="font-size:12px;">Устройства не привязаны</div>`;
 
