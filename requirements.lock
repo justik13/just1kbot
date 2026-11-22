@@ -10,9 +10,9 @@ aiofiles==25.1.0 \
     # via
     #   -r requirements.txt
     #   aiogram
-aiogram==3.33.0 \
-    --hash=sha256:d9d0704d638ad2cf4f6a91075818d42aceb365ceb157c1770be59d7d8e89144b \
-    --hash=sha256:f865566ddfdeac534f65d700b695cfe9b60645b837546946464a2bdb422a01a2
+aiogram==3.34.0 \
+    --hash=sha256:7b2dd2f7396675339c8cd1338341a6f07633542ffcd67185e6eeb20519df5707 \
+    --hash=sha256:830e3067fe5040740e685986f5b7b3fdeec11435f650a503ffce8dbe2d4fd407
     # via -r requirements.txt
 aiohappyeyeballs==2.7.1 \
     --hash=sha256:065665c041c42a5938ed220bdcd7230f22527fbec085e1853d2402c8a3615d9d \

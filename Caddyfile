@@ -9,7 +9,7 @@
 }
 
 http:// {
-	@domain host {$DOMAIN} {$SUBSCRIPTION_DOMAIN:invalid.localhost} {$SUBSCRIPTION_BACKUP_DOMAIN:invalid.localhost}
+	@domain host {$DOMAIN} {$SUBSCRIPTION_DOMAIN:sub.invalid.localhost} {$SUBSCRIPTION_BACKUP_DOMAIN:backup.invalid.localhost}
 	redir @domain https://{host}{uri} permanent
 	abort
 }
