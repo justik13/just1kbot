@@ -985,7 +985,7 @@ function _getProfileMeta(d) {
 
 function _renderAvatarInner(meta) {
     if (meta.photoUrl) {
-        return `<img class="avatar-img" src="${escapeHtml(meta.photoUrl)}" alt="${escapeHtml(meta.initial)}">`;
+        return `<img class="avatar-img" src="${escapeHtml(meta.photoUrl)}" data-fallback="${escapeHtml(meta.initial)}" alt="${escapeHtml(meta.initial)}" onerror="this.replaceWith(document.createTextNode(this.dataset.fallback || 'J'))">`;
     }
     return escapeHtml(meta.initial);
 }
@@ -1208,6 +1208,11 @@ function _renderConnectTab(body, d, reload, root) {
     const wiRemainingPct = wiLimitBytes > 0 ? Math.min(100, Math.max(0, Math.round((wiRemainingBytes / wiLimitBytes) * 100))) : 0;
     const wiExhausted = Boolean(wi.active && (String(wi.status || "").toUpperCase() === "EXHAUSTED" || (wiLimitBytes > 0 && wiUsedBytes >= wiLimitBytes)));
 
+    const _shortDate = (iso) => {
+        const dStr = formatDate(iso);
+        return dStr ? String(dStr).split(",")[0].trim() : "";
+    };
+
     const stdTileHtml = std.active
         ? `
             <button type="button" class="channel-tile ${isStdGrace ? "is-warn" : "is-active"}" data-jump-tariffs="1">
@@ -1218,8 +1223,8 @@ function _renderConnectTab(body, d, reload, root) {
                 <div class="channel-metric">∞ <span class="channel-metric-unit">ГБ</span></div>
                 <div class="channel-foot">
                     <div class="channel-meta">
-                        <span>${Number(std.device_limit || 2)} слота</span>
-                        <span>${isStdGrace ? `~${graceHoursLeft} ч.` : `до ${formatDate(std.expires_at)}`}</span>
+                        <span style="white-space:nowrap;">${Number(std.device_limit || 2)} устр.</span>
+                        <span style="white-space:nowrap;">${isStdGrace ? `~${graceHoursLeft} ч.` : `до ${_shortDate(std.expires_at)}`}</span>
                     </div>
                 </div>
             </button>
@@ -1253,8 +1258,8 @@ function _renderConnectTab(body, d, reload, root) {
                         <div class="progress-fill" style="width:${wiExhausted ? 0 : wiRemainingPct}%;"></div>
                     </div>
                     <div class="channel-meta">
-                        <span>${Number(wi.device_limit || 1)} слот</span>
-                        <span>до ${formatDate(wi.expires_at)}</span>
+                        <span style="white-space:nowrap;">${Number(wi.device_limit || 1)} слот</span>
+                        <span style="white-space:nowrap;">до ${_shortDate(wi.expires_at)}</span>
                     </div>
                 </div>
             </button>
@@ -1297,17 +1302,11 @@ function _renderConnectTab(body, d, reload, root) {
             <div class="connect-dock">
                 ${desktopFirst ? `
                     <button type="button" data-open-client="happ" class="btn btn-primary btn-lg">${_ICONS.bolt} Подключить в Happ</button>
+                    <button type="button" data-open-client="incy" class="btn btn-sm" style="width:100%;">Открыть в INCY</button>
                 ` : `
                     <button type="button" data-open-client="incy" class="btn btn-primary btn-lg">${_ICONS.bolt} Подключить в INCY</button>
+                    <button type="button" data-open-client="happ" class="btn btn-sm" style="width:100%;">Открыть в Happ</button>
                 `}
-                <div class="connect-pair">
-                    ${desktopFirst ? `
-                        <button type="button" data-open-client="incy" class="btn btn-sm">Открыть в INCY</button>
-                    ` : `
-                        <button type="button" data-open-client="happ" class="btn btn-sm">Открыть в Happ</button>
-                    `}
-                    <button id="copySubBtn" type="button" class="btn btn-sm">${_ICONS.copy} Копировать</button>
-                </div>
                 ${subUrl ? `
                     <button id="copyUrlStripBtn" type="button" class="sub-link-strip" title="Нажмите, чтобы скопировать">
                         <span class="sub-link-text">${escapeHtml(subUrl)}</span>
@@ -1346,7 +1345,6 @@ function _renderConnectTab(body, d, reload, root) {
             openExternalLink(targetUrl);
         });
     });
-    body.querySelector("#copySubBtn").addEventListener("click", () => copyText(subUrl, "Ссылка скопирована"));
     const stripBtn = body.querySelector("#copyUrlStripBtn");
     if (stripBtn) {
         stripBtn.addEventListener("click", () => copyText(subUrl, "Ссылка скопирована"));
