@@ -688,6 +688,7 @@ class UserDevice(Base):
     __table_args__ = (
         UniqueConstraint("user_id", "hwid", name="uq_user_devices_user_hwid"),
         Index("ix_user_devices_user_priority", "user_id", "bi_priority", "first_seen_at"),
+        Index("ix_user_devices_user_std_priority", "user_id", "std_priority", "first_seen_at"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -709,6 +710,9 @@ class UserDevice(Base):
     platform: Mapped[str | None] = mapped_column(String(64), nullable=True)
     os_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
     app_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    std_priority: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
     bi_priority: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default=text("0")
     )

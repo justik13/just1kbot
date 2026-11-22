@@ -339,7 +339,10 @@ async def api_user_dashboard_handler(request: web.Request) -> web.Response:
         )
 
         devices = await user_devices_repo.list_user_devices(
-            session, user.id, wi_device_limit=wi_limit
+            session,
+            user.id,
+            wi_device_limit=wi_limit,
+            std_device_limit=std_limit if std_active else 0,
         )
         referrals = await _get_referral_summary(
             session, user, bot_username=_resolve_bot_username(request)
@@ -1000,5 +1003,60 @@ async def api_user_device_priority_handler(request: web.Request) -> web.Response
                                     logger.debug("BI priority deprovision %s failed: %s", u_off, exc)
 
                 queue_post_commit_task(session, _sync_bi_priority_devices)
+
+        return web.json_response({"ok": True, "priority": payload.priority})
+
+
+async def api_user_device_std_priority_handler(request: web.Request) -> web.Response:
+    """Update manual Standard slot priority for a bound HWID device."""
+    ctx, err_resp = require_authenticated_user(request)
+    if err_resp is not None or ctx is None:
+        return err_resp  # type: ignore[return-value]
+
+    hwid = unquote(request.match_info.get("hwid", "")).strip()
+    if not hwid or len(hwid) > 128:
+        return web.json_response({"ok": False, "error": "Invalid HWID"}, status=400)
+
+    payload, parse_err = await _parse_json_model(request, DevicePriorityPayload)
+    if parse_err is not None or payload is None:
+        return parse_err  # type: ignore[return-value]
+
+    async with session_scope() as session:
+        user = await _ensure_user(session, ctx)
+        updated = await user_devices_repo.set_device_std_priority(
+            session,
+            user.id,
+            hwid,
+            payload.priority,
+            replace_hwid=payload.replace_hwid,
+        )
+        if not updated:
+            return web.json_response({"ok": False, "error": "Устройство не найдено"}, status=404)
+
+        vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+        if vless_sub is not None and SubscriptionService.check_vpn_access(user, vless_sub=vless_sub):
+            std_limit = max(1, await SubscriptionService.get_effective_device_limit(session, user) or 2)
+            devs = await user_devices_repo.list_user_devices(
+                session, user.id, std_device_limit=std_limit
+            )
+            assigned_uuids = [
+                str(d["device_uuid"])
+                for d in devs
+                if d.get("is_std_assigned") and d.get("device_uuid")
+            ]
+            displaced_uuids = [
+                str(d["device_uuid"])
+                for d in devs
+                if not d.get("is_std_assigned") and d.get("device_uuid")
+            ]
+            for u_on in assigned_uuids:
+                await vless_subscription_repo.pop_pending_revoked_uuid(session, vless_sub.id, u_on)
+            if displaced_uuids:
+                await vless_subscription_repo.add_pending_revocation_uuids(
+                    session, vless_sub.id, displaced_uuids
+                )
+            vless_sub.version = (vless_sub.version or 1) + 1
+            await session.flush()
+            VlessSubscriptionService.ensure_synced_background(user.id, session=session)
 
         return web.json_response({"ok": True, "priority": payload.priority})

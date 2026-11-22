@@ -1196,6 +1196,7 @@ async def api_admin_user_details_handler(request: web.Request) -> web.Response:
             session,
             user.id,
             wi_device_limit=int(wi_sub.device_limit or 0) if wi_sub else 0,
+            std_device_limit=int(vless_sub.device_limit or 0) if vless_sub else 0,
         )
 
         inviter = None
@@ -1248,7 +1249,9 @@ async def api_admin_user_details_handler(request: web.Request) -> web.Response:
                         "device_model": d.get("device_name"),
                         "platform": d.get("platform"),
                         "app_version": d.get("app_version"),
-                        "is_bi_priority": bool(d.get("bi_priority", 0)),
+                        "is_std_priority": int(d.get("std_priority") or 0) > 0,
+                        "is_std_assigned": bool(d.get("is_std_assigned", False)),
+                        "is_bi_priority": int(d.get("bi_priority") or 0) > 0,
                         "is_bi_assigned": bool(d.get("is_bi_assigned", False)),
                         "last_seen_at": d.get("last_seen_at"),
                     }

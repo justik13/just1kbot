@@ -904,21 +904,35 @@ class VlessSubscriptionService:
         std_limit = max(1, int(std_limit or 2))
         from database.models import UserDevice
         dev_rows = (
-            await session.scalars(
-                select(UserDevice.device_uuid)
+            await session.execute(
+                select(UserDevice.device_uuid, UserDevice.std_priority)
                 .where(
                     UserDevice.user_id == user_id,
                     UserDevice.device_uuid.is_not(None),
                 )
-                .order_by(UserDevice.first_seen_at.asc(), UserDevice.id.asc())
+                .order_by(
+                    UserDevice.std_priority.desc(),
+                    UserDevice.first_seen_at.asc(),
+                    UserDevice.id.asc(),
+                )
             )
         ).all()
-        devices = [str(u).strip() for u in dev_rows if isinstance(u, str) and str(u).strip()]
-        dev_uuids = devices[:std_limit] if desired_active else devices
+        eligible_devices = [
+            str(u).strip()
+            for u, prio in dev_rows
+            if isinstance(u, str) and str(u).strip() and (prio or 0) >= 0
+        ]
+        disabled_devices = [
+            str(u).strip()
+            for u, prio in dev_rows
+            if isinstance(u, str) and str(u).strip() and (prio or 0) < 0
+        ]
+        all_devices = eligible_devices + disabled_devices
+        dev_uuids = eligible_devices[:std_limit] if desired_active else all_devices
         all_sync_uuids = set(dev_uuids)
         excess_uuids = (
-            [u for u in devices[std_limit:] if u not in all_sync_uuids]
-            if desired_active and len(devices) > std_limit
+            [u for u in (eligible_devices[std_limit:] + disabled_devices) if u not in all_sync_uuids]
+            if desired_active
             else []
         )
 
@@ -1105,8 +1119,13 @@ class VlessSubscriptionService:
                             .where(
                                 UserDevice.user_id.in_(batch_user_ids),
                                 UserDevice.device_uuid.is_not(None),
+                                UserDevice.std_priority >= 0,
                             )
-                            .order_by(UserDevice.first_seen_at.asc(), UserDevice.id.asc())
+                            .order_by(
+                                UserDevice.std_priority.desc(),
+                                UserDevice.first_seen_at.asc(),
+                                UserDevice.id.asc(),
+                            )
                         )
                     ).all()
                     for u_id, d_uuid in dev_rows:

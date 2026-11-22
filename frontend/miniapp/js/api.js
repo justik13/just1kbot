@@ -235,4 +235,11 @@ export const api = {
                 replaceHwid ? { priority, replace_hwid: replaceHwid } : { priority }
             ),
         }),
+    setDeviceStdPriority: (hwid, priority, replaceHwid = null) =>
+        requestJson(`/api/app/user/devices/${encodeURIComponent(hwid)}/std-priority`, {
+            method: "POST",
+            body: JSON.stringify(
+                replaceHwid ? { priority, replace_hwid: replaceHwid } : { priority }
+            ),
+        }),
 };

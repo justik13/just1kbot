@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import timedelta, timezone
+from datetime import datetime, timedelta, timezone
 import logging
 from typing import Any
 from uuid import uuid4
@@ -55,8 +55,9 @@ async def list_user_devices(
     user_id: int,
     *,
     wi_device_limit: int = 0,
+    std_device_limit: int = 0,
 ) -> list[dict[str, Any]]:
-    """Return bound devices ordered by BI priority (manual desc, then FIFO first_seen_at asc)."""
+    """Return bound devices with independent Standard and BI slot assignment."""
     stmt = (
         select(UserDevice)
         .where(UserDevice.user_id == user_id)
@@ -67,14 +68,26 @@ async def list_user_devices(
         )
     )
     rows = (await session.scalars(stmt)).all()
-    limit = max(0, int(wi_device_limit or 0))
-    assigned_count = 0
+
+    bi_limit = max(0, int(wi_device_limit or 0))
+    bi_assigned_ids: set[int] = set()
+    for dev in rows:
+        if len(bi_assigned_ids) < bi_limit and (dev.bi_priority or 0) >= 0:
+            bi_assigned_ids.add(dev.id)
+
+    std_limit = max(0, int(std_device_limit or 0))
+    std_assigned_ids: set[int] = set()
+    if std_limit > 0:
+        std_ordered = sorted(
+            rows,
+            key=lambda d: (-(d.std_priority or 0), d.first_seen_at or datetime.min.replace(tzinfo=timezone.utc), d.id or 0),
+        )
+        for dev in std_ordered:
+            if len(std_assigned_ids) < std_limit and (dev.std_priority or 0) >= 0:
+                std_assigned_ids.add(dev.id)
+
     result: list[dict[str, Any]] = []
     for dev in rows:
-        is_assigned = False
-        if assigned_count < limit and (dev.bi_priority or 0) >= 0:
-            is_assigned = True
-            assigned_count += 1
         result.append(
             {
                 "id": dev.id,
@@ -84,10 +97,12 @@ async def list_user_devices(
                 "platform": dev.platform,
                 "os_version": dev.os_version,
                 "app_version": dev.app_version,
+                "std_priority": dev.std_priority,
                 "bi_priority": dev.bi_priority,
                 "first_seen_at": dev.first_seen_at.isoformat() if dev.first_seen_at else None,
                 "last_seen_at": dev.last_seen_at.isoformat() if dev.last_seen_at else None,
-                "is_bi_assigned": is_assigned,
+                "is_std_assigned": dev.id in std_assigned_ids,
+                "is_bi_assigned": dev.id in bi_assigned_ids,
             }
         )
     return result
@@ -199,6 +214,7 @@ async def register_user_device(
         platform=fields.get("platform"),
         os_version=fields.get("os_version"),
         app_version=fields.get("app_version"),
+        std_priority=0,
         bi_priority=0,
         first_seen_at=now,
         last_seen_at=now,
@@ -336,6 +352,53 @@ async def set_device_bi_priority(
     return True
 
 
+async def set_device_std_priority(
+    session: AsyncSession,
+    user_id: int,
+    hwid: str,
+    priority: int,
+    *,
+    replace_hwid: str | None = None,
+) -> bool:
+    """Set manual Standard priority for a specific HWID device (priority > 0 enables, <= 0 disables)."""
+    clean_hwid = str(hwid or "").strip()[:128]
+    if not clean_hwid:
+        return False
+    await session.scalar(select(User.id).where(User.id == user_id).with_for_update())
+    dev = await session.scalar(
+        select(UserDevice).where(
+            UserDevice.user_id == user_id,
+            UserDevice.hwid == clean_hwid,
+        ).with_for_update()
+    )
+    if dev is None:
+        return False
+
+    if replace_hwid:
+        clean_replace = str(replace_hwid).strip()[:128]
+        if clean_replace and clean_replace != clean_hwid:
+            rep_dev = await session.scalar(
+                select(UserDevice).where(
+                    UserDevice.user_id == user_id,
+                    UserDevice.hwid == clean_replace,
+                )
+            )
+            if rep_dev is not None:
+                rep_dev.std_priority = -1
+
+    if priority > 0:
+        max_prio = await session.scalar(
+            select(func.coalesce(func.max(UserDevice.std_priority), 0)).where(
+                UserDevice.user_id == user_id
+            )
+        )
+        dev.std_priority = max(int(priority), int(max_prio or 0) + 10)
+    else:
+        dev.std_priority = -1
+    await session.flush()
+    return True
+
+
 __all__ = [
     "calculate_daily_churn_limit",
     "count_active_user_devices",
@@ -346,4 +409,5 @@ __all__ = [
     "list_user_devices",
     "register_user_device",
     "set_device_bi_priority",
+    "set_device_std_priority",
 ]
