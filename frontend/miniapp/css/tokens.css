@@ -1,17 +1,19 @@
 :root {
+    --bg-black: #000000;
     --bg-canvas: #050505;
-    --bg-surface: #0c0c0e;
-    --bg-elevated: #131316;
+    --bg-surface: #0e0e11;
+    --bg-elevated: #17171c;
+    --bg-hover: #1f1f26;
     --bg-input: #09090b;
 
     --border-subtle: rgba(255, 255, 255, 0.08);
-    --border-strong: rgba(255, 255, 255, 0.16);
+    --border-strong: rgba(255, 255, 255, 0.18);
 
-    --text-primary: #ffffff;
-    --text-secondary: #d4d4d8;
-    --text-muted: #a1a1aa;
+    --text-primary: #f4f4f5;
+    --text-secondary: #a1a1aa;
+    --text-muted: #71717a;
 
-    --accent-white: #ffffff;
+    --accent-white: #f4f4f5;
     --accent-white-border: rgba(255, 255, 255, 0.32);
     --accent-white-soft: rgba(255, 255, 255, 0.06);
     --accent-emerald: #34d399;
@@ -24,10 +26,11 @@
 
     --radius-card: 16px;
     --radius-control: 12px;
+    --radius-sm: 8px;
     --radius-pill: 999px;
 
-    --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", system-ui, sans-serif;
-    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    --font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 * {

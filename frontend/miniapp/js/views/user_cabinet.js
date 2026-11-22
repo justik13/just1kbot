@@ -29,6 +29,9 @@ const _ICONS = {
     wrench: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>`,
     send: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>`,
     message: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`,
+    card: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>`,
+    more: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>`,
+    file: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`,
 };
 
 const _CLIENT_LINKS = {
@@ -966,6 +969,47 @@ export async function loadAndRenderUserCabinet(root) {
     }
 }
 
+function _getProfileMeta(d) {
+    const tgUser = (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initDataUnsafe && window.Telegram.WebApp.initDataUnsafe.user) || {};
+    const displayName = (d.user && d.user.name) || [tgUser.first_name, tgUser.last_name].filter(Boolean).join(" ") || (tgUser.username ? `@${tgUser.username}` : "Профиль");
+    const initial = String(displayName.replace(/^@/, "").trim().charAt(0) || "J").toUpperCase();
+    const photoUrl = tgUser.photo_url || "";
+    return {
+        displayName,
+        username: tgUser.username ? `@${tgUser.username}` : "",
+        userId: (d.user && d.user.telegram_id) || tgUser.id || "",
+        initial,
+        photoUrl,
+    };
+}
+
+function _renderAvatarInner(meta) {
+    if (meta.photoUrl) {
+        return `<img class="avatar-img" src="${escapeHtml(meta.photoUrl)}" alt="${escapeHtml(meta.initial)}">`;
+    }
+    return escapeHtml(meta.initial);
+}
+
+function _syncTopbarProfile(d, root) {
+    const pill = document.getElementById("profilePillBtn");
+    const avatarEl = document.getElementById("profileAvatar");
+    const balEl = document.getElementById("profileBalanceText");
+    if (!pill) return;
+
+    const bal = d.balance || { total: 0 };
+    const meta = _getProfileMeta(d);
+    if (avatarEl) avatarEl.innerHTML = _renderAvatarInner(meta);
+    if (balEl) balEl.textContent = `${bal.total ?? 0} ₽`;
+    pill.classList.toggle("active", _state.tab === "profile");
+
+    pill.onclick = () => {
+        if (_state.tab === "profile") return;
+        _state.tab = "profile";
+        _render(root);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+    };
+}
+
 function _render(root) {
     const d = _state.data;
     if (!d) return;
@@ -975,29 +1019,29 @@ function _render(root) {
     const wiActive = Boolean(d.wi && d.wi.active);
     const hasAny = stdActive || wiActive;
 
-    const tabs = hasAny
-        ? [
-            { id: "connect", label: "Подключение" },
-            { id: "tariffs", label: "Тарифы" },
-            { id: "profile", label: "Профиль" },
-        ]
-        : [
-            { id: "tariffs", label: "Тарифы" },
-            { id: "connect", label: "Подключение" },
-            { id: "profile", label: "Профиль" },
-        ];
+    const navTabs = [
+        { id: "connect", label: "Доступ", icon: _ICONS.bolt },
+        { id: "tariffs", label: "Тарифы", icon: _ICONS.card },
+        { id: "more", label: "Ещё", icon: _ICONS.more },
+    ];
+    const validTabs = ["connect", "tariffs", "more", "profile"];
 
-    if (!tabs.some((t) => t.id === _state.tab)) {
+    if (!validTabs.includes(_state.tab)) {
         _state.tab = hasAny ? "connect" : "tariffs";
     }
 
+    _syncTopbarProfile(d, root);
+
     root.innerHTML = `
-        <nav class="tabs-bar">
-            ${tabs.map((t) => `
-                <button type="button" class="tab-btn ${_state.tab === t.id ? "active" : ""}" data-utab="${t.id}">${escapeHtml(t.label)}</button>
+        <div id="userTabBody" class="app-main"></div>
+        <nav class="bottom-nav">
+            ${navTabs.map((t) => `
+                <button type="button" class="nav-item ${_state.tab === t.id ? "active" : ""}" data-utab="${t.id}">
+                    ${t.icon}
+                    <span>${escapeHtml(t.label)}</span>
+                </button>
             `).join("")}
         </nav>
-        <div id="userTabBody" class="app-main"></div>
     `;
 
     root.querySelectorAll("[data-utab]").forEach((b) => {
@@ -1005,6 +1049,7 @@ function _render(root) {
             if (_state.tab === b.dataset.utab) return;
             _state.tab = b.dataset.utab;
             _render(root);
+            window.scrollTo({ top: 0, behavior: "smooth" });
         });
     });
 
@@ -1013,13 +1058,14 @@ function _render(root) {
 
     if (_state.tab === "connect") _renderConnectTab(body, d, reload, root);
     else if (_state.tab === "tariffs") _renderTariffsTab(body, d, reload);
+    else if (_state.tab === "more") _renderMoreTab(body, d, reload);
     else _renderProfileTab(body, d, reload);
 
     if (prevGuideOpen) {
         const nextGuide = root.querySelector("#connectGuide");
         if (nextGuide) nextGuide.open = true;
     }
-    if (prevScrollY > 0) {
+    if (prevScrollY > 0 && _state.tab !== "profile") {
         window.scrollTo(0, prevScrollY);
     }
 }
@@ -1101,15 +1147,12 @@ function _bindGuideEvents(container, root) {
 function _renderConnectTab(body, d, reload, root) {
     if (d.financial_hold) {
         body.innerHTML = `
-            <section class="hero-card" style="border-color: rgba(239, 68, 68, 0.4);">
-                <div class="row">
-                    <div style="display:flex; align-items:center; gap:9px;">
-                        <span class="status-dot" style="background:var(--accent-red);"></span>
-                        <span class="hero-headline" style="color:var(--accent-red);">Обслуживание приостановлено</span>
-                    </div>
-                    <span class="chip chip-warn">Ограничение</span>
+            <section class="hero-section">
+                <div class="hero-title-group">
+                    <span class="hero-kicker err">Ограничение доступа</span>
+                    <h1 class="hero-headline-lg" style="color:var(--accent-red);">Обслуживание приостановлено</h1>
+                    <p class="hero-sub">Доступ к сервису временно ограничен администратором. Если у вас возникли вопросы по оплате или настройке, напишите нам в поддержку.</p>
                 </div>
-                <p class="muted">Доступ к сервису временно ограничен администратором. Если у вас возникли вопросы по оплате или настройке, напишите нам в поддержку.</p>
                 ${d.support && d.support.support_url ? `
                     <button id="holdContactSupportBtn" type="button" class="btn btn-primary btn-lg">Написать в поддержку</button>
                 ` : ""}
@@ -1133,15 +1176,12 @@ function _renderConnectTab(body, d, reload, root) {
 
     if (!isAnyActive) {
         body.innerHTML = `
-            <section class="hero-card">
-                <div class="row">
-                    <div style="display:flex; align-items:center; gap:9px;">
-                        <span class="status-dot"></span>
-                        <span class="hero-headline">Нет активных подписок</span>
-                    </div>
-                    <span class="chip chip-muted">Не подключено</span>
+            <section class="hero-section">
+                <div class="hero-title-group">
+                    <span class="hero-kicker muted">Не подключено</span>
+                    <h1 class="hero-headline-lg">Нет активных подписок</h1>
+                    <p class="hero-sub">Оформите «Стандарт» или «Белый интернет» — ссылка подключения активируется сразу после оплаты.</p>
                 </div>
-                <p class="muted">Оформите «Стандарт» или «Белый интернет» — ссылка подключения активируется сразу после оплаты.</p>
                 <button id="goTariffsBtn" type="button" class="btn btn-primary btn-lg">Перейти к тарифам</button>
                 ${_buildGuideHtml(subUrl, backupSubUrl, false)}
             </section>
@@ -1161,35 +1201,100 @@ function _renderConnectTab(body, d, reload, root) {
     const graceEndMs = stdExpMs + (4 * 3600 * 1000);
     const graceHoursLeft = Math.max(1, Math.ceil((graceEndMs - Date.now()) / (3600 * 1000)));
 
-    const pills = [];
-    if (std.active) {
-        if (isStdGrace) {
-            pills.push(`<span class="chip chip-warn">Стандарт · Льготный период (~${graceHoursLeft} ч.)</span>`);
-        } else {
-            pills.push(`<span class="chip chip-standard">Стандарт · ${Number(std.device_limit || 2)} устр. · до ${formatDate(std.expires_at)}</span>`);
-        }
-    }
-    if (wi.active) {
-        const usedGb = formatBytesGb(wi.traffic_used_bytes);
-        const totalGb = formatBytesGb(wi.traffic_limit_bytes);
-        pills.push(`<span class="chip chip-wi">Белый интернет · ${Number(wi.device_limit || 1)} устр. · ${usedGb}/${totalGb} ГБ · до ${formatDate(wi.expires_at)}</span>`);
-    }
+    const wiLimitBytes = Number(wi.traffic_limit_bytes || 0);
+    const wiUsedBytes = Number(wi.traffic_used_bytes || 0);
+    const wiRemainingBytes = Math.max(0, wiLimitBytes - wiUsedBytes);
+    const wiRemainingGb = formatBytesGb(wiRemainingBytes);
+    const wiRemainingPct = wiLimitBytes > 0 ? Math.min(100, Math.max(0, Math.round((wiRemainingBytes / wiLimitBytes) * 100))) : 0;
+    const wiExhausted = Boolean(wi.active && (String(wi.status || "").toUpperCase() === "EXHAUSTED" || (wiLimitBytes > 0 && wiUsedBytes >= wiLimitBytes)));
+
+    const stdTileHtml = std.active
+        ? `
+            <button type="button" class="channel-tile ${isStdGrace ? "is-warn" : "is-active"}" data-jump-tariffs="1">
+                <div class="channel-tile-head">
+                    <span class="channel-name">Стандарт</span>
+                    <span class="channel-indicator"></span>
+                </div>
+                <div class="channel-metric">∞ <span class="channel-metric-unit">ГБ</span></div>
+                <div class="channel-foot">
+                    <div class="channel-meta">
+                        <span>${Number(std.device_limit || 2)} слота</span>
+                        <span>${isStdGrace ? `~${graceHoursLeft} ч.` : `до ${formatDate(std.expires_at)}`}</span>
+                    </div>
+                </div>
+            </button>
+        `
+        : `
+            <button type="button" class="channel-tile is-inactive" data-jump-tariffs="1">
+                <div class="channel-tile-head">
+                    <span class="channel-name">Стандарт</span>
+                    <span class="channel-indicator"></span>
+                </div>
+                <div class="channel-metric">—</div>
+                <div class="channel-foot">
+                    <div class="channel-meta">
+                        <span>Не подключен</span>
+                        <span>Подключить</span>
+                    </div>
+                </div>
+            </button>
+        `;
+
+    const wiTileHtml = wi.active
+        ? `
+            <button type="button" class="channel-tile is-wi ${wiExhausted ? "is-warn" : "is-active"}" data-jump-tariffs="1">
+                <div class="channel-tile-head">
+                    <span class="channel-name">Белый интернет</span>
+                    <span class="channel-indicator"></span>
+                </div>
+                <div class="channel-metric">${wiExhausted ? "0" : wiRemainingGb} <span class="channel-metric-unit">ГБ ост.</span></div>
+                <div class="channel-foot">
+                    <div class="progress-track">
+                        <div class="progress-fill" style="width:${wiExhausted ? 0 : wiRemainingPct}%;"></div>
+                    </div>
+                    <div class="channel-meta">
+                        <span>${Number(wi.device_limit || 1)} слот</span>
+                        <span>до ${formatDate(wi.expires_at)}</span>
+                    </div>
+                </div>
+            </button>
+        `
+        : `
+            <button type="button" class="channel-tile is-wi is-inactive" data-jump-tariffs="1">
+                <div class="channel-tile-head">
+                    <span class="channel-name">Белый интернет</span>
+                    <span class="channel-indicator"></span>
+                </div>
+                <div class="channel-metric">—</div>
+                <div class="channel-foot">
+                    <div class="channel-meta">
+                        <span>Не подключен</span>
+                        <span>Подключить</span>
+                    </div>
+                </div>
+            </button>
+        `;
 
     body.innerHTML = `
-        <section class="hero-card is-active" ${isStdGrace ? 'style="border-color: rgba(245, 158, 11, 0.4);"' : ""}>
-            <div class="row">
-                <div style="display:flex; align-items:center; gap:9px;">
-                    <span class="status-dot ${isStdGrace ? "" : "active"}" ${isStdGrace ? 'style="background:var(--accent-warn);"' : ""}></span>
-                    <span class="hero-headline" ${isStdGrace ? 'style="color:var(--accent-warn);"' : ""}>${isStdGrace ? "Подписка закончилась" : "Доступ активен"}</span>
-                </div>
-                <span class="chip ${isStdGrace ? "chip-warn" : "chip-ok"}">${isStdGrace ? "Льготный период" : "Готов к работе"}</span>
+        <section class="hero-section">
+            <div class="hero-title-group">
+                <span class="hero-kicker ${isStdGrace ? "warn" : ""}">${isStdGrace ? `Льготный период · ~${graceHoursLeft} ч.` : "Активен · Готов к работе"}</span>
+                <h1 class="hero-headline-lg">${isStdGrace ? "Подписка закончилась" : "Доступ настроен"}</h1>
+                <p class="hero-sub">${isStdGrace
+                    ? `Основной срок подписки закончился, но доступ сохранён ещё на ~${graceHoursLeft} ч., чтобы вы успели продлить подписку без отключения.`
+                    : "Обе подписки работают по одной ссылке"}</p>
             </div>
+
             ${isStdGrace ? `
-                <p class="muted" style="margin:4px 0 10px 0;">Основной срок подписки закончился, но доступ сохранён ещё на ~${graceHoursLeft} ч., чтобы вы успели продлить подписку без отключения.</p>
-                <button id="graceRenewBtn" type="button" class="btn btn-primary btn-lg" style="margin-bottom:12px;">Продлить подписку</button>
+                <button id="graceRenewBtn" type="button" class="btn btn-primary btn-lg">Продлить подписку</button>
             ` : ""}
-            <div class="option-pills">${pills.join("")}</div>
-            <div class="connect-actions">
+
+            <div class="channels-grid">
+                ${stdTileHtml}
+                ${wiTileHtml}
+            </div>
+
+            <div class="connect-dock">
                 ${desktopFirst ? `
                     <button type="button" data-open-client="happ" class="btn btn-primary btn-lg">${_ICONS.bolt} Подключить в Happ</button>
                 ` : `
@@ -1201,10 +1306,17 @@ function _renderConnectTab(body, d, reload, root) {
                     ` : `
                         <button type="button" data-open-client="happ" class="btn btn-sm">Открыть в Happ</button>
                     `}
-                    <button id="copySubBtn" type="button" class="btn btn-sm">${_ICONS.copy} Копировать ссылку</button>
+                    <button id="copySubBtn" type="button" class="btn btn-sm">${_ICONS.copy} Копировать</button>
                 </div>
+                ${subUrl ? `
+                    <button id="copyUrlStripBtn" type="button" class="sub-link-strip" title="Нажмите, чтобы скопировать">
+                        <span class="sub-link-text">${escapeHtml(subUrl)}</span>
+                        <span style="display:inline-flex; color:var(--text-muted);">${_ICONS.copy}</span>
+                    </button>
+                ` : ""}
             </div>
-            <div class="troubleshoot-box">
+
+            <div class="troubleshoot-box" style="margin-top:0;">
                 <div class="troubleshoot-title">
                     <span class="status-dot warn" style="width:6px; height:6px;"></span>
                     <span>Если не открываются сайты:</span>
@@ -1219,6 +1331,13 @@ function _renderConnectTab(body, d, reload, root) {
         ${_buildDevicesSectionHtml(d)}
     `;
 
+    body.querySelectorAll("[data-jump-tariffs]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            _state.tab = "tariffs";
+            _render(root);
+            window.scrollTo({ top: 0, behavior: "smooth" });
+        });
+    });
     body.querySelectorAll("[data-open-client]").forEach((btn) => {
         btn.addEventListener("click", () => {
             const client = btn.dataset.openClient;
@@ -1228,6 +1347,10 @@ function _renderConnectTab(body, d, reload, root) {
         });
     });
     body.querySelector("#copySubBtn").addEventListener("click", () => copyText(subUrl, "Ссылка скопирована"));
+    const stripBtn = body.querySelector("#copyUrlStripBtn");
+    if (stripBtn) {
+        stripBtn.addEventListener("click", () => copyText(subUrl, "Ссылка скопирована"));
+    }
     const copyInlineBtn = body.querySelector("#copyInlineSubBtn");
     if (copyInlineBtn) {
         copyInlineBtn.addEventListener("click", () => copyText(subUrl, "Основная ссылка скопирована"));
@@ -1487,7 +1610,7 @@ function _buildDevicesSectionHtml(d) {
 
     const rowsHtml = !devices.length
         ? `
-            <div class="card card-center" style="background:var(--bg-elevated); padding:20px 14px;">
+            <div class="card card-center" style="padding:24px 16px;">
                 <div style="color:var(--text-secondary);">${_ICONS.phone}</div>
                 <div style="font-weight:600; font-size:14px;">Устройств пока нет</div>
                 <p class="muted" style="font-size:12px;">
@@ -1495,7 +1618,7 @@ function _buildDevicesSectionHtml(d) {
                 </p>
             </div>
         `
-        : devices.map((dev) => {
+        : `<div class="list-group">${devices.map((dev) => {
             const label = dev.device_name || dev.platform || "Устройство";
             const rawHwid = String(dev.hwid || "");
             const shortHwid = rawHwid.length > 14 ? `${rawHwid.slice(0, 6)}…${rawHwid.slice(-4)}` : rawHwid;
@@ -1507,15 +1630,16 @@ function _buildDevicesSectionHtml(d) {
 
             const leftMeta = meta || shortHwid;
             const dateLabel = formatDate(dev.last_seen_at);
+            const metaLine = [leftMeta, dateLabel].filter(Boolean).join(" · ");
 
             let biRowHtml = "";
             if (needBiToggles) {
                 biRowHtml = `
-                    <label class="device-bi-row">
-                        <span style="font-size:12px; font-weight:500; color:${isBi ? "var(--text-primary)" : "var(--text-secondary)"};">
-                            Белый интернет
+                    <label class="device-bi-bar">
+                        <span style="color:${isBi ? "var(--text-primary)" : "var(--text-secondary)"};">
+                            Слот «Белый интернет»
                         </span>
-                        <span class="switch switch-wi" style="transform:scale(0.86); transform-origin:right center;">
+                        <span class="switch switch-wi">
                             <input type="checkbox" data-bi-toggle="${escapeHtml(dev.hwid)}" data-name="${escapeHtml(label)}" ${isBi ? "checked" : ""}>
                             <span class="switch-track"></span>
                         </span>
@@ -1524,22 +1648,21 @@ function _buildDevicesSectionHtml(d) {
             }
 
             return `
-                <div class="device-row ${isBi && needBiToggles ? "device-bi-active" : ""}">
-                    <div class="device-header">
-                        <div class="device-name-wrap">
-                            <span style="display:inline-flex; flex-shrink:0; color:${isBi ? "var(--accent-white)" : "var(--text-secondary)"};">${devIcon}</span>
-                            <span class="device-name">${escapeHtml(label)}</span>
+                <div class="device-item">
+                    <div class="device-top">
+                        <div class="device-info">
+                            <div class="device-icon-box ${isBi && needBiToggles ? "is-bi" : ""}">${devIcon}</div>
+                            <div style="min-width:0;">
+                                <div class="device-name">${escapeHtml(label)}</div>
+                                <div class="device-meta">${escapeHtml(metaLine)}</div>
+                            </div>
                         </div>
                         <button type="button" class="btn btn-icon btn-danger" data-del="${escapeHtml(dev.hwid)}" data-name="${escapeHtml(label)}" aria-label="Удалить ${escapeHtml(label)}" title="Удалить">${_ICONS.trash}</button>
-                    </div>
-                    <div class="device-meta-row">
-                        <span class="muted" style="min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(leftMeta)}</span>
-                        <span class="muted" style="flex-shrink:0; font-variant-numeric:tabular-nums;">${escapeHtml(dateLabel)}</span>
                     </div>
                     ${biRowHtml}
                 </div>
             `;
-        }).join("");
+        }).join("")}</div>`;
 
     let wiHeaderChipHtml = "";
     if (wiActive) {
@@ -1551,24 +1674,24 @@ function _buildDevicesSectionHtml(d) {
     }
 
     return `
-        <section class="card" style="gap:10px;">
-            <div class="devices-header-row">
-                <div class="card-title" style="margin:0;">Устройства</div>
-                <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+        <section class="section-block">
+            <div class="section-head">
+                <div class="section-title-wrap">
+                    <h2 class="section-title">Устройства</h2>
+                    <span class="mono-badge">${devices.length} / ${totalLimit}</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
                     <button type="button" class="btn btn-icon" id="refreshDevicesBtn" aria-label="Обновить" title="Обновить">${_ICONS.refresh}</button>
                     ${devices.length > 1 ? `<button type="button" class="btn btn-sm btn-danger" id="resetAllDevicesBtn">Сбросить</button>` : ""}
                 </div>
             </div>
-            <div class="devices-chips-row">
-                <span class="chip ${isLimitReached ? "chip-warn" : "chip-muted"}">Подключено: ${devices.length} из ${totalLimit}</span>
-                ${wiHeaderChipHtml}
-            </div>
+            ${wiHeaderChipHtml ? `<div class="devices-chips-row">${wiHeaderChipHtml}</div>` : ""}
             ${isLimitReached ? `
                 <div class="notice-box notice-warn" style="margin:0;">
                     <span>Все слоты (${devices.length} из ${totalLimit}) заняты — удалите устройство, чтобы подключить новое.</span>
                 </div>
             ` : ""}
-            <div style="display:flex; flex-direction:column; gap:8px;">${rowsHtml}</div>
+            ${rowsHtml}
         </section>
     `;
 }
@@ -1740,14 +1863,12 @@ function _bindDevicesEvents(container, d, reload) {
     });
 }
 
-function _renderProfileTab(body, d, reload) {
+function _renderMoreTab(body, d) {
     const ref = d.referrals || {};
     const bal = d.balance || { real: 0, bonus: 0, total: 0 };
-    const minTopup = (d.pricing && d.pricing.min_topup_rub) || 20;
     const minActive = ref.active_min_topup_rub || 67;
     const shareText = `Держи приглашение — скидка ${ref.welcome_discount_pct ?? 25}% на первый заказ`;
     const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(ref.link || "")}&text=${encodeURIComponent(shareText)}`;
-    const items = d.history || [];
     const sup = d.support || {};
     const invitedUsers = ref.invited_users || [];
     const leaderboard = ref.leaderboard || [];
@@ -1760,24 +1881,12 @@ function _renderProfileTab(body, d, reload) {
         return `${n} активных друзей`;
     };
 
-    body.innerHTML = `
-        ${d.financial_hold ? `
-            <div class="notice-box notice-warn" style="margin-bottom:8px;">
-                <span style="display:flex; align-items:center; gap:8px;">${_ICONS.alert}<span>Оплата и изменение подписок временно недоступны: профиль находится на проверке. Свяжитесь с поддержкой.</span></span>
-            </div>
-        ` : (d.payments_maintenance ? `
-            <div class="notice-box notice-warn" style="margin-bottom:8px;">
-                <span style="display:flex; align-items:center; gap:8px;">${_ICONS.wrench}<span>Приём платежей временно приостановлен для проведения технических работ. Действующие подписки работают в штатном режиме.</span></span>
-            </div>
-        ` : "")}
+    const hasSupportRows = Boolean(sup.tg_proxy_url || sup.support_url || sup.tos_url || sup.privacy_url);
 
-        <section class="balance-card">
-            <div>
-                <div class="muted" style="font-size:12px;">Баланс аккаунта</div>
-                <div class="balance-value">${bal.total} ₽</div>
-                <div class="balance-sub">Основной: ${bal.real} ₽ · Бонусы: ${bal.bonus} ₽</div>
-            </div>
-            <button id="profileTopupBtn" type="button" class="btn btn-secondary btn-sm">${_ICONS.plus} Пополнить</button>
+    body.innerHTML = `
+        <section class="hero-title-group">
+            <span class="hero-kicker muted">Рефералы, помощь и документы</span>
+            <h1 class="hero-headline-lg">Ещё</h1>
         </section>
 
         <section class="stats-strip">
@@ -1814,23 +1923,23 @@ function _renderProfileTab(body, d, reload) {
                 <details class="guide-details" style="margin-top:4px;">
                     <summary class="guide-summary">
                         <span>Приглашённые пользователи (${invitedUsers.length})</span>
-                        <span class="muted" style="font-size:11px;">▾</span>
+                        <span class="muted" style="font-size:12px;">▾</span>
                     </summary>
-                    <div class="guide-body" style="gap:6px;">
+                    <div class="guide-body" style="gap:8px;">
                         ${invitedUsers.map((u) => `
                             <div class="item-row">
                                 <div class="row">
                                     <span style="font-size:13px; font-weight:500;">${escapeHtml(u.label)}</span>
                                     <span class="chip ${u.is_active ? "chip-ok" : "chip-muted"}">${u.is_active ? "Активен" : "Ожидает"}</span>
                                 </div>
-                                <div class="muted" style="font-size:11px;">${formatDate(u.created_at)}</div>
+                                <div class="muted" style="font-size:12px;">${formatDate(u.created_at)}</div>
                             </div>
                         `).join("")}
                     </div>
                 </details>
             ` : ""}
             ${leaderboard.length ? `
-                <details class="guide-details" style="margin-top:8px;">
+                <details class="guide-details" style="margin-top:4px;">
                     <summary class="guide-summary">
                         <span>Рейтинг лидеров ${ref.user_rank ? `(Ваше место: #${ref.user_rank})` : ""}</span>
                         <span class="muted" style="font-size:12px;">▾</span>
@@ -1860,21 +1969,95 @@ function _renderProfileTab(body, d, reload) {
             ` : ""}
         </section>
 
-        <section class="card">
-            <div class="card-title">Поддержка и документы</div>
-            <div style="display:flex; flex-direction:column; gap:8px;">
-                ${sup.tg_proxy_url ? `<button id="tgProxyBtn" type="button" class="btn btn-secondary">${_ICONS.send} Прокси для Telegram</button>` : ""}
-                ${sup.support_url ? `<button id="supportContactBtn" type="button" class="btn btn-secondary">${_ICONS.message} Написать в поддержку</button>` : ""}
-                <div class="connect-pair">
-                    ${sup.tos_url ? `<button id="tosLinkBtn" type="button" class="btn btn-sm">Соглашение</button>` : ""}
-                    ${sup.privacy_url ? `<button id="privacyLinkBtn" type="button" class="btn btn-sm">Конфиденциальность</button>` : ""}
+        ${hasSupportRows ? `
+            <section class="section-block">
+                <div class="section-head">
+                    <h2 class="section-title">Помощь и документы</h2>
+                </div>
+                <div class="list-group">
+                    ${sup.tg_proxy_url ? `
+                        <button id="tgProxyBtn" type="button" class="settings-row">
+                            <span class="settings-left">${_ICONS.send}<span>Прокси для Telegram</span></span>
+                            <span class="mono-badge">→</span>
+                        </button>
+                    ` : ""}
+                    ${sup.support_url ? `
+                        <button id="supportContactBtn" type="button" class="settings-row">
+                            <span class="settings-left">${_ICONS.message}<span>Написать в поддержку</span></span>
+                            <span class="mono-badge">→</span>
+                        </button>
+                    ` : ""}
+                    ${sup.tos_url ? `
+                        <button id="tosLinkBtn" type="button" class="settings-row">
+                            <span class="settings-left">${_ICONS.file}<span>Пользовательское соглашение</span></span>
+                            <span class="mono-badge">→</span>
+                        </button>
+                    ` : ""}
+                    ${sup.privacy_url ? `
+                        <button id="privacyLinkBtn" type="button" class="settings-row">
+                            <span class="settings-left">${_ICONS.file}<span>Политика конфиденциальности</span></span>
+                            <span class="mono-badge">→</span>
+                        </button>
+                    ` : ""}
+                </div>
+            </section>
+        ` : ""}
+    `;
+
+    body.querySelector("#shareRefBtn").addEventListener("click", () => openExternalLink(shareUrl));
+    body.querySelector("#copyRefBtn").addEventListener("click", () => copyText(ref.link, "Ссылка скопирована"));
+    body.querySelector("#refLinkBox")?.addEventListener("click", () => copyText(ref.link, "Ссылка скопирована"));
+    const supBtn = body.querySelector("#supportContactBtn");
+    if (supBtn && sup.support_url) supBtn.addEventListener("click", () => openExternalLink(sup.support_url));
+    const tgProxyBtn = body.querySelector("#tgProxyBtn");
+    if (tgProxyBtn && sup.tg_proxy_url) tgProxyBtn.addEventListener("click", () => openExternalLink(sup.tg_proxy_url));
+    const tosBtn = body.querySelector("#tosLinkBtn");
+    if (tosBtn && sup.tos_url) tosBtn.addEventListener("click", () => openExternalLink(sup.tos_url));
+    const privBtn = body.querySelector("#privacyLinkBtn");
+    if (privBtn && sup.privacy_url) privBtn.addEventListener("click", () => openExternalLink(sup.privacy_url));
+}
+
+function _renderProfileTab(body, d, reload) {
+    const bal = d.balance || { real: 0, bonus: 0, total: 0 };
+    const minTopup = (d.pricing && d.pricing.min_topup_rub) || 20;
+    const items = d.history || [];
+    const meta = _getProfileMeta(d);
+
+    body.innerHTML = `
+        <section class="hero-title-group">
+            <div style="display:flex; align-items:center; gap:12px;">
+                <span class="avatar-circle avatar-lg">${_renderAvatarInner(meta)}</span>
+                <div>
+                    <h1 class="hero-headline-lg" style="font-size:20px;">${escapeHtml(meta.displayName)}</h1>
+                    <span class="mono-badge">${escapeHtml([meta.username, meta.userId ? `ID ${meta.userId}` : ""].filter(Boolean).join(" · ") || "Профиль")}</span>
                 </div>
             </div>
         </section>
 
-        <section class="card">
-            <div class="card-title">История операций</div>
-            <div id="historyList" style="display:flex; flex-direction:column; gap:8px;"></div>
+        ${d.financial_hold ? `
+            <div class="notice-box notice-warn">
+                <span style="display:flex; align-items:center; gap:8px;">${_ICONS.alert}<span>Оплата и изменение подписок временно недоступны: профиль находится на проверке. Свяжитесь с поддержкой.</span></span>
+            </div>
+        ` : (d.payments_maintenance ? `
+            <div class="notice-box notice-warn">
+                <span style="display:flex; align-items:center; gap:8px;">${_ICONS.wrench}<span>Приём платежей временно приостановлен для проведения технических работ. Действующие подписки работают в штатном режиме.</span></span>
+            </div>
+        ` : "")}
+
+        <section class="balance-card">
+            <div>
+                <div class="muted" style="font-size:12px;">Баланс аккаунта</div>
+                <div class="balance-value">${bal.total} ₽</div>
+                <div class="balance-sub">Основной: ${bal.real} ₽ · Бонусы: ${bal.bonus} ₽</div>
+            </div>
+            <button id="profileTopupBtn" type="button" class="btn btn-primary btn-sm">${_ICONS.plus} Пополнить</button>
+        </section>
+
+        <section class="section-block">
+            <div class="section-head">
+                <h2 class="section-title">История операций</h2>
+            </div>
+            <div id="historyList"></div>
         </section>
     `;
 
@@ -1889,31 +2072,23 @@ function _renderProfileTab(body, d, reload) {
         }
         _openTopupModal(minTopup, reload);
     });
-    body.querySelector("#shareRefBtn").addEventListener("click", () => openExternalLink(shareUrl));
-    body.querySelector("#copyRefBtn").addEventListener("click", () => copyText(ref.link, "Ссылка скопирована"));
-    body.querySelector("#refLinkBox")?.addEventListener("click", () => copyText(ref.link, "Ссылка скопирована"));
-    const supBtn = body.querySelector("#supportContactBtn");
-    if (supBtn && sup.support_url) supBtn.addEventListener("click", () => openExternalLink(sup.support_url));
-    const tgProxyBtn = body.querySelector("#tgProxyBtn");
-    if (tgProxyBtn && sup.tg_proxy_url) tgProxyBtn.addEventListener("click", () => openExternalLink(sup.tg_proxy_url));
-    const tosBtn = body.querySelector("#tosLinkBtn");
-    if (tosBtn && sup.tos_url) tosBtn.addEventListener("click", () => openExternalLink(sup.tos_url));
-    const privBtn = body.querySelector("#privacyLinkBtn");
-    if (privBtn && sup.privacy_url) privBtn.addEventListener("click", () => openExternalLink(sup.privacy_url));
 
     const list = body.querySelector("#historyList");
     if (!items.length) {
-        list.innerHTML = `<div class="muted" style="text-align:center; padding:18px;">Операций пока нет</div>`;
+        list.innerHTML = `<div class="card card-center" style="padding:20px 16px;"><span class="muted">Операций пока нет</span></div>`;
         return;
     }
 
     const renderHistory = () => {
         list.innerHTML = "";
+        const group = document.createElement("div");
+        group.className = "list-group";
+
         const visibleLimit = _state.historyLimit || 5;
         const visibleItems = items.slice(0, visibleLimit);
         visibleItems.forEach((op) => {
             const row = document.createElement("div");
-            row.className = "item-row";
+            row.className = "device-item";
             const sign = op.amount_rub > 0 ? "+" : "";
             const cls = op.amount_rub > 0 ? "amount-pos" : "amount-neg";
             row.innerHTML = `
@@ -1921,16 +2096,17 @@ function _renderProfileTab(body, d, reload) {
                     <span style="font-weight:500;">${escapeHtml(op.description)}</span>
                     <span class="${cls}">${sign}${op.amount_rub} ₽</span>
                 </div>
-                <div class="muted" style="font-size:11px;">${formatDate(op.created_at)}</div>
+                <div class="device-meta">${formatDate(op.created_at)}</div>
             `;
-            list.appendChild(row);
+            group.appendChild(row);
         });
+        list.appendChild(group);
 
         if (items.length > visibleLimit) {
             const showMoreBtn = document.createElement("button");
             showMoreBtn.type = "button";
             showMoreBtn.className = "btn btn-secondary btn-sm";
-            showMoreBtn.style.cssText = "margin-top:6px; width:100%;";
+            showMoreBtn.style.cssText = "margin-top:8px; width:100%;";
             showMoreBtn.textContent = `Показать ещё (осталось ${items.length - visibleLimit})`;
             showMoreBtn.addEventListener("click", () => {
                 _state.historyLimit = visibleLimit + 10;
@@ -1941,7 +2117,7 @@ function _renderProfileTab(body, d, reload) {
             const collapseBtn = document.createElement("button");
             collapseBtn.type = "button";
             collapseBtn.className = "btn btn-sm";
-            collapseBtn.style.cssText = "margin-top:6px; width:100%; color:var(--text-muted);";
+            collapseBtn.style.cssText = "margin-top:8px; width:100%; color:var(--text-muted);";
             collapseBtn.textContent = "Свернуть список";
             collapseBtn.addEventListener("click", () => {
                 _state.historyLimit = 5;
