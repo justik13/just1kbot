@@ -203,8 +203,6 @@ async def setup_bot(
     dp.message.middleware(_PrivateChatMiddleware())
     dp.callback_query.middleware(_PrivateChatMiddleware())
 
-    start_router._parent_router = None
-    notifications_router._parent_router = None
     dp.include_router(notifications_router)
     dp.include_router(start_router)
     dp.errors.register(global_error_handler)
@@ -414,7 +412,7 @@ async def main():
             await bot.set_my_commands([BotCommand(command="start", description="Открыть главное меню")])
             await bot.set_chat_menu_button(
                 menu_button=MenuButtonWebApp(
-                    text="Кабинет",
+                    text=texts.BTN_MINIAPP_CONNECT,
                     web_app=WebAppInfo(url=f"https://{settings.DOMAIN}/app"),
                 )
             )

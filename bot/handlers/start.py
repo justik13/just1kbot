@@ -8,7 +8,7 @@ import re
 
 from aiogram import Router
 from aiogram.filters import CommandStart
-from aiogram.types import CallbackQuery, MenuButtonWebApp, Message, WebAppInfo
+from aiogram.types import CallbackQuery, Message
 from cachetools import TTLCache
 
 from bot import texts
@@ -130,17 +130,6 @@ async def cmd_start(message: Message) -> None:
 
     settings = get_settings()
     app_url = f"https://{settings.DOMAIN}/app"
-
-    try:
-        await message.bot.set_chat_menu_button(
-            chat_id=message.chat.id,
-            menu_button=MenuButtonWebApp(
-                text=texts.BTN_MINIAPP_CONNECT,
-                web_app=WebAppInfo(url=app_url),
-            ),
-        )
-    except Exception as exc:
-        logger.debug("Failed to update chat menu button for %s: %s", tg_user.id, exc)
 
     safe_name = safe(db_user.first_name or tg_user.first_name or texts.USER_HUB_START)
     discount_line = texts.START_REFERRAL_DISCOUNT_LINE if has_discount else ""
