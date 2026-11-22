@@ -57,7 +57,7 @@ export function renderAdminFinancesView(root, state) {
             <div class="row" style="align-items:center; justify-content:space-between; gap:12px;">
                 <div>
                     <div style="font-weight:600; display:flex; align-items:center; gap:8px;">
-                        <span>🛠 Техработы платежей</span>
+                        <span>Техработы платежей</span>
                         <span id="paymentsMaintBadge" class="chip ${state.paymentsMaintenance ? "chip-warn" : "chip-ok"}">
                             ${state.paymentsMaintenance ? "ВКЛЮЧЕНЫ (оплата заблокирована)" : "ВЫКЛЮЧЕНЫ (оплата активна)"}
                         </span>

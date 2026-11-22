@@ -17,14 +17,18 @@ const _state = {
 };
 
 const _ICONS = {
-    copy: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`,
-    bolt: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`,
-    share: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>`,
-    plus: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
-    phone: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>`,
-    desktop: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>`,
-    refresh: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>`,
-    trash: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>`,
+    copy: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`,
+    bolt: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`,
+    share: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>`,
+    plus: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
+    phone: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>`,
+    desktop: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>`,
+    refresh: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>`,
+    trash: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>`,
+    alert: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`,
+    wrench: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>`,
+    send: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>`,
+    message: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`,
 };
 
 const _CLIENT_LINKS = {
@@ -1100,7 +1104,7 @@ function _renderConnectTab(body, d, reload, root) {
             <section class="hero-card" style="border-color: rgba(239, 68, 68, 0.4);">
                 <div class="row">
                     <div style="display:flex; align-items:center; gap:9px;">
-                        <span class="status-dot" style="background:var(--accent-red); box-shadow:0 0 10px rgba(239, 68, 68, 0.5);"></span>
+                        <span class="status-dot" style="background:var(--accent-red);"></span>
                         <span class="hero-headline" style="color:var(--accent-red);">Обслуживание приостановлено</span>
                     </div>
                     <span class="chip chip-warn">Ограничение</span>
@@ -1175,7 +1179,7 @@ function _renderConnectTab(body, d, reload, root) {
         <section class="hero-card is-active" ${isStdGrace ? 'style="border-color: rgba(245, 158, 11, 0.4);"' : ""}>
             <div class="row">
                 <div style="display:flex; align-items:center; gap:9px;">
-                    <span class="status-dot ${isStdGrace ? "" : "active"}" ${isStdGrace ? 'style="background:var(--accent-warn); box-shadow:0 0 10px rgba(245, 158, 11, 0.5);"' : ""}></span>
+                    <span class="status-dot ${isStdGrace ? "" : "active"}" ${isStdGrace ? 'style="background:var(--accent-warn);"' : ""}></span>
                     <span class="hero-headline" ${isStdGrace ? 'style="color:var(--accent-warn);"' : ""}>${isStdGrace ? "Подписка закончилась" : "Доступ активен"}</span>
                 </div>
                 <span class="chip ${isStdGrace ? "chip-warn" : "chip-ok"}">${isStdGrace ? "Льготный период" : "Готов к работе"}</span>
@@ -1270,11 +1274,11 @@ function _renderTariffsTab(body, d, reload) {
     body.innerHTML = `
         ${d.financial_hold ? `
             <div class="notice-box notice-warn" style="margin-bottom:8px;">
-                <span>⚠️ Оплата и изменение подписок временно недоступны: профиль находится на проверке. Свяжитесь с поддержкой.</span>
+                <span style="display:flex; align-items:center; gap:8px;">${_ICONS.alert}<span>Оплата и изменение подписок временно недоступны: профиль находится на проверке. Свяжитесь с поддержкой.</span></span>
             </div>
         ` : (d.payments_maintenance ? `
             <div class="notice-box notice-warn" style="margin-bottom:8px;">
-                <span>🛠 Приём платежей временно приостановлен для проведения технических работ. Действующие подписки работают в штатном режиме.</span>
+                <span style="display:flex; align-items:center; gap:8px;">${_ICONS.wrench}<span>Приём платежей временно приостановлен для проведения технических работ. Действующие подписки работают в штатном режиме.</span></span>
             </div>
         ` : "")}
 
@@ -1759,11 +1763,11 @@ function _renderProfileTab(body, d, reload) {
     body.innerHTML = `
         ${d.financial_hold ? `
             <div class="notice-box notice-warn" style="margin-bottom:8px;">
-                <span>⚠️ Оплата и изменение подписок временно недоступны: профиль находится на проверке. Свяжитесь с поддержкой.</span>
+                <span style="display:flex; align-items:center; gap:8px;">${_ICONS.alert}<span>Оплата и изменение подписок временно недоступны: профиль находится на проверке. Свяжитесь с поддержкой.</span></span>
             </div>
         ` : (d.payments_maintenance ? `
             <div class="notice-box notice-warn" style="margin-bottom:8px;">
-                <span>🛠 Приём платежей временно приостановлен для проведения технических работ. Действующие подписки работают в штатном режиме.</span>
+                <span style="display:flex; align-items:center; gap:8px;">${_ICONS.wrench}<span>Приём платежей временно приостановлен для проведения технических работ. Действующие подписки работают в штатном режиме.</span></span>
             </div>
         ` : "")}
 
@@ -1826,20 +1830,20 @@ function _renderProfileTab(body, d, reload) {
                 </details>
             ` : ""}
             ${leaderboard.length ? `
-                <details class="guide-details" style="margin-top:6px;">
+                <details class="guide-details" style="margin-top:8px;">
                     <summary class="guide-summary">
                         <span>Рейтинг лидеров ${ref.user_rank ? `(Ваше место: #${ref.user_rank})` : ""}</span>
-                        <span class="muted" style="font-size:11px;">▾</span>
+                        <span class="muted" style="font-size:12px;">▾</span>
                     </summary>
-                    <div class="guide-body" style="gap:6px;">
+                    <div class="guide-body" style="gap:8px;">
                         ${leaderboard.map((item, idx) => {
-                            const medal = idx === 0 ? "🥇" : idx === 1 ? "🥈" : idx === 2 ? "🥉" : `#${item.rank}`;
+                            const rankLabel = `#${item.rank || idx + 1}`;
                             return `
                                 <div class="item-row ${item.is_you ? "is-current-user" : ""}">
                                     <div class="row">
                                         <span style="font-size:13px; font-weight:500;">
-                                            ${medal} ${escapeHtml(item.label)}
-                                            ${item.is_you ? `<span class="chip chip-standard" style="font-size:10px; padding:1px 6px; margin-left:4px;">Вы</span>` : ""}
+                                            <span class="mono muted">${rankLabel}</span> ${escapeHtml(item.label)}
+                                            ${item.is_you ? `<span class="chip chip-standard" style="font-size:12px; padding:2px 8px; margin-left:4px;">Вы</span>` : ""}
                                         </span>
                                         <span class="muted" style="font-size:12px;">${item.count} активных</span>
                                     </div>
@@ -1859,8 +1863,8 @@ function _renderProfileTab(body, d, reload) {
         <section class="card">
             <div class="card-title">Поддержка и документы</div>
             <div style="display:flex; flex-direction:column; gap:8px;">
-                ${sup.tg_proxy_url ? `<button id="tgProxyBtn" type="button" class="btn btn-secondary">🚀 Прокси для Telegram</button>` : ""}
-                ${sup.support_url ? `<button id="supportContactBtn" type="button" class="btn btn-secondary">💬 Написать в поддержку</button>` : ""}
+                ${sup.tg_proxy_url ? `<button id="tgProxyBtn" type="button" class="btn btn-secondary">${_ICONS.send} Прокси для Telegram</button>` : ""}
+                ${sup.support_url ? `<button id="supportContactBtn" type="button" class="btn btn-secondary">${_ICONS.message} Написать в поддержку</button>` : ""}
                 <div class="connect-pair">
                     ${sup.tos_url ? `<button id="tosLinkBtn" type="button" class="btn btn-sm">Соглашение</button>` : ""}
                     ${sup.privacy_url ? `<button id="privacyLinkBtn" type="button" class="btn btn-sm">Конфиденциальность</button>` : ""}
