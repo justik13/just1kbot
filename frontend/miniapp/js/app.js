@@ -1,12 +1,12 @@
-import { api } from "./api.js?v=2.6.6";
-import { escapeHtml, showToast } from "./ui.js?v=2.6.6";
-import { renderSecurity2FA } from "./views/security_2fa.js?v=2.6.6";
-import { renderNodesView, renderSubscriptionSettingsView } from "./views/nodes.js?v=2.6.6";
-import { renderNodeDetailView } from "./views/node_detail.js?v=2.6.6";
-import { renderAdminUsersView } from "./views/admin_users.js?v=2.6.6";
-import { clearBroadcastPollTimer, renderAdminBroadcastsView } from "./views/admin_broadcasts.js?v=2.6.6";
-import { renderAdminFinancesView } from "./views/admin_finances.js?v=2.6.6";
-import { loadAndRenderUserCabinet } from "./views/user_cabinet.js?v=2.6.6";
+import { api } from "./api.js?v=2.7.0";
+import { escapeHtml, showToast } from "./ui.js?v=2.7.0";
+import { renderSecurity2FA } from "./views/security_2fa.js?v=2.7.0";
+import { renderNodesView, renderSubscriptionSettingsView } from "./views/nodes.js?v=2.7.0";
+import { renderNodeDetailView } from "./views/node_detail.js?v=2.7.0";
+import { renderAdminUsersView } from "./views/admin_users.js?v=2.7.0";
+import { clearBroadcastPollTimer, renderAdminBroadcastsView } from "./views/admin_broadcasts.js?v=2.7.0";
+import { renderAdminFinancesView } from "./views/admin_finances.js?v=2.7.0";
+import { loadAndRenderUserCabinet } from "./views/user_cabinet.js?v=2.7.0";
 
 const appState = {
     user: null,
@@ -76,8 +76,13 @@ function _renderErrorCard(root, title, desc) {
 
 function _syncModeSwitch() {
     const modeSwitch = document.getElementById("modeSwitch");
-    if (!modeSwitch) return;
+    const profilePill = document.getElementById("profilePillBtn");
+    const userChip = document.getElementById("userChip");
     const isAdmin = Boolean(appState.user && appState.user.is_admin);
+    const inCabinet = !isAdmin || appState.mode === "cabinet";
+    if (profilePill) profilePill.hidden = !inCabinet;
+    if (userChip) userChip.hidden = inCabinet;
+    if (!modeSwitch) return;
     modeSwitch.hidden = !isAdmin;
     if (!isAdmin) return;
     modeSwitch.querySelectorAll("[data-mode]").forEach((btn) => {
@@ -255,6 +260,7 @@ async function bootstrap() {
         if (!me.user.is_admin) {
             roleChip.hidden = true;
             if (modeSwitch) modeSwitch.hidden = true;
+            _syncModeSwitch();
             await loadAndRenderUserCabinet(root);
             return;
         }
