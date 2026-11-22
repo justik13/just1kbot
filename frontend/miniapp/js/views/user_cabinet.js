@@ -100,7 +100,21 @@ function _newIdempotencyKey() {
 }
 
 function _handlePaymentResponse(res, successMsg, onReload) {
-    if (!res || !res.confirmation_url) {
+    if (!res) {
+        showToast("Не удалось оформить платёж. Попробуйте ещё раз.");
+        return;
+    }
+    if (res.fulfillment_error || res.fulfillment_failed) {
+        showToast(res.fulfillment_error || "Не удалось активировать подписку. Средства сохранены на балансе.");
+        onReload();
+        return;
+    }
+    if (!res.confirmation_url) {
+        const st = String(res.status || "").toLowerCase();
+        if (st === "canceled" || st === "pending") {
+            showToast("Платёж не был завершён. Попробуйте оформить заново.");
+            return;
+        }
         showToast(successMsg);
         onReload();
         return;
@@ -233,7 +247,7 @@ function _openTopupModal(minTopup, onReload) {
             form.querySelector("input[name='amount']").value = b.dataset.amt;
         });
     });
-    const idemKey = _newIdempotencyKey();
+    let idemKey = _newIdempotencyKey();
     form.addEventListener("submit", async (e) => {
         e.preventDefault();
         const amount = Number(form.querySelector("input[name='amount']").value);
@@ -248,6 +262,7 @@ function _openTopupModal(minTopup, onReload) {
             close();
             _handlePaymentResponse(res, "Баланс пополнен", onReload);
         } catch (err) {
+            idemKey = _newIdempotencyKey();
             btn.disabled = false;
             showToast(err.message || "Не удалось создать платёж");
         }
@@ -421,7 +436,7 @@ function _openStandardPlanModal(d, mode, onReload) {
         });
 
         const payBtn = wrap.querySelector("#modalStdPayBtn");
-        const idemKey = _newIdempotencyKey();
+        let idemKey = _newIdempotencyKey();
         payBtn.addEventListener("click", async () => {
             payBtn.disabled = true;
             try {
@@ -429,6 +444,7 @@ function _openStandardPlanModal(d, mode, onReload) {
                 close();
                 _handlePaymentResponse(res, "Подписка «Стандарт» оформлена", onReload);
             } catch (err) {
+                idemKey = _newIdempotencyKey();
                 payBtn.disabled = false;
                 showToast(err.message || "Ошибка оплаты");
             }
@@ -577,7 +593,7 @@ function _openStandardDevicesModal(d, onReload) {
             });
         }
 
-        const idemKey = _newIdempotencyKey();
+        let idemKey = _newIdempotencyKey();
         wrap.querySelector("#devApplyBtn").addEventListener("click", async () => {
             const btn = wrap.querySelector("#devApplyBtn");
             if (isUpgrade) {
@@ -587,6 +603,7 @@ function _openStandardDevicesModal(d, onReload) {
                     close();
                     _handlePaymentResponse(res, `Лимит увеличен до ${targetLimit} устр.`, onReload);
                 } catch (err) {
+                    idemKey = _newIdempotencyKey();
                     btn.disabled = false;
                     showToast(err.message || "Не удалось изменить лимит");
                 }
@@ -734,7 +751,7 @@ function _openWiPurchaseModal(d, mode, onReload) {
         });
 
         const payBtn = wrap.querySelector("#modalWiPayBtn");
-        const idemKey = _newIdempotencyKey();
+        let idemKey = _newIdempotencyKey();
         payBtn.addEventListener("click", async () => {
             payBtn.disabled = true;
             try {
@@ -751,6 +768,7 @@ function _openWiPurchaseModal(d, mode, onReload) {
                     onReload
                 );
             } catch (err) {
+                idemKey = _newIdempotencyKey();
                 payBtn.disabled = false;
                 showToast(err.message || (isRenew ? "Ошибка продления" : "Ошибка подключения"));
             }
@@ -903,7 +921,7 @@ function _openWiManageModal(d, onReload) {
         }
 
         const payBtn = wrap.querySelector("#modalWiManagePayBtn");
-        const idemKey = _newIdempotencyKey();
+        let idemKey = _newIdempotencyKey();
         if (payBtn && selectedItem) {
             payBtn.addEventListener("click", async () => {
                 payBtn.disabled = true;
@@ -927,6 +945,7 @@ function _openWiManageModal(d, onReload) {
                         _handlePaymentResponse(res, "Пакет трафика добавлен", onReload);
                     }
                 } catch (err) {
+                    idemKey = _newIdempotencyKey();
                     payBtn.disabled = false;
                     showToast(err.message || "Ошибка оформления");
                 }
@@ -1342,14 +1361,16 @@ function _renderConnectTab(body, d, reload, root) {
             </button>
         `;
 
+    const isWiOnlyExhausted = Boolean(!std.active && wiExhausted);
+
     body.innerHTML = `
         <section class="hero-section">
             <div class="hero-title-group">
-                <span class="hero-kicker ${isStdGrace ? "warn" : ""}">${isStdGrace ? `Льготный период · ~${graceHoursLeft} ч.` : "Активен · Готов к работе"}</span>
-                <h1 class="hero-headline-lg">${isStdGrace ? "Подписка закончилась" : "Доступ настроен"}</h1>
+                <span class="hero-kicker ${isStdGrace || isWiOnlyExhausted ? "warn" : ""}">${isStdGrace ? `Льготный период · ~${graceHoursLeft} ч.` : (isWiOnlyExhausted ? "Трафик исчерпан" : "Активен · Готов к работе")}</span>
+                <h1 class="hero-headline-lg">${isStdGrace ? "Подписка закончилась" : (isWiOnlyExhausted ? "Трафик закончился" : "Доступ настроен")}</h1>
                 <p class="hero-sub">${isStdGrace
                     ? `Основной срок подписки закончился, но доступ сохранён ещё на ~${graceHoursLeft} ч., чтобы вы успели продлить подписку без отключения.`
-                    : "Обе подписки работают по одной ссылке"}</p>
+                    : (isWiOnlyExhausted ? "Пополните пакет трафика или продлите подписку на вкладке «Тарифы»." : "Обе подписки работают по одной ссылке")}</p>
             </div>
 
             ${isStdGrace ? `
@@ -1491,7 +1512,7 @@ function _renderTariffsTab(body, d, reload) {
             </div>
             <div class="plan-features">
                 <span>• Без ограничений по трафику, от 2 до 10 устройств</span>
-                <span>• Высокая скорость для стриминга, игр и работы</span>
+                <span>• Работает через приложение по единой ссылке подключения</span>
             </div>
             ${std.active ? `
                 <label class="toggle-row">

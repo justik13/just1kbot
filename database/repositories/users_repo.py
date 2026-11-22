@@ -14,7 +14,6 @@ from config.enums import (
     WhiteInternetStatus,
 )
 from database.models import (
-    AccountLedgerEntry,
     Order,
     User,
     UserDevice,
@@ -254,16 +253,7 @@ def _referral_paid_activity_condition(referral) -> object:
         )
         .exists()
     )
-    qualifying_ledger_credit = (
-        select(AccountLedgerEntry.id)
-        .where(
-            AccountLedgerEntry.user_id == referral.id,
-            AccountLedgerEntry.entry_type == "payment_credit",
-            AccountLedgerEntry.amount >= REFERRAL_ACTIVE_MIN_TOPUP_RUB,
-        )
-        .exists()
-    )
-    return or_(qualifying_order, qualifying_ledger_credit)
+    return qualifying_order
 
 
 async def get_user_active_referrals_count(
@@ -391,6 +381,10 @@ async def is_eligible_for_referral_first_discount(
                         )
                     ),
                     discount_used_cond,
+                    or_(
+                        Order.metadata_.is_(None),
+                        Order.metadata_["mixed_fallback_credited"].astext.is_distinct_from("true"),
+                    ),
                 ),
             ),
         )

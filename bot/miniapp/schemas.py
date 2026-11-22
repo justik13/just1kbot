@@ -49,7 +49,7 @@ class StandardDowngradePayload(BaseModel):
 
 class WiCheckoutPayload(BaseModel):
     action: str = Field(..., pattern=r"^(buy|renew|add_slot|topup)$")
-    device_limit: int = Field(default=1, ge=1, le=3)
+    device_limit: int | None = Field(default=None, ge=1, le=3)
     gb: int | None = Field(default=None, ge=10, le=50)
     use_balance: bool = True
     idempotency_key: str | None = Field(default=None, max_length=64)

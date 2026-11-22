@@ -76,6 +76,10 @@ class ServiceUnavailableError(Exception):
     pass
 
 
+class PaymentRetryRequiredError(ValueError):
+    pass
+
+
 async def acquire_user_account_lock(session: AsyncSession, user_id: int) -> None:
     """Acquire canonical per-user transaction advisory lock (-user_id) on PostgreSQL."""
     bind = session.get_bind() if hasattr(session, "get_bind") else None
@@ -753,6 +757,47 @@ class OrderService:
         }
 
     @staticmethod
+    def _format_idempotent_checkout_response(existing_order: Order) -> dict:
+        if existing_order.status == OrderStatus.CANCELED or (
+            existing_order.status == OrderStatus.PENDING
+            and existing_order.payment_method != "wallet"
+            and not existing_order.payment_url
+        ):
+            raise PaymentRetryRequiredError(
+                "Предыдущая попытка оплаты не завершилась. Повторите оформление заказа."
+            )
+        meta = existing_order.metadata_ or {}
+        if existing_order.payment_method == "wallet":
+            resp = {
+                "order_id": str(existing_order.id),
+                "status": existing_order.status,
+                "confirmation_url": None,
+                "charged_balance": int(existing_order.amount_rub),
+                "charged_bonus": int(meta.get("charged_bonus", 0)),
+                "to_pay_rub": 0,
+                "total_cost_rub": int(existing_order.amount_rub),
+                "idempotent": True,
+            }
+        else:
+            resp = {
+                "order_id": str(existing_order.id),
+                "status": existing_order.status,
+                "confirmation_url": existing_order.payment_url,
+                "charged_balance": int(meta.get("wallet_debit_rub", 0)),
+                "charged_bonus": int(meta.get("wallet_bonus_debit_rub", 0)),
+                "to_pay_rub": int(existing_order.amount_rub),
+                "total_cost_rub": int(meta.get("total_cost_rub", existing_order.amount_rub)),
+                "idempotent": True,
+            }
+        if meta.get("mixed_fallback_credited") or meta.get("fulfillment_error"):
+            resp["fulfillment_failed"] = True
+            resp["fulfillment_error"] = (
+                meta.get("fulfillment_error")
+                or "Не удалось активировать подписку. Средства сохранены на балансе."
+            )
+        return resp
+
+    @staticmethod
     async def checkout_order(
         session: AsyncSession,
         *,
@@ -785,28 +830,7 @@ class OrderService:
                 )
             ).scalar_one_or_none()
             if existing_order is not None:
-                meta = existing_order.metadata_ or {}
-                if existing_order.payment_method == "wallet":
-                    return {
-                        "order_id": str(existing_order.id),
-                        "status": existing_order.status,
-                        "confirmation_url": None,
-                        "charged_balance": int(existing_order.amount_rub),
-                        "charged_bonus": int(meta.get("charged_bonus", 0)),
-                        "to_pay_rub": 0,
-                        "total_cost_rub": int(existing_order.amount_rub),
-                        "idempotent": True,
-                    }
-                return {
-                    "order_id": str(existing_order.id),
-                    "status": existing_order.status,
-                    "confirmation_url": existing_order.payment_url,
-                    "charged_balance": int(meta.get("wallet_debit_rub", 0)),
-                    "charged_bonus": int(meta.get("wallet_bonus_debit_rub", 0)),
-                    "to_pay_rub": int(existing_order.amount_rub),
-                    "total_cost_rub": int(meta.get("total_cost_rub", existing_order.amount_rub)),
-                    "idempotent": True,
-                }
+                return OrderService._format_idempotent_checkout_response(existing_order)
         if user is None:
             raise ValueError("User not found")
         if getattr(user, "financial_hold", False):
@@ -863,7 +887,10 @@ class OrderService:
             wi_sub = await get_wi_sub_by_user_id(session, user_id)
             op = operation or ("renew" if wi_sub else "purchase")
             if wi_sub is not None:
-                if wi_sub.status == WhiteInternetStatus.DISABLED:
+                if (
+                    wi_sub.status == WhiteInternetStatus.DISABLED
+                    and op in ("add_device_slot", "topup")
+                ):
                     raise ValueError(texts.WL_SUB_DISABLED)
                 if (
                     getattr(wi_sub, "provisioning_status", None)
@@ -918,7 +945,9 @@ class OrderService:
                 traffic_bytes = pack_bytes
                 description = f"Доп. пакет трафика {pack_gb} ГБ"
             else:
-                if wi_sub is not None and op == "purchase":
+                if wi_sub is not None and wi_sub.status == WhiteInternetStatus.DISABLED:
+                    op = "purchase"
+                elif wi_sub is not None and op == "purchase":
                     if (
                         wi_sub.status
                         in (
@@ -1068,17 +1097,7 @@ class OrderService:
                         )
                     ).scalar_one_or_none()
                     if existing is not None:
-                        meta = existing.metadata_ or {}
-                        return {
-                            "order_id": str(existing.id),
-                            "status": existing.status,
-                            "confirmation_url": None,
-                            "charged_balance": int(existing.amount_rub),
-                            "charged_bonus": int(meta.get("charged_bonus", 0)),
-                            "to_pay_rub": 0,
-                            "total_cost_rub": int(existing.amount_rub),
-                            "idempotent": True,
-                        }
+                        return OrderService._format_idempotent_checkout_response(existing)
                 raise
             if total_cost > 0:
                 await create_order_debit(
@@ -1091,7 +1110,8 @@ class OrderService:
                 )
             await FulfillmentService.fulfill_order(session, order)
             await session.flush()
-            return {
+            order_meta_after = order.metadata_ or {}
+            resp = {
                 "order_id": str(order.id),
                 "status": order.status,
                 "confirmation_url": None,
@@ -1100,6 +1120,13 @@ class OrderService:
                 "to_pay_rub": 0,
                 "total_cost_rub": int(total_cost),
             }
+            if order_meta_after.get("mixed_fallback_credited") or order_meta_after.get("fulfillment_error"):
+                resp["fulfillment_failed"] = True
+                resp["fulfillment_error"] = (
+                    order_meta_after.get("fulfillment_error")
+                    or "Не удалось активировать подписку. Средства сохранены на балансе."
+                )
+            return resp
 
         if getattr(user, "topup_blocked", False):
             raise ValueError(texts.TOPUP_ERROR_BLOCKED)

@@ -949,6 +949,9 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
             return web.json_response({"ok": False, "error": "Укажите traffic_action"}, status=400)
 
         if payload.action == "restrictions":
+            from services.order_service import OrderService, acquire_user_account_lock
+
+            await acquire_user_account_lock(session, user.id)
             locked_user = (
                 await session.execute(
                     select(User)
@@ -965,8 +968,6 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
             await session.flush()
             await SubscriptionService.sync_access_state(session, locked_user)
             if not locked_user.financial_hold and not locked_user.topup_blocked:
-                from services.order_service import OrderService
-
                 held_orders = (
                     await session.scalars(
                         select(Order).where(

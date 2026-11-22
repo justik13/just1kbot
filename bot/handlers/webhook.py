@@ -300,10 +300,16 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                     "white_internet": "Белый интернет",
                     "topup": "Пополнение",
                 }
+                is_partial_refund = refund_alert_info["status"] == "partially_refunded"
                 status_label = (
                     "Частичный возврат"
-                    if refund_alert_info["status"] == "partially_refunded"
+                    if is_partial_refund
                     else "Полный возврат"
+                )
+                footer_line = (
+                    "Требуется ручная проверка (доступ и баланс не изменялись)."
+                    if is_partial_refund
+                    else "Доступ и баланс обновлены автоматически."
                 )
                 refund_text = (
                     "💸 <b>Возврат ЮKassa</b>\n"
@@ -311,7 +317,7 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                     f"Пользователь ID: <code>{refund_alert_info['user_id']}</code>\n"
                     f"Услуга: {service_labels.get(refund_alert_info['service_type'], refund_alert_info['service_type'])}\n"
                     f"Сумма: {refund_alert_info['amount_rub']} ₽ ({status_label})\n"
-                    "Доступ и баланс обновлены автоматически."
+                    f"{footer_line}"
                 )
                 for aid in get_settings().ADMIN_IDS:
                     try:

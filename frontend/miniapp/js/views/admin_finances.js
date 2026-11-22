@@ -220,8 +220,16 @@ export function renderAdminFinancesView(root, state) {
                 btn.disabled = false;
             }
         }).catch(() => {
+            const badge = root.querySelector("#paymentsMaintBadge");
             const btn = root.querySelector("#togglePaymentsMaintBtn");
-            if (btn) btn.disabled = false;
+            if (badge) {
+                badge.className = "chip chip-warn";
+                badge.textContent = "Ошибка загрузки";
+            }
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = "Недоступно";
+            }
         });
     }
 

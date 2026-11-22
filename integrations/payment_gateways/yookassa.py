@@ -489,7 +489,8 @@ class YooKassaGateway(BasePaymentGateway):
         is_refunded = False
         if refunded_val is not None:
             try:
-                is_refunded = Decimal(str(refunded_val)) > 0
+                refunded_rub = Decimal(str(refunded_val))
+                is_refunded = amount_rub is not None and refunded_rub >= amount_rub
             except (InvalidOperation, ValueError, TypeError):
                 is_refunded = False
         return PaymentStatusResult(
