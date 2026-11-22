@@ -351,7 +351,21 @@ async def is_eligible_for_referral_first_discount(
         if paid_orders is not None:
             return False
         paid_orders = 0
-    return int(paid_orders) == 0
+    if int(paid_orders) > 0:
+        return False
+
+    pending_discounted = await session.scalar(
+        select(func.count(Order.id)).where(
+            Order.user_id == user_id,
+            Order.status == "pending",
+            Order.service_type.in_(("standard", "white_internet")),
+            or_(Order.expires_at.is_(None), Order.expires_at > now_utc()),
+            Order.metadata_["is_referral_discount"].astext == "true",
+        )
+    )
+    if not isinstance(pending_discounted, (int, float)):
+        return pending_discounted is None
+    return int(pending_discounted) == 0
 
 
 async def mark_user_bot_blocked(session: AsyncSession, telegram_id: int) -> None:

@@ -54,7 +54,7 @@ class FulfillmentService:
                     vless_sub.expires_at = base + timedelta(days=order.duration_days)
                 if order.device_limit:
                     vless_sub.device_limit = order.device_limit
-                if (order.device_limit or 0) > 2:
+                if op != "renew" and (order.device_limit or 0) > 2:
                     vless_sub.downgrade_cooldown_until = now + timedelta(
                         days=STANDARD_DOWNGRADE_COOLDOWN_DAYS
                     )

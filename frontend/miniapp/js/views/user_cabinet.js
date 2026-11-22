@@ -314,8 +314,13 @@ function _openStandardPlanModal(d, mode, onReload) {
                 ? `<div class="quote-line"><span>К оплате картой / СБП</span><strong>${split.cardDue} ₽</strong></div>`
                 : `<div class="quote-line"><span>К оплате картой / СБП</span><strong style="color:var(--accent-emerald);">0 ₽</strong></div>`
         );
+        const blockedReason = quote && quote.blocked_reason ? quote.blocked_reason : null;
+        if (blockedReason) {
+            lines.push(`<div class="notice-box notice-warn" style="margin-top:6px;"><span>${escapeHtml(blockedReason)}</span></div>`);
+        }
         summaryEl.innerHTML = lines.join("");
         submitBtn.textContent = getCheckoutText(price, split.cardDue, split.balUsed);
+        submitBtn.disabled = Boolean(blockedReason);
     };
 
     const renderModal = () => {
@@ -487,15 +492,23 @@ function _openStandardDevicesModal(d, onReload) {
                 </div>
             `;
         } else if (isDowngrade && quote) {
+            const tooManyDevices = Boolean(
+                blockedReason && blockedReason.includes("устройств") && Number(quote.active_hwid_count || 0) > targetLimit
+            );
             infoHtml = blockedReason
-                ? `<div class="notice-box notice-warn"><span>${escapeHtml(blockedReason)}</span></div>`
+                ? `<div class="notice-box notice-warn" style="flex-direction:column; align-items:flex-start; gap:8px;">
+                        <span>${escapeHtml(blockedReason)}</span>
+                        ${tooManyDevices ? `<button id="devGoDevicesBtn" type="button" class="btn btn-sm">Управлять устройствами</button>` : ""}
+                   </div>`
                 : `<div class="quote-box">
-                        <div class="quote-line"><span>Снижение лимита</span><strong>Бесплатно</strong></div>
                         ${Number(quote.bonus_credit_rub || 0) > 0
-                            ? `<div class="quote-line"><span>Возврат бонусами на баланс</span><strong style="color:var(--accent-emerald);">+${quote.bonus_credit_rub} ₽</strong></div>`
-                            : ""}
+                            ? `<div class="quote-line"><span>Возврат бонусами (${quote.days_left || 0} полн. дн.)</span><strong style="color:var(--accent-emerald);">+${quote.bonus_credit_rub} ₽</strong></div>`
+                            : `<div class="quote-line"><span>Возврат бонусами</span><strong>0 ₽</strong></div>`}
                         <div class="quote-line"><span>Следующее снижение</span><strong>через 7 дней</strong></div>
-                   </div>`;
+                   </div>
+                   ${Number(quote.bonus_credit_rub || 0) > 0
+                       ? `<div class="muted" style="font-size:11px;">Бонусами можно оплатить до 100% следующих заказов.</div>`
+                       : ""}`;
         }
 
         const btnLabel = isSame
@@ -555,25 +568,50 @@ function _openStandardDevicesModal(d, onReload) {
                 renderContent();
             });
         }
+        const goDevBtn = wrap.querySelector("#devGoDevicesBtn");
+        if (goDevBtn) {
+            goDevBtn.addEventListener("click", () => {
+                close();
+                const connectTab = document.querySelector('[data-utab="connect"]');
+                if (connectTab) connectTab.click();
+            });
+        }
+
         const idemKey = _newIdempotencyKey();
         wrap.querySelector("#devApplyBtn").addEventListener("click", async () => {
             const btn = wrap.querySelector("#devApplyBtn");
-            btn.disabled = true;
-            try {
-                if (isUpgrade) {
+            if (isUpgrade) {
+                btn.disabled = true;
+                try {
                     const res = await api.checkoutStandard(targetLimit, 30, useBalance, idemKey);
                     close();
                     _handlePaymentResponse(res, `Лимит увеличен до ${targetLimit} устр.`, onReload);
-                } else {
-                    await api.downgradeStandard(targetLimit);
-                    close();
-                    showToast(`Лимит снижен до ${targetLimit} устр.`);
-                    onReload();
+                } catch (err) {
+                    btn.disabled = false;
+                    showToast(err.message || "Не удалось изменить лимит");
                 }
-            } catch (err) {
-                btn.disabled = false;
-                showToast(err.message || "Не удалось изменить лимит");
+                return;
             }
+            const bonusAmt = Number((quote && quote.bonus_credit_rub) || 0);
+            const bonusMsg = bonusAmt > 0 ? ` На бонусный баланс вернётся ${bonusAmt} ₽.` : "";
+            showConfirmModal({
+                title: "Снизить лимит устройств?",
+                message: `Лимит уменьшится с ${currentLimit} до ${targetLimit} устр.${bonusMsg} Следующее снижение будет доступно через 7 дней.`,
+                confirmText: `Снизить до ${targetLimit} устр.`,
+                cancelText: "Отмена",
+                onConfirm: async () => {
+                    btn.disabled = true;
+                    try {
+                        await api.downgradeStandard(targetLimit);
+                        close();
+                        showToast(`Лимит снижен до ${targetLimit} устр.`);
+                        onReload();
+                    } catch (err) {
+                        btn.disabled = false;
+                        showToast(err.message || "Не удалось изменить лимит");
+                    }
+                },
+            });
         });
     };
 

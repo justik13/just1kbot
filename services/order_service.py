@@ -18,6 +18,7 @@ from config.constants import (
     REFERRAL_WELCOME_DISCOUNT_PERCENT,
     STANDARD_DOWNGRADE_COOLDOWN_DAYS,
     STANDARD_MAX_DEVICES,
+    STANDARD_MAX_EXPIRY_DAYS,
     STANDARD_MIN_DEVICES,
     STANDARD_PLANS,
     VPN_ACCESS_GRACE_HOURS,
@@ -445,19 +446,58 @@ class OrderService:
         return order
 
     @staticmethod
-    async def _is_standard_paid_subscription(session: AsyncSession, user_id: int) -> bool:
-        """Check whether user has at least one paid non-free Standard order."""
-        paid_id = await session.scalar(
-            select(Order.id)
-            .where(
-                Order.user_id == user_id,
-                Order.service_type == "standard",
-                Order.status == "paid",
-                Order.amount_rub > 0,
+    async def _get_standard_downgrade_cap(
+        session: AsyncSession, user_id: int, *, window_days: int = 365
+    ) -> tuple[int, Decimal]:
+        """Return (remaining_paid_cap_rub, effective_discount_ratio) for Standard downgrade."""
+        cutoff = now_utc() - timedelta(days=window_days)
+        paid_orders = (
+            await session.scalars(
+                select(Order)
+                .where(
+                    Order.user_id == user_id,
+                    Order.service_type == "standard",
+                    Order.status == "paid",
+                    Order.paid_at.is_not(None),
+                    Order.paid_at >= cutoff,
+                )
+                .order_by(Order.paid_at.desc())
             )
-            .limit(1)
+        ).all()
+        if not paid_orders:
+            return 0, Decimal(1)
+
+        total_paid_rub = 0
+        total_original_rub = 0
+        for ord_obj in paid_orders:
+            meta = ord_obj.metadata_ or {}
+            order_value = int(Decimal(str(meta.get("total_cost_rub") or ord_obj.amount_rub or 0)))
+            if order_value > 0:
+                orig_value = int(Decimal(str(meta.get("original_price_rub") or order_value)))
+                total_paid_rub += order_value
+                total_original_rub += max(order_value, orig_value)
+
+        if total_paid_rub <= 0:
+            return 0, Decimal(1)
+
+        already_credited = await session.scalar(
+            select(func.coalesce(func.sum(AccountLedgerEntry.amount), 0)).where(
+                AccountLedgerEntry.user_id == user_id,
+                AccountLedgerEntry.entry_type == "admin_adjustment",
+                AccountLedgerEntry.bucket == "bonus",
+                AccountLedgerEntry.created_at >= cutoff,
+                text("metadata @> CAST(:src AS jsonb)").bindparams(
+                    src='{"source": "standard_downgrade_cashback"}'
+                ),
+            )
         )
-        return paid_id is not None
+        cap_left = max(0, total_paid_rub - int(Decimal(str(already_credited or 0))))
+        discount_ratio = (
+            min(Decimal(1), Decimal(total_paid_rub) / Decimal(total_original_rub))
+            if total_original_rub > 0
+            else Decimal(1)
+        )
+        return cap_left, discount_ratio
 
     @staticmethod
     async def quote_standard_change(
@@ -509,6 +549,15 @@ class OrderService:
 
         if target_device_limit == current_limit:
             due = Decimal(calculate_standard_price(target_device_limit, target_duration_days))
+            max_expiry = now + timedelta(days=STANDARD_MAX_EXPIRY_DAYS)
+            horizon_exceeded = not is_permanent_subscription(sub_end) and (
+                sub_end + timedelta(days=target_duration_days) > max_expiry
+            )
+            renew_blocked_reason = (
+                f"Максимальный срок продления — {STANDARD_MAX_EXPIRY_DAYS} дн. вперёд."
+                if horizon_exceeded
+                else None
+            )
             return {
                 "operation": "renew",
                 "due_rub": int(due),
@@ -517,7 +566,7 @@ class OrderService:
                 "bonus_credit_rub": 0,
                 "days_left": max(0, math.ceil((sub_end - now).total_seconds() / 86400.0)),
                 "can_downgrade": False,
-                "blocked_reason": None,
+                "blocked_reason": renew_blocked_reason,
                 "cooldown_until": cooldown_until.isoformat() if cooldown_until else None,
                 "active_hwid_count": active_hwid_count,
             }
@@ -543,10 +592,13 @@ class OrderService:
             }
 
         # Downgrade: target_device_limit < current_limit
+        user_obj = await session.get(User, user_id)
         is_perm = is_permanent_subscription(sub_end)
         full_days_left = 0 if is_perm else max(0, int((sub_end - now).total_seconds() // 86400))
         blocked_reason: str | None = None
-        if cooldown_until and cooldown_until > now:
+        if getattr(user_obj, "financial_hold", False):
+            blocked_reason = "На аккаунте действует финансовое ограничение. Обратитесь в поддержку."
+        elif cooldown_until and cooldown_until > now:
             blocked_reason = f"Снижение лимита доступно после {cooldown_until.strftime('%d.%m.%Y %H:%M')}"
         elif active_hwid_count > target_device_limit:
             blocked_reason = (
@@ -554,12 +606,16 @@ class OrderService:
                 "Удалите лишние устройства."
             )
 
-        is_paid = await OrderService._is_standard_paid_subscription(session, user_id)
-        if is_paid and full_days_left > 0:
-            diff_30 = calculate_standard_price(current_limit, 30) - calculate_standard_price(
-                target_device_limit, 30
+        paid_cap_rub, discount_ratio = await OrderService._get_standard_downgrade_cap(session, user_id)
+        if paid_cap_rub > 0 and full_days_left > 0:
+            diff_90 = calculate_standard_price(current_limit, 90) - calculate_standard_price(
+                target_device_limit, 90
             )
-            bonus_credit = max(0, math.floor(full_days_left * (diff_30 / 30.0)))
+            raw_bonus = Decimal(full_days_left) * (Decimal(diff_90) / Decimal(90)) * discount_ratio
+            bonus_credit = min(
+                paid_cap_rub,
+                max(0, int(raw_bonus.to_integral_value(rounding=ROUND_DOWN))),
+            )
         else:
             bonus_credit = 0
 
@@ -586,6 +642,10 @@ class OrderService:
         user = await OrderService._load_settlement_user(session, user_id)
         if user is None:
             raise ValueError("User not found")
+        if getattr(user, "financial_hold", False):
+            raise FinancialHoldBlockedError(
+                "На аккаунте действует финансовое ограничение. Обратитесь в поддержку."
+            )
 
         quote = await OrderService.quote_standard_change(
             session, user_id, target_device_limit, target_duration_days=30
@@ -724,6 +784,8 @@ class OrderService:
             quote = await OrderService.quote_standard_change(session, user_id, d_limit, d_days)
             if quote["operation"] == "downgrade":
                 raise ValueError("Use downgrade_standard_devices for device downgrade")
+            if quote["operation"] == "renew" and quote.get("blocked_reason"):
+                raise ValueError(quote["blocked_reason"])
             total_cost = Decimal(quote["due_rub"])
             final_devices = d_limit
             final_duration = 0 if quote["operation"] == "upgrade" else d_days
