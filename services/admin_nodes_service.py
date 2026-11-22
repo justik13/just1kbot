@@ -415,6 +415,18 @@ async def discover_and_add_node(
     }
 
 
+def _queue_topology_sync(session: AsyncSession) -> None:
+    """Queue v2 topology sync to run after the current transaction commits and releases row locks."""
+    async def _sync_topology() -> None:
+        from database.connection import session_scope
+        from services.topology_sync_service import sync_v2_topology_to_nodes
+
+        async with session_scope() as topo_session:
+            await sync_v2_topology_to_nodes(topo_session)
+
+    queue_post_commit_task(session, _sync_topology)
+
+
 async def refresh_node(
     session: AsyncSession,
     *,
@@ -422,14 +434,15 @@ async def refresh_node(
     server_id: int,
 ) -> dict[str, Any]:
     """Re-query /v1/node/status and /v1/health and synchronize DB metadata."""
-    server = await get_server_by_id(session, server_id, for_update=True)
-    if server is None:
+    server_ro = await get_server_by_id(session, server_id, for_update=False)
+    if server_ro is None:
         raise AdminNodeServiceError("Node not found", status_code=404)
 
-    extra_cur = server.extra_data if isinstance(server.extra_data, dict) else {}
+    api_url = server_ro.api_url
+    api_key = server_ro.api_key
     status_data, health_data, probe_ok, probe_error = await _probe_v2_node(
-        server.api_url,
-        server.api_key,
+        api_url,
+        api_key,
     )
     if not probe_ok:
         raise AdminNodeServiceError(
@@ -437,13 +450,20 @@ async def refresh_node(
             status_code=502,
         )
 
+    resolved_ip = ""
+    if api_url:
+        host = urlparse(api_url).hostname or ""
+        resolved_ip = await _resolve_hostname_ipv4(host) if host else ""
+
+    server = await get_server_by_id(session, server_id, for_update=True)
+    if server is None:
+        raise AdminNodeServiceError("Node not found", status_code=404)
+
+    extra_cur = server.extra_data if isinstance(server.extra_data, dict) else {}
     caps = derive_v2_capabilities(status_data, health_data)
     extra = merge_v2_extra_data(extra_cur, status_data, health_data)
-    if server.api_url:
-        host = urlparse(server.api_url).hostname or ""
-        resolved = await _resolve_hostname_ipv4(host) if host else ""
-        if resolved:
-            extra["ip"] = resolved
+    if resolved_ip:
+        extra["ip"] = resolved_ip
     role = extra.get("role")
     if role == "exit_node":
         extra["location_code"] = await _ensure_unique_exit_location_code(
@@ -473,8 +493,7 @@ async def refresh_node(
             updates["xray_instance_starttime"] = int(health_data["starttime"])
 
     updated = await update_server(session, server, **updates)
-    from services.topology_sync_service import sync_v2_topology_to_nodes
-    await sync_v2_topology_to_nodes(session)
+    _queue_topology_sync(session)
     logger.info("Admin %s refreshed v2 node %s (role=%s)", admin_id, server.id, role)
     return serialize_server_node(updated)
 
@@ -498,6 +517,15 @@ async def update_node_settings(
     wi_turboflare_badge: str | None = None,
 ) -> dict[str, Any]:
     """Update admin-editable node metadata and credentials."""
+    clean_url: str | None = None
+    resolved_ip = ""
+    if api_url is not None:
+        clean_url = _normalize_api_url(api_url)
+        if not await is_safe_url(clean_url):
+            raise AdminNodeServiceError("Unsafe or forbidden node URL", status_code=400)
+        host = urlparse(clean_url).hostname or ""
+        resolved_ip = await _resolve_hostname_ipv4(host) if host else ""
+
     server = await get_server_by_id(session, server_id, for_update=True)
     if server is None:
         raise AdminNodeServiceError("Node not found", status_code=404)
@@ -514,19 +542,14 @@ async def update_node_settings(
             updates["country_flag"] = country_code_to_flag(raw_flag) or raw_flag
         else:
             updates["country_flag"] = None
-    if api_url is not None:
-        clean_url = _normalize_api_url(api_url)
-        if not await is_safe_url(clean_url):
-            raise AdminNodeServiceError("Unsafe or forbidden node URL", status_code=400)
+    if clean_url is not None:
         existing = await get_server_by_api_url(session, clean_url)
         if existing is not None and existing.id != server_id:
             raise AdminNodeServiceError("Node with this api_url already exists", status_code=409)
         updates["api_url"] = clean_url
-        host = urlparse(clean_url).hostname or ""
-        resolved = await _resolve_hostname_ipv4(host) if host else ""
-        if resolved:
+        if resolved_ip:
             extra_for_ip = updates.get("extra_data") or (dict(server.extra_data) if isinstance(server.extra_data, dict) else {})
-            extra_for_ip["ip"] = resolved
+            extra_for_ip["ip"] = resolved_ip
             updates["extra_data"] = extra_for_ip
     if api_key is not None:
         clean_key = api_key.strip()
@@ -572,8 +595,7 @@ async def update_node_settings(
 
     updated = await update_server(session, server, **updates)
     if any(v is not None for v in (in_standard, in_white_internet)):
-        from services.topology_sync_service import sync_v2_topology_to_nodes
-        await sync_v2_topology_to_nodes(session)
+        _queue_topology_sync(session)
     await AuditService.log_action(
         session,
         admin_id=admin_id,
@@ -619,8 +641,7 @@ async def toggle_node(
         updated.id,
         new_state=updated.health_state or (ServerHealthState.ONLINE if target_active else ServerHealthState.MANUAL_DISABLED),
     )
-    from services.topology_sync_service import sync_v2_topology_to_nodes
-    await sync_v2_topology_to_nodes(session)
+    _queue_topology_sync(session)
     if target_active:
         role = get_server_role(updated)
         if role == "ru_hub":
@@ -660,8 +681,7 @@ async def delete_node(
     await delete_server(session, server)
     from services.workers.node_monitor import clear_server_monitor_state
     clear_server_monitor_state(server_id)
-    from services.topology_sync_service import sync_v2_topology_to_nodes
-    await sync_v2_topology_to_nodes(session)
+    _queue_topology_sync(session)
     await AuditService.log_action(
         session,
         admin_id=admin_id,

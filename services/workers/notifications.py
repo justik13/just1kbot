@@ -452,6 +452,11 @@ async def _send_pre_expiry_notifications(
         batch_ids = user_ids[i : i + NOTIFICATION_BATCH_SIZE]
 
         for uid in batch_ids:
+            telegram_id: int | None = None
+            msg: str | None = None
+            notification_type: str | None = None
+            retry_count = 0
+
             async with session_scope() as session:
                 user = await session.scalar(
                     select(User).where(User.id == uid).with_for_update(skip_locked=True)
@@ -500,9 +505,6 @@ async def _send_pre_expiry_notifications(
 
                 time_left = vless_sub.expires_at - current_time
 
-                msg = None
-                notification_type = None
-
                 if time_left <= timedelta(hours=2) and not vless_sub.notified_2h:
                     msg = NOTIFY_2H
                     notification_type = "2h"
@@ -515,7 +517,7 @@ async def _send_pre_expiry_notifications(
                     msg = NOTIFY_3D
                     notification_type = "3d"
 
-                if not msg:
+                if not msg or not notification_type:
                     continue
 
                 _maybe_reset_retry_on_type_change(
@@ -523,51 +525,66 @@ async def _send_pre_expiry_notifications(
                     notification_type,
                     vless_sub=vless_sub,
                 )
+                await session.flush()
 
                 retry_count = user.notification_retry_count or 0
+                telegram_id = user.telegram_id
 
-                try:
-                    await global_send_limiter.acquire()
+            if telegram_id is None or msg is None or notification_type is None:
+                continue
 
-                    await safe_send_message(
-                        bot,
-                        user.telegram_id,
-                        msg,
-                        reply_markup=get_pre_expiry_keyboard(),
-                        parse_mode="HTML",
-                        raise_forbidden=True,
+            send_ok = False
+            send_err: Exception | None = None
+            try:
+                await global_send_limiter.acquire()
+                await safe_send_message(
+                    bot,
+                    telegram_id,
+                    msg,
+                    reply_markup=get_pre_expiry_keyboard(),
+                    parse_mode="HTML",
+                    raise_forbidden=True,
+                )
+                send_ok = True
+            except Exception as e:
+                send_err = e
+
+            async with session_scope() as session:
+                user = await session.scalar(
+                    select(User).where(User.id == uid).with_for_update()
+                )
+                if user is None:
+                    continue
+                if send_ok:
+                    vless_sub = await session.scalar(
+                        select(VlessSubscription).where(VlessSubscription.user_id == uid).with_for_update()
                     )
-
                     user.notification_retry_count = 0
                     user.last_notification_attempt = current_time
+                    if vless_sub is not None:
+                        if notification_type == "2h":
+                            vless_sub.notified_2h = True
+                            vless_sub.notified_1d = True
+                            vless_sub.notified_3d = True
+                        elif notification_type == "1d":
+                            vless_sub.notified_1d = True
+                            vless_sub.notified_3d = True
+                        elif notification_type == "3d":
+                            vless_sub.notified_3d = True
                     await session.flush()
-
-                    if notification_type == "2h":
-                        vless_sub.notified_2h = True
-                        vless_sub.notified_1d = True
-                        vless_sub.notified_3d = True
-
-                    elif notification_type == "1d":
-                        vless_sub.notified_1d = True
-                        vless_sub.notified_3d = True
-
-                    elif notification_type == "3d":
-                        vless_sub.notified_3d = True
-
-                except Exception as e:
-                    if is_terminal_telegram_error(e):
-                        logger.info("Marking user %s as blocked (terminal telegram error: %s)", user.telegram_id, e)
+                elif send_err is not None:
+                    if is_terminal_telegram_error(send_err):
+                        logger.info("Marking user %s as blocked (terminal telegram error: %s)", telegram_id, send_err)
                         user.is_bot_blocked = True
                         await session.flush()
                     else:
                         user.notification_retry_count = retry_count + 1
                         user.last_notification_attempt = current_time
                         await session.flush()
-
                         logger.warning(
                             "Failed to send pre-expiry notification to %s: %s",
-                            user.telegram_id,
-                            e,
+                            telegram_id,
+                            send_err,
                         )
 
 
@@ -604,6 +621,9 @@ async def _send_post_expiry_notifications(
         batch_ids = user_ids[i : i + NOTIFICATION_BATCH_SIZE]
 
         for uid in batch_ids:
+            telegram_id: int | None = None
+            retry_count = 0
+
             async with session_scope() as session:
                 user = await session.scalar(
                     select(User).where(User.id == uid).with_for_update(skip_locked=True)
@@ -648,40 +668,58 @@ async def _send_post_expiry_notifications(
                     "expired",
                     vless_sub=vless_sub,
                 )
+                await session.flush()
 
                 retry_count = user.notification_retry_count or 0
+                telegram_id = user.telegram_id
 
-                try:
-                    await global_send_limiter.acquire()
+            if telegram_id is None:
+                continue
 
-                    await safe_send_message(
-                        bot,
-                        user.telegram_id,
-                        NOTIFY_EXPIRED,
-                        reply_markup=get_post_expiry_keyboard(),
-                        parse_mode="HTML",
-                        raise_forbidden=True,
+            send_ok = False
+            send_err: Exception | None = None
+            try:
+                await global_send_limiter.acquire()
+                await safe_send_message(
+                    bot,
+                    telegram_id,
+                    NOTIFY_EXPIRED,
+                    reply_markup=get_post_expiry_keyboard(),
+                    parse_mode="HTML",
+                    raise_forbidden=True,
+                )
+                send_ok = True
+            except Exception as e:
+                send_err = e
+
+            async with session_scope() as session:
+                user = await session.scalar(
+                    select(User).where(User.id == uid).with_for_update()
+                )
+                if user is None:
+                    continue
+                if send_ok:
+                    vless_sub = await session.scalar(
+                        select(VlessSubscription).where(VlessSubscription.user_id == uid).with_for_update()
                     )
-
                     user.notification_retry_count = 0
                     user.last_notification_attempt = current_time
-                    vless_sub.notified_expired = True
+                    if vless_sub is not None:
+                        vless_sub.notified_expired = True
                     await session.flush()
-
-                except Exception as e:
-                    if is_terminal_telegram_error(e):
-                        logger.info("Marking user %s as blocked (terminal telegram error: %s)", user.telegram_id, e)
+                elif send_err is not None:
+                    if is_terminal_telegram_error(send_err):
+                        logger.info("Marking user %s as blocked (terminal telegram error: %s)", telegram_id, send_err)
                         user.is_bot_blocked = True
                         await session.flush()
                     else:
                         user.notification_retry_count = retry_count + 1
                         user.last_notification_attempt = current_time
                         await session.flush()
-
                         logger.warning(
                             "Failed to send post-expiry notification to %s: %s",
-                            user.telegram_id,
-                            e,
+                            telegram_id,
+                            send_err,
                         )
 
 
@@ -765,6 +803,11 @@ async def _send_white_internet_notifications(
     for i in range(0, len(sub_ids), NOTIFICATION_BATCH_SIZE):
         batch_ids = sub_ids[i : i + NOTIFICATION_BATCH_SIZE]
         for sid in batch_ids:
+            target_user_id: int | None = None
+            telegram_id: int | None = None
+            notify_type: str | None = None
+            msg: str | None = None
+
             async with session_scope() as session:
                 sub = await session.scalar(
                     select(WhiteInternetSubscription)
@@ -795,8 +838,6 @@ async def _send_white_internet_notifications(
                     continue
 
                 time_left = sub.expires_at - current_time
-                notify_type = None
-                msg = None
 
                 if time_left.total_seconds() <= 0:
                     if not sub.notified_expired:
@@ -837,44 +878,69 @@ async def _send_white_internet_notifications(
                         await session.flush()
                     continue
 
-                try:
-                    await global_send_limiter.acquire()
-                    wi_kb = (
-                        get_post_expiry_keyboard()
-                        if notify_type == "expired"
-                        else get_pre_expiry_keyboard()
+                target_user_id = user.id
+                telegram_id = user.telegram_id
+
+            if target_user_id is None or telegram_id is None or notify_type is None or msg is None:
+                continue
+
+            send_ok = False
+            send_err: Exception | None = None
+            try:
+                await global_send_limiter.acquire()
+                wi_kb = (
+                    get_post_expiry_keyboard()
+                    if notify_type == "expired"
+                    else get_pre_expiry_keyboard()
+                )
+                await safe_send_message(
+                    bot,
+                    telegram_id,
+                    msg,
+                    reply_markup=wi_kb,
+                    parse_mode="HTML",
+                    raise_forbidden=True,
+                )
+                send_ok = True
+            except Exception as e:
+                send_err = e
+
+            if send_ok:
+                async with session_scope() as session:
+                    sub = await session.scalar(
+                        select(WhiteInternetSubscription)
+                        .where(WhiteInternetSubscription.id == sid)
+                        .with_for_update()
                     )
-                    await safe_send_message(
-                        bot,
-                        user.telegram_id,
-                        msg,
-                        reply_markup=wi_kb,
-                        parse_mode="HTML",
-                        raise_forbidden=True,
-                    )
-                    if notify_type == "expired":
-                        sub.notified_expired = True
-                        sub.notified_2h = True
-                        sub.notified_1d = True
-                        sub.notified_3d = True
-                    elif notify_type == "2h":
-                        sub.notified_2h = True
-                        sub.notified_1d = True
-                        sub.notified_3d = True
-                    elif notify_type == "1d":
-                        sub.notified_1d = True
-                        sub.notified_3d = True
-                    elif notify_type == "3d":
-                        sub.notified_3d = True
-                    await session.flush()
-                except Exception as e:
-                    if is_terminal_telegram_error(e):
-                        logger.info("Marking user %s as blocked (terminal telegram error: %s)", user.telegram_id, e)
-                        user.is_bot_blocked = True
+                    if sub is not None:
+                        if notify_type == "expired":
+                            sub.notified_expired = True
+                            sub.notified_2h = True
+                            sub.notified_1d = True
+                            sub.notified_3d = True
+                        elif notify_type == "2h":
+                            sub.notified_2h = True
+                            sub.notified_1d = True
+                            sub.notified_3d = True
+                        elif notify_type == "1d":
+                            sub.notified_1d = True
+                            sub.notified_3d = True
+                        elif notify_type == "3d":
+                            sub.notified_3d = True
                         await session.flush()
-                    else:
-                        logger.warning(
-                            "Failed to send WI notification to %s: %s",
-                            user.telegram_id,
-                            e,
+            elif send_err is not None:
+                if is_terminal_telegram_error(send_err):
+                    logger.info("Marking user %s as blocked (terminal telegram error: %s)", telegram_id, send_err)
+                    async with session_scope() as session:
+                        user = await session.scalar(
+                            select(User).where(User.id == target_user_id).with_for_update()
                         )
+                        if user is not None:
+                            user.is_bot_blocked = True
+                            await session.flush()
+                else:
+                    logger.warning(
+                        "Failed to send WI notification to %s: %s",
+                        telegram_id,
+                        send_err,
+                    )

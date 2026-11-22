@@ -297,11 +297,13 @@ _http_limiter = HttpRateLimiter()
 async def _http_rate_limit_middleware(request: web.Request, handler):
     """Process-local rate limiting for incoming HTTP webhooks and endpoints."""
     path = request.path
-    wi_prefix = (os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX") or WHITE_INTERNET_SUB_PATH_PREFIX).strip().rstrip("/") + "/"
+    raw_wi_prefix = (os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX") or WHITE_INTERNET_SUB_PATH_PREFIX).strip().strip("/")
+    wi_prefix = f"/{raw_wi_prefix}/" if raw_wi_prefix else None
     if (
         path in {"/health", "/webhook/yookassa", "/yookassa/webhook"}
         or path == "/app"
-        or path.startswith(("/app/", "/api/app/", "/sub/", wi_prefix))
+        or path.startswith(("/app/", "/api/app/", "/sub/"))
+        or (wi_prefix is not None and path.startswith(wi_prefix))
     ):
         return await handler(request)
     client_ip = get_trusted_client_ip(request)

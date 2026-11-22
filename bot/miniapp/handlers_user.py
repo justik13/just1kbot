@@ -37,7 +37,7 @@ from config.constants import (
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
     WHITE_INTERNET_TOPUP_PACKS,
 )
-from config.enums import OrderStatus, WhiteInternetStatus
+from config.enums import OrderStatus, WhiteInternetProvisioningStatus, WhiteInternetStatus
 from config.settings import get_settings
 from database.connection import session_scope
 from database.models import Order, User
@@ -804,17 +804,29 @@ async def api_user_device_delete_handler(request: web.Request) -> web.Response:
                 await vless_subscription_repo.add_pending_revocation_uuids(session, vless_sub.id, [deleted_uuid])
             sub_ver = getattr(vless_sub, "version", None) if vless_sub else None
 
-            wi_sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
-            if wi_sub is not None:
-                await white_internet_repo.add_pending_revocation_uuids(session, wi_sub.id, [deleted_uuid])
-
             VlessSubscriptionService.deprovision_background(
                 deleted_uuid,
                 version=sub_ver,
                 sub_id=sub_id,
                 session=session,
-                services=("vless", "white_internet"),
+                services=("vless",),
             )
+            VlessSubscriptionService.ensure_synced_background(user.id, session=session)
+
+            wi_sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
+            if wi_sub is not None:
+                wi_sub = await white_internet_repo.get_subscription_with_lock(session, wi_sub.id) or wi_sub
+                await white_internet_repo.add_pending_revocation_uuids(session, wi_sub.id, [deleted_uuid])
+                wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
+                wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+                await session.flush()
+                VlessSubscriptionService.deprovision_background(
+                    deleted_uuid,
+                    version=wi_sub.desired_version,
+                    sub_id=None,
+                    session=session,
+                    services=("white_internet",),
+                )
 
         _DEVICE_DELETE_COOLDOWN[ctx.telegram_id] = now_mono
         return web.json_response({"ok": True})
@@ -858,20 +870,34 @@ async def api_user_devices_reset_handler(request: web.Request) -> web.Response:
                 )
             sub_ver = getattr(vless_sub, "version", None) if vless_sub else None
 
-            wi_sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
-            if wi_sub is not None:
-                await white_internet_repo.add_pending_revocation_uuids(
-                    session, wi_sub.id, deleted_uuids
-                )
-
             for u in deleted_uuids:
                 VlessSubscriptionService.deprovision_background(
                     u,
                     version=sub_ver,
                     sub_id=sub_id,
                     session=session,
-                    services=("vless", "white_internet"),
+                    services=("vless",),
                 )
+            VlessSubscriptionService.ensure_synced_background(user.id, session=session)
+
+            wi_sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
+            if wi_sub is not None:
+                wi_sub = await white_internet_repo.get_subscription_with_lock(session, wi_sub.id) or wi_sub
+                await white_internet_repo.add_pending_revocation_uuids(
+                    session, wi_sub.id, deleted_uuids
+                )
+                wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
+                wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+                await session.flush()
+                wi_ver = wi_sub.desired_version
+                for u in deleted_uuids:
+                    VlessSubscriptionService.deprovision_background(
+                        u,
+                        version=wi_ver,
+                        sub_id=None,
+                        session=session,
+                        services=("white_internet",),
+                    )
 
         _DEVICE_DELETE_COOLDOWN[ctx.telegram_id] = now_mono
         return web.json_response({"ok": True, "deleted_count": len(deleted_devices)})
@@ -908,6 +934,7 @@ async def api_user_device_priority_handler(request: web.Request) -> web.Response
             WhiteInternetStatus.ACTIVE,
             WhiteInternetStatus.PENDING,
         ):
+            wi_sub = await white_internet_repo.get_subscription_with_lock(session, wi_sub.id) or wi_sub
             wi_limit = max(1, int(getattr(wi_sub, "device_limit", 1) or 1))
             devs = await user_devices_repo.list_user_devices(
                 session, user.id, wi_device_limit=wi_limit
@@ -922,17 +949,22 @@ async def api_user_device_priority_handler(request: web.Request) -> web.Response
                 for d in devs
                 if not d.get("is_bi_assigned") and d.get("device_uuid") and d["device_uuid"] != wi_sub.uuid
             ]
+            for u_on in assigned_uuids:
+                await white_internet_repo.pop_pending_revoked_uuid(session, wi_sub.id, u_on)
             if displaced_uuids:
                 await white_internet_repo.add_pending_revocation_uuids(
                     session, wi_sub.id, displaced_uuids
                 )
+            wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
+            wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+            await session.flush()
             wi_hubs = await servers_repo.get_wi_capable_ru_hubs(session)
             targets = [
                 (h.api_url, h.api_key, h.xray_instance_epoch)
                 for h in wi_hubs
                 if h.api_url and h.api_key
             ]
-            ver_snap = int(getattr(wi_sub, "desired_version", 1) or 1)
+            ver_snap = int(wi_sub.desired_version or 1)
             if targets:
                 from database.connection import queue_post_commit_task
                 from services.xray_node_client import XrayNodeClient

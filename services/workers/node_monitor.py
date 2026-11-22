@@ -352,15 +352,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 re_enabled = True
                                 nonlocal topology_dirty
                                 topology_dirty = True
-                                try:
-                                    from services.topology_sync_service import sync_v2_topology_to_nodes
-                                    await sync_v2_topology_to_nodes(session)
-                                except Exception as topo_exc:
-                                    logger.warning(
-                                        "Failed to sync v2 topology after hosting traffic recovery for server %d: %s",
-                                        server.id,
-                                        topo_exc,
-                                    )
                     if re_enabled:
                         try:
                             await _send_admin_alert_msg(
@@ -963,15 +954,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                                         extra_data=fresh_extra,
                                     )
                                     topology_dirty = True
-                                    try:
-                                        from services.topology_sync_service import sync_v2_topology_to_nodes
-                                        await sync_v2_topology_to_nodes(session)
-                                    except Exception as topo_exc:
-                                        logger.warning(
-                                            "Failed to sync v2 topology after hosting traffic auto-disable for server %d: %s",
-                                            server.id,
-                                            topo_exc,
-                                        )
                                 else:
                                     await update_server(session, fresh, extra_data=fresh_extra)
 

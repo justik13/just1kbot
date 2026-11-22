@@ -173,7 +173,7 @@ async def _sweep_vless_pending_revocations() -> None:
             subs = await vless_subscription_repo.get_subscriptions_with_pending_revocations(session, limit=20)
             servers = await VlessSubscriptionService.get_revocation_target_servers(session)
             targets = VlessSubscriptionService._extract_node_targets(servers)
-            exit_nodes = await VlessSubscriptionService.get_eligible_exit_nodes(session)
+            exit_nodes = await VlessSubscriptionService.get_all_exit_nodes_for_revocation(session)
             sub_items = [
                 (s.id, list(getattr(s, "pending_revoked_uuids", None) or []), getattr(s, "version", 1) or 1)
                 for s in subs

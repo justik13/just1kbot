@@ -916,6 +916,11 @@ class VlessSubscriptionService:
         devices = [str(u).strip() for u in dev_rows if isinstance(u, str) and str(u).strip()]
         dev_uuids = devices[:std_limit] if desired_active else devices
         all_sync_uuids = set(dev_uuids)
+        excess_uuids = (
+            [u for u in devices[std_limit:] if u not in all_sync_uuids]
+            if desired_active and len(devices) > std_limit
+            else []
+        )
 
         if desired_active:
             exit_nodes = await VlessSubscriptionService.get_eligible_exit_nodes(session)
@@ -976,6 +981,19 @@ class VlessSubscriptionService:
                         results[srv_id] = False
                 if not all(res_item.values()) or len(res_item) < len(targets):
                     all_items_ok = False
+
+        if excess_uuids:
+            rev_exit_nodes = await VlessSubscriptionService.get_all_exit_nodes_for_revocation(session)
+            for ex_u in excess_uuids:
+                for u in VlessSubscriptionService._expand_revocation_uuids(ex_u, rev_exit_nodes):
+                    deprov_res = await VlessSubscriptionService._execute_deprovision_on_nodes(
+                        targets, u, version=sub_version, services=("vless",)
+                    )
+                    for srv_id, ok in deprov_res.items():
+                        if not ok:
+                            results[srv_id] = False
+                    if not all(deprov_res.values()) or len(deprov_res) < len(targets):
+                        all_items_ok = False
 
         if (
             all_items_ok
