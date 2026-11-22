@@ -89,9 +89,9 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
         <section class="card">
             <div class="row">
                 <div style="display:flex; align-items:center; gap:10px;">
-                    ${renderFlagHtml(node.country_flag || node.location_code || "🌐", 26)}
+                    ${renderFlagHtml(node.country_flag || node.location_code || "", 26)}
                     <div>
-                        <div style="font-size:16px; font-weight:700;">${escapeHtml(node.name)}</div>
+                        <div style="font-size:16px; font-weight:600;">${escapeHtml(node.name)}</div>
                         <div class="muted">Сервер #${node.id}</div>
                     </div>
                 </div>

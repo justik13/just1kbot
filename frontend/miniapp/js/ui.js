@@ -326,7 +326,7 @@ export function renderFlagHtml(flagOrCode, width = 20) {
     const code = _extractCountryCode(flagOrCode);
     const height = Math.round((width * 15) / 21);
     const wrap = (inner) =>
-        `<svg width="${width}" height="${height}" viewBox="0 0 21 15" aria-label="${escapeHtml(code)}" style="display:inline-block; vertical-align:-2px; border-radius:2px; flex-shrink:0; box-shadow:0 0 0 1px rgba(255,255,255,0.12);">${inner}</svg>`;
+        `<svg width="${width}" height="${height}" viewBox="0 0 21 15" aria-label="${escapeHtml(code)}" style="display:inline-block; vertical-align:-2px; border-radius:2px; flex-shrink:0; outline:1px solid rgba(255,255,255,0.12);">${inner}</svg>`;
     const hStripes = (c1, c2, c3) =>
         wrap(
             `<rect width="21" height="5" fill="${c1}"/><rect y="5" width="21" height="5" fill="${c2}"/><rect y="10" width="21" height="5" fill="${c3}"/>`
@@ -366,7 +366,10 @@ export function renderFlagHtml(flagOrCode, width = 20) {
     if (code && svgs[code]) {
         return svgs[code]();
     }
-    return `<span style="font-size:${Math.max(14, width - 2)}px; line-height:1;">${escapeHtml(flagOrCode || "🌐")}</span>`;
+    if (flagOrCode && flagOrCode !== "🌐") {
+        return `<span style="font-size:${Math.max(14, width - 2)}px; line-height:1;">${escapeHtml(flagOrCode)}</span>`;
+    }
+    return `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`;
 }
 
 export function renderPagination({

@@ -64,7 +64,7 @@ function _openLocationSubModal(node, onDone) {
     `;
     const previewEl = box.querySelector("#locPreviewBox");
     const refreshLocPreview = () => {
-        const flagVal = String(box.querySelector("input[name='country_flag']")?.value || "").trim() || "🌐";
+        const flagVal = String(box.querySelector("input[name='country_flag']")?.value || "").trim();
         const stdOn = Boolean(box.querySelector("input[name='in_standard']")?.checked);
         const wiOn = Boolean(box.querySelector("input[name='in_white_internet']")?.checked);
         const stdName = String(box.querySelector("input[name='vless_name']")?.value || "").trim() || baseLocName;
@@ -89,7 +89,7 @@ function _openLocationSubModal(node, onDone) {
     box.addEventListener("input", refreshLocPreview);
     box.addEventListener("change", refreshLocPreview);
     refreshLocPreview();
-    const close = openModal(`${node.country_flag || "🌐"} ${node.name} (#${node.id})`, box);
+    const close = openModal(`${node.country_flag ? `${node.country_flag} ` : ""}${node.name} (#${node.id})`, box);
     box.addEventListener("submit", async (e) => {
         e.preventDefault();
         const fd = new FormData(box);
@@ -146,10 +146,10 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
 
         <section class="card">
             <div class="card-title">Оформление подписки (INCY / Happ)</div>
-            <div class="notice-box" style="flex-direction:column; align-items:flex-start; gap:3px; font-size:11px; margin-bottom:10px;">
+            <div class="notice-box" style="flex-direction:column; align-items:flex-start; gap:4px; font-size:12px; margin-bottom:12px;">
                 <strong>Пример карточки в INCY / Happ:</strong>
                 <span><b>✦ Just1k</b> <span class="muted">(Profile-Title, автообновление 6 ч)</span></span>
-                <span>🔔 <i>Стандарт: 6 дн. • ∞ • устр. 1/2</i><br><i style="padding-left:18px;">Белый интернет: 29 дн. • 0/50 ГБ • устр. 1/1</i> <span class="muted">(Announce)</span></span>
+                <span><i>Стандарт: 6 дн. • ∞ • устр. 1/2</i><br><i style="padding-left:16px;">Белый интернет: 29 дн. • 0/50 ГБ • устр. 1/1</i> <span class="muted">(Announce)</span></span>
                 <span>Кнопки: <b>Поддержка</b> (Support-Url) • <b>Канал / Бот</b> (Announce-Url)</span>
             </div>
             <form id="subSettingsForm" class="field" style="gap:10px;">
@@ -301,7 +301,7 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
             row.innerHTML = `
                 <div class="row" style="align-items:center;">
                     <div class="node-compact-title">
-                        ${renderFlagHtml(node.country_flag || node.location_code || "🌐", 20)}
+                        ${renderFlagHtml(node.country_flag || node.location_code || "", 20)}
                         <span style="font-weight:600; font-size:14px;">${escapeHtml(node.vless_name || node.name)}</span>
                     </div>
                     <button type="button" class="btn btn-sm">Настроить</button>
@@ -475,7 +475,7 @@ export function renderNodesView(root, state, onReload, onSelectNode) {
         card.innerHTML = `
             <div class="row" style="align-items:center;">
                 <div class="node-compact-title">
-                    ${renderFlagHtml(node.country_flag || node.location_code || "🌐", 20)}
+                    ${renderFlagHtml(node.country_flag || node.location_code || "", 20)}
                     <span style="font-weight:600; font-size:14px;">${escapeHtml(node.name)}</span>
                     <span class="muted" style="font-size:12px;">#${node.id}</span>
                 </div>
