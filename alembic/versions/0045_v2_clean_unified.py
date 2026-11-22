@@ -887,10 +887,12 @@ def upgrade() -> None:
             bind.exec_driver_sql(f"DROP TABLE IF EXISTS {legacy_tbl} CASCADE")
 
     # 4. Servers: purge incompatible v1 servers on 0044->0045 cutover, drop max_clients, add role
+    v1_servers_purged = False
     if "servers" in tables:
         srv_cols = {c["name"] for c in insp.get_columns("servers")}
         if "role" not in srv_cols:
             bind.exec_driver_sql("DELETE FROM servers")
+            v1_servers_purged = True
         else:
             bind.exec_driver_sql("DELETE FROM servers WHERE protocol NOT IN ('vless', 'xray')")
         srv_indexes = {i["name"] for i in insp.get_indexes("servers")}
@@ -926,6 +928,8 @@ def upgrade() -> None:
 
         if "active_hwids" in vs_cols:
             op.drop_column("vless_subscriptions", "active_hwids")
+        if v1_servers_purged and "node_traffic_snapshots" in vs_cols:
+            bind.exec_driver_sql("UPDATE vless_subscriptions SET node_traffic_snapshots = '{}'::jsonb")
 
         add_vs_cols = [
             ("expires_at", sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True)),
