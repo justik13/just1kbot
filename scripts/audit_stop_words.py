@@ -122,10 +122,15 @@ def run_audit() -> list[str]:
                     content = fpath.read_text(encoding="utf-8")
                 except Exception:
                     continue
-                # Clean allowed URL-like scheme strings if any
-                clean_content = content.replace(".vpn", "").replace("vpn://", "")
+                # Clean allowed URL-like scheme strings and internal admin API field identifiers
+                clean_content = (
+                    content.replace(".vpn", "")
+                    .replace("vpn://", "")
+                    .replace("vless_name", "")
+                    .replace('caps.includes("vless")', "")
+                )
                 rel_path = fpath.relative_to(REPO_ROOT).as_posix()
-                if re.search(r"(?<![A-Za-zА-Яа-я])VPN(?![A-Za-zА-Яа-я])", clean_content):
+                if re.search(r"(?<![A-Za-zА-Яа-я])VPN(?![A-Za-zА-Яа-я])", clean_content, re.IGNORECASE):
                     violations.append(f"[{rel_path}] Contains forbidden 'VPN'")
                 if "ВПН" in clean_content.upper():
                     violations.append(f"[{rel_path}] Contains forbidden 'ВПН'")
@@ -136,6 +141,33 @@ def run_audit() -> list[str]:
                         continue
                     if phrase.lower() in clean_content.lower():
                         violations.append(f"[{rel_path}] Contains forbidden phrase: {phrase!r}")
+                for proto in ("vless", "xray", "wireguard", "amnezia", "amneziawg"):
+                    if proto in clean_content.lower():
+                        violations.append(f"[{rel_path}] Exposes forbidden protocol name: {proto!r}")
+
+    # 3b. Audit Caddyfile user-facing error pages / responses
+    caddyfile_path = REPO_ROOT / "Caddyfile"
+    if caddyfile_path.exists():
+        try:
+            content = caddyfile_path.read_text(encoding="utf-8")
+        except Exception:
+            content = ""
+        if content:
+            rel_path = caddyfile_path.relative_to(REPO_ROOT).as_posix()
+            if re.search(r"(?<![A-Za-zА-Яа-я])VPN(?![A-Za-zА-Яа-я])", content, re.IGNORECASE):
+                violations.append(f"[{rel_path}] Contains forbidden 'VPN'")
+            if "ВПН" in content.upper():
+                violations.append(f"[{rel_path}] Contains forbidden 'ВПН'")
+            if re.search(r"(?<![A-Za-z0-9])LTE(?![A-Za-z0-9])", content, re.IGNORECASE):
+                violations.append(f"[{rel_path}] Contains forbidden 'LTE'")
+            for phrase in FORBIDDEN_USER_WORDING:
+                if phrase == "LTE":
+                    continue
+                if phrase.lower() in content.lower():
+                    violations.append(f"[{rel_path}] Contains forbidden phrase: {phrase!r}")
+            for proto in ("vless", "xray", "wireguard", "amnezia", "amneziawg"):
+                if proto in content.lower():
+                    violations.append(f"[{rel_path}] Exposes forbidden protocol name: {proto!r}")
 
     # 4. Audit Telegram keyboards (bot/keyboards/)
     keyboards_dir = REPO_ROOT / "bot" / "keyboards"

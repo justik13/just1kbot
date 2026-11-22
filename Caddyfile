@@ -3,11 +3,13 @@
 	servers {
 		max_header_size 8KB
 		strict_sni_host
+		trusted_proxies static {$CADDY_TRUSTED_PROXIES:private_ranges}
+		trusted_proxies_strict
 	}
 }
 
 http:// {
-	@domain host {$DOMAIN}
+	@domain host {$DOMAIN} {$SUBSCRIPTION_DOMAIN:invalid.localhost} {$SUBSCRIPTION_BACKUP_DOMAIN:invalid.localhost}
 	redir @domain https://{host}{uri} permanent
 	abort
 }
@@ -43,7 +45,7 @@ http:// {
 		header X-Frame-Options "DENY"
 		log_skip
 		reverse_proxy bot:8080 {
-			header_up X-Real-IP {remote_host}
+			header_up X-Real-IP {client_ip}
 		}
 	}
 

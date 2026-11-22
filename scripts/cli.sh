@@ -263,7 +263,7 @@ ${h} {
 		header X-Frame-Options "DENY"
 		log_skip
 		reverse_proxy bot:8080 {
-			header_up X-Real-IP {remote_host}
+			header_up X-Real-IP {client_ip}
 		}
 	}
 	handle {
@@ -768,6 +768,10 @@ cmd_update() {
         fi
         if [[ ! "$force_rebuild" =~ ^[Yy]$ ]]; then
             apply_sysctl_hardening
+            ensure_subscription_domains_caddy
+            if docker inspect --format='{{.State.Status}}' just1kbot_caddy 2>/dev/null | grep -q "^running$"; then
+                docker exec just1kbot_caddy caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
+            fi
             log "Обновление завершено (код уже актуален)."
             if [ "$did_stash" = "true" ]; then
                 echo ""
@@ -905,7 +909,14 @@ cmd_update() {
 
     if [ "$db_ready" != "true" ]; then
         error "База данных (just1kbot_db) не находится в состоянии healthy! Проверка инвариантов отменена."
-        _rollback_services_after_db_failure "$rollback_commit" "$pre_update_backup"
+        if [[ "$migrations_applied" != "true" ]]; then
+            _rollback_services_after_db_failure "$rollback_commit" "$pre_update_backup"
+        else
+            warn "Миграции базы данных уже применены — автоматический откат кода не выполняется, чтобы не запустить старый код на новой схеме."
+            if [ -n "${pre_update_backup:-}" ]; then
+                warn "Восстановите БД из резервной копии: just1kbot restore \"$pre_update_backup\" и затем откатите код."
+            fi
+        fi
         return 1
     fi
 
@@ -1678,6 +1689,7 @@ EOF
 cmd_restart() {
     local service="${1:-bot}"
     echo -e "\n${BOLD}${BLUE}=== ⚡ ПЕРЕЗАПУСК СЕРВИСА: ${service} ===${NC}\n"
+    ensure_subscription_domains_caddy
     if [[ "$service" == "all" ]]; then
         docker compose restart
     else
@@ -1712,6 +1724,7 @@ cmd_config() {
     apply_restart="${apply_restart//[[:space:]]/}"
     if [[ -z "$apply_restart" || "$apply_restart" =~ ^[Yy]([Ee][Ss])?$ ]]; then
         info "Пересоздание контейнеров с новыми переменными окружения..."
+        ensure_subscription_domains_caddy
         dc_up --force-recreate
         log "Конфигурация успешно применена ко всем контейнерам."
     else

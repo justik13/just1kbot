@@ -176,28 +176,27 @@ def _reconcile_bucket_deficits(bind, *, has_orders: bool) -> None:
                             ),
                             {"new_amount": -(debit_abs - shift_amt), "entry_id": entry_id},
                         )
-            rem_deficit -= shift_amt
+                        rem_deficit -= shift_amt
+            if target_row is not None or shift_amt == debit_abs:
+                rem_deficit -= shift_amt
 
         if rem_deficit > 0 and from_bucket == "bonus" and to_bucket == "real" and has_orders:
             # Fallback when bonus_bal < 0 AND real_bal > 0 with no bonus purchase_debit rows left
             # (e.g., a negative admin_adjustment on a user whose funds came from payment_credit).
-            order_row = bind.execute(
+            # Always attach synthetic refund_debit to a dedicated synthetic order (never an arbitrary real paid order).
+            ext_id = f"legacy_deficit_rebalance:{user_id}"
+            rebal_order_id = bind.execute(
                 sa.text(
                     """
-                    SELECT order_id
-                    FROM account_ledger_entries
-                    WHERE user_id = :user_id
-                      AND entry_type = 'payment_credit'
-                      AND order_id IS NOT NULL
-                    ORDER BY created_at DESC, id DESC
+                    SELECT id
+                    FROM orders
+                    WHERE external_id = CAST(:ext_id AS varchar)
                     LIMIT 1
                     """
                 ),
-                {"user_id": user_id},
-            ).fetchone()
-            if order_row is not None and order_row[0] is not None:
-                rebal_order_id = order_row[0]
-            else:
+                {"ext_id": ext_id},
+            ).scalar()
+            if rebal_order_id is None:
                 rebal_order_id = bind.execute(
                     sa.text(
                         """
@@ -233,7 +232,7 @@ def _reconcile_bucket_deficits(bind, *, has_orders: bool) -> None:
                     {
                         "user_id": user_id,
                         "rem_deficit": rem_deficit,
-                        "ext_id": f"legacy_deficit_rebalance:{user_id}",
+                        "ext_id": ext_id,
                     },
                 ).scalar()
 
@@ -611,61 +610,76 @@ def upgrade() -> None:
                 alloc_plan AS (
                     SELECT
                         e.id AS debit_entry_id,
+                        e.user_id,
+                        e.currency,
+                        e.order_id,
+                        e.metadata,
+                        e.created_at,
                         LEAST(ABS(e.amount), at.real_alloc) AS real_part,
-                        ABS(e.amount) - LEAST(ABS(e.amount), at.real_alloc) AS bonus_part
+                        ABS(e.amount) - LEAST(ABS(e.amount), at.real_alloc) AS bonus_part,
+                        CASE
+                            WHEN e.idempotency_key IS NOT NULL
+                            THEN LEFT(e.idempotency_key, 130) || ':bonus_split:' || SUBSTRING(md5(e.idempotency_key || ':' || e.id::text), 1, 8)
+                            ELSE NULL
+                        END AS split_key
                     FROM account_ledger_entries e
                     JOIN alloc_totals at ON at.debit_entry_id = e.id
                     WHERE e.entry_type = 'purchase_debit'
                       AND (at.real_alloc > 0 OR at.bonus_alloc > 0)
                 ),
-                split_updated AS (
-                    UPDATE account_ledger_entries e
-                    SET bucket = 'real',
-                        amount = -ap.real_part
+                split_candidates AS (
+                    SELECT *
                     FROM alloc_plan ap
-                    WHERE e.id = ap.debit_entry_id
-                      AND ap.real_part > 0
+                    WHERE ap.real_part > 0
                       AND ap.bonus_part > 0
-                    RETURNING
-                        e.user_id,
-                        e.currency,
-                        e.order_id,
-                        e.idempotency_key,
-                        e.metadata,
-                        e.created_at,
-                        ap.bonus_part
+                      AND (
+                          ap.split_key IS NULL
+                          OR NOT EXISTS (
+                              SELECT 1
+                              FROM account_ledger_entries existing
+                              WHERE existing.idempotency_key = ap.split_key
+                          )
+                      )
+                ),
+                split_inserted AS (
+                    INSERT INTO account_ledger_entries (
+                        user_id,
+                        entry_type,
+                        bucket,
+                        amount,
+                        currency,
+                        order_id,
+                        idempotency_key,
+                        metadata,
+                        created_at
+                    )
+                    SELECT
+                        sc.user_id,
+                        'purchase_debit',
+                        'bonus',
+                        -sc.bonus_part,
+                        sc.currency,
+                        sc.order_id,
+                        sc.split_key,
+                        sc.metadata,
+                        sc.created_at
+                    FROM split_candidates sc
+                    ON CONFLICT (idempotency_key) DO NOTHING
+                    RETURNING idempotency_key
                 )
-                INSERT INTO account_ledger_entries (
-                    user_id,
-                    entry_type,
-                    bucket,
-                    amount,
-                    currency,
-                    order_id,
-                    idempotency_key,
-                    metadata,
-                    created_at
-                )
-                SELECT
-                    su.user_id,
-                    'purchase_debit',
-                    'bonus',
-                    -su.bonus_part,
-                    su.currency,
-                    su.order_id,
-                    CASE
-                        WHEN su.idempotency_key IS NOT NULL THEN su.idempotency_key || ':bonus_split'
-                        ELSE NULL
-                    END,
-                    su.metadata,
-                    su.created_at
-                FROM split_updated su
-                WHERE su.idempotency_key IS NULL
-                   OR NOT EXISTS (
-                       SELECT 1
-                       FROM account_ledger_entries existing
-                       WHERE existing.idempotency_key = su.idempotency_key || ':bonus_split'
-                   )
+                UPDATE account_ledger_entries e
+                SET bucket = 'real',
+                    amount = -sc.real_part
+                FROM split_candidates sc
+                WHERE e.id = sc.debit_entry_id
+                  AND (
+                      sc.split_key IS NULL
+                      OR EXISTS (
+                          SELECT 1
+                          FROM split_inserted si
+                          WHERE si.idempotency_key = sc.split_key
+                      )
+                  )
                 """
             )
 
@@ -752,7 +766,12 @@ def upgrade() -> None:
                         ud.debit_abs - LEAST(
                             ud.debit_abs,
                             GREATEST(0, urp.avail_real - ud.prior_unalloc_abs)
-                        ) AS bonus_part
+                        ) AS bonus_part,
+                        CASE
+                            WHEN ud.idempotency_key IS NOT NULL
+                            THEN LEFT(ud.idempotency_key, 130) || ':bonus_split:' || SUBSTRING(md5(ud.idempotency_key || ':' || ud.id::text), 1, 8)
+                            ELSE NULL
+                        END AS split_key
                     FROM unalloc_debits ud
                     JOIN user_real_pool urp ON urp.user_id = ud.user_id
                 ),
@@ -765,54 +784,59 @@ def upgrade() -> None:
                       AND up.bonus_part > 0
                     RETURNING e.id
                 ),
-                split_unalloc AS (
-                    UPDATE account_ledger_entries e
-                    SET bucket = 'real',
-                        amount = -up.real_part
+                split_candidates AS (
+                    SELECT *
                     FROM unalloc_plan up
-                    WHERE e.id = up.id
-                      AND up.real_part > 0
+                    WHERE up.real_part > 0
                       AND up.bonus_part > 0
-                    RETURNING
-                        e.user_id,
-                        e.currency,
-                        e.order_id,
-                        e.idempotency_key,
-                        e.metadata,
-                        e.created_at,
-                        up.bonus_part
+                      AND (
+                          up.split_key IS NULL
+                          OR NOT EXISTS (
+                              SELECT 1
+                              FROM account_ledger_entries existing
+                              WHERE existing.idempotency_key = up.split_key
+                          )
+                      )
+                ),
+                split_inserted AS (
+                    INSERT INTO account_ledger_entries (
+                        user_id,
+                        entry_type,
+                        bucket,
+                        amount,
+                        currency,
+                        order_id,
+                        idempotency_key,
+                        metadata,
+                        created_at
+                    )
+                    SELECT
+                        sc.user_id,
+                        'purchase_debit',
+                        'bonus',
+                        -sc.bonus_part,
+                        sc.currency,
+                        sc.order_id,
+                        sc.split_key,
+                        sc.metadata,
+                        sc.created_at
+                    FROM split_candidates sc
+                    ON CONFLICT (idempotency_key) DO NOTHING
+                    RETURNING idempotency_key
                 )
-                INSERT INTO account_ledger_entries (
-                    user_id,
-                    entry_type,
-                    bucket,
-                    amount,
-                    currency,
-                    order_id,
-                    idempotency_key,
-                    metadata,
-                    created_at
-                )
-                SELECT
-                    su.user_id,
-                    'purchase_debit',
-                    'bonus',
-                    -su.bonus_part,
-                    su.currency,
-                    su.order_id,
-                    CASE
-                        WHEN su.idempotency_key IS NOT NULL THEN su.idempotency_key || ':bonus_split'
-                        ELSE NULL
-                    END,
-                    su.metadata,
-                    su.created_at
-                FROM split_unalloc su
-                WHERE su.idempotency_key IS NULL
-                   OR NOT EXISTS (
-                       SELECT 1
-                       FROM account_ledger_entries existing
-                       WHERE existing.idempotency_key = su.idempotency_key || ':bonus_split'
-                   )
+                UPDATE account_ledger_entries e
+                SET bucket = 'real',
+                    amount = -sc.real_part
+                FROM split_candidates sc
+                WHERE e.id = sc.id
+                  AND (
+                      sc.split_key IS NULL
+                      OR EXISTS (
+                          SELECT 1
+                          FROM split_inserted si
+                          WHERE si.idempotency_key = sc.split_key
+                      )
+                  )
                 """
             )
         else:
@@ -979,7 +1003,7 @@ def upgrade() -> None:
                             substr(h, 1, 8) || '-' || substr(h, 9, 4) || '-4' || substr(h, 14, 3) ||
                             '-a' || substr(h, 18, 3) || '-' || substr(h, 21, 12)
                         ),
-                        (COALESCE(u.is_deleted, false) = false AND u.subscription_end IS NOT NULL AND u.subscription_end > now() - interval '4 hours'),
+                        (COALESCE(u.is_deleted, false) = false AND COALESCE(u.is_banned, false) = false AND COALESCE(u.financial_hold, false) = false AND u.subscription_end IS NOT NULL AND u.subscription_end > now() - interval '4 hours'),
                         u.subscription_end,
                         COALESCE(u.device_limit, 0),
                         false,
@@ -1004,7 +1028,7 @@ def upgrade() -> None:
                     SET
                         expires_at = u.subscription_end,
                         device_limit = COALESCE(u.device_limit, 0),
-                        is_active = (COALESCE(u.is_deleted, false) = false AND u.subscription_end IS NOT NULL AND u.subscription_end > now() - interval '4 hours'),
+                        is_active = (COALESCE(u.is_deleted, false) = false AND COALESCE(u.is_banned, false) = false AND COALESCE(u.financial_hold, false) = false AND u.subscription_end IS NOT NULL AND u.subscription_end > now() - interval '4 hours'),
                         notified_3d = COALESCE(u.notified_3d, false),
                         notified_1d = COALESCE(u.notified_1d, false),
                         notified_2h = COALESCE(u.notified_2h, false),
@@ -1017,6 +1041,10 @@ def upgrade() -> None:
     # 6. Drop legacy & Standard columns from users
     if "users" in tables:
         user_cols = {c["name"] for c in insp.get_columns("users")}
+        if "is_banned" in user_cols and "financial_hold" in user_cols:
+            bind.exec_driver_sql(
+                "UPDATE users SET financial_hold = true WHERE COALESCE(is_banned, false) = true AND COALESCE(financial_hold, false) = false"
+            )
         for idx_name in (
             "ix_users_active_subscription",
             "ix_users_expiring_subscription",
@@ -1154,6 +1182,7 @@ def upgrade() -> None:
             "locked_by",
             "last_error_code",
             "last_error",
+            "processed_at",
         ):
             if col in wi_box_cols:
                 op.drop_column("webhook_inbox", col)
