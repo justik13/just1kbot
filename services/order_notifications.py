@@ -8,9 +8,8 @@ already left the payment screen). Whoever delivers first clears the flag.
 
 This module is intentionally free of ``bot.*`` imports (architectural
 firewall: ``services/*.py`` may import only ``bot.texts``): the actual
-sending lives in ``bot/handlers/payment/credit_notify.py`` (full cards for
-the request path) and ``services/workers/credit_notifications.py``
-(compact push for the background path).
+sending lives in ``services/workers/credit_notifications.py`` and
+``bot/handlers/webhook.py``.
 """
 
 from __future__ import annotations

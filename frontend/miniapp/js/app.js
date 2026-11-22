@@ -1,0 +1,298 @@
+import { api } from "./api.js?v=2.7.3";
+import { escapeHtml, showToast } from "./ui.js?v=2.7.3";
+import { renderSecurity2FA } from "./views/security_2fa.js?v=2.7.3";
+import { renderNodesView, renderSubscriptionSettingsView } from "./views/nodes.js?v=2.7.3";
+import { renderNodeDetailView } from "./views/node_detail.js?v=2.7.3";
+import { renderAdminUsersView } from "./views/admin_users.js?v=2.7.3";
+import { clearBroadcastPollTimer, renderAdminBroadcastsView } from "./views/admin_broadcasts.js?v=2.7.3";
+import { renderAdminFinancesView } from "./views/admin_finances.js?v=2.7.3";
+import { loadAndRenderUserCabinet } from "./views/user_cabinet.js?v=2.7.3";
+
+const appState = {
+    user: null,
+    security: null,
+    twoFactorPassed: false,
+    mode: "cabinet",
+    adminTab: "nodes",
+    nodes: [],
+    selectedNodeId: null,
+    usersData: null,
+    usersQuery: "",
+    broadcastsData: null,
+    massTab: "bonus",
+    finSubTab: "orders",
+    financesData: null,
+    finQuery: "",
+    finStatus: "",
+    auditLogsData: null,
+    auditAction: "",
+    auditQuery: "",
+};
+
+let _tgBackListener = null;
+
+function _initTelegramChrome() {
+    const tg = window.Telegram && window.Telegram.WebApp;
+    if (!tg) return;
+    try {
+        tg.ready();
+        tg.expand();
+        tg.setHeaderColor("#050505");
+        tg.setBackgroundColor("#050505");
+    } catch {
+        // Non-critical in older Telegram clients
+    }
+}
+
+function _updateTelegramBackButton(onBack) {
+    const tg = window.Telegram && window.Telegram.WebApp;
+    if (!tg || !tg.BackButton) return;
+    try {
+        if (_tgBackListener) {
+            tg.BackButton.offClick(_tgBackListener);
+            _tgBackListener = null;
+        }
+        if (onBack) {
+            _tgBackListener = onBack;
+            tg.BackButton.onClick(_tgBackListener);
+            tg.BackButton.show();
+        } else {
+            tg.BackButton.hide();
+        }
+    } catch {
+        // Non-critical
+    }
+}
+
+function _renderErrorCard(root, title, desc) {
+    root.innerHTML = `
+        <section class="card card-center">
+            <span class="chip chip-muted">Доступ</span>
+            <div class="card-title">${escapeHtml(title)}</div>
+            <p class="muted">${escapeHtml(desc)}</p>
+        </section>
+    `;
+}
+
+function _syncModeSwitch() {
+    const modeSwitch = document.getElementById("modeSwitch");
+    const profilePill = document.getElementById("profilePillBtn");
+    const userChip = document.getElementById("userChip");
+    const isAdmin = Boolean(appState.user && appState.user.is_admin);
+    const inCabinet = !isAdmin || appState.mode === "cabinet";
+    if (profilePill) profilePill.hidden = !inCabinet;
+    if (userChip) userChip.hidden = inCabinet;
+    if (!modeSwitch) return;
+    modeSwitch.hidden = !isAdmin;
+    if (!isAdmin) return;
+    modeSwitch.querySelectorAll("[data-mode]").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.mode === appState.mode);
+    });
+}
+
+function _renderAdminView() {
+    const root = document.getElementById("appRoot");
+    if (!root) return;
+    _syncModeSwitch();
+
+    if (appState.mode === "cabinet") {
+        clearBroadcastPollTimer();
+        appState.selectedNodeId = null;
+        _updateTelegramBackButton(null);
+        loadAndRenderUserCabinet(root);
+        return;
+    }
+
+    if (appState.adminTab !== "broadcasts") {
+        clearBroadcastPollTimer();
+    }
+
+    if (appState.adminTab === "nodes" && appState.selectedNodeId != null) {
+        const node = appState.nodes.find((n) => n.id === appState.selectedNodeId);
+        if (node) {
+            const onBack = () => {
+                appState.selectedNodeId = null;
+                _updateTelegramBackButton(null);
+                _renderAdminView();
+            };
+            _updateTelegramBackButton(onBack);
+            renderNodeDetailView(root, node, onBack, _reloadNodesAndRender);
+            return;
+        }
+        appState.selectedNodeId = null;
+    }
+
+    _updateTelegramBackButton(null);
+    root.innerHTML = `
+        <nav class="tabs-bar">
+            <button type="button" class="tab-btn ${appState.adminTab === "nodes" ? "active" : ""}" data-atab="nodes">Ноды</button>
+            <button type="button" class="tab-btn ${appState.adminTab === "subscription" ? "active" : ""}" data-atab="subscription">Подписка</button>
+            <button type="button" class="tab-btn ${appState.adminTab === "users" ? "active" : ""}" data-atab="users">Пользователи</button>
+            <button type="button" class="tab-btn ${appState.adminTab === "broadcasts" ? "active" : ""}" data-atab="broadcasts">Рассылки</button>
+            <button type="button" class="tab-btn ${appState.adminTab === "finances" ? "active" : ""}" data-atab="finances">Финансы</button>
+        </nav>
+        <div id="adminTabBody" class="app-main"></div>
+    `;
+
+    root.querySelectorAll("[data-atab]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+            if (appState.adminTab === "broadcasts" && btn.dataset.atab !== "broadcasts") {
+                clearBroadcastPollTimer();
+            }
+            appState.adminTab = btn.dataset.atab;
+            appState.selectedNodeId = null;
+            if (appState.adminTab === "users" && !appState.usersData) {
+                try {
+                    appState.usersData = await api.listUsers(appState.usersQuery || "", appState.usersOffset || 0, 10, appState.usersFilter || "all");
+                } catch (err) {
+                    showToast(err.message || "Не удалось загрузить пользователей");
+                }
+            } else if (appState.adminTab === "broadcasts" && !appState.broadcastsData) {
+                try {
+                    const res = await api.listBroadcasts();
+                    appState.broadcastsData = res.broadcasts || [];
+                    appState.broadcastsTotal = res.total ?? appState.broadcastsData.length;
+                    appState.broadcastsOffset = res.offset ?? 0;
+                    appState.broadcastsLimit = res.limit ?? 20;
+                } catch (err) {
+                    showToast(err.message || "Не удалось загрузить рассылки");
+                }
+            } else if (appState.adminTab === "finances" && !appState.financesData) {
+                try {
+                    const validTabs = ["orders", "subscriptions", "topups"];
+                    appState.financesData = await api.listFinances(
+                        validTabs.includes(appState.finSubTab) ? appState.finSubTab : "orders",
+                        appState.finStatus || "",
+                        appState.finQuery || "",
+                        0,
+                        25
+                    );
+                } catch (err) {
+                    showToast(err.message || "Не удалось загрузить финансы");
+                }
+            }
+            _renderAdminView();
+        });
+    });
+
+    const body = root.querySelector("#adminTabBody");
+    if (appState.adminTab === "nodes") {
+        renderNodesView(body, appState, _reloadNodesAndRender, (id) => {
+            appState.selectedNodeId = id;
+            _renderAdminView();
+        });
+    } else if (appState.adminTab === "subscription") {
+        renderSubscriptionSettingsView(body, appState, _reloadNodesAndRender);
+    } else if (appState.adminTab === "users") {
+        renderAdminUsersView(body, appState);
+    } else if (appState.adminTab === "broadcasts") {
+        renderAdminBroadcastsView(body, appState);
+    } else {
+        renderAdminFinancesView(body, appState);
+    }
+}
+
+async function _reloadNodesAndRender() {
+    try {
+        const res = await api.listNodes();
+        appState.nodes = res.nodes || [];
+    } catch (err) {
+        if (err && err.code === "2fa_required") {
+            appState.twoFactorPassed = false;
+            const root = document.getElementById("appRoot");
+            if (root && appState.mode === "admin") {
+                _openAdmin2FAGate(root);
+            }
+            return;
+        }
+        showToast(err.message || "Не удалось загрузить ноды");
+    }
+    _renderAdminView();
+}
+
+function _openAdmin2FAGate(root) {
+    _syncModeSwitch();
+    _updateTelegramBackButton(() => {
+        appState.mode = "cabinet";
+        _renderAdminView();
+    });
+    renderSecurity2FA(root, appState.security, async (res) => {
+        const isConfigured = Boolean(
+            !res || res.totp_configured || res.configured || res.two_factor_configured || res.verified
+        );
+        appState.security = {
+            ...(appState.security || {}),
+            totp_enabled: true,
+            totp_verified: true,
+            totp_configured: isConfigured,
+            configured: isConfigured,
+            two_factor_configured: isConfigured,
+            two_factor_verified: true,
+            two_factor_mode: "totp",
+        };
+        appState.twoFactorPassed = true;
+        appState.mode = "admin";
+        await _reloadNodesAndRender();
+    });
+}
+
+async function bootstrap() {
+    _initTelegramChrome();
+
+    const root = document.getElementById("appRoot");
+    const userChip = document.getElementById("userChip");
+    const roleChip = document.getElementById("roleChip");
+    const modeSwitch = document.getElementById("modeSwitch");
+
+    if (modeSwitch && !modeSwitch.dataset.bound) {
+        modeSwitch.dataset.bound = "1";
+        modeSwitch.querySelectorAll("[data-mode]").forEach((btn) => {
+            btn.addEventListener("click", async () => {
+                const nextMode = btn.dataset.mode;
+                if (nextMode === appState.mode) return;
+                appState.mode = nextMode;
+                if (nextMode === "admin") {
+                    if (!appState.twoFactorPassed) {
+                        _openAdmin2FAGate(root);
+                        return;
+                    }
+                    if (!appState.nodes.length) {
+                        await _reloadNodesAndRender();
+                        return;
+                    }
+                }
+                _renderAdminView();
+            });
+        });
+    }
+
+    try {
+        const me = await api.getMe();
+        appState.user = me.user;
+        appState.security = me.security;
+        userChip.textContent = me.user.name || "";
+
+        if (!me.user.is_admin) {
+            roleChip.hidden = true;
+            if (modeSwitch) modeSwitch.hidden = true;
+            _syncModeSwitch();
+            await loadAndRenderUserCabinet(root);
+            return;
+        }
+
+        roleChip.hidden = true;
+        appState.twoFactorPassed = Boolean(me.security && me.security.two_factor_verified);
+        appState.mode = "cabinet";
+        _renderAdminView();
+    } catch (err) {
+        _renderErrorCard(
+            root,
+            "Вход через Telegram",
+            err && err.status === 401
+                ? "Откройте панель через кнопку внутри Telegram-бота."
+                : "Сервис временно недоступен."
+        );
+    }
+}
+
+bootstrap();

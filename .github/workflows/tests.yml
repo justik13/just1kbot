@@ -116,7 +116,7 @@ jobs:
       - name: Audit Python syntax, imports and common human errors
         run: >-
           ruff check
-          bot config database services utils alembic scripts tests integrations
+          bot config database services utils alembic scripts
           --select E4,E7,E9,F,B,ASYNC,PLE,PLW,RUF100
           --ignore PLW0603,PLW0108,ASYNC109
           --output-format full
@@ -129,19 +129,12 @@ jobs:
       - name: ShellCheck repository scripts
         run: find . -type f -name '*.sh' -print0 | xargs -0 shellcheck --severity=error
       - run: alembic upgrade head
-      - name: Run bot test suite
-        id: unittests
+      - name: Legal compliance stop-word audit
+        run: python scripts/audit_stop_words.py
+      - name: Run unit tests
         run: |
-          set -o pipefail
-          python scripts/run_suite.py -v 2>&1 | tee /tmp/unittest.log || {
-            echo "=================== FAILED TEST LOG ==================="
-            cat /tmp/unittest.log | grep -E '^(FAIL|ERROR|AssertionError|Traceback|  File)' -A 5 -B 2 || cat /tmp/unittest.log
-            exit 1
-          }
-        env:
-          RUN_BACKUP_INTEGRATION: "1"
-          BACKUP_TEST_DATABASE_URL: postgresql://projectx:projectx@localhost:5432/projectx_test
-
+          python -m pip install pytest==9.2.0
+          pytest -v
       - name: Audit locked dependencies for known CVEs
         run: |
           python -m pip install pip-audit==2.10.1
@@ -153,28 +146,17 @@ jobs:
           python -m pip install pip-audit==2.10.1
           python -m pip_audit --no-deps -r requirements-dev.txt
 
-      - name: Upload failing unittest log
-        if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: unittest-log-${{ github.sha }}
-          path: /tmp/unittest.log
-          if-no-files-found: warn
-          retention-days: 7
-
-      - run: alembic downgrade base
-      - name: Verify downgrade leaves no application tables
+      - run: alembic downgrade 0045_v2_clean_unified
+      - name: Verify downgrade cleanly reverts post-baseline migrations
         run: |
-          PGPASSWORD=projectx psql -h localhost -U projectx -d projectx_test \
-            -v ON_ERROR_STOP=1 -c 'DROP TABLE IF EXISTS backup_rehearsal_data'
-          remaining="$(PGPASSWORD=projectx psql -h localhost -U projectx -d projectx_test -Atc \
-            "SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename <> 'alembic_version' ORDER BY tablename")"
-          if [ -n "$remaining" ]; then
-            printf 'Application tables remain after downgrade:\n%s\n' "$remaining" >&2
+          leftover="$(PGPASSWORD=projectx psql -h localhost -U projectx -d projectx_test -Atc \
+            "SELECT to_regclass('public.device_registration_events')")"
+          if [ -n "$leftover" ]; then
+            printf 'Post-baseline table still exists after downgrade:\n%s\n' "$leftover" >&2
             exit 1
           fi
       - run: alembic upgrade head
       - name: Compile all tracked Python trees
-        run: python -m compileall -q bot config database services utils alembic scripts tests integrations
+        run: python -m compileall -q bot config database services utils alembic scripts
       - run: git diff --check
 

@@ -45,7 +45,7 @@ def _host_is_localish(hostname: str) -> bool:
     h = (hostname or "").lower().strip().strip("[]")
     if not h:
         return False
-    if h in _LOCAL_HOSTNAMES:
+    if h in _LOCAL_HOSTNAMES or h.endswith(".internal") or h.endswith(".local") or "." not in h:
         return True
     try:
         ip = ipaddress.ip_address(h)
@@ -63,6 +63,8 @@ def is_ip_allowed(ip, *, allow_local: bool = False) -> bool:
         return False
     if ip.is_loopback or ip.is_private or ip.is_unspecified:
         return allow_local
+    if not ip.is_global:
+        return False
     return True
 
 

@@ -6,61 +6,11 @@ All domain statuses, entry types, and operation kinds are defined here as standa
 from enum import StrEnum
 
 
-class PaymentProviderStatus(StrEnum):
-    NOT_CREATED = "not_created"
-    CREATING = "creating"
-    PENDING = "pending"
-    WAITING_FOR_CAPTURE = "waiting_for_capture"
-    SUCCEEDED = "succeeded"
-    CANCELED = "canceled"
-    REFUNDED = "refunded"
-    UNKNOWN = "unknown"
-    MANUAL_REVIEW = "manual_review"
-
-
-class PaymentFulfillmentStatus(StrEnum):
-    NOT_READY = "not_ready"
-    PROCESSING = "processing"
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
-    REVERSED = "reversed"
-    MANUAL_REVIEW = "manual_review"
-
-
-class PaymentCheckoutStatus(StrEnum):
-    ACTIVE = "active"
-    ABANDONED = "abandoned"
-
-
-class PaymentReconciliationStatus(StrEnum):
-    OK = "ok"
-    REQUIRED = "required"
-    MISMATCH = "mismatch"
-    MANUAL_REVIEW = "manual_review"
-
-
 class AccountLedgerEntryType(StrEnum):
     PAYMENT_CREDIT = "payment_credit"
     PURCHASE_DEBIT = "purchase_debit"
-    PURCHASE_REVERSAL = "purchase_reversal"
     REFUND_DEBIT = "refund_debit"
-    CHARGEBACK_DEBIT = "chargeback_debit"
     ADMIN_ADJUSTMENT = "admin_adjustment"
-
-
-class ApiOperationType(StrEnum):
-    CREATE_PEER = "create_peer"
-    UPDATE_PEER = "update_peer"
-    DELETE_PEER = "delete_peer"
-
-
-class ApiOperationStatus(StrEnum):
-    PENDING = "pending"
-    PROCESSING = "processing"
-    RETRY = "retry"
-    SUCCEEDED = "succeeded"
-    DEAD = "dead"
-    CANCELLED = "cancelled"
 
 
 class WebhookInboxStatus(StrEnum):
@@ -85,55 +35,28 @@ class ServerLifecycleStatus(StrEnum):
     ARCHIVED = "ARCHIVED"
 
 
-# Backward-compatible alias for payment outbox queue status
-
-
-class VPNProvisioningStatus(StrEnum):
-    PENDING_CREATE = "pending_create"
-    ACTIVE = "active"
-    PENDING_UPDATE = "pending_update"
-    DELETING = "deleting"
-    CREATE_FAILED = "create_failed"
-    CREATE_CLEANUP_PENDING = "create_cleanup_pending"
-    UPDATE_FAILED = "update_failed"
-    DELETE_FAILED = "delete_failed"
-
-
 class AdminAuditAction(StrEnum):
     ACCOUNT_PURCHASE_SETTLED = "ACCOUNT_PURCHASE_SETTLED"
     ACCOUNT_TARIFF_CHANGE_SETTLED = "ACCOUNT_TARIFF_CHANGE_SETTLED"
     ADD_SERVER = "ADD_SERVER"
-    ADD_TARIFF = "ADD_TARIFF"
     ADMIN_BALANCE_DEDUCT = "ADMIN_BALANCE_DEDUCT"
     ADMIN_BALANCE_TOPUP = "ADMIN_BALANCE_TOPUP"
-    ADMIN_DEVICE_DELETE = "ADMIN_DEVICE_DELETE"
-    ADMIN_DIRECT_MESSAGE = "ADMIN_DIRECT_MESSAGE"
     ADMIN_DIRECT_MESSAGE_SENT = "ADMIN_DIRECT_MESSAGE_SENT"
     ADMIN_SUB_CHANGE = "ADMIN_SUB_CHANGE"
     ADMIN_SUB_EXTEND = "ADMIN_SUB_EXTEND"
     ADMIN_SUB_GRANT = "ADMIN_SUB_GRANT"
     ADMIN_SUB_REDUCE = "ADMIN_SUB_REDUCE"
     BALANCE_REFUND_REQUESTED = "BALANCE_REFUND_REQUESTED"
-    BAN = "BAN"
-    BAN_USER = "BAN_USER"
     BROADCAST = "BROADCAST"
     BROADCAST_COMPLETED = "BROADCAST_COMPLETED"
     CHANGE_TARIFF = "CHANGE_TARIFF"
     CLEANUP_DEVICE_DELETE = "CLEANUP_DEVICE_DELETE"
     DEDUCT_USER_BALANCE = "DEDUCT_USER_BALANCE"
-    DELETE_DEVICE = "DELETE_DEVICE"
     DELETE_SERVER = "DELETE_SERVER"
-    DELETE_TARIFF = "DELETE_TARIFF"
-    DEVICE_CREATE = "DEVICE_CREATE"
-    DEVICE_CREATED = "DEVICE_CREATED"
-    DEVICE_CREATE_BLOCKED = "DEVICE_CREATE_BLOCKED"
-    DEVICE_DELETE = "DEVICE_DELETE"
-    DEVICE_DELETED = "DEVICE_DELETED"
-    DEVICE_RENAME = "DEVICE_RENAME"
     EDIT_SERVER = "EDIT_SERVER"
-    EDIT_TARIFF = "EDIT_TARIFF"
     EXTEND = "EXTEND"
     GRANT = "GRANT"
+    INCY_SETTINGS_UPDATED = "INCY_SETTINGS_UPDATED"
     MANUAL_GRANT = "MANUAL_GRANT"
     MASS_BONUS_GRANTED = "MASS_BONUS_GRANTED"
     MASS_SUB_EXTEND = "MASS_SUB_EXTEND"
@@ -151,18 +74,13 @@ class AdminAuditAction(StrEnum):
     REFERRAL_BONUS_GRANTED = "REFERRAL_BONUS_GRANTED"
     TOGGLE_MAINTENANCE = "TOGGLE_MAINTENANCE"
     TOGGLE_SERVER = "TOGGLE_SERVER"
-    UNBAN = "UNBAN"
-    UNBAN_USER = "UNBAN_USER"
     USER_REGISTER = "USER_REGISTER"
     USER_RESTORED = "USER_RESTORED"
     WELCOME_BONUS_GRANTED = "WELCOME_BONUS_GRANTED"
     WHITE_INTERNET_DEVLIMIT_SET = "WHITE_INTERNET_DEVLIMIT_SET"
     WHITE_INTERNET_EXTEND = "WHITE_INTERNET_EXTEND"
-    WHITE_INTERNET_GRANT_TRIAL = "WHITE_INTERNET_GRANT_TRIAL"
     WHITE_INTERNET_HWID_RESET = "WHITE_INTERNET_HWID_RESET"
-    WHITE_INTERNET_ORIGIN_MIGRATED = "WHITE_INTERNET_ORIGIN_MIGRATED"
     WHITE_INTERNET_QUOTA_SET = "WHITE_INTERNET_QUOTA_SET"
-    WHITE_INTERNET_RESET_TRIAL = "WHITE_INTERNET_RESET_TRIAL"
     WHITE_INTERNET_TOKEN_RESET = "WHITE_INTERNET_TOKEN_RESET"
     WHITE_INTERNET_TRAFFIC_ADDED = "WHITE_INTERNET_TRAFFIC_ADDED"
     WHITE_INTERNET_TRAFFIC_RESET = "WHITE_INTERNET_TRAFFIC_RESET"
@@ -174,7 +92,6 @@ class AdminAuditAction(StrEnum):
 class ServiceType(StrEnum):
     STANDARD = "standard"
     WHITE_INTERNET = "white_internet"
-    AWG = "awg"
 
 
 class WhiteInternetStatus(StrEnum):
@@ -194,14 +111,10 @@ class WhiteInternetProvisioningStatus(StrEnum):
     FAILED = "FAILED"
 
 
-class WhiteInternetGrantType(StrEnum):
-    BASE = "BASE"
-    TOPUP = "TOPUP"
-
-
 class OrderStatus(StrEnum):
     PENDING = "pending"
     PAID = "paid"
+    PARTIALLY_REFUNDED = "partially_refunded"
     REFUNDED = "refunded"
     CANCELED = "canceled"
 
@@ -210,26 +123,17 @@ class OrderServiceType(StrEnum):
     STANDARD = "standard"
     WHITE_INTERNET = "white_internet"
     TOPUP = "topup"
-    AWG = "awg"
 
 
 __all__ = [
     "AccountLedgerEntryType",
     "AdminAuditAction",
-    "ApiOperationStatus",
-    "ApiOperationType",
     "OrderStatus",
     "OrderServiceType",
-    "PaymentCheckoutStatus",
-    "PaymentFulfillmentStatus",
-    "PaymentProviderStatus",
-    "PaymentReconciliationStatus",
     "ServerHealthState",
     "ServerLifecycleStatus",
     "ServiceType",
-    "VPNProvisioningStatus",
     "WebhookInboxStatus",
-    "WhiteInternetGrantType",
     "WhiteInternetProvisioningStatus",
     "WhiteInternetStatus",
 ]

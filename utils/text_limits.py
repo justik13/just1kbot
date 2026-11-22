@@ -57,7 +57,8 @@ def split_text_by_lines(
                     if len(current) + len(close_tag) <= limit:
                         current += close_tag
                     else:
-                        current = current[:limit - len(close_tag)] + close_tag
+                        head = re.sub(r"<[^>]*$", "", current[:limit - len(close_tag)])
+                        current = head + close_tag
                 parts.append(current)
                 current = ""
 
@@ -110,54 +111,3 @@ def split_text_by_lines(
         parts.append(current)
 
     return parts
-
-
-def truncate_details(
-    value: str | None,
-    limit: int = 300,
-) -> str:
-    """
-    Обрезает длинные details для audit log и админских экранов.
-    """
-    if not value:
-        return ""
-
-    value = str(value)
-
-    if len(value) <= limit:
-        return value
-
-    return value[:limit] + "…"
-
-
-def truncate_button_text(
-    text: str,
-    max_bytes: int = 60,
-) -> str:
-    """
-    Обрезает текст inline-кнопки с учётом лимита Telegram.
-
-    Telegram ограничивает текст кнопки примерно 64 байтами.
-    Используем 60 байт как безопасный лимит.
-    """
-    if text is None:
-        return ""
-
-    text = str(text)
-
-    encoded = text.encode("utf-8")
-
-    if len(encoded) <= max_bytes:
-        return text
-
-    ellipsis = "…"
-    ellipsis_bytes = len(ellipsis.encode("utf-8"))
-
-    target_bytes = max_bytes - ellipsis_bytes
-
-    if target_bytes <= 0:
-        return ellipsis
-
-    truncated = encoded[:target_bytes].decode("utf-8", "ignore")
-
-    return truncated.rstrip() + ellipsis

@@ -205,7 +205,13 @@ check_bot_update_on_entry() {
     origin_url=$(git -C "$PROJECT_DIR" remote get-url origin 2>/dev/null || echo "")
     [[ -n "$origin_url" ]] || return 0
 
-    branch="main"
+    local env_branch=""
+    if [[ -f "${PROJECT_DIR}/.env" ]]; then
+        env_branch=$(grep -E '^JUST1KBOT_BRANCH=' "${PROJECT_DIR}/.env" | tail -n1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d '[:space:]' || true)
+    fi
+    branch=$(git -C "$PROJECT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+    [[ "$branch" == "HEAD" || -z "$branch" ]] && branch="main"
+    branch="${JUST1KBOT_BRANCH:-${env_branch:-$branch}}"
     local_sha=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "")
     [[ "$local_sha" =~ ^[0-9a-f]{40}$ ]] || return 0
 
@@ -216,6 +222,58 @@ check_bot_update_on_entry() {
         echo -e "  ${YELLOW}⚠️  Доступны изменения в GitHub origin/${branch}. Выполните: [3] Безопасное обновление${NC}"
     fi
     return 0
+}
+
+ensure_subscription_domains_caddy() {
+    local env_file="${PROJECT_DIR}/.env"
+    local conf_dir="${PROJECT_DIR}/caddy_conf.d"
+    local sub_caddy="${conf_dir}/subscriptions.caddy"
+    [[ -f "$env_file" ]] || return 0
+    mkdir -p "$conf_dir"
+
+    local main_dom sub_dom backup_dom cdn_dom app_port wi_prefix
+    main_dom=$(grep -E '^DOMAIN=' "$env_file" | tail -n1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d '[:space:]' || true)
+    sub_dom=$(grep -E '^SUBSCRIPTION_DOMAIN=' "$env_file" | tail -n1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d '[:space:]' || true)
+    backup_dom=$(grep -E '^SUBSCRIPTION_BACKUP_DOMAIN=' "$env_file" | tail -n1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d '[:space:]' || true)
+    cdn_dom=$(grep -E '^WHITE_INTERNET_CDN_DOMAIN=' "$env_file" | tail -n1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d '[:space:]' || true)
+    app_port=$(grep -E '^YOOKASSA_WEBHOOK_PORT=' "$env_file" | tail -n1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d '[:space:]' || true)
+    wi_prefix=$(grep -E '^WHITE_INTERNET_SUB_PATH_PREFIX=' "$env_file" | tail -n1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d '[:space:]' || true)
+    app_port="${app_port:-8443}"
+    wi_prefix="${wi_prefix:-/sub/wl}"
+
+    local extra_hosts=()
+    if [[ -n "$sub_dom" && "$sub_dom" != "$main_dom" && "$sub_dom" != "$cdn_dom" ]]; then
+        extra_hosts+=("$sub_dom")
+    fi
+    if [[ -n "$backup_dom" && "$backup_dom" != "$main_dom" && "$backup_dom" != "$cdn_dom" && "$backup_dom" != "$sub_dom" ]]; then
+        extra_hosts+=("$backup_dom")
+    fi
+
+    if [[ ${#extra_hosts[@]} -eq 0 ]]; then
+        rm -f "$sub_caddy"
+        return 0
+    fi
+
+    {
+        for h in "${extra_hosts[@]}"; do
+            cat <<EOF
+${h} {
+	@sub path /sub* ${wi_prefix}*
+	handle @sub {
+		header X-Frame-Options "DENY"
+		log_skip
+		reverse_proxy bot:8080 {
+			header_up X-Real-IP {client_ip}
+		}
+	}
+	handle {
+		respond 404
+	}
+}
+
+EOF
+        done
+    } > "$sub_caddy"
 }
 
 ensure_status_ingress_network() {
@@ -335,7 +393,7 @@ cmd_preflight() {
     fi
 
     # 3. Обязательные переменные окружения
-    local req_vars=(BOT_TOKEN POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB DB_ENCRYPTION_KEY BACKUP_AGE_RECIPIENT SUPPORT_USERNAME YOOKASSA_SHOP_ID YOOKASSA_SECRET_KEY DOMAIN SSL_EMAIL)
+    local req_vars=(BOT_TOKEN POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB REDIS_PASSWORD DB_ENCRYPTION_KEY BACKUP_AGE_RECIPIENT SUPPORT_USERNAME YOOKASSA_SHOP_ID YOOKASSA_SECRET_KEY YOOKASSA_RETURN_URL DOMAIN SSL_EMAIL)
     for var_name in "${req_vars[@]}"; do
         local val
         val=$(grep -E "^${var_name}=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || true)
@@ -653,39 +711,34 @@ cmd_update() {
         fi
     fi
 
+    local env_branch=""
+    if [[ -f "${PROJECT_DIR}/.env" ]]; then
+        env_branch=$(grep -E '^JUST1KBOT_BRANCH=' "${PROJECT_DIR}/.env" | tail -n1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d '[:space:]' || true)
+    fi
+    local target_branch="${JUST1KBOT_BRANCH:-${env_branch:-}}"
+
     local current_branch
     current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
     if [[ "$current_branch" == "HEAD" ]] || [[ -z "$current_branch" ]]; then
-        warn "Обнаружено состояние detached HEAD. Переключаемся на основную ветку main..."
-        if ! git checkout main 2>/dev/null; then
-            error "Не удалось переключиться на ветку main из detached HEAD."
+        local checkout_branch="${target_branch:-main}"
+        warn "Обнаружено состояние detached HEAD. Переключаемся на ветку $checkout_branch..."
+        if ! git checkout "$checkout_branch" 2>/dev/null; then
+            error "Не удалось переключиться на ветку $checkout_branch из detached HEAD."
             return 1
         fi
-        current_branch="main"
-    elif [[ "$current_branch" != "main" ]]; then
-        warn "⚠️ Текущая ветка '$current_branch' отличается от основной production-ветки 'main'!"
-        warn "Production обязан работать на ветке main для обеспечения стабильности."
-        local switch_to_main="y"
-        if [[ -t 0 ]]; then
-            if ! read -r -t 60 -p "Переключиться на ветку main перед обновлением? (Y/n): " switch_to_main; then
-                echo ""
-                switch_to_main="y"
-            fi
+        current_branch="$checkout_branch"
+    elif [[ -n "$target_branch" && "$current_branch" != "$target_branch" ]]; then
+        info "Переключаемся на целевую ветку $target_branch (задана в конфигурации)..."
+        if ! git checkout "$target_branch" 2>/dev/null; then
+            error "Не удалось переключиться на ветку $target_branch! Проверьте git status."
+            return 1
         fi
-        if [[ ! "$switch_to_main" =~ ^[Nn]$ ]]; then
-            info "Переключаемся на ветку main..."
-            if ! git checkout main 2>/dev/null; then
-                error "Не удалось переключиться на ветку main! Проверьте git status."
-                return 1
-            fi
-            current_branch="main"
-        else
-            warn "Продолжаем обновление на ветке '$current_branch' по запросу администратора."
-        fi
+        current_branch="$target_branch"
     fi
 
     local rollback_commit=""
     rollback_commit="$(git rev-parse HEAD 2>/dev/null || true)"
+    local migrations_applied=false
 
     info "Шаг 2/6. Создание страховочного бэкапа базы данных..."
     LAST_BACKUP_FILE=""
@@ -715,6 +768,10 @@ cmd_update() {
         fi
         if [[ ! "$force_rebuild" =~ ^[Yy]$ ]]; then
             apply_sysctl_hardening
+            ensure_subscription_domains_caddy
+            if docker inspect --format='{{.State.Status}}' just1kbot_caddy 2>/dev/null | grep -q "^running$"; then
+                docker exec just1kbot_caddy caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
+            fi
             log "Обновление завершено (код уже актуален)."
             if [ "$did_stash" = "true" ]; then
                 echo ""
@@ -834,6 +891,7 @@ cmd_update() {
         _rollback_services_after_db_failure "$rollback_commit" "$pre_update_backup"
         return 1
     fi
+    migrations_applied=true
 
     info "Проверка инвариантов базы данных (Invariant Integrity Audit)..."
     local db_ready=false
@@ -851,13 +909,27 @@ cmd_update() {
 
     if [ "$db_ready" != "true" ]; then
         error "База данных (just1kbot_db) не находится в состоянии healthy! Проверка инвариантов отменена."
-        _rollback_services_after_db_failure "$rollback_commit" "$pre_update_backup"
+        if [[ "$migrations_applied" != "true" ]]; then
+            _rollback_services_after_db_failure "$rollback_commit" "$pre_update_backup"
+        else
+            warn "Миграции базы данных уже применены — автоматический откат кода не выполняется, чтобы не запустить старый код на новой схеме."
+            if [ -n "${pre_update_backup:-}" ]; then
+                warn "Восстановите БД из резервной копии: just1kbot restore \"$pre_update_backup\" и затем откатите код."
+            fi
+        fi
         return 1
     fi
 
     if ! docker compose run --rm --no-deps bot python scripts/audit_invariants.py; then
         error "Нарушение инвариантов базы данных после применения миграций! Развёртывание прервано."
-        _rollback_services_after_db_failure "$rollback_commit" "$pre_update_backup"
+        if [ "${migrations_applied:-false}" = "true" ]; then
+            warn "Миграции базы данных уже применены — автоматический откат кода не выполняется, чтобы не запустить старый код на новой схеме."
+            if [ -n "${pre_update_backup:-}" ]; then
+                warn "Восстановите БД из резервной копии: just1kbot restore \"$pre_update_backup\" и затем откатите код."
+            fi
+        else
+            _rollback_services_after_db_failure "$rollback_commit" "$pre_update_backup"
+        fi
         return 1
     fi
 
@@ -881,7 +953,7 @@ cmd_update() {
     fi
 
     info "Шаг 6/6. Проверка статуса здоровья сервисов (Healthcheck)..."
-    local timeout=60
+    local timeout=120
     local elapsed=0
     local update_ok=false
 
@@ -929,6 +1001,7 @@ cmd_update() {
         chmod 600 "${PROJECT_DIR}/.env" 2>/dev/null || true
         chmod 700 "${PROJECT_DIR}/backups" 2>/dev/null || true
         apply_sysctl_hardening
+        ensure_subscription_domains_caddy
         if docker inspect --format='{{.State.Status}}' just1kbot_caddy 2>/dev/null | grep -q "^running$"; then
             info "Применение актуальной конфигурации Caddy (reload)..."
             if ! docker exec just1kbot_caddy caddy reload --config /etc/caddy/Caddyfile 2>/dev/null; then
@@ -949,6 +1022,27 @@ cmd_update() {
         local bot_err_logs=""
         bot_err_logs="$(docker compose logs --tail=50 bot 2>/dev/null || true)"
         echo "$bot_err_logs"
+        if [[ "$migrations_applied" == "true" ]]; then
+            echo ""
+            warn "🚨 Автоматический откат исходного кода (git reset --hard) ЗАБЛОКИРОВАН:"
+            warn "Миграции базы данных (Alembic) уже успешно применены к PostgreSQL."
+            warn "Откат кода к предыдущей версии ($rollback_commit) приведёт к несовместимости схемы БД и сбою сервиса."
+            if [[ -n "$pre_update_backup" ]] && [[ -f "$pre_update_backup" ]]; then
+                warn "Если требуется полный откат (включая БД), сначала восстановите базу данных:"
+                echo -e "${BOLD}${YELLOW}    just1kbot restore $pre_update_backup${NC}"
+                warn "И затем переключите код на предыдущий коммит:"
+                echo -e "${BOLD}${YELLOW}    git reset --hard $rollback_commit && just1kbot restart${NC}"
+            else
+                warn "Для полного восстановления рабочей базы данных выполните: just1kbot restore"
+            fi
+            print_ai_diagnostic_report \
+                "Just1kBot Update Healthcheck Failure" \
+                "Сервисы не смогли перейти в состояние Healthy, но миграции БД уже применены" \
+                "Автоматический откат кода заблокирован (защита от рассинхронизации схемы БД)" \
+                "$bot_err_logs" \
+                "1. Проверьте логи сервисов: just1kbot logs bot\n2. Исправьте ошибку запуска или выполните полный откат с восстановлением БД: just1kbot restore $pre_update_backup"
+            return 1
+        fi
         if [[ -n "$rollback_commit" ]]; then
             echo ""
             warn "🚨 Выполняем возврат исходного кода к предыдущему коммиту ($rollback_commit)..."
@@ -1080,8 +1174,10 @@ cmd_backup() {
             pg_user="$(get_env_var "POSTGRES_USER" "just1kbot")"
             pg_db="$(get_env_var "POSTGRES_DB" "just1kbot_bot")"
 
+            set +e
             docker compose exec -T db pg_dump -U "$pg_user" -d "$pg_db" 2>"$dump_err" | gzip > "$tmp_gz"
             local dump_status=("${PIPESTATUS[@]}")
+            set -e
             if [[ "${dump_status[0]}" -eq 0 ]] && [[ "${dump_status[1]}" -eq 0 ]]; then
                 if [[ -s "$tmp_gz" ]] && gzip -t "$tmp_gz" 2>/dev/null; then
                     if age -r "$age_recipient" -o "$backup_file" "$tmp_gz" 2>/dev/null; then
@@ -1593,6 +1689,7 @@ EOF
 cmd_restart() {
     local service="${1:-bot}"
     echo -e "\n${BOLD}${BLUE}=== ⚡ ПЕРЕЗАПУСК СЕРВИСА: ${service} ===${NC}\n"
+    ensure_subscription_domains_caddy
     if [[ "$service" == "all" ]]; then
         docker compose restart
     else
@@ -1624,10 +1721,14 @@ cmd_config() {
 
     echo ""
     read -r -p "Применить изменения и пересоздать контейнеры (docker compose up -d --force-recreate)? (Y/n): " apply_restart
-    if [[ ! "$apply_restart" =~ ^[Nn]$ ]]; then
+    apply_restart="${apply_restart//[[:space:]]/}"
+    if [[ -z "$apply_restart" || "$apply_restart" =~ ^[Yy]([Ee][Ss])?$ ]]; then
         info "Пересоздание контейнеров с новыми переменными окружения..."
+        ensure_subscription_domains_caddy
         dc_up --force-recreate
         log "Конфигурация успешно применена ко всем контейнерам."
+    else
+        info "Пересоздание контейнеров пропущено."
     fi
 }
 

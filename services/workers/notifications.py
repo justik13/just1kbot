@@ -3,44 +3,56 @@ import logging
 from datetime import datetime, timedelta
 
 from aiogram import Bot
-from aiogram.exceptions import TelegramForbiddenError
+from aiogram.types import InlineKeyboardMarkup
 from cachetools import TTLCache
 from sqlalchemy import or_, select, update
 
 from bot.keyboards.notifications import (
+    get_action_notification_keyboard,
+    get_autorenew_failed_keyboard,
     get_post_expiry_keyboard,
     get_pre_expiry_keyboard,
+)
+from bot.texts import (
+    NOTIFY_AUTORENEW_INSUFFICIENT_FUNDS,
 )
 from bot.texts.runtime.notifications import (
     NOTIFY_1D,
     NOTIFY_2H,
     NOTIFY_3D,
     NOTIFY_EXPIRED,
-    NOTIFY_GRACE_12H,
+    NOTIFY_STANDARD_AUTORENEWED,
+    NOTIFY_WI_AUTORENEWED,
     TIME_DAYS_HOURS_FORMAT,
     TIME_HOURS_MINUTES_FORMAT,
     TIME_SOON_LABEL,
 )
 from config.constants import (
-    GRACE_PERIOD_HOURS,
     NOTIFICATION_INTERVAL,
     WORKER_ERROR_SLEEP_INTERVAL,
 )
 from database.connection import session_scope
-from database.models import User
-from utils.datetime_helpers import now_utc
+from database.models import User, VlessSubscription
+from utils.datetime_helpers import is_permanent_subscription, now_utc
+from utils.formatters import format_tg_time
 from utils.rate_limiter import global_send_limiter
+from utils.telegram import is_terminal_telegram_error, safe_send_message
 
 logger = logging.getLogger(__name__)
 
 MAX_RETRY_COUNT = 4
-BACKOFF_BASE_INTERVAL = NOTIFICATION_INTERVAL
+NOTIFICATION_CHECK_INTERVAL = max(NOTIFICATION_INTERVAL, 900)
+BACKOFF_BASE_INTERVAL = NOTIFICATION_CHECK_INTERVAL
 NOTIFICATION_BATCH_SIZE = 20
 NOTIFICATION_START_DELAY = 60.0
 
 _last_notification_type: TTLCache[int, str] = TTLCache(
     maxsize=10000,
     ttl=86400,
+)
+_autorenew_fail_notified: TTLCache[tuple[str, int], str] = TTLCache(
+    maxsize=10000,
+    ttl=86400 * 2,
 )
 
 
@@ -67,10 +79,11 @@ def _format_countdown(delta: timedelta) -> str:
 def _maybe_reset_retry_on_type_change(
     user: User,
     notification_type: str,
+    vless_sub: VlessSubscription | None = None,
 ) -> None:
     last_type = _last_notification_type.get(user.id)
     if last_type is None:
-        last_type = _infer_last_notification_type(user)
+        last_type = _infer_last_notification_type(vless_sub)
 
     if last_type and last_type != notification_type:
         user.notification_retry_count = 0
@@ -79,16 +92,16 @@ def _maybe_reset_retry_on_type_change(
     _last_notification_type[user.id] = notification_type
 
 
-def _infer_last_notification_type(user: User) -> str | None:
-    if user.notified_grace_12h:
-        return "grace_12h"
-    if user.notified_expired:
+def _infer_last_notification_type(vless_sub: VlessSubscription | None) -> str | None:
+    if vless_sub is None:
+        return None
+    if vless_sub.notified_expired:
         return "expired"
-    if user.notified_2h:
+    if vless_sub.notified_2h:
         return "2h"
-    if user.notified_1d:
+    if vless_sub.notified_1d:
         return "1d"
-    if user.notified_3d:
+    if vless_sub.notified_3d:
         return "3d"
     return None
 
@@ -113,6 +126,11 @@ async def subscription_notifications_loop(
     while not shutdown_event.is_set():
         try:
             current_time = now_utc()
+
+            await _process_auto_renewals(
+                bot,
+                current_time,
+            )
 
             await _send_pre_expiry_notifications(
                 bot,
@@ -143,14 +161,19 @@ async def subscription_notifications_loop(
             if shutdown_event.is_set():
                 break
 
-            await asyncio.sleep(WORKER_ERROR_SLEEP_INTERVAL)
-
-            continue
+            try:
+                await asyncio.wait_for(
+                    shutdown_event.wait(),
+                    timeout=WORKER_ERROR_SLEEP_INTERVAL,
+                )
+                break
+            except asyncio.TimeoutError:
+                continue
 
         try:
             await asyncio.wait_for(
                 shutdown_event.wait(),
-                timeout=NOTIFICATION_INTERVAL,
+                timeout=NOTIFICATION_CHECK_INTERVAL,
             )
 
             break
@@ -161,6 +184,240 @@ async def subscription_notifications_loop(
     logger.info("Notifications worker stopped gracefully")
 
 
+async def _send_autorenew_notice(
+    bot: Bot,
+    telegram_id: int,
+    text: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
+) -> None:
+    try:
+        await global_send_limiter.acquire()
+        await safe_send_message(
+            bot,
+            telegram_id,
+            text,
+            reply_markup=reply_markup or get_action_notification_keyboard("⚡ Открыть кабинет", tab="connect"),
+            parse_mode="HTML",
+            raise_forbidden=True,
+        )
+    except Exception as exc:
+        if is_terminal_telegram_error(exc):
+            async with session_scope() as session:
+                u = await session.scalar(select(User).where(User.telegram_id == telegram_id))
+                if u:
+                    u.is_bot_blocked = True
+        else:
+            logger.warning("Failed to send auto-renew notice to %s: %s", telegram_id, exc)
+
+
+async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
+    """Automatically renew Standard and White Internet subscriptions from wallet balance when enabled."""
+    from config.enums import WhiteInternetStatus
+    from database.models import WhiteInternetSubscription
+    from database.repositories.account_ledger_repo import get_account_balance
+    from services.order_service import OrderService, acquire_user_account_lock
+    from services.subscription import SubscriptionService
+    from services.white_internet_service import get_white_internet_tier_price
+
+    window_start = current_time - timedelta(hours=24)
+    window_end = current_time + timedelta(hours=24)
+
+    # 1. Standard subscription auto-renewal (30 days at current device_limit)
+    async with session_scope() as session:
+        std_ids = list(
+            (
+                await session.execute(
+                    select(User.id)
+                    .join(VlessSubscription, VlessSubscription.user_id == User.id)
+                    .where(
+                        VlessSubscription.auto_renew_enabled.is_(True),
+                        User.is_deleted.is_(False),
+                        User.financial_hold.is_(False),
+                        VlessSubscription.expires_at.is_not(None),
+                        VlessSubscription.expires_at >= window_start,
+                        VlessSubscription.expires_at <= window_end,
+                    )
+                    .order_by(VlessSubscription.expires_at.asc())
+                    .limit(200)
+                )
+            ).scalars().all()
+        )
+
+    for uid in std_ids:
+        push_tg_id: int | None = None
+        push_text: str | None = None
+        push_kb: InlineKeyboardMarkup | None = None
+        try:
+            async with session_scope() as session:
+                await acquire_user_account_lock(session, uid)
+                user = await session.scalar(
+                    select(User).where(User.id == uid).with_for_update(skip_locked=True)
+                )
+                vless_sub = await session.scalar(
+                    select(VlessSubscription)
+                    .where(VlessSubscription.user_id == uid)
+                    .with_for_update(skip_locked=True)
+                )
+                if (
+                    user is None
+                    or vless_sub is None
+                    or not vless_sub.auto_renew_enabled
+                    or user.is_deleted
+                    or user.financial_hold
+                    or not vless_sub.expires_at
+                    or is_permanent_subscription(vless_sub.expires_at)
+                    or vless_sub.expires_at < window_start
+                    or vless_sub.expires_at > window_end
+                ):
+                    continue
+
+                std_limit = max(2, await SubscriptionService.get_effective_device_limit(session, user))
+                quote = await OrderService.quote_standard_change(session, user.id, std_limit, 30)
+                due_rub = int(quote["due_rub"])
+                bal = await get_account_balance(
+                    session, user_id=user.id, for_update=True, locked_user=user
+                )
+                if bal.debt > 0 or bal.available < due_rub:
+                    cycle_key = vless_sub.expires_at.strftime("%Y-%m-%d") if vless_sub.expires_at else ""
+                    cache_key = ("std", user.id)
+                    if _autorenew_fail_notified.get(cache_key) != cycle_key and not user.is_bot_blocked:
+                        _autorenew_fail_notified[cache_key] = cycle_key
+                        push_tg_id = user.telegram_id
+                        push_text = NOTIFY_AUTORENEW_INSUFFICIENT_FUNDS.format(
+                            service="Стандарт",
+                            due_rub=due_rub,
+                            available_rub=int(bal.available),
+                        )
+                        push_kb = get_autorenew_failed_keyboard()
+                    continue
+
+                idem_key = f"std_autorenew:{user.id}:{int(vless_sub.expires_at.timestamp())}"
+                res = await OrderService.checkout_order(
+                    session,
+                    user_id=user.id,
+                    service_type="standard",
+                    device_limit=std_limit,
+                    duration_days=30,
+                    use_balance=True,
+                    idempotency_key=idem_key,
+                )
+                if res.get("status") == "paid" and not user.is_bot_blocked:
+                    await session.refresh(vless_sub)
+                    push_tg_id = user.telegram_id
+                    push_text = NOTIFY_STANDARD_AUTORENEWED.format(
+                        amount=res.get("charged_balance", due_rub),
+                        devices=std_limit,
+                        date=format_tg_time(vless_sub.expires_at) if vless_sub.expires_at else "",
+                    )
+        except Exception as exc:
+            logger.warning("Standard auto-renew failed for user_id=%s: %s", uid, exc)
+            continue
+
+        if push_tg_id and push_text:
+            await _send_autorenew_notice(bot, push_tg_id, push_text, reply_markup=push_kb)
+
+    # 2. White Internet auto-renewal (30 days at effective device_limit)
+    async with session_scope() as session:
+        wi_items = (
+            await session.execute(
+                select(WhiteInternetSubscription.id, WhiteInternetSubscription.user_id)
+                .join(User, User.id == WhiteInternetSubscription.user_id)
+                .where(
+                    WhiteInternetSubscription.auto_renew_enabled.is_(True),
+                    WhiteInternetSubscription.status.in_([
+                        WhiteInternetStatus.ACTIVE,
+                        WhiteInternetStatus.EXHAUSTED,
+                        WhiteInternetStatus.EXPIRED,
+                    ]),
+                    WhiteInternetSubscription.expires_at.is_not(None),
+                    WhiteInternetSubscription.expires_at >= window_start,
+                    WhiteInternetSubscription.expires_at <= window_end,
+                    User.is_deleted.is_(False),
+                    User.financial_hold.is_(False),
+                )
+                .order_by(WhiteInternetSubscription.expires_at.asc())
+                .limit(200)
+            )
+        ).all()
+
+    for sid, uid in wi_items:
+        push_tg_id = None
+        push_text = None
+        push_kb = None
+        try:
+            async with session_scope() as session:
+                await acquire_user_account_lock(session, uid)
+                user = await session.scalar(
+                    select(User).where(User.id == uid).with_for_update(skip_locked=True)
+                )
+                if user is None or user.is_deleted or user.financial_hold:
+                    continue
+
+                sub = await session.scalar(
+                    select(WhiteInternetSubscription)
+                    .where(WhiteInternetSubscription.id == sid)
+                    .with_for_update(skip_locked=True)
+                )
+                if (
+                    sub is None
+                    or not sub.auto_renew_enabled
+                    or not sub.expires_at
+                    or sub.expires_at < window_start
+                    or sub.expires_at > window_end
+                    or sub.status not in (
+                        WhiteInternetStatus.ACTIVE,
+                        WhiteInternetStatus.EXHAUSTED,
+                        WhiteInternetStatus.EXPIRED,
+                    )
+                ):
+                    continue
+
+                eff_limit = int(sub.pending_device_limit or sub.device_limit or 1)
+                due_rub = get_white_internet_tier_price(eff_limit)
+                bal = await get_account_balance(
+                    session, user_id=user.id, for_update=True, locked_user=user
+                )
+                if bal.debt > 0 or bal.available < due_rub:
+                    cycle_key = sub.expires_at.strftime("%Y-%m-%d") if sub.expires_at else ""
+                    cache_key = ("wi", user.id)
+                    if _autorenew_fail_notified.get(cache_key) != cycle_key and not user.is_bot_blocked:
+                        _autorenew_fail_notified[cache_key] = cycle_key
+                        push_tg_id = user.telegram_id
+                        push_text = NOTIFY_AUTORENEW_INSUFFICIENT_FUNDS.format(
+                            service="Белый Интернет",
+                            due_rub=int(due_rub),
+                            available_rub=int(bal.available),
+                        )
+                        push_kb = get_autorenew_failed_keyboard()
+                    continue
+
+                wi_idem_key = f"wi_autorenew:{user.id}:{int(sub.expires_at.timestamp())}"
+                res = await OrderService.checkout_order(
+                    session,
+                    user_id=user.id,
+                    service_type="white_internet",
+                    device_limit=eff_limit,
+                    operation="renew",
+                    use_balance=True,
+                    allow_early_downgrade=True,
+                    idempotency_key=wi_idem_key,
+                )
+                if res.get("status") == "paid" and not user.is_bot_blocked:
+                    await session.refresh(sub)
+                    push_tg_id = user.telegram_id
+                    push_text = NOTIFY_WI_AUTORENEWED.format(
+                        amount=res.get("charged_balance", int(due_rub)),
+                        devices=eff_limit,
+                        date=format_tg_time(sub.expires_at) if sub.expires_at else "",
+                    )
+        except Exception as exc:
+            logger.warning("WI auto-renew failed for sub_id=%s: %s", sid, exc)
+            continue
+
+        if push_tg_id and push_text:
+            await _send_autorenew_notice(bot, push_tg_id, push_text, reply_markup=push_kb)
+
+
 async def _send_pre_expiry_notifications(
     bot: Bot,
     current_time,
@@ -168,19 +425,19 @@ async def _send_pre_expiry_notifications(
     async with session_scope() as session:
         stmt = (
             select(User.id)
+            .join(VlessSubscription, VlessSubscription.user_id == User.id)
             .where(
-                User.subscription_end > current_time,
-                User.subscription_end <= current_time + timedelta(days=3),
-                User.is_banned.is_(False),
+                VlessSubscription.expires_at > current_time,
+                VlessSubscription.expires_at <= current_time + timedelta(days=3),
                 User.is_bot_blocked.is_(False),
                 User.is_deleted.is_(False),
                 or_(
-                    User.notified_3d.is_(False),
-                    User.notified_1d.is_(False),
-                    User.notified_2h.is_(False),
+                    VlessSubscription.notified_3d.is_(False),
+                    VlessSubscription.notified_1d.is_(False),
+                    VlessSubscription.notified_2h.is_(False),
                 ),
             )
-            .order_by(User.subscription_end.asc())
+            .order_by(VlessSubscription.expires_at.asc())
             .limit(500)
         )
 
@@ -195,6 +452,11 @@ async def _send_pre_expiry_notifications(
         batch_ids = user_ids[i : i + NOTIFICATION_BATCH_SIZE]
 
         for uid in batch_ids:
+            telegram_id: int | None = None
+            msg: str | None = None
+            notification_type: str | None = None
+            retry_count = 0
+
             async with session_scope() as session:
                 user = await session.scalar(
                     select(User).where(User.id == uid).with_for_update(skip_locked=True)
@@ -202,20 +464,25 @@ async def _send_pre_expiry_notifications(
                 if user is None:
                     continue
 
-                if user.is_banned or user.is_bot_blocked or user.is_deleted:
+                vless_sub = await session.scalar(
+                    select(VlessSubscription).where(VlessSubscription.user_id == uid).with_for_update(skip_locked=True)
+                )
+                if vless_sub is None:
                     continue
 
-                if not user.subscription_end or user.subscription_end <= current_time:
+                if user.is_bot_blocked or user.is_deleted:
                     continue
 
-                if user.subscription_end > current_time + timedelta(days=3):
+                if not vless_sub.expires_at or vless_sub.expires_at <= current_time:
+                    continue
+
+                if vless_sub.expires_at > current_time + timedelta(days=3):
                     continue
 
                 retry_count = user.notification_retry_count or 0
 
                 if retry_count >= MAX_RETRY_COUNT:
-                    # P0-4: НЕ помечаем notified_* как True при исчерпании ретраев
-                    # Это предотвращает потерю уведомлений, если Telegram был недоступен
+                    # Не помечаем notified_* как True при исчерпании ретраев, чтобы не терять уведомления при сбое Telegram.
                     user.notification_retry_count = 0
                     user.last_notification_attempt = None
                     await session.flush()
@@ -236,96 +503,110 @@ async def _send_pre_expiry_notifications(
                     if time_since_last < backoff_delay:
                         continue
 
-                time_left = user.subscription_end - current_time
+                time_left = vless_sub.expires_at - current_time
 
-                msg = None
-                notification_type = None
-
-                if time_left <= timedelta(hours=2) and not user.notified_2h:
+                if time_left <= timedelta(hours=2) and not vless_sub.notified_2h:
                     msg = NOTIFY_2H
                     notification_type = "2h"
 
-                elif time_left <= timedelta(days=1) and not user.notified_1d:
+                elif time_left <= timedelta(days=1) and not vless_sub.notified_1d:
                     msg = NOTIFY_1D
                     notification_type = "1d"
 
-                elif time_left <= timedelta(days=3) and not user.notified_3d:
+                elif time_left <= timedelta(days=3) and not vless_sub.notified_3d:
                     msg = NOTIFY_3D
                     notification_type = "3d"
 
-                if not msg:
+                if not msg or not notification_type:
                     continue
 
                 _maybe_reset_retry_on_type_change(
                     user,
                     notification_type,
+                    vless_sub=vless_sub,
                 )
+                await session.flush()
 
                 retry_count = user.notification_retry_count or 0
+                telegram_id = user.telegram_id
 
-                try:
-                    await global_send_limiter.acquire()
+            if telegram_id is None or msg is None or notification_type is None:
+                continue
 
-                    await bot.send_message(
-                        user.telegram_id,
-                        msg,
-                        reply_markup=get_pre_expiry_keyboard(),
-                        parse_mode="HTML",
+            send_ok = False
+            send_err: Exception | None = None
+            try:
+                await global_send_limiter.acquire()
+                await safe_send_message(
+                    bot,
+                    telegram_id,
+                    msg,
+                    reply_markup=get_pre_expiry_keyboard(),
+                    parse_mode="HTML",
+                    raise_forbidden=True,
+                )
+                send_ok = True
+            except Exception as e:
+                send_err = e
+
+            async with session_scope() as session:
+                user = await session.scalar(
+                    select(User).where(User.id == uid).with_for_update()
+                )
+                if user is None:
+                    continue
+                if send_ok:
+                    vless_sub = await session.scalar(
+                        select(VlessSubscription).where(VlessSubscription.user_id == uid).with_for_update()
                     )
-
                     user.notification_retry_count = 0
                     user.last_notification_attempt = current_time
+                    if vless_sub is not None:
+                        if notification_type == "2h":
+                            vless_sub.notified_2h = True
+                            vless_sub.notified_1d = True
+                            vless_sub.notified_3d = True
+                        elif notification_type == "1d":
+                            vless_sub.notified_1d = True
+                            vless_sub.notified_3d = True
+                        elif notification_type == "3d":
+                            vless_sub.notified_3d = True
                     await session.flush()
-
-                    if notification_type == "2h":
-                        user.notified_2h = True
-                        user.notified_1d = True
-                        user.notified_3d = True
-
-                    elif notification_type == "1d":
-                        user.notified_1d = True
-                        user.notified_3d = True
-
-                    elif notification_type == "3d":
-                        user.notified_3d = True
-
-                except TelegramForbiddenError:
-                    user.is_bot_blocked = True
-
-                except Exception as e:
-                    user.notification_retry_count = retry_count + 1
-                    user.last_notification_attempt = current_time
-                    await session.flush()
-
-                    logger.warning(
-                        "Failed to send pre-expiry notification to %s: %s",
-                        user.telegram_id,
-                        e,
-                    )
+                elif send_err is not None:
+                    if is_terminal_telegram_error(send_err):
+                        logger.info("Marking user %s as blocked (terminal telegram error: %s)", telegram_id, send_err)
+                        user.is_bot_blocked = True
+                        await session.flush()
+                    else:
+                        user.notification_retry_count = retry_count + 1
+                        user.last_notification_attempt = current_time
+                        await session.flush()
+                        logger.warning(
+                            "Failed to send pre-expiry notification to %s: %s",
+                            telegram_id,
+                            send_err,
+                        )
 
 
 async def _send_post_expiry_notifications(
     bot: Bot,
     current_time,
 ):
-    grace_start = current_time - timedelta(hours=GRACE_PERIOD_HOURS)
+    expiry_lookback = current_time - timedelta(days=14)
 
     async with session_scope() as session:
         stmt = (
             select(User.id)
+            .join(VlessSubscription, VlessSubscription.user_id == User.id)
             .where(
-                User.subscription_end.is_not(None),
-                User.subscription_end < current_time,
-                User.subscription_end > grace_start,
-                User.is_banned.is_(False),
+                VlessSubscription.expires_at.is_not(None),
+                VlessSubscription.expires_at < current_time,
+                VlessSubscription.expires_at > expiry_lookback,
                 User.is_bot_blocked.is_(False),
                 User.is_deleted.is_(False),
-                or_(
-                    User.notified_expired.is_(False),
-                    User.notified_grace_12h.is_(False),
-                ),
+                VlessSubscription.notified_expired.is_(False),
             )
-            .order_by(User.subscription_end.asc())
+            .order_by(VlessSubscription.expires_at.asc())
             .limit(500)
         )
 
@@ -340,6 +621,9 @@ async def _send_post_expiry_notifications(
         batch_ids = user_ids[i : i + NOTIFICATION_BATCH_SIZE]
 
         for uid in batch_ids:
+            telegram_id: int | None = None
+            retry_count = 0
+
             async with session_scope() as session:
                 user = await session.scalar(
                     select(User).where(User.id == uid).with_for_update(skip_locked=True)
@@ -347,24 +631,18 @@ async def _send_post_expiry_notifications(
                 if user is None:
                     continue
 
-                if not user.subscription_end or user.subscription_end >= current_time:
-                    continue
-
-                if user.is_banned or user.is_bot_blocked or user.is_deleted:
-                    continue
-
-                deletion_time = user.subscription_end + timedelta(
-                    hours=GRACE_PERIOD_HOURS,
+                vless_sub = await session.scalar(
+                    select(VlessSubscription).where(VlessSubscription.user_id == uid).with_for_update(skip_locked=True)
                 )
+                if vless_sub is None or not vless_sub.expires_at or vless_sub.expires_at >= current_time:
+                    continue
 
-                if current_time >= deletion_time:
+                if user.is_bot_blocked or user.is_deleted or vless_sub.notified_expired:
                     continue
 
                 retry_count = user.notification_retry_count or 0
 
                 if retry_count >= MAX_RETRY_COUNT:
-                    # P0-4: НЕ помечаем notified_* как True при исчерпании ретраев
-                    # Это предотвращает потерю уведомлений, если Telegram был недоступен
                     user.notification_retry_count = 0
                     user.last_notification_attempt = None
                     await session.flush()
@@ -385,71 +663,64 @@ async def _send_post_expiry_notifications(
                     if time_since_last < backoff_delay:
                         continue
 
-                time_until_delete = deletion_time - current_time
-
-                msg = None
-                notification_type = None
-
-                if (
-                    not user.notified_grace_12h
-                    and current_time >= deletion_time - timedelta(hours=12)
-                ):
-                    msg = NOTIFY_GRACE_12H
-                    notification_type = "grace_12h"
-
-                elif not user.notified_expired:
-                    countdown = _format_countdown(time_until_delete)
-
-                    msg = NOTIFY_EXPIRED.format(
-                        countdown=countdown,
-                    )
-
-                    notification_type = "expired"
-
-                if not msg:
-                    continue
-
                 _maybe_reset_retry_on_type_change(
                     user,
-                    notification_type,
+                    "expired",
+                    vless_sub=vless_sub,
                 )
+                await session.flush()
 
                 retry_count = user.notification_retry_count or 0
+                telegram_id = user.telegram_id
 
-                try:
-                    await global_send_limiter.acquire()
+            if telegram_id is None:
+                continue
 
-                    await bot.send_message(
-                        user.telegram_id,
-                        msg,
-                        reply_markup=get_post_expiry_keyboard(),
-                        parse_mode="HTML",
+            send_ok = False
+            send_err: Exception | None = None
+            try:
+                await global_send_limiter.acquire()
+                await safe_send_message(
+                    bot,
+                    telegram_id,
+                    NOTIFY_EXPIRED,
+                    reply_markup=get_post_expiry_keyboard(),
+                    parse_mode="HTML",
+                    raise_forbidden=True,
+                )
+                send_ok = True
+            except Exception as e:
+                send_err = e
+
+            async with session_scope() as session:
+                user = await session.scalar(
+                    select(User).where(User.id == uid).with_for_update()
+                )
+                if user is None:
+                    continue
+                if send_ok:
+                    vless_sub = await session.scalar(
+                        select(VlessSubscription).where(VlessSubscription.user_id == uid).with_for_update()
                     )
-
                     user.notification_retry_count = 0
                     user.last_notification_attempt = current_time
+                    if vless_sub is not None:
+                        vless_sub.notified_expired = True
                     await session.flush()
-
-                    if notification_type == "grace_12h":
-                        user.notified_grace_12h = True
-                        user.notified_expired = True
-
-                    elif notification_type == "expired":
-                        user.notified_expired = True
-
-                except TelegramForbiddenError:
-                    user.is_bot_blocked = True
-
-                except Exception as e:
-                    user.notification_retry_count = retry_count + 1
-                    user.last_notification_attempt = current_time
-                    await session.flush()
-
-                    logger.warning(
-                        "Failed to send post-expiry notification to %s: %s",
-                        user.telegram_id,
-                        e,
-                    )
+                elif send_err is not None:
+                    if is_terminal_telegram_error(send_err):
+                        logger.info("Marking user %s as blocked (terminal telegram error: %s)", telegram_id, send_err)
+                        user.is_bot_blocked = True
+                        await session.flush()
+                    else:
+                        user.notification_retry_count = retry_count + 1
+                        user.last_notification_attempt = current_time
+                        await session.flush()
+                        logger.warning(
+                            "Failed to send post-expiry notification to %s: %s",
+                            telegram_id,
+                            send_err,
+                        )
 
 
 async def _send_white_internet_notifications(
@@ -459,13 +730,10 @@ async def _send_white_internet_notifications(
     if bot is None:
         return
 
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
     from config.enums import WhiteInternetStatus
     from database.models import User, WhiteInternetSubscription
     from utils.formatters import format_tg_time
     from bot.texts.runtime.notifications import (
-        BTN_DISMISS_NOTIFICATION,
-        BTN_EXTEND_WHITE_INTERNET,
         NOTIFY_WI_1D,
         NOTIFY_WI_2H,
         NOTIFY_WI_3D,
@@ -521,7 +789,6 @@ async def _send_white_internet_notifications(
                     WhiteInternetSubscription.notified_expired.is_(False),
                 ),
                 User.is_bot_blocked.is_(False),
-                User.is_banned.is_(False),
                 User.is_deleted.is_(False),
             )
             .order_by(WhiteInternetSubscription.expires_at.asc())
@@ -536,6 +803,11 @@ async def _send_white_internet_notifications(
     for i in range(0, len(sub_ids), NOTIFICATION_BATCH_SIZE):
         batch_ids = sub_ids[i : i + NOTIFICATION_BATCH_SIZE]
         for sid in batch_ids:
+            target_user_id: int | None = None
+            telegram_id: int | None = None
+            notify_type: str | None = None
+            msg: str | None = None
+
             async with session_scope() as session:
                 sub = await session.scalar(
                     select(WhiteInternetSubscription)
@@ -561,18 +833,11 @@ async def _send_white_internet_notifications(
                 if (
                     not user
                     or user.is_bot_blocked
-                    or user.is_banned
                     or user.is_deleted
                 ):
                     continue
 
-                if getattr(sub, "is_trial", False) and not sub.notified_3d:
-                    sub.notified_3d = True
-                    await session.flush()
-
                 time_left = sub.expires_at - current_time
-                notify_type = None
-                msg = None
 
                 if time_left.total_seconds() <= 0:
                     if not sub.notified_expired:
@@ -586,7 +851,7 @@ async def _send_white_internet_notifications(
                     if not sub.notified_1d:
                         notify_type = "1d"
                         msg = NOTIFY_WI_1D.format(countdown=_format_countdown(time_left))
-                elif time_left <= timedelta(days=3) and not getattr(sub, "is_trial", False):
+                elif time_left <= timedelta(days=3):
                     if not sub.notified_3d:
                         notify_type = "3d"
                         msg = NOTIFY_WI_3D.format(
@@ -613,40 +878,69 @@ async def _send_white_internet_notifications(
                         await session.flush()
                     continue
 
-                kb = InlineKeyboardBuilder()
-                kb.button(text=BTN_EXTEND_WHITE_INTERNET, callback_data="wl_renew_preview")
-                kb.button(text=BTN_DISMISS_NOTIFICATION, callback_data="dismiss_notification")
-                kb.adjust(1)
+                target_user_id = user.id
+                telegram_id = user.telegram_id
 
-                try:
-                    await global_send_limiter.acquire()
-                    await bot.send_message(
-                        user.telegram_id,
-                        msg,
-                        reply_markup=kb.as_markup(),
-                        parse_mode="HTML",
+            if target_user_id is None or telegram_id is None or notify_type is None or msg is None:
+                continue
+
+            send_ok = False
+            send_err: Exception | None = None
+            try:
+                await global_send_limiter.acquire()
+                wi_kb = (
+                    get_post_expiry_keyboard()
+                    if notify_type == "expired"
+                    else get_pre_expiry_keyboard()
+                )
+                await safe_send_message(
+                    bot,
+                    telegram_id,
+                    msg,
+                    reply_markup=wi_kb,
+                    parse_mode="HTML",
+                    raise_forbidden=True,
+                )
+                send_ok = True
+            except Exception as e:
+                send_err = e
+
+            if send_ok:
+                async with session_scope() as session:
+                    sub = await session.scalar(
+                        select(WhiteInternetSubscription)
+                        .where(WhiteInternetSubscription.id == sid)
+                        .with_for_update()
                     )
-                    if notify_type == "expired":
-                        sub.notified_expired = True
-                        sub.notified_2h = True
-                        sub.notified_1d = True
-                        sub.notified_3d = True
-                    elif notify_type == "2h":
-                        sub.notified_2h = True
-                        sub.notified_1d = True
-                        sub.notified_3d = True
-                    elif notify_type == "1d":
-                        sub.notified_1d = True
-                        sub.notified_3d = True
-                    elif notify_type == "3d":
-                        sub.notified_3d = True
-                    await session.flush()
-                except TelegramForbiddenError:
-                    user.is_bot_blocked = True
-                    await session.flush()
-                except Exception as e:
+                    if sub is not None:
+                        if notify_type == "expired":
+                            sub.notified_expired = True
+                            sub.notified_2h = True
+                            sub.notified_1d = True
+                            sub.notified_3d = True
+                        elif notify_type == "2h":
+                            sub.notified_2h = True
+                            sub.notified_1d = True
+                            sub.notified_3d = True
+                        elif notify_type == "1d":
+                            sub.notified_1d = True
+                            sub.notified_3d = True
+                        elif notify_type == "3d":
+                            sub.notified_3d = True
+                        await session.flush()
+            elif send_err is not None:
+                if is_terminal_telegram_error(send_err):
+                    logger.info("Marking user %s as blocked (terminal telegram error: %s)", telegram_id, send_err)
+                    async with session_scope() as session:
+                        user = await session.scalar(
+                            select(User).where(User.id == target_user_id).with_for_update()
+                        )
+                        if user is not None:
+                            user.is_bot_blocked = True
+                            await session.flush()
+                else:
                     logger.warning(
                         "Failed to send WI notification to %s: %s",
-                        user.telegram_id,
-                        e,
+                        telegram_id,
+                        send_err,
                     )

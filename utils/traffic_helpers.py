@@ -2,9 +2,70 @@
 
 from __future__ import annotations
 
-import re
+from datetime import datetime
+from typing import NamedTuple
 
-_SLOT_NUM_RE = re.compile(r"#(\d+)$")
+
+class ServerHostingUsage(NamedTuple):
+    limit_gb: int | None
+    reset_day: int
+    current_cycle: str
+    host_bytes: int
+    host_gb: float
+    pct: float
+
+
+def get_server_hosting_reset_day(extra: dict | None) -> int:
+    """Extracts clamped hosting billing reset day (1..31) from Server.extra_data."""
+    raw = (extra or {}).get("hosting_reset_day", 1)
+    if isinstance(raw, bool):
+        return 1
+    try:
+        day = int(raw or 1)
+    except (TypeError, ValueError):
+        return 1
+    return max(1, min(31, day))
+
+
+def get_server_hosting_usage(
+    extra: dict | None,
+    current_time: datetime | None = None,
+) -> ServerHostingUsage:
+    """Computes current-cycle host traffic usage and hosting limit percentage from Server.extra_data."""
+    from utils.datetime_helpers import get_hosting_billing_cycle, now_utc
+
+    data = extra if isinstance(extra, dict) else {}
+    now = current_time or now_utc()
+    reset_day = get_server_hosting_reset_day(data)
+    current_cycle = get_hosting_billing_cycle(now, reset_day)
+
+    raw_limit = data.get("hosting_limit_gb")
+    limit_gb: int | None = None
+    if raw_limit is not None and not isinstance(raw_limit, bool):
+        try:
+            parsed_limit = int(raw_limit)
+            if parsed_limit > 0:
+                limit_gb = parsed_limit
+        except (TypeError, ValueError):
+            pass
+
+    host_cycle = data.get("host_traffic_cycle")
+    try:
+        raw_bytes = int(data.get("host_monthly_traffic_bytes", 0) or 0)
+    except (TypeError, ValueError):
+        raw_bytes = 0
+    host_bytes = max(0, raw_bytes) if host_cycle == current_cycle else 0
+    host_gb = host_bytes / (1024 ** 3)
+    pct = (host_bytes / (limit_gb * (1024 ** 3)) * 100.0) if limit_gb else 0.0
+
+    return ServerHostingUsage(
+        limit_gb=limit_gb,
+        reset_day=reset_day,
+        current_cycle=current_cycle,
+        host_bytes=host_bytes,
+        host_gb=host_gb,
+        pct=pct,
+    )
 
 
 def accumulate_host_traffic_cycle(
@@ -47,63 +108,38 @@ def accumulate_host_traffic_cycle(
     return False
 
 
+def accumulate_server_traffic_extra(
+    server_obj,
+    delta_bytes: int,
+    host_tx: int,
+    host_rx: int,
+    now,
+    *,
+    accumulate_host: bool = True,
+) -> bool:
+    """Update monthly_traffic_bytes and host_monthly_traffic_bytes on server_obj.extra_data."""
+    from utils.datetime_helpers import get_hosting_billing_cycle
 
-def get_device_slot_key(device_name: str | None) -> str:
-    """Extract canonical slot key ('slot_1', 'slot_2', etc.) from device name."""
-    if not device_name:
-        return "slot_1"
-    match = _SLOT_NUM_RE.search(device_name)
-    if match:
-        return f"slot_{match.group(1)}"
-    return f"slot_{device_name.strip().lower()}"
+    raw_extra = getattr(server_obj, "extra_data", None)
+    extra = dict(raw_extra) if isinstance(raw_extra, dict) else {}
+    changed = False
+    current_cycle = now.strftime("%Y-%m")
 
+    if delta_bytes > 0:
+        if extra.get("traffic_cycle") != current_cycle:
+            extra["traffic_cycle"] = current_cycle
+            extra["monthly_traffic_bytes"] = delta_bytes
+        else:
+            extra["monthly_traffic_bytes"] = int(extra.get("monthly_traffic_bytes", 0)) + delta_bytes
+        changed = True
 
-def get_archived_traffic_for_device(archived: dict | None, device_name: str | None) -> int:
-    """Safely retrieves accumulated archived traffic for a device slot.
+    if accumulate_host and (host_tx > 0 or host_rx > 0):
+        host_cycle = get_hosting_billing_cycle(now, get_server_hosting_reset_day(extra))
+        if accumulate_host_traffic_cycle(extra, host_tx, host_rx, host_cycle):
+            changed = True
 
-    Supports canonical slot key ('slot_1'), exact name, and case-insensitive match.
-    """
-    if not archived or not device_name:
-        return 0
-    slot_key = get_device_slot_key(device_name)
-    if slot_key in archived:
-        return int(archived[slot_key] or 0)
-    if device_name in archived:
-        return int(archived[device_name] or 0)
-    for k, v in archived.items():
-        if k.lower() == device_name.lower():
-            return int(v or 0)
-    return 0
-
-
-def record_device_traffic_archive(archived: dict, device_name: str | None, cur_bytes: int) -> dict:
-    """Accumulates cur_bytes into archived dictionary using canonical slot key.
-
-    Also migrates any legacy entry for device_name into the canonical slot key.
-    """
-    if cur_bytes <= 0 and not device_name:
-        return archived
-    slot_key = get_device_slot_key(device_name)
-    legacy_bytes = 0
-    if device_name and device_name in archived and device_name != slot_key:
-        legacy_bytes = int(archived.pop(device_name, 0) or 0)
-
-    archived[slot_key] = int(archived.get(slot_key, 0)) + legacy_bytes + max(0, cur_bytes)
-    return archived
-
-
-def get_user_monthly_standard_traffic(user: object | None, current_cycle: str | None = None) -> int:
-    """Returns standard subscription VLESS traffic for the active cycle."""
-    if not user:
-        return 0
-    if current_cycle is None:
-        from utils.datetime_helpers import now_utc
-
-        current_cycle = now_utc().strftime("%Y-%m")
-    user_cycle = getattr(user, "traffic_cycle", None)
-    if user_cycle != current_cycle:
-        return 0
-    vless = getattr(user, "monthly_vless_bytes", 0) or 0
-    return max(0, int(vless))
+    if changed:
+        server_obj.extra_data = extra
+    return changed
 
 

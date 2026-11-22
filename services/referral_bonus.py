@@ -18,9 +18,6 @@ from config.constants import (
 )
 from config.enums import AdminAuditAction
 from database.models import AccountLedgerEntry, User
-from database.repositories.account_ledger_repo import (
-    get_account_balance,
-)
 
 _logger = logging.getLogger(__name__)
 
@@ -161,28 +158,24 @@ async def is_first_topup_eligible(
 
     from sqlalchemy import func
 
-    from database.models import Order, Payment
+    from database.models import Order
 
-    count = await session.scalar(
-        select(func.count(Payment.id)).where(
-            Payment.user_id == user_id,
-            Payment.credited_at.is_not(None),
-            Payment.fulfillment_status == "succeeded",
-            Payment.amount >= REFERRAL_ACTIVE_MIN_TOPUP_RUB,
-        )
-    )
     order_count = await session.scalar(
         select(func.count(Order.id)).where(
             Order.user_id == user_id,
             Order.status == "paid",
             Order.amount_rub >= REFERRAL_ACTIVE_MIN_TOPUP_RUB,
             or_(
+                Order.metadata_.is_(None),
+                Order.metadata_["settlement_held"].astext.is_distinct_from("true"),
+            ),
+            or_(
                 Order.service_type == "topup",
                 Order.payment_method != "wallet",
             ),
         )
     )
-    return (count or 0) == 0 and (order_count or 0) == 0
+    return (order_count or 0) == 0
 
 
 async def _has_other_qualifying_topup(
@@ -205,12 +198,16 @@ async def _has_other_qualifying_topup(
     purchase (payment_method != 'wallet').  Wallet-funded non-topup orders are
     intentionally excluded because they may represent gifted balance.
     """
-    from database.models import Order, Payment
+    from database.models import Order
 
     order_conds = [
         Order.user_id == user_id,
         Order.status == "paid",
         Order.amount_rub >= REFERRAL_ACTIVE_MIN_TOPUP_RUB,
+        or_(
+            Order.metadata_.is_(None),
+            Order.metadata_["settlement_held"].astext.is_distinct_from("true"),
+        ),
         or_(
             Order.service_type == "topup",
             Order.payment_method != "wallet",
@@ -230,22 +227,7 @@ async def _has_other_qualifying_topup(
     other_order = await session.scalar(
         select(Order.id).where(*order_conds).limit(1)
     )
-    if other_order is not None:
-        return True
-
-    payment_conds = [
-        Payment.user_id == user_id,
-        Payment.provider_status == "succeeded",
-        Payment.fulfillment_status == "succeeded",
-        Payment.credited_at.is_not(None),
-        Payment.amount >= REFERRAL_ACTIVE_MIN_TOPUP_RUB,
-    ]
-    if exclude_payment_id is not None:
-        payment_conds.append(Payment.id != exclude_payment_id)
-    other_payment = await session.scalar(
-        select(Payment.id).where(*payment_conds).limit(1)
-    )
-    return other_payment is not None
+    return other_order is not None
 
 
 async def grant_referral_bonus_for_topup(
@@ -290,8 +272,6 @@ async def grant_referral_bonus_for_topup(
     )
     if (
         referrer is None
-        or not hasattr(referrer, "is_banned")
-        or referrer.is_banned
         or not hasattr(referrer, "id")
     ):
         return ReferralBonusGrantResult(
@@ -335,35 +315,28 @@ async def grant_referral_bonus_for_topup(
     referrer_bonus_granted = Decimal(0)
     op_id = order_id or str(payment_id or "unknown")
     idempotency_key = f"referral-bonus:topup:{op_id}:{referrer.id}"
-    existing = await session.scalar(
-        select(AccountLedgerEntry).where(
-            AccountLedgerEntry.idempotency_key == idempotency_key
-        )
+    from database.repositories.account_ledger_repo import create_admin_adjustment
+
+    _, created = await create_admin_adjustment(
+        session,
+        user_id=referrer.id,
+        signed_amount=bonus,
+        idempotency_key=idempotency_key,
+        metadata={
+            "source": REFERRAL_BONUS_SOURCE,
+            "source_type": REFERRAL_BONUS_SOURCE,
+            "referrer_user_id": referrer.id,
+            "referred_user_id": purchaser.id,
+            "referred_telegram_id": purchaser.telegram_id,
+            "topup_payment_id": payment_id,
+            "topup_order_id": str(order_id) if order_id is not None else None,
+            "bonus_rate": str(tier_info.rate),
+            "tier_name": tier_info.name,
+            "active_referrals_count": effective_count,
+        },
+        locked_user=referrer,
     )
-    if existing is None:
-        session.add(
-            AccountLedgerEntry(
-                user_id=referrer.id,
-                entry_type="admin_adjustment",
-                amount=bonus,
-                currency="RUB",
-                payment_id=None,
-                quote_id=None,
-                reversal_of_id=None,
-                idempotency_key=idempotency_key,
-                metadata_={
-                    "source_type": REFERRAL_BONUS_SOURCE,
-                    "referrer_user_id": referrer.id,
-                    "referred_user_id": purchaser.id,
-                    "referred_telegram_id": purchaser.telegram_id,
-                    "topup_payment_id": payment_id,
-                    "topup_order_id": str(order_id) if order_id is not None else None,
-                    "bonus_rate": str(tier_info.rate),
-                    "tier_name": tier_info.name,
-                    "active_referrals_count": effective_count,
-                },
-            )
-        )
+    if created:
         referrer_bonus_granted = bonus
         from services.audit_service import AuditService
         await AuditService.log_action(
@@ -517,16 +490,15 @@ async def reverse_referral_bonus_for_topup(
         reversal_amount = -abs(reversal_val)
         meta_payment_id = payment_id or (credit.metadata_ or {}).get("topup_payment_id")
         meta_order_id = order_str or (credit.metadata_ or {}).get("topup_order_id")
-        reversal_entry = AccountLedgerEntry(
+        from database.repositories.account_ledger_repo import create_admin_adjustment
+
+        rev_entry, _ = await create_admin_adjustment(
+            session,
             user_id=credit.user_id,
-            entry_type="admin_adjustment",
-            amount=reversal_amount,
-            currency="RUB",
-            payment_id=None,
-            quote_id=None,
-            reversal_of_id=None,
+            signed_amount=reversal_amount,
             idempotency_key=idempotency_key,
-            metadata_={
+            metadata={
+                "source": REFERRAL_BONUS_SOURCE,
                 "source_type": REFERRAL_BONUS_SOURCE,
                 "reason": "topup_refund_reversal",
                 "topup_payment_id": meta_payment_id,
@@ -534,38 +506,26 @@ async def reverse_referral_bonus_for_topup(
                 "original_credit_id": credit.id,
                 "refund_id": refund_id,
             },
+            cap_to_available=True,
         )
-        session.add(reversal_entry)
+        actual_rev = abs(Decimal(rev_entry.amount)) if rev_entry is not None else Decimal(0)
+        if actual_rev < max_can_reverse:
+            _logger.warning(
+                "Referral bonus reversal capped for user_id=%s, op_id=%s: requested=%s, reversed=%s (already spent)",
+                credit.user_id,
+                op_id,
+                max_can_reverse,
+                actual_rev,
+            )
         _logger.debug(
-            "Referral bonus reversal created for credit_id=%s, user_id=%s, op_id=%s, amount=%s",
+            "Referral bonus reversal for credit_id=%s, user_id=%s, op_id=%s, reversed=%s",
             credit.id,
             credit.user_id,
             op_id,
-            reversal_amount,
+            actual_rev,
         )
-        total_reversed += abs(reversal_amount)
+        total_reversed += actual_rev
 
     await session.flush()
     return total_reversed
 
-
-async def get_referral_bonus_balance(
-    session: AsyncSession,
-    *,
-    user_id: int,
-) -> Decimal:
-    """Return available referral bonus balance capped by user's available bonus funds."""
-    from sqlalchemy import func
-
-    net_referral = await session.scalar(
-        select(func.coalesce(func.sum(AccountLedgerEntry.amount), 0)).where(
-            AccountLedgerEntry.user_id == user_id,
-            AccountLedgerEntry.entry_type == "admin_adjustment",
-            AccountLedgerEntry.metadata_["source_type"].astext == REFERRAL_BONUS_SOURCE,
-        )
-    )
-    balance = await get_account_balance(session, user_id=user_id)
-    remaining = max(Decimal(0), Decimal(str(net_referral or 0)))
-    if balance.debt > 0:
-        remaining = max(Decimal(0), remaining - balance.debt)
-    return min(remaining, balance.bonus_available)

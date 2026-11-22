@@ -75,3 +75,10 @@ log.txt
 log-failed.txt
 wget-log
 wget-log.*
+uv.lock
+
+# Caddy runtime generated configurations
+caddy_conf.d/subscriptions.caddy
+caddy_conf.d/*.caddy
+!caddy_conf.d/status.caddy.example
+!caddy_conf.d/README.md

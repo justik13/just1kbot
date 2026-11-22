@@ -14,38 +14,21 @@ from typing import Any
 from config.enums import (
     AccountLedgerEntryType,
     AdminAuditAction,
-    ApiOperationStatus,
-    ApiOperationType,
     OrderServiceType,
     OrderStatus,
-    PaymentCheckoutStatus,
-    PaymentFulfillmentStatus,
-    PaymentProviderStatus,
-    PaymentReconciliationStatus,
     ServerHealthState,
     ServerLifecycleStatus,
     ServiceType,
-    VPNProvisioningStatus,
     WebhookInboxStatus,
-    WhiteInternetGrantType,
     WhiteInternetProvisioningStatus,
     WhiteInternetStatus,
 )
 
 
 # Protocol
-AMNEZIA_PROTOCOL = "amneziawg2"
-AMNEZIA_PROTOCOLS: tuple[str, ...] = (
-    AMNEZIA_PROTOCOL,
-    "amneziawg3",
-    "amneziawg3.1",
-)
 XRAY_PROTOCOL = "xray"
 VLESS_PROTOCOL = "vless"
-XRAY_ORIGIN_CAPABILITY = "xray_origin"
-
-# VPN Configuration transport limits
-MAX_RAW_CONFIG_BYTES = 65536  # 64 KiB max raw config payload
+WHITE_INTERNET_CAPABILITY = "white_internet"
 
 # Default HTTP rate limiter settings
 RATE_LIMIT_REQUESTS_PER_MINUTE = 30.0
@@ -54,8 +37,17 @@ RATE_LIMIT_BURST = 10
 # Subscriptions & Lifetimes
 PERMANENT_SUBSCRIPTION_DAYS = 36500
 PERMANENT_END_DATE = datetime(2100, 1, 1, tzinfo=timezone.utc)
-GRACE_PERIOD_HOURS = 24
 VPN_ACCESS_GRACE_HOURS = 4
+MIN_TOPUP_RUB: Decimal = Decimal("20")
+STANDARD_DOWNGRADE_COOLDOWN_DAYS = 7
+STANDARD_MAX_EXPIRY_DAYS = 180
+STANDARD_MIN_DEVICES = 2
+STANDARD_MAX_DEVICES = 10
+STANDARD_PLANS: dict[int, tuple[int, int]] = {
+    7: (39, 12),
+    30: (99, 30),
+    90: (255, 78),
+}
 
 # YooKassa Official Webhook IP Ranges
 YOOKASSA_IP_RANGES = (
@@ -68,18 +60,15 @@ YOOKASSA_IP_RANGES = (
     "2a02:5180::/32",
 )
 
-# Device limits
-DEVICE_DAILY_LIMIT = 25
-
 # Operational & Worker timings
 STALE_PAYMENT_THRESHOLD = 300
 WORKER_ERROR_SLEEP_INTERVAL = 60
 NOTIFICATION_INTERVAL = 1800
-TRAFFIC_SYNC_INTERVAL = 900
+TRAFFIC_SYNC_INTERVAL = 60
 SELF_HEALING_MAX_PER_CYCLE = 50
 
 # Local payment-expiry window: the cleanup worker marks a payment canceled
-# only after a provider GET still reports pending (provider-verified LOCAL
+# only after a provider GET still reports pending.
 # API Client timings and concurrency
 API_CONCURRENCY_LIMIT = 20
 API_RETRY_COUNT = 2
@@ -87,12 +76,6 @@ API_TIMEOUT = 15
 
 # UI & Message limits
 TELEGRAM_MESSAGE_LIMIT = 4096
-
-# In-memory Caches
-HUB_CACHE_MAX_SIZE = 10000
-HUB_CACHE_TTL = 43200
-USER_CONTEXT_CACHE_MAX_SIZE = 2000
-USER_CONTEXT_CACHE_TTL = 15.0
 
 
 # White Internet Service Constants
@@ -102,10 +85,6 @@ WHITE_INTERNET_BASE_DURATION_DAYS = int(os.getenv("WHITE_INTERNET_BASE_DURATION_
 WHITE_INTERNET_BASE_TRAFFIC_BYTES = int(
     os.getenv("WHITE_INTERNET_BASE_TRAFFIC_BYTES", str(53_687_091_200))
 )  # 50 GiB
-WHITE_INTERNET_TRIAL_DURATION_DAYS = int(os.getenv("WHITE_INTERNET_TRIAL_DURATION_DAYS", "3"))
-WHITE_INTERNET_TRIAL_TRAFFIC_BYTES = int(
-    os.getenv("WHITE_INTERNET_TRIAL_TRAFFIC_BYTES", str(5 * 1024 * 1024 * 1024))
-)  # 5 GiB
 WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB = Decimal(
     os.getenv("WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB", "200.00")
 )
@@ -128,7 +107,6 @@ WHITE_INTERNET_TOPUP_PACKS: dict[int, Decimal] = {
     25: Decimal(os.getenv("WHITE_INTERNET_TOPUP_25GB_PRICE_RUB", "100.00")),
     50: Decimal(os.getenv("WHITE_INTERNET_TOPUP_50GB_PRICE_RUB", "200.00")),
 }
-DEFAULT_XRAY_ORIGIN_MAX_CLIENTS = 1000
 DEFAULT_WHITE_INTERNET_PATH = os.getenv("WHITE_INTERNET_XHTTP_PATH", "/assets/v1")
 DEFAULT_WHITE_INTERNET_PADDING_KEY = os.getenv("WHITE_INTERNET_PADDING_KEY", "dc")
 WHITE_INTERNET_TLS_FINGERPRINT = os.getenv("WHITE_INTERNET_TLS_FINGERPRINT", "firefox")
@@ -162,10 +140,6 @@ if not WHITE_INTERNET_SUB_PATH_PREFIX.startswith("/"):
 WHITE_INTERNET_DEFAULT_DEVICE_LIMIT: int = 1
 
 DEFAULT_VLESS_PROFILE_TITLE = "✦ Just1k"
-DEFAULT_WHITE_INTERNET_PROFILE_TITLE = "✦ Just1k WL"
-WHITE_INTERNET_PROFILE_TITLE = os.getenv(
-    "WHITE_INTERNET_PROFILE_TITLE", DEFAULT_WHITE_INTERNET_PROFILE_TITLE
-).strip()
 
 DEFAULT_WHITE_INTERNET_CHANNEL_URL = os.getenv("TELEGRAM_CHANNEL_URL", "").strip()
 WHITE_INTERNET_CHANNEL_URL = os.getenv(
@@ -182,9 +156,6 @@ WHITE_INTERNET_SUPPORT_URL = os.getenv(
 ).strip()
 
 DEFAULT_FALLBACK_BOT_USERNAME = "just1k13bot"
-
-WHITE_INTERNET_ORIGIN_BADGE = os.getenv("WHITE_INTERNET_ORIGIN_BADGE", "").strip()
-WHITE_INTERNET_RELAY_BADGE = os.getenv("WHITE_INTERNET_RELAY_BADGE", "").strip()
 
 
 def _validate_xhttp_padding_bytes(val: str | None) -> str:
@@ -235,12 +206,9 @@ REFERRAL_WELCOME_DISCOUNT_PERCENT: Decimal = Decimal("0.25")
 # Minimum qualifying top-up for a referral to become "active".
 # Dust top-ups below this threshold neither activate the referral
 # (leaderboard/tier counting) nor consume the inviter's tier step.
-# 68 RUB = discounted first Base-30 tariff (90 - 25%): the smallest *real*
-# purchase. A referred test-week buyer pays 27 (35 - 25%) and intentionally
-# does NOT activate; White Internet buyers (188+ discounted) always qualify.
-# Independent business constant, NOT auto-derived from tariffs: if tariff
-# prices or the welcome rate change, adjust it manually in one place.
-REFERRAL_ACTIVE_MIN_TOPUP_RUB: Decimal = Decimal("68")
+# 67 RUB: discounted first Base-30 tariff (99 - 25% = 75 RUB) qualifies,
+# while 7-day plan (39 - 25% = 30 RUB) intentionally does NOT activate.
+REFERRAL_ACTIVE_MIN_TOPUP_RUB: Decimal = Decimal("67")
 
 
 CANONICAL_XHTTP_PROFILE: dict[str, Any] = {
@@ -263,6 +231,12 @@ CANONICAL_XHTTP_PROFILE: dict[str, Any] = {
     "xPaddingMethod": "tokenish",
     "xPaddingObfsMode": True,
     "xPaddingBytes": _validate_xhttp_padding_bytes(os.getenv("WHITE_INTERNET_PADDING_BYTES")),
+    "xmux": {
+        "maxConnections": 2,
+        "cMaxReuseTimes": "10-20",
+        "hMaxRequestTimes": "300-500",
+        "hMaxReusableSecs": "120-240",
+    },
     "security": "tls",
     "alpn": ["h2", "http/1.1"],
     "fp": WHITE_INTERNET_TLS_FINGERPRINT,
@@ -270,36 +244,22 @@ CANONICAL_XHTTP_PROFILE: dict[str, Any] = {
 
 
 __all__ = [
-    "AMNEZIA_PROTOCOL",
-    "AMNEZIA_PROTOCOLS",
     "API_CONCURRENCY_LIMIT",
     "API_RETRY_COUNT",
     "API_TIMEOUT",
     "AccountLedgerEntryType",
     "AdminAuditAction",
-    "ApiOperationStatus",
     "CANONICAL_XHTTP_PROFILE",
-    "ApiOperationType",
     "DEFAULT_FALLBACK_BOT_USERNAME",
     "DEFAULT_VLESS_PROFILE_TITLE",
     "DEFAULT_WHITE_INTERNET_CHANNEL_URL",
-    "DEFAULT_WHITE_INTERNET_PROFILE_TITLE",
     "DEFAULT_WHITE_INTERNET_SUPPORT_URL",
-    "DEFAULT_XRAY_ORIGIN_MAX_CLIENTS",
-    "DEVICE_DAILY_LIMIT",
     "OrderServiceType",
     "OrderStatus",
-    "GRACE_PERIOD_HOURS",
-    "HUB_CACHE_MAX_SIZE",
-    "HUB_CACHE_TTL",
-    "MAX_RAW_CONFIG_BYTES",
+    "MIN_TOPUP_RUB",
     "NOTIFICATION_INTERVAL",
     "PERMANENT_END_DATE",
     "PERMANENT_SUBSCRIPTION_DAYS",
-    "PaymentCheckoutStatus",
-    "PaymentFulfillmentStatus",
-    "PaymentProviderStatus",
-    "PaymentReconciliationStatus",
     "RATE_LIMIT_BURST",
     "RATE_LIMIT_REQUESTS_PER_MINUTE",
     "REFERRAL_DEFAULT_RATE",
@@ -307,17 +267,19 @@ __all__ = [
     "REFERRAL_ACTIVE_MIN_TOPUP_RUB",
     "REFERRAL_WELCOME_DISCOUNT_PERCENT",
     "SELF_HEALING_MAX_PER_CYCLE",
+    "STANDARD_DOWNGRADE_COOLDOWN_DAYS",
+    "STANDARD_MAX_DEVICES",
+    "STANDARD_MAX_EXPIRY_DAYS",
+    "STANDARD_MIN_DEVICES",
+    "STANDARD_PLANS",
     "ServerHealthState",
     "ServerLifecycleStatus",
     "ServiceType",
     "STALE_PAYMENT_THRESHOLD",
     "TELEGRAM_MESSAGE_LIMIT",
     "TRAFFIC_SYNC_INTERVAL",
-    "USER_CONTEXT_CACHE_MAX_SIZE",
-    "USER_CONTEXT_CACHE_TTL",
     "DEFAULT_WHITE_INTERNET_SUB_PATH_PREFIX",
     "VPN_ACCESS_GRACE_HOURS",
-    "VPNProvisioningStatus",
     "WHITE_INTERNET_BASE_DURATION_DAYS",
     "WHITE_INTERNET_BASE_PRICE_RUB",
     "WHITE_INTERNET_BASE_TRAFFIC_BYTES",
@@ -329,25 +291,19 @@ __all__ = [
     "WHITE_INTERNET_MAX_DEVICE_LIMIT",
     "WHITE_INTERNET_MAX_EXPIRY_DAYS",
     "WHITE_INTERNET_MAX_QUOTA_BYTES",
-    "WHITE_INTERNET_ORIGIN_BADGE",
-    "WHITE_INTERNET_PROFILE_TITLE",
-    "WHITE_INTERNET_RELAY_BADGE",
     "WHITE_INTERNET_SERVICE_TYPE",
     "WHITE_INTERNET_SUB_PATH_PREFIX",
     "WHITE_INTERNET_SUPPORT_URL",
     "WHITE_INTERNET_TOPUP_PACKS",
-    "WHITE_INTERNET_TRIAL_DURATION_DAYS",
-    "WHITE_INTERNET_TRIAL_TRAFFIC_BYTES",
     "DEFAULT_VLESS_TLS_FINGERPRINT",
     "VALID_VLESS_TLS_FINGERPRINTS",
     "VLESS_PROTOCOL",
     "VLESS_TLS_FINGERPRINT",
     "WebhookInboxStatus",
-    "WhiteInternetGrantType",
     "WhiteInternetProvisioningStatus",
     "WhiteInternetStatus",
     "WORKER_ERROR_SLEEP_INTERVAL",
-    "XRAY_ORIGIN_CAPABILITY",
+    "WHITE_INTERNET_CAPABILITY",
     "XRAY_PROTOCOL",
     "YOOKASSA_IP_RANGES",
 ]

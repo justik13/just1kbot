@@ -1,77 +1,49 @@
 import asyncio
 import logging
 import time
-import uuid
 from datetime import timedelta
 from typing import Any
 
-from aiogram import Bot
-from aiogram.exceptions import TelegramForbiddenError
 from cachetools import TTLCache
-from sqlalchemy import and_, cast, delete, or_, select, String, update
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from config.constants import (
-    AdminAuditAction,
-    GRACE_PERIOD_HOURS,
     VPN_ACCESS_GRACE_HOURS,
 )
 from database.connection import session_scope
 from database.models import (
-    AdminOperationIdempotency,
-    BroadcastProgress,
-    HubMessage,
+    DeviceRegistrationEvent,
     Order,
     User,
     VlessSubscription,
     WebhookInbox,
 )
 from database.repositories.audit_repo import clear_audit_logs
-from bot.keyboards.notifications import get_devices_deleted_keyboard
-from bot.texts.runtime.notifications import NOTIFY_DEVICES_DELETED
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger(__name__)
 
-_unmanaged_peers_log_cache: TTLCache[tuple[int, str], float] = TTLCache(maxsize=5000, ttl=3600.0)
-_unmanaged_peers_summary_last_logged: float | None = None
-
-MAX_PENDING_ATTEMPTS = 10
 PENDING_RETRY_INTERVAL = 3600
 CLEANUP_START_DELAY = 60.0
-CLEANUP_LOOP_INTERVAL = 900.0
+CLEANUP_LOOP_INTERVAL = 3600.0
 RECONCILE_LOOP_INTERVAL = 60.0
 OLD_RECORDS_INTERVAL = 86400.0
-# Auto-expire throughput: each daily pass drains the pending-expiry backlog
-# within a wall-clock budget (and at most MAX_BATCHES batches ≈ 400
-# verifications), so a large backlog shrinks every day without one unbounded
-# or stalled run.
 
 AUDIT_LOG_RETENTION_DAYS = 180
 WEBHOOK_INBOX_RETENTION_DAYS = 30
 
-_last_heavy_cleanup: float = 0.0
+_last_heavy_cleanup: float | None = None
 _last_old_cleanup: float = 0.0
 _pending_order_backoff_cache: TTLCache[Any, float] = TTLCache(maxsize=2000, ttl=300.0)
 
 
-def _safe_log_value(value, limit=64):
-    text = str(value or "unknown")
-    sanitized = "".join(character if character.isprintable() else "?" for character in text)
-    return sanitized[:limit]
-
-
-async def cleanup_dangling_peers_loop(
-    bot_or_shutdown: Bot | asyncio.Event | None = None,
+async def cleanup_expired_subscriptions_loop(
     shutdown_event: asyncio.Event | None = None,
 ):
     global _last_old_cleanup, _last_heavy_cleanup
 
-    bot: Bot | None = bot_or_shutdown if isinstance(bot_or_shutdown, Bot) else None
-    if isinstance(bot_or_shutdown, asyncio.Event):
-        event = bot_or_shutdown
-    else:
-        event = shutdown_event or asyncio.Event()
+    event = shutdown_event or asyncio.Event()
 
     try:
         await asyncio.wait_for(
@@ -86,10 +58,10 @@ async def cleanup_dangling_peers_loop(
     while not event.is_set():
         try:
             now = time.monotonic()
-            if now - _last_heavy_cleanup >= CLEANUP_LOOP_INTERVAL:
+            if _last_heavy_cleanup is None or (now - _last_heavy_cleanup) >= CLEANUP_LOOP_INTERVAL:
                 await _cleanup_expired_vless_network_grace()
-                await _cleanup_expired_vless_retention_grace(bot)
                 await _sweep_vless_pending_revocations()
+                await _apply_due_white_internet_downgrades()
                 _last_heavy_cleanup = now
 
             await _reconcile_stale_pending_orders()
@@ -123,164 +95,71 @@ async def cleanup_dangling_peers_loop(
 
 
 
+async def _apply_due_white_internet_downgrades() -> None:
+    """Apply scheduled White Internet device limit downgrades when pending_from is reached."""
+    from services.white_internet_service import WhiteInternetService
+
+    try:
+        async with session_scope() as session:
+            applied = await WhiteInternetService.apply_due_wi_downgrades(session, now=now_utc())
+            if applied:
+                logger.info("Applied %d scheduled White Internet device downgrades", applied)
+    except Exception as exc:
+        logger.warning("Failed to apply scheduled White Internet downgrades: %s", exc)
+
+
 async def _cleanup_expired_vless_network_grace() -> None:
     """Deactivate VLESS access when network grace window (4 hours) expires or under financial hold."""
     current_time = now_utc()
     threshold = current_time - timedelta(hours=VPN_ACCESS_GRACE_HOURS)
 
-    async with session_scope() as session:
-        stmt = (
-            select(User.id)
-            .join(VlessSubscription, VlessSubscription.user_id == User.id)
-            .where(
-                User.is_deleted.is_(False),
-                or_(
-                    and_(
-                        User.subscription_end.is_not(None),
-                        User.subscription_end < threshold,
+    for _batch in range(10):
+        async with session_scope() as session:
+            stmt = (
+                select(User.id)
+                .join(VlessSubscription, VlessSubscription.user_id == User.id)
+                .where(
+                    User.is_deleted.is_(False),
+                    or_(
+                        and_(
+                            VlessSubscription.expires_at.is_not(None),
+                            VlessSubscription.expires_at < threshold,
+                        ),
+                        User.financial_hold.is_(True),
                     ),
-                    User.financial_hold.is_(True),
-                ),
-                VlessSubscription.is_active.is_(True),
-            )
-            .order_by(User.subscription_end.asc().nullslast())
-            .limit(50)
-        )
-        result = await session.execute(stmt)
-        user_ids = [row[0] for row in result.all()]
-
-    for user_id in user_ids:
-        try:
-            async with session_scope() as session:
-                user = await session.get(User, user_id, with_for_update=True)
-                if not user or user.is_deleted:
-                    continue
-                from utils.datetime_helpers import is_permanent_subscription
-
-                if user.subscription_end and is_permanent_subscription(user.subscription_end):
-                    continue
-                if not user.financial_hold and (not user.subscription_end or user.subscription_end >= threshold):
-                    continue
-                await SubscriptionService.sync_access_state(session, user)
-                logger.info("VLESS network grace/hold deactivation applied for user_id=%s", user_id)
-        except Exception as e:
-            logger.warning("VLESS network grace deactivation failed for user_id=%s: %s", user_id, e)
-
-
-async def _cleanup_expired_vless_retention_grace(bot: Bot | None = None) -> None:
-    """Perform 24h grace retention cleanup for expired VLESS subscriptions (reset HWIDs, rotate UUID, notify user)."""
-    current_time = now_utc()
-    threshold = current_time - timedelta(hours=GRACE_PERIOD_HOURS)
-
-    async with session_scope() as session:
-        stmt = (
-            select(User.id)
-            .join(VlessSubscription, VlessSubscription.user_id == User.id)
-            .where(
-                User.is_deleted.is_(False),
-                User.subscription_end.is_not(None),
-                User.subscription_end < threshold,
-                or_(
                     VlessSubscription.is_active.is_(True),
-                    and_(
-                        VlessSubscription.active_hwids.is_not(None),
-                        cast(VlessSubscription.active_hwids, String) != "{}",
-                    ),
-                ),
+                )
+                .order_by(VlessSubscription.expires_at.asc().nullslast())
+                .limit(50)
             )
-            .order_by(User.subscription_end.asc())
-            .limit(50)
-        )
-        result = await session.execute(stmt)
-        user_ids = [row[0] for row in result.all()]
+            result = await session.execute(stmt)
+            user_ids = [row[0] for row in result.all()]
 
-    if not user_ids:
-        return
+        if not user_ids:
+            break
 
-    from database.repositories import vless_subscription_repo
-    from services.audit_service import AuditService
-    from services.vless_subscription_service import VlessSubscriptionService
+        for user_id in user_ids:
+            try:
+                async with session_scope() as session:
+                    user = await session.get(User, user_id, with_for_update=True)
+                    if not user or user.is_deleted:
+                        continue
+                    from database.repositories import vless_subscription_repo
+                    from utils.datetime_helpers import is_permanent_subscription
 
-    for user_id in user_ids:
-        notify_tg_id = None
-        try:
-            async with session_scope() as session:
-                user = await session.get(User, user_id, with_for_update=True)
-                if not user or user.is_deleted or not user.subscription_end:
-                    continue
+                    vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+                    sub_end = vless_sub.expires_at if vless_sub else None
+                    if not user.financial_hold and sub_end and is_permanent_subscription(sub_end):
+                        continue
+                    if not user.financial_hold and (not sub_end or sub_end >= threshold):
+                        continue
+                    await SubscriptionService._sync_access_state(session, user, vless_sub=vless_sub)
+                    logger.info("VLESS network grace/hold deactivation applied for user_id=%s", user_id)
+            except Exception as e:
+                logger.warning("VLESS network grace deactivation failed for user_id=%s: %s", user_id, e)
 
-                from utils.datetime_helpers import is_permanent_subscription
-
-                if is_permanent_subscription(user.subscription_end):
-                    continue
-                if user.subscription_end >= threshold:
-                    continue
-
-                vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
-                had_vless_devices = bool(vless_sub and (vless_sub.active_hwids or vless_sub.is_active))
-
-                await SubscriptionService.sync_access_state(session, user)
-
-                if not vless_sub or not had_vless_devices:
-                    continue
-
-                old_uuid, new_uuid = await vless_subscription_repo.reset_hwids(session, vless_sub.id)
-                if not old_uuid:
-                    old_uuid = vless_sub.uuid
-                    new_uuid = str(uuid.uuid4())
-                    vless_sub.uuid = new_uuid
-                    vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1
-                    vless_sub.active_hwids = {}
-                    vless_sub.node_traffic_snapshots = {"_fresh": True}
-                    pending = list(getattr(vless_sub, "pending_revoked_uuids", None) or [])
-                    if old_uuid and old_uuid not in pending:
-                        pending.append(old_uuid)
-                    vless_sub.pending_revoked_uuids = pending
-                vless_sub.is_active = False
-                await session.flush()
-
-                if old_uuid:
-                    VlessSubscriptionService.deprovision_background(
-                        old_uuid, version=vless_sub.version, sub_id=vless_sub.id, session=session
-                    )
-                VlessSubscriptionService.ensure_synced_background(user.id, is_active=False, session=session)
-
-                notify_tg_id = user.telegram_id
-                await AuditService.log_action(
-                    session,
-                    admin_id=0,
-                    action=AdminAuditAction.CLEANUP_DEVICE_DELETE,
-                    target_type="user",
-                    target_id=user.id,
-                    details={
-                        "profiles_deleted": 0,
-                        "vless_deleted": True,
-                        "reason": "grace_delete",
-                    },
-                )
-                logger.info(
-                    "VLESS 24h retention grace cleanup: reset HWIDs and rotated UUID for user_id=%s",
-                    user_id,
-                )
-
-            if notify_tg_id and bot:
-                try:
-                    await bot.send_message(
-                        notify_tg_id,
-                        NOTIFY_DEVICES_DELETED,
-                        reply_markup=get_devices_deleted_keyboard(),
-                        parse_mode="HTML",
-                    )
-                except TelegramForbiddenError:
-                    async with session_scope() as blocked_session:
-                        b_user = await blocked_session.get(User, user_id)
-                        if b_user:
-                            b_user.is_bot_blocked = True
-                except Exception as e:
-                    logger.warning("Failed to notify user %s on device deletion: %s", user_id, e)
-
-        except Exception as e:
-            logger.warning("VLESS 24h retention grace cleanup failed for user_id=%s: %s", user_id, e)
+        if len(user_ids) < 50:
+            break
 
 
 async def _sweep_vless_pending_revocations() -> None:
@@ -294,6 +173,7 @@ async def _sweep_vless_pending_revocations() -> None:
             subs = await vless_subscription_repo.get_subscriptions_with_pending_revocations(session, limit=20)
             servers = await VlessSubscriptionService.get_revocation_target_servers(session)
             targets = VlessSubscriptionService._extract_node_targets(servers)
+            exit_nodes = await VlessSubscriptionService.get_all_exit_nodes_for_revocation(session)
             sub_items = [
                 (s.id, list(getattr(s, "pending_revoked_uuids", None) or []), getattr(s, "version", 1) or 1)
                 for s in subs
@@ -305,12 +185,17 @@ async def _sweep_vless_pending_revocations() -> None:
                 for rev_uuid in rev_uuids:
                     cleared_this = False
                     try:
-                        res = await VlessSubscriptionService._execute_deprovision_on_nodes(targets, rev_uuid, version=ver)
+                        expanded = VlessSubscriptionService._expand_revocation_uuids(rev_uuid, exit_nodes)
+                        results: dict[int, bool] = {}
+                        for u in expanded:
+                            res = await VlessSubscriptionService._execute_deprovision_on_nodes(targets, u, version=ver)
+                            for s_id, ok in res.items():
+                                results[s_id] = results.get(s_id, True) and ok
                         if (
                             servers
                             and len(targets) == len(servers)
-                            and all(res.values())
-                            and len(res) == len(targets)
+                            and all(results.values())
+                            and len(results) == len(targets)
                         ):
                             async with session_scope() as session:
                                 await vless_subscription_repo.pop_pending_revoked_uuid(session, sub_id, rev_uuid)
@@ -455,38 +340,8 @@ async def _batch_delete_matching(
 async def _cleanup_old_records():
     current_time = now_utc()
 
-    # Mark stuck in_progress broadcasts as stopped (short atomic transaction)
-    threshold_stuck = current_time - timedelta(hours=2)
-    async with session_scope() as session:
-        stmt_stuck = (
-            update(BroadcastProgress)
-            .where(BroadcastProgress.status == "in_progress")
-            .where(BroadcastProgress.updated_at < threshold_stuck)
-            .values(status="stopped")
-        )
-        await session.execute(stmt_stuck)
-
-    threshold_broadcasts = current_time - timedelta(days=7)
-    broadcasts_deleted = await _batch_delete_matching(
-        BroadcastProgress,
-        BroadcastProgress.status.in_(["completed", "stopped"]),
-        BroadcastProgress.updated_at < threshold_broadcasts,
-    )
-
     deleted_logs = await clear_audit_logs(
         older_than_days=AUDIT_LOG_RETENTION_DAYS,
-    )
-
-    threshold_hub = current_time - timedelta(days=1)
-    hub_deleted = await _batch_delete_matching(
-        HubMessage,
-        HubMessage.created_at < threshold_hub,
-    )
-
-    threshold_idempotency = current_time - timedelta(days=7)
-    idempotency_deleted = await _batch_delete_matching(
-        AdminOperationIdempotency,
-        AdminOperationIdempotency.created_at < threshold_idempotency,
     )
 
     # Prune old settled webhook inbox records in per-batch committed transactions.
@@ -500,21 +355,18 @@ async def _cleanup_old_records():
         WebhookInbox.received_at < threshold_webhooks,
     )
 
-    if (
-        broadcasts_deleted > 0
-        or deleted_logs > 0
-        or hub_deleted > 0
-        or webhooks_deleted > 0
-        or idempotency_deleted > 0
-    ):
+    threshold_device_events = current_time - timedelta(hours=24)
+    device_events_deleted = await _batch_delete_matching(
+        DeviceRegistrationEvent,
+        DeviceRegistrationEvent.created_at < threshold_device_events,
+    )
+
+    if deleted_logs > 0 or webhooks_deleted > 0 or device_events_deleted > 0:
         logger.info(
-            "Cleanup: %s old broadcasts, %s old audit logs, "
-            "%s old hub_messages, %s old webhooks deleted, %s old idempotency records deleted",
-            broadcasts_deleted,
+            "Cleanup: %s old audit logs, %s old webhooks, %s old device events deleted",
             deleted_logs,
-            hub_deleted,
             webhooks_deleted,
-            idempotency_deleted,
+            device_events_deleted,
         )
 
 
@@ -527,23 +379,25 @@ async def _reconcile_stale_pending_orders() -> None:
     3. Settle or cancel each order in its own isolated transaction boundary.
     4. Expire ancient pending orders (> 24 hours old).
     """
+    from config.enums import OrderStatus
     from integrations.payment_gateways.factory import get_payment_gateway
-    from services.order_service import OrderService
+    from services.order_service import OrderService, acquire_user_account_lock
 
     now = now_utc()
     window_start = now - timedelta(hours=24)
     stale_threshold = now - timedelta(minutes=3)
 
     # 1. Fetch candidate order tuples in a fast read query (no lock held during external HTTP)
-    candidates: list[tuple[Any, str, str]] = []
+    candidates: list[tuple[Any, int | None, str, str]] = []
     try:
         cached_ids = list(_pending_order_backoff_cache.keys())
         async with session_scope() as session:
             stmt = (
-                select(Order.id, Order.external_id, Order.payment_method)
+                select(Order.id, Order.user_id, Order.external_id, Order.payment_method, Order.metadata_)
                 .where(
                     Order.status == "pending",
                     Order.external_id.is_not(None),
+                    Order.external_id != "",
                     Order.created_at >= window_start,
                     Order.created_at <= stale_threshold,
                 )
@@ -553,9 +407,10 @@ async def _reconcile_stale_pending_orders() -> None:
             stmt = stmt.order_by(Order.created_at.asc()).limit(20)
             res = await session.execute(stmt)
             candidates = [
-                (row[0], row[1], row[2])
+                (row[0], row[1], row[2], row[3])
                 for row in res.all()
                 if row[0] not in _pending_order_backoff_cache
+                and not (isinstance(row[4], dict) and row[4].get("underpaid"))
             ]
     except Exception as exc:
         logger.error("Failed to query stale pending order candidates: %s", exc)
@@ -563,12 +418,13 @@ async def _reconcile_stale_pending_orders() -> None:
 
     # 2. Check each candidate with the payment gateway outside DB transactions,
     # then settle/cancel in an isolated transaction per order.
-    for order_id, external_id, payment_method in candidates:
+    for order_id, user_id, external_id, payment_method in candidates:
         try:
             gateway = get_payment_gateway(payment_method)
             status_res = await gateway.check_payment_status(external_id)
+            is_refunded = bool(getattr(status_res, "is_refunded", False))
 
-            if not (status_res.is_paid or status_res.is_canceled):
+            if not (status_res.is_paid or status_res.is_canceled or is_refunded):
                 _pending_order_backoff_cache[order_id] = time.monotonic()
                 if status_res.status_str == "not_found":
                     logger.warning(
@@ -578,12 +434,20 @@ async def _reconcile_stale_pending_orders() -> None:
                     )
                 continue
 
-            # Isolated transaction for this specific order
+            # Isolated transaction for this specific order (canonical lock order: advisory -> User -> Order)
             async with session_scope() as order_session:
+                if user_id is not None:
+                    await acquire_user_account_lock(order_session, user_id)
+                    await order_session.scalar(
+                        select(User.id).where(User.id == user_id).with_for_update()
+                    )
                 order = await order_session.scalar(
                     select(Order).where(Order.id == order_id).with_for_update()
                 )
                 if not order or order.status != "pending":
+                    continue
+                if isinstance(order.metadata_, dict) and order.metadata_.get("underpaid"):
+                    _pending_order_backoff_cache[order_id] = time.monotonic()
                     continue
 
                 if status_res.is_paid:
@@ -593,7 +457,7 @@ async def _reconcile_stale_pending_orders() -> None:
                         external_id=external_id,
                         paid_amount_rub=status_res.amount_rub,
                     )
-                    if paid_order:
+                    if paid_order and paid_order.status == "paid":
                         _pending_order_backoff_cache.pop(order_id, None)
                         logger.info(
                             "Reconciliation settled stale pending order %s (amount=%s rub)",
@@ -611,11 +475,24 @@ async def _reconcile_stale_pending_orders() -> None:
                         order,
                         reason=status_res.cancellation_reason or "gateway_canceled",
                     )
+                    await OrderService.refund_reserved_mixed_debit(order_session, order)
                     _pending_order_backoff_cache.pop(order_id, None)
                     logger.info(
                         "Reconciliation canceled stale pending order %s (reason=%s)",
                         order.id,
                         status_res.cancellation_reason,
+                    )
+                elif is_refunded:
+                    await OrderService.refund_reserved_mixed_debit(order_session, order)
+                    order.status = OrderStatus.REFUNDED
+                    order.refunded_at = now_utc()
+                    order_meta = dict(order.metadata_ or {})
+                    order_meta["refunded_during_pending"] = True
+                    order.metadata_ = order_meta
+                    _pending_order_backoff_cache.pop(order_id, None)
+                    logger.info(
+                        "Reconciliation marked pending order %s as refunded",
+                        order.id,
                     )
         except Exception as exc:
             _pending_order_backoff_cache[order_id] = time.monotonic()
@@ -626,12 +503,12 @@ async def _reconcile_stale_pending_orders() -> None:
             )
 
     # 3. Expire orphaned pending orders without external_id (> 30 min old)
-    # and ancient pending orders (> 24 hours old) in a bounded transaction
+    # and ancient pending orders (> 24 hours old) after checking gateway if external_id exists.
     try:
         ambiguous_threshold = now - timedelta(minutes=30)
         async with session_scope() as session:
             expired_stmt = (
-                select(Order)
+                select(Order.id, Order.user_id, Order.external_id, Order.payment_method, Order.metadata_)
                 .where(
                     Order.status == "pending",
                     or_(
@@ -644,18 +521,70 @@ async def _reconcile_stale_pending_orders() -> None:
                 )
                 .order_by(Order.created_at.asc())
                 .limit(50)
-                .with_for_update(skip_locked=True)
             )
-            expired_res = await session.execute(expired_stmt)
-            expired_orders = list(expired_res.scalars().all())
-            for exp_order in expired_orders:
-                reason = "ambiguous_creation_timeout" if exp_order.external_id is None else "order_expired_24h"
-                OrderService.mark_order_canceled(exp_order, reason=reason)
-                logger.info(
-                    "Reconciliation expired pending order %s (reason=%s)",
-                    exp_order.id,
-                    reason,
+            expired_candidates = [
+                (row[0], row[1], row[2], row[3])
+                for row in (await session.execute(expired_stmt)).all()
+                if not (isinstance(row[4], dict) and row[4].get("underpaid"))
+            ]
+
+        for exp_id, exp_user_id, exp_ext_id, exp_pm in expired_candidates:
+            paid_status = None
+            refunded_status = None
+            if exp_ext_id:
+                try:
+                    gateway = get_payment_gateway(exp_pm)
+                    status_res = await gateway.check_payment_status(exp_ext_id)
+                    if status_res.is_paid:
+                        paid_status = status_res
+                    elif getattr(status_res, "is_refunded", False):
+                        refunded_status = status_res
+                except Exception as gw_exc:
+                    logger.warning(
+                        "Gateway check before expiry failed for order %s: %s; skipping expiry",
+                        exp_id,
+                        gw_exc,
+                    )
+                    continue
+
+            async with session_scope() as order_session:
+                if exp_user_id is not None:
+                    await acquire_user_account_lock(order_session, exp_user_id)
+                    await order_session.scalar(
+                        select(User.id).where(User.id == exp_user_id).with_for_update()
+                    )
+                exp_order = await order_session.scalar(
+                    select(Order).where(Order.id == exp_id).with_for_update(skip_locked=True)
                 )
+                if not exp_order or exp_order.status != "pending":
+                    continue
+                if isinstance(exp_order.metadata_, dict) and exp_order.metadata_.get("underpaid"):
+                    continue
+                if paid_status is not None:
+                    await OrderService.mark_order_paid(
+                        order_session,
+                        exp_order.id,
+                        external_id=exp_ext_id,
+                        paid_amount_rub=paid_status.amount_rub,
+                    )
+                    logger.info("Reconciliation settled 24h+ pending order %s before expiry", exp_order.id)
+                elif refunded_status is not None:
+                    await OrderService.refund_reserved_mixed_debit(order_session, exp_order)
+                    exp_order.status = OrderStatus.REFUNDED
+                    exp_order.refunded_at = now_utc()
+                    order_meta = dict(exp_order.metadata_ or {})
+                    order_meta["refunded_during_pending"] = True
+                    exp_order.metadata_ = order_meta
+                    logger.info("Reconciliation marked 24h+ pending order %s as refunded before expiry", exp_order.id)
+                else:
+                    reason = "ambiguous_creation_timeout" if not exp_order.external_id else "order_expired_24h"
+                    OrderService.mark_order_canceled(exp_order, reason=reason)
+                    await OrderService.refund_reserved_mixed_debit(order_session, exp_order)
+                    logger.info(
+                        "Reconciliation expired pending order %s (reason=%s)",
+                        exp_order.id,
+                        reason,
+                    )
     except Exception as exc:
         logger.error("Error expiring ancient pending orders: %s", exc)
 

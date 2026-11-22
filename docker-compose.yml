@@ -127,6 +127,7 @@ services:
       WEBHOOK_HOST: "0.0.0.0"
       POSTGRES_HOST: "db"
       REDIS_HOST: "redis"
+      ALLOW_LOCAL_HTTP: ${ALLOW_LOCAL_HTTP:-false}
       JUST1KBOT_HEARTBEAT_FILE: "/tmp/heartbeat"
     cap_drop:
       - ALL
@@ -163,6 +164,8 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    env_file:
+      - .env
     environment:
       DOMAIN: ${DOMAIN:?DOMAIN is required}
       SSL_EMAIL: ${SSL_EMAIL:?SSL_EMAIL is required}
@@ -208,6 +211,60 @@ services:
     depends_on:
       db:
         condition: service_healthy
+
+  node_ru:
+    build:
+      context: ../just1knode
+      dockerfile: Dockerfile
+    container_name: just1knode_ru
+    profiles: ["nodes"]
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - backend_net
+    environment:
+      NODE_ROLE: ru_hub
+      PORT: "8444"
+      GRPC_PORT: "10085"
+      LOCATION_CODE: "de"
+      DOMAIN: "dash.just1k.pro"
+      XRAY_API_KEY: ${DEV_NODE_API_KEY:-dev_node_secret_key_123456}
+
+  node_exit_de:
+    build:
+      context: ../just1knode
+      dockerfile: Dockerfile
+    container_name: just1knode_exit_de
+    profiles: ["nodes"]
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - backend_net
+    environment:
+      NODE_ROLE: exit_node
+      PORT: "8444"
+      GRPC_PORT: "10085"
+      LOCATION_CODE: "de"
+      DOMAIN: "de-1.dash.just1k.pro"
+      XRAY_API_KEY: ${DEV_NODE_API_KEY:-dev_node_secret_key_123456}
+
+  node_eu:
+    build:
+      context: ../just1knode
+      dockerfile: Dockerfile
+    container_name: just1knode_eu
+    profiles: ["nodes"]
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - backend_net
+    environment:
+      NODE_ROLE: eu_hub
+      PORT: "8444"
+      GRPC_PORT: "10085"
+      LOCATION_CODE: "nl"
+      DOMAIN: "eu-transit.just1k.pro"
+      XRAY_API_KEY: ${DEV_NODE_API_KEY:-dev_node_secret_key_123456}
 
 volumes:
   postgres_data:

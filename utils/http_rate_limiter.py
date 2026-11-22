@@ -118,8 +118,12 @@ def get_trusted_client_ip(request: web.Request) -> str:
 
     X-Forwarded-For handling is rightmost-untrusted: entries are walked from the
     right and trusted proxy hops are skipped, so a client-supplied first entry
-    cannot spoof the resolved address. X-Real-IP is only honoured because the
-    reverse proxy overwrites it (Caddyfile: header_up X-Real-IP {remote_host}).
+    cannot spoof the resolved address. X-Real-IP is honoured when it is an
+    untrusted client IP; if X-Real-IP itself belongs to TRUSTED_PROXIES (for
+    example, an upstream ru_hub node proxying /sub/* requests with
+    X-Forwarded-For: <client_ip>, <ru_hub_ip>), X-Forwarded-For is inspected to
+    extract the rightmost untrusted client IP. Add ru_hub IPs/CIDRs to
+    TRUSTED_PROXIES to unwrap multi-hop CDN -> ru_hub -> Bot requests.
     """
     peer_ip = request.remote or "127.0.0.1"
     trusted_proxies = None
@@ -132,13 +136,17 @@ def get_trusted_client_ip(request: web.Request) -> str:
             trusted_proxies = None
 
     if _is_trusted_proxy_peer(peer_ip, trusted_proxies):
-        # 1. Prefer X-Real-IP set (overwritten) by the trusted reverse proxy
+        # 1. Prefer X-Real-IP set (overwritten) by the trusted reverse proxy,
+        # unless X-Real-IP itself is a trusted proxy hop (e.g., ru_hub in TRUSTED_PROXIES).
+        valid_real_ip: str | None = None
         real_ip = request.headers.get("X-Real-IP")
         if real_ip:
             candidate = real_ip.strip()
             try:
                 ipaddress.ip_address(candidate)
-                return candidate
+                valid_real_ip = candidate
+                if not _is_trusted_proxy_peer(candidate, trusted_proxies):
+                    return candidate
             except ValueError:
                 pass
 
@@ -160,5 +168,8 @@ def get_trusted_client_ip(request: web.Request) -> str:
                     return raw_ip
                 except ValueError:
                     continue
+
+        if valid_real_ip:
+            return valid_real_ip
 
     return peer_ip

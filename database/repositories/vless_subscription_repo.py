@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import logging
-import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 import secrets
-from typing import Any
 import uuid
 
 from sqlalchemy import case, func, select, update
@@ -18,48 +16,6 @@ from database.models import User, VlessSubscription
 from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger(__name__)
-
-VLESS_HWID_TTL_HOURS = 48
-
-
-def _parse_hwid_last_seen_dt(val: Any) -> datetime:
-    """Parse last_seen from HWID dict or raw timestamp into timezone-aware UTC datetime."""
-    try:
-        raw_ts = val.get("last_seen") if isinstance(val, dict) else val
-        if isinstance(raw_ts, datetime):
-            return raw_ts if raw_ts.tzinfo else raw_ts.replace(tzinfo=timezone.utc)
-        if isinstance(raw_ts, (int, float)):
-            return datetime.fromtimestamp(raw_ts, tz=timezone.utc)
-        if isinstance(raw_ts, str):
-            dt = datetime.fromisoformat(raw_ts)
-            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-    except Exception:
-        pass
-    return datetime.min.replace(tzinfo=timezone.utc)
-
-
-def prune_stale_hwids(current_hwids: dict | None, ttl_hours: int = VLESS_HWID_TTL_HOURS) -> dict[str, Any]:
-    """Filter out HWIDs older than ttl_hours, supporting both ISO timestamp strings and enriched metadata dicts."""
-    if not isinstance(current_hwids, dict):
-        return {}
-    now = now_utc()
-    try:
-        ttl = int(ttl_hours)
-    except (ValueError, TypeError):
-        ttl = VLESS_HWID_TTL_HOURS
-    cutoff = now - timedelta(hours=ttl)
-    res: dict[str, Any] = {}
-    for h, val in current_hwids.items():
-        try:
-            dt = _parse_hwid_last_seen_dt(val)
-            if dt >= cutoff:
-                if isinstance(val, dict):
-                    res[h] = val
-                else:
-                    res[h] = val if isinstance(val, str) else dt.isoformat()
-        except Exception:
-            continue
-    return res
 
 
 async def get_or_create_subscription(
@@ -78,9 +34,8 @@ async def get_or_create_subscription(
         user_id=user_id,
         token=token,
         uuid=client_uuid,
-        is_active=True,
+        is_active=False,
         version=1,
-        active_hwids={},
         pending_revoked_uuids=[],
         node_traffic_snapshots={"_fresh": True},
     )
@@ -119,218 +74,11 @@ async def get_subscription_by_user_id(
     return val if isinstance(val, VlessSubscription) else None
 
 
-async def get_active_hwid_count(
-    session: AsyncSession,
-    user_id: int,
-    ttl_hours: int = VLESS_HWID_TTL_HOURS,
-) -> int:
-    """Return count of active non-stale HWIDs currently registered for user."""
-    stmt = select(VlessSubscription.active_hwids).where(VlessSubscription.user_id == user_id)
-    val = await session.scalar(stmt)
-    raw_hwids = val if isinstance(val, dict) else None
-    active = prune_stale_hwids(raw_hwids, ttl_hours=ttl_hours)
-    return len(active)
-
-
-async def get_active_vless_counts(
-    session: AsyncSession,
-    ttl_hours: int = VLESS_HWID_TTL_HOURS,
-) -> tuple[int, int]:
-    """Return tuple of (active_users_count, active_devices_count) for VLESS.
-
-    Only counts users who:
-    - Have an active VlessSubscription (is_active is True)
-    - Are not deleted, not banned, not on financial hold
-    - Have a valid subscription_end within network grace window
-    - Have at least one non-stale HWID in active_hwids
-    """
-    now = now_utc()
-    from config.constants import VPN_ACCESS_GRACE_HOURS
-
-    grace_cutoff = now - timedelta(hours=VPN_ACCESS_GRACE_HOURS)
-
-    stmt = (
-        select(VlessSubscription.active_hwids)
-        .join(User, VlessSubscription.user_id == User.id)
-        .where(
-            VlessSubscription.is_active.is_(True),
-            User.is_deleted.is_(False),
-            User.is_banned.is_(False),
-            User.financial_hold.is_(False),
-            User.subscription_end.is_not(None),
-            User.subscription_end > grace_cutoff,
-        )
-    )
-    result = await session.execute(stmt)
-    total_users = 0
-    total_devices = 0
-    for raw_hwids in result.scalars().all():
-        if isinstance(raw_hwids, dict) and raw_hwids:
-            active = prune_stale_hwids(raw_hwids, ttl_hours=ttl_hours)
-            if active:
-                total_users += 1
-                total_devices += len(active)
-    return total_users, total_devices
-
-
-async def get_total_active_hwid_count(
-    session: AsyncSession,
-    ttl_hours: int = VLESS_HWID_TTL_HOURS,
-) -> int:
-    """Return total count of active non-stale HWIDs across all valid active VLESS subscriptions."""
-    _users, devices = await get_active_vless_counts(session, ttl_hours=ttl_hours)
-    return devices
-
-
-async def register_hwid_atomic(
-    session: AsyncSession,
-    subscription_id: int,
-    hwid: str,
-    effective_limit: int | None = None,
-    ttl_hours: int = VLESS_HWID_TTL_HOURS,
-    device_info: dict | None = None,
-) -> tuple[bool, int, int]:
-    """Atomically registers an HWID for a VlessSubscription under row-level lock.
-
-    effective_limit is the maximum number of VLESS HWIDs permitted given any
-    existing AWG profiles already consuming quota. If None, it is dynamically
-    computed under User lock.
-
-    Returns:
-        tuple[allowed: bool, active_count: int, effective_limit: int]
-    """
-    if not hwid or not isinstance(hwid, str) or not re.match(r"^[a-zA-Z0-9_\-:]{3,128}$", hwid.strip()):
-        return False, 0, max(0, effective_limit or 0)
-    hwid = hwid.strip()
-
-    # Resolve user_id without lock to enforce strict global lock hierarchy: User -> VlessSubscription
-    user_id_stmt = select(VlessSubscription.user_id).where(VlessSubscription.id == subscription_id)
-    raw_sub_user_id = await session.scalar(user_id_stmt)
-    if raw_sub_user_id is None:
-        return False, 0, max(0, effective_limit or 0)
-    sub_user_id = getattr(raw_sub_user_id, "user_id", raw_sub_user_id)
-
-    # 1. Lock User row FIRST (populate_existing=True guarantees fresh attributes in Identity Map)
-    from database.models import User
-    user_stmt = (
-        select(User)
-        .where(User.id == sub_user_id)
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
-    user = await session.scalar(user_stmt)
-
-    # 2. Lock VlessSubscription row SECOND (populate_existing=True guarantees fresh attributes)
-    stmt = (
-        select(VlessSubscription)
-        .where(VlessSubscription.id == subscription_id)
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
-    sub = await session.scalar(stmt)
-    if sub is None:
-        return False, 0, max(0, effective_limit or 0)
-
-    from services.subscription import SubscriptionService
-
-    if (
-        user is None
-        or getattr(user, "is_banned", False)
-        or getattr(user, "financial_hold", False)
-        or getattr(user, "is_deleted", False)
-        or not getattr(sub, "is_active", True)
-        or (hasattr(user, "subscription_end") and not SubscriptionService.check_vpn_access(user))
-    ):
-        active = prune_stale_hwids(getattr(sub, "active_hwids", None), ttl_hours=ttl_hours)
-        return False, len(active), 0
-
-    if effective_limit is None:
-        user_limit = (
-            await SubscriptionService.get_effective_device_limit(session, user)
-            if user
-            else 5
-        )
-        user_limit_int = user_limit if isinstance(user_limit, int) else 5
-        effective_limit = user_limit_int
-
-    clean_hwid = str(hwid).strip().lower()[:128]
-    if not clean_hwid:
-        active = prune_stale_hwids(getattr(sub, "active_hwids", None), ttl_hours=ttl_hours)
-        return False, len(active), effective_limit
-
-    current_raw_hwids = getattr(sub, "active_hwids", None) or {}
-    active_hwids = prune_stale_hwids(current_raw_hwids, ttl_hours=ttl_hours)
-    now = now_utc()
-
-    if effective_limit <= 0:
-        return False, len(active_hwids), 0
-
-    # If active devices exceed limit (e.g. after tariff downgrade), prune to effective_limit most recently active
-    if len(active_hwids) > effective_limit:
-        sorted_hwids = sorted(
-            active_hwids.items(),
-            key=lambda item: _parse_hwid_last_seen_dt(item[1]),
-            reverse=True,
-        )
-        active_hwids = dict(sorted_hwids[:effective_limit])
-
-    has_pruned_hwids = len(active_hwids) != len(current_raw_hwids)
-    entry: dict[str, Any] = {"last_seen": now.isoformat()}
-    if device_info and isinstance(device_info, dict):
-        for k, v in device_info.items():
-            if isinstance(v, str) and v.strip():
-                entry[k] = v.strip()[:64]
-
-    if clean_hwid in active_hwids:
-        # Existing device — refresh activity timestamp and update metadata (throttled to 15m)
-        prev = active_hwids[clean_hwid]
-        if isinstance(prev, dict):
-            prev_last_seen_str = prev.get("last_seen")
-            should_update = True
-            if prev_last_seen_str:
-                try:
-                    prev_dt = datetime.fromisoformat(prev_last_seen_str)
-                    if (now - prev_dt).total_seconds() < 900 and not has_pruned_hwids:
-                        should_update = False
-                except Exception:
-                    should_update = True
-            if device_info and isinstance(device_info, dict):
-                for k, v in device_info.items():
-                    if isinstance(v, str) and v.strip() and prev.get(k) != v.strip()[:64]:
-                        should_update = True
-                        break
-
-            if not should_update:
-                return True, len(active_hwids), effective_limit
-
-            updated_entry = {**prev, "last_seen": now.isoformat()}
-            if device_info and isinstance(device_info, dict):
-                for k, v in device_info.items():
-                    if isinstance(v, str) and v.strip():
-                        updated_entry[k] = v.strip()[:64]
-            active_hwids[clean_hwid] = updated_entry
-        else:
-            active_hwids[clean_hwid] = entry
-        sub.active_hwids = dict(active_hwids)
-        await session.flush()
-        return True, len(active_hwids), effective_limit
-
-    # New device — check available quota without evicting active devices on rejection
-    if len(active_hwids) >= effective_limit:
-        return False, len(active_hwids), effective_limit
-
-    # Quota available — register
-    active_hwids[clean_hwid] = entry
-    sub.active_hwids = dict(active_hwids)
-    await session.flush()
-    return True, len(active_hwids), effective_limit
-
-
 async def reset_hwids(
     session: AsyncSession,
     subscription_id: int,
 ) -> tuple[str | None, str | None]:
-    """Clear all registered HWIDs, increment monotonic version, and rotate client UUID to revoke access on old devices.
+    """Increment monotonic version and rotate client UUID to revoke access on old devices.
 
     Returns:
         tuple[old_uuid, new_uuid] or (None, None) if subscription not found.
@@ -343,13 +91,10 @@ async def reset_hwids(
     )
     sub = await session.scalar(stmt)
     if isinstance(sub, VlessSubscription):
-        if not sub.active_hwids:
-            return None, None
         old_uuid = sub.uuid
         new_uuid = str(uuid.uuid4())
         sub.uuid = new_uuid
         sub.version = (getattr(sub, "version", 1) or 1) + 1
-        sub.active_hwids = {}
         sub.node_traffic_snapshots = {"_fresh": True}
         pending = list(getattr(sub, "pending_revoked_uuids", None) or [])
         if old_uuid and old_uuid not in pending:
@@ -382,20 +127,50 @@ async def rotate_token(
         raise ValueError(f"VlessSubscription {subscription_id} not found")
 
     token = secrets.token_urlsafe(32)
-    old_uuid = sub.uuid
-    new_uuid = str(uuid.uuid4())
+    old_uuid: str | None = None
+    new_uuid: str | None = None
     sub.token = token
-    sub.uuid = new_uuid
-    sub.version = (getattr(sub, "version", 1) or 1) + 1
-    sub.node_traffic_snapshots = {"_fresh": True}
     if reset_hwids:
-        sub.active_hwids = {}
-    pending = list(getattr(sub, "pending_revoked_uuids", None) or [])
-    if old_uuid and old_uuid not in pending:
-        pending.append(old_uuid)
-    sub.pending_revoked_uuids = pending
+        old_uuid = sub.uuid
+        new_uuid = str(uuid.uuid4())
+        sub.uuid = new_uuid
+        sub.version = (getattr(sub, "version", 1) or 1) + 1
+        sub.node_traffic_snapshots = {"_fresh": True}
+        pending = list(getattr(sub, "pending_revoked_uuids", None) or [])
+        if old_uuid and old_uuid not in pending:
+            pending.append(old_uuid)
+        sub.pending_revoked_uuids = pending
     await session.flush()
     return token, old_uuid, new_uuid
+
+
+async def add_pending_revocation_uuids(
+    session: AsyncSession,
+    subscription_id: int,
+    uuids: list[str],
+) -> VlessSubscription | None:
+    """Adds a list of revoked UUIDs to pending_revoked_uuids under row lock."""
+    if not uuids:
+        return None
+    stmt = (
+        select(VlessSubscription)
+        .where(VlessSubscription.id == subscription_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    sub = await session.scalar(stmt)
+    if isinstance(sub, VlessSubscription):
+        pending = list(getattr(sub, "pending_revoked_uuids", None) or [])
+        added = False
+        for u in uuids:
+            if u and u not in pending:
+                pending.append(u)
+                added = True
+        if added:
+            sub.pending_revoked_uuids = pending
+            sub.version = (getattr(sub, "version", 1) or 1) + 1
+            await session.flush()
+    return sub
 
 
 async def pop_pending_revoked_uuid(
@@ -460,6 +235,7 @@ async def record_vless_traffic_atomic(
     raw_uplink: int,
     raw_downlink: int,
     *,
+    client_uuid: str | None = None,
     expected_uuid: str | None = None,
     now: datetime | None = None,
 ) -> tuple[int, int, int]:
@@ -483,7 +259,7 @@ async def record_vless_traffic_atomic(
     if not sub_meta:
         return 0, 0, 0
 
-    if expected_uuid and sub_meta.uuid != expected_uuid:
+    if expected_uuid and sub_meta.uuid != expected_uuid and client_uuid != expected_uuid:
         return 0, 0, 0
 
     # 2. Lock User FIRST (hierarchy)
@@ -504,11 +280,12 @@ async def record_vless_traffic_atomic(
     if not sub:
         return 0, 0, 0
 
-    if expected_uuid and sub.uuid != expected_uuid:
+    if expected_uuid and sub.uuid != expected_uuid and client_uuid != expected_uuid:
         return 0, 0, 0
 
+    snap_key = f"{str_server_id}:{client_uuid}" if client_uuid else str_server_id
     snapshots = dict(sub.node_traffic_snapshots or {})
-    prev_snap = snapshots.get(str_server_id)
+    prev_snap = snapshots.get(snap_key) or (snapshots.get(str_server_id) if not client_uuid else None)
 
     prev_epoch = prev_snap.get("epoch") if isinstance(prev_snap, dict) else None
     prev_up = int(prev_snap.get("up", 0)) if isinstance(prev_snap, dict) else 0
@@ -517,8 +294,10 @@ async def record_vless_traffic_atomic(
     current_up = max(0, int(raw_uplink or 0))
     current_down = max(0, int(raw_downlink or 0))
 
-    if str_server_id not in snapshots:
-        if snapshots.get("_fresh"):
+    if snap_key not in snapshots:
+        has_prior_snapshots = any(k != "_fresh" for k in snapshots)
+        has_zero_usage = (sub.traffic_up or 0) + (sub.traffic_down or 0) == 0
+        if snapshots.get("_fresh") or has_prior_snapshots or has_zero_usage:
             delta_up = current_up
             delta_down = current_down
         else:
@@ -540,11 +319,12 @@ async def record_vless_traffic_atomic(
         or prev_epoch != str_epoch
         or prev_up != current_up
         or prev_down != current_down
-        or str_server_id not in snapshots
+        or snap_key not in snapshots
     ):
         sub.traffic_up = (sub.traffic_up or 0) + delta_up
         sub.traffic_down = (sub.traffic_down or 0) + delta_down
-        snapshots[str_server_id] = {
+        snapshots.pop("_fresh", None)
+        snapshots[snap_key] = {
             "epoch": str_epoch,
             "up": current_up,
             "down": current_down,
