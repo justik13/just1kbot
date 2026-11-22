@@ -166,24 +166,49 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
 
             admin_alert_info = None
             refund_alert_info = None
-            if order and (order.metadata_ or {}).get("requires_manual_review"):
+            order_meta = (order.metadata_ or {}) if order else {}
+            has_mismatch_review = bool(
+                order_meta.get("requires_manual_review")
+                and (
+                    order_meta.get("refund_amount_mismatch")
+                    or order_meta.get("payment_id_mismatch")
+                    or order_meta.get("refund_payment_id_mismatch")
+                    or order_meta.get("underpaid")
+                )
+            )
+            if order and has_mismatch_review:
                 admin_alert_info = {
                     "order_id": order.id,
                     "amount_rub": order.amount_rub,
-                    "mismatch": (order.metadata_ or {}).get("refund_amount_mismatch", "—"),
+                    "mismatch": (
+                        order_meta.get("refund_amount_mismatch")
+                        or order_meta.get("payment_id_mismatch")
+                        or order_meta.get("refund_payment_id_mismatch")
+                        or "—"
+                    ),
                 }
-            elif (
+            if (
                 event == "refund.succeeded"
                 and order is not None
                 and inbox_status == WebhookInboxStatus.SUCCEEDED.value
+                and not (
+                    order_meta.get("refund_payment_id_mismatch")
+                    or (
+                        order_meta.get("refund_amount_mismatch")
+                        and not order_meta.get("negative_balance_rub")
+                    )
+                )
             ):
-                order_meta = order.metadata_ or {}
                 refund_alert_info = {
                     "order_id": order.id,
                     "user_id": order.user_id,
                     "service_type": order.service_type,
                     "status": order.status,
-                    "amount_rub": order_meta.get("partial_refund_amount_rub") or order.amount_rub,
+                    "amount_rub": (
+                        order_meta.get("partial_refund_amount_rub")
+                        if order.status == "partially_refunded"
+                        else order.amount_rub
+                    ) or order.amount_rub,
                 }
 
             if existing_event:

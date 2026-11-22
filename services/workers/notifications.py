@@ -215,7 +215,7 @@ async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
     from config.enums import WhiteInternetStatus
     from database.models import WhiteInternetSubscription
     from database.repositories.account_ledger_repo import get_account_balance
-    from services.order_service import OrderService
+    from services.order_service import OrderService, acquire_user_account_lock
     from services.subscription import SubscriptionService
     from services.white_internet_service import get_white_internet_tier_price
 
@@ -249,11 +249,14 @@ async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
         push_kb: InlineKeyboardMarkup | None = None
         try:
             async with session_scope() as session:
+                await acquire_user_account_lock(session, uid)
                 user = await session.scalar(
-                    select(User).where(User.id == uid)
+                    select(User).where(User.id == uid).with_for_update(skip_locked=True)
                 )
                 vless_sub = await session.scalar(
-                    select(VlessSubscription).where(VlessSubscription.user_id == uid)
+                    select(VlessSubscription)
+                    .where(VlessSubscription.user_id == uid)
+                    .with_for_update(skip_locked=True)
                 )
                 if (
                     user is None
@@ -271,7 +274,9 @@ async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
                 std_limit = max(2, await SubscriptionService.get_effective_device_limit(session, user))
                 quote = await OrderService.quote_standard_change(session, user.id, std_limit, 30)
                 due_rub = int(quote["due_rub"])
-                bal = await get_account_balance(session, user_id=user.id)
+                bal = await get_account_balance(
+                    session, user_id=user.id, for_update=True, locked_user=user
+                )
                 if bal.debt > 0 or bal.available < due_rub:
                     cycle_key = vless_sub.expires_at.strftime("%Y-%m-%d") if vless_sub.expires_at else ""
                     cache_key = ("std", user.id)
@@ -286,6 +291,7 @@ async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
                         push_kb = get_autorenew_failed_keyboard()
                     continue
 
+                idem_key = f"std_autorenew:{user.id}:{int(vless_sub.expires_at.timestamp())}"
                 res = await OrderService.checkout_order(
                     session,
                     user_id=user.id,
@@ -293,6 +299,7 @@ async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
                     device_limit=std_limit,
                     duration_days=30,
                     use_balance=True,
+                    idempotency_key=idem_key,
                 )
                 if res.get("status") == "paid" and not user.is_bot_blocked:
                     await session.refresh(vless_sub)
@@ -339,6 +346,7 @@ async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
         push_kb = None
         try:
             async with session_scope() as session:
+                await acquire_user_account_lock(session, uid)
                 user = await session.scalar(
                     select(User).where(User.id == uid).with_for_update(skip_locked=True)
                 )
@@ -366,7 +374,9 @@ async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
 
                 eff_limit = int(sub.pending_device_limit or sub.device_limit or 1)
                 due_rub = get_white_internet_tier_price(eff_limit)
-                bal = await get_account_balance(session, user_id=user.id)
+                bal = await get_account_balance(
+                    session, user_id=user.id, for_update=True, locked_user=user
+                )
                 if bal.debt > 0 or bal.available < due_rub:
                     cycle_key = sub.expires_at.strftime("%Y-%m-%d") if sub.expires_at else ""
                     cache_key = ("wi", user.id)
@@ -381,6 +391,7 @@ async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
                         push_kb = get_autorenew_failed_keyboard()
                     continue
 
+                wi_idem_key = f"wi_autorenew:{user.id}:{int(sub.expires_at.timestamp())}"
                 res = await OrderService.checkout_order(
                     session,
                     user_id=user.id,
@@ -389,6 +400,7 @@ async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
                     operation="renew",
                     use_balance=True,
                     allow_early_downgrade=True,
+                    idempotency_key=wi_idem_key,
                 )
                 if res.get("status") == "paid" and not user.is_bot_blocked:
                     await session.refresh(sub)

@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 # Notification buttons
-BTN_RENEW_ACCESS = "💳 Продлить доступ"
-BTN_RESUME_ACCESS = "💳 Возобновить доступ"
-BTN_TOPUP_BALANCE = "💰 Пополнить баланс"
-BTN_OPEN_CABINET = "⚡ Открыть кабинет"
-BTN_OPEN_PROFILE = "👤 Открыть профиль"
-BTN_OPEN_APP = "⚡ Открыть приложение"
+BTN_RENEW_ACCESS = "Продлить доступ"
+BTN_RESUME_ACCESS = "Возобновить доступ"
+BTN_TOPUP_BALANCE = "Пополнить баланс"
+BTN_OPEN_CABINET = "Открыть кабинет"
+BTN_OPEN_PROFILE = "Открыть профиль"
+BTN_OPEN_APP = "Открыть приложение"
 
 NOTIFY_AUTORENEW_INSUFFICIENT_FUNDS = """⚠️ <b>Автопродление не удалось: недостаточно средств</b>
 
@@ -26,18 +26,18 @@ ERROR_TECHNICAL_ALERT = "⚠️ Ведутся технические работ
 TIME_HOURS_LEFT = "{hours} ч."
 
 # Billing, orders & tariffs
-BALANCE_BALANCE = "💰 Баланс: <b>{int_snapshot_real_available} ₽</b>"
+BALANCE_BALANCE = "Баланс: <b>{int_snapshot_real_available} ₽</b>"
 TOPUP_CREDITED_NOTICE = "✅ Баланс пополнен."
 TOPUP_ERROR_BLOCKED = "Новые пополнения временно заблокированы. Обратитесь в поддержку."
 CHECKOUT_DESCRIPTION_DEFAULT = "Предоставление доступа к информационному сервису Just1k"
 PAYMENT_DISPUTE_BLOCKED_NOTICE = "Операция заблокирована из-за финансового спора."
-PAYMENT_PURCHASE_SUCCESS_CARD = """🎉 <b>{operation_title}</b>
+PAYMENT_PURCHASE_SUCCESS_CARD = """<b>{operation_title}</b>
 
 Тариф: <b>{tariff_name}</b>
 Срок: {duration_text}
 Списано: <b>{charged} ₽</b>
-💰 Баланс: <b>{real_balance} ₽</b>
-🎁 Бонусный баланс: <b>{bonus_balance} ₽</b>"""
+Баланс: <b>{real_balance} ₽</b>
+Бонусный баланс: <b>{bonus_balance} ₽</b>"""
 PURCHASE_COMPLETED = "Тариф куплен"
 PAYMENT_OP_TITLE_CHANGE = "Смена тарифа"
 PAYMENT_OP_TITLE_RENEWAL = "Тариф продлён"
@@ -45,9 +45,9 @@ PAYMENT_OP_TITLE_WI_BOUGHT = "Белый интернет подключён"
 PAYMENT_OP_TITLE_WI_RENEWED = "Белый интернет продлён"
 PAYMENT_OP_TITLE_WI_ADD_SLOTS = "Лимит устройств увеличен"
 PAYMENT_OP_TITLE_WI_TRAFFIC_TOPUP = "Пакет трафика подключён"
-TARIFF_DISPLAY_BASIC = "📱 Базовый"
-TARIFF_DISPLAY_FAMILY = "👨‍👩‍👧‍👦 Семейный"
-TARIFF_DISPLAY_PRO = "🚀 Pro"
+TARIFF_DISPLAY_BASIC = "Базовый"
+TARIFF_DISPLAY_FAMILY = "Семейный"
+TARIFF_DISPLAY_PRO = "Pro"
 
 # Admin alerts
 ADMIN_ALERT_ORDER_REQUIRES_MANUAL_REVIEW = (
@@ -106,7 +106,7 @@ LANDING_REPORT_DELIVERY_FAILED = "Не удалось доставить соо�
 WL_RENEWAL_HORIZON_EXCEEDED = "Подписка уже продлена на максимальный срок (до 2 месяцев вперед)."
 WL_ADMIN_ONLY_ALERT = "🔒 Данная операция доступна только администраторам бота."
 WL_DEVICE_LIMIT_MAX_REACHED = "Достигнут максимум устройств (3 устройства)."
-WL_ADD_DEVICE_SUCCESS = "Устройство успешно добавлено! Теперь доступно слотов: {limit}."
+WL_ADD_DEVICE_SUCCESS = "Устройство добавлено. Доступно слотов: {limit}."
 WL_INSUFFICIENT_BALANCE_BUY = (
     "❌ <b>Недостаточно средств на балансе</b>\n\n"
     "Для оформления доступа требуется пополнение баланса. Перейдите в раздел «Баланс» для оплаты."
@@ -124,7 +124,7 @@ WL_INSUFFICIENT_BALANCE_ADD_DEVICE = (
     "• <b>Слот (+1 устройство и +{gb} ГБ):</b> {price} ₽\n"
     "• <b>Ваш баланс:</b> {balance:.2f} ₽\n"
     "• <b>Не хватает:</b> {shortage:.2f} ₽\n\n"
-    "💡 Покупка слота расширяет лимит до конца текущего периода и <b>не продлевает</b> срок действия."
+    "Покупка слота расширяет лимит до конца текущего периода и <b>не продлевает</b> срок действия."
 )
 WL_USER_NOT_FOUND = "Пользователь не найден."
 WL_SUB_NOT_FOUND = "Подписка «Белый интернет» не найдена."
@@ -133,26 +133,26 @@ WL_NO_SUB = "У вас нет подписки «Белый интернет». 
 WL_SUB_EXPIRED = "Срок действия вашей подписки истек. Сначала продлите подписку, чтобы докупить трафик."
 WL_SUB_DISABLED = "Подписка отключена администратором. Обратитесь в поддержку."
 WL_SUB_NOT_READY = "Подписка еще настраивается. Повторите попытку через несколько секунд."
-WL_BUY_SUCCESS = "Подписка успешно оформлена!"
-WL_RENEW_SUCCESS = "Подписка успешно продлена на 30 дней!"
-WL_TOPUP_SUCCESS = "Пакет +{gb} ГБ успешно добавлен к вашей подписке!"
+WL_BUY_SUCCESS = "Подписка оформлена."
+WL_RENEW_SUCCESS = "Подписка продлена на 30 дней."
+WL_TOPUP_SUCCESS = "Пакет +{gb} ГБ добавлен к вашей подписке."
 WL_CAP_EXCEEDED = "Докупка {gb} ГБ превысит максимальный лимит накопления (150 ГБ). У вас доступно {available} ГБ."
 WL_INVALID_TOPUP_PACK = "Недопустимый пакет трафика: {gb} ГБ."
 WL_DEBIT_FAILED = "Ошибка списания средств."
 WL_NO_SERVERS_AVAILABLE = "К сожалению, сейчас нет доступных свободных шлюзов для подключения. Пожалуйста, обратитесь в поддержку или повторите попытку позже."
 WL_DEACTIVATION_PENDING = "Ожидается завершение деактивации предыдущей подписки на узле."
 WL_AUTO_PUSH_READY = (
-    "🚀 <b>Белый интернет готов к работе!</b>\n\n"
+    "<b>Белый интернет готов к работе</b>\n\n"
     "Шлюз настроен, соединение активно."
 )
 
 WL_TRAFFIC_EXHAUSTED_ALERT = (
-    "⚪️ <b>Белый интернет: Лимит трафика исчерпан</b>\n\n"
+    "<b>Белый интернет: Лимит трафика исчерпан</b>\n\n"
     "Включенный пакет трафика закончился. Для продолжения работы вы можете "
     "докупить дополнительный пакет трафика (+10, +25 или +50 ГБ) в главном меню бота."
 )
 WL_TRAFFIC_90P_ALERT = (
-    "⚪️ <b>Белый интернет: Осталось 10% трафика</b>\n\n"
+    "<b>Белый интернет: Осталось 10% трафика</b>\n\n"
     "Вы израсходовали 90% пакета трафика. "
     "Рекомендуем докупить пакет заранее в боте, чтобы доступ не прерывался."
 )
@@ -182,17 +182,17 @@ WL_DEFAULT_TARIFF_NAME = "Белый интернет 50 ГБ"
 TOS_AGREEMENT_URL = "https://telegra.ph/Polzovatelskoe-soglashenie-07-23-48"
 PRIVACY_POLICY_URL = "https://telegra.ph/Politika-konfidencialnosti-07-23-84"
 USER_HUB_START = "друг"
-BTN_MINIAPP_CONNECT = "🚀 Подключить"
+BTN_MINIAPP_CONNECT = "Подключить"
 START_REFERRAL_DISCOUNT_LINE = (
-    "\n🎁 <b>Приветственная скидка 25%</b> по приглашению активна для вашего первого заказа!\n"
+    "\n<b>Приветственная скидка 25%</b> по приглашению активна для вашего первого заказа.\n"
 )
 START_HUB_MESSAGE = (
-    "👋 Привет, <b>{name}</b>!\n"
+    "Привет, <b>{name}</b>.\n"
     "{discount_line}\n"
-    "🤝 <b>Партнёрская программа:</b> приглашайте друзей по своей ссылке и получайте "
+    "<b>Партнёрская программа:</b> приглашайте друзей по своей ссылке и получайте "
     "<b>15%–30%</b> бонусами с их оплат на свой баланс.\n\n"
-    "Нажмите кнопку <b>«🚀 Подключить»</b> ниже, чтобы открыть панель управления, тарифы и реферальную ссылку.\n\n"
-    "ℹ️ <i>Используя сервис, вы соглашаетесь с "
+    "Нажмите кнопку <b>«Подключить»</b> ниже, чтобы открыть панель управления, тарифы и реферальную ссылку.\n\n"
+    "<i>Используя сервис, вы соглашаетесь с "
     f'<a href="{TOS_AGREEMENT_URL}">Условиями использования</a> и '
     f'<a href="{PRIVACY_POLICY_URL}">Политикой конфиденциальности</a>.</i>'
 )

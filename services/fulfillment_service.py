@@ -137,7 +137,9 @@ class FulfillmentService:
                 from sqlalchemy.orm.attributes import flag_modified
 
                 await OrderService.refund_reserved_mixed_debit(session, order)
-                if order.payment_method != "wallet" and order.amount_rub and order.amount_rub > 0:
+                meta = dict(order.metadata_ or {})
+                is_pure_wallet = order.payment_method == "wallet"
+                if not is_pure_wallet and order.amount_rub and order.amount_rub > 0:
                     await account_ledger_repo.create_order_credit(
                         session,
                         user_id=user.id,
@@ -148,7 +150,8 @@ class FulfillmentService:
                             "reason": f"Компенсация заказа #{order.id}: {msg}",
                         },
                     )
-                    meta["mixed_fallback_credited"] = True
+                meta["mixed_fallback_credited"] = True
+                meta["fulfillment_error"] = msg
                 meta["fulfillment_fallback"] = msg
                 meta["requires_manual_review"] = True
                 order.metadata_ = meta
@@ -192,6 +195,7 @@ class FulfillmentService:
                         vless_sub.device_limit = int(meta["previous_device_limit"])
                     except (ValueError, TypeError):
                         pass
+                vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1
             elif order.duration_days > 0 and vless_sub.expires_at:
                 now = now_utc()
                 new_end = vless_sub.expires_at - timedelta(days=order.duration_days)
@@ -201,6 +205,14 @@ class FulfillmentService:
                 else:
                     vless_sub.expires_at = new_end
             await SubscriptionService._sync_access_state(session, user, vless_sub=vless_sub)
+            if op == "upgrade":
+                from services.vless_subscription_service import VlessSubscriptionService
+
+                VlessSubscriptionService.ensure_synced_background(
+                    user.id,
+                    is_active=bool(vless_sub.is_active),
+                    session=session,
+                )
             logger.info(
                 "Revoked standard order %s for user %s (expires_at=%s)",
                 order.id,
@@ -209,9 +221,26 @@ class FulfillmentService:
             )
 
         elif order.service_type == "white_internet":
+            from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
+
             meta = dict(order.metadata_ or {})
             meta_op = meta.get("operation")
             target_sub_id = meta.get("subscription_id")
+
+            def _sync_wi_revoke_quota_state(wi_sub) -> None:
+                total_quota = int(wi_sub.base_traffic_bytes or 0) + int(wi_sub.extra_traffic_bytes or 0)
+                used = max(
+                    0,
+                    int(wi_sub.traffic_used_bytes or 0)
+                    - int(getattr(wi_sub, "traffic_overage_bytes", 0) or 0),
+                )
+                if wi_sub.status == WhiteInternetStatus.ACTIVE:
+                    if total_quota - used <= 0:
+                        wi_sub.status = WhiteInternetStatus.EXHAUSTED
+                        wi_sub.status_reason = "traffic_exhausted"
+                        wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_DELETE
+                    else:
+                        wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
 
             if meta_op == "add_device_slot" or (
                 order.device_limit
@@ -237,6 +266,7 @@ class FulfillmentService:
                         0,
                         (sub.base_traffic_bytes or 0) - revoked_bytes,
                     )
+                    _sync_wi_revoke_quota_state(sub)
                     sub.desired_version = (sub.desired_version or 0) + 1
                     await session.flush()
                     logger.info(
@@ -260,6 +290,7 @@ class FulfillmentService:
                     sub.extra_traffic_bytes = max(
                         0, (sub.extra_traffic_bytes or 0) - (order.traffic_bytes or 0)
                     )
+                    _sync_wi_revoke_quota_state(sub)
                     sub.desired_version = (sub.desired_version or 0) + 1
                     await session.flush()
                     logger.info(
@@ -289,6 +320,7 @@ class FulfillmentService:
                         )
                     else:
                         sub.expires_at = new_expires
+                        _sync_wi_revoke_quota_state(sub)
                         sub.desired_version = (sub.desired_version or 0) + 1
                         await session.flush()
                         logger.info(

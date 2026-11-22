@@ -250,7 +250,7 @@ class Order(Base):
         String(30), nullable=False, default="yookassa", server_default=text("'yookassa'")
     )
     external_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    idempotency_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
     payment_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="pending", server_default=text("'pending'")
@@ -443,7 +443,7 @@ class WhiteInternetSubscription(Base):
             name="ck_white_internet_subscriptions_device_limit",
         ),
         CheckConstraint(
-            "pending_device_limit IS NULL OR (pending_device_limit >= 1 AND pending_device_limit <= 3)",
+            "pending_device_limit IS NULL OR (pending_device_limit >= 1 AND pending_device_limit <= 5)",
             name="ck_wi_subs_pending_device_limit",
         ),
         Index(

@@ -979,12 +979,23 @@ function _openWiManageModal(d, onReload) {
     renderModal();
 }
 
+function _wiHasActivePeriod(wi) {
+    if (!wi) return false;
+    if (wi.has_period || wi.active) return true;
+    const status = String(wi.status || "").toUpperCase();
+    return Boolean(
+        ["ACTIVE", "PENDING", "EXHAUSTED"].includes(status)
+        && wi.expires_at
+        && new Date(wi.expires_at).getTime() > Date.now()
+    );
+}
+
 export async function loadAndRenderUserCabinet(root) {
     try {
         const data = await api.getUserDashboard();
         _state.data = data;
         const stdActive = Boolean(data.standard && data.standard.active);
-        const wiActive = Boolean(data.wi && data.wi.active);
+        const wiActive = _wiHasActivePeriod(data.wi);
         if (!_state.tab) {
             const urlParams = new URLSearchParams(window.location.search);
             const requestedTab = urlParams.get("tab");
@@ -1072,7 +1083,7 @@ function _render(root) {
     const prevGuideOpen = Boolean(root.querySelector("#connectGuide")?.open);
     const prevScrollY = window.scrollY;
     const stdActive = Boolean(d.standard && d.standard.active);
-    const wiActive = Boolean(d.wi && d.wi.active);
+    const wiActive = _wiHasActivePeriod(d.wi);
     const hasAny = stdActive || wiActive;
 
     const navTabs = [
@@ -1219,7 +1230,8 @@ function _renderConnectTab(body, d, reload, root) {
 
     const std = d.standard || {};
     const wi = d.wi || {};
-    const isAnyActive = Boolean(std.active || wi.active);
+    const wiHasPeriod = _wiHasActivePeriod(wi);
+    const isAnyActive = Boolean(std.active || wiHasPeriod);
     const subUrl = d.subscription_url || "";
     const backupSubUrl = d.subscription_backup_url || "";
     const desktopFirst = _state.platform === "windows" || _state.platform === "macos";
@@ -1256,7 +1268,7 @@ function _renderConnectTab(body, d, reload, root) {
     const wiRemainingBytes = Math.max(0, wiLimitBytes - wiUsedBytes);
     const wiRemainingGb = formatBytesGb(wiRemainingBytes);
     const wiRemainingPct = wiLimitBytes > 0 ? Math.min(100, Math.max(0, Math.round((wiRemainingBytes / wiLimitBytes) * 100))) : 0;
-    const wiExhausted = Boolean(wi.active && (String(wi.status || "").toUpperCase() === "EXHAUSTED" || (wiLimitBytes > 0 && wiUsedBytes >= wiLimitBytes)));
+    const wiExhausted = Boolean(wiHasPeriod && (String(wi.status || "").toUpperCase() === "EXHAUSTED" || (wiLimitBytes > 0 && wiUsedBytes >= wiLimitBytes)));
 
     const _shortDate = (iso) => {
         const dStr = formatDate(iso);
@@ -1295,7 +1307,7 @@ function _renderConnectTab(body, d, reload, root) {
             </button>
         `;
 
-    const wiTileHtml = wi.active
+    const wiTileHtml = wiHasPeriod
         ? `
             <button type="button" class="channel-tile is-wi ${wiExhausted ? "is-warn" : "is-active"}" data-jump-tariffs="1">
                 <div class="channel-tile-head">
@@ -1533,7 +1545,7 @@ function _renderTariffsTab(body, d, reload) {
                 <span>• Работает отдельно от «Стандарта» или вместе с ним</span>
                 <span>• 50 ГБ трафика на каждый слот устройства, срок 30 дней</span>
             </div>
-            ${wi.active ? `
+            ${_wiHasActivePeriod(wi) ? `
                 <div class="field">
                     <div class="row muted" style="font-size:12px;">
                         <span class="tabular">Трафик: <strong style="color:var(--text-primary);">${wiUsedGb} / ${wiTotalGb} ГБ</strong></span>
@@ -1643,7 +1655,7 @@ function _buildDevicesSectionHtml(d) {
     const std = d.standard || {};
     const stdActive = Boolean(std && std.active);
     const wi = d.wi || {};
-    const wiActive = Boolean(wi && wi.active);
+    const wiActive = _wiHasActivePeriod(wi);
     const wiLimit = Number(wi.device_limit || 1);
     const stdLimit = Number(std.device_limit || 2);
     const totalLimit = Math.max(stdActive ? stdLimit : 0, wiActive ? wiLimit : 0, 1);

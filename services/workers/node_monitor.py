@@ -350,6 +350,17 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 reset_server_monitor_state(server.id, ServerHealthState.ONLINE)
                                 st = get_server_monitor_state(server.id, server)
                                 re_enabled = True
+                                nonlocal topology_dirty
+                                topology_dirty = True
+                                try:
+                                    from services.topology_sync_service import sync_v2_topology_to_nodes
+                                    await sync_v2_topology_to_nodes(session)
+                                except Exception as topo_exc:
+                                    logger.warning(
+                                        "Failed to sync v2 topology after hosting traffic recovery for server %d: %s",
+                                        server.id,
+                                        topo_exc,
+                                    )
                     if re_enabled:
                         try:
                             await _send_admin_alert_msg(
@@ -951,6 +962,16 @@ async def check_node_resources_and_alerts(bot: Bot):
                                         last_alert_sent_state=None,
                                         extra_data=fresh_extra,
                                     )
+                                    topology_dirty = True
+                                    try:
+                                        from services.topology_sync_service import sync_v2_topology_to_nodes
+                                        await sync_v2_topology_to_nodes(session)
+                                    except Exception as topo_exc:
+                                        logger.warning(
+                                            "Failed to sync v2 topology after hosting traffic auto-disable for server %d: %s",
+                                            server.id,
+                                            topo_exc,
+                                        )
                                 else:
                                     await update_server(session, fresh, extra_data=fresh_extra)
 
@@ -1149,7 +1170,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                 **update_kwargs,
             )
             if applied and expected_health_state != st.health_state:
-                nonlocal topology_dirty
                 topology_dirty = True
             if db_server and not applied:
                 st.sync_from_db_server(db_server)
@@ -1186,7 +1206,10 @@ async def check_node_resources_and_alerts(bot: Bot):
     try:
         for batch_start in range(0, len(servers), CHECK_PARALLELISM):
             batch = servers[batch_start:batch_start + CHECK_PARALLELISM]
-            await asyncio.gather(*(_check_one(s) for s in batch))
+            batch_results = await asyncio.gather(*(_check_one(s) for s in batch), return_exceptions=True)
+            for res in batch_results:
+                if isinstance(res, Exception):
+                    logger.error("Error in node_monitor batch check: %s", res)
     finally:
         await shared_probe_sess.close()
 

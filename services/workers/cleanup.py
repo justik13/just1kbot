@@ -149,7 +149,7 @@ async def _cleanup_expired_vless_network_grace() -> None:
 
                     vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
                     sub_end = vless_sub.expires_at if vless_sub else None
-                    if sub_end and is_permanent_subscription(sub_end):
+                    if not user.financial_hold and sub_end and is_permanent_subscription(sub_end):
                         continue
                     if not user.financial_hold and (not sub_end or sub_end >= threshold):
                         continue
@@ -379,20 +379,21 @@ async def _reconcile_stale_pending_orders() -> None:
     3. Settle or cancel each order in its own isolated transaction boundary.
     4. Expire ancient pending orders (> 24 hours old).
     """
+    from config.enums import OrderStatus
     from integrations.payment_gateways.factory import get_payment_gateway
-    from services.order_service import OrderService
+    from services.order_service import OrderService, acquire_user_account_lock
 
     now = now_utc()
     window_start = now - timedelta(hours=24)
     stale_threshold = now - timedelta(minutes=3)
 
     # 1. Fetch candidate order tuples in a fast read query (no lock held during external HTTP)
-    candidates: list[tuple[Any, str, str]] = []
+    candidates: list[tuple[Any, int | None, str, str]] = []
     try:
         cached_ids = list(_pending_order_backoff_cache.keys())
         async with session_scope() as session:
             stmt = (
-                select(Order.id, Order.external_id, Order.payment_method)
+                select(Order.id, Order.user_id, Order.external_id, Order.payment_method, Order.metadata_)
                 .where(
                     Order.status == "pending",
                     Order.external_id.is_not(None),
@@ -406,9 +407,10 @@ async def _reconcile_stale_pending_orders() -> None:
             stmt = stmt.order_by(Order.created_at.asc()).limit(20)
             res = await session.execute(stmt)
             candidates = [
-                (row[0], row[1], row[2])
+                (row[0], row[1], row[2], row[3])
                 for row in res.all()
                 if row[0] not in _pending_order_backoff_cache
+                and not (isinstance(row[4], dict) and row[4].get("underpaid"))
             ]
     except Exception as exc:
         logger.error("Failed to query stale pending order candidates: %s", exc)
@@ -416,12 +418,13 @@ async def _reconcile_stale_pending_orders() -> None:
 
     # 2. Check each candidate with the payment gateway outside DB transactions,
     # then settle/cancel in an isolated transaction per order.
-    for order_id, external_id, payment_method in candidates:
+    for order_id, user_id, external_id, payment_method in candidates:
         try:
             gateway = get_payment_gateway(payment_method)
             status_res = await gateway.check_payment_status(external_id)
+            is_refunded = bool(getattr(status_res, "is_refunded", False))
 
-            if not (status_res.is_paid or status_res.is_canceled):
+            if not (status_res.is_paid or status_res.is_canceled or is_refunded):
                 _pending_order_backoff_cache[order_id] = time.monotonic()
                 if status_res.status_str == "not_found":
                     logger.warning(
@@ -431,12 +434,20 @@ async def _reconcile_stale_pending_orders() -> None:
                     )
                 continue
 
-            # Isolated transaction for this specific order
+            # Isolated transaction for this specific order (canonical lock order: advisory -> User -> Order)
             async with session_scope() as order_session:
+                if user_id is not None:
+                    await acquire_user_account_lock(order_session, user_id)
+                    await order_session.scalar(
+                        select(User.id).where(User.id == user_id).with_for_update()
+                    )
                 order = await order_session.scalar(
                     select(Order).where(Order.id == order_id).with_for_update()
                 )
                 if not order or order.status != "pending":
+                    continue
+                if isinstance(order.metadata_, dict) and order.metadata_.get("underpaid"):
+                    _pending_order_backoff_cache[order_id] = time.monotonic()
                     continue
 
                 if status_res.is_paid:
@@ -446,7 +457,7 @@ async def _reconcile_stale_pending_orders() -> None:
                         external_id=external_id,
                         paid_amount_rub=status_res.amount_rub,
                     )
-                    if paid_order:
+                    if paid_order and paid_order.status == "paid":
                         _pending_order_backoff_cache.pop(order_id, None)
                         logger.info(
                             "Reconciliation settled stale pending order %s (amount=%s rub)",
@@ -471,6 +482,18 @@ async def _reconcile_stale_pending_orders() -> None:
                         order.id,
                         status_res.cancellation_reason,
                     )
+                elif is_refunded:
+                    await OrderService.refund_reserved_mixed_debit(order_session, order)
+                    order.status = OrderStatus.REFUNDED
+                    order.refunded_at = now_utc()
+                    order_meta = dict(order.metadata_ or {})
+                    order_meta["refunded_during_pending"] = True
+                    order.metadata_ = order_meta
+                    _pending_order_backoff_cache.pop(order_id, None)
+                    logger.info(
+                        "Reconciliation marked pending order %s as refunded",
+                        order.id,
+                    )
         except Exception as exc:
             _pending_order_backoff_cache[order_id] = time.monotonic()
             logger.warning(
@@ -485,7 +508,7 @@ async def _reconcile_stale_pending_orders() -> None:
         ambiguous_threshold = now - timedelta(minutes=30)
         async with session_scope() as session:
             expired_stmt = (
-                select(Order.id, Order.external_id, Order.payment_method)
+                select(Order.id, Order.user_id, Order.external_id, Order.payment_method, Order.metadata_)
                 .where(
                     Order.status == "pending",
                     or_(
@@ -499,16 +522,23 @@ async def _reconcile_stale_pending_orders() -> None:
                 .order_by(Order.created_at.asc())
                 .limit(50)
             )
-            expired_candidates = list((await session.execute(expired_stmt)).all())
+            expired_candidates = [
+                (row[0], row[1], row[2], row[3])
+                for row in (await session.execute(expired_stmt)).all()
+                if not (isinstance(row[4], dict) and row[4].get("underpaid"))
+            ]
 
-        for exp_id, exp_ext_id, exp_pm in expired_candidates:
+        for exp_id, exp_user_id, exp_ext_id, exp_pm in expired_candidates:
             paid_status = None
+            refunded_status = None
             if exp_ext_id:
                 try:
                     gateway = get_payment_gateway(exp_pm)
                     status_res = await gateway.check_payment_status(exp_ext_id)
                     if status_res.is_paid:
                         paid_status = status_res
+                    elif getattr(status_res, "is_refunded", False):
+                        refunded_status = status_res
                 except Exception as gw_exc:
                     logger.warning(
                         "Gateway check before expiry failed for order %s: %s; skipping expiry",
@@ -518,10 +548,17 @@ async def _reconcile_stale_pending_orders() -> None:
                     continue
 
             async with session_scope() as order_session:
+                if exp_user_id is not None:
+                    await acquire_user_account_lock(order_session, exp_user_id)
+                    await order_session.scalar(
+                        select(User.id).where(User.id == exp_user_id).with_for_update()
+                    )
                 exp_order = await order_session.scalar(
                     select(Order).where(Order.id == exp_id).with_for_update(skip_locked=True)
                 )
                 if not exp_order or exp_order.status != "pending":
+                    continue
+                if isinstance(exp_order.metadata_, dict) and exp_order.metadata_.get("underpaid"):
                     continue
                 if paid_status is not None:
                     await OrderService.mark_order_paid(
@@ -531,6 +568,14 @@ async def _reconcile_stale_pending_orders() -> None:
                         paid_amount_rub=paid_status.amount_rub,
                     )
                     logger.info("Reconciliation settled 24h+ pending order %s before expiry", exp_order.id)
+                elif refunded_status is not None:
+                    await OrderService.refund_reserved_mixed_debit(order_session, exp_order)
+                    exp_order.status = OrderStatus.REFUNDED
+                    exp_order.refunded_at = now_utc()
+                    order_meta = dict(exp_order.metadata_ or {})
+                    order_meta["refunded_during_pending"] = True
+                    exp_order.metadata_ = order_meta
+                    logger.info("Reconciliation marked 24h+ pending order %s as refunded before expiry", exp_order.id)
                 else:
                     reason = "ambiguous_creation_timeout" if not exp_order.external_id else "order_expired_24h"
                     OrderService.mark_order_canceled(exp_order, reason=reason)

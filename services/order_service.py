@@ -21,14 +21,13 @@ from config.constants import (
     STANDARD_MAX_EXPIRY_DAYS,
     STANDARD_MIN_DEVICES,
     STANDARD_PLANS,
-    VPN_ACCESS_GRACE_HOURS,
     WHITE_INTERNET_BASE_DURATION_DAYS,
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
     WHITE_INTERNET_MAX_EXPIRY_DAYS,
     WHITE_INTERNET_MAX_QUOTA_BYTES,
     WHITE_INTERNET_TOPUP_PACKS,
 )
-from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
+from config.enums import OrderStatus, WhiteInternetProvisioningStatus, WhiteInternetStatus
 from config.tariffs import calculate_standard_price
 from database.models import AccountLedgerEntry, Order, User
 from database.repositories.users_repo import (
@@ -51,7 +50,7 @@ from services.fulfillment_service import FulfillmentService
 from services.order_notifications import mark_notify_pending
 from services.referral_bonus import reverse_referral_bonus_for_topup
 from services.white_internet_service import WhiteInternetService, get_white_internet_tier_price
-from utils.datetime_helpers import is_permanent_subscription, is_vpn_access_expired, now_utc
+from utils.datetime_helpers import is_permanent_subscription, now_utc
 
 logger = logging.getLogger(__name__)
 
@@ -77,12 +76,30 @@ class ServiceUnavailableError(Exception):
     pass
 
 
+async def acquire_user_account_lock(session: AsyncSession, user_id: int) -> None:
+    """Acquire canonical per-user transaction advisory lock (-user_id) on PostgreSQL."""
+    bind = session.get_bind() if hasattr(session, "get_bind") else None
+    if bind and getattr(bind, "dialect", None) and bind.dialect.name == "postgresql":
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(:key)"),
+            {"key": -int(user_id)},
+        )
+
+
 class OrderService:
+    @staticmethod
+    async def acquire_user_account_lock(
+        session: AsyncSession, user_id: int
+    ) -> None:
+        """Acquire canonical per-user advisory lock (-user_id) before any row locks."""
+        await acquire_user_account_lock(session, user_id)
+
     @staticmethod
     async def _load_settlement_user(
         session: AsyncSession, user_id: int
     ) -> User | None:
-        """Authoritative user read with row lock for the settlement boundary."""
+        """Authoritative user read with canonical advisory + row lock for the settlement boundary."""
+        await acquire_user_account_lock(session, user_id)
         return await session.scalar(
             select(User)
             .where(User.id == user_id)
@@ -208,6 +225,8 @@ class OrderService:
         metadata: dict | None = None,
         bot_username: str | None = None,
         idempotency_key: str | None = None,
+        wallet_debit: Decimal = Decimal(0),
+        locked_user: User | None = None,
     ) -> tuple[Order, bool]:
         """Create (or deduplicate) an external YooKassa order and obtain payment link."""
         order_meta: dict = dict(metadata) if metadata else {}
@@ -253,32 +272,78 @@ class OrderService:
         session.add(order)
         await session.flush()
 
+        if wallet_debit > 0:
+            await create_order_debit(
+                session,
+                user_id=user_id,
+                amount_rub=wallet_debit,
+                order_id=order.id,
+                metadata={"description": f"Резерв смешанной оплаты: {order.description}"},
+                locked_user=locked_user,
+            )
+
+        # Commit pending order (and mixed wallet reservation) BEFORE calling external
+        # YooKassa HTTP API so PostgreSQL advisory/row locks are not held across network I/O
+        # and the Order row persists even if the HTTP call times out or becomes ambiguous.
+        order_id = order.id
+        if hasattr(session, "commit"):
+            await session.commit()
+
         gateway = get_payment_gateway("yookassa")
         try:
             invoice = await gateway.create_payment_url(
-                order_id=str(order.id),
+                order_id=str(order_id),
                 amount_rub=order.amount_rub,
                 description=description,
                 return_url=return_url,
                 bot_username=bot_username,
             )
-            order.external_id = invoice.external_id
-            order.payment_url = invoice.payment_url
+            await acquire_user_account_lock(session, user_id)
+            locked_order = await session.scalar(
+                select(Order).where(Order.id == order_id).with_for_update()
+            )
+            target_order = locked_order if locked_order is not None else order
+            if target_order.status == OrderStatus.PENDING:
+                target_order.external_id = invoice.external_id
+                target_order.payment_url = invoice.payment_url
+                await session.flush()
+                if hasattr(session, "commit"):
+                    await session.commit()
+            return target_order, True
         except PaymentCreationAmbiguousError:
-            held_meta = dict(order.metadata_ or {})
-            held_meta["payment_creation_ambiguous"] = True
-            order.metadata_ = held_meta
-            await session.flush()
+            await acquire_user_account_lock(session, user_id)
+            locked_order = await session.scalar(
+                select(Order).where(Order.id == order_id).with_for_update()
+            )
+            target_order = locked_order if locked_order is not None else order
+            if target_order.status == OrderStatus.PENDING:
+                held_meta = dict(target_order.metadata_ or {})
+                held_meta["payment_creation_ambiguous"] = True
+                target_order.metadata_ = held_meta
+                await session.flush()
+                if hasattr(session, "commit"):
+                    await session.commit()
             raise
         except Exception as exc:
-            order_id = order.id
             logger.exception(
                 "Gateway failed to create payment for order %s: %s", order_id, exc
             )
+            try:
+                await acquire_user_account_lock(session, user_id)
+                locked_order = await session.scalar(
+                    select(Order).where(Order.id == order_id).with_for_update()
+                )
+                target_order = locked_order if locked_order is not None else order
+                if target_order.status == OrderStatus.PENDING:
+                    OrderService.mark_order_canceled(target_order, reason="gateway_create_failed")
+                    if wallet_debit > 0:
+                        await OrderService.refund_reserved_mixed_debit(session, target_order)
+                    await session.flush()
+                    if hasattr(session, "commit"):
+                        await session.commit()
+            except Exception:
+                logger.exception("Failed to clean up order %s after gateway create failure", order_id)
             raise
-
-        await session.flush()
-        return order, True
 
     @staticmethod
     def mark_order_canceled(order: Order, reason: str = "gateway_canceled") -> None:
@@ -318,10 +383,11 @@ class OrderService:
         external_id: str | None = None,
         paid_amount_rub: Decimal | None = None,
     ) -> Order | None:
-        """Idempotent, atomic order settlement with row-level locking."""
+        """Idempotent, atomic order settlement with canonical advisory + row-level locking."""
         order_uuid = uuid.UUID(str(order_id)) if not isinstance(order_id, uuid.UUID) else order_id
         owner_id = await session.scalar(select(Order.user_id).where(Order.id == order_uuid))
         if owner_id is not None:
+            await acquire_user_account_lock(session, owner_id)
             await session.scalar(select(User.id).where(User.id == owner_id).with_for_update())
         order = await session.scalar(
             select(Order)
@@ -522,8 +588,8 @@ class OrderService:
         active_hwid_count = await count_active_user_devices(session, user_id)
 
         is_active = bool(
-            sub_end
-            and not is_vpn_access_expired(sub_end, grace_hours=VPN_ACCESS_GRACE_HOURS)
+            sub_end is not None
+            and sub_end > now
             and current_limit > 0
         )
         if not is_active:
@@ -704,13 +770,8 @@ class OrderService:
         idempotency_key: str | None = None,
     ) -> dict:
         """Unified server-side checkout supporting 100% wallet (bonuses first), mixed payment, or YooKassa."""
-        # Acquire advisory lock BEFORE row lock to prevent lock-inversion deadlocks.
-        bind = session.get_bind()
-        if bind and getattr(bind, "dialect", None) and bind.dialect.name == "postgresql":
-            await session.execute(
-                text("SELECT pg_advisory_xact_lock(:key)"),
-                {"key": -user_id},
-            )
+        # Canonical lock order: 1) pg_advisory_xact_lock(-user_id) -> 2) User FOR UPDATE -> 3) Order FOR UPDATE.
+        user = await OrderService._load_settlement_user(session, user_id)
         clean_idem_key = (idempotency_key or "").strip()[:64] or None
         if clean_idem_key:
             existing_order = (
@@ -746,7 +807,6 @@ class OrderService:
                     "total_cost_rub": int(meta.get("total_cost_rub", existing_order.amount_rub)),
                     "idempotent": True,
                 }
-        user = await OrderService._load_settlement_user(session, user_id)
         if user is None:
             raise ValueError("User not found")
         if getattr(user, "financial_hold", False):
@@ -828,7 +888,8 @@ class OrderService:
                 final_devices = min(WHITE_INTERNET_MAX_DEVICE_LIMIT, cur_wi_limit + 1)
                 traffic_bytes = gb_added * (1024**3)
                 description = "Доп. устройство высокой устойчивости"
-            elif op == "topup":
+            elif op in ("topup", "topup_gb"):
+                op = "topup"
                 if gb is None or int(gb) not in WHITE_INTERNET_TOPUP_PACKS:
                     raise ValueError(f"Unsupported traffic pack: {gb}")
                 if wi_sub is None:
@@ -863,7 +924,6 @@ class OrderService:
                         in (
                             WhiteInternetStatus.PENDING,
                             WhiteInternetStatus.ACTIVE,
-                            WhiteInternetStatus.EXHAUSTED,
                         )
                         and wi_sub.expires_at
                         and wi_sub.expires_at > now
@@ -1058,7 +1118,7 @@ class OrderService:
             order_meta["total_cost_rub"] = int(total_cost)
             order_meta["is_mixed_payment"] = True
 
-        order, is_new_order = await OrderService._create_yookassa_order(
+        order, _is_new_order = await OrderService._create_yookassa_order(
             session,
             user_id=user_id,
             service_type=service_type,
@@ -1071,16 +1131,9 @@ class OrderService:
             metadata=order_meta,
             bot_username=bot_username,
             idempotency_key=clean_idem_key,
+            wallet_debit=wallet_debit,
+            locked_user=user,
         )
-        if is_new_order and wallet_debit > 0:
-            await create_order_debit(
-                session,
-                user_id=user.id,
-                amount_rub=wallet_debit,
-                order_id=order.id,
-                metadata={"description": f"Резерв смешанной оплаты: {order.description}"},
-                locked_user=user,
-            )
         return {
             "order_id": str(order.id),
             "status": order.status,
@@ -1173,6 +1226,7 @@ class OrderService:
 
         target_order_id, target_user_id = order_row
         if target_user_id is not None:
+            await acquire_user_account_lock(session, target_user_id)
             await session.scalar(select(User.id).where(User.id == target_user_id).with_for_update())
 
         order = await session.scalar(
@@ -1251,170 +1305,227 @@ class OrderService:
             return order
 
         if result.is_refunded:
-            if order.status == "refunded":
-                logger.info(
-                    "Order %s already marked refunded, ignoring duplicate webhook",
-                    order.id,
-                )
-                return order
-
-            if order.status not in ("paid", "partially_refunded"):
-                logger.warning(
-                    "Refund received for non-paid order %s (status=%s), deferring to retry",
-                    order.id,
-                    order.status,
-                )
-                return None
-
-            if result.amount_rub is None or result.amount_rub <= 0:
-                logger.warning(
-                    "Refund amount missing or non-positive for order %s (got %s, ext_id=%s); flagging manual review",
-                    order.id,
-                    result.amount_rub,
-                    result.external_id,
-                )
-                order_meta = dict(order.metadata_ or {})
-                order_meta["requires_manual_review"] = True
-                order_meta["refund_amount_mismatch"] = f"Missing or invalid refund amount: {result.amount_rub}"
-                if result.external_id:
-                    order_meta["refund_external_id"] = result.external_id
-                order.metadata_ = order_meta
-                await session.flush()
-                return order
-
-            refund_amount = result.amount_rub
-            if refund_amount > order.amount_rub:
-                logger.warning(
-                    "Refund amount mismatch or missing for order %s: expected <= %s, got %s (ext_id=%s)",
-                    order.id,
-                    order.amount_rub,
-                    result.amount_rub,
-                    result.external_id,
-                )
-                order_meta = dict(order.metadata_ or {})
-                order_meta["requires_manual_review"] = True
-                order_meta["refund_amount_mismatch"] = (
-                    f"Refund {refund_amount} exceeds order {order.amount_rub}"
-                )
-                if result.external_id:
-                    order_meta["refund_external_id"] = result.external_id
-                order.metadata_ = order_meta
-                await session.flush()
-                return order
-
-            is_partial = refund_amount < order.amount_rub
-            order.status = "refunded" if not is_partial else "partially_refunded"
-            order.refunded_at = now_utc()
-            order_meta = dict(order.metadata_ or {})
-            if result.external_id:
-                order_meta["refund_external_id"] = result.external_id
-            if is_partial:
-                order_meta["partial_refund_amount_rub"] = str(refund_amount)
-                order_meta["requires_manual_review"] = True
-                order.metadata_ = order_meta
-                await session.flush()
-                logger.warning(
-                    "Partial refund %s RUB for order %s (total %s RUB): flagged for manual review without auto-revoke",
-                    refund_amount,
-                    order.id,
-                    order.amount_rub,
-                )
-                return order
-            order.metadata_ = order_meta
-
-            if order.service_type == "topup" or (order.metadata_ or {}).get("mixed_fallback_credited"):
-                has_credit = bool(
-                    await session.scalar(
-                        select(func.count(AccountLedgerEntry.id)).where(
-                            AccountLedgerEntry.order_id == order.id,
-                            AccountLedgerEntry.entry_type == "payment_credit",
-                        )
-                    )
-                )
-
-                if has_credit:
-                    refund_ref = (
-                        (result.external_id or "").strip()
-                        or f"refund_{order.id}"
-                    )
-                    await create_order_refund_debit(
-                        session,
-                        user_id=order.user_id,
-                        amount_rub=refund_amount,
-                        order_id=order.id,
-                        refund_id=refund_ref,
-                        metadata={"source": "yookassa_refund", "partial": is_partial},
-                    )
-                    await reverse_referral_bonus_for_topup(
-                        session,
-                        order_id=order.id,
-                        refund_id=refund_ref,
-                    )
-                    balance_after = await get_account_balance(session, user_id=order.user_id)
-                    if balance_after.debt > 0:
-                        order_meta = dict(order.metadata_ or {})
-                        order_meta["requires_manual_review"] = True
-                        order_meta["negative_balance_rub"] = str(balance_after.accounting_position)
-                        order_meta["refund_amount_mismatch"] = (
-                            f"Negative real balance detected: -{balance_after.debt} RUB"
-                        )
-                        order.metadata_ = order_meta
-                        debt_user = await OrderService._load_settlement_user(session, order.user_id)
-                        if debt_user is not None:
-                            debt_user.financial_hold = True
-                            debt_user.financial_block_reason = "refund_debt"
-                            from services.subscription import SubscriptionService
-
-                            await SubscriptionService.sync_access_state(session, debt_user)
-                        await session.flush()
-                else:
-                    logger.info(
-                        "Order %s topup has no payment_credit in ledger; skipping refund debit",
-                        order.id,
-                    )
-            else:
-                refund_ref = (
-                    (result.external_id or "").strip()
-                    or f"refund_{order.id}"
-                )
-                if order.payment_method != "wallet":
-                    await reverse_referral_bonus_for_topup(
-                        session,
-                        order_id=order.id,
-                        refund_id=refund_ref,
-                    )
-                order_meta = dict(order.metadata_ or {})
-                if not order_meta.get("mixed_debit_refunded"):
-                    real_restored, bonus_restored = await create_mixed_cancel_refund(
-                        session,
-                        user_id=order.user_id,
-                        order_id=order.id,
-                        key_prefix="mixed_refund",
-                        source="mixed_order_refund_restore",
-                    )
-                    if real_restored > 0 or bonus_restored > 0:
-                        order_meta["mixed_debit_refunded"] = True
-                if not order_meta.get("settlement_held") and not order_meta.get("benefits_revoked"):
-                    await FulfillmentService.revoke_order(session, order)
-                    order_meta["benefits_revoked"] = True
-                    logger.info(
-                        "Order %s refunded (%s RUB) and revoked",
-                        order.id,
-                        order.amount_rub,
-                    )
-                else:
-                    logger.info(
-                        "Order %s refunded; skipping revocation (settlement_held=%s, benefits_revoked=%s)",
-                        order.id,
-                        bool(order_meta.get("settlement_held")),
-                        bool(order_meta.get("benefits_revoked")),
-                    )
-                order.metadata_ = order_meta
-            await session.flush()
-            return order
+            return await OrderService.process_refund_webhook(
+                session,
+                order,
+                refund_amount=result.amount_rub,
+                refund_external_id=result.external_id,
+                already_locked=True,
+            )
         logger.info(
             "Webhook event %s for order %s has no actionable transition, acknowledging",
             result.event_type,
             order.id,
         )
+        return order
+
+    @staticmethod
+    async def process_refund_webhook(
+        session: AsyncSession,
+        order: Order,
+        *,
+        refund_amount: Decimal | None,
+        refund_external_id: str | None = None,
+        already_locked: bool = False,
+    ) -> Order | None:
+        """Process partial or cumulative full refund with canonical lock order."""
+        if not already_locked:
+            if order.user_id is not None:
+                await acquire_user_account_lock(session, order.user_id)
+                await session.scalar(
+                    select(User.id).where(User.id == order.user_id).with_for_update()
+                )
+            locked_order = await session.scalar(
+                select(Order).where(Order.id == order.id).with_for_update()
+            )
+            if not locked_order:
+                return None
+            order = locked_order
+
+        if order.status == "refunded":
+            logger.info(
+                "Order %s already marked refunded, ignoring duplicate webhook",
+                order.id,
+            )
+            return order
+
+        if order.status not in ("paid", "partially_refunded"):
+            logger.warning(
+                "Refund received for non-paid order %s (status=%s), deferring to retry",
+                order.id,
+                order.status,
+            )
+            return None
+
+        if refund_amount is None or refund_amount <= 0:
+            logger.warning(
+                "Refund amount missing or non-positive for order %s (got %s, ext_id=%s); flagging manual review",
+                order.id,
+                refund_amount,
+                refund_external_id,
+            )
+            order_meta = dict(order.metadata_ or {})
+            order_meta["requires_manual_review"] = True
+            order_meta["refund_amount_mismatch"] = f"Missing or invalid refund amount: {refund_amount}"
+            if refund_external_id:
+                order_meta["refund_external_id"] = refund_external_id
+            order.metadata_ = order_meta
+            await session.flush()
+            return order
+
+        order_meta = dict(order.metadata_ or {})
+        processed_refund_ids = list(order_meta.get("refund_external_ids") or [])
+        prev_ext_id = order_meta.get("refund_external_id")
+        if prev_ext_id and prev_ext_id not in processed_refund_ids:
+            processed_refund_ids.append(prev_ext_id)
+        if refund_external_id and refund_external_id in processed_refund_ids:
+            logger.info(
+                "Refund %s for order %s already processed, ignoring duplicate webhook",
+                refund_external_id,
+                order.id,
+            )
+            return order
+
+        prev_raw = order_meta.get("partial_refund_amount_rub")
+        try:
+            prev_refunded = Decimal(str(prev_raw)) if prev_raw is not None else Decimal(0)
+        except Exception:
+            prev_refunded = Decimal(0)
+        if prev_refunded < 0:
+            prev_refunded = Decimal(0)
+
+        cumulative_refunded = prev_refunded + refund_amount
+        if refund_amount > order.amount_rub or cumulative_refunded > order.amount_rub:
+            logger.warning(
+                "Refund amount mismatch or missing for order %s: expected <= %s, got %s (cumulative=%s, ext_id=%s)",
+                order.id,
+                order.amount_rub,
+                refund_amount,
+                cumulative_refunded,
+                refund_external_id,
+            )
+            order_meta["requires_manual_review"] = True
+            order_meta["refund_amount_mismatch"] = (
+                f"Refund {refund_amount} (cumulative {cumulative_refunded}) exceeds order {order.amount_rub}"
+            )
+            if refund_external_id:
+                order_meta["refund_external_id"] = refund_external_id
+            order.metadata_ = order_meta
+            await session.flush()
+            return order
+
+        is_partial = cumulative_refunded < order.amount_rub
+        order.status = "refunded" if not is_partial else "partially_refunded"
+        order.refunded_at = now_utc()
+        if refund_external_id:
+            order_meta["refund_external_id"] = refund_external_id
+            processed_refund_ids.append(refund_external_id)
+            order_meta["refund_external_ids"] = processed_refund_ids
+        order_meta["partial_refund_amount_rub"] = str(cumulative_refunded)
+        if is_partial:
+            order_meta["requires_manual_review"] = True
+            order.metadata_ = order_meta
+            await session.flush()
+            logger.warning(
+                "Partial refund %s RUB (cumulative %s/%s RUB) for order %s: flagged for manual review without auto-revoke",
+                refund_amount,
+                cumulative_refunded,
+                order.amount_rub,
+                order.id,
+            )
+            return order
+        if not order_meta.get("refund_amount_mismatch") and not order_meta.get("payment_id_mismatch"):
+            order_meta.pop("requires_manual_review", None)
+        order.metadata_ = order_meta
+
+        effective_refund_debit = min(cumulative_refunded, order.amount_rub)
+        if order.service_type == "topup" or (order.metadata_ or {}).get("mixed_fallback_credited"):
+            has_credit = bool(
+                await session.scalar(
+                    select(func.count(AccountLedgerEntry.id)).where(
+                        AccountLedgerEntry.order_id == order.id,
+                        AccountLedgerEntry.entry_type == "payment_credit",
+                    )
+                )
+            )
+
+            if has_credit:
+                refund_ref = (
+                    (refund_external_id or "").strip()
+                    or f"refund_{order.id}"
+                )
+                await create_order_refund_debit(
+                    session,
+                    user_id=order.user_id,
+                    amount_rub=effective_refund_debit,
+                    order_id=order.id,
+                    refund_id=refund_ref,
+                    metadata={"source": "yookassa_refund", "partial": is_partial},
+                )
+                await reverse_referral_bonus_for_topup(
+                    session,
+                    order_id=order.id,
+                    refund_id=refund_ref,
+                )
+                balance_after = await get_account_balance(session, user_id=order.user_id)
+                if balance_after.debt > 0:
+                    order_meta = dict(order.metadata_ or {})
+                    order_meta["requires_manual_review"] = True
+                    order_meta["negative_balance_rub"] = str(balance_after.accounting_position)
+                    order_meta["refund_amount_mismatch"] = (
+                        f"Negative real balance detected: -{balance_after.debt} RUB"
+                    )
+                    order.metadata_ = order_meta
+                    debt_user = await OrderService._load_settlement_user(session, order.user_id)
+                    if debt_user is not None:
+                        debt_user.financial_hold = True
+                        debt_user.financial_block_reason = "refund_debt"
+                        from services.subscription import SubscriptionService
+
+                        await SubscriptionService.sync_access_state(session, debt_user)
+                    await session.flush()
+            else:
+                logger.info(
+                    "Order %s topup has no payment_credit in ledger; skipping refund debit",
+                    order.id,
+                )
+        else:
+            refund_ref = (
+                (refund_external_id or "").strip()
+                or f"refund_{order.id}"
+            )
+            if order.payment_method != "wallet":
+                await reverse_referral_bonus_for_topup(
+                    session,
+                    order_id=order.id,
+                    refund_id=refund_ref,
+                )
+            order_meta = dict(order.metadata_ or {})
+            if not order_meta.get("mixed_debit_refunded"):
+                real_restored, bonus_restored = await create_mixed_cancel_refund(
+                    session,
+                    user_id=order.user_id,
+                    order_id=order.id,
+                    key_prefix="mixed_refund",
+                    source="mixed_order_refund_restore",
+                )
+                if real_restored > 0 or bonus_restored > 0:
+                    order_meta["mixed_debit_refunded"] = True
+            if not order_meta.get("settlement_held") and not order_meta.get("benefits_revoked"):
+                await FulfillmentService.revoke_order(session, order)
+                order_meta["benefits_revoked"] = True
+                logger.info(
+                    "Order %s refunded (%s RUB) and revoked",
+                    order.id,
+                    order.amount_rub,
+                )
+            else:
+                logger.info(
+                    "Order %s refunded; skipping revocation (settlement_held=%s, benefits_revoked=%s)",
+                    order.id,
+                    bool(order_meta.get("settlement_held")),
+                    bool(order_meta.get("benefits_revoked")),
+                )
+            order.metadata_ = order_meta
+        await session.flush()
         return order

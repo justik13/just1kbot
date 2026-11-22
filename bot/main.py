@@ -205,8 +205,8 @@ async def setup_bot(
 
     start_router._parent_router = None
     notifications_router._parent_router = None
-    dp.include_router(start_router)
     dp.include_router(notifications_router)
+    dp.include_router(start_router)
     dp.errors.register(global_error_handler)
 
     return bot, dp
@@ -432,7 +432,10 @@ async def main():
 
         if shutdown_event.is_set():
             logger.info("Shutdown requested, stopping polling...")
-            await dp.stop_polling()
+            try:
+                await dp.stop_polling()
+            except RuntimeError:
+                pass
             polling_task.cancel()
             try:
                 await polling_task

@@ -10,8 +10,8 @@ Operational contract:
     DB_ENCRYPTION_KEYS='<OLD_KEY_1>,<OLD_KEY_2>'
 
 Safety:
-    Contract: rotation proceeds ONLY when MaintenanceMode is explicitly
-    enabled, or with an explicit `--force` EMERGENCY override (not a normal
+    Contract: rotation proceeds ONLY when payments_maintenance_enabled is explicitly
+    enabled in system_settings, or with an explicit `--force` EMERGENCY override (not a normal
     mode - it permits live writers during rotation). Stopping the bot
     container alone does NOT satisfy the guard — the check reads the
     payments_maintenance_enabled setting. Typical flow: stop bot → enable maintenance →

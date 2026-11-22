@@ -256,12 +256,14 @@ async def renew_subscription_atomic(
     max_extra_allowed = max(0, effective_devices * WHITE_INTERNET_MAX_QUOTA_BYTES)
     new_extra = min(extra_rollover, max_extra_allowed) if is_grace_valid else 0
 
+    if not sub.token:
+        sub.token = secrets.token_hex(32)
     sub.base_traffic_bytes = new_base_bytes
     sub.extra_traffic_bytes = new_extra
     sub.expires_at = new_expires_at
     sub.status = WhiteInternetStatus.ACTIVE
     sub.status_reason = None
-    sub.desired_version += 1
+    sub.desired_version = (sub.desired_version or 1) + 1
     sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
     sub.notified_3d = False
     sub.notified_1d = False
@@ -269,7 +271,7 @@ async def renew_subscription_atomic(
     sub.notified_expired = False
     sub.notified_90p = False
 
-    # Reset period usage counters; DO NOT reset last_uplink_snapshot / last_downlink_snapshot!
+    # Reset period usage counters; preserve per-node delta baselines in node_traffic_snapshots
     sub.traffic_used_bytes = 0
     sub.traffic_uplink_bytes = 0
     sub.traffic_downlink_bytes = 0
@@ -314,7 +316,10 @@ async def add_device_slot_atomic(
     if sub.status == WhiteInternetStatus.EXHAUSTED:
         sub.status = WhiteInternetStatus.ACTIVE
         sub.status_reason = None
-        sub.desired_version += 1
+        sub.desired_version = (sub.desired_version or 1) + 1
+        sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+    elif sub.status == WhiteInternetStatus.ACTIVE:
+        sub.desired_version = (sub.desired_version or 1) + 1
         sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
 
     await session.flush()
@@ -391,13 +396,14 @@ async def apply_due_downgrades(
         sub.pending_from = None
         total_quota = (sub.base_traffic_bytes or 0) + (sub.extra_traffic_bytes or 0)
         used = max(0, (sub.traffic_used_bytes or 0) - (sub.traffic_overage_bytes or 0))
-        if sub.status == WhiteInternetStatus.ACTIVE and total_quota > 0 and used >= total_quota:
-            sub.status = WhiteInternetStatus.EXHAUSTED
-            sub.status_reason = "quota_exhausted"
-            sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_DELETE
-        else:
-            sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
-        sub.desired_version += 1
+        if sub.status == WhiteInternetStatus.ACTIVE:
+            if total_quota > 0 and used >= total_quota:
+                sub.status = WhiteInternetStatus.EXHAUSTED
+                sub.status_reason = "quota_exhausted"
+                sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_DELETE
+            else:
+                sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+            sub.desired_version = (sub.desired_version or 1) + 1
         applied += 1
     if applied:
         await session.flush()
@@ -445,87 +451,6 @@ async def topup_quota_atomic(
     return pack_bytes
 
 
-async def record_and_deduct_traffic_atomic(
-    session: AsyncSession,
-    subscription_id: int,
-    node_epoch: int | str,
-    snapshot_uplink_after: int,
-    snapshot_downlink_after: int,
-    snapshot_uplink_before: int | None = None,
-    snapshot_downlink_before: int | None = None,
-    *,
-    node_boot_id: str | None = None,
-    node_starttime: int | None = None,
-    now: datetime | None = None,
-) -> tuple[int, bool, int, None]:
-    now = now or now_utc()
-    str_node_epoch = str(node_epoch)
-
-    sub = await get_subscription_with_lock(session, subscription_id)
-    if sub is None:
-        raise WhiteInternetSubscriptionNotFoundError(f"Subscription {subscription_id} not found")
-
-    effective_before_up = (
-        snapshot_uplink_before
-        if snapshot_uplink_before is not None
-        else (sub.last_uplink_snapshot or 0)
-    )
-    effective_before_down = (
-        snapshot_downlink_before
-        if snapshot_downlink_before is not None
-        else (sub.last_downlink_snapshot or 0)
-    )
-
-    delta_uplink = snapshot_uplink_after - effective_before_up
-    delta_downlink = snapshot_downlink_after - effective_before_down
-
-    if delta_uplink < 0:
-        delta_uplink = max(0, snapshot_uplink_after)
-    if delta_downlink < 0:
-        delta_downlink = max(0, snapshot_downlink_after)
-
-    total_quota = (sub.base_traffic_bytes or 0) + (sub.extra_traffic_bytes or 0)
-    used_before = max(0, (sub.traffic_used_bytes or 0) - (sub.traffic_overage_bytes or 0))
-    available_before = max(0, total_quota - used_before)
-
-    if delta_uplink <= 0 and delta_downlink <= 0:
-        return 0, False, available_before, None
-
-    # Quota is metered strictly by downlink (Egress from CDN to client)
-    consumed_delta = max(0, delta_downlink)
-
-    if sub.status in (WhiteInternetStatus.DISABLED, WhiteInternetStatus.EXPIRED):
-        overage = consumed_delta
-    else:
-        overage = max(0, consumed_delta - available_before)
-
-    sub.traffic_used_bytes = (sub.traffic_used_bytes or 0) + consumed_delta
-    sub.traffic_overage_bytes = (sub.traffic_overage_bytes or 0) + overage
-    sub.traffic_uplink_bytes = (sub.traffic_uplink_bytes or 0) + delta_uplink
-    sub.traffic_downlink_bytes = (sub.traffic_downlink_bytes or 0) + delta_downlink
-    sub.last_uplink_snapshot = snapshot_uplink_after
-    sub.last_downlink_snapshot = snapshot_downlink_after
-    sub.traffic_stats_epoch = str_node_epoch
-
-    used_after = max(0, (sub.traffic_used_bytes or 0) - (sub.traffic_overage_bytes or 0))
-    available_after = max(0, total_quota - used_after)
-    became_exhausted = False
-    event = None
-    if available_after == 0 and sub.status == WhiteInternetStatus.ACTIVE:
-        sub.status = WhiteInternetStatus.EXHAUSTED
-        sub.status_reason = "quota_exhausted"
-        sub.desired_version += 1
-        sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
-        became_exhausted = True
-        sub.notified_90p = True
-    elif total_quota > 0 and sub.status == WhiteInternetStatus.ACTIVE and not getattr(sub, "notified_90p", False):
-        if used_after >= 0.90 * total_quota:
-            event = "traffic_90p"
-
-    await session.flush()
-    return consumed_delta, became_exhausted, available_after, event
-
-
 async def add_pending_revocation_uuids(
     session: AsyncSession,
     subscription_id: int,
@@ -546,6 +471,30 @@ async def add_pending_revocation_uuids(
             changed = True
     if changed:
         sub.pending_revoked_uuids = pending
+        flag_modified(sub, "pending_revoked_uuids")
+        await session.flush()
+
+
+async def pop_pending_revoked_uuid(
+    session: AsyncSession,
+    sub_id: int,
+    target_uuid: str,
+) -> None:
+    """Remove a successfully deprovisioned UUID from pending_revoked_uuids under row lock."""
+    clean_uuid = str(target_uuid or "").strip().lower()
+    if not clean_uuid:
+        return
+    sub = await get_subscription_with_lock(session, sub_id)
+    if sub is None:
+        return
+    pending = list(getattr(sub, "pending_revoked_uuids", None) or [])
+    if not pending:
+        return
+    new_pending = [
+        u for u in pending if str(u).strip().lower() != clean_uuid and u != target_uuid
+    ]
+    if len(new_pending) != len(pending):
+        sub.pending_revoked_uuids = new_pending
         flag_modified(sub, "pending_revoked_uuids")
         await session.flush()
 
@@ -645,7 +594,7 @@ async def reset_subscription_token_atomic(
     reset_hwids: bool = True,
     now: datetime | None = None,
 ) -> str:
-    """Atomically regenerates the subscription token and clears active HWIDs under row-level lock.
+    """Atomically regenerates the subscription token under row-level lock.
 
     Returns the new token string.
     """
@@ -670,8 +619,7 @@ async def reset_traffic_used_atomic(
     """Zeroes traffic usage counters for ACTIVE or EXHAUSTED subscription under row lock.
 
     State Guard: rejects DISABLED, PENDING_DELETE, or EXPIRED subscriptions.
-    Preserves last_uplink_snapshot, last_downlink_snapshot, and traffic_stats_epoch
-    to prevent worker delta desynchronization.
+    Preserves node_traffic_snapshots to prevent worker delta desynchronization.
     """
     sub = await get_subscription_with_lock(session, subscription_id)
     if sub is None:
@@ -686,7 +634,7 @@ async def reset_traffic_used_atomic(
     sub.traffic_uplink_bytes = 0
     sub.traffic_downlink_bytes = 0
     sub.notified_90p = False
-    # Preserves last_uplink_snapshot, last_downlink_snapshot, and traffic_stats_epoch
+    # Preserves node_traffic_snapshots so per-node Xray counters remain monotonic
 
     if sub.status == WhiteInternetStatus.EXHAUSTED:
         sub.status = WhiteInternetStatus.ACTIVE
@@ -835,8 +783,8 @@ async def extend_subscription_atomic(
         old_expires_at = old_expires_at.replace(tzinfo=timezone.utc)
 
     is_expired_by_time = old_expires_at is not None and old_expires_at <= current_time
-    is_new_cycle = is_expired_by_time or sub.status in (
-        WhiteInternetStatus.EXPIRED,
+    is_expired_cycle = is_expired_by_time or sub.status == WhiteInternetStatus.EXPIRED
+    is_new_cycle = is_expired_cycle or sub.status in (
         WhiteInternetStatus.EXHAUSTED,
         WhiteInternetStatus.PENDING,
     )
@@ -844,14 +792,28 @@ async def extend_subscription_atomic(
     from utils.datetime_helpers import calculate_extension_end
 
     sub.expires_at = calculate_extension_end(sub.expires_at, days, now=current_time)
-    sub.desired_version += 1
+    sub.desired_version = (sub.desired_version or 1) + 1
     sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
     if is_new_cycle:
+        if is_expired_cycle or sub.status == WhiteInternetStatus.EXHAUSTED:
+            effective_devices = _effective_device_limit(sub)
+            used_quota = max(0, (sub.traffic_used_bytes or 0) - (sub.traffic_overage_bytes or 0))
+            total_left = max(
+                0,
+                ((sub.base_traffic_bytes or 0) + (sub.extra_traffic_bytes or 0)) - used_quota,
+            )
+            extra_rollover = min(sub.extra_traffic_bytes or 0, total_left)
+            is_grace_valid = (
+                (current_time <= (old_expires_at + timedelta(days=7)))
+                if old_expires_at
+                else True
+            )
+            max_extra_allowed = max(0, effective_devices * WHITE_INTERNET_MAX_QUOTA_BYTES)
+            sub.extra_traffic_bytes = min(extra_rollover, max_extra_allowed) if is_grace_valid else 0
         sub.traffic_used_bytes = 0
         sub.traffic_overage_bytes = 0
         sub.traffic_uplink_bytes = 0
         sub.traffic_downlink_bytes = 0
-        sub.extra_traffic_bytes = 0
         sub.notified_90p = False
         sub.status = WhiteInternetStatus.ACTIVE
         sub.status_reason = None

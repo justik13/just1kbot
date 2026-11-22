@@ -142,7 +142,10 @@ class VlessSubscriptionService:
                 continue
             role = get_server_role(srv)
             if role == "ru_hub":
-                ru_hubs.append(srv)
+                srv_extra = srv.extra_data if isinstance(srv.extra_data, dict) else {}
+                srv_domain = str(srv_extra.get("domain") or srv_extra.get("vless_domain") or "").strip().lower()
+                if srv_domain and _FQDN_REGEX.match(srv_domain):
+                    ru_hubs.append(srv)
             elif role == "exit_node":
                 discovered_exits.append(srv)
 
@@ -179,11 +182,15 @@ class VlessSubscriptionService:
             route_by_code = {r["bridge_code"]: r["sni"] for r in sni_routes}
 
             if active_exits:
+                seen_loc_codes: set[str] = set()
                 for ex in active_exits:
                     ex_extra = ex.extra_data if isinstance(ex.extra_data, dict) else {}
                     if ex_extra.get("in_standard") is False:
                         continue
                     loc_code = str(ex_extra.get("location_code") or f"exit{ex.id}").strip().lower()
+                    if loc_code in seen_loc_codes and getattr(ex, "id", None) is not None:
+                        loc_code = f"{loc_code}-{ex.id}"
+                    seen_loc_codes.add(loc_code)
                     fragment = VlessSubscriptionService._build_vless_fragment(
                         ex.country_flag,
                         ex_extra.get("vless_name") or ex.name,
@@ -275,6 +282,8 @@ class VlessSubscriptionService:
                     loc_code = str(ex_extra.get("location_code") or f"exit{ex.id}").strip().lower()
                     if not loc_code:
                         continue
+                    if loc_code in wi_exit_meta and getattr(ex, "id", None) is not None:
+                        loc_code = f"{loc_code}-{ex.id}"
                     flag = (ex.country_flag or "🌐").strip()
                     raw_name = str(ex_extra.get("vless_name") or ex.name or loc_code).strip()
                     raw_name = re.sub(r"(?i)\s*\bexit\b", "", raw_name)
@@ -482,7 +491,7 @@ class VlessSubscriptionService:
                     if sub and sub.pending_revoked_uuids:
                         servers = await cls.get_revocation_target_servers(scoped_session)
                         targets = cls._extract_node_targets(servers)
-                        exit_nodes = await cls.get_eligible_exit_nodes(scoped_session)
+                        exit_nodes = await cls.get_all_exit_nodes_for_revocation(scoped_session)
                         if targets:
                             sub_ver = getattr(sub, "version", 1) or 1
                             for rev_uuid in list(sub.pending_revoked_uuids):
@@ -521,11 +530,11 @@ class VlessSubscriptionService:
             base_u = uuid.UUID(base_uuid)
             for ex in exit_nodes:
                 ex_extra = ex.extra_data if isinstance(ex.extra_data, dict) else {}
-                if ex_extra.get("in_standard") is False:
-                    continue
                 lc = str(ex_extra.get("location_code") or f"exit{ex.id}").strip().lower()
                 if lc:
-                    uuids_to_deprov.append(str(uuid.uuid5(base_u, lc)))
+                    loc_uuid = str(uuid.uuid5(base_u, lc))
+                    if loc_uuid not in uuids_to_deprov:
+                        uuids_to_deprov.append(loc_uuid)
         except Exception:
             pass
         return uuids_to_deprov
@@ -549,7 +558,7 @@ class VlessSubscriptionService:
                 async with session_scope() as scoped_session:
                     servers = await cls.get_revocation_target_servers(scoped_session)
                     targets = cls._extract_node_targets(servers)
-                    exit_nodes = await cls.get_eligible_exit_nodes(scoped_session)
+                    exit_nodes = await cls.get_all_exit_nodes_for_revocation(scoped_session)
                     uuids_to_deprov = cls._expand_revocation_uuids(old_uuid, exit_nodes)
 
                 if targets:
@@ -624,6 +633,15 @@ class VlessSubscriptionService:
             )
             .order_by(Server.id.asc())
         )
+        servers = (await session.execute(stmt)).scalars().all()
+        return [srv for srv in servers if get_server_role(srv) == "exit_node"]
+
+    @staticmethod
+    async def get_all_exit_nodes_for_revocation(
+        session: AsyncSession,
+    ) -> list[Server]:
+        """Fetch all exit_node servers regardless of transient health/active state for complete location UUID revocation."""
+        stmt = select(Server).order_by(Server.id.asc())
         servers = (await session.execute(stmt)).scalars().all()
         return [srv for srv in servers if get_server_role(srv) == "exit_node"]
 
@@ -878,15 +896,35 @@ class VlessSubscriptionService:
             return {}
 
         sub_version = getattr(sub, "version", 1) or 1
-        from database.repositories import user_devices_repo
-        dev_uuids = await user_devices_repo.get_active_device_uuids(session, user_id)
+        std_limit = (
+            await SubscriptionService.get_effective_device_limit(session, user)
+            if user is not None
+            else max(1, int(getattr(sub, "device_limit", 2) or 2))
+        )
+        std_limit = max(1, int(std_limit or 2))
+        from database.models import UserDevice
+        dev_rows = (
+            await session.scalars(
+                select(UserDevice.device_uuid)
+                .where(
+                    UserDevice.user_id == user_id,
+                    UserDevice.device_uuid.is_not(None),
+                )
+                .order_by(UserDevice.first_seen_at.asc(), UserDevice.id.asc())
+            )
+        ).all()
+        devices = [str(u).strip() for u in dev_rows if isinstance(u, str) and str(u).strip()]
+        dev_uuids = devices[:std_limit] if desired_active else devices
         all_sync_uuids = set(dev_uuids)
 
-        exit_nodes = await VlessSubscriptionService.get_eligible_exit_nodes(session)
+        if desired_active:
+            exit_nodes = await VlessSubscriptionService.get_eligible_exit_nodes(session)
+        else:
+            exit_nodes = await VlessSubscriptionService.get_all_exit_nodes_for_revocation(session)
         loc_codes: list[str] = []
         for ex in exit_nodes:
             ex_extra = ex.extra_data if isinstance(ex.extra_data, dict) else {}
-            if ex_extra.get("in_standard") is False:
+            if desired_active and ex_extra.get("in_standard") is False:
                 continue
             lc = str(ex_extra.get("location_code") or f"exit{ex.id}").strip().lower()
             if lc and lc not in loc_codes:
@@ -958,7 +996,7 @@ class VlessSubscriptionService:
         client_uuid: str,
         version: int | None = None,
     ) -> dict[int, bool]:
-        """Deprovision a revoked UUID across all configured exit nodes."""
+        """Deprovision a revoked UUID (and its per-location uuid5 derivatives) across all configured exit nodes."""
         if not client_uuid:
             return {}
 
@@ -966,7 +1004,16 @@ class VlessSubscriptionService:
         targets = VlessSubscriptionService._extract_node_targets(servers)
         if not targets:
             return {}
-        return await VlessSubscriptionService._execute_deprovision_on_nodes(targets, client_uuid, version=version)
+        exit_nodes = await VlessSubscriptionService.get_all_exit_nodes_for_revocation(session)
+        uuids_to_deprov = VlessSubscriptionService._expand_revocation_uuids(client_uuid, exit_nodes)
+        combined_results: dict[int, bool] = {}
+        for u in uuids_to_deprov:
+            res = await VlessSubscriptionService._execute_deprovision_on_nodes(
+                targets, u, version=version
+            )
+            for s_id, ok in res.items():
+                combined_results[s_id] = combined_results.get(s_id, True) and ok
+        return combined_results
 
     @classmethod
     async def sync_all_active_to_server(cls, server_id: int) -> int:
@@ -1036,10 +1083,12 @@ class VlessSubscriptionService:
                 if batch_user_ids:
                     dev_rows = (
                         await session.execute(
-                            select(UserDevice.user_id, UserDevice.device_uuid).where(
+                            select(UserDevice.user_id, UserDevice.device_uuid)
+                            .where(
                                 UserDevice.user_id.in_(batch_user_ids),
                                 UserDevice.device_uuid.is_not(None),
                             )
+                            .order_by(UserDevice.first_seen_at.asc(), UserDevice.id.asc())
                         )
                     ).all()
                     for u_id, d_uuid in dev_rows:
@@ -1065,7 +1114,16 @@ class VlessSubscriptionService:
                     continue
                 total_eligible += 1
                 sub_ver = getattr(sub, "version", 1) or 1
-                all_sub_uuids = set(user_devices_map.get(user.id, []))
+                std_limit = max(
+                    1,
+                    int(
+                        getattr(sub, "device_limit", None)
+                        or getattr(user, "max_devices", None)
+                        or 2
+                    ),
+                )
+                devices = user_devices_map.get(user.id, [])
+                all_sub_uuids = set(devices[:std_limit])
                 expected_for_sub: set[str] = set()
                 for cl_uuid in all_sub_uuids:
                     sub_tasks.append((cl_uuid, f"{cl_uuid}:std", sub_ver, user.id, sub.id))

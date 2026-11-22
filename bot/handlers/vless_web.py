@@ -667,8 +667,12 @@ async def serve_unified_subscription_feed(
         wi_up = max(0, int(getattr(wi_sub, "traffic_uplink_bytes", 0) or 0)) if wi_sub else 0
         wi_down = max(0, int(getattr(wi_sub, "traffic_downlink_bytes", 0) or 0)) if wi_sub else 0
         if wi_active and not std_active:
-            upload_bytes = wi_up
-            download_bytes = wi_down
+            upload_bytes = 0
+            download_bytes = max(
+                0,
+                int(getattr(wi_sub, "traffic_used_bytes", 0) or 0)
+                - int(getattr(wi_sub, "traffic_overage_bytes", 0) or 0),
+            )
         elif std_active and not wi_active:
             upload_bytes = std_up
             download_bytes = std_down
@@ -913,6 +917,10 @@ async def serve_unified_subscription_feed(
                 )
                 all_links.extend(std_links)
 
+                if is_new_device:
+                    vless_sub.version = (vless_sub.version or 1) + 1
+                    await session.flush()
+
                 last_synced_version = getattr(vless_sub, "last_synced_version", None)
                 current_version = getattr(vless_sub, "version", 1) or 1
                 needs_sync = (
@@ -954,7 +962,13 @@ async def serve_unified_subscription_feed(
                             or sync_entry.get("epoch") == hub.xray_instance_epoch
                         )
                         if (
-                            sync_entry.get("version") == wi_sub.desired_version
+                            (
+                                sync_entry.get("version") == wi_sub.desired_version
+                                or (
+                                    wi_sub.status == WhiteInternetStatus.ACTIVE
+                                    and (sync_entry.get("version") or 0) > 0
+                                )
+                            )
                             and sync_entry.get("active", True) is True
                             and epoch_ok
                         ):
@@ -987,7 +1001,13 @@ async def serve_unified_subscription_feed(
                             if frag not in seen_bi_fragments:
                                 seen_bi_fragments.add(frag)
                                 all_links.append(lk)
-                    if is_new_device and device_client_uuid and is_bi_assigned and wi_hubs:
+                else:
+                    all_links.append(_make_inline_stub(texts.FEED_STUB_WI_PENDING, "Нажмите ⟳ через 1 минуту"))
+                if is_new_device and device_client_uuid and is_bi_assigned:
+                    wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
+                    wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+                    await session.flush()
+                    if wi_hubs:
                         from services.xray_node_client import XrayNodeClient
 
                         targets_snapshot = [
@@ -1024,8 +1044,6 @@ async def serve_unified_subscription_feed(
                                 session,
                                 lambda: _provision_new_wi_device(targets_snapshot, device_client_uuid, ver_snap),
                             )
-                else:
-                    all_links.append(_make_inline_stub(texts.FEED_STUB_WI_PENDING, "Нажмите ⟳ через 1 минуту"))
             else:
                 all_links.append(
                     _make_inline_stub(

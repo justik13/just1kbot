@@ -1,14 +1,26 @@
 from datetime import timedelta
+import uuid
 
-from sqlalchemy import and_, case, false, func, or_, select, text, update
+from sqlalchemy import and_, case, false, func, or_, select, text, union_all, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
 from config.constants import (
     REFERRAL_ACTIVE_MIN_TOPUP_RUB,
 )
-from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
-from database.models import Order, User, VlessSubscription, WhiteInternetSubscription
+from config.enums import (
+    OrderStatus,
+    WhiteInternetProvisioningStatus,
+    WhiteInternetStatus,
+)
+from database.models import (
+    AccountLedgerEntry,
+    Order,
+    User,
+    UserDevice,
+    VlessSubscription,
+    WhiteInternetSubscription,
+)
 from utils.datetime_helpers import now_utc
 
 ALLOWED_USER_UPDATE_FIELDS = {
@@ -242,7 +254,16 @@ def _referral_paid_activity_condition(referral) -> object:
         )
         .exists()
     )
-    return qualifying_order
+    qualifying_ledger_credit = (
+        select(AccountLedgerEntry.id)
+        .where(
+            AccountLedgerEntry.user_id == referral.id,
+            AccountLedgerEntry.entry_type == "payment_credit",
+            AccountLedgerEntry.amount >= REFERRAL_ACTIVE_MIN_TOPUP_RUB,
+        )
+        .exists()
+    )
+    return or_(qualifying_order, qualifying_ledger_credit)
 
 
 async def get_user_active_referrals_count(
@@ -343,15 +364,34 @@ async def is_eligible_for_referral_first_discount(
     ):
         return False
 
+    now = now_utc()
+    discount_used_cond = or_(
+        Order.metadata_["is_referral_discount"].astext == "true",
+        Order.metadata_["referral_discount_applied"].astext == "true",
+    )
     paid_orders = await session.scalar(
         select(func.count(Order.id)).where(
             Order.user_id == user_id,
-            Order.status == "paid",
-            Order.amount_rub > 0,
             Order.service_type.in_(("standard", "white_internet")),
             or_(
-                Order.metadata_.is_(None),
-                Order.metadata_["mixed_fallback_credited"].astext.is_distinct_from("true"),
+                and_(
+                    Order.status == OrderStatus.PAID,
+                    Order.amount_rub > 0,
+                    or_(
+                        Order.metadata_.is_(None),
+                        Order.metadata_["mixed_fallback_credited"].astext.is_distinct_from("true"),
+                    ),
+                ),
+                and_(
+                    Order.status.in_(
+                        (
+                            OrderStatus.PAID,
+                            OrderStatus.REFUNDED,
+                            OrderStatus.PARTIALLY_REFUNDED,
+                        )
+                    ),
+                    discount_used_cond,
+                ),
             ),
         )
     )
@@ -365,10 +405,13 @@ async def is_eligible_for_referral_first_discount(
     pending_discounted = await session.scalar(
         select(func.count(Order.id)).where(
             Order.user_id == user_id,
-            Order.status == "pending",
+            Order.status == OrderStatus.PENDING,
             Order.service_type.in_(("standard", "white_internet")),
-            or_(Order.expires_at.is_(None), Order.expires_at > now_utc()),
-            Order.metadata_["is_referral_discount"].astext == "true",
+            or_(
+                Order.created_at > now - timedelta(hours=24),
+                Order.expires_at.is_(None),
+                Order.expires_at > now,
+            ),
         )
     )
     if not isinstance(pending_discounted, (int, float)):
@@ -444,120 +487,52 @@ async def search_user_flexible(session: AsyncSession, query: str) -> User | None
 
     # 3. Canonical client UUID or Order UUID (36 chars: 8-4-4-4-12)
     if len(query_str) == 36 and query_str.count("-") == 4:
-        vless_user_id = await session.scalar(
-            select(VlessSubscription.user_id)
-            .where(VlessSubscription.uuid == query_str)
-            .limit(1)
-        )
-        if vless_user_id:
-            stmt = (
-                select(User)
-                .where(User.id == vless_user_id, User.is_deleted.is_(False))
-                .options(selectinload(User.vless_subscription))
-            )
-            return (await session.execute(stmt)).scalar_one_or_none()
-
-        sub_user_id = await session.scalar(
-            select(WhiteInternetSubscription.user_id)
-            .where(WhiteInternetSubscription.uuid == query_str)
-            .limit(1)
-        )
-        if sub_user_id:
-            stmt = (
-                select(User)
-                .where(User.id == sub_user_id, User.is_deleted.is_(False))
-                .options(selectinload(User.vless_subscription))
-            )
-            return (await session.execute(stmt)).scalar_one_or_none()
-
-        from database.models import UserDevice
-        dev_user_id = await session.scalar(
-            select(UserDevice.user_id)
-            .where(UserDevice.device_uuid == query_str)
-            .limit(1)
-        )
-        if dev_user_id:
-            stmt = (
-                select(User)
-                .where(User.id == dev_user_id, User.is_deleted.is_(False))
-                .options(selectinload(User.vless_subscription))
-            )
-            return (await session.execute(stmt)).scalar_one_or_none()
-
+        uuid_branches = [
+            select(VlessSubscription.user_id.label("uid")).where(VlessSubscription.uuid == query_str),
+            select(WhiteInternetSubscription.user_id.label("uid")).where(WhiteInternetSubscription.uuid == query_str),
+            select(UserDevice.user_id.label("uid")).where(UserDevice.device_uuid == query_str),
+        ]
         try:
-            import uuid
             order_uuid = uuid.UUID(query_str)
-            order_user_id = await session.scalar(
-                select(Order.user_id)
-                .where(Order.id == order_uuid)
-                .limit(1)
-            )
-            if order_user_id:
-                stmt = (
-                    select(User)
-                    .where(User.id == order_user_id, User.is_deleted.is_(False))
-                    .options(selectinload(User.vless_subscription))
-                )
-                return (await session.execute(stmt)).scalar_one_or_none()
+            uuid_branches.append(select(Order.user_id.label("uid")).where(Order.id == order_uuid))
         except (ValueError, TypeError):
             pass
 
-    # 4. Subscription token lookup (16..64 chars without spaces)
+        uuid_subq = union_all(*uuid_branches).subquery()
+        matched_uid = await session.scalar(select(uuid_subq.c.uid).limit(1))
+        if matched_uid:
+            stmt = (
+                select(User)
+                .where(User.id == matched_uid, User.is_deleted.is_(False))
+                .options(selectinload(User.vless_subscription))
+            )
+            return (await session.execute(stmt)).scalar_one_or_none()
+
+    # 4. Subscription token, Order external_id, or HWID lookup (combined into single UNION ALL)
+    lookup_branches = [
+        select(Order.user_id.label("uid")).where(Order.external_id == query_str),
+    ]
     if 16 <= len(query_str) <= 64 and " " not in query_str:
-        vless_token_user_id = await session.scalar(
-            select(VlessSubscription.user_id)
-            .where(VlessSubscription.token == query_str)
-            .limit(1)
+        lookup_branches.append(
+            select(VlessSubscription.user_id.label("uid")).where(VlessSubscription.token == query_str)
         )
-        if vless_token_user_id:
-            stmt = (
-                select(User)
-                .where(User.id == vless_token_user_id, User.is_deleted.is_(False))
-                .options(selectinload(User.vless_subscription))
-            )
-            return (await session.execute(stmt)).scalar_one_or_none()
-
-        wi_token_user_id = await session.scalar(
-            select(WhiteInternetSubscription.user_id)
-            .where(WhiteInternetSubscription.token == query_str)
-            .limit(1)
+        lookup_branches.append(
+            select(WhiteInternetSubscription.user_id.label("uid")).where(WhiteInternetSubscription.token == query_str)
         )
-        if wi_token_user_id:
-            stmt = (
-                select(User)
-                .where(User.id == wi_token_user_id, User.is_deleted.is_(False))
-                .options(selectinload(User.vless_subscription))
-            )
-            return (await session.execute(stmt)).scalar_one_or_none()
+    if len(query_str) >= 8:
+        lookup_branches.append(
+            select(UserDevice.user_id.label("uid")).where(UserDevice.hwid == query_str)
+        )
 
-    # 5. Order external_id
-    order_user_id = await session.scalar(
-        select(Order.user_id)
-        .where(Order.external_id == query_str)
-        .limit(1)
-    )
-    if order_user_id:
+    lookup_subq = union_all(*lookup_branches).subquery()
+    matched_uid = await session.scalar(select(lookup_subq.c.uid).limit(1))
+    if matched_uid:
         stmt = (
             select(User)
-            .where(User.id == order_user_id, User.is_deleted.is_(False))
+            .where(User.id == matched_uid, User.is_deleted.is_(False))
             .options(selectinload(User.vless_subscription))
         )
         return (await session.execute(stmt)).scalar_one_or_none()
-
-    # 6. HWID lookup (authoritative user_devices registry)
-    if len(query_str) >= 8:
-        device_user_id = await session.scalar(
-            select(UserDevice.user_id)
-            .where(UserDevice.hwid == query_str)
-            .limit(1)
-        )
-        if device_user_id:
-            stmt = (
-                select(User)
-                .where(User.id == device_user_id, User.is_deleted.is_(False))
-                .options(selectinload(User.vless_subscription))
-            )
-            return (await session.execute(stmt)).scalar_one_or_none()
 
     return None
 

@@ -216,8 +216,20 @@ function _openAdmin2FAGate(root) {
         appState.mode = "cabinet";
         _renderAdminView();
     });
-    renderSecurity2FA(root, appState.security, async () => {
-        appState.security = { ...(appState.security || {}), totp_enabled: true, totp_verified: true };
+    renderSecurity2FA(root, appState.security, async (res) => {
+        const isConfigured = Boolean(
+            !res || res.totp_configured || res.configured || res.two_factor_configured || res.verified
+        );
+        appState.security = {
+            ...(appState.security || {}),
+            totp_enabled: true,
+            totp_verified: true,
+            totp_configured: isConfigured,
+            configured: isConfigured,
+            two_factor_configured: isConfigured,
+            two_factor_verified: true,
+            two_factor_mode: "totp",
+        };
         appState.twoFactorPassed = true;
         appState.mode = "admin";
         await _reloadNodesAndRender();

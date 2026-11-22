@@ -131,6 +131,10 @@ jobs:
       - run: alembic upgrade head
       - name: Legal compliance stop-word audit
         run: python scripts/audit_stop_words.py
+      - name: Run unit tests
+        run: |
+          python -m pip install pytest==9.2.0
+          pytest -v
       - name: Audit locked dependencies for known CVEs
         run: |
           python -m pip install pip-audit==2.10.1

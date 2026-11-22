@@ -569,9 +569,9 @@ async def api_admin_users_handler(request: web.Request) -> web.Response:
         if user_ids:
             wi_rows = (
                 await session.scalars(
-                    select(WhiteInternetSubscription).where(
-                        WhiteInternetSubscription.user_id.in_(user_ids)
-                    )
+                    select(WhiteInternetSubscription)
+                    .where(WhiteInternetSubscription.user_id.in_(user_ids))
+                    .order_by(WhiteInternetSubscription.id.asc())
                 )
             ).all()
             wi_map = {w.user_id: w for w in wi_rows}
@@ -596,9 +596,9 @@ async def api_admin_users_handler(request: web.Request) -> web.Response:
             wi_active = bool(
                 wi
                 and wi.status in (
-                    WhiteInternetStatus.ACTIVE.value,
-                    WhiteInternetStatus.PENDING.value,
-                    WhiteInternetStatus.EXHAUSTED.value,
+                    WhiteInternetStatus.ACTIVE,
+                    WhiteInternetStatus.PENDING,
+                    WhiteInternetStatus.EXHAUSTED,
                 )
                 and wi.expires_at
                 and wi.expires_at > now
@@ -703,18 +703,25 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
             bal_after = await get_account_balance(session, user_id=user.id)
             bot = request.app.get("bot")
             if bot is not None and payload.amount_rub != 0:
-                try:
-                    sign_word = "начислено" if payload.amount_rub > 0 else "списано"
-                    msg_text = (
-                        f"💳 Администратор изменил ваш бонусный баланс: "
-                        f"{sign_word} {abs(payload.amount_rub)} ₽.\n"
-                        f"Текущий баланс: {int(bal_after.available)} ₽."
-                    )
-                    if note:
-                        msg_text += f"\nКомментарий: {note}"
-                    await bot.send_message(user.telegram_id, msg_text)
-                except Exception:
-                    pass
+                from database.connection import queue_post_commit_task
+
+                target_tg_id = user.telegram_id
+                sign_word = "начислено" if payload.amount_rub > 0 else "списано"
+                msg_text = (
+                    f"💳 Администратор изменил ваш бонусный баланс: "
+                    f"{sign_word} {abs(payload.amount_rub)} ₽.\n"
+                    f"Текущий баланс: {int(bal_after.available)} ₽."
+                )
+                if note:
+                    msg_text += f"\nКомментарий: {note}"
+
+                async def _notify_balance_adj() -> None:
+                    try:
+                        await bot.send_message(target_tg_id, msg_text)
+                    except Exception:
+                        pass
+
+                queue_post_commit_task(session, _notify_balance_adj)
             return web.json_response({
                 "ok": True,
                 "action": "balance",
@@ -727,7 +734,19 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
         if payload.action == "grant_standard":
             if payload.days is None:
                 return web.json_response({"ok": False, "error": "Укажите количество дней"}, status=400)
-            await get_or_create_subscription(session, user.id)
+            if payload.device_limit is not None and not (
+                constants.STANDARD_MIN_DEVICES <= payload.device_limit <= constants.STANDARD_MAX_DEVICES
+            ):
+                return web.json_response(
+                    {
+                        "ok": False,
+                        "error": (
+                            f"Лимит устройств должен быть от {constants.STANDARD_MIN_DEVICES} "
+                            f"до {constants.STANDARD_MAX_DEVICES}"
+                        ),
+                    },
+                    status=400,
+                )
             if payload.days < 0:
                 locked_user = (
                     await session.execute(
@@ -747,11 +766,6 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                         {"ok": False, "error": "У пользователя нет активной подписки «Стандарт»"},
                         status=400,
                     )
-                new_end = vless_sub.expires_at - timedelta(days=abs(payload.days))
-                if new_end <= now:
-                    vless_sub.expires_at = now - timedelta(hours=constants.VPN_ACCESS_GRACE_HOURS + 1)
-                else:
-                    vless_sub.expires_at = new_end
                 if payload.device_limit is not None:
                     from database.repositories import user_devices_repo
 
@@ -767,6 +781,12 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                             },
                             status=400,
                         )
+                new_end = vless_sub.expires_at - timedelta(days=abs(payload.days))
+                if new_end <= now:
+                    vless_sub.expires_at = now - timedelta(hours=constants.VPN_ACCESS_GRACE_HOURS + 1)
+                else:
+                    vless_sub.expires_at = new_end
+                if payload.device_limit is not None:
                     vless_sub.device_limit = payload.device_limit
                 await session.flush()
                 await AuditService.log_action(
@@ -791,6 +811,8 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                     "standard_device_limit": int(vless_sub.device_limit or 0),
                     "message": f"Подписка «Стандарт» сокращена на {abs(payload.days)} дн.",
                 })
+
+            await get_or_create_subscription(session, user.id)
 
             cur_vless = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
             cur_limit = int(getattr(cur_vless, "device_limit", 0) or 0) if cur_vless else 0
@@ -983,6 +1005,16 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
         # grant_wi
         if payload.days is None:
             return web.json_response({"ok": False, "error": "Укажите количество дней"}, status=400)
+        if payload.device_limit is not None and not (
+            1 <= payload.device_limit <= constants.WHITE_INTERNET_MAX_DEVICE_LIMIT
+        ):
+            return web.json_response(
+                {
+                    "ok": False,
+                    "error": f"Лимит устройств должен быть от 1 до {constants.WHITE_INTERNET_MAX_DEVICE_LIMIT}",
+                },
+                status=400,
+            )
         wi_sub = await get_subscription_by_user_id(session, user.id)
         if wi_sub is None or (
             wi_sub.status == WhiteInternetStatus.DISABLED and payload.days > 0
@@ -1016,16 +1048,29 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                 "message": f"Подписка «Белый интернет» активирована на {payload.days} дн.",
             })
 
-        if payload.device_limit is not None and payload.device_limit != wi_sub.device_limit:
-            if not (1 <= payload.device_limit <= constants.WHITE_INTERNET_MAX_DEVICE_LIMIT):
+        locked_wi = await white_internet_repo.get_subscription_with_lock(session, wi_sub.id)
+        if locked_wi is None:
+            return web.json_response({"ok": False, "error": "Подписка не найдена"}, status=404)
+        wi_sub = locked_wi
+        now = now_utc()
+
+        # Validate days before applying any device_limit ORM mutations so HTTP 400 never commits partial changes.
+        if payload.days < 0:
+            if not wi_sub.expires_at or wi_sub.expires_at <= now:
                 return web.json_response(
-                    {"ok": False, "error": f"Лимит устройств должен быть от 1 до {constants.WHITE_INTERNET_MAX_DEVICE_LIMIT}"},
+                    {"ok": False, "error": "Подписка «Белый интернет» уже истекла"},
                     status=400,
                 )
-            locked_wi_dl = await white_internet_repo.get_subscription_with_lock(session, wi_sub.id)
-            if locked_wi_dl is None:
-                return web.json_response({"ok": False, "error": "Подписка не найдена"}, status=404)
-            wi_sub = locked_wi_dl
+        elif payload.days > 0:
+            ok, msg, updated = await WhiteInternetService.extend_subscription(
+                session, user.id, payload.days
+            )
+            if not ok:
+                return web.json_response({"ok": False, "error": msg}, status=400)
+            if updated is not None:
+                wi_sub = updated
+
+        if payload.device_limit is not None and payload.device_limit != wi_sub.device_limit:
             wi_sub.device_limit = payload.device_limit
             wi_sub.base_traffic_bytes = payload.device_limit * constants.WHITE_INTERNET_BASE_TRAFFIC_BYTES
             wi_sub.pending_device_limit = None
@@ -1067,21 +1112,12 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
             })
 
         if payload.days < 0:
-            locked_wi = await white_internet_repo.get_subscription_with_lock(session, wi_sub.id)
-            if locked_wi is None:
-                return web.json_response({"ok": False, "error": "Подписка не найдена"}, status=404)
-            now = now_utc()
-            if not locked_wi.expires_at or locked_wi.expires_at <= now:
-                return web.json_response(
-                    {"ok": False, "error": "Подписка «Белый интернет» уже истекла"},
-                    status=400,
-                )
-            new_end = locked_wi.expires_at - timedelta(days=abs(payload.days))
+            new_end = wi_sub.expires_at - timedelta(days=abs(payload.days))
             if new_end <= now:
-                locked_wi.expires_at = now
-                locked_wi.status = WhiteInternetStatus.EXPIRED
-                locked_wi.provisioning_status = WhiteInternetProvisioningStatus.PENDING_DELETE
-                locked_wi.desired_version = (locked_wi.desired_version or 1) + 1
+                wi_sub.expires_at = now
+                wi_sub.status = WhiteInternetStatus.EXPIRED
+                wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_DELETE
+                wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
                 wi_hubs = await WhiteInternetService.get_hub_nodes(session)
                 dev_rows = (
                     await session.scalars(
@@ -1091,7 +1127,7 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                         )
                     )
                 ).all()
-                uuids_to_revoke = list(dict.fromkeys([locked_wi.uuid, *[str(u) for u in dev_rows if u]]))
+                uuids_to_revoke = list(dict.fromkeys([wi_sub.uuid, *[str(u) for u in dev_rows if u]]))
                 from services.white_internet_service import _dispatch_deprovision
 
                 for hub in wi_hubs:
@@ -1099,12 +1135,12 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                         _dispatch_deprovision(
                             hub,
                             rev_u,
-                            locked_wi.desired_version,
+                            wi_sub.desired_version,
                             session=session,
                             context="admin_reduce_expired",
                         )
             else:
-                locked_wi.expires_at = new_end
+                wi_sub.expires_at = new_end
             await session.flush()
             await AuditService.log_action(
                 session,
@@ -1117,15 +1153,10 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
             return web.json_response({
                 "ok": True,
                 "action": "grant_wi",
-                "wi_end": locked_wi.expires_at.isoformat() if locked_wi.expires_at else None,
+                "wi_end": wi_sub.expires_at.isoformat() if wi_sub.expires_at else None,
                 "message": f"Подписка «Белый интернет» сокращена на {abs(payload.days)} дн.",
             })
 
-        ok, msg, updated = await WhiteInternetService.extend_subscription(
-            session, user.id, payload.days
-        )
-        if not ok:
-            return web.json_response({"ok": False, "error": msg}, status=400)
         await AuditService.log_action(
             session,
             admin_id=ctx.telegram_id,
@@ -1134,7 +1165,7 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
             target_id=user.id,
             details={"days": payload.days, "note": note},
         )
-        end_iso = updated.expires_at.isoformat() if updated and updated.expires_at else None
+        end_iso = wi_sub.expires_at.isoformat() if wi_sub and wi_sub.expires_at else None
         return web.json_response({
             "ok": True,
             "action": "grant_wi",

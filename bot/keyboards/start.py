@@ -25,7 +25,7 @@ def build_start_inline_keyboard(miniapp_url: str, mtproto_url: str | None = None
         rows.append(
             [
                 InlineKeyboardButton(
-                    text="🚀 Прокси для Telegram",
+                    text="Прокси для Telegram",
                     url=str(mtproto_url).strip(),
                 )
             ]

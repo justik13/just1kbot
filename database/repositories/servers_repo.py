@@ -320,8 +320,12 @@ async def has_available_service_capacity(
     if service_type == "standard":
         active_servers = await get_active_servers(session)
         return any(
-            is_vless_capable_server(srv)
-            and srv.health_state in (ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION)
+            is_vless_sync_target_server(srv)
+            and srv.health_state == ServerHealthState.ONLINE
+            and bool(
+                isinstance(getattr(srv, "extra_data", None), dict)
+                and str(srv.extra_data.get("domain") or "").strip()
+            )
             for srv in active_servers
         )
 

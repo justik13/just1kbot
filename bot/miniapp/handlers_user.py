@@ -37,7 +37,7 @@ from config.constants import (
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
     WHITE_INTERNET_TOPUP_PACKS,
 )
-from config.enums import WhiteInternetStatus
+from config.enums import OrderStatus, WhiteInternetStatus
 from config.settings import get_settings
 from database.connection import session_scope
 from database.models import Order, User
@@ -369,7 +369,7 @@ async def api_user_dashboard_handler(request: web.Request) -> web.Response:
         tg_proxy_url = str(raw_mtproto).strip() if raw_mtproto and str(raw_mtproto).strip() else None
 
         effective_sub_token = vless_sub.token
-        if wi_active and not std_active and wi_sub and wi_sub.token:
+        if wi_has_period and not std_active and wi_sub and wi_sub.token:
             effective_sub_token = wi_sub.token
 
         return web.json_response({
@@ -398,6 +398,7 @@ async def api_user_dashboard_handler(request: web.Request) -> web.Response:
             },
             "wi": {
                 "active": wi_active,
+                "has_period": wi_has_period,
                 "status": wi_sub.status if wi_sub else "none",
                 "expires_at": wi_sub.expires_at.isoformat() if wi_sub and wi_sub.expires_at else None,
                 "device_limit": int(wi_sub.device_limit or 0) if wi_sub else 0,
@@ -466,16 +467,26 @@ async def api_user_standard_checkout_handler(request: web.Request) -> web.Respon
     try:
         async with session_scope() as session:
             user = await _ensure_user(session, ctx)
-            res = await OrderService.checkout_order(
-                session,
-                user_id=user.id,
-                service_type="standard",
-                device_limit=payload.device_limit,
-                duration_days=payload.duration_days,
-                use_balance=payload.use_balance,
-                bot_username=_resolve_bot_username(request),
-                idempotency_key=payload.idempotency_key,
-            )
+            try:
+                res = await OrderService.checkout_order(
+                    session,
+                    user_id=user.id,
+                    service_type="standard",
+                    device_limit=payload.device_limit,
+                    duration_days=payload.duration_days,
+                    use_balance=payload.use_balance,
+                    bot_username=_resolve_bot_username(request),
+                    idempotency_key=payload.idempotency_key,
+                )
+            except order_service.PaymentCreationAmbiguousError as exc:
+                logger.warning("Standard checkout ambiguous gateway state for %s: %s", ctx.telegram_id, exc)
+                return web.json_response(
+                    {
+                        "ok": False,
+                        "error": "Платежный шлюз долго отвечает. Если средства списались, заказ зачислится автоматически.",
+                    },
+                    status=503,
+                )
             return web.json_response({"ok": True, **res})
     except order_service.ServiceUnavailableError as exc:
         logger.warning("Standard checkout unavailable for %s: %s", ctx.telegram_id, exc)
@@ -528,17 +539,27 @@ async def api_user_wi_checkout_handler(request: web.Request) -> web.Response:
     try:
         async with session_scope() as session:
             user = await _ensure_user(session, ctx)
-            res = await OrderService.checkout_order(
-                session,
-                user_id=user.id,
-                service_type="white_internet",
-                operation=op_map[payload.action],
-                device_limit=payload.device_limit,
-                gb=payload.gb,
-                use_balance=payload.use_balance,
-                bot_username=_resolve_bot_username(request),
-                idempotency_key=payload.idempotency_key,
-            )
+            try:
+                res = await OrderService.checkout_order(
+                    session,
+                    user_id=user.id,
+                    service_type="white_internet",
+                    operation=op_map[payload.action],
+                    device_limit=payload.device_limit,
+                    gb=payload.gb,
+                    use_balance=payload.use_balance,
+                    bot_username=_resolve_bot_username(request),
+                    idempotency_key=payload.idempotency_key,
+                )
+            except order_service.PaymentCreationAmbiguousError as exc:
+                logger.warning("WI checkout ambiguous gateway state for %s: %s", ctx.telegram_id, exc)
+                return web.json_response(
+                    {
+                        "ok": False,
+                        "error": "Платежный шлюз долго отвечает. Если средства списались, заказ зачислится автоматически.",
+                    },
+                    status=503,
+                )
             return web.json_response({"ok": True, **res})
     except order_service.ServiceUnavailableError as exc:
         logger.warning("WI checkout unavailable for %s: %s", ctx.telegram_id, exc)
@@ -595,15 +616,25 @@ async def api_user_topup_handler(request: web.Request) -> web.Response:
     try:
         async with session_scope() as session:
             user = await _ensure_user(session, ctx)
-            res = await OrderService.checkout_order(
-                session,
-                user_id=user.id,
-                service_type="topup",
-                amount_rub=Decimal(payload.amount_rub),
-                use_balance=False,
-                bot_username=_resolve_bot_username(request),
-                idempotency_key=payload.idempotency_key,
-            )
+            try:
+                res = await OrderService.checkout_order(
+                    session,
+                    user_id=user.id,
+                    service_type="topup",
+                    amount_rub=Decimal(payload.amount_rub),
+                    use_balance=False,
+                    bot_username=_resolve_bot_username(request),
+                    idempotency_key=payload.idempotency_key,
+                )
+            except order_service.PaymentCreationAmbiguousError as exc:
+                logger.warning("Topup ambiguous gateway state for %s: %s", ctx.telegram_id, exc)
+                return web.json_response(
+                    {
+                        "ok": False,
+                        "error": "Платежный шлюз долго отвечает. Если средства списались, пополнение зачислится автоматически.",
+                    },
+                    status=503,
+                )
             return web.json_response({"ok": True, **res})
     except order_service.ServiceUnavailableError as exc:
         logger.warning("Topup unavailable for %s: %s", ctx.telegram_id, exc)
@@ -656,7 +687,8 @@ async def api_user_order_check_handler(request: web.Request) -> web.Response:
             "service_type": service_type,
         })
 
-    if not (status_res.is_paid or status_res.is_canceled):
+    is_refunded = bool(getattr(status_res, "is_refunded", False))
+    if not (status_res.is_paid or status_res.is_canceled or is_refunded):
         return web.json_response({
             "ok": True,
             "order_id": str(order_uuid),
@@ -666,6 +698,10 @@ async def api_user_order_check_handler(request: web.Request) -> web.Response:
 
     try:
         async with session_scope() as session:
+            await order_service.acquire_user_account_lock(session, user_id)
+            await session.scalar(
+                select(User.id).where(User.id == user_id).with_for_update()
+            )
             locked = await session.scalar(
                 select(Order)
                 .where(Order.id == order_uuid, Order.user_id == user_id)
@@ -682,6 +718,12 @@ async def api_user_order_check_handler(request: web.Request) -> web.Response:
                         paid_amount_rub=status_res.amount_rub,
                     )
                     final_status = paid.status if paid else locked.status
+                elif is_refunded:
+                    await order_service.OrderService.refund_reserved_mixed_debit(session, locked)
+                    locked.status = OrderStatus.REFUNDED
+                    locked.refunded_at = now_utc()
+                    await session.flush()
+                    final_status = locked.status
                 else:
                     order_service.OrderService.mark_order_canceled(
                         locked,

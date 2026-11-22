@@ -190,16 +190,18 @@ class XrayNodeClient:
                         continue
                     return status_code, None, f"HTTP {status_code}: {sanitize_short(text, limit=200)}"
             except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                err_detail = str(exc) or type(exc).__name__
                 if attempt < retries_limit:
                     logger.warning(
                         "%s %s failed with %s (attempt %d/%d), retrying...",
-                        method, safe_url, exc, attempt + 1, retries_limit + 1
+                        method, safe_url, err_detail, attempt + 1, retries_limit + 1
                     )
                     await asyncio.sleep(1.5 * (2**attempt))
                     continue
-                return 0, None, f"Network failure: {exc}"
+                return 0, None, f"Network failure: {err_detail}"
             except Exception as exc:
-                return 0, None, f"Unexpected failure: {exc}"
+                err_detail = str(exc) or type(exc).__name__
+                return 0, None, f"Unexpected failure: {err_detail}"
 
         return 0, None, "Max retries exceeded"
 

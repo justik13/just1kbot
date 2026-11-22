@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import logging
+import re
 import socket
 from typing import Any
 from urllib.parse import urlparse
@@ -272,6 +273,31 @@ async def list_nodes(session: AsyncSession) -> list[dict[str, Any]]:
     return [serialize_server_node(s) for s in servers]
 
 
+async def _ensure_unique_exit_location_code(
+    session: AsyncSession,
+    server_id: int,
+    raw_code: Any,
+) -> str:
+    """Ensure every exit_node has a unique location_code across all exit_node servers."""
+    base_code = re.sub(r"[^a-z0-9_-]+", "", str(raw_code or "").strip().lower())[:32]
+    if not base_code:
+        base_code = f"exit{server_id}"
+    all_srvs = await get_all_servers(session)
+    taken = {
+        str((s.extra_data or {}).get("location_code") or "").strip().lower()
+        for s in all_srvs
+        if s.id != server_id
+        and get_server_role(s) == "exit_node"
+        and isinstance(s.extra_data, dict)
+    }
+    if base_code not in taken:
+        return base_code
+    candidate = f"{base_code}{server_id}"[:32]
+    if candidate not in taken:
+        return candidate
+    return f"exit{server_id}"
+
+
 async def discover_and_add_node(
     session: AsyncSession,
     *,
@@ -351,11 +377,15 @@ async def discover_and_add_node(
     server.health_state = ServerHealthState.MANUAL_DISABLED
     server.disabled_reason = "manual"
     server.disabled_at = now_utc()
-    if role == "exit_node" and not str(extra.get("location_code") or "").strip():
-        extra["location_code"] = f"exit{server.id}"
-        server.extra_data = dict(extra)
-        from sqlalchemy.orm.attributes import flag_modified
-        flag_modified(server, "extra_data")
+    if role == "exit_node":
+        unique_loc = await _ensure_unique_exit_location_code(
+            session, server.id, extra.get("location_code")
+        )
+        if extra.get("location_code") != unique_loc:
+            extra["location_code"] = unique_loc
+            server.extra_data = dict(extra)
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(server, "extra_data")
     if isinstance(health_data, dict) and health_data.get("status") == "ok":
         server.last_successful_check = now_utc()
         if health_data.get("node_epoch"):
@@ -415,11 +445,10 @@ async def refresh_node(
         if resolved:
             extra["ip"] = resolved
     role = extra.get("role")
-    if role == "exit_node" and not str(extra.get("location_code") or "").strip():
-        extra["location_code"] = f"exit{server.id}"
-
-    if role == "exit_node" and not str(extra.get("location_code") or "").strip():
-        extra["location_code"] = f"exit{server.id}"
+    if role == "exit_node":
+        extra["location_code"] = await _ensure_unique_exit_location_code(
+            session, server.id, extra.get("location_code")
+        )
     updates: dict[str, Any] = {
         "capabilities": caps or list(server.capabilities or []),
         "extra_data": extra,
@@ -592,10 +621,18 @@ async def toggle_node(
     )
     from services.topology_sync_service import sync_v2_topology_to_nodes
     await sync_v2_topology_to_nodes(session)
-    if target_active and get_server_role(updated) == "ru_hub":
-        from services.vless_subscription_service import VlessSubscriptionService
-        sid = updated.id
-        queue_post_commit_task(session, lambda sid=sid: VlessSubscriptionService.sync_all_active_to_server_background(sid))
+    if target_active:
+        role = get_server_role(updated)
+        if role == "ru_hub":
+            from services.vless_subscription_service import VlessSubscriptionService
+            sid = updated.id
+            queue_post_commit_task(session, lambda sid=sid: VlessSubscriptionService.sync_all_active_to_server_background(sid))
+        elif role == "exit_node":
+            from services.vless_subscription_service import VlessSubscriptionService
+            ru_hubs = await VlessSubscriptionService.get_configured_vless_servers(session)
+            for hub in ru_hubs:
+                hid = hub.id
+                queue_post_commit_task(session, lambda hid=hid: VlessSubscriptionService.sync_all_active_to_server_background(hid))
     await AuditService.log_action(
         session,
         admin_id=admin_id,

@@ -165,7 +165,7 @@ class WhiteInternetReconciliationWorker:
                     for disp_uuid in displaced_dev_uuids:
                         if disp_uuid and disp_uuid != sub_uuid:
                             try:
-                                await self.client.sync_client(
+                                disp_resp = await self.client.sync_client(
                                     api_url,
                                     api_key,
                                     disp_uuid,
@@ -174,8 +174,12 @@ class WhiteInternetReconciliationWorker:
                                     expected_node_epoch=target_epoch,
                                     service="white_internet",
                                 )
+                                disp_res = disp_resp.result if hasattr(disp_resp, "result") else disp_resp[0]
+                                if disp_res not in (SyncResult.APPLIED, SyncResult.ALREADY_NEWER):
+                                    dev_sync_failed = True
                             except Exception as disp_exc:
-                                logger.debug("WI reconcile displaced device %s note: %s", disp_uuid, disp_exc)
+                                dev_sync_failed = True
+                                logger.warning("WI reconcile displaced device %s deactivation failed: %s", disp_uuid, disp_exc)
 
                     if dev_sync_failed:
                         return False

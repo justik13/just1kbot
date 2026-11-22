@@ -181,12 +181,18 @@ async def cb_legacy_fallback(callback: CallbackQuery) -> None:
     """Handle legacy inline buttons from older bot versions gracefully."""
     data = (callback.data or "").strip()
     if data == "ignore":
-        await callback.answer()
+        try:
+            await callback.answer()
+        except Exception as exc:
+            logger.debug("Ignored legacy callback.answer error: %s", exc)
         return
     settings = get_settings()
     app_url = f"https://{settings.DOMAIN}/app"
     kb = build_start_inline_keyboard(app_url)
-    await callback.answer("Меню обновлено. Откройте кабинет.", show_alert=False)
+    try:
+        await callback.answer("Меню обновлено. Откройте кабинет.", show_alert=False)
+    except Exception as exc:
+        logger.debug("Legacy fallback callback.answer error: %s", exc)
     if callback.message:
         await safe_send_message(
             callback.bot,

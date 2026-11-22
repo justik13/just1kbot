@@ -392,6 +392,26 @@ async def create_order_refund_debit(
         raise ValueError("Refund debit amount must be at least 1 ruble")
     amount = -abs(whole_rubles(quantized_amount))
 
+    idempotency_key = f"order_refund:{order_id}:{refund_id.strip()}"
+    existing = await session.scalar(
+        select(AccountLedgerEntry).where(
+            AccountLedgerEntry.idempotency_key == idempotency_key
+        )
+    )
+    if isinstance(existing, AccountLedgerEntry):
+        expected = {
+            "user_id": user_id,
+            "entry_type": "refund_debit",
+            "bucket": "real",
+            "amount": amount,
+            "currency": "RUB",
+            "order_id": order_id,
+            "idempotency_key": idempotency_key,
+        }
+        if not _same_entry(existing, expected):
+            raise AccountLedgerConflictError("account_ledger_idempotency_conflict")
+        return existing, False
+
     try:
         credit_total = Decimal(
             str(
@@ -430,7 +450,6 @@ async def create_order_refund_debit(
     ):
         raise AccountLedgerInvariantError("refund_debit_exceeds_credit")
 
-    idempotency_key = f"order_refund:{order_id}:{refund_id.strip()}"
     values = {
         "user_id": user_id,
         "entry_type": "refund_debit",
@@ -464,6 +483,31 @@ async def create_admin_adjustment(
         or amount != amount.to_integral_value()
     ):
         raise ValueError("adjustment must be non-zero whole rubles")
+
+    existing = await session.scalar(
+        select(AccountLedgerEntry).where(
+            AccountLedgerEntry.idempotency_key == idempotency_key
+        )
+    )
+    if isinstance(existing, AccountLedgerEntry):
+        quantized = amount.quantize(Decimal("1.00"))
+        amount_matches = existing.amount == quantized or (
+            cap_to_available
+            and quantized < ZERO
+            and existing.amount < ZERO
+            and abs(existing.amount) <= abs(quantized)
+        )
+        expected = {
+            "user_id": user.id,
+            "entry_type": "admin_adjustment",
+            "bucket": "bonus",
+            "currency": "RUB",
+            "order_id": None,
+            "idempotency_key": idempotency_key,
+        }
+        if not amount_matches or not _same_entry(existing, expected):
+            raise AccountLedgerConflictError("account_ledger_idempotency_conflict")
+        return existing, False
 
     if amount < 0:
         bal = await get_account_balance(

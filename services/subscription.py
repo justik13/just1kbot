@@ -19,7 +19,6 @@ from database.repositories.users_repo import (
     get_user_by_telegram_id_any,
 )
 from utils.datetime_helpers import (
-    is_expired,
     is_vpn_access_expired,
     now_utc,
 )
@@ -56,18 +55,6 @@ class SubscriptionService:
         if not sub or not sub.expires_at:
             return False
         return not is_vpn_access_expired(sub.expires_at, grace_hours=VPN_ACCESS_GRACE_HOURS)
-
-    @staticmethod
-    async def check_access(session: AsyncSession, telegram_id: int) -> bool:
-        from database.repositories import vless_subscription_repo
-
-        user = await get_user_by_telegram_id(session, telegram_id)
-        if not user or user.is_deleted or user.financial_hold:
-            return False
-        vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
-        if not vless_sub or not vless_sub.expires_at:
-            return False
-        return not is_expired(vless_sub.expires_at)
 
     @staticmethod
     async def _validate_referral(

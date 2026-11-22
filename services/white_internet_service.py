@@ -185,14 +185,14 @@ class WhiteInternetService:
         existing = await white_internet_repo.get_subscription_by_user_id(session, user_id)
         now = now_utc()
         if existing is not None:
-            if existing.status == WhiteInternetStatus.DISABLED:
-                # Previous subscription was disabled (e.g. refund/admin revoke); allow buying a fresh one
-                existing = None
-            elif (
+            if (
                 getattr(existing, "provisioning_status", None)
                 == WhiteInternetProvisioningStatus.PENDING_DELETE
             ):
                 return False, texts.WL_DEACTIVATION_PENDING, existing
+            elif existing.status == WhiteInternetStatus.DISABLED:
+                # Re-activate disabled subscription in-place to preserve legacy /sub/wl/{token}
+                pass
             elif existing.status in (
                 WhiteInternetStatus.PENDING,
                 WhiteInternetStatus.ACTIVE,
@@ -201,7 +201,14 @@ class WhiteInternetService:
                 return False, texts.WL_ALREADY_ACTIVE, existing
             else:
                 # Existing expired subscription routes to renew_subscription to preserve UUID and token
-                return await cls.renew_subscription(session, user_id, target_device_limit=device_limit)
+                if not existing.token:
+                    existing.token = secrets.token_hex(32)
+                return await cls.renew_subscription(
+                    session,
+                    user_id,
+                    target_device_limit=device_limit,
+                    duration_days=duration_days,
+                )
 
         # Pre-Debit Validation: verify mandatory tariff quota BEFORE touching ledger
         if not WHITE_INTERNET_BASE_TRAFFIC_BYTES or WHITE_INTERNET_BASE_TRAFFIC_BYTES <= 0:
@@ -217,20 +224,48 @@ class WhiteInternetService:
         clamped_devices = max(1, min(WHITE_INTERNET_MAX_DEVICE_LIMIT, int(device_limit)))
         base_bytes = clamped_devices * WHITE_INTERNET_BASE_TRAFFIC_BYTES
 
-        sub = await white_internet_repo.create_white_internet_subscription(
-            session,
-            user_id=user.id,
-            token=secrets.token_hex(32),
-            uuid=str(uuid.uuid4()),
-            duration_days=duration_days,
-            base_bytes=base_bytes,
-            device_limit=clamped_devices,
-        )
+        if existing is not None:
+            sub = await white_internet_repo.get_subscription_with_lock(session, existing.id) or existing
+            if not sub.token:
+                sub.token = secrets.token_hex(32)
+            if not sub.uuid:
+                sub.uuid = str(uuid.uuid4())
+            sub.status = WhiteInternetStatus.PENDING
+            sub.status_reason = None
+            sub.started_at = now
+            sub.expires_at = now + timedelta(days=duration_days)
+            sub.base_traffic_bytes = base_bytes
+            sub.extra_traffic_bytes = 0
+            sub.device_limit = clamped_devices
+            sub.pending_device_limit = None
+            sub.pending_from = None
+            sub.notified_3d = False
+            sub.notified_1d = False
+            sub.notified_2h = False
+            sub.notified_expired = False
+            sub.notified_90p = False
+            sub.traffic_used_bytes = 0
+            sub.traffic_uplink_bytes = 0
+            sub.traffic_downlink_bytes = 0
+            sub.traffic_overage_bytes = 0
+            sub.desired_version = (existing.desired_version or 1) + 1
+            sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+        else:
+            sub = await white_internet_repo.create_white_internet_subscription(
+                session,
+                user_id=user.id,
+                token=secrets.token_hex(32),
+                uuid=str(uuid.uuid4()),
+                duration_days=duration_days,
+                base_bytes=base_bytes,
+                device_limit=clamped_devices,
+            )
         await session.flush()
 
         from database.connection import queue_post_commit_task
 
         sub_id = sub.id
+        sub_ver = int(sub.desired_version or 1)
         target_hubs = [(h.id, h.api_url, h.api_key, h.xray_instance_epoch) for h in hub_nodes if h.api_url and h.api_key]
 
         async def _post_commit_sync() -> None:
@@ -239,7 +274,7 @@ class WhiteInternetService:
                 bg_sub = await white_internet_repo.get_subscription_by_id(bg_sess, sub_id)
                 if bg_sub is not None:
                     await cls._try_inline_sync_multi(
-                        bg_sess, bg_sub, target_hubs, idempotency_key=f"purchase:{sub_id}:1:True"
+                        bg_sess, bg_sub, target_hubs, idempotency_key=f"purchase:{sub_id}:{sub_ver}:True"
                     )
 
         queue_post_commit_task(session, _post_commit_sync)
@@ -247,7 +282,7 @@ class WhiteInternetService:
             "White Internet subscription purchased: user_id=%s, sub_id=%s, days=%s, devices=%s",
             user.id,
             sub.id,
-            WHITE_INTERNET_BASE_DURATION_DAYS,
+            duration_days,
             clamped_devices,
         )
         return True, texts.WL_BUY_SUCCESS, sub
@@ -258,6 +293,7 @@ class WhiteInternetService:
         session: AsyncSession,
         user_id: int,
         target_device_limit: int | None = None,
+        duration_days: int = WHITE_INTERNET_BASE_DURATION_DAYS,
     ):
         user = await lock_checkout_user(session, user_id)
         if user is None:
@@ -289,7 +325,7 @@ class WhiteInternetService:
 
         now = now_utc()
         base_time = sub.expires_at if sub.expires_at and sub.expires_at > now else now
-        if base_time + timedelta(days=WHITE_INTERNET_BASE_DURATION_DAYS) > now + timedelta(
+        if base_time + timedelta(days=duration_days) > now + timedelta(
             days=WHITE_INTERNET_MAX_EXPIRY_DAYS
         ):
             return False, texts.WL_RENEWAL_HORIZON_EXCEEDED, None
@@ -307,7 +343,7 @@ class WhiteInternetService:
             session,
             subscription_id=sub.id,
             price_rub=tier_price,
-            duration_days=WHITE_INTERNET_BASE_DURATION_DAYS,
+            duration_days=duration_days,
             base_bytes=tier_base_bytes,
             target_device_limit=target_device_limit,
         )
@@ -318,7 +354,7 @@ class WhiteInternetService:
             "White Internet subscription renewed: user_id=%s, sub_id=%s, days=%s",
             user.id,
             renewed.id,
-            WHITE_INTERNET_BASE_DURATION_DAYS,
+            duration_days,
         )
         return True, texts.WL_RENEW_SUCCESS, renewed
 

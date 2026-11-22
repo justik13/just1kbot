@@ -231,20 +231,21 @@ ensure_subscription_domains_caddy() {
     [[ -f "$env_file" ]] || return 0
     mkdir -p "$conf_dir"
 
-    local main_dom sub_dom backup_dom app_port wi_prefix
+    local main_dom sub_dom backup_dom cdn_dom app_port wi_prefix
     main_dom=$(grep -E '^DOMAIN=' "$env_file" | tail -n1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d '[:space:]' || true)
     sub_dom=$(grep -E '^SUBSCRIPTION_DOMAIN=' "$env_file" | tail -n1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d '[:space:]' || true)
     backup_dom=$(grep -E '^SUBSCRIPTION_BACKUP_DOMAIN=' "$env_file" | tail -n1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d '[:space:]' || true)
+    cdn_dom=$(grep -E '^WHITE_INTERNET_CDN_DOMAIN=' "$env_file" | tail -n1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d '[:space:]' || true)
     app_port=$(grep -E '^YOOKASSA_WEBHOOK_PORT=' "$env_file" | tail -n1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d '[:space:]' || true)
     wi_prefix=$(grep -E '^WHITE_INTERNET_SUB_PATH_PREFIX=' "$env_file" | tail -n1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d '[:space:]' || true)
     app_port="${app_port:-8443}"
     wi_prefix="${wi_prefix:-/sub/wl}"
 
     local extra_hosts=()
-    if [[ -n "$sub_dom" && "$sub_dom" != "$main_dom" ]]; then
+    if [[ -n "$sub_dom" && "$sub_dom" != "$main_dom" && "$sub_dom" != "$cdn_dom" ]]; then
         extra_hosts+=("$sub_dom")
     fi
-    if [[ -n "$backup_dom" && "$backup_dom" != "$main_dom" && "$backup_dom" != "$sub_dom" ]]; then
+    if [[ -n "$backup_dom" && "$backup_dom" != "$main_dom" && "$backup_dom" != "$cdn_dom" && "$backup_dom" != "$sub_dom" ]]; then
         extra_hosts+=("$backup_dom")
     fi
 
@@ -1708,10 +1709,13 @@ cmd_config() {
 
     echo ""
     read -r -p "Применить изменения и пересоздать контейнеры (docker compose up -d --force-recreate)? (Y/n): " apply_restart
-    if [[ ! "$apply_restart" =~ ^[Nn]$ ]]; then
+    apply_restart="${apply_restart//[[:space:]]/}"
+    if [[ -z "$apply_restart" || "$apply_restart" =~ ^[Yy]([Ee][Ss])?$ ]]; then
         info "Пересоздание контейнеров с новыми переменными окружения..."
         dc_up --force-recreate
         log "Конфигурация успешно применена ко всем контейнерам."
+    else
+        info "Пересоздание контейнеров пропущено."
     fi
 }
 

@@ -27,7 +27,13 @@ def check_miniapp_rate_limit(request: web.Request) -> web.Response | None:
 
 
 def extract_miniapp_user(request: web.Request) -> MiniAppUserContext | None:
-    init_data = request.headers.get("X-Telegram-Init-Data") or request.query.get("initData")
+    init_data = request.headers.get("X-Telegram-Init-Data")
+    if not init_data:
+        auth_header = (request.headers.get("Authorization") or "").strip()
+        if auth_header.lower().startswith(("tma ", "bearer ")):
+            init_data = auth_header.split(" ", 1)[1].strip()
+        elif auth_header:
+            init_data = auth_header
     return authenticate_miniapp_request(init_data)
 
 

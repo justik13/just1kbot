@@ -137,6 +137,30 @@ def run_audit() -> list[str]:
                     if phrase.lower() in clean_content.lower():
                         violations.append(f"[{rel_path}] Contains forbidden phrase: {phrase!r}")
 
+    # 4. Audit Telegram keyboards (bot/keyboards/)
+    keyboards_dir = REPO_ROOT / "bot" / "keyboards"
+    if keyboards_dir.exists():
+        for fpath in sorted(keyboards_dir.rglob("*.py")):
+            try:
+                content = fpath.read_text(encoding="utf-8")
+            except Exception:
+                continue
+            rel_path = fpath.relative_to(REPO_ROOT).as_posix()
+            if re.search(r"(?<![A-Za-zА-Яа-я])VPN(?![A-Za-zА-Яа-я])", content, re.IGNORECASE):
+                violations.append(f"[{rel_path}] Contains forbidden 'VPN'")
+            if "ВПН" in content.upper():
+                violations.append(f"[{rel_path}] Contains forbidden 'ВПН'")
+            if re.search(r"(?<![A-Za-z0-9])LTE(?![A-Za-z0-9])", content, re.IGNORECASE):
+                violations.append(f"[{rel_path}] Contains forbidden 'LTE'")
+            for phrase in FORBIDDEN_USER_WORDING:
+                if phrase == "LTE":
+                    continue
+                if phrase.lower() in content.lower():
+                    violations.append(f"[{rel_path}] Contains forbidden phrase: {phrase!r}")
+            for proto in ("vless", "xray", "wireguard", "amnezia", "amneziawg"):
+                if proto in content.lower():
+                    violations.append(f"[{rel_path}] Exposes forbidden protocol name: {proto!r}")
+
     return violations
 
 

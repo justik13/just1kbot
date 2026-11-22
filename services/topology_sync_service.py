@@ -272,7 +272,16 @@ async def sync_v2_topology_to_nodes(session: AsyncSession) -> dict[int, bool]:
             continue
         if srv.lifecycle_status not in (None, ServerLifecycleStatus.ACTIVE):
             continue
-        payload = payloads.get(srv.id, {})
+        if not is_v2_node_server(srv):
+            continue
+        payload = payloads.get(srv.id)
+        if not payload:
+            logger.warning(
+                "Skipping topology push for active node %s (%s): missing required topology metadata",
+                srv.id,
+                srv.name,
+            )
+            continue
         api_url = get_server_xray_api_url(srv)
         if api_url and srv.api_key:
             targets.append((srv.id, api_url, srv.api_key, payload))
