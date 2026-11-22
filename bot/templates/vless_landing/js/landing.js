@@ -5,7 +5,7 @@
         if (subUrlTextEl) subUrlTextEl.textContent = subUrl;
 
         const deepLinkHapp = document.getElementById("deepLinkHapp");
-        if (deepLinkHapp) deepLinkHapp.href = "happ://add/" + subUrl + "#subscription-always-hwid-enable: 1";
+        if (deepLinkHapp) deepLinkHapp.href = "happ://add/" + subUrl;
 
         const deepLinkIncy = document.getElementById("deepLinkIncy");
         if (deepLinkIncy) deepLinkIncy.href = "incy://add/" + subUrl;
@@ -32,10 +32,7 @@
         if (openClientParam === "happ" || openClientParam === "incy") {
             updateActiveClient(openClientParam);
             setTimeout(function() {
-                const targetSubUrl = openClientParam === "happ"
-                    ? subUrl + "#subscription-always-hwid-enable: 1"
-                    : subUrl;
-                window.location.href = openClientParam + "://add/" + targetSubUrl;
+                window.location.href = openClientParam + "://add/" + subUrl;
             }, 250);
         }
 
