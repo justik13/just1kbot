@@ -1679,8 +1679,9 @@ function _buildDevicesSectionHtml(d) {
     const wiActive = _wiHasActivePeriod(wi);
     const wiLimit = Number(wi.device_limit || 1);
     const stdLimit = Number(std.device_limit || 2);
-    const totalLimit = Math.max(stdActive ? stdLimit : 0, wiActive ? wiLimit : 0, 1);
+    const totalLimit = Math.max((stdActive ? stdLimit : 0) + (wiActive ? wiLimit : 0), 1);
     const isLimitReached = devices.length >= totalLimit;
+    const stdAssignedCount = stdActive ? devices.filter((dev) => dev.is_std_assigned).length : 0;
     const biAssignedCount = wiActive ? devices.filter((dev) => dev.is_bi_assigned).length : 0;
     const isWiExhausted = Boolean(
         wiActive && (
@@ -1688,7 +1689,12 @@ function _buildDevicesSectionHtml(d) {
             || (wi.traffic_limit_bytes > 0 && wi.traffic_used_bytes >= wi.traffic_limit_bytes)
         )
     );
-    const needBiToggles = Boolean(wiActive && (devices.length > wiLimit || biAssignedCount < devices.length));
+    const needStdToggles = Boolean(
+        stdActive && (devices.length > stdLimit || stdAssignedCount < devices.length || (wiActive && devices.length > 1))
+    );
+    const needBiToggles = Boolean(
+        wiActive && (devices.length > wiLimit || biAssignedCount < devices.length || (stdActive && devices.length > 1))
+    );
 
     const rowsHtml = !devices.length
         ? `
@@ -1708,11 +1714,27 @@ function _buildDevicesSectionHtml(d) {
             const meta = [osText, dev.app_version].filter(Boolean).join(" · ");
             const isDesktop = /win|mac|linux|desktop|amd64|x86_64/i.test(`${label} ${meta}`);
             const devIcon = isDesktop ? _ICONS.desktop : _ICONS.phone;
+            const isStd = Boolean(stdActive && dev.is_std_assigned);
             const isBi = Boolean(wiActive && dev.is_bi_assigned);
 
             const leftMeta = meta || shortHwid;
             const dateLabel = formatDate(dev.last_seen_at);
             const metaLine = [leftMeta, dateLabel].filter(Boolean).join(" · ");
+
+            let stdRowHtml = "";
+            if (needStdToggles) {
+                stdRowHtml = `
+                    <label class="device-bi-bar">
+                        <span style="color:${isStd ? "var(--text-primary)" : "var(--text-secondary)"};">
+                            Слот «Стандарт»
+                        </span>
+                        <span class="switch">
+                            <input type="checkbox" data-std-toggle="${escapeHtml(dev.hwid)}" data-name="${escapeHtml(label)}" ${isStd ? "checked" : ""}>
+                            <span class="switch-track"></span>
+                        </span>
+                    </label>
+                `;
+            }
 
             let biRowHtml = "";
             if (needBiToggles) {
@@ -1741,19 +1763,24 @@ function _buildDevicesSectionHtml(d) {
                         </div>
                         <button type="button" class="btn btn-icon btn-danger" data-del="${escapeHtml(dev.hwid)}" data-name="${escapeHtml(label)}" aria-label="Удалить ${escapeHtml(label)}" title="Удалить">${_ICONS.trash}</button>
                     </div>
+                    ${stdRowHtml}
                     ${biRowHtml}
                 </div>
             `;
         }).join("")}</div>`;
 
-    let wiHeaderChipHtml = "";
+    const headerChips = [];
+    if (stdActive && wiActive) {
+        headerChips.push(`<span class="chip chip-muted">Стандарт: ${stdAssignedCount} из ${stdLimit}</span>`);
+    }
     if (wiActive) {
         if (isWiExhausted) {
-            wiHeaderChipHtml = `<span class="chip chip-warn">Белый интернет: 0 ГБ</span>`;
+            headerChips.push(`<span class="chip chip-warn">Белый интернет: 0 ГБ</span>`);
         } else if (stdActive || totalLimit !== wiLimit) {
-            wiHeaderChipHtml = `<span class="chip chip-wi">Белый интернет: ${biAssignedCount} из ${wiLimit}</span>`;
+            headerChips.push(`<span class="chip chip-wi">Белый интернет: ${biAssignedCount} из ${wiLimit}</span>`);
         }
     }
+    const headerChipsHtml = headerChips.join("");
 
     return `
         <section class="section-block">
@@ -1767,7 +1794,7 @@ function _buildDevicesSectionHtml(d) {
                     ${devices.length > 1 ? `<button type="button" class="btn btn-sm btn-danger" id="resetAllDevicesBtn">Сбросить</button>` : ""}
                 </div>
             </div>
-            ${wiHeaderChipHtml ? `<div class="devices-chips-row">${wiHeaderChipHtml}</div>` : ""}
+            ${headerChipsHtml ? `<div class="devices-chips-row">${headerChipsHtml}</div>` : ""}
             ${isLimitReached ? `
                 <div class="notice-box notice-warn" style="margin:0;">
                     <span>Все слоты (${devices.length} из ${totalLimit}) заняты — удалите устройство, чтобы подключить новое.</span>
@@ -1778,20 +1805,20 @@ function _buildDevicesSectionHtml(d) {
     `;
 }
 
-function _openBiReplaceModal(targetDev, activeBiDevices, onReplaced) {
+function _openSlotReplaceModal(slotTitle, targetDev, activeDevices, applyFn, onReplaced, chipClass = "chip-wi") {
     const wrap = document.createElement("div");
     wrap.className = "field";
     wrap.style.gap = "10px";
 
     const targetLabel = targetDev.device_name || targetDev.platform || "Устройство";
-    const close = openModal("Замена слота · Белый интернет", wrap);
+    const close = openModal(`Замена слота · ${slotTitle}`, wrap);
 
     wrap.innerHTML = `
         <div class="muted" style="font-size:12px; line-height:1.45;">
-            Все слоты (${activeBiDevices.length} из ${activeBiDevices.length}) уже заняты. Выберите, с какого устройства перенести «Белый интернет» на <strong style="color:var(--text-primary);">${escapeHtml(targetLabel)}</strong>:
+            Все слоты (${activeDevices.length} из ${activeDevices.length}) уже заняты. Выберите, с какого устройства перенести «${escapeHtml(slotTitle)}» на <strong style="color:var(--text-primary);">${escapeHtml(targetLabel)}</strong>:
         </div>
         <div style="display:flex; flex-direction:column; gap:8px;">
-            ${activeBiDevices.map((dev) => {
+            ${activeDevices.map((dev) => {
                 const label = dev.device_name || dev.platform || "Устройство";
                 const osText = [dev.platform, dev.os_version].filter(Boolean).join(" ");
                 const meta = [osText, dev.app_version].filter(Boolean).join(" · ");
@@ -1801,7 +1828,7 @@ function _openBiReplaceModal(targetDev, activeBiDevices, onReplaced) {
                             <div style="font-weight:600; font-size:13px; color:var(--text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(label)}</div>
                             ${meta ? `<div class="muted" style="font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(meta)}</div>` : ""}
                         </div>
-                        <span class="chip chip-wi" style="flex-shrink:0;">Забрать слот →</span>
+                        <span class="chip ${chipClass}" style="flex-shrink:0;">Забрать слот →</span>
                     </button>
                 `;
             }).join("")}
@@ -1813,7 +1840,7 @@ function _openBiReplaceModal(targetDev, activeBiDevices, onReplaced) {
             const fromHwid = btn.dataset.replaceFrom;
             wrap.querySelectorAll("[data-replace-from]").forEach((b) => { b.disabled = true; });
             try {
-                await api.setDevicePriority(targetDev.hwid, 10, fromHwid);
+                await applyFn(targetDev.hwid, 10, fromHwid);
                 close();
                 showToast("Слот перенесён — нажмите ⟳ в приложении");
                 onReplaced();
@@ -1887,61 +1914,92 @@ function _bindDevicesEvents(container, d, reload) {
     }
 
     const devices = [...(d?.devices || [])].sort((a, b) => (a.id || 0) - (b.id || 0));
+    const stdLimit = Number((d?.standard && d.standard.device_limit) || 2);
     const wiLimit = Number((d?.wi && d.wi.device_limit) || 1);
+    const activeStdDevices = devices.filter((dev) => dev.is_std_assigned);
     const activeBiDevices = devices.filter((dev) => dev.is_bi_assigned);
 
-    container.querySelectorAll("[data-bi-toggle]").forEach((chk) => {
-        chk.addEventListener("change", async () => {
-            const hwid = chk.dataset.biToggle;
-            const wantEnable = chk.checked;
-            const targetDev = devices.find((dev) => dev.hwid === hwid) || { hwid, device_name: chk.dataset.name };
+    const bindSlotToggle = ({
+        selector,
+        dataAttr,
+        slotTitle,
+        slotLimit,
+        activeDevices,
+        applyFn,
+        chipClass,
+    }) => {
+        container.querySelectorAll(selector).forEach((chk) => {
+            chk.addEventListener("change", async () => {
+                const hwid = chk.dataset[dataAttr];
+                const wantEnable = chk.checked;
+                const targetDev = devices.find((dev) => dev.hwid === hwid) || { hwid, device_name: chk.dataset.name };
 
-            if (wantEnable && activeBiDevices.length >= wiLimit) {
-                chk.checked = false;
-                if (activeBiDevices.length === 1) {
-                    const fromDev = activeBiDevices[0];
-                    const fromLabel = fromDev.device_name || fromDev.platform || "текущего устройства";
-                    const toLabel = targetDev.device_name || targetDev.platform || "это устройство";
-                    showConfirmModal({
-                        title: "Перенести «Белый интернет»?",
-                        message: `Слот занят устройством «${fromLabel}». Перенести «Белый интернет» на «${toLabel}»?`,
-                        confirmText: "Перенести слот",
-                        cancelText: "Отмена",
-                        onConfirm: async () => {
-                            chk.disabled = true;
-                            try {
-                                await api.setDevicePriority(hwid, 10, fromDev.hwid);
-                                showToast("Слот перенесён — нажмите ⟳ в приложении");
-                                reload();
-                            } catch (err) {
-                                showToast(err.message || "Не удалось перенести слот");
-                            } finally {
-                                chk.disabled = false;
-                            }
-                        },
-                    });
+                if (wantEnable && activeDevices.length >= slotLimit) {
+                    chk.checked = false;
+                    if (activeDevices.length === 1) {
+                        const fromDev = activeDevices[0];
+                        const fromLabel = fromDev.device_name || fromDev.platform || "текущего устройства";
+                        const toLabel = targetDev.device_name || targetDev.platform || "это устройство";
+                        showConfirmModal({
+                            title: `Перенести «${slotTitle}»?`,
+                            message: `Слот занят устройством «${fromLabel}». Перенести «${slotTitle}» на «${toLabel}»?`,
+                            confirmText: "Перенести слот",
+                            cancelText: "Отмена",
+                            onConfirm: async () => {
+                                chk.disabled = true;
+                                try {
+                                    await applyFn(hwid, 10, fromDev.hwid);
+                                    showToast("Слот перенесён — нажмите ⟳ в приложении");
+                                    reload();
+                                } catch (err) {
+                                    showToast(err.message || "Не удалось перенести слот");
+                                } finally {
+                                    chk.disabled = false;
+                                }
+                            },
+                        });
+                        return;
+                    }
+                    _openSlotReplaceModal(slotTitle, targetDev, activeDevices, applyFn, reload, chipClass);
                     return;
                 }
-                _openBiReplaceModal(targetDev, activeBiDevices, reload);
-                return;
-            }
 
-            chk.disabled = true;
-            try {
-                await api.setDevicePriority(hwid, wantEnable ? 10 : -1);
-                showToast(
-                    wantEnable
-                        ? "Белый интернет включён — нажмите ⟳ в приложении"
-                        : "Белый интернет отключён на устройстве"
-                );
-                reload();
-            } catch (err) {
-                chk.checked = !wantEnable;
-                showToast(err.message || "Не удалось изменить статус слота");
-            } finally {
-                chk.disabled = false;
-            }
+                chk.disabled = true;
+                try {
+                    await applyFn(hwid, wantEnable ? 10 : -1);
+                    showToast(
+                        wantEnable
+                            ? `${slotTitle} включён — нажмите ⟳ в приложении`
+                            : `${slotTitle} отключён на устройстве`
+                    );
+                    reload();
+                } catch (err) {
+                    chk.checked = !wantEnable;
+                    showToast(err.message || "Не удалось изменить статус слота");
+                } finally {
+                    chk.disabled = false;
+                }
+            });
         });
+    };
+
+    bindSlotToggle({
+        selector: "[data-std-toggle]",
+        dataAttr: "stdToggle",
+        slotTitle: "Стандарт",
+        slotLimit: stdLimit,
+        activeDevices: activeStdDevices,
+        applyFn: (hwid, prio, rep) => api.setDeviceStdPriority(hwid, prio, rep),
+        chipClass: "chip-muted",
+    });
+    bindSlotToggle({
+        selector: "[data-bi-toggle]",
+        dataAttr: "biToggle",
+        slotTitle: "Белый интернет",
+        slotLimit: wiLimit,
+        activeDevices: activeBiDevices,
+        applyFn: (hwid, prio, rep) => api.setDevicePriority(hwid, prio, rep),
+        chipClass: "chip-wi",
     });
 }
 
