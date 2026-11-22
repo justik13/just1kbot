@@ -886,10 +886,13 @@ def upgrade() -> None:
         if legacy_tbl in tables:
             bind.exec_driver_sql(f"DROP TABLE IF EXISTS {legacy_tbl} CASCADE")
 
-    # 4. Servers: purge legacy non-vless/xray rows, drop max_clients, add role
+    # 4. Servers: purge incompatible v1 servers on 0044->0045 cutover, drop max_clients, add role
     if "servers" in tables:
-        bind.exec_driver_sql("DELETE FROM servers WHERE protocol NOT IN ('vless', 'xray')")
         srv_cols = {c["name"] for c in insp.get_columns("servers")}
+        if "role" not in srv_cols:
+            bind.exec_driver_sql("DELETE FROM servers")
+        else:
+            bind.exec_driver_sql("DELETE FROM servers WHERE protocol NOT IN ('vless', 'xray')")
         srv_indexes = {i["name"] for i in insp.get_indexes("servers")}
         if "max_clients" in srv_cols:
             op.drop_column("servers", "max_clients")
