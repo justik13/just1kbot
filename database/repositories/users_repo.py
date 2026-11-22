@@ -232,6 +232,10 @@ def _referral_paid_activity_condition(referral) -> object:
             Order.status == "paid",
             Order.amount_rub >= REFERRAL_ACTIVE_MIN_TOPUP_RUB,
             or_(
+                Order.metadata_.is_(None),
+                Order.metadata_["settlement_held"].astext.is_distinct_from("true"),
+            ),
+            or_(
                 Order.service_type == "topup",
                 Order.payment_method != "wallet",
             ),
@@ -345,6 +349,10 @@ async def is_eligible_for_referral_first_discount(
             Order.status == "paid",
             Order.amount_rub > 0,
             Order.service_type.in_(("standard", "white_internet")),
+            or_(
+                Order.metadata_.is_(None),
+                Order.metadata_["mixed_fallback_credited"].astext.is_distinct_from("true"),
+            ),
         )
     )
     if not isinstance(paid_orders, (int, float)):

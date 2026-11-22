@@ -216,7 +216,12 @@ function _openAdjustUserModal(user, onUpdated) {
                 return;
             }
             payload.days = days;
-            payload.device_limit = deviceLimit;
+            const currentDevLimit = action === "grant_wi"
+                ? Number(user.wi_device_limit || 1)
+                : Number(user.standard_device_limit || 2);
+            if (days >= 0 || deviceLimit !== currentDevLimit) {
+                payload.device_limit = deviceLimit;
+            }
         }
 
         const btn = form.querySelector("button[type='submit']");

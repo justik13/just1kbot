@@ -173,6 +173,7 @@ async def _sweep_vless_pending_revocations() -> None:
             subs = await vless_subscription_repo.get_subscriptions_with_pending_revocations(session, limit=20)
             servers = await VlessSubscriptionService.get_revocation_target_servers(session)
             targets = VlessSubscriptionService._extract_node_targets(servers)
+            exit_nodes = await VlessSubscriptionService.get_eligible_exit_nodes(session)
             sub_items = [
                 (s.id, list(getattr(s, "pending_revoked_uuids", None) or []), getattr(s, "version", 1) or 1)
                 for s in subs
@@ -184,12 +185,17 @@ async def _sweep_vless_pending_revocations() -> None:
                 for rev_uuid in rev_uuids:
                     cleared_this = False
                     try:
-                        res = await VlessSubscriptionService._execute_deprovision_on_nodes(targets, rev_uuid, version=ver)
+                        expanded = VlessSubscriptionService._expand_revocation_uuids(rev_uuid, exit_nodes)
+                        results: dict[int, bool] = {}
+                        for u in expanded:
+                            res = await VlessSubscriptionService._execute_deprovision_on_nodes(targets, u, version=ver)
+                            for s_id, ok in res.items():
+                                results[s_id] = results.get(s_id, True) and ok
                         if (
                             servers
                             and len(targets) == len(servers)
-                            and all(res.values())
-                            and len(res) == len(targets)
+                            and all(results.values())
+                            and len(results) == len(targets)
                         ):
                             async with session_scope() as session:
                                 await vless_subscription_repo.pop_pending_revoked_uuid(session, sub_id, rev_uuid)

@@ -334,6 +334,7 @@ async def grant_referral_bonus_for_topup(
             "tier_name": tier_info.name,
             "active_referrals_count": effective_count,
         },
+        locked_user=referrer,
     )
     if created:
         referrer_bonus_granted = bonus
@@ -508,6 +509,14 @@ async def reverse_referral_bonus_for_topup(
             cap_to_available=True,
         )
         actual_rev = abs(Decimal(rev_entry.amount)) if rev_entry is not None else Decimal(0)
+        if actual_rev < max_can_reverse:
+            _logger.warning(
+                "Referral bonus reversal capped for user_id=%s, op_id=%s: requested=%s, reversed=%s (already spent)",
+                credit.user_id,
+                op_id,
+                max_can_reverse,
+                actual_rev,
+            )
         _logger.debug(
             "Referral bonus reversal for credit_id=%s, user_id=%s, op_id=%s, reversed=%s",
             credit.id,

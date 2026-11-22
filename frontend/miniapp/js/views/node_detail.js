@@ -39,11 +39,11 @@ function _openEditModal(node, onDone) {
         </div>
         <div class="field">
             <label>URL API ноды</label>
-            <input name="api_url" class="input" type="url" required maxlength="255" value="${escapeHtml(node.api_url || "")}">
+            <input name="api_url" class="input" type="url" required maxlength="500" value="${escapeHtml(node.api_url || "")}">
         </div>
         <div class="field">
             <label>Новый API Токен (оставьте пустым, чтобы не менять)</label>
-            <input name="api_key" class="input" type="password" maxlength="255" placeholder="••••••••">
+            <input name="api_key" class="input" type="password" maxlength="512" placeholder="••••••••">
         </div>
         <button type="submit" class="btn btn-primary">Сохранить</button>
     `;

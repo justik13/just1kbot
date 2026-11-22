@@ -137,17 +137,18 @@ class FulfillmentService:
                 from sqlalchemy.orm.attributes import flag_modified
 
                 await OrderService.refund_reserved_mixed_debit(session, order)
-                if order.amount_rub and order.amount_rub > 0:
-                    await account_ledger_repo.create_admin_adjustment(
+                if order.payment_method != "wallet" and order.amount_rub and order.amount_rub > 0:
+                    await account_ledger_repo.create_order_credit(
                         session,
                         user_id=user.id,
-                        amount=order.amount_rub,
-                        bucket="real",
-                        reason=f"Компенсация заказа #{order.id}: {msg}",
-                        actor_id=0,
-                        idempotency_key=f"wi_fulfill_fallback:{order.id}",
-                        locked_user=user,
+                        amount_rub=order.amount_rub,
+                        order_id=order.id,
+                        metadata={
+                            "source": "wi_fulfill_fallback",
+                            "reason": f"Компенсация заказа #{order.id}: {msg}",
+                        },
                     )
+                    meta["mixed_fallback_credited"] = True
                 meta["fulfillment_fallback"] = msg
                 meta["requires_manual_review"] = True
                 order.metadata_ = meta

@@ -107,8 +107,8 @@ class IncyGlobalSettingsPayload(BaseModel):
 class UpdateNodePayload(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     country_flag: str | None = Field(default=None, max_length=10)
-    api_url: str | None = Field(default=None, min_length=1, max_length=255)
-    api_key: str | None = Field(default=None, min_length=1, max_length=255)
+    api_url: str | None = Field(default=None, min_length=1, max_length=500)
+    api_key: str | None = Field(default=None, min_length=1, max_length=512)
     in_standard: bool | None = None
     in_white_internet: bool | None = None
     vless_name: str | None = Field(default=None, max_length=120)
@@ -169,6 +169,11 @@ class AdminUserAdjustPayload(BaseModel):
                 raise ValueError("days is required for grant_wi")
             if self.device_limit is not None and not (1 <= self.device_limit <= 3):
                 raise ValueError("device_limit must be between 1 and 3 for wi")
+        elif self.action == "wi_traffic":
+            if self.traffic_action is None:
+                raise ValueError("traffic_action is required for wi_traffic")
+            if self.traffic_action in ("add_gb", "set_base_gb") and (self.gb is None or self.gb < 1):
+                raise ValueError("gb (>= 1) is required for add_gb/set_base_gb")
         elif self.action == "restrictions":
             if self.financial_hold is None and self.topup_blocked is None:
                 raise ValueError("financial_hold or topup_blocked is required for restrictions")

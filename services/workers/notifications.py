@@ -340,7 +340,7 @@ async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
         try:
             async with session_scope() as session:
                 user = await session.scalar(
-                    select(User).where(User.id == uid)
+                    select(User).where(User.id == uid).with_for_update(skip_locked=True)
                 )
                 if user is None or user.is_deleted or user.financial_hold:
                     continue

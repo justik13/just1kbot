@@ -1136,33 +1136,49 @@ class OrderService:
             )
             return None
 
-        order = None
+        order_row = None
         if result.order_id:
             try:
                 order_uuid = uuid.UUID(result.order_id)
-                order = await session.scalar(
-                    select(Order).where(Order.id == order_uuid).with_for_update()
-                )
+                order_row = (
+                    await session.execute(
+                        select(Order.id, Order.user_id).where(Order.id == order_uuid)
+                    )
+                ).one_or_none()
             except (ValueError, TypeError):
                 pass
 
         related_id = getattr(result, "related_external_id", None) or getattr(result, "payment_id", None)
-        if not order and related_id:
-            order = await session.scalar(
-                select(Order).where(Order.external_id == related_id).with_for_update()
-            )
+        if not order_row and related_id:
+            order_row = (
+                await session.execute(
+                    select(Order.id, Order.user_id).where(Order.external_id == related_id)
+                )
+            ).one_or_none()
 
-        if not order and result.external_id:
-            order = await session.scalar(
-                select(Order).where(Order.external_id == result.external_id).with_for_update()
-            )
+        if not order_row and result.external_id:
+            order_row = (
+                await session.execute(
+                    select(Order.id, Order.user_id).where(Order.external_id == result.external_id)
+                )
+            ).one_or_none()
 
-        if not order:
+        if not order_row:
             logger.warning(
                 "Order not found for webhook: order_id=%s, ext_id=%s",
                 result.order_id,
                 result.external_id,
             )
+            return None
+
+        target_order_id, target_user_id = order_row
+        if target_user_id is not None:
+            await session.scalar(select(User.id).where(User.id == target_user_id).with_for_update())
+
+        order = await session.scalar(
+            select(Order).where(Order.id == target_order_id).with_for_update()
+        )
+        if not order:
             return None
 
         # Verify gateway payment identity matches order.external_id
@@ -1174,7 +1190,13 @@ class OrderService:
                     order.external_id,
                     result.external_id,
                 )
-                return None
+                order_meta = dict(order.metadata_ or {})
+                order_meta["requires_manual_review"] = True
+                order_meta["payment_id_mismatch"] = str(result.external_id)
+                order.metadata_ = order_meta
+                order._newly_paid = False
+                await session.flush()
+                return order
             if result.is_refunded and related_id and order.external_id != related_id:
                 logger.warning(
                     "Order %s refund payment_id mismatch: order.external_id=%s, webhook.payment_id=%s",
@@ -1182,7 +1204,12 @@ class OrderService:
                     order.external_id,
                     related_id,
                 )
-                return None
+                order_meta = dict(order.metadata_ or {})
+                order_meta["requires_manual_review"] = True
+                order_meta["refund_payment_id_mismatch"] = str(related_id)
+                order.metadata_ = order_meta
+                await session.flush()
+                return order
 
         if result.is_paid:
             paid_order = await OrderService.mark_order_paid(

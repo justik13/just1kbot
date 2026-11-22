@@ -204,6 +204,8 @@ async def start_mass_bonus(
 ) -> dict[str, Any]:
     if not (1 <= amount_rub <= 50000):
         raise ValueError("Сумма должна быть от 1 до 50000 ₽")
+    if any(not t.done() for t in _active_bulk_tasks):
+        raise ValueError("Массовая операция уже выполняется. Дождитесь завершения.")
 
     batch_id = uuid4().hex[:12]
     async with session_scope() as session:
@@ -378,6 +380,8 @@ async def start_mass_extend(
         raise ValueError("Укажите сервис: standard или white_internet")
     if not (1 <= days <= 365):
         raise ValueError("Срок продления должен быть от 1 до 365 дней")
+    if any(not t.done() for t in _active_bulk_tasks):
+        raise ValueError("Массовая операция уже выполняется. Дождитесь завершения.")
 
     batch_id = uuid4().hex[:12]
     async with session_scope() as session:
@@ -388,11 +392,14 @@ async def start_mass_extend(
             include_bot_blocked=True,
         )
         if service_scope == "white_internet" and targets:
+            from config.enums import WhiteInternetStatus
+
             eligible_ids = set(
                 (
                     await session.scalars(
                         select(WhiteInternetSubscription.user_id).where(
                             WhiteInternetSubscription.user_id.in_([t[0] for t in targets]),
+                            WhiteInternetSubscription.status != WhiteInternetStatus.DISABLED,
                         )
                     )
                 ).all()
@@ -446,7 +453,7 @@ async def _revenue_for_period(session: AsyncSession, since: Any) -> Decimal:
         select(func.coalesce(func.sum(Order.amount_rub), 0)).where(
             Order.status == OrderStatus.PAID,
             Order.payment_method != "wallet",
-            Order.created_at >= since,
+            func.coalesce(Order.paid_at, Order.created_at) >= since,
         )
     )
     return Decimal(str(external_orders_sum or 0))

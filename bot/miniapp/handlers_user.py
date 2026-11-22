@@ -42,6 +42,7 @@ from config.settings import get_settings
 from database.connection import session_scope
 from database.models import Order, User
 from database.repositories import (
+    servers_repo,
     user_devices_repo,
     vless_subscription_repo,
     white_internet_repo,
@@ -859,4 +860,71 @@ async def api_user_device_priority_handler(request: web.Request) -> web.Response
         )
         if not updated:
             return web.json_response({"ok": False, "error": "Устройство не найдено"}, status=404)
+
+        wi_sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
+        if wi_sub is not None and wi_sub.status in (
+            WhiteInternetStatus.ACTIVE,
+            WhiteInternetStatus.PENDING,
+        ):
+            wi_limit = max(1, int(getattr(wi_sub, "device_limit", 1) or 1))
+            devs = await user_devices_repo.list_user_devices(
+                session, user.id, wi_device_limit=wi_limit
+            )
+            assigned_uuids = [
+                str(d["device_uuid"])
+                for d in devs
+                if d.get("is_bi_assigned") and d.get("device_uuid")
+            ]
+            displaced_uuids = [
+                str(d["device_uuid"])
+                for d in devs
+                if not d.get("is_bi_assigned") and d.get("device_uuid") and d["device_uuid"] != wi_sub.uuid
+            ]
+            if displaced_uuids:
+                await white_internet_repo.add_pending_revocation_uuids(
+                    session, wi_sub.id, displaced_uuids
+                )
+            wi_hubs = await servers_repo.get_wi_capable_ru_hubs(session)
+            targets = [
+                (h.api_url, h.api_key, h.xray_instance_epoch)
+                for h in wi_hubs
+                if h.api_url and h.api_key
+            ]
+            ver_snap = int(getattr(wi_sub, "desired_version", 1) or 1)
+            if targets:
+                from database.connection import queue_post_commit_task
+                from services.xray_node_client import XrayNodeClient
+
+                async def _sync_bi_priority_devices() -> None:
+                    async with XrayNodeClient(timeout=5.0) as client:
+                        for srv_url, srv_key, epoch in targets:
+                            for u_on in assigned_uuids:
+                                try:
+                                    await client.sync_client(
+                                        srv_url,
+                                        srv_key,
+                                        client_uuid=u_on,
+                                        is_active=True,
+                                        version=ver_snap,
+                                        expected_node_epoch=epoch,
+                                        service="white_internet",
+                                    )
+                                except Exception as exc:
+                                    logger.debug("BI priority provision %s failed: %s", u_on, exc)
+                            for u_off in displaced_uuids:
+                                try:
+                                    await client.sync_client(
+                                        srv_url,
+                                        srv_key,
+                                        client_uuid=u_off,
+                                        is_active=False,
+                                        version=ver_snap,
+                                        expected_node_epoch=epoch,
+                                        service="white_internet",
+                                    )
+                                except Exception as exc:
+                                    logger.debug("BI priority deprovision %s failed: %s", u_off, exc)
+
+                queue_post_commit_task(session, _sync_bi_priority_devices)
+
         return web.json_response({"ok": True, "priority": payload.priority})

@@ -622,18 +622,24 @@ class WhiteInternetService:
         """Best-effort inline sync across all active WI ru_hub nodes."""
         if not target_hubs:
             return False
-        from database.models import UserDevice
+        from database.repositories import user_devices_repo
         from sqlalchemy.orm.attributes import flag_modified
 
-        dev_rows = (
-            await session.scalars(
-                select(UserDevice.device_uuid).where(
-                    UserDevice.user_id == sub.user_id,
-                    UserDevice.device_uuid.is_not(None),
-                )
-            )
-        ).all()
-        all_uuids = list(dict.fromkeys([sub.uuid, *[str(u) for u in dev_rows if u]]))
+        wi_limit = _effective_device_limit(sub)
+        devices = await user_devices_repo.list_user_devices(
+            session, sub.user_id, wi_device_limit=wi_limit
+        )
+        assigned_dev_uuids = [
+            str(d["device_uuid"])
+            for d in devices
+            if d.get("is_bi_assigned") and d.get("device_uuid")
+        ]
+        displaced_dev_uuids = [
+            str(d["device_uuid"])
+            for d in devices
+            if not d.get("is_bi_assigned") and d.get("device_uuid")
+        ]
+        all_uuids = list(dict.fromkeys([sub.uuid, *assigned_dev_uuids]))
         target_version = sub.desired_version or 1
         node_sync_state = dict(getattr(sub, "node_sync_state", None) or {})
         all_ok = True
@@ -655,15 +661,37 @@ class WhiteInternetService:
                                 service="white_internet",
                             )
                             sync_res = resp.result if hasattr(resp, "result") else resp[0]
-                            if sync_res not in (SyncResult.APPLIED, SyncResult.ALREADY_NEWER):
+                            if sync_res == SyncResult.ALREADY_NEWER:
+                                inv_ok, inv_data, _ = await xray_client.get_inventory(
+                                    api_url, api_key, client_ids=[c_uuid], service="white_internet"
+                                )
+                                client_inv = (inv_data or {}).get("inventory", {}).get(c_uuid) if inv_ok else None
+                                if not client_inv or client_inv.get("observed_state") != "active":
+                                    hub_ok = False
+                            elif sync_res != SyncResult.APPLIED:
                                 hub_ok = False
                         except Exception as exc:
                             logger.warning("Inline WI sync failed for %s on hub %s: %s", c_uuid, srv_id, exc)
                             hub_ok = False
+                    for disp_uuid in displaced_dev_uuids:
+                        if disp_uuid and disp_uuid != sub.uuid:
+                            try:
+                                await xray_client.sync_client(
+                                    api_url,
+                                    api_key,
+                                    client_uuid=disp_uuid,
+                                    is_active=False,
+                                    version=target_version,
+                                    expected_node_epoch=node_epoch,
+                                    service="white_internet",
+                                )
+                            except Exception as exc:
+                                logger.debug("Inline WI deprovision failed for displaced %s: %s", disp_uuid, exc)
                     if hub_ok:
                         node_sync_state[str(srv_id)] = {
                             "version": target_version,
                             "epoch": node_epoch or "",
+                            "active": True,
                         }
                     else:
                         all_ok = False

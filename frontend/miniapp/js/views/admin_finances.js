@@ -219,7 +219,10 @@ export function renderAdminFinancesView(root, state) {
                 btn.textContent = state.paymentsMaintenance ? "Включить приём платежей" : "Приостановить платежи";
                 btn.disabled = false;
             }
-        }).catch(() => {});
+        }).catch(() => {
+            const btn = root.querySelector("#togglePaymentsMaintBtn");
+            if (btn) btn.disabled = false;
+        });
     }
 
     if (subTab === "audit") {

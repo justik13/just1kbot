@@ -244,6 +244,10 @@ async def _deliver_to_user(
 
 async def _run_broadcast_worker(bot: Bot, broadcast_id: int) -> None:
     logger.info("Broadcast worker started for id=%s", broadcast_id)
+    batch_success = 0
+    batch_fail = 0
+    blocked_user_ids: list[int] = []
+    max_uid = 0
     try:
         while True:
             async with session_scope() as session:
@@ -326,11 +330,34 @@ async def _run_broadcast_worker(bot: Bot, broadcast_id: int) -> None:
                 bp.success_count = (bp.success_count or 0) + batch_success
                 bp.fail_count = (bp.fail_count or 0) + batch_fail
                 bp.updated_at = now_utc()
-                if bp.status != "in_progress":
-                    return
+                should_stop = bp.status != "in_progress"
+            batch_success = 0
+            batch_fail = 0
+            blocked_user_ids = []
+            max_uid = 0
+            if should_stop:
+                return
 
     except asyncio.CancelledError:
         logger.info("Broadcast worker cancelled for id=%s", broadcast_id)
+        if batch_success or batch_fail or blocked_user_ids:
+            try:
+                async with session_scope() as session:
+                    if blocked_user_ids:
+                        await session.execute(
+                            update(User)
+                            .where(User.id.in_(blocked_user_ids))
+                            .values(is_bot_blocked=True)
+                        )
+                    bp = await session.get(BroadcastProgress, broadcast_id)
+                    if bp is not None:
+                        if max_uid > (bp.last_processed_id or 0):
+                            bp.last_processed_id = max_uid
+                        bp.success_count = (bp.success_count or 0) + batch_success
+                        bp.fail_count = (bp.fail_count or 0) + batch_fail
+                        bp.updated_at = now_utc()
+            except Exception as cancel_exc:
+                logger.warning("Failed to flush partial broadcast %s batch on cancel: %s", broadcast_id, cancel_exc)
         raise
     except Exception as exc:
         logger.error("Broadcast worker crashed for id=%s: %s", broadcast_id, exc, exc_info=True)
@@ -375,6 +402,8 @@ async def create_and_start_broadcast(
 
     clean_media = (media_url or "").strip() or None
     content_type = "photo" if clean_media else "text"
+    if bot is None:
+        raise ValueError("Bot instance is unavailable for broadcast")
 
     async with session_scope() as session:
         total_count = await count_broadcast_audience(

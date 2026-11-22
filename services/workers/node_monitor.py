@@ -465,6 +465,19 @@ async def check_node_resources_and_alerts(bot: Bot):
                 )
                 xray_ok = False
 
+        traffic_limit_exceeded = bool(
+            isinstance(xray_data, dict)
+            and isinstance(xray_data.get("traffic_limit"), dict)
+            and xray_data["traffic_limit"].get("exceeded")
+        )
+        if traffic_limit_exceeded:
+            logger.warning(
+                "Server %s (%s) exceeded hosting traffic limit; marking unhealthy in bot",
+                server.id,
+                server.name,
+            )
+            xray_ok = False
+
         if has_xray:
             is_healthy = xray_ok
         else:

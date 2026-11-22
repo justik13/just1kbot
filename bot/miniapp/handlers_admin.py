@@ -753,6 +753,20 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                 else:
                     vless_sub.expires_at = new_end
                 if payload.device_limit is not None:
+                    from database.repositories import user_devices_repo
+
+                    active_devs = await user_devices_repo.count_active_user_devices(session, user.id)
+                    if active_devs > payload.device_limit:
+                        return web.json_response(
+                            {
+                                "ok": False,
+                                "error": (
+                                    f"Нельзя снизить лимит до {payload.device_limit}: "
+                                    f"привязано устройств ({active_devs}). Сначала сбросьте устройства."
+                                ),
+                            },
+                            status=400,
+                        )
                     vless_sub.device_limit = payload.device_limit
                 await session.flush()
                 await AuditService.log_action(
@@ -795,6 +809,23 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
             if updated_user is None:
                 return web.json_response({"ok": False, "error": "Пользователь не найден"}, status=404)
             updated_vless = await vless_subscription_repo.get_subscription_by_user_id(session, updated_user.id)
+            await AuditService.log_action(
+                session,
+                admin_id=ctx.telegram_id,
+                action=(
+                    AdminAuditAction.ADMIN_SUB_EXTEND
+                    if payload.days > 0
+                    else AdminAuditAction.ADMIN_SUB_CHANGE
+                ),
+                target_type="user",
+                target_id=user.id,
+                details={
+                    "service": "standard",
+                    "days": payload.days,
+                    "device_limit": target_limit,
+                    "note": note,
+                },
+            )
             msg_done = (
                 "Лимит устройств «Стандарт» обновлён"
                 if payload.days == 0
@@ -851,6 +882,33 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                         msg_ok = f"Базовая квота установлена: {payload.gb} ГБ"
                 except white_internet_repo.WhiteInternetError as exc:
                     return web.json_response({"ok": False, "error": str(exc)}, status=400)
+                if (
+                    updated_sub.status == WhiteInternetStatus.ACTIVE
+                    and updated_sub.provisioning_status == WhiteInternetProvisioningStatus.PENDING_UPDATE
+                ):
+                    hubs = await WhiteInternetService.get_hub_nodes(session)
+                    target_hubs = [
+                        (h.id, h.api_url, h.api_key, h.xray_instance_epoch)
+                        for h in hubs
+                        if h.api_url and h.api_key
+                    ]
+                    if target_hubs:
+                        from database.connection import queue_post_commit_task
+
+                        sub_id_snap = updated_sub.id
+
+                        async def _sync_wi_after_traffic_adj() -> None:
+                            async with session_scope() as bg_sess:
+                                bg_sub = await white_internet_repo.get_subscription_by_id(bg_sess, sub_id_snap)
+                                if bg_sub is not None:
+                                    await WhiteInternetService._try_inline_sync_multi(
+                                        bg_sess,
+                                        bg_sub,
+                                        target_hubs,
+                                        idempotency_key=f"admin_wi_traffic:{sub_id_snap}:{bg_sub.desired_version}",
+                                    )
+
+                        queue_post_commit_task(session, _sync_wi_after_traffic_adj)
                 await AuditService.log_action(
                     session,
                     admin_id=ctx.telegram_id,
@@ -926,7 +984,9 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
         if payload.days is None:
             return web.json_response({"ok": False, "error": "Укажите количество дней"}, status=400)
         wi_sub = await get_subscription_by_user_id(session, user.id)
-        if wi_sub is None:
+        if wi_sub is None or (
+            wi_sub.status == WhiteInternetStatus.DISABLED and payload.days > 0
+        ):
             if payload.days <= 0:
                 return web.json_response(
                     {"ok": False, "error": "Для новой активации укажите положительное число дней"},
@@ -962,18 +1022,31 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                     {"ok": False, "error": f"Лимит устройств должен быть от 1 до {constants.WHITE_INTERNET_MAX_DEVICE_LIMIT}"},
                     status=400,
                 )
+            locked_wi_dl = await white_internet_repo.get_subscription_with_lock(session, wi_sub.id)
+            if locked_wi_dl is None:
+                return web.json_response({"ok": False, "error": "Подписка не найдена"}, status=404)
+            wi_sub = locked_wi_dl
             wi_sub.device_limit = payload.device_limit
             wi_sub.base_traffic_bytes = payload.device_limit * constants.WHITE_INTERNET_BASE_TRAFFIC_BYTES
+            wi_sub.pending_device_limit = None
+            wi_sub.pending_from = None
             wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
+            total_quota = (wi_sub.base_traffic_bytes or 0) + (wi_sub.extra_traffic_bytes or 0)
+            used_quota = max(0, (wi_sub.traffic_used_bytes or 0) - (wi_sub.traffic_overage_bytes or 0))
             if (
-                wi_sub.status == WhiteInternetStatus.EXHAUSTED
-                and (wi_sub.base_traffic_bytes + (wi_sub.extra_traffic_bytes or 0))
-                > (wi_sub.traffic_used_bytes or 0)
+                wi_sub.status == WhiteInternetStatus.ACTIVE
+                and total_quota > 0
+                and used_quota >= total_quota
             ):
+                wi_sub.status = WhiteInternetStatus.EXHAUSTED
+                wi_sub.status_reason = "quota_exhausted"
+                wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_DELETE
+            elif wi_sub.status == WhiteInternetStatus.EXHAUSTED and total_quota > used_quota:
                 wi_sub.status = WhiteInternetStatus.ACTIVE
                 wi_sub.status_reason = None
                 wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
-            wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
+            elif wi_sub.status == WhiteInternetStatus.ACTIVE:
+                wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
             await session.flush()
             await AuditService.log_action(
                 session,
@@ -1009,6 +1082,27 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                 locked_wi.status = WhiteInternetStatus.EXPIRED
                 locked_wi.provisioning_status = WhiteInternetProvisioningStatus.PENDING_DELETE
                 locked_wi.desired_version = (locked_wi.desired_version or 1) + 1
+                wi_hubs = await WhiteInternetService.get_hub_nodes(session)
+                dev_rows = (
+                    await session.scalars(
+                        select(UserDevice.device_uuid).where(
+                            UserDevice.user_id == user.id,
+                            UserDevice.device_uuid.is_not(None),
+                        )
+                    )
+                ).all()
+                uuids_to_revoke = list(dict.fromkeys([locked_wi.uuid, *[str(u) for u in dev_rows if u]]))
+                from services.white_internet_service import _dispatch_deprovision
+
+                for hub in wi_hubs:
+                    for rev_u in uuids_to_revoke:
+                        _dispatch_deprovision(
+                            hub,
+                            rev_u,
+                            locked_wi.desired_version,
+                            session=session,
+                            context="admin_reduce_expired",
+                        )
             else:
                 locked_wi.expires_at = new_end
             await session.flush()
@@ -1142,7 +1236,9 @@ async def api_admin_user_devices_reset_handler(request: web.Request) -> web.Resp
         return id_err  # type: ignore[return-value]
 
     async with session_scope() as session:
-        user = await session.get(User, target_user_id)
+        user = await session.scalar(
+            select(User).where(User.id == target_user_id).with_for_update()
+        )
         if user is None or getattr(user, "is_deleted", False):
             return web.json_response({"ok": False, "error": "Пользователь не найден"}, status=404)
 
@@ -1163,6 +1259,12 @@ async def api_admin_user_devices_reset_handler(request: web.Request) -> web.Resp
         await session.execute(
             delete(UserDevice).where(UserDevice.user_id == user.id)
         )
+        for u_uuid in dev_uuids:
+            VlessSubscriptionService.deprovision_background(
+                u_uuid, version=sub_ver, sub_id=sub_id, session=session, services=("vless", "white_internet")
+            )
+        if vless_sub is not None:
+            VlessSubscriptionService.ensure_synced_background(user.id, session=session)
         await AuditService.log_action(
             session,
             admin_id=ctx.telegram_id,
@@ -1171,12 +1273,6 @@ async def api_admin_user_devices_reset_handler(request: web.Request) -> web.Resp
             target_id=user.id,
         )
 
-    for u_uuid in dev_uuids:
-        VlessSubscriptionService.deprovision_background(
-            u_uuid, version=sub_ver, sub_id=sub_id, services=("vless", "white_internet")
-        )
-    if vless_sub is not None:
-        VlessSubscriptionService.ensure_synced_background(user.id)
     return web.json_response({"ok": True, "message": "Привязки устройств сброшены"})
 
 
@@ -1190,7 +1286,9 @@ async def api_admin_user_token_rotate_handler(request: web.Request) -> web.Respo
         return id_err  # type: ignore[return-value]
 
     async with session_scope() as session:
-        user = await session.get(User, target_user_id)
+        user = await session.scalar(
+            select(User).where(User.id == target_user_id).with_for_update()
+        )
         if user is None or getattr(user, "is_deleted", False):
             return web.json_response({"ok": False, "error": "Пользователь не найден"}, status=404)
 
@@ -1202,9 +1300,20 @@ async def api_admin_user_token_rotate_handler(request: web.Request) -> web.Respo
                 session, vless_sub.id, reset_hwids=True
             )
         if wi_sub is not None:
+            old_wi_uuid = wi_sub.uuid
             wi_token = await white_internet_repo.reset_subscription_token_atomic(
                 session, wi_sub.id, new_token=new_token, reset_hwids=True
             )
+            locked_wi = await white_internet_repo.get_subscription_with_lock(session, wi_sub.id)
+            if locked_wi is not None:
+                if old_wi_uuid:
+                    await white_internet_repo.add_pending_revocation_uuids(
+                        session, locked_wi.id, [old_wi_uuid]
+                    )
+                locked_wi.uuid = str(uuid4())
+                locked_wi.desired_version = (locked_wi.desired_version or 1) + 1
+                if locked_wi.status == WhiteInternetStatus.ACTIVE:
+                    locked_wi.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
             new_token = new_token or wi_token
 
         existing_devs = (await session.scalars(select(UserDevice).where(UserDevice.user_id == user.id))).all()

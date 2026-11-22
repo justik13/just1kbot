@@ -477,20 +477,28 @@ class VlessSubscriptionService:
                 async with session_scope() as scoped_session:
                     await cls.sync_user_to_nodes(scoped_session, user_id, is_active=is_active)
 
-                    # Retry deprovisioning for any pending revoked UUIDs
+                    # Retry deprovisioning for any pending revoked UUIDs (including location UUIDs)
                     sub = await vless_subscription_repo.get_subscription_by_user_id(scoped_session, user_id)
                     if sub and sub.pending_revoked_uuids:
                         servers = await cls.get_revocation_target_servers(scoped_session)
                         targets = cls._extract_node_targets(servers)
+                        exit_nodes = await cls.get_eligible_exit_nodes(scoped_session)
                         if targets:
                             sub_ver = getattr(sub, "version", 1) or 1
                             for rev_uuid in list(sub.pending_revoked_uuids):
-                                deprov_res = await cls._execute_deprovision_on_nodes(targets, rev_uuid, version=sub_ver)
+                                expanded = cls._expand_revocation_uuids(rev_uuid, exit_nodes)
+                                results: dict[int, bool] = {}
+                                for u in expanded:
+                                    deprov_res = await cls._execute_deprovision_on_nodes(
+                                        targets, u, version=sub_ver
+                                    )
+                                    for s_id, ok in deprov_res.items():
+                                        results[s_id] = results.get(s_id, True) and ok
                                 if (
                                     servers
                                     and len(targets) == len(servers)
-                                    and all(deprov_res.values())
-                                    and len(deprov_res) == len(targets)
+                                    and all(results.values())
+                                    and len(results) == len(targets)
                                 ):
                                     await vless_subscription_repo.pop_pending_revoked_uuid(scoped_session, sub.id, rev_uuid)
             except Exception as e:
@@ -505,6 +513,22 @@ class VlessSubscriptionService:
         _BACKGROUND_TASKS.add(task)
         task.add_done_callback(_BACKGROUND_TASKS.discard)
         return task
+
+    @staticmethod
+    def _expand_revocation_uuids(base_uuid: str, exit_nodes: list[Server]) -> list[str]:
+        uuids_to_deprov = [base_uuid]
+        try:
+            base_u = uuid.UUID(base_uuid)
+            for ex in exit_nodes:
+                ex_extra = ex.extra_data if isinstance(ex.extra_data, dict) else {}
+                if ex_extra.get("in_standard") is False:
+                    continue
+                lc = str(ex_extra.get("location_code") or f"exit{ex.id}").strip().lower()
+                if lc:
+                    uuids_to_deprov.append(str(uuid.uuid5(base_u, lc)))
+        except Exception:
+            pass
+        return uuids_to_deprov
 
     @classmethod
     def deprovision_background(
@@ -526,17 +550,7 @@ class VlessSubscriptionService:
                     servers = await cls.get_revocation_target_servers(scoped_session)
                     targets = cls._extract_node_targets(servers)
                     exit_nodes = await cls.get_eligible_exit_nodes(scoped_session)
-                    try:
-                        base_u = uuid.UUID(old_uuid)
-                        for ex in exit_nodes:
-                            ex_extra = ex.extra_data if isinstance(ex.extra_data, dict) else {}
-                            if ex_extra.get("in_standard") is False:
-                                continue
-                            lc = str(ex_extra.get("location_code") or f"exit{ex.id}").strip().lower()
-                            if lc:
-                                uuids_to_deprov.append(str(uuid.uuid5(base_u, lc)))
-                    except Exception:
-                        pass
+                    uuids_to_deprov = cls._expand_revocation_uuids(old_uuid, exit_nodes)
 
                 if targets:
                     results = {}

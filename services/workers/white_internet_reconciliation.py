@@ -19,7 +19,7 @@ from config.enums import (
     WhiteInternetStatus,
 )
 from database.connection import session_scope
-from database.models import Server, WhiteInternetSubscription
+from database.models import Server, User, WhiteInternetSubscription
 from database.repositories import user_devices_repo, white_internet_repo
 from services.xray_node_client import SyncResult, XrayNodeClient
 from utils.datetime_helpers import now_utc
@@ -111,6 +111,7 @@ class WhiteInternetReconciliationWorker:
         user_id = task["user_id"]
         desired_active = task["desired_active"]
         target_version = task["target_version"]
+        wi_device_limit = max(1, int(task.get("device_limit") or 1))
         expected_inbound_tags = self._expected_inbound_tags(expected_xhttp)
 
         notify_user_id: int | None = None
@@ -128,13 +129,25 @@ class WhiteInternetReconciliationWorker:
                         service="white_internet",
                     )
 
-                    dev_uuids: list[str] = []
                     async with sf() as dev_session:
-                        dev_uuids = await user_devices_repo.get_active_device_uuids(dev_session, user_id)
-                    for d_uuid in dev_uuids:
+                        devs = await user_devices_repo.list_user_devices(
+                            dev_session, user_id, wi_device_limit=wi_device_limit
+                        )
+                    assigned_dev_uuids = [
+                        str(d["device_uuid"])
+                        for d in devs
+                        if d.get("is_bi_assigned") and d.get("device_uuid")
+                    ]
+                    displaced_dev_uuids = [
+                        str(d["device_uuid"])
+                        for d in devs
+                        if not d.get("is_bi_assigned") and d.get("device_uuid")
+                    ]
+                    dev_sync_failed = False
+                    for d_uuid in assigned_dev_uuids:
                         if d_uuid and d_uuid != sub_uuid:
                             try:
-                                await self.client.sync_client(
+                                d_resp = await self.client.sync_client(
                                     api_url,
                                     api_key,
                                     d_uuid,
@@ -143,8 +156,29 @@ class WhiteInternetReconciliationWorker:
                                     expected_node_epoch=target_epoch,
                                     service="white_internet",
                                 )
+                                d_res = d_resp.result if hasattr(d_resp, "result") else d_resp[0]
+                                if d_res not in (SyncResult.APPLIED, SyncResult.ALREADY_NEWER):
+                                    dev_sync_failed = True
                             except Exception as dev_exc:
-                                logger.debug("WI reconcile device %s sync note: %s", d_uuid, dev_exc)
+                                dev_sync_failed = True
+                                logger.warning("WI reconcile device %s sync failed: %s", d_uuid, dev_exc)
+                    for disp_uuid in displaced_dev_uuids:
+                        if disp_uuid and disp_uuid != sub_uuid:
+                            try:
+                                await self.client.sync_client(
+                                    api_url,
+                                    api_key,
+                                    disp_uuid,
+                                    is_active=False,
+                                    version=target_version,
+                                    expected_node_epoch=target_epoch,
+                                    service="white_internet",
+                                )
+                            except Exception as disp_exc:
+                                logger.debug("WI reconcile displaced device %s note: %s", disp_uuid, disp_exc)
+
+                    if dev_sync_failed:
+                        return False
 
                     sync_result = resp.result if hasattr(resp, "result") else resp[0]
                     err_msg = resp.error if hasattr(resp, "error") else resp[1]
@@ -223,7 +257,9 @@ class WhiteInternetReconciliationWorker:
                                 if client_inv:
                                     observed_state = client_inv.get("observed_state")
                                     expected_state = "active" if desired_active else "disabled"
-                                    if observed_state == expected_state:
+                                    inbounds_ok = not verified_inbounds or expected_inbound_tags.issubset(verified_inbounds)
+                                    epoch_ok = verified_epoch == target_epoch
+                                    if observed_state == expected_state and inbounds_ok and epoch_ok:
                                         node_state = dict(sub.node_sync_state or {}) if isinstance(sub.node_sync_state, dict) else {}
                                         node_state[str(server_id)] = {
                                             "version": target_version,
@@ -403,8 +439,9 @@ class WhiteInternetReconciliationWorker:
         all_server_ids = {t[0] for t in active_server_targets}
 
         async with sf() as sess:
-            stmt_subs = (
-                select(WhiteInternetSubscription)
+            stmt_urgent = (
+                select(WhiteInternetSubscription, User.financial_hold, User.is_deleted)
+                .join(User, User.id == WhiteInternetSubscription.user_id)
                 .where(
                     or_(
                         WhiteInternetSubscription.actual_version != WhiteInternetSubscription.desired_version,
@@ -413,23 +450,48 @@ class WhiteInternetReconciliationWorker:
                             WhiteInternetProvisioningStatus.PENDING_UPDATE,
                             WhiteInternetProvisioningStatus.PENDING_DELETE,
                         ]),
-                        WhiteInternetSubscription.status.in_([
-                            WhiteInternetStatus.PENDING,
-                            WhiteInternetStatus.ACTIVE,
-                        ]),
+                        WhiteInternetSubscription.status == WhiteInternetStatus.PENDING,
                         and_(
-                            WhiteInternetSubscription.status == WhiteInternetStatus.EXHAUSTED,
+                            WhiteInternetSubscription.status.in_([
+                                WhiteInternetStatus.ACTIVE,
+                                WhiteInternetStatus.EXHAUSTED,
+                            ]),
                             WhiteInternetSubscription.expires_at <= now,
+                        ),
+                        and_(
+                            WhiteInternetSubscription.status == WhiteInternetStatus.ACTIVE,
+                            or_(User.financial_hold.is_(True), User.is_deleted.is_(True)),
                         ),
                     )
                 )
                 .order_by(WhiteInternetSubscription.id.asc())
                 .limit(BATCH_SIZE)
             )
-            subs = (await sess.execute(stmt_subs)).scalars().all()
+            urgent_rows = (await sess.execute(stmt_urgent)).all()
+            seen_sub_ids = {sub.id for sub, _, _ in urgent_rows}
+
+            remaining_limit = max(0, BATCH_SIZE - len(urgent_rows))
+            active_rows = []
+            if remaining_limit > 0:
+                stmt_active = (
+                    select(WhiteInternetSubscription, User.financial_hold, User.is_deleted)
+                    .join(User, User.id == WhiteInternetSubscription.user_id)
+                    .where(WhiteInternetSubscription.status == WhiteInternetStatus.ACTIVE)
+                )
+                if seen_sub_ids:
+                    stmt_active = stmt_active.where(
+                        WhiteInternetSubscription.id.not_in(seen_sub_ids)
+                    )
+                stmt_active = stmt_active.order_by(
+                    WhiteInternetSubscription.last_synced_at.asc().nullsfirst(),
+                    WhiteInternetSubscription.id.asc(),
+                ).limit(remaining_limit)
+                active_rows = (await sess.execute(stmt_active)).all()
+
+            subs_with_flags = [*urgent_rows, *active_rows]
 
             sub_tasks: list[dict] = []
-            for sub in subs:
+            for sub, is_hold, is_deleted in subs_with_flags:
                 if sub.expires_at is not None and sub.expires_at <= now and sub.status in (
                     WhiteInternetStatus.PENDING,
                     WhiteInternetStatus.ACTIVE,
@@ -441,11 +503,14 @@ class WhiteInternetReconciliationWorker:
                 desired_active = (
                     sub.status in (WhiteInternetStatus.PENDING, WhiteInternetStatus.ACTIVE)
                     and (sub.expires_at is None or sub.expires_at > now)
+                    and not bool(is_hold)
+                    and not bool(is_deleted)
                 )
                 sub_tasks.append({
                     "sub_id": sub.id,
                     "user_id": sub.user_id,
                     "uuid": sub.uuid,
+                    "device_limit": max(1, int(getattr(sub, "device_limit", 1) or 1)),
                     "desired_active": desired_active,
                     "target_version": sub.desired_version,
                     "node_sync_state": dict(sub.node_sync_state or {}) if isinstance(sub.node_sync_state, dict) else {},

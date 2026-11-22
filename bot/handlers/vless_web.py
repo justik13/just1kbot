@@ -939,21 +939,33 @@ async def serve_unified_subscription_feed(
                 from database.repositories import servers_repo
 
                 wi_hubs = await servers_repo.get_wi_capable_ru_hubs(session)
-                ready_hubs = [
-                    hub
-                    for hub in wi_hubs
-                    if constants.WHITE_INTERNET_CAPABILITY in (hub.capabilities or [])
-                    and (
-                        (
-                            isinstance(getattr(wi_sub, "node_sync_state", None), dict)
-                            and ((wi_sub.node_sync_state.get(str(hub.id)) or {}).get("version") == wi_sub.desired_version)
-                        )
-                        or (
-                            getattr(wi_sub, "provisioning_status", None) == WhiteInternetProvisioningStatus.ACTIVE
-                            and (getattr(wi_sub, "actual_version", 0) or 0) > 0
-                        )
+                ready_hubs = []
+                for hub in wi_hubs:
+                    if constants.WHITE_INTERNET_CAPABILITY not in (hub.capabilities or []):
+                        continue
+                    sync_entry = (
+                        wi_sub.node_sync_state.get(str(hub.id))
+                        if isinstance(getattr(wi_sub, "node_sync_state", None), dict)
+                        else None
                     )
-                ]
+                    if isinstance(sync_entry, dict):
+                        epoch_ok = (
+                            not hub.xray_instance_epoch
+                            or sync_entry.get("epoch") == hub.xray_instance_epoch
+                        )
+                        if (
+                            sync_entry.get("version") == wi_sub.desired_version
+                            and sync_entry.get("active", True) is True
+                            and epoch_ok
+                        ):
+                            ready_hubs.append(hub)
+                            continue
+                    if (
+                        not getattr(wi_sub, "node_sync_state", None)
+                        and getattr(wi_sub, "provisioning_status", None) == WhiteInternetProvisioningStatus.ACTIVE
+                        and (getattr(wi_sub, "actual_version", 0) or 0) > 0
+                    ):
+                        ready_hubs.append(hub)
                 if ready_hubs:
                     ready_hubs.sort(key=lambda s: (servers_repo.get_server_load_score(s), int(s.id or 0)))
                     cdn_label_mode = str(await get_system_setting(session, "bi_cdn_label_mode", "name") or "name")
@@ -975,9 +987,7 @@ async def serve_unified_subscription_feed(
                             if frag not in seen_bi_fragments:
                                 seen_bi_fragments.add(frag)
                                 all_links.append(lk)
-                    if is_new_device and device_client_uuid and wi_hubs:
-                        wi_sub.desired_version = (getattr(wi_sub, "desired_version", 1) or 1) + 1
-                        wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+                    if is_new_device and device_client_uuid and is_bi_assigned and wi_hubs:
                         from services.xray_node_client import XrayNodeClient
 
                         targets_snapshot = [

@@ -221,8 +221,9 @@ async def notify_order_credited(
             return False
         balance = await get_account_balance(session, user_id=user.id)
         meta = order.metadata_ or {}
+        effective_service = "topup" if meta.get("mixed_fallback_credited") else order.service_type
         text = _format_credit_push_text(
-            order.service_type,
+            effective_service,
             device_limit=order.device_limit,
             is_tariff_change=bool(meta.get("is_tariff_change")),
             operation_kind=meta.get("operation"),
@@ -450,9 +451,13 @@ async def _snapshot(order_id) -> dict | None:
                         balance = await get_account_balance(
                             session, user_id=user.id
                         )
+                        owner_meta = order.metadata_ or {}
+                        effective_service = (
+                            "topup" if owner_meta.get("mixed_fallback_credited") else order.service_type
+                        )
                         owner = {
                             "kind": "send",
-                            "service_type": order.service_type,
+                            "service_type": effective_service,
                             "fields": {
                                 "id": order.id,
                                 "amount_rub": order.amount_rub,

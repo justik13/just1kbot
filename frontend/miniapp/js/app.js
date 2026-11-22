@@ -151,6 +151,9 @@ function _renderAdminView() {
                 try {
                     const res = await api.listBroadcasts();
                     appState.broadcastsData = res.broadcasts || [];
+                    appState.broadcastsTotal = res.total ?? appState.broadcastsData.length;
+                    appState.broadcastsOffset = res.offset ?? 0;
+                    appState.broadcastsLimit = res.limit ?? 20;
                 } catch (err) {
                     showToast(err.message || "Не удалось загрузить рассылки");
                 }
