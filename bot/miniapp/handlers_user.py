@@ -1035,6 +1035,26 @@ async def api_user_device_std_priority_handler(request: web.Request) -> web.Resp
 
         vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
         if vless_sub is not None and SubscriptionService.check_vpn_access(user, vless_sub=vless_sub):
+            std_limit = max(1, await SubscriptionService.get_effective_device_limit(session, user) or 2)
+            devs = await user_devices_repo.list_user_devices(
+                session, user.id, std_device_limit=std_limit
+            )
+            assigned_uuids = [
+                str(d["device_uuid"])
+                for d in devs
+                if d.get("is_std_assigned") and d.get("device_uuid")
+            ]
+            displaced_uuids = [
+                str(d["device_uuid"])
+                for d in devs
+                if not d.get("is_std_assigned") and d.get("device_uuid")
+            ]
+            for u_on in assigned_uuids:
+                await vless_subscription_repo.pop_pending_revoked_uuid(session, vless_sub.id, u_on)
+            if displaced_uuids:
+                await vless_subscription_repo.add_pending_revocation_uuids(
+                    session, vless_sub.id, displaced_uuids
+                )
             vless_sub.version = (vless_sub.version or 1) + 1
             await session.flush()
             VlessSubscriptionService.ensure_synced_background(user.id, session=session)

@@ -788,9 +788,22 @@ async def serve_unified_subscription_feed(
             )
 
         # 2. Active subscription(s), but no HWID provided -> landing page for browser or 403 for app
+        wi_has_period = bool(
+            wi_sub is not None
+            and not is_financial_hold
+            and wi_sub.status
+            in (
+                WhiteInternetStatus.ACTIVE,
+                WhiteInternetStatus.PENDING,
+                WhiteInternetStatus.EXHAUSTED,
+            )
+            and wi_sub.expires_at
+            and wi_sub.expires_at > now
+        )
         std_limit = await SubscriptionService.get_effective_device_limit(session, user) if std_active else 0
         wi_limit = max(1, getattr(wi_sub, "device_limit", 1) or 1) if wi_active else 0
-        max_devices = max(std_limit + wi_limit, 1)
+        wi_slot_limit = max(1, getattr(wi_sub, "device_limit", 1) or 1) if wi_has_period else 0
+        max_devices = max(std_limit + wi_slot_limit, 1)
 
         if not raw_hwid:
             if _is_browser_request(request):
@@ -881,11 +894,10 @@ async def serve_unified_subscription_feed(
 
         current_dev_info = next((d for d in devices_list if d.get("hwid") == raw_hwid), None)
         is_std_assigned = bool(std_active and current_dev_info and current_dev_info.get("is_std_assigned"))
-        is_std_explicitly_disabled = bool(
-            current_dev_info is not None and int(current_dev_info.get("std_priority") or 0) < 0
-        )
-
         is_bi_assigned = bool(wi_active and current_dev_info and current_dev_info.get("is_bi_assigned"))
+        is_bi_explicitly_disabled = bool(
+            current_dev_info is not None and int(current_dev_info.get("bi_priority") or 0) < 0
+        )
 
         # 4. Generate links for active options (with independent per-option stubs)
         all_links: list[str] = []
@@ -923,7 +935,7 @@ async def serve_unified_subscription_feed(
                 )
                 if needs_sync:
                     VlessSubscriptionService.ensure_synced_background(user.id, session=session)
-            elif not (is_std_explicitly_disabled and wi_active and is_bi_assigned):
+            elif not (wi_active and is_bi_assigned):
                 all_links.append(
                     _make_inline_stub(
                         texts.FEED_STUB_STD_DEVICE_LIMIT.format(limit=std_limit),
@@ -1035,7 +1047,7 @@ async def serve_unified_subscription_feed(
                                 session,
                                 lambda: _provision_new_wi_device(targets_snapshot, device_client_uuid, ver_snap),
                             )
-            else:
+            elif not (is_bi_explicitly_disabled and std_active and is_std_assigned):
                 all_links.append(
                     _make_inline_stub(
                         texts.FEED_STUB_WI_DEVICE_LIMIT.format(limit=wi_limit),
@@ -1166,7 +1178,7 @@ async def serve_unified_subscription_feed(
         elif isinstance(raw_announce, str) and raw_announce.strip():
             announce_summary = raw_announce.strip()
         else:
-            std_devices_active = min(len(devices_list), std_limit) if std_active else 0
+            std_devices_active = sum(1 for d in devices_list if d.get("is_std_assigned")) if std_active else 0
             wi_devices_active = sum(1 for d in devices_list if d.get("is_bi_assigned")) if wi_active else 0
             announce_summary = _format_announce_summary(
                 std_active=std_active,
