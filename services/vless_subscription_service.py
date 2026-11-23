@@ -967,57 +967,66 @@ class VlessSubscriptionService:
             except Exception:
                 pass
 
-        results: dict[int, bool] = {t[0]: True for t in targets}
-        needs_version_bump = False
-        all_items_ok = True
+        async def _run_sync_pass(pass_version: int) -> tuple[dict[int, bool], bool, bool]:
+            pass_results: dict[int, bool] = {t[0]: True for t in targets}
+            pass_ok = True
+            pass_bump = False
+            fallback_targets = list(targets)
 
-        fallback_targets = list(targets)
-        if sync_items:
-            batch_payload = [
-                {
-                    "uuid": target_uuid,
-                    "email": target_email,
-                    "is_active": desired_active,
-                    "version": sub_version,
-                    "service": "vless",
-                }
-                for target_uuid, target_email in sync_items
-            ]
-            expected_uuids = {str(target_uuid).lower() for target_uuid, _ in sync_items}
+            if sync_items:
+                batch_payload = [
+                    {
+                        "uuid": target_uuid,
+                        "email": target_email,
+                        "is_active": desired_active,
+                        "version": pass_version,
+                        "service": "vless",
+                    }
+                    for target_uuid, target_email in sync_items
+                ]
+                expected_uuids = {str(target_uuid).lower() for target_uuid, _ in sync_items}
 
-            async def _batch_one(
-                srv_id: int, api_url: str, api_key: str
-            ) -> tuple[int, bool]:
-                try:
-                    async with get_xray_node_client(timeout=15.0) as node_client:
-                        supported, succeeded, failed = await node_client.batch_sync_clients(
-                            api_url, api_key, batch_payload, timeout=15.0
-                        )
-                    if supported and not failed and expected_uuids.issubset(succeeded):
-                        return srv_id, True
-                except Exception as exc:
-                    logger.debug("Batch sync fast-path failed on server %s: %s", srv_id, exc)
-                return srv_id, False
+                async def _batch_one(srv_id: int, api_url: str, api_key: str) -> tuple[int, bool]:
+                    try:
+                        async with get_xray_node_client(timeout=15.0) as node_client:
+                            supported, succeeded, failed = await node_client.batch_sync_clients(
+                                api_url, api_key, batch_payload, timeout=15.0
+                            )
+                        if supported and not failed and expected_uuids.issubset(succeeded):
+                            return srv_id, True
+                    except Exception as exc:
+                        logger.debug("Batch sync fast-path failed on server %s: %s", srv_id, exc)
+                    return srv_id, False
 
-            batch_res = await asyncio.gather(*[_batch_one(t[0], t[1], t[2]) for t in targets])
-            succeeded_srv_ids = {srv_id for srv_id, ok in batch_res if ok}
-            fallback_targets = [t for t in targets if t[0] not in succeeded_srv_ids]
+                batch_res = await asyncio.gather(*[_batch_one(t[0], t[1], t[2]) for t in targets])
+                succeeded_srv_ids = {srv_id for srv_id, ok in batch_res if ok}
+                fallback_targets = [t for t in targets if t[0] not in succeeded_srv_ids]
 
-        if fallback_targets:
-            for target_uuid, target_email in sync_items:
-                res_item, bump_item = await VlessSubscriptionService._execute_sync_to_nodes_with_status(
-                    fallback_targets, target_uuid, desired_active, version=sub_version, user_id=user_id, sub_id=sub.id, email=target_email
-                )
-                for srv_id, ok in res_item.items():
-                    if not ok:
-                        results[srv_id] = False
-                if not all(res_item.values()) or len(res_item) < len(fallback_targets):
-                    all_items_ok = False
-                if bump_item:
-                    needs_version_bump = True
+            if fallback_targets:
+                for target_uuid, target_email in sync_items:
+                    res_item, bump_item = await VlessSubscriptionService._execute_sync_to_nodes_with_status(
+                        fallback_targets,
+                        target_uuid,
+                        desired_active,
+                        version=pass_version,
+                        user_id=user_id,
+                        sub_id=sub.id,
+                        email=target_email,
+                    )
+                    for srv_id, ok in res_item.items():
+                        if not ok:
+                            pass_results[srv_id] = False
+                    if not all(res_item.values()) or len(res_item) < len(fallback_targets):
+                        pass_ok = False
+                    if bump_item:
+                        pass_bump = True
 
-        # If node reported version conflict, bump version and retry once
-        if needs_version_bump and fallback_targets:
+            return pass_results, pass_ok, pass_bump
+
+        results, all_items_ok, needs_version_bump = await _run_sync_pass(sub_version)
+
+        # If node reported version conflict, bump version and retry across all targets
+        if needs_version_bump:
             locked_sub = await vless_subscription_repo.bump_subscription_version(session, sub.id)
             if locked_sub:
                 sub = locked_sub
@@ -1026,18 +1035,7 @@ class VlessSubscriptionService:
                 sub.version = sub_version + 1
                 await session.flush()
                 sub_version = sub.version
-            all_items_ok = True
-            for t in fallback_targets:
-                results[t[0]] = True
-            for target_uuid, target_email in sync_items:
-                res_item, _ = await VlessSubscriptionService._execute_sync_to_nodes_with_status(
-                    fallback_targets, target_uuid, desired_active, version=sub_version, user_id=user_id, sub_id=sub.id, email=target_email
-                )
-                for srv_id, ok in res_item.items():
-                    if not ok:
-                        results[srv_id] = False
-                if not all(res_item.values()) or len(res_item) < len(fallback_targets):
-                    all_items_ok = False
+            results, all_items_ok, _ = await _run_sync_pass(sub_version)
 
         if excess_uuids:
             rev_exit_nodes = await VlessSubscriptionService.get_all_exit_nodes_for_revocation(session)
