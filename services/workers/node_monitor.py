@@ -620,8 +620,10 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 extra_changed = True
 
                             if not has_ingress_problem and st.consecutive_ingress_fails >= REQUIRED_INGRESS_FAILS:
+                                st.ingress_problem = True
                                 st.ingress_problem_started_at = now_m
                                 st.last_ingress_reminder_at = now_m
+                                db_extra["ingress_problem"] = True
                                 db_extra["ingress_problem_started_at"] = time.time()
                                 extra_changed = True
                                 ingress_alerts_to_send.append((
@@ -663,22 +665,25 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 db_extra["consecutive_ingress_fails"] = 0
                                 extra_changed = True
 
-                            if has_ingress_problem and st.consecutive_ingress_successes >= REQUIRED_INGRESS_SUCCESSES:
+                            if st.consecutive_ingress_successes >= REQUIRED_INGRESS_SUCCESSES:
+                                st.ingress_problem = False
                                 st.ingress_problem_started_at = None
                                 st.last_ingress_reminder_at = None
-                                if "ingress_problem_started_at" in db_extra:
+                                if "ingress_problem" in db_extra or "ingress_problem_started_at" in db_extra:
+                                    db_extra.pop("ingress_problem", None)
                                     db_extra.pop("ingress_problem_started_at", None)
                                     extra_changed = True
-                                ingress_alerts_to_send.append((
-                                    "ingress",
-                                    ALERT_INGRESS_RESTORED.format(
-                                        server_name=safe(server.name),
-                                        server_id=server.id,
-                                        domain=safe(active_origin_domain),
-                                        endpoint=safe(f"{sub_prefix}/ping"),
-                                    ),
-                                    False,
-                                ))
+                                if has_ingress_problem:
+                                    ingress_alerts_to_send.append((
+                                        "ingress",
+                                        ALERT_INGRESS_RESTORED.format(
+                                            server_name=safe(server.name),
+                                            server_id=server.id,
+                                            domain=safe(active_origin_domain),
+                                            endpoint=safe(f"{sub_prefix}/ping"),
+                                        ),
+                                        False,
+                                    ))
 
                         # 2. Evaluate CDN Delivery (only in dual probe mode when origin is healthy)
                         if cdn_probe_result is not None and cdn_domain:
@@ -695,22 +700,25 @@ async def check_node_resources_and_alerts(bot: Bot):
                                         db_extra["consecutive_cdn_fails"] = 0
                                         extra_changed = True
 
-                                    if has_cdn_problem and st.consecutive_cdn_successes >= REQUIRED_INGRESS_SUCCESSES:
+                                    if st.consecutive_cdn_successes >= REQUIRED_INGRESS_SUCCESSES:
+                                        st.cdn_problem = False
                                         st.cdn_problem_started_at = None
                                         st.last_cdn_reminder_at = None
-                                        if "cdn_problem_started_at" in db_extra:
+                                        if "cdn_problem" in db_extra or "cdn_problem_started_at" in db_extra:
+                                            db_extra.pop("cdn_problem", None)
                                             db_extra.pop("cdn_problem_started_at", None)
                                             extra_changed = True
-                                        ingress_alerts_to_send.append((
-                                            "cdn",
-                                            ALERT_CDN_INGRESS_RESTORED.format(
-                                                server_name=safe(server.name),
-                                                server_id=server.id,
-                                                domain=safe(cdn_domain),
-                                                endpoint=safe(f"{sub_prefix}/ping"),
-                                            ),
-                                            False,
-                                        ))
+                                        if has_cdn_problem:
+                                            ingress_alerts_to_send.append((
+                                                "cdn",
+                                                ALERT_CDN_INGRESS_RESTORED.format(
+                                                    server_name=safe(server.name),
+                                                    server_id=server.id,
+                                                    domain=safe(cdn_domain),
+                                                    endpoint=safe(f"{sub_prefix}/ping"),
+                                                ),
+                                                False,
+                                            ))
                                 else:
                                     st.consecutive_cdn_fails += 1
                                     st.consecutive_cdn_successes = 0
@@ -728,8 +736,10 @@ async def check_node_resources_and_alerts(bot: Bot):
                                             server.id, active_origin_domain, cdn_domain, cdn_detail, st.consecutive_cdn_fails, REQUIRED_CDN_FAILS,
                                         )
                                     elif not has_cdn_problem:
+                                        st.cdn_problem = True
                                         st.cdn_problem_started_at = now_m
                                         st.last_cdn_reminder_at = now_m
+                                        db_extra["cdn_problem"] = True
                                         db_extra["cdn_problem_started_at"] = time.time()
                                         extra_changed = True
                                         logger.warning(
@@ -769,38 +779,25 @@ async def check_node_resources_and_alerts(bot: Bot):
                     if extra_changed and fresh_server:
                         merged_extra = dict(fresh_server.extra_data or {})
                         merged_extra.update(db_extra)
+                        for _health_key in (
+                            "ingress_problem",
+                            "ingress_problem_started_at",
+                            "cdn_problem",
+                            "cdn_problem_started_at",
+                        ):
+                            if _health_key not in db_extra:
+                                merged_extra.pop(_health_key, None)
                         await update_server(session, fresh_server, extra_data=merged_extra)
 
-            # Decoupled alert dispatch outside DB transaction and advisory lock
-            for alert_kind, alert_text, is_problem in ingress_alerts_to_send:
-                sent_ok = False
+            # Decoupled alert dispatch outside DB transaction and advisory lock (notifications only)
+            for alert_kind, alert_text, _is_problem in ingress_alerts_to_send:
                 try:
-                    sent_ok = await _send_admin_alert_msg(
+                    await _send_admin_alert_msg(
                         bot,
                         alert_text,
                     )
                 except Exception as e:
                     logger.error("Failed to deliver %s alert for server %d: %s", alert_kind, server.id, e)
-                if sent_ok:
-                    state_prop = "cdn_problem" if alert_kind == "cdn" else "ingress_problem"
-                    setattr(st, state_prop, is_problem)
-                    async with session_scope() as session:
-                        fresh = await get_server_by_id(session, server.id, for_update=True)
-                        if fresh:
-                            cur_extra = dict(fresh.extra_data or {})
-                            if is_problem:
-                                cur_extra[state_prop] = True
-                                if alert_kind == "ingress" and "ingress_problem_started_at" not in cur_extra:
-                                    cur_extra["ingress_problem_started_at"] = time.time()
-                                elif alert_kind == "cdn" and "cdn_problem_started_at" not in cur_extra:
-                                    cur_extra["cdn_problem_started_at"] = time.time()
-                            else:
-                                cur_extra.pop(state_prop, None)
-                                if alert_kind == "ingress":
-                                    cur_extra.pop("ingress_problem_started_at", None)
-                                elif alert_kind == "cdn":
-                                    cur_extra.pop("cdn_problem_started_at", None)
-                            await update_server(session, fresh, extra_data=cur_extra)
 
         if is_healthy:
             if st.health_state == ServerHealthState.WAITING_CONFIRMATION:

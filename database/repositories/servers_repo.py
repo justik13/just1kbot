@@ -283,13 +283,13 @@ def get_server_load_score(server: Server) -> float:
 def has_server_ingress_problem(server: Server) -> bool:
     """Return True when node_monitor recorded an active origin ingress /ping outage."""
     extra = server.extra_data if isinstance(server.extra_data, dict) else {}
-    return bool(extra.get("ingress_problem_started_at"))
+    return bool(extra.get("ingress_problem") or extra.get("ingress_problem_started_at"))
 
 
 def has_server_cdn_problem(server: Server) -> bool:
     """Return True when node_monitor recorded an active CDN /ping outage."""
     extra = server.extra_data if isinstance(server.extra_data, dict) else {}
-    return bool(extra.get("cdn_problem_started_at"))
+    return bool(extra.get("cdn_problem") or extra.get("cdn_problem_started_at"))
 
 
 def _server_load_score(server: Server) -> tuple[bool, float, int]:
