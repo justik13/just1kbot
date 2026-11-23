@@ -23,8 +23,12 @@ from config.constants import (
 from config.enums import ServerHealthState, ServerLifecycleStatus
 from database.models import Server, User, VlessSubscription, WhiteInternetSubscription
 from database.repositories import vless_subscription_repo
-from database.repositories.servers_repo import get_server_load_score, get_server_role
-from services.xray_node_client import XrayNodeClient
+from database.repositories.servers_repo import (
+    get_server_load_score,
+    get_server_role,
+    has_server_ingress_problem,
+)
+from services.xray_node_client import XrayNodeClient, get_xray_node_client
 from utils.datetime_helpers import now_utc
 from utils.security import normalize_public_domain
 
@@ -166,8 +170,12 @@ class VlessSubscriptionService:
 
         selected_hubs: list[Server] = []
         if ru_hubs:
-            # Bypass overloaded hubs (>=85% CPU/RAM load) if at least one healthy hub exists
-            healthy_hubs = [s for s in ru_hubs if get_server_load_score(s) < 85.0] or ru_hubs
+            # Prefer hubs with clean origin ingress and <85% load; fall back softly so feeds never go empty
+            healthy_hubs = (
+                [s for s in ru_hubs if not has_server_ingress_problem(s) and get_server_load_score(s) < 85.0]
+                or [s for s in ru_hubs if get_server_load_score(s) < 85.0]
+                or ru_hubs
+            )
             # Consistent hashing per user UUID to prevent herding and jitter
             hub_idx = int(hashlib.md5(eff_uuid.encode()).hexdigest(), 16) % len(healthy_hubs)
             selected_hubs = [healthy_hubs[hub_idx]]
@@ -962,20 +970,54 @@ class VlessSubscriptionService:
         results: dict[int, bool] = {t[0]: True for t in targets}
         needs_version_bump = False
         all_items_ok = True
-        for target_uuid, target_email in sync_items:
-            res_item, bump_item = await VlessSubscriptionService._execute_sync_to_nodes_with_status(
-                targets, target_uuid, desired_active, version=sub_version, user_id=user_id, sub_id=sub.id, email=target_email
-            )
-            for srv_id, ok in res_item.items():
-                if not ok:
-                    results[srv_id] = False
-            if not all(res_item.values()) or len(res_item) < len(targets):
-                all_items_ok = False
-            if bump_item:
-                needs_version_bump = True
+
+        fallback_targets = list(targets)
+        if sync_items:
+            batch_payload = [
+                {
+                    "uuid": target_uuid,
+                    "email": target_email,
+                    "is_active": desired_active,
+                    "version": sub_version,
+                    "service": "vless",
+                }
+                for target_uuid, target_email in sync_items
+            ]
+            expected_uuids = {str(target_uuid).lower() for target_uuid, _ in sync_items}
+
+            async def _batch_one(
+                srv_id: int, api_url: str, api_key: str
+            ) -> tuple[int, bool]:
+                try:
+                    async with get_xray_node_client(timeout=15.0) as node_client:
+                        supported, succeeded, failed = await node_client.batch_sync_clients(
+                            api_url, api_key, batch_payload, timeout=15.0
+                        )
+                    if supported and not failed and expected_uuids.issubset(succeeded):
+                        return srv_id, True
+                except Exception as exc:
+                    logger.debug("Batch sync fast-path failed on server %s: %s", srv_id, exc)
+                return srv_id, False
+
+            batch_res = await asyncio.gather(*[_batch_one(t[0], t[1], t[2]) for t in targets])
+            succeeded_srv_ids = {srv_id for srv_id, ok in batch_res if ok}
+            fallback_targets = [t for t in targets if t[0] not in succeeded_srv_ids]
+
+        if fallback_targets:
+            for target_uuid, target_email in sync_items:
+                res_item, bump_item = await VlessSubscriptionService._execute_sync_to_nodes_with_status(
+                    fallback_targets, target_uuid, desired_active, version=sub_version, user_id=user_id, sub_id=sub.id, email=target_email
+                )
+                for srv_id, ok in res_item.items():
+                    if not ok:
+                        results[srv_id] = False
+                if not all(res_item.values()) or len(res_item) < len(fallback_targets):
+                    all_items_ok = False
+                if bump_item:
+                    needs_version_bump = True
 
         # If node reported version conflict, bump version and retry once
-        if needs_version_bump:
+        if needs_version_bump and fallback_targets:
             locked_sub = await vless_subscription_repo.bump_subscription_version(session, sub.id)
             if locked_sub:
                 sub = locked_sub
@@ -985,15 +1027,16 @@ class VlessSubscriptionService:
                 await session.flush()
                 sub_version = sub.version
             all_items_ok = True
-            results = {t[0]: True for t in targets}
+            for t in fallback_targets:
+                results[t[0]] = True
             for target_uuid, target_email in sync_items:
                 res_item, _ = await VlessSubscriptionService._execute_sync_to_nodes_with_status(
-                    targets, target_uuid, desired_active, version=sub_version, user_id=user_id, sub_id=sub.id, email=target_email
+                    fallback_targets, target_uuid, desired_active, version=sub_version, user_id=user_id, sub_id=sub.id, email=target_email
                 )
                 for srv_id, ok in res_item.items():
                     if not ok:
                         results[srv_id] = False
-                if not all(res_item.values()) or len(res_item) < len(targets):
+                if not all(res_item.values()) or len(res_item) < len(fallback_targets):
                     all_items_ok = False
 
         if excess_uuids:

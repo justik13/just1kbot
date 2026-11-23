@@ -280,9 +280,22 @@ def get_server_load_score(server: Server) -> float:
     return 0.0
 
 
-def _server_load_score(server: Server) -> tuple[float, int]:
-    """Sort key for servers: lower load score first, server.id tie-breaker."""
-    return (get_server_load_score(server), int(server.id or 0))
+def has_server_ingress_problem(server: Server) -> bool:
+    """Return True when node_monitor recorded an active origin ingress /ping outage."""
+    extra = server.extra_data if isinstance(server.extra_data, dict) else {}
+    return bool(extra.get("ingress_problem_started_at"))
+
+
+def has_server_cdn_problem(server: Server) -> bool:
+    """Return True when node_monitor recorded an active CDN /ping outage."""
+    extra = server.extra_data if isinstance(server.extra_data, dict) else {}
+    return bool(extra.get("cdn_problem_started_at"))
+
+
+def _server_load_score(server: Server) -> tuple[bool, float, int]:
+    """Sort key for servers: healthy ingress/CDN first, lower load score, server.id tie-breaker."""
+    has_probe_issue = has_server_ingress_problem(server) or has_server_cdn_problem(server)
+    return (has_probe_issue, get_server_load_score(server), int(server.id or 0))
 
 
 def _is_wi_hub_eligible(server: Server) -> bool:
