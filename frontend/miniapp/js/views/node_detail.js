@@ -38,6 +38,10 @@ function _openEditModal(node, onDone) {
             <input name="name" class="input" required maxlength="255" value="${escapeHtml(node.name)}">
         </div>
         <div class="field">
+            <label>Флаг</label>
+            <input name="country_flag" class="input" maxlength="10" value="${escapeHtml(node.country_flag || "")}" placeholder="🇸🇪">
+        </div>
+        <div class="field">
             <label>URL API ноды</label>
             <input name="api_url" class="input" type="url" required maxlength="500" value="${escapeHtml(node.api_url || "")}">
         </div>
@@ -57,6 +61,10 @@ function _openEditModal(node, onDone) {
             const payload = {
                 name: String(fd.get("name") || "").trim(),
             };
+            const newFlag = String(fd.get("country_flag") || "").trim();
+            if (newFlag !== (node.country_flag || "")) {
+                payload.country_flag = newFlag;
+            }
             const newUrl = String(fd.get("api_url") || "").trim();
             if (newUrl && newUrl !== node.api_url) {
                 payload.api_url = newUrl;
