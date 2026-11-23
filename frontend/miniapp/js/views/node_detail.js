@@ -1,5 +1,5 @@
 import { api } from "../api.js";
-import { escapeHtml, healthChipInfo, openModal, renderFlagHtml, roleLabel, showConfirmModal, showToast } from "../ui.js";
+import { escapeHtml, healthChipInfo, openModal, renderCountryFlagField, renderFlagHtml, roleLabel, showConfirmModal, showToast, wireCountryFlagFields } from "../ui.js";
 
 function _renderModules(node) {
     const mods = node.modules || {};
@@ -28,19 +28,15 @@ function _renderModuleErrors(node) {
 }
 
 function _openEditModal(node, onDone) {
-    const isExitNode = node.role === "exit_node";
     const box = document.createElement("form");
     box.className = "field";
-    box.style.gap = "10px";
+    box.style.gap = "12px";
     box.innerHTML = `
         <div class="field">
             <label>Название</label>
             <input name="name" class="input" required maxlength="255" value="${escapeHtml(node.name)}">
         </div>
-        <div class="field">
-            <label>Флаг</label>
-            <input name="country_flag" class="input" maxlength="10" value="${escapeHtml(node.country_flag || "")}" placeholder="🇸🇪">
-        </div>
+        ${renderCountryFlagField({ value: node.country_flag || "" })}
         <div class="field">
             <label>URL API ноды</label>
             <input name="api_url" class="input" type="url" required maxlength="500" value="${escapeHtml(node.api_url || "")}">
@@ -52,6 +48,7 @@ function _openEditModal(node, onDone) {
         <button type="submit" class="btn btn-primary">Сохранить</button>
     `;
     const close = openModal(`Редактировать #${node.id}`, box);
+    wireCountryFlagFields(box);
     box.addEventListener("submit", async (e) => {
         e.preventDefault();
         const fd = new FormData(box);
@@ -96,20 +93,20 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
 
         <section class="card">
             <div class="row">
-                <div style="display:flex; align-items:center; gap:10px;">
+                <div style="display:flex; align-items:center; gap:12px;">
                     ${renderFlagHtml(node.country_flag || node.location_code || "", 26)}
                     <div>
                         <div style="font-size:16px; font-weight:600;">${escapeHtml(node.name)}</div>
                         <div class="muted">Сервер #${node.id}</div>
                     </div>
                 </div>
-                <div class="row" style="gap:6px;">
+                <div class="row" style="gap:8px;">
                     <span class="chip chip-muted">${escapeHtml(roleLabel(node.role))}</span>
                     <span class="chip ${health.cls}">${escapeHtml(health.text)}</span>
                 </div>
             </div>
 
-            <div class="actions-row" style="margin-top:6px;">
+            <div class="actions-row" style="margin-top:8px;">
                 <button type="button" id="detailToggleBtn" class="btn btn-sm ${node.is_active ? "" : "btn-primary"}">
                     ${node.is_active ? "Выключить" : "Включить"}
                 </button>
@@ -162,10 +159,10 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
 
         <section class="card">
             <div class="card-title">Модули</div>
-            <div class="filter-pills" style="margin-bottom:6px;">${_renderModules(node)}</div>
+            <div class="filter-pills" style="margin-bottom:8px;">${_renderModules(node)}</div>
             ${node.inbounds && node.inbounds.length ? `
-                <div class="detail-item" style="margin-top:6px;">
-                    <span class="detail-label">Inbounds:</span>
+                <div class="detail-item" style="margin-top:8px;">
+                    <span class="detail-label">Inbounds</span>
                     <span class="mono">${node.inbounds.map((ib) => escapeHtml(ib)).join(", ")}</span>
                 </div>
             ` : ""}
