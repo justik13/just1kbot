@@ -984,7 +984,13 @@ async def serve_unified_subscription_feed(
                     ):
                         ready_hubs.append(hub)
                 if ready_hubs:
-                    ready_hubs.sort(key=lambda s: (servers_repo.get_server_load_score(s), int(s.id or 0)))
+                    ready_hubs.sort(
+                        key=lambda s: (
+                            servers_repo.has_server_ingress_problem(s) or servers_repo.has_server_cdn_problem(s),
+                            servers_repo.get_server_load_score(s),
+                            int(s.id or 0),
+                        )
+                    )
                     cdn_label_mode = str(await get_system_setting(session, "bi_cdn_label_mode", "name") or "name")
                     cdn_yandex_label = str(await get_system_setting(session, "bi_cdn_yandex_label", "Yandex") or "Yandex")
                     cdn_turboflare_label = str(await get_system_setting(session, "bi_cdn_turboflare_label", "Turboflare") or "Turboflare")
