@@ -311,6 +311,137 @@ export function healthChipInfo(node) {
     return { text: "Проблема", cls: "chip-err" };
 }
 
+export const COUNTRY_OPTIONS = [
+    { code: "AT", name: "Австрия" },
+    { code: "GB", name: "Великобритания" },
+    { code: "DE", name: "Германия" },
+    { code: "DK", name: "Дания" },
+    { code: "ES", name: "Испания" },
+    { code: "IT", name: "Италия" },
+    { code: "KZ", name: "Казахстан" },
+    { code: "CA", name: "Канада" },
+    { code: "LV", name: "Латвия" },
+    { code: "LT", name: "Литва" },
+    { code: "NL", name: "Нидерланды" },
+    { code: "NO", name: "Норвегия" },
+    { code: "AE", name: "ОАЭ" },
+    { code: "PL", name: "Польша" },
+    { code: "RU", name: "Россия" },
+    { code: "SG", name: "Сингапур" },
+    { code: "US", name: "США" },
+    { code: "TR", name: "Турция" },
+    { code: "UA", name: "Украина" },
+    { code: "FI", name: "Финляндия" },
+    { code: "FR", name: "Франция" },
+    { code: "CZ", name: "Чехия" },
+    { code: "CH", name: "Швейцария" },
+    { code: "SE", name: "Швеция" },
+    { code: "EE", name: "Эстония" },
+    { code: "JP", name: "Япония" },
+];
+
+const _COUNTRY_CODE_SET = new Set(COUNTRY_OPTIONS.map((c) => c.code));
+
+export function countryCodeToEmoji(code) {
+    const clean = String(code || "").trim().toUpperCase();
+    if (!/^[A-Z]{2}$/.test(clean)) return "";
+    return String.fromCodePoint(
+        0x1f1e6 + clean.charCodeAt(0) - 65,
+        0x1f1e6 + clean.charCodeAt(1) - 65
+    );
+}
+
+export function renderCountryFlagField({
+    name = "country_flag",
+    id = "",
+    label = "Страна / флаг",
+    value = "",
+    emptyLabel = "Не задан",
+} = {}) {
+    const raw = String(value || "").trim();
+    const code = _extractCountryCode(raw);
+    const isKnown = Boolean(code && _COUNTRY_CODE_SET.has(code));
+    const isCustom = Boolean(raw && raw !== "🌐" && !isKnown);
+    const selectVal = isKnown ? code : isCustom ? "__custom__" : "";
+    const effectiveVal = isKnown ? countryCodeToEmoji(code) : isCustom ? raw : "";
+
+    const optionsHtml = COUNTRY_OPTIONS.map(
+        (c) =>
+            `<option value="${c.code}" ${selectVal === c.code ? "selected" : ""}>${escapeHtml(c.name)} (${c.code})</option>`
+    ).join("");
+
+    return `
+        <div class="field" data-flag-field>
+            <label>${escapeHtml(label)}</label>
+            <div class="flag-picker">
+                <span class="flag-picker-preview" data-flag-preview>${renderFlagHtml(effectiveVal, 22)}</span>
+                <select class="select flag-picker-select" data-flag-select>
+                    <option value="" ${selectVal === "" ? "selected" : ""}>${escapeHtml(emptyLabel)}</option>
+                    ${optionsHtml}
+                    <option value="__custom__" ${selectVal === "__custom__" ? "selected" : ""}>Другая (код или флаг)…</option>
+                </select>
+                <input type="hidden" name="${escapeHtml(name)}" ${id ? `id="${escapeHtml(id)}"` : ""} value="${escapeHtml(effectiveVal)}" data-flag-value>
+            </div>
+            <input type="text" class="input" data-flag-custom maxlength="10" value="${escapeHtml(isCustom ? raw : "")}" placeholder="Код (напр. AU) или эмодзи" ${isCustom ? "" : "hidden"}>
+        </div>
+    `;
+}
+
+export function wireCountryFlagFields(root) {
+    if (!root) return;
+    root.querySelectorAll("[data-flag-field]").forEach((field) => {
+        const select = field.querySelector("[data-flag-select]");
+        const customInput = field.querySelector("[data-flag-custom]");
+        const hiddenInput = field.querySelector("[data-flag-value]");
+        const preview = field.querySelector("[data-flag-preview]");
+        if (!select || !customInput || !hiddenInput || !preview) return;
+
+        const sync = (nextVal, emit = true) => {
+            hiddenInput.value = nextVal;
+            preview.innerHTML = renderFlagHtml(nextVal, 22);
+            if (emit) {
+                hiddenInput.dispatchEvent(new Event("input", { bubbles: true }));
+            }
+        };
+
+        select.addEventListener("change", () => {
+            const val = select.value;
+            if (val === "__custom__") {
+                customInput.hidden = false;
+                customInput.focus();
+                sync(customInput.value.trim());
+            } else if (val) {
+                customInput.hidden = true;
+                sync(countryCodeToEmoji(val));
+            } else {
+                customInput.hidden = true;
+                sync("");
+            }
+        });
+
+        customInput.addEventListener("input", () => {
+            if (select.value === "__custom__") {
+                sync(customInput.value.trim());
+            }
+        });
+
+        const form = field.closest("form");
+        if (form) {
+            form.addEventListener("reset", () => {
+                setTimeout(() => {
+                    customInput.hidden = select.value !== "__custom__";
+                    const v = select.value === "__custom__"
+                        ? customInput.value.trim()
+                        : select.value
+                            ? countryCodeToEmoji(select.value)
+                            : "";
+                    sync(v, false);
+                }, 0);
+            });
+        }
+    });
+}
+
 function _extractCountryCode(flagOrCode) {
     const raw = String(flagOrCode || "").trim();
     if (!raw) return "";

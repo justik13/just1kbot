@@ -343,6 +343,29 @@
     border-color: var(--border-strong);
 }
 
+.flag-picker {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.flag-picker-preview {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-control);
+    background: var(--bg-input);
+    border: 1px solid var(--border-subtle);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.flag-picker-select {
+    flex: 1;
+    min-width: 0;
+}
+
 .checkbox-row {
     display: flex;
     align-items: center;

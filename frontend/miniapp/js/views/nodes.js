@@ -1,5 +1,5 @@
 import { api } from "../api.js";
-import { escapeHtml, healthChipInfo, openModal, renderFlagHtml, roleLabel, showToast } from "../ui.js";
+import { escapeHtml, healthChipInfo, openModal, renderCountryFlagField, renderFlagHtml, roleLabel, showToast, wireCountryFlagFields } from "../ui.js";
 
 let currentFilter = "all";
 
@@ -11,12 +11,9 @@ function _openLocationSubModal(node, onDone) {
     const defaultTurboflareName = baseLocName ? `${baseLocName} Turboflare` : "Turboflare";
     const box = document.createElement("form");
     box.className = "field";
-    box.style.gap = "10px";
+    box.style.gap = "12px";
     box.innerHTML = `
-        <div class="field">
-            <label>Флаг</label>
-            <input name="country_flag" class="input" maxlength="10" value="${escapeHtml(node.country_flag || "")}" placeholder="🇩🇪">
-        </div>
+        ${renderCountryFlagField({ value: node.country_flag || "" })}
         <label class="checkbox-row">
             <input name="in_standard" type="checkbox" ${inStdChecked ? "checked" : ""}>
             <span>Входит в Стандарт</span>
@@ -86,10 +83,11 @@ function _openLocationSubModal(node, onDone) {
         }
         previewEl.innerHTML = `<div class="muted" style="font-size:11px;">Как будет выглядеть в клиенте:</div>${lines.join("")}`;
     };
+    wireCountryFlagFields(box);
     box.addEventListener("input", refreshLocPreview);
     box.addEventListener("change", refreshLocPreview);
     refreshLocPreview();
-    const close = openModal(`${node.country_flag ? `${node.country_flag} ` : ""}${node.name} (#${node.id})`, box);
+    const close = openModal(`${node.name} (#${node.id})`, box);
     box.addEventListener("submit", async (e) => {
         e.preventDefault();
         const fd = new FormData(box);
@@ -392,7 +390,7 @@ export function renderNodesView(root, state, onReload, onSelectNode) {
             <div class="row">
                 <div class="card-title">Добавить ноду (v2 auto-discovery)</div>
             </div>
-            <form id="addNodeForm" class="field" style="gap:9px;">
+            <form id="addNodeForm" class="field" style="gap:12px;">
                 <div class="field">
                     <label>URL API ноды</label>
                     <input id="addApiUrl" class="input" type="url" required placeholder="https://node.domain.com:8444">
@@ -406,10 +404,7 @@ export function renderNodesView(root, state, onReload, onSelectNode) {
                         <label>Название (опционально)</label>
                         <input id="addName" class="input" type="text" maxlength="255">
                     </div>
-                    <div class="field">
-                        <label>Флаг (опционально)</label>
-                        <input id="addFlag" class="input" type="text" maxlength="10">
-                    </div>
+                    ${renderCountryFlagField({ id: "addFlag", label: "Страна (опционально)", emptyLabel: "Авто (GeoIP)" })}
                 </div>
                 <button id="addSubmitBtn" type="submit" class="btn btn-primary">Проверить и добавить</button>
             </form>
@@ -439,6 +434,7 @@ export function renderNodesView(root, state, onReload, onSelectNode) {
     });
 
     const addForm = root.querySelector("#addNodeForm");
+    wireCountryFlagFields(addForm);
     const addBtn = root.querySelector("#addSubmitBtn");
     addForm.addEventListener("submit", async (e) => {
         e.preventDefault();
