@@ -1,5 +1,5 @@
-import { api } from "../api.js";
-import { escapeHtml, formatDate, openModal, renderPagination, showConfirmModal, showToast } from "../ui.js";
+import { api } from "../api.js?v=2.7.6";
+import { escapeHtml, formatDate, openModal, renderPagination, showConfirmModal, showToast } from "../ui.js?v=2.7.6";
 
 let _pollTimer = null;
 

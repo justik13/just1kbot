@@ -57,6 +57,7 @@ from bot.miniapp.handlers_user import (
 logger = logging.getLogger(__name__)
 
 FRONTEND_DIR = (Path(__file__).resolve().parents[2] / "frontend" / "miniapp").resolve()
+GUIDES_ASSETS_DIR = (Path(__file__).resolve().parents[2] / "bot" / "templates" / "vless_landing" / "assets").resolve()
 
 _MIME_TYPES = {
     ".html": "text/html",
@@ -64,6 +65,10 @@ _MIME_TYPES = {
     ".js": "application/javascript",
     ".json": "application/json",
     ".svg": "image/svg+xml",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".mp4": "video/mp4",
 }
 
 _NO_CACHE_HEADERS = {
@@ -99,20 +104,33 @@ async def miniapp_index_handler(request: web.Request) -> web.Response:
 
 
 async def miniapp_asset_handler(request: web.Request) -> web.Response:
-    """Serve modular JS/CSS assets strictly from FRONTEND_DIR without traversal."""
+    """Serve modular JS/CSS assets strictly from FRONTEND_DIR (or guide images) without traversal."""
     rel_path = (request.match_info.get("asset_path") or "").lstrip("/")
     if not rel_path or ".." in rel_path.split("/"):
         return web.Response(status=404, text="Not Found")
 
-    target = (FRONTEND_DIR / rel_path).resolve()
-    if FRONTEND_DIR not in target.parents or not target.is_file():
-        return web.Response(status=404, text="Not Found")
+    if rel_path.startswith("guides/"):
+        guide_rel = rel_path[len("guides/"):]
+        if not guide_rel or "/" in guide_rel:
+            return web.Response(status=404, text="Not Found")
+        target = (GUIDES_ASSETS_DIR / guide_rel).resolve()
+        if GUIDES_ASSETS_DIR not in target.parents or not target.is_file():
+            return web.Response(status=404, text="Not Found")
+    else:
+        target = (FRONTEND_DIR / rel_path).resolve()
+        if FRONTEND_DIR not in target.parents or not target.is_file():
+            return web.Response(status=404, text="Not Found")
 
     content_type = _MIME_TYPES.get(target.suffix.lower())
     if not content_type:
         return web.Response(status=404, text="Not Found")
 
-    return web.FileResponse(target, headers=_ASSET_CACHE_HEADERS)
+    headers = (
+        {"Cache-Control": "public, max-age=604800"}
+        if rel_path.startswith("guides/")
+        else _ASSET_CACHE_HEADERS
+    )
+    return web.FileResponse(target, headers=headers)
 
 
 def setup_miniapp_routes(app: web.Application) -> None:

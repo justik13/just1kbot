@@ -11,8 +11,12 @@ from aiogram.types import (
 from bot import texts
 
 
-def build_start_inline_keyboard(miniapp_url: str, mtproto_url: str | None = None) -> InlineKeyboardMarkup:
-    """Inline keyboard with Mini App Connect button and optional MTProto proxy button."""
+def build_start_inline_keyboard(
+    miniapp_url: str,
+    mtproto_url: str | None = None,
+    referral_share_url: str | None = None,
+) -> InlineKeyboardMarkup:
+    """Inline keyboard with Mini App Connect button, optional referral share, and MTProto proxy button."""
     rows = [
         [
             InlineKeyboardButton(
@@ -21,6 +25,15 @@ def build_start_inline_keyboard(miniapp_url: str, mtproto_url: str | None = None
             )
         ]
     ]
+    if referral_share_url and str(referral_share_url).strip():
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="Пригласить друга",
+                    url=str(referral_share_url).strip(),
+                )
+            ]
+        )
     if mtproto_url and str(mtproto_url).strip():
         rows.append(
             [

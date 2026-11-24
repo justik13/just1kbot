@@ -1,4 +1,4 @@
-import { api } from "../api.js";
+import { api } from "../api.js?v=2.7.6";
 import {
     copyText,
     escapeHtml,
@@ -8,13 +8,20 @@ import {
     openModal,
     showConfirmModal,
     showToast,
-} from "../ui.js";
+} from "../ui.js?v=2.7.6";
+import { renderUserGuidesView } from "./user_guides.js?v=2.7.6";
 
 const _state = {
     tab: null,
     platform: _detectPlatform(),
     data: null,
     avatarFailed: false,
+    guidesReturnTab: "connect",
+    guidesReturnScrollY: 0,
+    guideTab: null,
+    guideIosMethod: "tf",
+    guideAndroidMethod: "play",
+    guideDesktopMethod: null,
 };
 
 const _ICONS = {
@@ -33,6 +40,7 @@ const _ICONS = {
     card: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>`,
     more: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>`,
     file: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`,
+    book: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>`,
 };
 
 const _CLIENT_LINKS = {
@@ -1097,6 +1105,24 @@ function _syncTopbarProfile(d, root) {
     };
 }
 
+let _cabinetTgBackListener = null;
+
+function _setCabinetBackButton(onBack) {
+    const tg = window.Telegram && window.Telegram.WebApp;
+    if (!tg || !tg.BackButton) return;
+    if (_cabinetTgBackListener) {
+        tg.BackButton.offClick(_cabinetTgBackListener);
+        _cabinetTgBackListener = null;
+    }
+    if (onBack) {
+        _cabinetTgBackListener = onBack;
+        tg.BackButton.onClick(_cabinetTgBackListener);
+        tg.BackButton.show();
+    } else {
+        tg.BackButton.hide();
+    }
+}
+
 function _render(root) {
     const d = _state.data;
     if (!d) return;
@@ -1111,7 +1137,7 @@ function _render(root) {
         { id: "tariffs", label: "Тарифы", icon: _ICONS.card },
         { id: "more", label: "Ещё", icon: _ICONS.more },
     ];
-    const validTabs = ["connect", "tariffs", "more", "profile"];
+    const validTabs = ["connect", "tariffs", "more", "profile", "guides"];
 
     if (!validTabs.includes(_state.tab)) {
         _state.tab = hasAny ? "connect" : "tariffs";
@@ -1143,16 +1169,34 @@ function _render(root) {
     const body = root.querySelector("#userTabBody");
     const reload = () => loadAndRenderUserCabinet(root);
 
-    if (_state.tab === "connect") _renderConnectTab(body, d, reload, root);
-    else if (_state.tab === "tariffs") _renderTariffsTab(body, d, reload);
-    else if (_state.tab === "more") _renderMoreTab(body, d, reload);
-    else _renderProfileTab(body, d, reload);
+    if (_state.tab === "connect") {
+        _setCabinetBackButton(null);
+        _renderConnectTab(body, d, reload, root);
+    } else if (_state.tab === "tariffs") {
+        _setCabinetBackButton(null);
+        _renderTariffsTab(body, d, reload);
+    } else if (_state.tab === "more") {
+        _setCabinetBackButton(null);
+        _renderMoreTab(body, d, root);
+    } else if (_state.tab === "guides") {
+        const goBack = () => {
+            _setCabinetBackButton(null);
+            _state.tab = _state.guidesReturnTab || "connect";
+            _render(root);
+            requestAnimationFrame(() => window.scrollTo(0, _state.guidesReturnScrollY || 0));
+        };
+        _setCabinetBackButton(goBack);
+        renderUserGuidesView(body, _state, d, goBack);
+    } else {
+        _setCabinetBackButton(null);
+        _renderProfileTab(body, d, reload);
+    }
 
     if (prevGuideOpen) {
         const nextGuide = root.querySelector("#connectGuide");
         if (nextGuide) nextGuide.open = true;
     }
-    if (prevScrollY > 0 && _state.tab !== "profile") {
+    if (prevScrollY > 0 && _state.tab !== "profile" && _state.tab !== "guides") {
         window.scrollTo(0, prevScrollY);
     }
 }
@@ -1266,12 +1310,29 @@ function _renderConnectTab(body, d, reload, root) {
                 </div>
                 <button id="goTariffsBtn" type="button" class="btn btn-primary btn-lg">Перейти к тарифам</button>
                 ${_buildGuideHtml(subUrl, backupSubUrl, false)}
+                <button id="openGuidesFromInactiveBtn" type="button" class="guides-trigger-card">
+                    <span class="settings-left">
+                        ${_ICONS.book}
+                        <span>
+                            <span style="display:block; font-weight:600; font-size:13px;">Центр инструкций и база знаний</span>
+                            <span class="muted" style="font-size:12px;">iOS, Android, ПК / Mac и частые вопросы</span>
+                        </span>
+                    </span>
+                    <span class="node-chevron">›</span>
+                </button>
             </section>
             ${(d.devices || []).length ? _buildDevicesSectionHtml(d) : ""}
         `;
         body.querySelector("#goTariffsBtn").addEventListener("click", () => {
             _state.tab = "tariffs";
             _render(root);
+        });
+        body.querySelector("#openGuidesFromInactiveBtn")?.addEventListener("click", () => {
+            _state.guidesReturnTab = "connect";
+            _state.guidesReturnScrollY = window.scrollY;
+            _state.tab = "guides";
+            _render(root);
+            window.scrollTo(0, 0);
         });
         _bindGuideEvents(body, root);
         _bindDevicesEvents(body, d, reload);
@@ -1363,15 +1424,18 @@ function _renderConnectTab(body, d, reload, root) {
         `;
 
     const isWiOnlyExhausted = Boolean(!std.active && wiExhausted);
+    const hasBothActive = Boolean(std.active && wiHasPeriod && !wiExhausted);
 
     body.innerHTML = `
         <section class="hero-section">
             <div class="hero-title-group">
-                <span class="hero-kicker ${isStdGrace || isWiOnlyExhausted ? "warn" : ""}">${isStdGrace ? `Льготный период · ~${graceHoursLeft} ч.` : (isWiOnlyExhausted ? "Трафик исчерпан" : "Активен · Готов к работе")}</span>
-                <h1 class="hero-headline-lg">${isStdGrace ? "Подписка закончилась" : (isWiOnlyExhausted ? "Трафик закончился" : "Доступ настроен")}</h1>
+                <span class="hero-kicker ${isStdGrace || isWiOnlyExhausted ? "warn" : ""}">${isStdGrace ? `Льготный период · ~${graceHoursLeft} ч.` : (isWiOnlyExhausted ? "Белый интернет" : "Подписка активна")}</span>
+                <h1 class="hero-headline-lg">${isStdGrace ? "Подписка закончилась" : (isWiOnlyExhausted ? "Трафик закончился" : "Подключение готово")}</h1>
                 <p class="hero-sub">${isStdGrace
                     ? `Основной срок подписки закончился, но доступ сохранён ещё на ~${graceHoursLeft} ч., чтобы вы успели продлить подписку без отключения.`
-                    : (isWiOnlyExhausted ? "Пополните пакет трафика или продлите подписку на вкладке «Тарифы»." : "Обе подписки работают по одной ссылке")}</p>
+                    : (isWiOnlyExhausted
+                        ? "Пополните пакет трафика или выберите тариф на вкладке «Тарифы»."
+                        : (hasBothActive ? "Стандарт и Белый интернет работают по одной ссылке" : "Выберите приложение ниже или скопируйте ссылку"))}</p>
             </div>
 
             ${isStdGrace ? `
@@ -1400,6 +1464,17 @@ function _renderConnectTab(body, d, reload, root) {
             </div>
 
             ${_buildGuideHtml(subUrl, backupSubUrl, true)}
+
+            <button id="openGuidesFromConnectBtn" type="button" class="guides-trigger-card">
+                <span class="settings-left">
+                    ${_ICONS.book}
+                    <span>
+                        <span style="display:block; font-weight:600; font-size:13px;">Центр инструкций и база знаний</span>
+                        <span class="muted" style="font-size:12px;">iOS, Android, ПК / Mac и частые вопросы</span>
+                    </span>
+                </span>
+                <span class="node-chevron">›</span>
+            </button>
 
             <div class="troubleshoot-box" style="margin-top:0;">
                 <div class="troubleshoot-title">
@@ -1451,6 +1526,13 @@ function _renderConnectTab(body, d, reload, root) {
     }
     _bindGuideEvents(body, root);
     _bindDevicesEvents(body, d, reload);
+    body.querySelector("#openGuidesFromConnectBtn")?.addEventListener("click", () => {
+        _state.guidesReturnTab = "connect";
+        _state.guidesReturnScrollY = window.scrollY;
+        _state.tab = "guides";
+        _render(root);
+        window.scrollTo(0, 0);
+    });
 }
 
 function _renderTariffsTab(body, d, reload) {
@@ -2004,7 +2086,7 @@ function _bindDevicesEvents(container, d, reload) {
     });
 }
 
-function _renderMoreTab(body, d) {
+function _renderMoreTab(body, d, root) {
     const ref = d.referrals || {};
     const bal = d.balance || { real: 0, bonus: 0, total: 0 };
     const minActive = ref.active_min_topup_rub || 67;
@@ -2110,6 +2192,18 @@ function _renderMoreTab(body, d) {
             ` : ""}
         </section>
 
+        <section class="section-block">
+            <div class="section-head">
+                <h2 class="section-title">Инструкции</h2>
+            </div>
+            <div class="list-group">
+                <button id="openGuidesFromMoreBtn" type="button" class="settings-row">
+                    <span class="settings-left">${_ICONS.book}<span>Центр инструкций и база знаний</span></span>
+                    <span class="mono-badge">→</span>
+                </button>
+            </div>
+        </section>
+
         ${hasSupportRows ? `
             <section class="section-block">
                 <div class="section-head">
@@ -2145,6 +2239,13 @@ function _renderMoreTab(body, d) {
         ` : ""}
     `;
 
+    body.querySelector("#openGuidesFromMoreBtn")?.addEventListener("click", () => {
+        _state.guidesReturnTab = "more";
+        _state.guidesReturnScrollY = window.scrollY;
+        _state.tab = "guides";
+        _render(root);
+        window.scrollTo(0, 0);
+    });
     body.querySelector("#shareRefBtn").addEventListener("click", () => openExternalLink(shareUrl));
     body.querySelector("#copyRefBtn").addEventListener("click", () => copyText(ref.link, "Ссылка скопирована"));
     body.querySelector("#refLinkBox")?.addEventListener("click", () => copyText(ref.link, "Ссылка скопирована"));

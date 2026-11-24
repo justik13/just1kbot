@@ -1604,6 +1604,39 @@
             text-align: center;
         }
 
+        .guide-video-details {
+            background: rgba(255, 255, 255, 0.025);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            margin-bottom: 12px;
+            overflow: hidden;
+        }
+        .guide-video-summary {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 12px 14px;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-main);
+            cursor: pointer;
+            list-style: none;
+        }
+        .guide-video-summary::-webkit-details-marker {
+            display: none;
+        }
+        .guide-video-wrap {
+            padding: 0 12px 12px;
+        }
+        .guide-video {
+            width: 100%;
+            max-height: 440px;
+            border-radius: 8px;
+            background: #000000;
+            display: block;
+        }
+
         /* Clean Data Table Card (Kazakhstan Address) */
         .guide-data-card {
             background: rgba(255, 255, 255, 0.025);
