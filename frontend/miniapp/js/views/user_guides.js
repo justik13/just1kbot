@@ -1,4 +1,4 @@
-import { copyText, escapeHtml, openModal } from "../ui.js?v=2.7.7";
+import { copyText, escapeHtml, openModal } from "../ui.js?v=2.7.8";
 
 function _openExternal(url) {
     if (!url) return;
@@ -156,7 +156,7 @@ function _renderAndroidContent(method) {
             </div>
             <div class="guide-step-card">
                 <div class="guide-step-head"><span class="guide-step-num">2</span><span>Подключите профиль</span></div>
-                <p class="muted">Вернитесь на вкладку «Доступ» и нажмите кнопку «Подключить в INCY» или «Открыть в Happ», либо вставьте скопированную ссылку в приложении через «+».</p>
+                <p class="muted">Вернитесь на вкладку «Доступ» и нажмите кнопку «Подключить в INCY» или «Подключить в Happ», либо вставьте скопированную ссылку в приложении через «+».</p>
             </div>
         `;
     }

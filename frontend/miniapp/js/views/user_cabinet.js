@@ -1,4 +1,4 @@
-import { api } from "../api.js?v=2.7.7";
+import { api } from "../api.js?v=2.7.8";
 import {
     copyText,
     escapeHtml,
@@ -8,8 +8,8 @@ import {
     openModal,
     showConfirmModal,
     showToast,
-} from "../ui.js?v=2.7.7";
-import { renderUserGuidesView } from "./user_guides.js?v=2.7.7";
+} from "../ui.js?v=2.7.8";
+import { renderUserGuidesView } from "./user_guides.js?v=2.7.8";
 
 const _state = {
     tab: null,
@@ -1861,7 +1861,7 @@ function _buildDevicesSectionHtml(d) {
                 <div style="color:var(--text-secondary);">${_ICONS.phone}</div>
                 <div style="font-weight:600; font-size:14px;">Устройств пока нет</div>
                 <p class="muted" style="font-size:12px;">
-                    Нажмите «Подключить в INCY» или «Открыть в Happ» выше — устройство привяжется автоматически.
+                    Нажмите «Подключить в INCY» или «Подключить в Happ» выше — устройство привяжется автоматически.
                 </p>
             </div>
         `

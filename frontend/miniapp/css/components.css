@@ -1476,7 +1476,8 @@ body[data-tier="white_internet"] .guides-trigger-badge {
 }
 
 .guide-video-priority[open] .guide-video-chevron,
-details[open] > summary .guide-video-chevron {
+details[open] > summary .guide-video-chevron,
+details[open] > summary .disclosure-pill svg {
     transform: rotate(180deg);
 }
 
@@ -1496,10 +1497,12 @@ details[open] > summary .guide-video-chevron {
     flex-shrink: 0;
 }
 
-.disclosure-pill .guide-video-chevron {
+.disclosure-pill .guide-video-chevron,
+.disclosure-pill svg {
     color: var(--text-primary);
     width: 14px;
     height: 14px;
+    transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .seg-btn-with-icon {

@@ -48,6 +48,7 @@ def get_shared_design_tokens_css() -> str:
     return tokens_path.read_text(encoding="utf-8")
 
 
+@functools.lru_cache(maxsize=1)
 def get_vless_landing_active_html() -> str:
     """Assemble modular landing template with inline Base64 real screenshots into memory."""
     landing_dir = _TEMPLATES_DIR / "vless_landing"
