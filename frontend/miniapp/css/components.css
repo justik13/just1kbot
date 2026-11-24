@@ -73,7 +73,8 @@
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: var(--accent-emerald);
+    background: var(--accent-white);
+    box-shadow: 0 0 8px rgba(255, 255, 255, 0.6);
 }
 
 .brand-title {
@@ -297,8 +298,9 @@
 }
 
 .chip-ok {
-    color: var(--accent-emerald);
-    border-color: rgba(52, 211, 153, 0.25);
+    color: var(--accent-sky);
+    border-color: rgba(56, 189, 248, 0.30);
+    background: rgba(56, 189, 248, 0.08);
 }
 
 .chip-info {
@@ -1235,8 +1237,8 @@
 }
 
 .switch input:checked + .switch-track {
-    background: var(--accent-emerald);
-    border-color: var(--accent-emerald);
+    background: var(--accent-sky);
+    border-color: var(--accent-sky);
 }
 
 .switch input:checked + .switch-track::after {
@@ -1524,8 +1526,13 @@
 
 .plan-card.plan-wi,
 .plan-card.plan-featured {
-    border-color: var(--border-strong);
-    background: var(--bg-elevated);
+    border-color: rgba(255, 255, 255, 0.24);
+    background:
+        radial-gradient(ellipse 80% 50% at 50% 0%, rgba(255, 255, 255, 0.08), transparent 70%),
+        var(--bg-elevated);
+    box-shadow:
+        0 0 36px -10px rgba(255, 255, 255, 0.18),
+        inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
 
 .plan-wi .progress-fill {
@@ -1665,7 +1672,7 @@
     gap: 8px;
     font-size: 12px;
     font-weight: 500;
-    color: var(--accent-emerald);
+    color: var(--accent-sky);
 }
 
 .hero-kicker.warn {
@@ -1719,7 +1726,13 @@
 }
 
 .channel-tile.is-wi {
-    border-color: var(--border-strong);
+    border-color: rgba(255, 255, 255, 0.22);
+    background:
+        radial-gradient(ellipse 85% 55% at 50% 0%, rgba(255, 255, 255, 0.06), transparent 70%),
+        var(--bg-surface);
+    box-shadow:
+        0 0 28px -10px rgba(255, 255, 255, 0.16),
+        inset 0 1px 0 rgba(255, 255, 255, 0.16);
 }
 
 .channel-tile.is-inactive {
@@ -1748,11 +1761,13 @@
 }
 
 .channel-tile.is-active .channel-indicator {
-    background: var(--accent-emerald);
+    background: var(--accent-sky);
+    box-shadow: 0 0 8px rgba(56, 189, 248, 0.7);
 }
 
 .channel-tile.is-wi.is-active .channel-indicator {
     background: var(--accent-white);
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.85);
 }
 
 .channel-tile.is-warn .channel-indicator {

@@ -28,12 +28,12 @@
             --negative-tint: rgba(239, 68, 68, 0.12);
             --negative-border: rgba(239, 68, 68, 0.32);
 
-            /* Tier ambient illumination (Apple glow) */
-            --tier-glow-color: rgba(16, 185, 129, 0.12);
-            --tier-highlight-line: rgba(52, 211, 153, 0.45);
-            --tier-accent: #34d399;
-            --tier-tint: rgba(16, 185, 129, 0.14);
-            --tier-border: rgba(52, 211, 153, 0.34);
+            /* Tier ambient illumination (Apple blue for Standard, white glow for White Internet) */
+            --tier-glow-color: rgba(56, 189, 248, 0.11);
+            --tier-highlight-line: rgba(56, 189, 248, 0.45);
+            --tier-accent: #38bdf8;
+            --tier-tint: rgba(56, 189, 248, 0.14);
+            --tier-border: rgba(56, 189, 248, 0.34);
 
             /* Radii (Apple smooth corners) */
             --radius-card: 22px;
@@ -64,11 +64,18 @@
         }
 
         body[data-tier="white_internet"] {
-            --tier-glow-color: rgba(255, 255, 255, 0.12);
-            --tier-highlight-line: rgba(255, 255, 255, 0.50);
+            --tier-glow-color: rgba(255, 255, 255, 0.16);
+            --tier-highlight-line: rgba(255, 255, 255, 0.65);
             --tier-accent: #ffffff;
-            --tier-tint: rgba(255, 255, 255, 0.12);
-            --tier-border: rgba(255, 255, 255, 0.34);
+            --tier-tint: rgba(255, 255, 255, 0.14);
+            --tier-border: rgba(255, 255, 255, 0.36);
+        }
+
+        body[data-tier="white_internet"] .card {
+            box-shadow:
+                0 24px 60px rgba(0, 0, 0, 0.92),
+                0 0 56px -12px rgba(255, 255, 255, 0.22),
+                inset 0 1px 0 rgba(255, 255, 255, 0.18);
         }
 
         *, *::before, *::after {
