@@ -1,4 +1,4 @@
-import { copyText, escapeHtml, openModal } from "../ui.js?v=2.7.6";
+import { copyText, escapeHtml, openModal } from "../ui.js?v=2.7.7";
 
 function _openExternal(url) {
     if (!url) return;
@@ -26,7 +26,7 @@ function _renderIosContent(method) {
             </div>
             <details class="guide-details">
                 <summary class="guide-summary">
-                    <span>Видеоинструкция (38 сек · 8,4 МБ)</span>
+                    <span>Видеоинструкция (38 сек · 2,0 МБ)</span>
                     <span class="muted" style="font-size:12px;">▾</span>
                 </summary>
                 <div class="guide-body">

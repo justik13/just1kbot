@@ -425,34 +425,18 @@ def _extract_manual_review_alert_after_mark_paid(
     external_id: str | None,
 ) -> tuple[Any, int | None, Any, str, str | None] | None:
     """Return one-time admin alert payload if mark_order_paid quarantined the order."""
-    order_meta = dict(order.metadata_ or {})
-    is_quarantined = bool(
-        order_meta.get("underpaid")
-        or order_meta.get("late_payment_after_refund_on_canceled")
-        or order_meta.get("late_payment_attempt_rejected")
-        or order_meta.get("requires_manual_review")
-    )
-    if not is_quarantined or order_meta.get("mismatch_alert_sent"):
+    from services.order_service import extract_manual_review_alert
+
+    info = extract_manual_review_alert(order)
+    if info is None:
         return None
-    reason = (
-        order_meta.get("refund_amount_mismatch")
-        or order_meta.get("payment_mismatch_reason")
-        or (
-            f"late_payment_after_refund_on_canceled: {order_meta.get('late_payment_after_refund_on_canceled')}"
-            if order_meta.get("late_payment_after_refund_on_canceled")
-            else None
-        )
-        or (
-            f"late_payment_attempt_rejected: {order_meta.get('late_payment_attempt_rejected')}"
-            if order_meta.get("late_payment_attempt_rejected")
-            else None
-        )
-        or order_meta.get("manual_review_reason")
-        or "requires_manual_review"
+    return (
+        info["order_id"],
+        info["user_id"],
+        info["amount_rub"],
+        str(info["mismatch"]),
+        external_id,
     )
-    order_meta["mismatch_alert_sent"] = True
-    order.metadata_ = order_meta
-    return (order.id, order.user_id, order.amount_rub, str(reason), external_id)
 
 
 def _flag_order_manual_review(

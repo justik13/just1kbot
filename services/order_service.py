@@ -90,6 +90,70 @@ async def acquire_user_account_lock(session: AsyncSession, user_id: int) -> None
         )
 
 
+def extract_manual_review_alert(
+    order: Order | None,
+    *,
+    require_mismatch_key: bool = False,
+) -> dict[str, object] | None:
+    """Build a one-time admin alert payload for quarantined/mismatched orders.
+
+    Marks ``mismatch_alert_sent = True`` on ``order.metadata_`` so repeated
+    webhook/reconciliation/check passes never duplicate the alert.
+    """
+    if order is None:
+        return None
+    order_meta = dict(order.metadata_ or {})
+    if order_meta.get("mismatch_alert_sent"):
+        return None
+
+    has_mismatch_key = bool(
+        order_meta.get("payment_amount_mismatch")
+        or order_meta.get("refund_amount_mismatch")
+        or order_meta.get("payment_mismatch_reason")
+        or order_meta.get("payment_id_mismatch")
+        or order_meta.get("refund_payment_id_mismatch")
+        or order_meta.get("cancel_payment_id_mismatch")
+        or order_meta.get("late_payment_after_refund_on_canceled")
+        or order_meta.get("late_payment_attempt_rejected")
+        or order_meta.get("underpaid")
+    )
+    if require_mismatch_key:
+        if not (order_meta.get("requires_manual_review") and has_mismatch_key):
+            return None
+    else:
+        if not (has_mismatch_key or order_meta.get("requires_manual_review")):
+            return None
+
+    reason = (
+        order_meta.get("payment_amount_mismatch")
+        or order_meta.get("refund_amount_mismatch")
+        or order_meta.get("payment_mismatch_reason")
+        or order_meta.get("payment_id_mismatch")
+        or order_meta.get("refund_payment_id_mismatch")
+        or order_meta.get("cancel_payment_id_mismatch")
+        or (
+            f"late_payment_after_refund_on_canceled: {order_meta.get('late_payment_after_refund_on_canceled')}"
+            if order_meta.get("late_payment_after_refund_on_canceled")
+            else None
+        )
+        or (
+            f"late_payment_attempt_rejected: {order_meta.get('late_payment_attempt_rejected')}"
+            if order_meta.get("late_payment_attempt_rejected")
+            else None
+        )
+        or order_meta.get("manual_review_reason")
+        or "requires_manual_review"
+    )
+    order_meta["mismatch_alert_sent"] = True
+    order.metadata_ = order_meta
+    return {
+        "order_id": order.id,
+        "user_id": order.user_id,
+        "amount_rub": order.amount_rub,
+        "mismatch": str(reason),
+    }
+
+
 class OrderService:
     @staticmethod
     async def acquire_user_account_lock(
@@ -1612,13 +1676,6 @@ class OrderService:
                         order.id,
                         result.external_id,
                     )
-                    order_meta = dict(order.metadata_ or {})
-                    order_meta["requires_manual_review"] = True
-                    order_meta["manual_review"] = True
-                    order_meta["late_payment_attempt_rejected"] = str(result.external_id)
-                    order.metadata_ = order_meta
-                    order._newly_paid = False
-                    await session.flush()
                     return order
                 if (order.metadata_ or {}).get("underpaid"):
                     order._newly_paid = False

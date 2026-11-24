@@ -1,4 +1,4 @@
-import { api } from "../api.js?v=2.7.6";
+import { api } from "../api.js?v=2.7.7";
 import {
     copyText,
     escapeHtml,
@@ -8,8 +8,8 @@ import {
     openModal,
     showConfirmModal,
     showToast,
-} from "../ui.js?v=2.7.6";
-import { renderUserGuidesView } from "./user_guides.js?v=2.7.6";
+} from "../ui.js?v=2.7.7";
+import { renderUserGuidesView } from "./user_guides.js?v=2.7.7";
 
 const _state = {
     tab: null,
@@ -1192,6 +1192,13 @@ function _render(root) {
         _renderMoreTab(body, d, root);
     } else if (_state.tab === "guides") {
         const goBack = () => {
+            body.querySelectorAll("video").forEach((v) => {
+                try {
+                    if (!v.paused) v.pause();
+                } catch {
+                    // Non-critical
+                }
+            });
             _setCabinetBackButton(null);
             _state.tab = _state.guidesReturnTab || "connect";
             _render(root);

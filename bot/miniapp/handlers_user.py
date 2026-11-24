@@ -751,39 +751,9 @@ async def api_user_order_check_handler(request: web.Request) -> web.Response:
                         external_id=external_id,
                         paid_amount_rub=status_res.amount_rub,
                     )
-                    target_order = paid or locked
-                    target_meta = dict(target_order.metadata_ or {})
-                    is_quarantined = bool(
-                        target_meta.get("underpaid")
-                        or target_meta.get("late_payment_after_refund_on_canceled")
-                        or target_meta.get("late_payment_attempt_rejected")
-                        or target_meta.get("requires_manual_review")
-                    )
-                    if is_quarantined and not target_meta.get("mismatch_alert_sent"):
-                        reason_text = str(
-                            target_meta.get("refund_amount_mismatch")
-                            or target_meta.get("payment_mismatch_reason")
-                            or (
-                                f"late_payment_after_refund_on_canceled: {target_meta.get('late_payment_after_refund_on_canceled')}"
-                                if target_meta.get("late_payment_after_refund_on_canceled")
-                                else None
-                            )
-                            or (
-                                f"late_payment_attempt_rejected: {target_meta.get('late_payment_attempt_rejected')}"
-                                if target_meta.get("late_payment_attempt_rejected")
-                                else None
-                            )
-                            or target_meta.get("manual_review_reason")
-                            or "requires_manual_review"
-                        )
-                        target_meta["mismatch_alert_sent"] = True
-                        target_order.metadata_ = target_meta
+                    admin_alert_info = order_service.extract_manual_review_alert(paid or locked)
+                    if admin_alert_info is not None:
                         await session.flush()
-                        admin_alert_info = {
-                            "order_id": target_order.id,
-                            "amount_rub": target_order.amount_rub,
-                            "mismatch": reason_text,
-                        }
                     final_status = paid.status if paid else locked.status
                 elif is_partial_refund or mismatch_reason:
                     reason_text = str(

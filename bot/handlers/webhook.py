@@ -190,48 +190,12 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                 notify_order_info = (order.id, order.user_id)
                 await session.flush()
 
-            admin_alert_info = None
+            from services.order_service import extract_manual_review_alert
+
+            admin_alert_info = extract_manual_review_alert(order, require_mismatch_key=True)
+            if admin_alert_info is not None and order is not None:
+                order_meta = order.metadata_ or {}
             refund_alert_info = None
-            has_mismatch_review = bool(
-                order_meta.get("requires_manual_review")
-                and (
-                    order_meta.get("payment_amount_mismatch")
-                    or order_meta.get("refund_amount_mismatch")
-                    or order_meta.get("payment_id_mismatch")
-                    or order_meta.get("refund_payment_id_mismatch")
-                    or order_meta.get("cancel_payment_id_mismatch")
-                    or order_meta.get("late_payment_after_refund_on_canceled")
-                    or order_meta.get("late_payment_attempt_rejected")
-                    or order_meta.get("underpaid")
-                )
-            )
-            if order and has_mismatch_review and not order_meta.get("mismatch_alert_sent"):
-                updated_meta = dict(order_meta)
-                updated_meta["mismatch_alert_sent"] = True
-                order.metadata_ = updated_meta
-                order_meta = updated_meta
-                admin_alert_info = {
-                    "order_id": order.id,
-                    "amount_rub": order.amount_rub,
-                    "mismatch": (
-                        order_meta.get("payment_amount_mismatch")
-                        or order_meta.get("refund_amount_mismatch")
-                        or order_meta.get("payment_id_mismatch")
-                        or order_meta.get("refund_payment_id_mismatch")
-                        or order_meta.get("cancel_payment_id_mismatch")
-                        or (
-                            f"late_payment_after_refund_on_canceled: {order_meta.get('late_payment_after_refund_on_canceled')}"
-                            if order_meta.get("late_payment_after_refund_on_canceled")
-                            else None
-                        )
-                        or (
-                            f"late_payment_attempt_rejected: {order_meta.get('late_payment_attempt_rejected')}"
-                            if order_meta.get("late_payment_attempt_rejected")
-                            else None
-                        )
-                        or "—"
-                    ),
-                }
             if (
                 event == "refund.succeeded"
                 and order is not None
