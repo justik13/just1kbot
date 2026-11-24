@@ -1490,34 +1490,53 @@ function _renderConnectTab(body, d, reload, root) {
                 ${wiTileHtml}
             </div>
 
-            <div class="connect-dock">
-                ${desktopFirst ? `
-                    <button type="button" data-open-client="happ" class="btn btn-primary btn-lg">${_ICONS.bolt} Подключить в Happ</button>
-                    <button type="button" data-open-client="incy" class="btn btn-sm" style="width:100%;">${_ICONS.globe} Подключить в INCY</button>
-                ` : `
-                    <button type="button" data-open-client="incy" class="btn btn-primary btn-lg">${_ICONS.globe} Подключить в INCY</button>
-                    <button type="button" data-open-client="happ" class="btn btn-sm" style="width:100%;">${_ICONS.bolt} Подключить в Happ</button>
-                `}
-                ${subUrl ? `
-                    <button id="copyUrlStripBtn" type="button" class="sub-link-strip" title="Нажмите, чтобы скопировать">
-                        <span class="sub-link-text">${escapeHtml(subUrl)}</span>
-                        <span style="display:inline-flex; color:var(--text-muted);">${_ICONS.copy}</span>
-                    </button>
-                ` : ""}
+            <div class="connect-flow-step">
+                <div class="connect-flow-head">
+                    <span class="connect-step-badge" aria-hidden="true">1</span>
+                    <h2 class="connect-step-title">Установите приложение</h2>
+                </div>
+                <p class="connect-step-sub">Скачайте клиент для вашего устройства или откройте пошаговую видеоинструкцию</p>
+
+                ${_buildGuideHtml(subUrl, backupSubUrl, true)}
+
+                <button id="openGuidesFromConnectBtn" type="button" class="guides-trigger-card">
+                    <span class="settings-left">
+                        <span class="guides-trigger-icon" aria-hidden="true">${_ICONS.book}</span>
+                        <span>
+                            <span style="display:block; font-weight:600; font-size:13.5px; color:var(--text-primary);">Пошаговая инструкция и видео</span>
+                            <span style="display:block; font-size:12px; color:var(--text-secondary);">iOS, Android, ПК / Mac и частые вопросы</span>
+                        </span>
+                    </span>
+                    <span style="display:inline-flex; align-items:center; gap:8px; flex-shrink:0;">
+                        <span class="guides-trigger-badge">Видео</span>
+                        <span class="node-chevron" style="display:inline-flex;">${_ICONS.chevronRight}</span>
+                    </span>
+                </button>
             </div>
 
-            ${_buildGuideHtml(subUrl, backupSubUrl, true)}
+            <div class="connect-flow-step">
+                <div class="connect-flow-head">
+                    <span class="connect-step-badge" aria-hidden="true">2</span>
+                    <h2 class="connect-step-title">Подключите профиль</h2>
+                </div>
+                <p class="connect-step-sub">После установки нажмите кнопку ниже — профиль добавится автоматически</p>
 
-            <button id="openGuidesFromConnectBtn" type="button" class="guides-trigger-card">
-                <span class="settings-left">
-                    ${_ICONS.book}
-                    <span>
-                        <span style="display:block; font-weight:600; font-size:13px;">Пошаговая инструкция и видео</span>
-                        <span class="muted" style="font-size:12px;">iOS, Android, ПК / Mac и частые вопросы</span>
-                    </span>
-                </span>
-                <span class="node-chevron" style="display:inline-flex;">${_ICONS.chevronRight}</span>
-            </button>
+                <div class="connect-dock">
+                    ${desktopFirst ? `
+                        <button type="button" data-open-client="happ" class="btn btn-primary btn-lg">${_ICONS.bolt} Подключить в Happ</button>
+                        <button type="button" data-open-client="incy" class="btn btn-secondary" style="width:100%;">${_ICONS.globe} Подключить в INCY</button>
+                    ` : `
+                        <button type="button" data-open-client="incy" class="btn btn-primary btn-lg">${_ICONS.globe} Подключить в INCY</button>
+                        <button type="button" data-open-client="happ" class="btn btn-secondary" style="width:100%;">${_ICONS.bolt} Подключить в Happ</button>
+                    `}
+                    ${subUrl ? `
+                        <button id="copyUrlStripBtn" type="button" class="sub-link-strip" title="Нажмите, чтобы скопировать">
+                            <span class="sub-link-text">${escapeHtml(subUrl)}</span>
+                            <span style="display:inline-flex; color:var(--text-secondary);">${_ICONS.copy}</span>
+                        </button>
+                    ` : ""}
+                </div>
+            </div>
 
             <div class="troubleshoot-box" style="margin-top:0;">
                 <div class="troubleshoot-title">
