@@ -215,29 +215,20 @@ class OrderService:
         await session.flush()
 
     @staticmethod
-    async def _create_yookassa_order(
+    async def _find_recent_pending_yookassa_order(
         session: AsyncSession,
         *,
         user_id: int,
         service_type: str,
         amount_rub: Decimal,
         duration_days: int,
-        traffic_bytes: int = 0,
-        device_limit: int | None = None,
-        description: str,
-        return_url: str | None = None,
-        metadata: dict | None = None,
-        bot_username: str | None = None,
-        idempotency_key: str | None = None,
-        wallet_debit: Decimal = Decimal(0),
-        locked_user: User | None = None,
-    ) -> tuple[Order, bool]:
-        """Create (or deduplicate) an external YooKassa order and obtain payment link."""
-        order_meta: dict = dict(metadata) if metadata else {}
-        op_name = order_meta.get("operation")
-
-        cutoff = now_utc() - timedelta(minutes=15)
-        now = now_utc()
+        traffic_bytes: int,
+        device_limit: int | None,
+        op_name: str | None,
+        now=None,
+    ) -> Order | None:
+        now = now or now_utc()
+        cutoff = now - timedelta(minutes=15)
         recent_stmt = (
             select(Order)
             .where(
@@ -260,23 +251,148 @@ class OrderService:
             if cand_meta.get("operation") == op_name and (
                 cand.payment_url or not cand_meta.get("payment_creation_ambiguous")
             ):
-                return cand, False
+                return cand
+        return None
 
-        active_pending_count = int(
-            await session.scalar(
-                select(func.count(Order.id)).where(
-                    Order.user_id == user_id,
-                    Order.payment_method == "yookassa",
-                    Order.status == "pending",
-                    or_(Order.expires_at.is_(None), Order.expires_at > now),
+    @staticmethod
+    async def _cancel_excess_pending_yookassa_orders(
+        session: AsyncSession,
+        user_id: int,
+        *,
+        now=None,
+        max_active: int = 3,
+    ) -> bool:
+        """Cancel oldest non-ambiguous active pending YooKassa orders to stay below cap."""
+        now = now or now_utc()
+        active_pending = list(
+            (
+                await session.execute(
+                    select(Order)
+                    .where(
+                        Order.user_id == user_id,
+                        Order.payment_method == "yookassa",
+                        Order.status == "pending",
+                        or_(Order.expires_at.is_(None), Order.expires_at > now),
+                    )
+                    .order_by(Order.created_at.asc())
+                    .with_for_update()
                 )
             )
-            or 0
+            .scalars()
+            .all()
         )
-        if active_pending_count >= 3:
+        if len(active_pending) < max_active:
+            return False
+
+        canceled_any = False
+        remaining = len(active_pending)
+        for old_order in active_pending:
+            if remaining < max_active:
+                break
+            old_meta = old_order.metadata_ or {}
+            if old_meta.get("payment_creation_ambiguous"):
+                continue
+            OrderService.mark_order_canceled(old_order, reason="superseded_by_new_order")
+            updated_meta = dict(old_order.metadata_ or {})
+            updated_meta["superseded_at"] = now.isoformat()
+            old_order.metadata_ = updated_meta
+            await OrderService.refund_reserved_mixed_debit(session, old_order)
+            canceled_any = True
+            remaining -= 1
+
+        if canceled_any:
+            await session.flush()
+
+        if remaining >= max_active:
             raise ValueError(
                 "У вас уже есть 3 неоплаченных заказа. Завершите или дождитесь отмены текущих."
             )
+        return canceled_any
+
+    @staticmethod
+    async def _create_yookassa_order(
+        session: AsyncSession,
+        *,
+        user_id: int,
+        service_type: str,
+        amount_rub: Decimal,
+        duration_days: int,
+        traffic_bytes: int = 0,
+        device_limit: int | None = None,
+        description: str,
+        return_url: str | None = None,
+        metadata: dict | None = None,
+        bot_username: str | None = None,
+        idempotency_key: str | None = None,
+        wallet_debit: Decimal = Decimal(0),
+        locked_user: User | None = None,
+    ) -> tuple[Order, bool]:
+        """Create (or deduplicate) an external YooKassa order and obtain payment link."""
+        order_meta: dict = dict(metadata) if metadata else {}
+        op_name = order_meta.get("operation")
+
+        now = now_utc()
+        cand = await OrderService._find_recent_pending_yookassa_order(
+            session,
+            user_id=user_id,
+            service_type=service_type,
+            amount_rub=amount_rub,
+            duration_days=duration_days,
+            traffic_bytes=traffic_bytes,
+            device_limit=device_limit,
+            op_name=op_name,
+            now=now,
+        )
+        if cand is not None:
+            if cand.payment_url:
+                return cand, False
+            # Recent matching pending order exists without payment_url and is not ambiguous:
+            # re-request YooKassa with the SAME order_id (Idempotence-Key = order_<cand.id>)
+            # so YooKassa returns the exact same payment/URL without creating a duplicate.
+            cand_id = cand.id
+            cand_amount = cand.amount_rub
+            cand_desc = cand.description or description
+            if hasattr(session, "commit"):
+                await session.commit()
+            gateway = get_payment_gateway("yookassa")
+            try:
+                invoice = await gateway.create_payment_url(
+                    order_id=str(cand_id),
+                    amount_rub=cand_amount,
+                    description=cand_desc,
+                    return_url=return_url,
+                    bot_username=bot_username,
+                )
+                await acquire_user_account_lock(session, user_id)
+                locked_order = await session.scalar(
+                    select(Order).where(Order.id == cand_id).with_for_update()
+                )
+                target_order = locked_order if locked_order is not None else cand
+                if target_order.status == OrderStatus.PENDING:
+                    target_order.external_id = invoice.external_id
+                    target_order.payment_url = invoice.payment_url
+                    await session.flush()
+                    if hasattr(session, "commit"):
+                        await session.commit()
+                return target_order, False
+            except PaymentCreationAmbiguousError:
+                await acquire_user_account_lock(session, user_id)
+                locked_order = await session.scalar(
+                    select(Order).where(Order.id == cand_id).with_for_update()
+                )
+                target_order = locked_order if locked_order is not None else cand
+                if target_order.status == OrderStatus.PENDING:
+                    held_meta = dict(target_order.metadata_ or {})
+                    held_meta["payment_creation_ambiguous"] = True
+                    target_order.metadata_ = held_meta
+                    await session.flush()
+                    if hasattr(session, "commit"):
+                        await session.commit()
+                raise
+
+        await OrderService._cancel_excess_pending_yookassa_orders(
+            session, user_id, now=now
+        )
 
         order = Order(
             id=uuid.uuid4(),
@@ -460,7 +576,21 @@ class OrderService:
 
         was_canceled = order.status == "canceled"
         if was_canceled:
-            cancellation_reason = (order.metadata_ or {}).get("cancellation_reason")
+            order_meta = dict(order.metadata_ or {})
+            if order_meta.get("refund_received_on_canceled"):
+                logger.warning(
+                    "Cannot revive canceled order %s: refund.succeeded was already received",
+                    order.id,
+                )
+                order_meta["requires_manual_review"] = True
+                order_meta["late_payment_after_refund_on_canceled"] = (
+                    str(external_id) if external_id else True
+                )
+                order.metadata_ = order_meta
+                order._newly_paid = False
+                await session.flush()
+                return order
+            cancellation_reason = order_meta.get("cancellation_reason")
             if cancellation_reason == "gateway_canceled":
                 logger.warning(
                     "Cannot mark order %s paid: order was canceled by payment gateway",
@@ -1107,6 +1237,36 @@ class OrderService:
         if bal.debt > 0 and service_type != "topup":
             raise AccountDebtBlockedError("Имеется задолженность на балансе. Покупки заблокированы до погашения.")
 
+        if not (use_balance and bal.available >= total_cost):
+            prelim_wallet_debit = (
+                bal.available if (use_balance and bal.available > 0) else Decimal(0)
+            )
+            prelim_to_pay = total_cost - prelim_wallet_debit
+            if (
+                prelim_wallet_debit > 0
+                and 0 < prelim_to_pay < MIN_TOPUP_RUB
+                and total_cost >= MIN_TOPUP_RUB
+            ):
+                prelim_to_pay = MIN_TOPUP_RUB
+            matching_pending = await OrderService._find_recent_pending_yookassa_order(
+                session,
+                user_id=user_id,
+                service_type=service_type,
+                amount_rub=prelim_to_pay,
+                duration_days=final_duration,
+                traffic_bytes=traffic_bytes,
+                device_limit=final_devices,
+                op_name=order_meta.get("operation"),
+            )
+            if matching_pending is None:
+                canceled_any = await OrderService._cancel_excess_pending_yookassa_orders(
+                    session, user_id
+                )
+                if canceled_any:
+                    bal = await get_account_balance(
+                        session, user_id=user_id, for_update=True, locked_user=user
+                    )
+
         if use_balance and bal.available >= total_cost:
             if clean_idem_key is None:
                 recent_candidates = (
@@ -1342,6 +1502,7 @@ class OrderService:
         )
         if not order:
             return None
+        order._webhook_amount_mismatch = False
 
         # Verify gateway payment identity matches order.external_id
         if order.external_id:
@@ -1455,6 +1616,7 @@ class OrderService:
             )
             order.metadata_ = order_meta
             order._newly_paid = False
+            order._webhook_amount_mismatch = True
             await session.flush()
             return order
 
@@ -1497,10 +1659,24 @@ class OrderService:
 
         if order.status == "canceled":
             logger.warning(
-                "Refund received for canceled order %s (ext_id=%s), ignoring without retry",
+                "Refund received for canceled order %s (ext_id=%s, amount=%s); recording flag to prevent resurrection",
                 order.id,
                 refund_external_id,
+                refund_amount,
             )
+            order_meta = dict(order.metadata_ or {})
+            order_meta["refund_received_on_canceled"] = True
+            order_meta["requires_manual_review"] = True
+            if refund_external_id:
+                processed_refund_ids = list(order_meta.get("refund_external_ids") or [])
+                if refund_external_id not in processed_refund_ids:
+                    processed_refund_ids.append(refund_external_id)
+                order_meta["refund_external_ids"] = processed_refund_ids
+                order_meta["refund_external_id"] = refund_external_id
+            if refund_amount is not None:
+                order_meta["refund_on_canceled_amount_rub"] = str(refund_amount)
+            order.metadata_ = order_meta
+            await session.flush()
             return order
 
         if order.status not in ("paid", "partially_refunded"):

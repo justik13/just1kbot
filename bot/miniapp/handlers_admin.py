@@ -1333,20 +1333,9 @@ async def api_admin_user_token_rotate_handler(request: web.Request) -> web.Respo
                 session, vless_sub.id, reset_hwids=True
             )
         if wi_sub is not None:
-            old_wi_uuid = wi_sub.uuid
             wi_token = await white_internet_repo.reset_subscription_token_atomic(
                 session, wi_sub.id, new_token=new_token, reset_hwids=True
             )
-            locked_wi = await white_internet_repo.get_subscription_with_lock(session, wi_sub.id)
-            if locked_wi is not None:
-                if old_wi_uuid:
-                    await white_internet_repo.add_pending_revocation_uuids(
-                        session, locked_wi.id, [old_wi_uuid]
-                    )
-                locked_wi.uuid = str(uuid4())
-                locked_wi.desired_version = (locked_wi.desired_version or 1) + 1
-                if locked_wi.status == WhiteInternetStatus.ACTIVE:
-                    locked_wi.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
             new_token = new_token or wi_token
 
         existing_devs = (await session.scalars(select(UserDevice).where(UserDevice.user_id == user.id))).all()

@@ -370,6 +370,81 @@ async def _cleanup_old_records():
         )
 
 
+async def _send_reconciliation_admin_alert(
+    order_id: Any,
+    user_id: int | None,
+    amount_rub: Any,
+    reason: str,
+    external_id: str | None = None,
+) -> None:
+    """Send a one-time admin alert for a payment mismatch or partial refund."""
+    try:
+        from aiogram import Bot
+        from config.settings import get_settings
+        from utils.telegram import safe, safe_send_message
+
+        settings = get_settings()
+        admin_ids = getattr(settings, "ADMIN_IDS", None) or []
+        bot_token = getattr(settings, "BOT_TOKEN", None)
+        if not admin_ids or not bot_token:
+            logger.warning(
+                "Cannot send reconciliation admin alert for order %s: missing ADMIN_IDS or BOT_TOKEN",
+                order_id,
+            )
+            return
+
+        text = (
+            "⚠️ <b>Требуется ручная проверка платежа (reconciliation)</b>\n"
+            f"Заказ: <code>{safe(str(order_id))}</code>\n"
+            f"Пользователь ID: <code>{safe(str(user_id))}</code>\n"
+            f"Сумма: <b>{safe(str(amount_rub))} ₽</b>\n"
+            f"Платеж: <code>{safe(external_id)}</code>\n"
+            f"Причина: <code>{safe(reason)}</code>"
+        )
+        async with Bot(token=bot_token) as alert_bot:
+            for aid in admin_ids:
+                try:
+                    await safe_send_message(alert_bot, aid, text, parse_mode="HTML")
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to send reconciliation alert to admin %s for order %s: %s",
+                        aid,
+                        order_id,
+                        exc,
+                    )
+    except Exception as exc:
+        logger.warning(
+            "Failed to prepare reconciliation admin alert for order %s: %s",
+            order_id,
+            exc,
+        )
+
+
+def _flag_order_manual_review(
+    order: Order,
+    *,
+    reason: str,
+    is_partial_refund: bool,
+    external_id: str | None,
+    extra_meta: dict[str, Any] | None = None,
+) -> tuple[Any, int | None, Any, str, str | None] | None:
+    """Mark order metadata for manual review and return alert payload once."""
+    order_meta = dict(order.metadata_ or {})
+    order_meta["requires_manual_review"] = True
+    order_meta["manual_review"] = True
+    order_meta["payment_mismatch_reason"] = reason
+    if is_partial_refund:
+        order_meta["is_partial_refund"] = True
+    if extra_meta:
+        order_meta.update(extra_meta)
+    alert_payload: tuple[Any, int | None, Any, str, str | None] | None = None
+    if not order_meta.get("mismatch_alert_sent"):
+        order_meta["mismatch_alert_sent"] = True
+        alert_payload = (order.id, order.user_id, order.amount_rub, reason, external_id)
+    order.metadata_ = order_meta
+    return alert_payload
+
+
 async def _reconcile_stale_pending_orders() -> None:
     """Safety net: reconcile pending orders whose webhooks were dropped or missed.
 
@@ -378,6 +453,7 @@ async def _reconcile_stale_pending_orders() -> None:
     2. Query external gateway HTTP outside DB transactions.
     3. Settle or cancel each order in its own isolated transaction boundary.
     4. Expire ancient pending orders (> 24 hours old).
+    5. Reconcile recently canceled superseded_by_new_order YooKassa orders.
     """
     from config.enums import OrderStatus
     from integrations.payment_gateways.factory import get_payment_gateway
@@ -410,7 +486,10 @@ async def _reconcile_stale_pending_orders() -> None:
                 (row[0], row[1], row[2], row[3])
                 for row in res.all()
                 if row[0] not in _pending_order_backoff_cache
-                and not (isinstance(row[4], dict) and row[4].get("underpaid"))
+                and not (
+                    isinstance(row[4], dict)
+                    and (row[4].get("underpaid") or row[4].get("requires_manual_review"))
+                )
             ]
     except Exception as exc:
         logger.error("Failed to query stale pending order candidates: %s", exc)
@@ -423,8 +502,11 @@ async def _reconcile_stale_pending_orders() -> None:
             gateway = get_payment_gateway(payment_method)
             status_res = await gateway.check_payment_status(external_id)
             is_refunded = bool(getattr(status_res, "is_refunded", False))
+            is_partial_refund = bool(getattr(status_res, "is_partial_refund", False))
+            mismatch_reason = getattr(status_res, "mismatch_reason", None)
+            needs_manual_review = is_partial_refund or bool(mismatch_reason)
 
-            if not (status_res.is_paid or status_res.is_canceled or is_refunded):
+            if not (status_res.is_paid or status_res.is_canceled or is_refunded or needs_manual_review):
                 _pending_order_backoff_cache[order_id] = time.monotonic()
                 if status_res.status_str == "not_found":
                     logger.warning(
@@ -434,6 +516,7 @@ async def _reconcile_stale_pending_orders() -> None:
                     )
                 continue
 
+            alert_payload: tuple[Any, int | None, Any, str, str | None] | None = None
             # Isolated transaction for this specific order (canonical lock order: advisory -> User -> Order)
             async with session_scope() as order_session:
                 if user_id is not None:
@@ -446,11 +529,30 @@ async def _reconcile_stale_pending_orders() -> None:
                 )
                 if not order or order.status != "pending":
                     continue
-                if isinstance(order.metadata_, dict) and order.metadata_.get("underpaid"):
+                if isinstance(order.metadata_, dict) and (
+                    order.metadata_.get("underpaid") or order.metadata_.get("requires_manual_review")
+                ):
                     _pending_order_backoff_cache[order_id] = time.monotonic()
                     continue
 
-                if status_res.is_paid:
+                if needs_manual_review:
+                    reason_text = mismatch_reason or (
+                        "partial_refund" if is_partial_refund else "payment_status_mismatch"
+                    )
+                    alert_payload = _flag_order_manual_review(
+                        order,
+                        reason=reason_text,
+                        is_partial_refund=is_partial_refund,
+                        external_id=external_id,
+                    )
+                    _pending_order_backoff_cache[order_id] = time.monotonic()
+                    logger.warning(
+                        "Reconciliation flagged pending order %s for manual review (reason=%s, is_partial_refund=%s)",
+                        order.id,
+                        reason_text,
+                        is_partial_refund,
+                    )
+                elif status_res.is_paid:
                     paid_order = await OrderService.mark_order_paid(
                         order_session,
                         order.id,
@@ -494,6 +596,9 @@ async def _reconcile_stale_pending_orders() -> None:
                         "Reconciliation marked pending order %s as refunded",
                         order.id,
                     )
+
+            if alert_payload is not None:
+                await _send_reconciliation_admin_alert(*alert_payload)
         except Exception as exc:
             _pending_order_backoff_cache[order_id] = time.monotonic()
             logger.warning(
@@ -525,17 +630,28 @@ async def _reconcile_stale_pending_orders() -> None:
             expired_candidates = [
                 (row[0], row[1], row[2], row[3])
                 for row in (await session.execute(expired_stmt)).all()
-                if not (isinstance(row[4], dict) and row[4].get("underpaid"))
+                if not (
+                    isinstance(row[4], dict)
+                    and (row[4].get("underpaid") or row[4].get("requires_manual_review"))
+                )
             ]
 
         for exp_id, exp_user_id, exp_ext_id, exp_pm in expired_candidates:
             paid_status = None
             refunded_status = None
+            manual_review_info: tuple[str, bool] | None = None
             if exp_ext_id:
                 try:
                     gateway = get_payment_gateway(exp_pm)
                     status_res = await gateway.check_payment_status(exp_ext_id)
-                    if status_res.is_paid:
+                    exp_is_partial = bool(getattr(status_res, "is_partial_refund", False))
+                    exp_mismatch = getattr(status_res, "mismatch_reason", None)
+                    if exp_is_partial or exp_mismatch:
+                        manual_review_info = (
+                            exp_mismatch or ("partial_refund" if exp_is_partial else "payment_status_mismatch"),
+                            exp_is_partial,
+                        )
+                    elif status_res.is_paid:
                         paid_status = status_res
                     elif getattr(status_res, "is_refunded", False):
                         refunded_status = status_res
@@ -547,6 +663,7 @@ async def _reconcile_stale_pending_orders() -> None:
                     )
                     continue
 
+            exp_alert_payload: tuple[Any, int | None, Any, str, str | None] | None = None
             async with session_scope() as order_session:
                 if exp_user_id is not None:
                     await acquire_user_account_lock(order_session, exp_user_id)
@@ -558,9 +675,24 @@ async def _reconcile_stale_pending_orders() -> None:
                 )
                 if not exp_order or exp_order.status != "pending":
                     continue
-                if isinstance(exp_order.metadata_, dict) and exp_order.metadata_.get("underpaid"):
+                if isinstance(exp_order.metadata_, dict) and (
+                    exp_order.metadata_.get("underpaid") or exp_order.metadata_.get("requires_manual_review")
+                ):
                     continue
-                if paid_status is not None:
+                if manual_review_info is not None:
+                    reason_text, is_partial = manual_review_info
+                    exp_alert_payload = _flag_order_manual_review(
+                        exp_order,
+                        reason=reason_text,
+                        is_partial_refund=is_partial,
+                        external_id=exp_ext_id,
+                    )
+                    logger.warning(
+                        "Reconciliation flagged 24h+ pending order %s for manual review (reason=%s)",
+                        exp_order.id,
+                        reason_text,
+                    )
+                elif paid_status is not None:
                     await OrderService.mark_order_paid(
                         order_session,
                         exp_order.id,
@@ -585,6 +717,145 @@ async def _reconcile_stale_pending_orders() -> None:
                         exp_order.id,
                         reason,
                     )
+
+            if exp_alert_payload is not None:
+                await _send_reconciliation_admin_alert(*exp_alert_payload)
     except Exception as exc:
         logger.error("Error expiring ancient pending orders: %s", exc)
+
+    # 4. Reconcile recently canceled `superseded_by_new_order` YooKassa orders
+    # so a payment completed on an old open tab with a lost webhook is still credited.
+    try:
+        superseded_window_start = now - timedelta(hours=2)
+        cached_ids = list(_pending_order_backoff_cache.keys())
+        async with session_scope() as session:
+            sup_stmt = (
+                select(Order.id, Order.user_id, Order.external_id, Order.payment_method, Order.metadata_)
+                .where(
+                    Order.status == "canceled",
+                    Order.payment_method == "yookassa",
+                    Order.external_id.is_not(None),
+                    Order.external_id != "",
+                    Order.created_at >= superseded_window_start,
+                    Order.metadata_["cancellation_reason"].as_string() == "superseded_by_new_order",
+                )
+            )
+            if cached_ids:
+                sup_stmt = sup_stmt.where(Order.id.notin_(cached_ids))
+            sup_stmt = sup_stmt.order_by(Order.created_at.asc()).limit(20)
+            sup_candidates = [
+                (row[0], row[1], row[2], row[3])
+                for row in (await session.execute(sup_stmt)).all()
+                if row[0] not in _pending_order_backoff_cache
+                and not (
+                    isinstance(row[4], dict)
+                    and (
+                        row[4].get("superseded_reconciled")
+                        or row[4].get("underpaid")
+                        or row[4].get("requires_manual_review")
+                    )
+                )
+            ]
+
+        for sup_id, sup_user_id, sup_ext_id, sup_pm in sup_candidates:
+            try:
+                gateway = get_payment_gateway(sup_pm)
+                status_res = await gateway.check_payment_status(sup_ext_id)
+                is_refunded = bool(getattr(status_res, "is_refunded", False))
+                is_partial_refund = bool(getattr(status_res, "is_partial_refund", False))
+                mismatch_reason = getattr(status_res, "mismatch_reason", None)
+                needs_manual_review = is_partial_refund or bool(mismatch_reason)
+                is_not_found = status_res.status_str == "not_found"
+
+                if not (
+                    status_res.is_paid
+                    or status_res.is_canceled
+                    or is_refunded
+                    or needs_manual_review
+                    or is_not_found
+                ):
+                    _pending_order_backoff_cache[sup_id] = time.monotonic()
+                    continue
+
+                sup_alert_payload: tuple[Any, int | None, Any, str, str | None] | None = None
+                async with session_scope() as order_session:
+                    if sup_user_id is not None:
+                        await acquire_user_account_lock(order_session, sup_user_id)
+                        await order_session.scalar(
+                            select(User.id).where(User.id == sup_user_id).with_for_update()
+                        )
+                    sup_order = await order_session.scalar(
+                        select(Order).where(Order.id == sup_id).with_for_update(skip_locked=True)
+                    )
+                    if not sup_order or sup_order.status != "canceled":
+                        continue
+                    sup_meta = sup_order.metadata_ if isinstance(sup_order.metadata_, dict) else {}
+                    if (
+                        sup_meta.get("cancellation_reason") != "superseded_by_new_order"
+                        or sup_meta.get("superseded_reconciled")
+                        or sup_meta.get("underpaid")
+                        or sup_meta.get("requires_manual_review")
+                    ):
+                        continue
+
+                    if needs_manual_review:
+                        reason_text = mismatch_reason or (
+                            "partial_refund" if is_partial_refund else "payment_status_mismatch"
+                        )
+                        sup_alert_payload = _flag_order_manual_review(
+                            sup_order,
+                            reason=reason_text,
+                            is_partial_refund=is_partial_refund,
+                            external_id=sup_ext_id,
+                            extra_meta={"superseded_reconciled": True},
+                        )
+                        _pending_order_backoff_cache.pop(sup_id, None)
+                        logger.warning(
+                            "Reconciliation flagged superseded order %s for manual review (reason=%s)",
+                            sup_order.id,
+                            reason_text,
+                        )
+                    elif status_res.is_paid:
+                        paid_order = await OrderService.mark_order_paid(
+                            order_session,
+                            sup_order.id,
+                            external_id=sup_ext_id,
+                            paid_amount_rub=status_res.amount_rub,
+                        )
+                        if paid_order and paid_order.status == "paid":
+                            _pending_order_backoff_cache.pop(sup_id, None)
+                            logger.info(
+                                "Reconciliation revived paid superseded order %s (amount=%s rub)",
+                                sup_order.id,
+                                sup_order.amount_rub,
+                            )
+                        else:
+                            _pending_order_backoff_cache[sup_id] = time.monotonic()
+                            logger.info(
+                                "Reconciliation deferred paid superseded order %s (withheld or underpaid)",
+                                sup_order.id,
+                            )
+                    elif status_res.is_canceled or is_not_found:
+                        order_meta = dict(sup_meta)
+                        order_meta["superseded_reconciled"] = True
+                        sup_order.metadata_ = order_meta
+                        _pending_order_backoff_cache.pop(sup_id, None)
+                    elif is_refunded:
+                        order_meta = dict(sup_meta)
+                        order_meta["superseded_reconciled"] = True
+                        order_meta["refunded_after_supersede"] = True
+                        sup_order.metadata_ = order_meta
+                        _pending_order_backoff_cache.pop(sup_id, None)
+
+                if sup_alert_payload is not None:
+                    await _send_reconciliation_admin_alert(*sup_alert_payload)
+            except Exception as sup_exc:
+                _pending_order_backoff_cache[sup_id] = time.monotonic()
+                logger.warning(
+                    "Superseded order reconciliation check failed for order %s: %s",
+                    sup_id,
+                    sup_exc,
+                )
+    except Exception as exc:
+        logger.error("Error reconciling superseded canceled orders: %s", exc)
 

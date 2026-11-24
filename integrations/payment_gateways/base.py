@@ -36,6 +36,7 @@ class PaymentStatusResult:
     amount_rub: Decimal | None = None
     cancellation_reason: str | None = None
     is_temporary_error: bool = False
+    is_partial_refund: bool = False
 
 
 class PaymentCreationAmbiguousError(RuntimeError):
