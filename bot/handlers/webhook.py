@@ -102,10 +102,25 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
             peer_ip,
         )
         return web.Response(status=404, text="Not Found")
-    if request.content_length is not None and request.content_length > 262144:
+    max_body_bytes = 262144
+    if request.content_length is not None and request.content_length > max_body_bytes:
         return web.Response(status=413, text="Payload too large")
+    raw_body_bytes: bytes | None = None
+    if getattr(request, "content", None) is not None:
+        chunks: list[bytes] = []
+        total_bytes = 0
+        async for chunk in request.content.iter_chunked(65536):
+            total_bytes += len(chunk)
+            if total_bytes > max_body_bytes:
+                return web.Response(status=413, text="Payload too large")
+            chunks.append(chunk)
+        raw_body_bytes = b"".join(chunks)
     try:
-        payload = await request.json()
+        payload = (
+            json.loads(raw_body_bytes.decode("utf-8"))
+            if raw_body_bytes is not None
+            else await request.json()
+        )
         event, obj, provider_object_id, payment_external_id = (
             _validate_webhook_payload(payload)
         )
@@ -147,6 +162,7 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                 return web.Response(status=200, text="OK")
 
             order = await OrderService.process_webhook_event(session, payload)
+            order_meta = (order.metadata_ or {}) if order else {}
             if not order:
                 if event in ("refund.succeeded", "payment.succeeded", "payment.canceled"):
                     inbox_status = WebhookInboxStatus.PENDING.value
@@ -154,6 +170,15 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                     inbox_status = WebhookInboxStatus.DEAD.value
                 else:
                     inbox_status = WebhookInboxStatus.PENDING.value
+            elif order_meta.get("payment_amount_mismatch"):
+                logger.critical(
+                    "[%s] YooKassa webhook %s for order %s flagged payment_amount_mismatch (%s); marking inbox dead",
+                    request_id,
+                    event,
+                    order.id,
+                    order_meta.get("payment_amount_mismatch"),
+                )
+                inbox_status = WebhookInboxStatus.DEAD.value
             else:
                 inbox_status = WebhookInboxStatus.SUCCEEDED.value
 
@@ -166,11 +191,11 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
 
             admin_alert_info = None
             refund_alert_info = None
-            order_meta = (order.metadata_ or {}) if order else {}
             has_mismatch_review = bool(
                 order_meta.get("requires_manual_review")
                 and (
-                    order_meta.get("refund_amount_mismatch")
+                    order_meta.get("payment_amount_mismatch")
+                    or order_meta.get("refund_amount_mismatch")
                     or order_meta.get("payment_id_mismatch")
                     or order_meta.get("refund_payment_id_mismatch")
                     or order_meta.get("underpaid")
@@ -181,7 +206,8 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                     "order_id": order.id,
                     "amount_rub": order.amount_rub,
                     "mismatch": (
-                        order_meta.get("refund_amount_mismatch")
+                        order_meta.get("payment_amount_mismatch")
+                        or order_meta.get("refund_amount_mismatch")
                         or order_meta.get("payment_id_mismatch")
                         or order_meta.get("refund_payment_id_mismatch")
                         or "—"

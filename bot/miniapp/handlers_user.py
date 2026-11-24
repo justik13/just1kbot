@@ -73,6 +73,7 @@ from utils.datetime_helpers import now_utc
 logger = logging.getLogger(__name__)
 SchemaT = TypeVar("SchemaT", bound=BaseModel)
 _DEVICE_DELETE_COOLDOWN: TTLCache[int, float] = TTLCache(maxsize=5000, ttl=5)
+_ORDER_CHECK_COOLDOWN: TTLCache[tuple[int, str], float] = TTLCache(maxsize=5000, ttl=5)
 
 
 async def _parse_json_model(
@@ -659,6 +660,19 @@ async def api_user_order_check_handler(request: web.Request) -> web.Response:
     except ValueError:
         return web.json_response({"ok": False, "error": "Некорректный идентификатор заказа"}, status=400)
 
+    cooldown_key = (ctx.telegram_id, str(order_uuid))
+    now_mono = time.monotonic()
+    last_check = _ORDER_CHECK_COOLDOWN.get(cooldown_key)
+    if last_check is not None and (now_mono - last_check) < 5.0:
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "Подождите несколько секунд перед повторной проверкой.",
+            },
+            status=429,
+        )
+    _ORDER_CHECK_COOLDOWN[cooldown_key] = now_mono
+
     async with session_scope() as session:
         user = await _ensure_user(session, ctx)
         order = await session.scalar(
@@ -792,6 +806,7 @@ async def api_user_device_delete_handler(request: web.Request) -> web.Response:
             },
             status=429,
         )
+    _DEVICE_DELETE_COOLDOWN[ctx.telegram_id] = now_mono
 
     async with session_scope() as session:
         user = await _ensure_user(session, ctx)
@@ -831,7 +846,6 @@ async def api_user_device_delete_handler(request: web.Request) -> web.Response:
                     services=("white_internet",),
                 )
 
-        _DEVICE_DELETE_COOLDOWN[ctx.telegram_id] = now_mono
         return web.json_response({"ok": True})
 
 
@@ -851,6 +865,7 @@ async def api_user_devices_reset_handler(request: web.Request) -> web.Response:
             },
             status=429,
         )
+    _DEVICE_DELETE_COOLDOWN[ctx.telegram_id] = now_mono
 
     async with session_scope() as session:
         user = await _ensure_user(session, ctx)
@@ -902,7 +917,6 @@ async def api_user_devices_reset_handler(request: web.Request) -> web.Response:
                         services=("white_internet",),
                     )
 
-        _DEVICE_DELETE_COOLDOWN[ctx.telegram_id] = now_mono
         return web.json_response({"ok": True, "deleted_count": len(deleted_devices)})
 
 

@@ -1,6 +1,7 @@
 """YooKassa implementation of BasePaymentGateway."""
 
 import asyncio
+from dataclasses import dataclass
 import logging
 import os
 import time
@@ -25,6 +26,16 @@ from services.yookassa_service import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class YooKassaWebhookResult(WebhookResult):
+    mismatch_reason: str | None = None
+
+
+@dataclass(frozen=True)
+class YooKassaPaymentStatusResult(PaymentStatusResult):
+    mismatch_reason: str | None = None
 
 
 class YooKassaGateway(BasePaymentGateway):
@@ -402,6 +413,7 @@ class YooKassaGateway(BasePaymentGateway):
 
         related_external_id = None
         is_canceled = False
+        mismatch_reason: str | None = None
         if event == "refund.succeeded":
             external_id = obj.get("id", "")
             related_external_id = obj.get("payment_id")
@@ -411,6 +423,11 @@ class YooKassaGateway(BasePaymentGateway):
             external_id = obj.get("id", "")
             is_paid = (status == "succeeded" and amount_rub is not None and amount_rub > 0)
             is_refunded = False
+            if status == "succeeded" and not is_paid:
+                mismatch_reason = (
+                    f"Invalid currency or amount on payment.succeeded: "
+                    f"currency={currency!r}, value={amount_val!r}"
+                )
         elif event == "payment.canceled":
             external_id = obj.get("id", "")
             is_paid = False
@@ -421,7 +438,7 @@ class YooKassaGateway(BasePaymentGateway):
             is_paid = False
             is_refunded = False
 
-        return WebhookResult(
+        return YooKassaWebhookResult(
             order_id=order_id,
             is_paid=is_paid,
             is_refunded=is_refunded,
@@ -430,6 +447,7 @@ class YooKassaGateway(BasePaymentGateway):
             amount_rub=amount_rub,
             event_type=event or status,
             related_external_id=related_external_id,
+            mismatch_reason=mismatch_reason,
         )
 
     async def check_payment_status(
@@ -486,19 +504,47 @@ class YooKassaGateway(BasePaymentGateway):
         )
         refunded_obj = data.get("refunded_amount") or {}
         refunded_val = refunded_obj.get("value") if isinstance(refunded_obj, dict) else None
+        refunded_currency = refunded_obj.get("currency") if isinstance(refunded_obj, dict) else None
         is_refunded = False
+        mismatch_reason: str | None = None
+        if status == "succeeded" and amount_rub is None:
+            mismatch_reason = (
+                f"Invalid currency or amount on payment status: "
+                f"currency={currency!r}, value={amount_val!r}"
+            )
         if refunded_val is not None:
-            try:
-                refunded_rub = Decimal(str(refunded_val))
-                is_refunded = amount_rub is not None and refunded_rub >= amount_rub
-            except (InvalidOperation, ValueError, TypeError):
-                is_refunded = False
-        return PaymentStatusResult(
-            is_paid=(status == "succeeded" and not is_refunded and amount_rub is not None and amount_rub > 0),
+            if refunded_currency is not None and refunded_currency != "RUB":
+                is_refunded = True
+                mismatch_reason = (
+                    f"Non-RUB refunded_amount currency: {refunded_currency!r}"
+                )
+            else:
+                try:
+                    refunded_rub = Decimal(str(refunded_val))
+                    if refunded_rub > 0:
+                        # Treat any positive refund (partial or full) as refunded
+                        # so pending-order reconciliation never grants full benefits.
+                        is_refunded = True
+                        if amount_rub is not None and refunded_rub < amount_rub:
+                            mismatch_reason = (
+                                f"Partial refund detected during status check: "
+                                f"{refunded_rub} / {amount_rub} RUB"
+                            )
+                except (InvalidOperation, ValueError, TypeError):
+                    is_refunded = False
+        return YooKassaPaymentStatusResult(
+            is_paid=(
+                status == "succeeded"
+                and not is_refunded
+                and mismatch_reason is None
+                and amount_rub is not None
+                and amount_rub > 0
+            ),
             is_refunded=is_refunded,
             is_canceled=(status == "canceled"),
             status_str=status,
             amount_rub=amount_rub,
             cancellation_reason=cancellation_reason,
             is_temporary_error=False,
+            mismatch_reason=mismatch_reason,
         )

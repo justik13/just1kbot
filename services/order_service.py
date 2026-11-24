@@ -8,7 +8,7 @@ import logging
 import math
 import uuid
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -237,6 +237,7 @@ class OrderService:
         op_name = order_meta.get("operation")
 
         cutoff = now_utc() - timedelta(minutes=15)
+        now = now_utc()
         recent_stmt = (
             select(Order)
             .where(
@@ -249,14 +250,33 @@ class OrderService:
                 Order.amount_rub == amount_rub,
                 Order.status == "pending",
                 Order.created_at >= cutoff,
-                Order.payment_url.is_not(None),
+                or_(Order.expires_at.is_(None), Order.expires_at > now),
             )
             .order_by(Order.created_at.desc())
             .limit(5)
         )
         for cand in (await session.execute(recent_stmt)).scalars().all():
-            if cand.payment_url and (cand.metadata_ or {}).get("operation") == op_name:
+            cand_meta = cand.metadata_ or {}
+            if cand_meta.get("operation") == op_name and (
+                cand.payment_url or not cand_meta.get("payment_creation_ambiguous")
+            ):
                 return cand, False
+
+        active_pending_count = int(
+            await session.scalar(
+                select(func.count(Order.id)).where(
+                    Order.user_id == user_id,
+                    Order.payment_method == "yookassa",
+                    Order.status == "pending",
+                    or_(Order.expires_at.is_(None), Order.expires_at > now),
+                )
+            )
+            or 0
+        )
+        if active_pending_count >= 3:
+            raise ValueError(
+                "У вас уже есть 3 неоплаченных заказа. Завершите или дождитесь отмены текущих."
+            )
 
         order = Order(
             id=uuid.uuid4(),
@@ -541,7 +561,17 @@ class OrderService:
         total_original_rub = 0
         for ord_obj in paid_orders:
             meta = ord_obj.metadata_ or {}
-            order_value = int(Decimal(str(meta.get("total_cost_rub") or ord_obj.amount_rub or 0)))
+            raw_value = int(Decimal(str(meta.get("total_cost_rub") or ord_obj.amount_rub or 0)))
+            bonus_used = int(
+                Decimal(
+                    str(
+                        meta.get("wallet_bonus_debit_rub")
+                        or (meta.get("charged_bonus") if ord_obj.payment_method == "wallet" else 0)
+                        or 0
+                    )
+                )
+            )
+            order_value = max(0, raw_value - max(0, bonus_used))
             if order_value > 0:
                 orig_value = int(Decimal(str(meta.get("original_price_rub") or order_value)))
                 total_paid_rub += order_value
@@ -575,6 +605,8 @@ class OrderService:
         user_id: int,
         target_device_limit: int,
         target_duration_days: int = 30,
+        *,
+        operation: str | None = None,
     ) -> dict:
         """Calculate quote for Standard purchase, renewal, mid-term upgrade, or downgrade."""
         if target_device_limit < STANDARD_MIN_DEVICES or target_device_limit > STANDARD_MAX_DEVICES:
@@ -608,7 +640,14 @@ class OrderService:
             and sub_end > now
             and current_limit > 0
         )
-        if not is_active:
+        is_grace_autorenew = bool(
+            operation == "renew"
+            and sub_end is not None
+            and current_limit > 0
+            and target_device_limit == current_limit
+            and (sub_end > now or (now - sub_end) <= timedelta(hours=24))
+        )
+        if not is_active and not is_grace_autorenew:
             base_price = Decimal(calculate_standard_price(target_device_limit, target_duration_days))
             discount = Decimal(0)
             if await is_eligible_for_referral_first_discount(session, user_id):
@@ -854,7 +893,23 @@ class OrderService:
                 )
             ).scalar_one_or_none()
             if existing_order is not None:
-                return OrderService._format_idempotent_checkout_response(existing_order)
+                existing_meta = existing_order.metadata_ or {}
+                if (
+                    existing_order.payment_method == "wallet"
+                    and (
+                        existing_meta.get("mixed_fallback_credited")
+                        or existing_meta.get("fulfillment_error")
+                    )
+                ):
+                    retired_meta = dict(existing_meta)
+                    retired_meta["superseded_idempotency_key"] = clean_idem_key
+                    existing_order.metadata_ = retired_meta
+                    existing_order.idempotency_key = (
+                        f"{clean_idem_key}:failed:{str(existing_order.id)[:8]}"[:128]
+                    )
+                    await session.flush()
+                else:
+                    return OrderService._format_idempotent_checkout_response(existing_order)
         if user is None:
             raise ValueError("User not found")
         if getattr(user, "financial_hold", False):
@@ -889,7 +944,9 @@ class OrderService:
         elif service_type == "standard":
             d_limit = int(device_limit or STANDARD_MIN_DEVICES)
             d_days = int(duration_days or 30)
-            quote = await OrderService.quote_standard_change(session, user_id, d_limit, d_days)
+            quote = await OrderService.quote_standard_change(
+                session, user_id, d_limit, d_days, operation=operation
+            )
             if quote["operation"] == "downgrade":
                 raise ValueError("Use downgrade_standard_devices for device downgrade")
             if quote["operation"] == "renew" and quote.get("blocked_reason"):
@@ -1315,6 +1372,19 @@ class OrderService:
                 order.metadata_ = order_meta
                 await session.flush()
                 return order
+            if result.is_canceled and result.external_id and order.external_id != result.external_id:
+                logger.warning(
+                    "Order %s cancel payment ID mismatch: order.external_id=%s, webhook.external_id=%s",
+                    order.id,
+                    order.external_id,
+                    result.external_id,
+                )
+                order_meta = dict(order.metadata_ or {})
+                order_meta["requires_manual_review"] = True
+                order_meta["cancel_payment_id_mismatch"] = str(result.external_id)
+                order.metadata_ = order_meta
+                await session.flush()
+                return order
 
         if result.is_paid:
             paid_order = await OrderService.mark_order_paid(
@@ -1363,6 +1433,31 @@ class OrderService:
                 refund_external_id=result.external_id,
                 already_locked=True,
             )
+        mismatch_reason = getattr(result, "mismatch_reason", None) or getattr(result, "error", None)
+        is_mismatch = bool(
+            getattr(result, "is_amount_mismatch", False)
+            or mismatch_reason
+            or (result.event_type == "payment.succeeded" and not result.is_paid)
+        )
+        if is_mismatch:
+            logger.critical(
+                "Webhook currency/amount/status mismatch for order %s (ext_id=%s, event=%s, amount=%s, reason=%s)",
+                order.id,
+                result.external_id,
+                result.event_type,
+                result.amount_rub,
+                mismatch_reason,
+            )
+            order_meta = dict(order.metadata_ or {})
+            order_meta["requires_manual_review"] = True
+            order_meta["payment_amount_mismatch"] = str(
+                mismatch_reason or f"event={result.event_type}, amount={result.amount_rub}"
+            )
+            order.metadata_ = order_meta
+            order._newly_paid = False
+            await session.flush()
+            return order
+
         logger.info(
             "Webhook event %s for order %s has no actionable transition, acknowledging",
             result.event_type,
@@ -1397,6 +1492,14 @@ class OrderService:
             logger.info(
                 "Order %s already marked refunded, ignoring duplicate webhook",
                 order.id,
+            )
+            return order
+
+        if order.status == "canceled":
+            logger.warning(
+                "Refund received for canceled order %s (ext_id=%s), ignoring without retry",
+                order.id,
+                refund_external_id,
             )
             return order
 

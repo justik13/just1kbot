@@ -435,7 +435,8 @@ class WhiteInternetSubscription(Base):
         ),
         CheckConstraint(
             "base_traffic_bytes >= 0 AND extra_traffic_bytes >= 0 AND traffic_used_bytes >= 0 "
-            "AND traffic_uplink_bytes >= 0 AND traffic_downlink_bytes >= 0",
+            "AND traffic_uplink_bytes >= 0 AND traffic_downlink_bytes >= 0 "
+            "AND traffic_overage_bytes >= 0",
             name="ck_white_internet_subscriptions_traffic_nonnegative",
         ),
         CheckConstraint(
@@ -443,7 +444,7 @@ class WhiteInternetSubscription(Base):
             name="ck_white_internet_subscriptions_device_limit",
         ),
         CheckConstraint(
-            "pending_device_limit IS NULL OR (pending_device_limit >= 1 AND pending_device_limit <= 5)",
+            "pending_device_limit IS NULL OR (pending_device_limit >= 1 AND pending_device_limit <= 3)",
             name="ck_wi_subs_pending_device_limit",
         ),
         Index(

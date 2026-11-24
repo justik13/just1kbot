@@ -18,6 +18,37 @@ logger = logging.getLogger(__name__)
 
 class FulfillmentService:
     @staticmethod
+    async def _compensate_failed_fulfillment(
+        session: AsyncSession, user: User, order: Order, msg: str
+    ) -> None:
+        """Compensate user balance when fulfillment cannot proceed on paid order."""
+        from database.repositories import account_ledger_repo
+        from services.order_service import OrderService
+        from sqlalchemy.orm.attributes import flag_modified
+
+        await OrderService.refund_reserved_mixed_debit(session, order)
+        meta = dict(order.metadata_ or {})
+        is_pure_wallet = order.payment_method == "wallet"
+        if not is_pure_wallet and order.amount_rub and order.amount_rub > 0:
+            await account_ledger_repo.create_order_credit(
+                session,
+                user_id=user.id,
+                amount_rub=order.amount_rub,
+                order_id=order.id,
+                metadata={
+                    "source": "wi_fulfill_fallback" if order.service_type == "white_internet" else "std_fulfill_fallback",
+                    "reason": f"Компенсация заказа #{order.id}: {msg}",
+                },
+            )
+        meta["mixed_fallback_credited"] = True
+        meta["fulfillment_error"] = msg
+        meta["fulfillment_fallback"] = msg
+        meta["requires_manual_review"] = True
+        order.metadata_ = meta
+        flag_modified(order, "metadata_")
+        await session.flush()
+
+    @staticmethod
     async def fulfill_order(session: AsyncSession, order: Order) -> None:
         """Fulfill paid order linearly based on service_type."""
         user = await session.get(User, order.user_id, with_for_update=True)
@@ -43,17 +74,32 @@ class FulfillmentService:
 
             op = meta.get("operation")
             if op == "upgrade":
-                if order.device_limit:
+                is_sub_active = bool(vless_sub.expires_at and vless_sub.expires_at > now)
+                if not is_sub_active and (order.duration_days or 0) == 0:
+                    msg = "Подписка истекла до оплаты улучшения"
+                    await FulfillmentService._compensate_failed_fulfillment(
+                        session, user, order, msg
+                    )
+                    logger.error(
+                        "Standard upgrade failed for paid order %s (user %s): %s; compensated to balance",
+                        order.id,
+                        user.id,
+                        msg,
+                    )
+                    return
+                if order.device_limit and order.device_limit > (vless_sub.device_limit or 0):
                     vless_sub.device_limit = order.device_limit
                 vless_sub.downgrade_cooldown_until = now + timedelta(
                     days=STANDARD_DOWNGRADE_COOLDOWN_DAYS
                 )
             else:
+                is_sub_active = bool(vless_sub.expires_at and vless_sub.expires_at > now)
                 base = max(vless_sub.expires_at, now) if vless_sub.expires_at else now
                 if order.duration_days > 0:
                     vless_sub.expires_at = base + timedelta(days=order.duration_days)
                 if order.device_limit:
-                    vless_sub.device_limit = order.device_limit
+                    if not is_sub_active or order.device_limit >= (vless_sub.device_limit or 0):
+                        vless_sub.device_limit = order.device_limit
                 if op != "renew" and (order.device_limit or 0) > 2:
                     vless_sub.downgrade_cooldown_until = now + timedelta(
                         days=STANDARD_DOWNGRADE_COOLDOWN_DAYS
@@ -86,6 +132,8 @@ class FulfillmentService:
                 meta["previous_subscription_end"] = sub.expires_at.isoformat()
             if sub and getattr(sub, "device_limit", None) is not None:
                 meta["previous_device_limit"] = sub.device_limit
+            if sub and getattr(sub, "base_traffic_bytes", None) is not None:
+                meta["previous_base_traffic_bytes"] = int(sub.base_traffic_bytes)
             order.metadata_ = meta
 
             ok = False
@@ -131,32 +179,9 @@ class FulfillmentService:
                     await session.flush()
 
             if not ok:
-                # Compensate user balance instead of losing paid funds on business-state mismatch
-                from database.repositories import account_ledger_repo
-                from services.order_service import OrderService
-                from sqlalchemy.orm.attributes import flag_modified
-
-                await OrderService.refund_reserved_mixed_debit(session, order)
-                meta = dict(order.metadata_ or {})
-                is_pure_wallet = order.payment_method == "wallet"
-                if not is_pure_wallet and order.amount_rub and order.amount_rub > 0:
-                    await account_ledger_repo.create_order_credit(
-                        session,
-                        user_id=user.id,
-                        amount_rub=order.amount_rub,
-                        order_id=order.id,
-                        metadata={
-                            "source": "wi_fulfill_fallback",
-                            "reason": f"Компенсация заказа #{order.id}: {msg}",
-                        },
-                    )
-                meta["mixed_fallback_credited"] = True
-                meta["fulfillment_error"] = msg
-                meta["fulfillment_fallback"] = msg
-                meta["requires_manual_review"] = True
-                order.metadata_ = meta
-                flag_modified(order, "metadata_")
-                await session.flush()
+                await FulfillmentService._compensate_failed_fulfillment(
+                    session, user, order, msg
+                )
                 logger.error(
                     "WI fulfillment failed for paid order %s (user %s): %s; compensated to balance",
                     order.id,
@@ -204,6 +229,11 @@ class FulfillmentService:
                     vless_sub.expires_at = cutoff
                 else:
                     vless_sub.expires_at = new_end
+                    if "previous_device_limit" in meta:
+                        try:
+                            vless_sub.device_limit = int(meta["previous_device_limit"])
+                        except (ValueError, TypeError):
+                            pass
             await SubscriptionService._sync_access_state(session, user, vless_sub=vless_sub)
             if op == "upgrade":
                 from services.vless_subscription_service import VlessSubscriptionService
@@ -320,6 +350,16 @@ class FulfillmentService:
                         )
                     else:
                         sub.expires_at = new_expires
+                        if "previous_device_limit" in meta:
+                            try:
+                                sub.device_limit = int(meta["previous_device_limit"])
+                            except (ValueError, TypeError):
+                                pass
+                        if "previous_base_traffic_bytes" in meta:
+                            try:
+                                sub.base_traffic_bytes = max(0, int(meta["previous_base_traffic_bytes"]))
+                            except (ValueError, TypeError):
+                                pass
                         _sync_wi_revoke_quota_state(sub)
                         sub.desired_version = (sub.desired_version or 0) + 1
                         await session.flush()
