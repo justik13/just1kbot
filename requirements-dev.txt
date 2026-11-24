@@ -7,3 +7,4 @@
 # via unittest discover, pytest is for local use only.
 ruff==0.17.3
 pytest==9.2.0
+pytest-asyncio==1.4.1.post1

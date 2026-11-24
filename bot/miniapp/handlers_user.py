@@ -458,6 +458,18 @@ async def api_user_standard_quote_handler(request: web.Request) -> web.Response:
         return web.json_response({"ok": True, "price_rub": amount_rub, "amount_rub": amount_rub, **quote, **split})
 
 
+def _safe_user_error_response(exc: Exception, *, default_msg: str = "Не удалось выполнить операцию") -> web.Response:
+    """Return user-safe error JSON without leaking internal DB/network exception details."""
+    safe_types = (
+        ValueError,
+        order_service.InsufficientBalanceError,
+        order_service.AccountDebtBlockedError,
+        order_service.FinancialHoldBlockedError,
+    )
+    msg = str(exc) if isinstance(exc, safe_types) else default_msg
+    return web.json_response({"ok": False, "error": msg}, status=400)
+
+
 async def api_user_standard_checkout_handler(request: web.Request) -> web.Response:
     """Purchase or extend Standard subscription with bonus-first balance + card/SBP fallback."""
     ctx, err_resp = require_authenticated_user(request)
@@ -497,7 +509,7 @@ async def api_user_standard_checkout_handler(request: web.Request) -> web.Respon
         return web.json_response({"ok": False, "error": str(exc)}, status=503)
     except Exception as exc:
         logger.warning("Standard checkout error for %s: %s", ctx.telegram_id, exc)
-        return web.json_response({"ok": False, "error": str(exc)}, status=400)
+        return _safe_user_error_response(exc)
 
 
 async def api_user_standard_downgrade_handler(request: web.Request) -> web.Response:
@@ -521,7 +533,8 @@ async def api_user_standard_downgrade_handler(request: web.Request) -> web.Respo
         logger.warning("Standard downgrade unavailable for %s: %s", ctx.telegram_id, exc)
         return web.json_response({"ok": False, "error": str(exc)}, status=503)
     except Exception as exc:
-        return web.json_response({"ok": False, "error": str(exc)}, status=400)
+        logger.warning("Standard downgrade error for %s: %s", ctx.telegram_id, exc)
+        return _safe_user_error_response(exc)
 
 
 async def api_user_wi_checkout_handler(request: web.Request) -> web.Response:
@@ -570,7 +583,7 @@ async def api_user_wi_checkout_handler(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": str(exc)}, status=503)
     except Exception as exc:
         logger.warning("WI checkout error for %s: %s", ctx.telegram_id, exc)
-        return web.json_response({"ok": False, "error": str(exc)}, status=400)
+        return _safe_user_error_response(exc)
 
 
 async def api_user_wi_downgrade_handler(request: web.Request) -> web.Response:
@@ -645,7 +658,7 @@ async def api_user_topup_handler(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": str(exc)}, status=503)
     except Exception as exc:
         logger.warning("Topup error for %s: %s", ctx.telegram_id, exc)
-        return web.json_response({"ok": False, "error": str(exc)}, status=400)
+        return _safe_user_error_response(exc)
 
 
 async def api_user_order_check_handler(request: web.Request) -> web.Response:
@@ -778,7 +791,7 @@ async def api_user_order_check_handler(request: web.Request) -> web.Response:
             }
     except Exception as exc:
         logger.warning("Mini App order %s check fulfillment error: %s", order_uuid, exc)
-        return web.json_response({"ok": False, "error": str(exc)}, status=500)
+        return web.json_response({"ok": False, "error": "Внутренняя ошибка сервера"}, status=500)
 
     if admin_alert_info:
         bot = request.app.get("bot") if hasattr(request, "app") else None

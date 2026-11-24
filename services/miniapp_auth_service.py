@@ -15,6 +15,7 @@ import time
 from typing import Any
 from urllib.parse import parse_qsl, quote
 
+from cachetools import TTLCache
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.settings import get_settings
@@ -30,9 +31,15 @@ SETUP_TOKEN_TTL_SECONDS = 600
 MAX_2FA_ATTEMPTS = 5
 ATTEMPT_WINDOW_SECONDS = 300
 LOCKOUT_SECONDS = 300
+TOTP_REPLAY_TTL_SECONDS = 90
 
 # In-memory per-admin TOTP brute-force tracker: admin_id -> (fail_count, window_start, locked_until)
 _2fa_failures: dict[int, tuple[int, float, float]] = {}
+# Bounded in-memory TOTP replay guard: (admin_id, time_step) -> True (90s TTL covers +-30s window)
+_used_totp_steps: TTLCache[tuple[int, int], bool] = TTLCache(
+    maxsize=1024,
+    ttl=TOTP_REPLAY_TTL_SECONDS,
+)
 
 
 @dataclass(frozen=True)
@@ -196,6 +203,29 @@ def _compute_hotp(secret: str, counter: int) -> str:
     return f"{code_int:06d}"
 
 
+def _match_totp_step(
+    secret: str,
+    code: str,
+    *,
+    window: int = 1,
+    now: int | None = None,
+) -> int | None:
+    """Return matched 30s TOTP time step within +-window, or None if invalid."""
+    clean_code = (code or "").strip().replace(" ", "")
+    if not clean_code.isdigit() or len(clean_code) != 6:
+        return None
+    ts = int(time.time()) if now is None else int(now)
+    step = ts // 30
+    try:
+        for delta in range(-window, window + 1):
+            candidate_step = step + delta
+            if hmac.compare_digest(_compute_hotp(secret, candidate_step), clean_code):
+                return candidate_step
+    except Exception:
+        return None
+    return None
+
+
 def verify_totp_code(
     secret: str,
     code: str,
@@ -204,18 +234,7 @@ def verify_totp_code(
     now: int | None = None,
 ) -> bool:
     """Verify 6-digit RFC 6238 TOTP code within +-window 30s steps."""
-    clean_code = (code or "").strip().replace(" ", "")
-    if not clean_code.isdigit() or len(clean_code) != 6:
-        return False
-    ts = int(time.time()) if now is None else int(now)
-    step = ts // 30
-    try:
-        for delta in range(-window, window + 1):
-            if hmac.compare_digest(_compute_hotp(secret, step + delta), clean_code):
-                return True
-    except Exception:
-        return False
-    return False
+    return _match_totp_step(secret, code, window=window, now=now) is not None
 
 
 def issue_totp_setup_token(telegram_id: int, secret: str) -> str:
@@ -289,6 +308,44 @@ def _record_2fa_failure(telegram_id: int) -> int:
     return 0
 
 
+_TOTP_ENC_PREFIX = "enc:"
+
+
+def _encrypt_totp_secret(secret: str) -> str:
+    """Encrypt TOTP secret with DB_ENCRYPTION_KEY before persisting to system_settings."""
+    from utils.encryption import _get_active_keys, _get_fernet_engine
+
+    keys_str = _get_active_keys()
+    if not keys_str:
+        raise RuntimeError("DB_ENCRYPTION_KEY is required to store TOTP secret")
+    token = _get_fernet_engine(keys_str).encrypt(secret.encode("utf-8")).decode("utf-8")
+    return f"{_TOTP_ENC_PREFIX}{token}"
+
+
+def _decrypt_totp_secret(stored: str) -> str | None:
+    """Decrypt enc:-prefixed TOTP secret, or return legacy plaintext Base32 secret.
+
+    Returns None when decryption fails (invalid token or missing/mismatched key)
+    so callers degrade gracefully instead of crashing with HTTP 500.
+    """
+    clean = stored.strip()
+    if not clean.startswith(_TOTP_ENC_PREFIX):
+        return clean
+    from cryptography.fernet import InvalidToken
+
+    from utils.encryption import _get_active_keys, _get_fernet_engine
+
+    try:
+        keys_str = _get_active_keys()
+        if not keys_str:
+            raise RuntimeError("DB_ENCRYPTION_KEY is required to decrypt TOTP secret")
+        raw_token = clean[len(_TOTP_ENC_PREFIX):]
+        return _get_fernet_engine(keys_str).decrypt(raw_token.encode("utf-8")).decode("utf-8")
+    except (InvalidToken, RuntimeError) as exc:
+        logger.error("Failed to decrypt admin TOTP secret: %s", exc)
+        return None
+
+
 async def get_admin_2fa_config(
     session: AsyncSession,
     telegram_id: int,
@@ -300,7 +357,20 @@ async def get_admin_2fa_config(
 
     db_totp = await get_system_setting(session, f"miniapp_admin_totp_{telegram_id}")
     if db_totp:
-        return {"configured": True, "mode": "totp", "secret": db_totp.strip(), "source": "db"}
+        decrypted = _decrypt_totp_secret(db_totp)
+        if decrypted is None:
+            return {
+                "configured": True,
+                "mode": "error",
+                "secret": None,
+                "source": "db",
+            }
+        return {
+            "configured": True,
+            "mode": "totp",
+            "secret": decrypted,
+            "source": "db",
+        }
 
     return {"configured": False, "mode": "setup_required", "source": "none"}
 
@@ -321,6 +391,7 @@ async def verify_admin_2fa(
         return {
             "verified": False,
             "locked": True,
+            "newly_locked": False,
             "retry_after": retry_after,
             "error": f"Слишком много неверных попыток. Повторите через {retry_after} сек.",
         }
@@ -334,12 +405,14 @@ async def verify_admin_2fa(
         pending_secret = verify_totp_setup_token(setup_token, telegram_id)
         if not pending_secret:
             return {"verified": False, "error": "Срок настройки истёк, сгенерируйте ключ заново"}
-        if not verify_totp_code(pending_secret, clean_code):
+        matched_step = _match_totp_step(pending_secret, clean_code)
+        if matched_step is None:
             lockout = _record_2fa_failure(telegram_id)
             if lockout > 0:
                 return {
                     "verified": False,
                     "locked": True,
+                    "newly_locked": True,
                     "retry_after": lockout,
                     "error": f"Слишком много неверных попыток. Повторите через {lockout} сек.",
                 }
@@ -347,9 +420,10 @@ async def verify_admin_2fa(
         await set_system_setting(
             session,
             f"miniapp_admin_totp_{telegram_id}",
-            pending_secret,
+            _encrypt_totp_secret(pending_secret),
             updated_by=telegram_id,
         )
+        _used_totp_steps[(telegram_id, matched_step)] = True
         _2fa_failures.pop(telegram_id, None)
         token, exp_ts = issue_admin_session_token(telegram_id)
         return {
@@ -359,20 +433,31 @@ async def verify_admin_2fa(
             "expires_at": exp_ts,
         }
 
-    if cfg["mode"] != "totp":
+    if cfg["mode"] != "totp" or not cfg.get("secret"):
+        if cfg["mode"] == "error":
+            return {"verified": False, "error": "Ошибка конфигурации 2FA. Обратитесь к администратору."}
         return {"verified": False, "error": "2FA не настроена. Настройте TOTP."}
 
-    if not verify_totp_code(cfg["secret"], clean_code):
+    matched_step = _match_totp_step(cfg["secret"], clean_code)
+    if matched_step is None:
         lockout = _record_2fa_failure(telegram_id)
         if lockout > 0:
             return {
                 "verified": False,
                 "locked": True,
+                "newly_locked": True,
                 "retry_after": lockout,
                 "error": f"Слишком много неверных попыток. Повторите через {lockout} сек.",
             }
         return {"verified": False, "error": "Неверный код подтверждения"}
 
+    if (telegram_id, matched_step) in _used_totp_steps:
+        return {
+            "verified": False,
+            "error": "Этот код уже использован. Дождитесь следующего кода.",
+        }
+
+    _used_totp_steps[(telegram_id, matched_step)] = True
     _2fa_failures.pop(telegram_id, None)
     token, exp_ts = issue_admin_session_token(telegram_id)
     return {

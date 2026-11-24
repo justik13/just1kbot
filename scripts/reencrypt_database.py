@@ -34,7 +34,8 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from config.settings import get_settings
 from database.connection import session_scope
-from database.models import Server
+from database.models import Server, SystemSetting
+from utils.encryption import _get_active_keys, _get_fernet_engine
 from utils.logging_security import install_sensitive_data_filter
 
 logging.basicConfig(
@@ -80,6 +81,7 @@ async def reencrypt_all(*, force: bool = False) -> None:
         )
 
     total_servers = 0
+    total_totp_settings = 0
 
     # 1. Re-encrypt servers in batches
     last_server_id = 0
@@ -106,10 +108,31 @@ async def reencrypt_all(*, force: bool = False) -> None:
             # session_scope() automatically commits on block exit
             logger.info("Re-encrypted batch of servers up to ID %d (total: %d)", last_server_id, total_servers)
 
-    # 2. Verification phase: ensure raw database ciphertext is encrypted strictly with the primary key
-    logger.info("Verifying all records in database are encrypted strictly with the NEW primary key...")
+    # 1b. Re-encrypt encrypted admin TOTP secrets in system_settings (enc:-prefixed)
     settings = get_settings()
     primary_fernet = Fernet(settings.DB_ENCRYPTION_KEY.encode("utf-8"))
+    active_keys = _get_active_keys()
+    multi_fernet = _get_fernet_engine(active_keys)
+
+    async with session_scope() as session:
+        totp_settings = (
+            await session.scalars(
+                select(SystemSetting).where(SystemSetting.key.like("miniapp_admin_totp_%"))
+            )
+        ).all()
+        for setting in totp_settings:
+            raw_val = (setting.value or "").strip()
+            if raw_val.startswith("enc:"):
+                plaintext = multi_fernet.decrypt(raw_val[4:].encode("utf-8"))
+                new_token = primary_fernet.encrypt(plaintext).decode("utf-8")
+                setting.value = f"enc:{new_token}"
+                flag_modified(setting, "value")
+                total_totp_settings += 1
+        if total_totp_settings:
+            logger.info("Re-encrypted %d admin TOTP settings in system_settings", total_totp_settings)
+
+    # 2. Verification phase: ensure raw database ciphertext is encrypted strictly with the primary key
+    logger.info("Verifying all records in database are encrypted strictly with the NEW primary key...")
 
     async with session_scope() as session:
         server_rows = (await session.execute(text("SELECT id, api_key FROM servers"))).all()
@@ -122,9 +145,26 @@ async def reencrypt_all(*, force: bool = False) -> None:
                         f"Server ID {s_id} is not encrypted with the new primary key: {exc}"
                     ) from exc
 
+        totp_rows = (
+            await session.execute(
+                text(
+                    "SELECT key, value FROM system_settings "
+                    "WHERE key LIKE 'miniapp_admin_totp_%' AND value LIKE 'enc:%'"
+                )
+            )
+        ).all()
+        for s_key, raw_val in totp_rows:
+            try:
+                primary_fernet.decrypt(raw_val[4:].encode("utf-8"))
+            except Exception as exc:
+                raise RuntimeError(
+                    f"SystemSetting key {s_key} is not encrypted with the new primary key: {exc}"
+                ) from exc
+
     logger.info(
-        "Successfully finished database re-encryption & primary key verification: %d servers.",
+        "Successfully finished database re-encryption & primary key verification: %d servers, %d TOTP settings.",
         total_servers,
+        total_totp_settings,
     )
 
 

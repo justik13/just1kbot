@@ -7,7 +7,7 @@ from pathlib import Path
 
 from aiohttp import web
 
-from bot.miniapp.auth import check_miniapp_rate_limit
+from bot.miniapp.auth import check_miniapp_asset_rate_limit, check_miniapp_rate_limit
 from bot.miniapp.handlers_admin import (
     api_admin_2fa_setup_handler,
     api_admin_2fa_verify_handler,
@@ -105,6 +105,10 @@ async def miniapp_index_handler(request: web.Request) -> web.Response:
 
 async def miniapp_asset_handler(request: web.Request) -> web.Response:
     """Serve modular JS/CSS assets strictly from FRONTEND_DIR (or guide images) without traversal."""
+    rate_err = check_miniapp_asset_rate_limit(request)
+    if rate_err is not None:
+        return rate_err
+
     rel_path = (request.match_info.get("asset_path") or "").lstrip("/")
     if not rel_path or ".." in rel_path.split("/"):
         return web.Response(status=404, text="Not Found")
