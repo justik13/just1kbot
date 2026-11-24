@@ -1,5 +1,5 @@
-import { api } from "../api.js";
-import { escapeHtml, healthChipInfo, openModal, renderCountryFlagField, renderFlagHtml, roleLabel, showToast, wireCountryFlagFields } from "../ui.js";
+import { api } from "../api.js?v=2.7.6";
+import { escapeHtml, healthChipInfo, openModal, renderCountryFlagField, renderFlagHtml, roleLabel, showToast, wireCountryFlagFields } from "../ui.js?v=2.7.6";
 
 let currentFilter = "all";
 

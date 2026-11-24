@@ -1105,6 +1105,24 @@ function _syncTopbarProfile(d, root) {
     };
 }
 
+let _cabinetTgBackListener = null;
+
+function _setCabinetBackButton(onBack) {
+    const tg = window.Telegram && window.Telegram.WebApp;
+    if (!tg || !tg.BackButton) return;
+    if (_cabinetTgBackListener) {
+        tg.BackButton.offClick(_cabinetTgBackListener);
+        _cabinetTgBackListener = null;
+    }
+    if (onBack) {
+        _cabinetTgBackListener = onBack;
+        tg.BackButton.onClick(_cabinetTgBackListener);
+        tg.BackButton.show();
+    } else {
+        tg.BackButton.hide();
+    }
+}
+
 function _render(root) {
     const d = _state.data;
     if (!d) return;
@@ -1151,22 +1169,34 @@ function _render(root) {
     const body = root.querySelector("#userTabBody");
     const reload = () => loadAndRenderUserCabinet(root);
 
-    if (_state.tab === "connect") _renderConnectTab(body, d, reload, root);
-    else if (_state.tab === "tariffs") _renderTariffsTab(body, d, reload);
-    else if (_state.tab === "more") _renderMoreTab(body, d, root);
-    else if (_state.tab === "guides") {
-        renderUserGuidesView(body, _state, d, () => {
+    if (_state.tab === "connect") {
+        _setCabinetBackButton(null);
+        _renderConnectTab(body, d, reload, root);
+    } else if (_state.tab === "tariffs") {
+        _setCabinetBackButton(null);
+        _renderTariffsTab(body, d, reload);
+    } else if (_state.tab === "more") {
+        _setCabinetBackButton(null);
+        _renderMoreTab(body, d, root);
+    } else if (_state.tab === "guides") {
+        const goBack = () => {
+            _setCabinetBackButton(null);
             _state.tab = _state.guidesReturnTab || "connect";
             _render(root);
             requestAnimationFrame(() => window.scrollTo(0, _state.guidesReturnScrollY || 0));
-        });
-    } else _renderProfileTab(body, d, reload);
+        };
+        _setCabinetBackButton(goBack);
+        renderUserGuidesView(body, _state, d, goBack);
+    } else {
+        _setCabinetBackButton(null);
+        _renderProfileTab(body, d, reload);
+    }
 
     if (prevGuideOpen) {
         const nextGuide = root.querySelector("#connectGuide");
         if (nextGuide) nextGuide.open = true;
     }
-    if (prevScrollY > 0 && _state.tab !== "profile") {
+    if (prevScrollY > 0 && _state.tab !== "profile" && _state.tab !== "guides") {
         window.scrollTo(0, prevScrollY);
     }
 }
@@ -1280,12 +1310,29 @@ function _renderConnectTab(body, d, reload, root) {
                 </div>
                 <button id="goTariffsBtn" type="button" class="btn btn-primary btn-lg">Перейти к тарифам</button>
                 ${_buildGuideHtml(subUrl, backupSubUrl, false)}
+                <button id="openGuidesFromInactiveBtn" type="button" class="guides-trigger-card">
+                    <span class="settings-left">
+                        ${_ICONS.book}
+                        <span>
+                            <span style="display:block; font-weight:600; font-size:13px;">Центр инструкций и база знаний</span>
+                            <span class="muted" style="font-size:12px;">iOS, Android, ПК / Mac и частые вопросы</span>
+                        </span>
+                    </span>
+                    <span class="node-chevron">›</span>
+                </button>
             </section>
             ${(d.devices || []).length ? _buildDevicesSectionHtml(d) : ""}
         `;
         body.querySelector("#goTariffsBtn").addEventListener("click", () => {
             _state.tab = "tariffs";
             _render(root);
+        });
+        body.querySelector("#openGuidesFromInactiveBtn")?.addEventListener("click", () => {
+            _state.guidesReturnTab = "connect";
+            _state.guidesReturnScrollY = window.scrollY;
+            _state.tab = "guides";
+            _render(root);
+            window.scrollTo(0, 0);
         });
         _bindGuideEvents(body, root);
         _bindDevicesEvents(body, d, reload);

@@ -26,7 +26,9 @@ from database.repositories.users_repo import (
     get_user_active_referrals_count,
     is_eligible_for_referral_first_discount,
 )
-from database.repositories.vless_subscription_repo import get_or_create_subscription
+from database.repositories.vless_subscription_repo import (
+    get_subscription_by_user_id as get_vless_subscription_by_user_id,
+)
 from database.repositories.white_internet_repo import get_subscription_by_user_id
 from services.referral_bonus import get_referral_tier
 from services.subscription import SubscriptionService
@@ -76,7 +78,7 @@ async def _build_start_profile_context(session, db_user) -> dict:
     """Build concise user profile summary and real referral tier values for /start."""
     now = now_utc()
     bal = await get_account_balance(session, user_id=db_user.id)
-    vless_sub = await get_or_create_subscription(session, db_user.id)
+    vless_sub = await get_vless_subscription_by_user_id(session, db_user.id)
     wi_sub = await get_subscription_by_user_id(session, db_user.id)
 
     std_active = SubscriptionService.check_vpn_access(db_user, vless_sub=vless_sub)
@@ -149,6 +151,7 @@ async def cmd_start(message: Message) -> None:
     has_discount = False
     mtproto_url = None
     profile_ctx: dict | None = None
+    referrer_rate_pct: int | None = None
     try:
         async with session_scope() as session:
             db_user = await SubscriptionService.process_onboarding(
@@ -164,6 +167,9 @@ async def cmd_start(message: Message) -> None:
                 if raw_proxy and str(raw_proxy).strip():
                     mtproto_url = str(raw_proxy).strip()
                 profile_ctx = await _build_start_profile_context(session, db_user)
+                if getattr(db_user, "is_newly_referred", False) and db_user.referred_by:
+                    ref_active = await get_user_active_referrals_count(session, db_user.referred_by)
+                    referrer_rate_pct = int(get_referral_tier(ref_active).rate * 100)
     except Exception as exc:
         logger.error("Failed onboarding in /start for user %s: %s", tg_user.id, exc)
         await safe_send_message(message.bot, message.chat.id, texts.START_TECHNICAL_ERROR)
@@ -176,13 +182,22 @@ async def cmd_start(message: Message) -> None:
     if getattr(db_user, "is_newly_referred", False) and db_user.referred_by:
         bot_inst = message.bot
         ref_tg_id = db_user.referred_by
+        referred_label = (
+            f"@{safe(db_user.username)}"
+            if db_user.username
+            else safe(db_user.first_name or f"ID {db_user.telegram_id}")
+        )
+        notify_text = texts.REFERRAL_ONBOARDING_NOTIFICATION.format(
+            referred_user=referred_label,
+            rate_pct=referrer_rate_pct if referrer_rate_pct is not None else 15,
+        )
 
         async def _send_onboarding_push() -> None:
             try:
                 await safe_send_message(
                     bot_inst,
                     ref_tg_id,
-                    texts.REFERRAL_ONBOARDING_NOTIFICATION,
+                    notify_text,
                     reply_markup=get_referral_onboarding_keyboard(),
                     message_effect_id=EFFECT_LIKE,
                 )
@@ -201,7 +216,7 @@ async def cmd_start(message: Message) -> None:
     app_url = f"https://{settings.DOMAIN}/app"
     bot_username = (settings.BOT_USERNAME or DEFAULT_FALLBACK_BOT_USERNAME).lstrip("@")
     ref_link = f"https://t.me/{bot_username}?start=ref_{db_user.telegram_id}"
-    share_text = f"Держи приглашение — скидка {profile_ctx['welcome_discount_pct']}% на первый заказ"
+    share_text = f"Держи приглашение: скидка {profile_ctx['welcome_discount_pct']}% на первый заказ"
     referral_share_url = (
         f"https://t.me/share/url?url={quote(ref_link, safe='')}"
         f"&text={quote(share_text, safe='')}"

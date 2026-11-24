@@ -1,5 +1,5 @@
-import { api } from "../api.js";
-import { copyText, escapeHtml, formatDate, showConfirmModal, showToast } from "../ui.js";
+import { api } from "../api.js?v=2.7.6";
+import { copyText, escapeHtml, formatDate, showConfirmModal, showToast } from "../ui.js?v=2.7.6";
 
 function _renderDevicesHtml(devices) {
     if (!devices.length) {
@@ -82,7 +82,7 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
     const realBal = details.real_balance ?? userSummary.real_balance ?? 0;
     const bonusBal = details.bonus_balance ?? userSummary.bonus_balance ?? 0;
     const stdLimit = details.standard_device_limit ?? userSummary.standard_device_limit ?? 2;
-    const wiLimit = details.wi_device_limit ?? userSummary.wi_device_limit ?? 1;
+    const wiLimit = (wi && wi.device_limit) ?? userSummary.wi_device_limit ?? 1;
 
     const stdSummary = details.standard_end
         ? `До ${formatDate(details.standard_end)} · ${stdLimit} устр.`

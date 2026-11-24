@@ -1,5 +1,5 @@
-import { api } from "../api.js";
-import { escapeHtml, formatDate, renderPagination, showToast } from "../ui.js";
+import { api } from "../api.js?v=2.7.6";
+import { escapeHtml, formatDate, renderPagination, showToast } from "../ui.js?v=2.7.6";
 
 export function renderAdminUsersView(root, state, onOpenUser) {
     const data = state.usersData || { stats: {}, filter_counts: {}, users: [], total: 0, offset: 0, limit: 10 };
