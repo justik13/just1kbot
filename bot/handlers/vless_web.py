@@ -110,6 +110,7 @@ _ip_rate_limiter = HttpRateLimiter(rate_per_minute=60.0, burst=15)
 _token_rate_limiter = HttpRateLimiter(rate_per_minute=30.0, burst=10)
 _report_ip_limiter = HttpRateLimiter(rate_per_minute=5.0, burst=3)
 _report_token_limiter = HttpRateLimiter(rate_per_minute=3.0, burst=2)
+_asset_rate_limiter = HttpRateLimiter(rate_per_minute=600.0, burst=150)
 
 HWID_PATTERN = re.compile(r"^[a-zA-Z0-9_\-:]{3,128}$")
 
@@ -1386,6 +1387,14 @@ async def vless_report_handler(request: web.Request) -> web.Response:
 
 async def vless_guide_video_handler(request: web.Request) -> web.Response:
     """Serve the iOS region-change video guide with HTTP Range support and long cache."""
+    client_ip = get_trusted_client_ip(request)
+    allowed, retry_after = _asset_rate_limiter.check(client_ip)
+    if not allowed:
+        return web.Response(
+            status=429,
+            text="Too Many Requests",
+            headers={"Retry-After": str(retry_after)},
+        )
     video_path = (_TEMPLATES_DIR / "vless_landing" / "assets" / "happ_guide.mp4").resolve()
     if not video_path.is_file():
         return web.Response(status=404, text="Not Found")
@@ -1394,6 +1403,8 @@ async def vless_guide_video_handler(request: web.Request) -> web.Response:
         headers={
             "Content-Type": "video/mp4",
             "Cache-Control": "public, max-age=604800",
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "no-referrer",
         },
     )
 

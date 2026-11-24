@@ -258,6 +258,13 @@ class FulfillmentService:
             target_sub_id = meta.get("subscription_id")
 
             def _sync_wi_revoke_quota_state(wi_sub) -> None:
+                from config.constants import WHITE_INTERNET_MAX_QUOTA_BYTES
+
+                max_extra_allowed = max(1, int(wi_sub.device_limit or 1)) * WHITE_INTERNET_MAX_QUOTA_BYTES
+                if (wi_sub.extra_traffic_bytes or 0) > max_extra_allowed:
+                    wi_sub.extra_traffic_bytes = max_extra_allowed
+                elif (wi_sub.extra_traffic_bytes or 0) < 0:
+                    wi_sub.extra_traffic_bytes = 0
                 total_quota = int(wi_sub.base_traffic_bytes or 0) + int(wi_sub.extra_traffic_bytes or 0)
                 used = max(
                     0,

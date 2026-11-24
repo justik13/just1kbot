@@ -122,12 +122,16 @@ async def reencrypt_all(*, force: bool = False) -> None:
         ).all()
         for setting in totp_settings:
             raw_val = (setting.value or "").strip()
+            if not raw_val:
+                continue
             if raw_val.startswith("enc:"):
                 plaintext = multi_fernet.decrypt(raw_val[4:].encode("utf-8"))
-                new_token = primary_fernet.encrypt(plaintext).decode("utf-8")
-                setting.value = f"enc:{new_token}"
-                flag_modified(setting, "value")
-                total_totp_settings += 1
+            else:
+                plaintext = raw_val.encode("utf-8")
+            new_token = primary_fernet.encrypt(plaintext).decode("utf-8")
+            setting.value = f"enc:{new_token}"
+            flag_modified(setting, "value")
+            total_totp_settings += 1
         if total_totp_settings:
             logger.info("Re-encrypted %d admin TOTP settings in system_settings", total_totp_settings)
 
@@ -149,13 +153,18 @@ async def reencrypt_all(*, force: bool = False) -> None:
             await session.execute(
                 text(
                     "SELECT key, value FROM system_settings "
-                    "WHERE key LIKE 'miniapp_admin_totp_%' AND value LIKE 'enc:%'"
+                    "WHERE key LIKE 'miniapp_admin_totp_%' AND value IS NOT NULL AND value != ''"
                 )
             )
         ).all()
         for s_key, raw_val in totp_rows:
+            clean_val = (raw_val or "").strip()
+            if not clean_val.startswith("enc:"):
+                raise RuntimeError(
+                    f"SystemSetting key {s_key} is still stored in plaintext (missing enc: prefix)"
+                )
             try:
-                primary_fernet.decrypt(raw_val[4:].encode("utf-8"))
+                primary_fernet.decrypt(clean_val[4:].encode("utf-8"))
             except Exception as exc:
                 raise RuntimeError(
                     f"SystemSetting key {s_key} is not encrypted with the new primary key: {exc}"

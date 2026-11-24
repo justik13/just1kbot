@@ -420,6 +420,25 @@ async def _send_reconciliation_admin_alert(
         )
 
 
+def _extract_manual_review_alert_after_mark_paid(
+    order: Order,
+    external_id: str | None,
+) -> tuple[Any, int | None, Any, str, str | None] | None:
+    """Return one-time admin alert payload if mark_order_paid quarantined the order."""
+    from services.order_service import extract_manual_review_alert
+
+    info = extract_manual_review_alert(order)
+    if info is None:
+        return None
+    return (
+        info["order_id"],
+        info["user_id"],
+        info["amount_rub"],
+        str(info["mismatch"]),
+        external_id,
+    )
+
+
 def _flag_order_manual_review(
     order: Order,
     *,
@@ -559,6 +578,10 @@ async def _reconcile_stale_pending_orders() -> None:
                         external_id=external_id,
                         paid_amount_rub=status_res.amount_rub,
                     )
+                    target_order = paid_order or order
+                    alert_payload = _extract_manual_review_alert_after_mark_paid(
+                        target_order, external_id
+                    )
                     if paid_order and paid_order.status == "paid":
                         _pending_order_backoff_cache.pop(order_id, None)
                         logger.info(
@@ -575,7 +598,8 @@ async def _reconcile_stale_pending_orders() -> None:
                 elif status_res.is_canceled:
                     OrderService.mark_order_canceled(
                         order,
-                        reason=status_res.cancellation_reason or "gateway_canceled",
+                        reason="gateway_canceled",
+                        gateway_reason=status_res.cancellation_reason,
                     )
                     await OrderService.refund_reserved_mixed_debit(order_session, order)
                     _pending_order_backoff_cache.pop(order_id, None)
@@ -644,6 +668,13 @@ async def _reconcile_stale_pending_orders() -> None:
                 try:
                     gateway = get_payment_gateway(exp_pm)
                     status_res = await gateway.check_payment_status(exp_ext_id)
+                    if getattr(status_res, "is_temporary_error", False):
+                        logger.warning(
+                            "Gateway temporary error before expiry for order %s (status=%s); skipping expiry",
+                            exp_id,
+                            getattr(status_res, "status_str", "error"),
+                        )
+                        continue
                     exp_is_partial = bool(getattr(status_res, "is_partial_refund", False))
                     exp_mismatch = getattr(status_res, "mismatch_reason", None)
                     if exp_is_partial or exp_mismatch:
@@ -693,13 +724,22 @@ async def _reconcile_stale_pending_orders() -> None:
                         reason_text,
                     )
                 elif paid_status is not None:
-                    await OrderService.mark_order_paid(
+                    paid_order = await OrderService.mark_order_paid(
                         order_session,
                         exp_order.id,
                         external_id=exp_ext_id,
                         paid_amount_rub=paid_status.amount_rub,
                     )
-                    logger.info("Reconciliation settled 24h+ pending order %s before expiry", exp_order.id)
+                    exp_alert_payload = _extract_manual_review_alert_after_mark_paid(
+                        paid_order or exp_order, exp_ext_id
+                    )
+                    if paid_order and paid_order.status == "paid":
+                        logger.info("Reconciliation settled 24h+ pending order %s before expiry", exp_order.id)
+                    else:
+                        logger.warning(
+                            "Reconciliation deferred 24h+ pending order %s before expiry (quarantined or withheld)",
+                            exp_order.id,
+                        )
                 elif refunded_status is not None:
                     await OrderService.refund_reserved_mixed_debit(order_session, exp_order)
                     exp_order.status = OrderStatus.REFUNDED
@@ -821,6 +861,9 @@ async def _reconcile_stale_pending_orders() -> None:
                             sup_order.id,
                             external_id=sup_ext_id,
                             paid_amount_rub=status_res.amount_rub,
+                        )
+                        sup_alert_payload = _extract_manual_review_alert_after_mark_paid(
+                            paid_order or sup_order, sup_ext_id
                         )
                         if paid_order and paid_order.status == "paid":
                             _pending_order_backoff_cache.pop(sup_id, None)

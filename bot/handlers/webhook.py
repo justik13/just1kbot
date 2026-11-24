@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import html
 import ipaddress
 import json
 import logging
@@ -189,38 +190,12 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                 notify_order_info = (order.id, order.user_id)
                 await session.flush()
 
-            admin_alert_info = None
+            from services.order_service import extract_manual_review_alert
+
+            admin_alert_info = extract_manual_review_alert(order, require_mismatch_key=True)
+            if admin_alert_info is not None and order is not None:
+                order_meta = order.metadata_ or {}
             refund_alert_info = None
-            has_mismatch_review = bool(
-                order_meta.get("requires_manual_review")
-                and (
-                    order_meta.get("payment_amount_mismatch")
-                    or order_meta.get("refund_amount_mismatch")
-                    or order_meta.get("payment_id_mismatch")
-                    or order_meta.get("refund_payment_id_mismatch")
-                    or order_meta.get("cancel_payment_id_mismatch")
-                    or order_meta.get("late_payment_after_refund_on_canceled")
-                    or order_meta.get("underpaid")
-                )
-            )
-            if order and has_mismatch_review:
-                admin_alert_info = {
-                    "order_id": order.id,
-                    "amount_rub": order.amount_rub,
-                    "mismatch": (
-                        order_meta.get("payment_amount_mismatch")
-                        or order_meta.get("refund_amount_mismatch")
-                        or order_meta.get("payment_id_mismatch")
-                        or order_meta.get("refund_payment_id_mismatch")
-                        or order_meta.get("cancel_payment_id_mismatch")
-                        or (
-                            f"late_payment_after_refund_on_canceled: {order_meta.get('late_payment_after_refund_on_canceled')}"
-                            if order_meta.get("late_payment_after_refund_on_canceled")
-                            else None
-                        )
-                        or "—"
-                    ),
-                }
             if (
                 event == "refund.succeeded"
                 and order is not None
@@ -315,9 +290,9 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                 from utils.telegram import safe_send_message
                 admin_ids = get_settings().ADMIN_IDS
                 alert_text = texts.ADMIN_ALERT_ORDER_REQUIRES_MANUAL_REVIEW.format(
-                    order_id=admin_alert_info["order_id"],
-                    amount_rub=admin_alert_info["amount_rub"],
-                    mismatch=admin_alert_info["mismatch"],
+                    order_id=html.escape(str(admin_alert_info["order_id"])),
+                    amount_rub=html.escape(str(admin_alert_info["amount_rub"])),
+                    mismatch=html.escape(str(admin_alert_info["mismatch"])),
                 )
                 for aid in admin_ids:
                     try:

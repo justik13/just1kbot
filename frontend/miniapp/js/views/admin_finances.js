@@ -1,5 +1,5 @@
-import { api } from "../api.js?v=2.7.6";
-import { escapeHtml, formatDate, renderPagination, showConfirmModal, showToast } from "../ui.js?v=2.7.6";
+import { api } from "../api.js?v=2.7.7";
+import { escapeHtml, formatDate, renderPagination, showConfirmModal, showToast } from "../ui.js?v=2.7.7";
 
 function _financeStatusChip(status) {
     if (status === "paid") {

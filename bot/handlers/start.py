@@ -32,7 +32,7 @@ from database.repositories.vless_subscription_repo import (
 from database.repositories.white_internet_repo import get_subscription_by_user_id
 from services.referral_bonus import get_referral_tier
 from services.subscription import SubscriptionService
-from utils.telegram import EFFECT_LIKE, safe, safe_send_message
+from utils.telegram import EFFECT_LIKE, resolve_bot_username, safe, safe_send_message
 from utils.datetime_helpers import now_utc
 
 router = Router()
@@ -214,7 +214,7 @@ async def cmd_start(message: Message) -> None:
 
     settings = get_settings()
     app_url = f"https://{settings.DOMAIN}/app"
-    bot_username = (settings.BOT_USERNAME or DEFAULT_FALLBACK_BOT_USERNAME).lstrip("@")
+    bot_username = (await resolve_bot_username(message.bot) or DEFAULT_FALLBACK_BOT_USERNAME).lstrip("@")
     ref_link = f"https://t.me/{bot_username}?start=ref_{db_user.telegram_id}"
     share_text = f"Держи приглашение: скидка {profile_ctx['welcome_discount_pct']}% на первый заказ"
     referral_share_url = (

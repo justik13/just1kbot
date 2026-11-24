@@ -1,5 +1,5 @@
-import { api } from "../api.js?v=2.7.6";
-import { copyText, escapeHtml, formatDate, showConfirmModal, showToast } from "../ui.js?v=2.7.6";
+import { api } from "../api.js?v=2.7.7";
+import { copyText, escapeHtml, formatDate, showConfirmModal, showToast } from "../ui.js?v=2.7.7";
 
 function _renderDevicesHtml(devices) {
     if (!devices.length) {
@@ -87,9 +87,23 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
     const stdSummary = details.standard_end
         ? `До ${formatDate(details.standard_end)} · ${stdLimit} устр.`
         : "Не подключён";
+    const wiStatusMap = {
+        active: "Активен",
+        expired: "Истёк",
+        exhausted: "Трафик исчерпан",
+        disabled: "Отключён",
+        suspended: "Приостановлен",
+        revoked: "Отозван",
+    };
+    const wiStatusKey = wi && wi.status ? String(wi.status).toLowerCase() : "";
+    const wiIsExpiredByDate = Boolean(wi && wi.expires_at && new Date(wi.expires_at).getTime() <= Date.now());
+    const wiStatusLabel = wi
+        ? (wiStatusMap[wiStatusKey] || (wiIsExpiredByDate ? "Истёк" : (wi.status ? String(wi.status) : "")))
+        : "";
+    const wiEffectiveStatus = wiStatusKey === "active" && wiIsExpiredByDate ? "Истёк" : wiStatusLabel;
     const wiSummary = wi && wi.expires_at
-        ? `До ${formatDate(wi.expires_at)} · ${wiUsedGb} / ${wiTotalGb} ГБ · ${wiLimit} сл.`
-        : "Не подключён";
+        ? `${wiEffectiveStatus ? `${wiEffectiveStatus} · ` : ""}До ${formatDate(wi.expires_at)} · ${wiUsedGb} / ${wiTotalGb} ГБ · ${wiLimit} сл.`
+        : (wi && wiEffectiveStatus ? `${wiEffectiveStatus} · ${wiUsedGb} / ${wiTotalGb} ГБ · ${wiLimit} сл.` : "Не подключён");
 
     root.innerHTML = `
         <div class="detail-header-nav">
