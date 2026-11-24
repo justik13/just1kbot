@@ -41,6 +41,10 @@ const _ICONS = {
     more: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>`,
     file: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`,
     book: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>`,
+    shield: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`,
+    globe: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3.6 9h16.8M3.6 15h16.8"/><path d="M11.5 3a15 15 0 0 0 0 18M12.5 3a15 15 0 0 1 0 18"/></svg>`,
+    chevronRight: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>`,
+    chevronDown: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>`,
 };
 
 const _CLIENT_LINKS = {
@@ -1107,6 +1111,7 @@ function _syncTopbarProfile(d, root) {
 
     pill.onclick = () => {
         if (_state.tab === "profile") return;
+        _state.profileReturnTab = ["connect", "tariffs", "more"].includes(_state.tab) ? _state.tab : "connect";
         _state.tab = "profile";
         _render(root);
         window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1145,7 +1150,7 @@ function _render(root) {
     const hasAny = stdActive || wiActive;
 
     const navTabs = [
-        { id: "connect", label: "Доступ", icon: _ICONS.bolt },
+        { id: "connect", label: "Доступ", icon: _ICONS.shield },
         { id: "tariffs", label: "Тарифы", icon: _ICONS.card },
         { id: "more", label: "Ещё", icon: _ICONS.more },
     ];
@@ -1159,9 +1164,9 @@ function _render(root) {
 
     root.innerHTML = `
         <div id="userTabBody" class="app-main"></div>
-        <nav class="bottom-nav">
+        <nav class="bottom-nav" role="tablist" aria-label="Разделы кабинета">
             ${navTabs.map((t) => `
-                <button type="button" class="nav-item ${_state.tab === t.id ? "active" : ""}" data-utab="${t.id}">
+                <button type="button" class="nav-item ${_state.tab === t.id ? "active" : ""}" role="tab" aria-selected="${_state.tab === t.id ? "true" : "false"}" data-utab="${t.id}">
                     ${t.icon}
                     <span>${escapeHtml(t.label)}</span>
                 </button>
@@ -1207,8 +1212,13 @@ function _render(root) {
         _setCabinetBackButton(goBack);
         renderUserGuidesView(body, _state, d, goBack);
     } else {
-        _setCabinetBackButton(null);
-        _renderProfileTab(body, d, reload);
+        const goBackProfile = () => {
+            _setCabinetBackButton(null);
+            _state.tab = _state.profileReturnTab || "connect";
+            _render(root);
+        };
+        _setCabinetBackButton(goBackProfile);
+        _renderProfileTab(body, d, reload, goBackProfile);
     }
 
     if (prevGuideOpen) {
@@ -1233,8 +1243,8 @@ function _buildGuideHtml(subUrl, backupSubUrl, isActive) {
     return `
         <details class="guide-details guide-details-prominent" id="connectGuide">
             <summary class="guide-summary">
-                <span>Как подключить</span>
-                <span class="chip" style="padding:2px 8px;">${platformLabels[_state.platform] || "iOS"} ▾</span>
+                <span>Скачать приложение (${platformLabels[_state.platform] || "iOS"})</span>
+                <span style="display:inline-flex; color:var(--text-muted);">${_ICONS.chevronDown}</span>
             </summary>
             <div class="guide-body">
                 <div class="filter-pills">
@@ -1339,11 +1349,11 @@ function _renderConnectTab(body, d, reload, root) {
                     <span class="settings-left">
                         ${_ICONS.book}
                         <span>
-                            <span style="display:block; font-weight:600; font-size:13px;">Центр инструкций и база знаний</span>
+                            <span style="display:block; font-weight:600; font-size:13px;">Пошаговая инструкция и видео</span>
                             <span class="muted" style="font-size:12px;">iOS, Android, ПК / Mac и частые вопросы</span>
                         </span>
                     </span>
-                    <span class="node-chevron">›</span>
+                    <span class="node-chevron" style="display:inline-flex;">${_ICONS.chevronRight}</span>
                 </button>
             </section>
             ${(d.devices || []).length ? _buildDevicesSectionHtml(d) : ""}
@@ -1426,7 +1436,7 @@ function _renderConnectTab(body, d, reload, root) {
                         <div class="progress-fill" style="width:${wiExhausted ? 0 : wiRemainingPct}%;"></div>
                     </div>
                     <div class="channel-meta">
-                        <span style="white-space:nowrap;">${Number(wi.device_limit || 1)} слот</span>
+                        <span style="white-space:nowrap;">${Number(wi.device_limit || 1)} устр.</span>
                         <span style="white-space:nowrap;">до ${_shortDate(wi.expires_at)}</span>
                     </div>
                 </div>
@@ -1475,10 +1485,10 @@ function _renderConnectTab(body, d, reload, root) {
             <div class="connect-dock">
                 ${desktopFirst ? `
                     <button type="button" data-open-client="happ" class="btn btn-primary btn-lg">${_ICONS.bolt} Подключить в Happ</button>
-                    <button type="button" data-open-client="incy" class="btn btn-sm" style="width:100%;">Открыть в INCY</button>
+                    <button type="button" data-open-client="incy" class="btn btn-sm" style="width:100%;">${_ICONS.globe} Подключить в INCY</button>
                 ` : `
-                    <button type="button" data-open-client="incy" class="btn btn-primary btn-lg">${_ICONS.bolt} Подключить в INCY</button>
-                    <button type="button" data-open-client="happ" class="btn btn-sm" style="width:100%;">Открыть в Happ</button>
+                    <button type="button" data-open-client="incy" class="btn btn-primary btn-lg">${_ICONS.globe} Подключить в INCY</button>
+                    <button type="button" data-open-client="happ" class="btn btn-sm" style="width:100%;">${_ICONS.bolt} Подключить в Happ</button>
                 `}
                 ${subUrl ? `
                     <button id="copyUrlStripBtn" type="button" class="sub-link-strip" title="Нажмите, чтобы скопировать">
@@ -1494,11 +1504,11 @@ function _renderConnectTab(body, d, reload, root) {
                 <span class="settings-left">
                     ${_ICONS.book}
                     <span>
-                        <span style="display:block; font-weight:600; font-size:13px;">Центр инструкций и база знаний</span>
+                        <span style="display:block; font-weight:600; font-size:13px;">Пошаговая инструкция и видео</span>
                         <span class="muted" style="font-size:12px;">iOS, Android, ПК / Mac и частые вопросы</span>
                     </span>
                 </span>
-                <span class="node-chevron">›</span>
+                <span class="node-chevron" style="display:inline-flex;">${_ICONS.chevronRight}</span>
             </button>
 
             <div class="troubleshoot-box" style="margin-top:0;">
@@ -1507,8 +1517,10 @@ function _renderConnectTab(body, d, reload, root) {
                     <span>Если нет подключения:</span>
                 </div>
                 <span>• Выберите другую локацию в списке приложения</span>
-                <span>• Обновите подписку (потяните список серверов вниз или нажмите ⟳)</span>
-                <span>• Напишите в поддержку, если ничего не изменилось</span>
+                <span>• Обновите подписку (потяните список серверов вниз)</span>
+                ${d.support && d.support.support_url ? `
+                    <button id="connectSupportBtn" type="button" class="btn btn-sm" style="margin-top:6px; width:100%;">${_ICONS.message} Написать в поддержку</button>
+                ` : `<span>• Напишите в поддержку (раздел «Ещё»), если ничего не изменилось</span>`}
             </div>
         </section>
 
@@ -1557,6 +1569,9 @@ function _renderConnectTab(body, d, reload, root) {
         _state.tab = "guides";
         _render(root);
         window.scrollTo(0, 0);
+    });
+    body.querySelector("#connectSupportBtn")?.addEventListener("click", () => {
+        if (d.support && d.support.support_url) openExternalLink(d.support.support_url);
     });
 }
 
@@ -1615,7 +1630,7 @@ function _renderTariffsTab(body, d, reload) {
                     <div class="muted" style="font-size:12px;">Для дома, Wi-Fi и повседневного использования</div>
                 </div>
                 <span class="chip ${isStdGrace ? "chip-warn" : (std.active ? "chip-ok" : "chip-muted")}">
-                    ${isStdGrace ? `Льготный период (~${graceHoursLeft} ч.)` : (std.active ? `до ${formatDate(std.expires_at)}` : "Не подключена")}
+                    ${isStdGrace ? `Продлить · ~${graceHoursLeft} ч.` : (std.active ? `до ${formatDate(std.expires_at)}` : "Не подключена")}
                 </span>
             </div>
             <div class="plan-features">
@@ -1632,7 +1647,7 @@ function _renderTariffsTab(body, d, reload) {
                 </label>
                 <div class="connect-pair">
                     <button id="stdRenewBtn" type="button" class="btn btn-primary">Продлить</button>
-                    <button id="stdDevicesBtn" type="button" class="btn">Лимит: ${stdLimit} устр.</button>
+                    <button id="stdDevicesBtn" type="button" class="btn">Устройств: ${stdLimit} · Изменить</button>
                 </div>
             ` : `
                 <div class="plan-meta-row">
@@ -1672,13 +1687,13 @@ function _renderTariffsTab(body, d, reload) {
             </div>
             <div class="plan-features">
                 <span>• Работает отдельно от «Стандарта» или вместе с ним</span>
-                <span>• 50 ГБ трафика на каждый слот устройства, срок 30 дней</span>
+                <span>• 50 ГБ трафика на каждое устройство, срок 30 дней</span>
             </div>
             ${_wiHasActivePeriod(wi) ? `
                 <div class="field">
                     <div class="row muted" style="font-size:12px;">
                         <span class="tabular">Трафик: <strong style="color:var(--text-primary);">${wiUsedGb} / ${wiTotalGb} ГБ</strong></span>
-                        <span class="tabular">Слотов: <strong style="color:var(--text-primary);">${wiCurLimit}</strong></span>
+                        <span class="tabular">Устройств: <strong style="color:var(--text-primary);">${wiCurLimit}</strong></span>
                     </div>
                     <div class="progress-track"><div class="progress-fill" style="transform:scaleX(${(wiPct / 100).toFixed(3)});"></div></div>
                 </div>
@@ -1691,7 +1706,7 @@ function _renderTariffsTab(body, d, reload) {
                 </label>
                 <div class="connect-pair">
                     <button id="wiRenewBtn" type="button" class="btn btn-primary">Продлить +30 дн.</button>
-                    <button id="wiManageBtn" type="button" class="btn">Слоты и трафик</button>
+                    <button id="wiManageBtn" type="button" class="btn">Трафик и устройства</button>
                 </div>
             ` : `
                 <div class="plan-meta-row">
@@ -1903,6 +1918,9 @@ function _buildDevicesSectionHtml(d) {
                 </div>
             </div>
             ${headerChipsHtml ? `<div class="devices-chips-row">${headerChipsHtml}</div>` : ""}
+            ${(needStdToggles || needBiToggles) ? `
+                <div class="muted" style="font-size:12px; line-height:1.4;">Выберите, какие тарифы активны на каждом устройстве, затем обновите список в приложении</div>
+            ` : ""}
             ${isLimitReached ? `
                 <div class="notice-box notice-warn" style="margin:0;">
                     <span>Все слоты (${devices.length} из ${totalLimit}) заняты — удалите устройство, чтобы подключить новое.</span>
@@ -1936,7 +1954,7 @@ function _openSlotReplaceModal(slotTitle, targetDev, activeDevices, applyFn, onR
                             <div style="font-weight:600; font-size:13px; color:var(--text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(label)}</div>
                             ${meta ? `<div class="muted" style="font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(meta)}</div>` : ""}
                         </div>
-                        <span class="chip ${chipClass}" style="flex-shrink:0;">Забрать слот →</span>
+                        <span class="chip ${chipClass}" style="flex-shrink:0;">Перенести</span>
                     </button>
                 `;
             }).join("")}
@@ -1950,7 +1968,7 @@ function _openSlotReplaceModal(slotTitle, targetDev, activeDevices, applyFn, onR
             try {
                 await applyFn(targetDev.hwid, 10, fromHwid);
                 close();
-                showToast("Слот перенесён — нажмите ⟳ в приложении");
+                showToast("Слот перенесён — обновите список в приложении");
                 onReplaced();
             } catch (err) {
                 showToast(err.message || "Не удалось перенести слот");
@@ -2057,7 +2075,7 @@ function _bindDevicesEvents(container, d, reload) {
                                 chk.disabled = true;
                                 try {
                                     await applyFn(hwid, 10, fromDev.hwid);
-                                    showToast("Слот перенесён — нажмите ⟳ в приложении");
+                                    showToast("Слот перенесён — обновите список в приложении");
                                     reload();
                                 } catch (err) {
                                     showToast(err.message || "Не удалось перенести слот");
@@ -2077,7 +2095,7 @@ function _bindDevicesEvents(container, d, reload) {
                     await applyFn(hwid, wantEnable ? 10 : -1);
                     showToast(
                         wantEnable
-                            ? `${slotTitle} включён — нажмите ⟳ в приложении`
+                            ? `${slotTitle} включён — обновите список в приложении`
                             : `${slotTitle} отключён на устройстве`
                     );
                     reload();
@@ -2133,8 +2151,32 @@ function _renderMoreTab(body, d, root) {
 
     body.innerHTML = `
         <section class="hero-title-group">
-            <span class="hero-kicker muted">Рефералы, помощь и документы</span>
+            <span class="hero-kicker muted">Помощь, инструкции и рефералы</span>
             <h1 class="hero-headline-lg">Ещё</h1>
+        </section>
+
+        <section class="section-block">
+            <div class="section-head">
+                <h2 class="section-title">Помощь и инструкции</h2>
+            </div>
+            <div class="list-group">
+                <button id="openGuidesFromMoreBtn" type="button" class="settings-row">
+                    <span class="settings-left">${_ICONS.book}<span>Пошаговая инструкция и видео</span></span>
+                    <span style="display:inline-flex; color:var(--text-muted);">${_ICONS.chevronRight}</span>
+                </button>
+                ${sup.support_url ? `
+                    <button id="supportContactBtn" type="button" class="settings-row">
+                        <span class="settings-left">${_ICONS.message}<span>Написать в поддержку</span></span>
+                        <span style="display:inline-flex; color:var(--text-muted);">${_ICONS.chevronRight}</span>
+                    </button>
+                ` : ""}
+                ${sup.tg_proxy_url ? `
+                    <button id="tgProxyBtn" type="button" class="settings-row">
+                        <span class="settings-left">${_ICONS.send}<span>Прокси для Telegram</span></span>
+                        <span style="display:inline-flex; color:var(--text-muted);">${_ICONS.chevronRight}</span>
+                    </button>
+                ` : ""}
+            </div>
         </section>
 
         <section class="stats-strip">
@@ -2171,7 +2213,7 @@ function _renderMoreTab(body, d, root) {
                 <details class="guide-details" style="margin-top:4px;">
                     <summary class="guide-summary">
                         <span>Приглашённые пользователи (${invitedUsers.length})</span>
-                        <span class="muted" style="font-size:12px;">▾</span>
+                        <span style="display:inline-flex; color:var(--text-muted);">${_ICONS.chevronDown}</span>
                     </summary>
                     <div class="guide-body" style="gap:8px;">
                         ${invitedUsers.map((u) => `
@@ -2190,7 +2232,7 @@ function _renderMoreTab(body, d, root) {
                 <details class="guide-details" style="margin-top:4px;">
                     <summary class="guide-summary">
                         <span>Рейтинг лидеров ${ref.user_rank ? `(Ваше место: #${ref.user_rank})` : ""}</span>
-                        <span class="muted" style="font-size:12px;">▾</span>
+                        <span style="display:inline-flex; color:var(--text-muted);">${_ICONS.chevronDown}</span>
                     </summary>
                     <div class="guide-body" style="gap:8px;">
                         ${leaderboard.map((item, idx) => {
@@ -2217,46 +2259,22 @@ function _renderMoreTab(body, d, root) {
             ` : ""}
         </section>
 
-        <section class="section-block">
-            <div class="section-head">
-                <h2 class="section-title">Инструкции</h2>
-            </div>
-            <div class="list-group">
-                <button id="openGuidesFromMoreBtn" type="button" class="settings-row">
-                    <span class="settings-left">${_ICONS.book}<span>Центр инструкций и база знаний</span></span>
-                    <span class="mono-badge">→</span>
-                </button>
-            </div>
-        </section>
-
-        ${hasSupportRows ? `
+        ${(sup.tos_url || sup.privacy_url) ? `
             <section class="section-block">
                 <div class="section-head">
-                    <h2 class="section-title">Помощь и документы</h2>
+                    <h2 class="section-title">Документы</h2>
                 </div>
                 <div class="list-group">
-                    ${sup.tg_proxy_url ? `
-                        <button id="tgProxyBtn" type="button" class="settings-row">
-                            <span class="settings-left">${_ICONS.send}<span>Прокси для Telegram</span></span>
-                            <span class="mono-badge">→</span>
-                        </button>
-                    ` : ""}
-                    ${sup.support_url ? `
-                        <button id="supportContactBtn" type="button" class="settings-row">
-                            <span class="settings-left">${_ICONS.message}<span>Написать в поддержку</span></span>
-                            <span class="mono-badge">→</span>
-                        </button>
-                    ` : ""}
                     ${sup.tos_url ? `
                         <button id="tosLinkBtn" type="button" class="settings-row">
                             <span class="settings-left">${_ICONS.file}<span>Пользовательское соглашение</span></span>
-                            <span class="mono-badge">→</span>
+                            <span style="display:inline-flex; color:var(--text-muted);">${_ICONS.chevronRight}</span>
                         </button>
                     ` : ""}
                     ${sup.privacy_url ? `
                         <button id="privacyLinkBtn" type="button" class="settings-row">
                             <span class="settings-left">${_ICONS.file}<span>Политика конфиденциальности</span></span>
-                            <span class="mono-badge">→</span>
+                            <span style="display:inline-flex; color:var(--text-muted);">${_ICONS.chevronRight}</span>
                         </button>
                     ` : ""}
                 </div>
@@ -2284,13 +2302,18 @@ function _renderMoreTab(body, d, root) {
     if (privBtn && sup.privacy_url) privBtn.addEventListener("click", () => openExternalLink(sup.privacy_url));
 }
 
-function _renderProfileTab(body, d, reload) {
+function _renderProfileTab(body, d, reload, onBack) {
     const bal = d.balance || { real: 0, bonus: 0, total: 0 };
     const minTopup = (d.pricing && d.pricing.min_topup_rub) || 20;
     const items = d.history || [];
     const meta = _getProfileMeta(d);
 
     body.innerHTML = `
+        <div class="detail-header-nav">
+            <button id="profileBackBtn" type="button" class="btn btn-sm btn-ghost">← Назад</button>
+            <span class="detail-sticky-meta">Профиль и баланс</span>
+        </div>
+
         <section class="hero-title-group">
             <div style="display:flex; align-items:center; gap:12px;">
                 <span id="profileLargeAvatar" class="avatar-circle avatar-lg">${_renderAvatarInner(meta)}</span>
@@ -2329,6 +2352,10 @@ function _renderProfileTab(body, d, reload) {
     `;
 
     _bindAvatarImg(body.querySelector("#profileLargeAvatar"), meta.initial);
+
+    body.querySelector("#profileBackBtn")?.addEventListener("click", () => {
+        if (typeof onBack === "function") onBack();
+    });
 
     body.querySelector("#profileTopupBtn").addEventListener("click", () => {
         if (d.financial_hold) {

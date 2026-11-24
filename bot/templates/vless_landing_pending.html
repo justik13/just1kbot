@@ -43,12 +43,16 @@
             justify-content: center;
             padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
         }
+        :where(a, button, summary, input, textarea, [tabindex]):focus-visible {
+            outline: 2px solid #ffffff;
+            outline-offset: 2px;
+        }
         .card {
             width: 100%;
             max-width: 420px;
             background-color: var(--card-bg);
-            border-radius: 24px;
-            padding: 32px 24px 26px;
+            border-radius: 16px;
+            padding: 28px 22px 22px;
             text-align: center;
             box-shadow:
                 0 24px 48px -12px rgba(0, 0, 0, 0.9),
@@ -77,15 +81,13 @@
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            padding: 5px 11px;
-            border-radius: 999px;
-            background: rgba(245, 158, 11, 0.08);
-            border: 1px solid rgba(245, 158, 11, 0.24);
+            padding: 4px 10px;
+            border-radius: 6px;
+            background: rgba(245, 158, 11, 0.1);
+            border: 1px solid rgba(245, 158, 11, 0.28);
             color: #fbbf24;
-            font-size: 11px;
-            font-weight: 600;
-            letter-spacing: 0.03em;
-            text-transform: uppercase;
+            font-size: 12px;
+            font-weight: 500;
         }
         .status-dot {
             width: 6px;
@@ -465,7 +467,7 @@
             </div>
         </div>
         <h1>Настройка шлюза</h1>
-        <p>Идет подготовка защищенного шлюза. Обычно это занимает несколько секунд. Страница обновится автоматически.</p>
+        <p>Идёт подготовка защищённого шлюза. Обычно это занимает несколько секунд. Страница проверяет статус каждые 5 секунд.</p>
         <a href="{bot_link}" class="btn">Перейти в бота @{clean_bot}</a>
 
         <!-- Support Disclosure Accordion -->

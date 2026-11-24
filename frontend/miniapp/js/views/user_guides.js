@@ -64,10 +64,10 @@ function _renderIosContent(method) {
                 <div class="guide-step-head"><span class="guide-step-num">3</span><span>Заполните оплату и адрес</span></div>
                 <p class="muted">Способ оплаты выберите <b>Нет</b>. Поля адреса можно заполнить любыми данными (например, Алматы):</p>
                 <div class="guide-kv-list">
-                    <div class="guide-kv-row"><span>Улица</span><code>Abay 10</code></div>
-                    <div class="guide-kv-row"><span>Город</span><code>Almaty</code></div>
-                    <div class="guide-kv-row"><span>Индекс</span><code>050000</code></div>
-                    <div class="guide-kv-row"><span>Телефон</span><code>701 0000000</code></div>
+                    <div class="guide-kv-row"><span>Улица</span><span class="guide-kv-val"><code>ул. Абая, 1</code><button type="button" class="btn btn-sm guide-kv-copy" data-copy="ул. Абая, 1">Копировать</button></span></div>
+                    <div class="guide-kv-row"><span>Город</span><span class="guide-kv-val"><code>Алматы</code><button type="button" class="btn btn-sm guide-kv-copy" data-copy="Алматы">Копировать</button></span></div>
+                    <div class="guide-kv-row"><span>Индекс</span><span class="guide-kv-val"><code>050000</code><button type="button" class="btn btn-sm guide-kv-copy" data-copy="050000">Копировать</button></span></div>
+                    <div class="guide-kv-row"><span>Телефон</span><span class="guide-kv-val"><code>(701) 123-4567</code><button type="button" class="btn btn-sm guide-kv-copy" data-copy="7011234567">Копировать</button></span></div>
                 </div>
                 <button type="button" class="guide-shot-btn" data-shot="/app/assets/guides/ios_03_payment.jpg" data-shot-title="Способ оплаты и адрес">
                     <img src="/app/assets/guides/ios_03_payment.jpg" alt="Способ оплаты и адрес" loading="lazy">
@@ -298,9 +298,9 @@ export function renderUserGuidesView(root, state, data, onBack) {
     if (state.guideTab === "ios") {
         subTabsHtml = `
             <div class="filter-pills">
-                <button type="button" class="pill-btn ${state.guideIosMethod === "tf" ? "active" : ""}" data-ios-m="tf">TestFlight</button>
-                <button type="button" class="pill-btn ${state.guideIosMethod === "region" ? "active" : ""}" data-ios-m="region">Казахстан</button>
-                <button type="button" class="pill-btn ${state.guideIosMethod === "newid" ? "active" : ""}" data-ios-m="newid">Второй ID</button>
+                <button type="button" class="pill-btn ${state.guideIosMethod === "tf" ? "active" : ""}" data-ios-m="tf">TestFlight · Быстро</button>
+                <button type="button" class="pill-btn ${state.guideIosMethod === "region" ? "active" : ""}" data-ios-m="region">Казахстан · Навсегда</button>
+                <button type="button" class="pill-btn ${state.guideIosMethod === "newid" ? "active" : ""}" data-ios-m="newid">Второй ID · Запасной</button>
             </div>
         `;
         contentHtml = _renderIosContent(state.guideIosMethod);

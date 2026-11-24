@@ -115,17 +115,37 @@ async def _build_start_profile_context(session, db_user) -> dict:
     active_count = await get_user_active_referrals_count(session, db_user.telegram_id)
     tier = get_referral_tier(active_count)
     ref_rate_pct = int(tier.rate * 100)
-    ref_next_line = ""
-    if tier.needed_for_next and tier.next_rate is not None:
-        next_pct = int(tier.next_rate * 100)
-        ref_next_line = f" До ставки <b>{next_pct}%</b> осталось <b>{tier.needed_for_next}</b> акт. реф."
+    welcome_pct = int(REFERRAL_WELCOME_DISCOUNT_PERCENT * 100)
+    has_active_sub = bool(std_active or wi_has_period)
+
+    if has_active_sub or active_count > 0 or total_rub > 0:
+        ref_next_line = ""
+        if tier.needed_for_next and tier.next_rate is not None:
+            next_pct = int(tier.next_rate * 100)
+            ref_next_line = f" До ставки <b>{next_pct}%</b> осталось <b>{tier.needed_for_next}</b> акт. реф."
+        referral_block = (
+            f"<b>Партнёрская программа:</b> ваша ставка <b>{ref_rate_pct}%</b> ({safe(tier.name)}). "
+            f"Друг получает скидку <b>{welcome_pct}%</b> на первый заказ, "
+            f"а вы получаете бонусы с каждой его оплаты.{ref_next_line}"
+        )
+    else:
+        referral_block = (
+            f"<b>Пригласите друзей:</b> друг получит скидку <b>{welcome_pct}%</b> на первый заказ, "
+            f"а вы — <b>{ref_rate_pct}%</b> бонусами на баланс."
+        )
+
+    action_hint = (
+        "Нажмите <b>«Подключить»</b>, чтобы открыть ссылку подключения, устройства и инструкции."
+        if has_active_sub
+        else "Нажмите <b>«Открыть кабинет»</b>, чтобы выбрать тариф, пополнить баланс и подключиться."
+    )
 
     return {
         "profile_block": profile_block,
-        "ref_rate_pct": ref_rate_pct,
-        "ref_tier_name": safe(tier.name),
-        "ref_next_line": ref_next_line,
-        "welcome_discount_pct": int(REFERRAL_WELCOME_DISCOUNT_PERCENT * 100),
+        "referral_block": referral_block,
+        "action_hint": action_hint,
+        "has_active_sub": has_active_sub,
+        "welcome_discount_pct": welcome_pct,
     }
 
 
@@ -234,6 +254,9 @@ async def cmd_start(message: Message) -> None:
         app_url,
         mtproto_url=mtproto_url,
         referral_share_url=referral_share_url,
+        connect_btn_text=(
+            texts.BTN_MINIAPP_CONNECT if profile_ctx["has_active_sub"] else texts.BTN_OPEN_CABINET
+        ),
     )
     msg_text = texts.START_HUB_MESSAGE.format(
         name=safe_name,
