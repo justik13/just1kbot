@@ -289,6 +289,34 @@ def _record_2fa_failure(telegram_id: int) -> int:
     return 0
 
 
+_TOTP_ENC_PREFIX = "enc:"
+
+
+def _encrypt_totp_secret(secret: str) -> str:
+    """Encrypt TOTP secret with DB_ENCRYPTION_KEY before persisting to system_settings."""
+    from utils.encryption import _get_active_keys, _get_fernet_engine
+
+    keys_str = _get_active_keys()
+    if not keys_str:
+        raise RuntimeError("DB_ENCRYPTION_KEY is required to store TOTP secret")
+    token = _get_fernet_engine(keys_str).encrypt(secret.encode("utf-8")).decode("utf-8")
+    return f"{_TOTP_ENC_PREFIX}{token}"
+
+
+def _decrypt_totp_secret(stored: str) -> str:
+    """Decrypt enc:-prefixed TOTP secret, or return legacy plaintext Base32 secret."""
+    clean = stored.strip()
+    if not clean.startswith(_TOTP_ENC_PREFIX):
+        return clean
+    from utils.encryption import _get_active_keys, _get_fernet_engine
+
+    keys_str = _get_active_keys()
+    if not keys_str:
+        raise RuntimeError("DB_ENCRYPTION_KEY is required to decrypt TOTP secret")
+    raw_token = clean[len(_TOTP_ENC_PREFIX):]
+    return _get_fernet_engine(keys_str).decrypt(raw_token.encode("utf-8")).decode("utf-8")
+
+
 async def get_admin_2fa_config(
     session: AsyncSession,
     telegram_id: int,
@@ -300,7 +328,12 @@ async def get_admin_2fa_config(
 
     db_totp = await get_system_setting(session, f"miniapp_admin_totp_{telegram_id}")
     if db_totp:
-        return {"configured": True, "mode": "totp", "secret": db_totp.strip(), "source": "db"}
+        return {
+            "configured": True,
+            "mode": "totp",
+            "secret": _decrypt_totp_secret(db_totp),
+            "source": "db",
+        }
 
     return {"configured": False, "mode": "setup_required", "source": "none"}
 
@@ -347,7 +380,7 @@ async def verify_admin_2fa(
         await set_system_setting(
             session,
             f"miniapp_admin_totp_{telegram_id}",
-            pending_secret,
+            _encrypt_totp_secret(pending_secret),
             updated_by=telegram_id,
         )
         _2fa_failures.pop(telegram_id, None)

@@ -182,6 +182,22 @@ async def api_admin_2fa_verify_handler(request: web.Request) -> web.Response:
         )
 
     if not result.get("verified"):
+        if result.get("locked"):
+            bot = request.app.get("bot")
+            if bot is not None:
+                from config.settings import get_settings
+                from utils.telegram import safe_send_message
+
+                alert = (
+                    "⚠️ <b>Блокировка 2FA в Mini App</b>\n"
+                    f"Администратор ID: <code>{ctx.telegram_id}</code>\n"
+                    f"Причина: превышен лимит неверных кодов (блокировка на {result.get('retry_after', 300)} сек)."
+                )
+                for aid in get_settings().ADMIN_IDS:
+                    try:
+                        await safe_send_message(bot, aid, alert, parse_mode="HTML")
+                    except Exception:
+                        pass
         status = 429 if result.get("locked") else 403
         return web.json_response({"ok": False, "error": result.get("error", "Неверный код")}, status=status)
     return web.json_response({"ok": True, **result})
