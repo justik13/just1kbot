@@ -298,9 +298,9 @@ export function renderUserGuidesView(root, state, data, onBack) {
     if (state.guideTab === "ios") {
         subTabsHtml = `
             <div class="filter-pills">
-                <button type="button" class="pill-btn ${state.guideIosMethod === "tf" ? "active" : ""}" data-ios-m="tf">TestFlight · Быстро</button>
-                <button type="button" class="pill-btn ${state.guideIosMethod === "region" ? "active" : ""}" data-ios-m="region">Казахстан · Навсегда</button>
-                <button type="button" class="pill-btn ${state.guideIosMethod === "newid" ? "active" : ""}" data-ios-m="newid">Второй ID · Запасной</button>
+                <button type="button" class="pill-btn ${state.guideIosMethod === "tf" ? "active" : ""}" data-ios-m="tf">TestFlight</button>
+                <button type="button" class="pill-btn ${state.guideIosMethod === "region" ? "active" : ""}" data-ios-m="region">Казахстан</button>
+                <button type="button" class="pill-btn ${state.guideIosMethod === "newid" ? "active" : ""}" data-ios-m="newid">Второй ID</button>
             </div>
         `;
         contentHtml = _renderIosContent(state.guideIosMethod);

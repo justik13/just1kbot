@@ -1266,12 +1266,13 @@
 }
 
 .guide-details.guide-video-priority {
-    border-color: rgba(52, 211, 153, 0.34);
-    background: var(--bg-surface);
+    border-color: var(--border-strong);
+    background: var(--bg-elevated);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .guide-details.guide-video-priority[open] {
-    border-color: var(--accent-emerald);
+    border-color: rgba(255, 255, 255, 0.28);
 }
 
 .guide-video-summary {
@@ -1284,9 +1285,8 @@
     width: 36px;
     height: 36px;
     border-radius: 8px;
-    background: var(--accent-emerald-soft);
-    border: 1px solid rgba(52, 211, 153, 0.34);
-    color: var(--accent-emerald);
+    background: var(--accent-white);
+    color: #09090b;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1340,7 +1340,7 @@
 .guide-video-chevron {
     width: 16px;
     height: 16px;
-    color: var(--accent-emerald);
+    color: var(--text-secondary);
     flex-shrink: 0;
     transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
 }
