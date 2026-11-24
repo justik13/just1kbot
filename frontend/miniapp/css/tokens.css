@@ -24,22 +24,18 @@
     --accent-warn: #fbbf24;
     --accent-red: #f87171;
 
-    --radius-card: 22px;
+    --radius-card: 20px;
     --radius-control: 12px;
     --radius-sm: 8px;
     --radius-pill: 999px;
 
+    --glass-blur: blur(20px) saturate(180%);
+    --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    --dur-fast: 150ms;
+    --dur-mid: 220ms;
+
     --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
     --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    --ambient-glow: rgba(255, 255, 255, 0.06);
-}
-
-body[data-tier="standard"] {
-    --ambient-glow: rgba(16, 185, 129, 0.08);
-}
-
-body[data-tier="white_internet"] {
-    --ambient-glow: rgba(255, 255, 255, 0.14);
 }
 
 * {
@@ -51,10 +47,6 @@ body[data-tier="white_internet"] {
 html,
 body {
     background-color: var(--bg-canvas);
-    background-image:
-        radial-gradient(ellipse 90% 42% at 50% -10%, var(--ambient-glow), transparent 70%),
-        radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.03) 0%, transparent 65%);
-    background-attachment: fixed;
     color: var(--text-primary);
     font-family: var(--font-sans);
     font-size: 14px;

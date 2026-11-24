@@ -1,81 +1,46 @@
         :root {
-            /* Surface ramp (Pure AMOLED #000000 + Apple translucent glass) */
-            --bg-page: #000000;
-            --bg-card: rgba(18, 18, 22, 0.76);
-            --bg-surface: rgba(255, 255, 255, 0.045);
-            --bg-raised: rgba(255, 255, 255, 0.085);
-            --bg-input: rgba(0, 0, 0, 0.55);
-
-            /* Borders (Apple glass hairlines) */
-            --border-subtle: rgba(255, 255, 255, 0.10);
-            --border-strong: rgba(255, 255, 255, 0.20);
-
-            /* Text roles */
-            --text-primary: #f5f5f7;
-            --text-secondary: #a1a1aa;
-            --text-muted: #8e8e96;
+            /* Aliases mapped to shared Mini App SSOT tokens.css */
+            --bg-page: var(--bg-canvas);
+            --bg-card: var(--bg-surface);
+            --bg-surface-landing: rgba(255, 255, 255, 0.045);
+            --bg-raised: var(--bg-elevated);
 
             /* Primary CTA */
-            --cta-bg: #ffffff;
+            --cta-bg: var(--accent-white);
             --cta-hover: #e4e4e7;
             --cta-text: #09090b;
 
             /* Semantic colors */
-            --positive: #34d399;
-            --positive-tint: rgba(16, 185, 129, 0.12);
+            --positive: var(--accent-emerald);
+            --positive-tint: var(--accent-emerald-soft);
             --positive-border: rgba(52, 211, 153, 0.28);
-            --negative: #ef4444;
-            --negative-tint: rgba(239, 68, 68, 0.12);
-            --negative-border: rgba(239, 68, 68, 0.32);
+            --negative: var(--accent-red);
+            --negative-tint: rgba(248, 113, 113, 0.12);
+            --negative-border: rgba(248, 113, 113, 0.32);
 
-            /* Tier ambient illumination (emerald for Standard, white glow for White Internet) */
-            --tier-glow-color: rgba(16, 185, 129, 0.09);
+            /* Tier accent */
             --tier-highlight-line: rgba(52, 211, 153, 0.36);
-            --tier-accent: #34d399;
-            --tier-tint: rgba(16, 185, 129, 0.12);
+            --tier-accent: var(--accent-emerald);
+            --tier-tint: var(--accent-emerald-soft);
             --tier-border: rgba(52, 211, 153, 0.28);
 
-            /* Radii (Apple smooth corners) */
-            --radius-card: 22px;
-            --radius-panel: 14px;
-            --radius-control: 11px;
-            --radius-badge: 7px;
-
-            /* Motion */
-            --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
-            --dur-fast: 150ms;
-            --dur-mid: 220ms;
+            /* Radii aliases */
+            --radius-panel: var(--radius-control);
+            --radius-badge: var(--radius-sm);
         }
 
         body[data-tier="pro"] {
-            --tier-glow-color: rgba(16, 185, 129, 0.11);
             --tier-highlight-line: rgba(52, 211, 153, 0.40);
-            --tier-accent: #34d399;
-            --tier-tint: rgba(16, 185, 129, 0.14);
+            --tier-accent: var(--accent-emerald);
+            --tier-tint: var(--accent-emerald-soft);
             --tier-border: rgba(52, 211, 153, 0.32);
         }
 
-        body[data-tier="family"] {
-            --tier-glow-color: rgba(59, 130, 246, 0.14);
-            --tier-highlight-line: rgba(96, 165, 250, 0.48);
-            --tier-accent: #60a5fa;
-            --tier-tint: rgba(59, 130, 246, 0.14);
-            --tier-border: rgba(96, 165, 250, 0.35);
-        }
-
         body[data-tier="white_internet"] {
-            --tier-glow-color: rgba(255, 255, 255, 0.16);
-            --tier-highlight-line: rgba(255, 255, 255, 0.65);
-            --tier-accent: #ffffff;
-            --tier-tint: rgba(255, 255, 255, 0.14);
-            --tier-border: rgba(255, 255, 255, 0.36);
-        }
-
-        body[data-tier="white_internet"] .card {
-            box-shadow:
-                0 24px 60px rgba(0, 0, 0, 0.92),
-                0 0 56px -12px rgba(255, 255, 255, 0.22),
-                inset 0 1px 0 rgba(255, 255, 255, 0.18);
+            --tier-highlight-line: rgba(255, 255, 255, 0.55);
+            --tier-accent: var(--accent-white);
+            --tier-tint: var(--accent-white-soft);
+            --tier-border: rgba(255, 255, 255, 0.32);
         }
 
         *, *::before, *::after {
@@ -89,9 +54,6 @@
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
             background-color: var(--bg-page);
-            background-image:
-                radial-gradient(ellipse 85% 45% at 50% -10%, var(--tier-glow-color), transparent 70%),
-                radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.04) 0%, transparent 65%);
             color: var(--text-primary);
             min-height: 100vh;
             min-height: 100dvh;
@@ -113,8 +75,8 @@
             width: 100%;
             max-width: 440px;
             background-color: var(--bg-card);
-            backdrop-filter: blur(28px) saturate(180%);
-            -webkit-backdrop-filter: blur(28px) saturate(180%);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
             border: 1px solid var(--border-subtle);
             border-radius: var(--radius-card);
             padding: 20px;
@@ -123,7 +85,6 @@
             overflow: clip;
             box-shadow:
                 0 24px 60px rgba(0, 0, 0, 0.92),
-                0 0 40px -12px var(--tier-glow-color),
                 inset 0 1px 0 rgba(255, 255, 255, 0.12);
         }
 
@@ -478,12 +439,12 @@
             display: flex;
             align-items: center;
             gap: 12px;
-            margin-top: 14px;
-            padding: 13px 14px;
-            min-height: 58px;
-            background: linear-gradient(135deg, rgba(255, 255, 255, 0.085) 0%, var(--tier-tint) 100%);
+            margin-top: 16px;
+            padding: 12px 16px;
+            min-height: 56px;
+            background: var(--tier-tint);
             border: 1px solid var(--tier-border);
-            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 6px 20px rgba(0, 0, 0, 0.35);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
             border-radius: var(--radius-panel);
             color: var(--text-primary);
             font-family: inherit;
@@ -603,7 +564,7 @@
         .btn-primary {
             background-color: var(--cta-bg);
             color: var(--cta-text);
-            box-shadow: 0 0 24px rgba(255, 255, 255, 0.14), inset 0 1px 0 #ffffff;
+            box-shadow: inset 0 1px 0 #ffffff;
         }
 
         .btn-primary:hover {
@@ -1219,7 +1180,6 @@
             border-radius: var(--radius-control);
             background-color: var(--cta-bg);
             color: var(--cta-text);
-            box-shadow: 0 0 20px rgba(255, 255, 255, 0.25);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -1285,6 +1245,28 @@
             transform: rotate(180deg);
         }
 
+        .disclosure-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 10px;
+            border-radius: var(--radius-control);
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid var(--border-strong);
+            color: var(--text-primary);
+            font-size: 12px;
+            font-weight: 500;
+            line-height: 1.2;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        .disclosure-pill .guide-video-chevron {
+            color: var(--text-primary);
+            width: 14px;
+            height: 14px;
+        }
+
         .guide-video-wrap {
             padding: 0 14px 14px;
             border-top: 1px solid var(--border-subtle);
@@ -1308,12 +1290,6 @@
 
         details:not([open])::details-content {
             block-size: 0;
-        }
-
-        @media (prefers-reduced-motion: no-preference) {
-            details::details-content {
-                transition: block-size var(--dur-mid) var(--ease-out), content-visibility var(--dur-mid) allow-discrete, display var(--dur-mid) allow-discrete;
-            }
         }
 
         /* Callout Boxes */

@@ -119,12 +119,21 @@ export function formatBytesGb(bytes) {
 let _modalStack = [];
 let _modalTitleSeq = 0;
 
-function _focusFirstInModal(card) {
-    const focusable = card.querySelector(
-        "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])"
+const _FOCUSABLE_SELECTOR =
+    "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
+
+function _getModalFocusable(card) {
+    return Array.from(card.querySelectorAll(_FOCUSABLE_SELECTOR)).filter(
+        (el) => !el.hidden && el.offsetParent !== null
     );
+}
+
+function _focusFirstInModal(card) {
+    const focusable = _getModalFocusable(card)[0];
     if (focusable && typeof focusable.focus === "function") {
         focusable.focus({ preventScroll: true });
+    } else if (typeof card.focus === "function") {
+        card.focus({ preventScroll: true });
     }
 }
 
@@ -147,6 +156,7 @@ export function openModal(title, bodyNode, { showCloseBtn = true } = {}) {
     backdrop.innerHTML = "";
     const card = document.createElement("div");
     card.className = "modal-card";
+    card.tabIndex = -1;
     card.setAttribute("role", "dialog");
     card.setAttribute("aria-modal", "true");
 
@@ -164,6 +174,26 @@ export function openModal(title, bodyNode, { showCloseBtn = true } = {}) {
     const onKeyDown = (e) => {
         if (e.key === "Escape") {
             close();
+            return;
+        }
+        if (e.key !== "Tab") return;
+        const focusables = _getModalFocusable(card);
+        if (focusables.length === 0) {
+            e.preventDefault();
+            card.focus({ preventScroll: true });
+            return;
+        }
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        const active = document.activeElement;
+        if (e.shiftKey) {
+            if (active === first || !card.contains(active)) {
+                e.preventDefault();
+                last.focus({ preventScroll: true });
+            }
+        } else if (active === last || !card.contains(active)) {
+            e.preventDefault();
+            first.focus({ preventScroll: true });
         }
     };
 

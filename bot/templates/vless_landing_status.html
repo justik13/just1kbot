@@ -3,38 +3,26 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <noscript><meta http-equiv="refresh" content="5"></noscript>
-    <meta name="theme-color" content="#050505">
+    {head_extra}
+    <meta name="theme-color" content="#000000">
     <meta name="color-scheme" content="dark">
-    <title>Настройка подключения</title>
+    <title>{page_title}</title>
     <style>
+        /* {{SHARED_TOKENS_CSS}} */
         :root {
-            --bg-color: #000000;
-            --card-bg: rgba(18, 18, 22, 0.76);
+            --bg-color: var(--bg-canvas);
+            --card-bg: var(--bg-surface);
             --surface-elevated: rgba(255, 255, 255, 0.05);
             --surface-hover: rgba(255, 255, 255, 0.09);
-            --border-subtle: rgba(255, 255, 255, 0.10);
-            --border-strong: rgba(255, 255, 255, 0.22);
-            --text-main: #fafafa;
-            --text-sub: #a1a1aa;
-            --text-muted: #71717a;
-            --cta-bg: #fafafa;
+            --text-main: var(--text-primary);
+            --text-sub: var(--text-secondary);
+            --cta-bg: var(--accent-white);
             --cta-hover: #e4e4e7;
             --cta-text: #09090b;
-            --amber: #f59e0b;
-            --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
-        }
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
+            --amber: var(--accent-amber);
         }
         body {
             background-color: var(--bg-color);
-            background-image: radial-gradient(ellipse 90% 50% at 50% -10%, rgba(255, 255, 255, 0.06), transparent 70%);
             color: var(--text-main);
             min-height: 100vh;
             min-height: 100dvh;
@@ -49,14 +37,16 @@
         }
         .card {
             width: 100%;
-            max-width: 420px;
+            max-width: 440px;
             background-color: var(--card-bg);
-            border-radius: 24px;
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-card);
             padding: 24px 16px 16px;
             text-align: center;
             box-shadow:
                 0 24px 48px -12px rgba(0, 0, 0, 0.9),
-                0 0 0 1px var(--border-subtle),
                 inset 0 1px 0 rgba(255, 255, 255, 0.08);
             animation: cardEnter 280ms var(--ease-out) both;
         }
@@ -74,15 +64,15 @@
             display: flex;
             flex-direction: column;
             align-items: center;
-            gap: 14px;
-            margin-bottom: 14px;
+            gap: 12px;
+            margin-bottom: 16px;
         }
         .status-pill {
             display: inline-flex;
             align-items: center;
-            gap: 6px;
-            padding: 4px 10px;
-            border-radius: 6px;
+            gap: 8px;
+            padding: 4px 12px;
+            border-radius: var(--radius-sm);
             background: rgba(245, 158, 11, 0.1);
             border: 1px solid rgba(245, 158, 11, 0.28);
             color: #fbbf24;
@@ -94,22 +84,14 @@
             height: 6px;
             border-radius: 50%;
             background-color: var(--amber);
-            box-shadow: 0 0 8px var(--amber);
-            animation: pulse 1.5s infinite;
-        }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.4; transform: scale(0.85); }
         }
         .icon-badge {
             width: 52px;
             height: 52px;
-            border-radius: 15px;
-            background: linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.02) 100%);
-            box-shadow:
-                inset 0 1px 0 rgba(255, 255, 255, 0.14),
-                0 0 0 1px var(--border-subtle),
-                0 8px 20px rgba(0, 0, 0, 0.5);
+            border-radius: var(--radius-control);
+            background: var(--surface-elevated);
+            border: 1px solid var(--border-subtle);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -118,10 +100,6 @@
         .icon-badge svg {
             width: 24px;
             height: 24px;
-            animation: spin 3s linear infinite;
-        }
-        @keyframes spin {
-            100% { transform: rotate(360deg); }
         }
         h1 {
             font-size: clamp(20px, 5vw, 23px);
@@ -142,8 +120,8 @@
             gap: 8px;
             width: 100%;
             min-height: 52px;
-            padding: 14px 18px;
-            border-radius: 14px;
+            padding: 12px 16px;
+            border-radius: var(--radius-control);
             font-size: 15px;
             font-weight: 600;
             letter-spacing: -0.01em;
@@ -153,9 +131,7 @@
             -webkit-tap-highlight-color: transparent;
             background-color: var(--cta-bg);
             color: var(--cta-text);
-            box-shadow:
-                0 1px 2px rgba(0, 0, 0, 0.5),
-                inset 0 1px 0 #ffffff;
+            box-shadow: inset 0 1px 0 #ffffff;
             transition: transform 160ms var(--ease-out), background-color 150ms ease;
         }
         .btn:active {
@@ -164,30 +140,28 @@
         @media (hover: hover) and (pointer: fine) {
             .btn:hover { background-color: var(--cta-hover); }
         }
-
-        /* Collapsible Support Disclosure Accordion */
+        .hint-note {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin: 12px 0 0;
+        }
         .support-accordion {
             background-color: var(--surface-elevated);
             border: 1px solid var(--border-subtle);
-            border-radius: 14px;
+            border-radius: var(--radius-control);
             overflow: hidden;
             margin-top: 12px;
-            transition:
-                background-color 150ms ease,
-                border-color 200ms ease,
-                box-shadow 200ms ease;
+            transition: background-color 150ms ease, border-color 200ms ease;
         }
-
         .support-accordion:hover {
             border-color: var(--border-strong);
         }
-
         .support-accordion-header {
             width: 100%;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 14px 16px;
+            padding: 12px 16px;
             background: transparent;
             border: none;
             color: var(--text-main);
@@ -198,26 +172,22 @@
             -webkit-tap-highlight-color: transparent;
             transition: color 150ms ease;
         }
-
         .support-header-left {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
         }
-
         .support-icon {
-            width: 18px;
-            height: 18px;
+            width: 16px;
+            height: 16px;
             flex-shrink: 0;
             color: var(--text-sub);
             transition: color 150ms ease;
         }
-
         .support-accordion:hover .support-icon,
         .support-accordion.open .support-icon {
             color: var(--text-main);
         }
-
         .support-chevron {
             width: 16px;
             height: 16px;
@@ -225,16 +195,13 @@
             color: var(--text-sub);
             transition: transform 240ms cubic-bezier(0.16, 1, 0.3, 1), color 150ms ease;
         }
-
         .support-accordion:hover .support-chevron {
             color: var(--text-main);
         }
-
         .support-accordion.open .support-chevron {
             transform: rotate(180deg);
             color: var(--text-main);
         }
-
         .support-form-container {
             display: grid;
             grid-template-rows: 0fr;
@@ -242,12 +209,10 @@
             overflow: hidden;
             visibility: hidden;
         }
-
         .support-accordion.open .support-form-container {
             grid-template-rows: 1fr;
             visibility: visible;
         }
-
         .support-form-inner {
             min-height: 0;
             overflow: hidden;
@@ -258,102 +223,90 @@
             text-align: left;
             border-top: 1px solid transparent;
         }
-
         .support-accordion.open .support-form-inner {
             padding: 8px 16px 16px;
             opacity: 1;
             transform: translateY(0);
             border-top-color: rgba(255, 255, 255, 0.06);
         }
-
         .support-intro {
-            font-size: 12.5px;
+            font-size: 13px;
             color: var(--text-sub);
             line-height: 1.45;
             margin-bottom: 12px;
             padding-top: 4px;
         }
-
         .support-field {
             margin-bottom: 12px;
         }
-
         .support-label {
             display: block;
             font-size: 12px;
             font-weight: 500;
             color: var(--text-sub);
-            margin-bottom: 6px;
+            margin-bottom: 8px;
         }
-
         .support-input, .support-textarea {
             width: 100%;
             background-color: #09090b;
             border: 1px solid var(--border-subtle);
-            border-radius: 10px;
-            padding: 11px 13px;
-            font-size: 13.5px;
+            border-radius: var(--radius-sm);
+            padding: 12px;
+            font-size: 14px;
             color: var(--text-main);
             outline: none;
             font-family: inherit;
             transition: border-color 150ms ease, box-shadow 150ms ease;
             box-sizing: border-box;
         }
-
         .support-input::placeholder, .support-textarea::placeholder {
             color: var(--text-muted);
             opacity: 0.9;
         }
-
         .support-input:focus, .support-textarea:focus {
             border-color: var(--border-strong);
             box-shadow: 0 0 0 1px var(--border-strong);
         }
-
         .support-input:disabled, .support-textarea:disabled {
             opacity: 0.55;
             cursor: not-allowed;
             background-color: rgba(255, 255, 255, 0.03);
             border-color: var(--border-subtle);
         }
-
         .support-reset-btn {
             background: rgba(255, 255, 255, 0.05);
             border: 1px solid var(--border-subtle);
-            border-radius: 8px;
+            border-radius: var(--radius-sm);
             color: var(--text-sub);
             font-size: 12px;
             cursor: pointer;
-            margin-top: 10px;
+            margin-top: 8px;
             display: inline-flex;
             align-items: center;
             justify-content: center;
             min-height: 36px;
-            padding: 6px 14px;
+            padding: 8px 16px;
             font-family: inherit;
             transition: color 150ms ease, background-color 150ms ease;
         }
-
         .support-reset-btn:hover {
             color: var(--text-main);
             background-color: rgba(255, 255, 255, 0.09);
         }
-
         .support-textarea {
             resize: vertical;
-            min-height: 74px;
+            min-height: 76px;
             line-height: 1.45;
         }
-
         .support-submit-btn {
             display: flex;
             align-items: center;
             justify-content: center;
             gap: 8px;
             width: 100%;
-            min-height: 46px;
+            min-height: 48px;
             padding: 12px 16px;
-            border-radius: 11px;
+            border-radius: var(--radius-sm);
             background-color: var(--cta-bg);
             color: var(--cta-text);
             font-size: 14px;
@@ -364,62 +317,52 @@
             user-select: none;
             -webkit-tap-highlight-color: transparent;
         }
-
         .support-submit-btn:hover {
             background-color: var(--cta-hover);
         }
-
         .support-submit-btn:active {
             transform: scale(0.975);
         }
-
         .support-submit-btn:disabled {
             opacity: 0.65;
             cursor: not-allowed;
         }
-
         .support-spinner {
-            width: 15px;
-            height: 15px;
+            width: 16px;
+            height: 16px;
             border: 2px solid rgba(0, 0, 0, 0.25);
             border-top-color: #09090b;
             border-radius: 50%;
             animation: supportSpin 600ms linear infinite;
         }
-
         @keyframes supportSpin {
             to { transform: rotate(360deg); }
         }
-
         .support-status-msg {
             display: none;
-            padding: 11px 13px;
-            border-radius: 10px;
-            font-size: 12.5px;
+            padding: 12px;
+            border-radius: var(--radius-sm);
+            font-size: 13px;
             line-height: 1.4;
-            margin-top: 10px;
+            margin-top: 12px;
             text-align: center;
         }
-
         .support-status-msg.success {
             background-color: rgba(16, 185, 129, 0.1);
             border: 1px solid rgba(16, 185, 129, 0.25);
             color: #34d399;
         }
-
         .support-status-msg.error {
             background-color: rgba(239, 68, 68, 0.1);
             border: 1px solid rgba(239, 68, 68, 0.25);
             color: #f87171;
         }
-
         @media (max-width: 480px) {
             body {
                 padding: max(12px, env(safe-area-inset-top)) 12px max(16px, env(safe-area-inset-bottom)) 12px;
             }
             .card {
-                padding: 26px 18px 22px;
-                border-radius: 22px;
+                padding: 24px 16px 20px;
             }
             .btn {
                 min-height: 52px;
@@ -431,16 +374,15 @@
                 padding: max(8px, env(safe-area-inset-top)) 8px max(12px, env(safe-area-inset-bottom)) 8px;
             }
             .card {
-                padding: 20px 14px 18px;
-                border-radius: 18px;
+                padding: 20px 16px 16px;
             }
             .btn {
-                min-height: 50px;
-                font-size: 13.5px;
+                min-height: 48px;
+                font-size: 14px;
             }
             .support-accordion-header {
-                padding: 13px 14px;
-                font-size: 13.5px;
+                padding: 12px 16px;
+                font-size: 14px;
             }
         }
         @media (prefers-reduced-motion: reduce) {
@@ -457,29 +399,30 @@
         <div class="header-top">
             <div class="status-pill">
                 <span class="status-dot"></span>
-                <span>Настройка доступа</span>
+                <span>{status_badge}</span>
             </div>
             <div class="icon-badge" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                     <circle cx="12" cy="12" r="10"/>
-                    <path d="M12 6v6l4 2"/>
+                    <polyline points="12 6 12 12 16 14"/>
                 </svg>
             </div>
         </div>
-        <h1>Настройка шлюза</h1>
-        <p>Идёт подготовка защищённого шлюза. Обычно это занимает несколько секунд. Страница проверяет статус каждые 5 секунд.</p>
+        <h1>{status_title}</h1>
+        <p>{status_description}</p>
         <a href="{bot_link}" class="btn">Перейти в бота @{clean_bot}</a>
+        {extra_hint}
 
         <!-- Support Disclosure Accordion -->
         <div id="supportAccordion" class="support-accordion">
             <button id="supportToggleBtn" type="button" class="support-accordion-header" onclick="toggleSupportForm()" aria-expanded="false" aria-controls="supportFormContainer">
                 <span class="support-header-left">
-                    <svg class="support-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <svg class="support-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
                     </svg>
                     <span>Связь с поддержкой</span>
                 </span>
-                <svg class="support-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <svg class="support-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <polyline points="6 9 12 15 18 9"/>
                 </svg>
             </button>
@@ -506,10 +449,7 @@
     </div>
 
     <script>
-        let refreshTimer = setTimeout(function() {
-            location.reload();
-        }, 5000);
-
+        {extra_script}
         function toggleSupportForm() {
             const accordion = document.getElementById("supportAccordion");
             const btn = document.getElementById("supportToggleBtn");
@@ -520,18 +460,9 @@
                 accordion.classList.remove("open");
                 btn.setAttribute("aria-expanded", "false");
                 if (container) container.setAttribute("aria-hidden", "true");
-                if (!refreshTimer) {
-                    refreshTimer = setTimeout(function() {
-                        location.reload();
-                    }, 5000);
-                }
+                if (typeof resumeAutoRefresh === "function") resumeAutoRefresh();
             } else {
-                // Pause refresh timer so user's typing isn't interrupted
-                if (refreshTimer) {
-                    clearTimeout(refreshTimer);
-                    refreshTimer = null;
-                }
-
+                if (typeof pauseAutoRefresh === "function") pauseAutoRefresh();
                 accordion.classList.add("open");
                 btn.setAttribute("aria-expanded", "true");
                 if (container) container.setAttribute("aria-hidden", "false");
@@ -552,15 +483,15 @@
 
             const contact = contactInput.value.trim();
             const message = messageInput.value.trim();
+            const alertIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;display:inline-block;vertical-align:-3px;margin-right:6px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
+
             if (contact.length < 3) {
-                const alertIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;display:inline-block;vertical-align:-2px;margin-right:6px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
                 statusMsg.innerHTML = alertIcon + "Укажите контакт для связи (минимум 3 символа)";
                 statusMsg.className = "support-status-msg error";
                 statusMsg.style.display = "block";
                 return;
             }
             if (message.length < 5) {
-                const alertIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;display:inline-block;vertical-align:-2px;margin-right:6px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
                 statusMsg.innerHTML = alertIcon + "Опишите проблему подробнее (минимум 5 символов)";
                 statusMsg.className = "support-status-msg error";
                 statusMsg.style.display = "block";
@@ -581,8 +512,8 @@
 
                 const data = await response.json().catch(() => ({}));
                 if (response.ok && data.ok) {
-                    const checkIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;display:inline-block;vertical-align:-2px;margin-right:6px;"><polyline points="20 6 9 17 4 12"/></svg>';
-                    statusMsg.innerHTML = checkIcon + '<span>Контакты отправлены. Мы скоро свяжемся с вами!</span><br><button type="button" class="support-reset-btn" onclick="resetSupportForm()">Отправить ещё сообщение</button>';
+                    const checkIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;display:inline-block;vertical-align:-3px;margin-right:6px;"><polyline points="20 6 9 17 4 12"/></svg>';
+                    statusMsg.innerHTML = checkIcon + '<span>Контакты отправлены. Мы скоро свяжемся с вами.</span><br><button type="button" class="support-reset-btn" onclick="resetSupportForm()">Отправить ещё сообщение</button>';
                     statusMsg.className = "support-status-msg success";
                     statusMsg.style.display = "block";
                     contactInput.disabled = true;
@@ -590,7 +521,6 @@
                     submitBtn.style.display = "none";
                 } else {
                     const errText = data.error || "Не удалось отправить. Попробуйте позже.";
-                    const alertIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;display:inline-block;vertical-align:-2px;margin-right:6px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
                     statusMsg.innerHTML = alertIcon;
                     statusMsg.appendChild(document.createTextNode(errText));
                     statusMsg.className = "support-status-msg error";
@@ -599,7 +529,6 @@
                     submitBtn.innerHTML = '<span>Отправить контакты</span>';
                 }
             } catch (err) {
-                const alertIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;display:inline-block;vertical-align:-2px;margin-right:6px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
                 statusMsg.innerHTML = alertIcon + "Ошибка сети при отправке. Пожалуйста, проверьте соединение.";
                 statusMsg.className = "support-status-msg error";
                 statusMsg.style.display = "block";

@@ -31,9 +31,9 @@ function _renderIosContent(method) {
                             <span class="guide-video-title">Видеоинструкция: смена региона за 2 минуты</span>
                             <span class="guide-video-tag">Рекомендуем</span>
                         </span>
-                        <span class="guide-video-meta">38 сек · 2,0 МБ · без банковской карты</span>
+                        <span class="guide-video-meta">38 сек · 2,0 МБ · наглядный показ без банковской карты</span>
                     </span>
-                    <svg class="guide-video-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+                    <span class="disclosure-pill"><span>Смотреть</span><svg class="guide-video-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></span>
                 </summary>
                 <div class="guide-body">
                     <video class="guide-video" controls playsinline preload="none" poster="/app/assets/guides/ios_02_kazakhstan.jpg">
@@ -43,6 +43,9 @@ function _renderIosContent(method) {
             </details>
             <div class="notice-box">
                 <span>В App Store Казахстана интерфейс на русском языке, а карта для скачивания не требуется. После установки можно сразу вернуть регион РФ.</span>
+            </div>
+            <div class="notice-box notice-warn">
+                <span><b>Условия смены:</b> на балансе Apple ID не должно быть остатка (0 ₽), действующих подписок Apple, незавершённых заказов и семейного доступа.</span>
             </div>
             <div class="guide-step-card">
                 <div class="guide-step-head"><span class="guide-step-num">1</span><span>Откройте меню смены страны в App Store</span></div>
@@ -201,7 +204,7 @@ function _renderDesktopContent(method) {
                 <div class="sub-url-box" style="font-size:12px;">${escapeHtml(cmd)}</div>
                 <div class="connect-pair">
                     <button type="button" class="btn btn-sm" data-copy="${escapeHtml(cmd)}">Копировать команду</button>
-                    <button type="button" class="btn btn-sm" data-ext="https://github.com/Happ-proxy/happ-desktop/releases">Релизы GitHub</button>
+                    <button type="button" class="btn btn-sm" data-ext="https://github.com/Happ-proxy/happ-desktop/releases/latest">Релизы GitHub</button>
                 </div>
             </div>
         `;
@@ -255,7 +258,7 @@ function _renderFaqContent(deviceLimit) {
             <details class="guide-details" ${idx === 0 ? "open" : ""}>
                 <summary class="guide-summary">
                     <span>${escapeHtml(item.q)}</span>
-                    <span class="muted" style="font-size:12px;">▾</span>
+                    <span class="disclosure-pill"><span>Ответ</span><svg class="guide-video-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></span>
                 </summary>
                 <div class="guide-body">
                     <p class="muted">${escapeHtml(item.a)}</p>
