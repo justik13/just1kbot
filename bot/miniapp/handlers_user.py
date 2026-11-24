@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+import html
 import logging
 import time
 from typing import Any, TypeVar
@@ -461,12 +462,12 @@ async def api_user_standard_quote_handler(request: web.Request) -> web.Response:
 def _safe_user_error_response(exc: Exception, *, default_msg: str = "Не удалось выполнить операцию") -> web.Response:
     """Return user-safe error JSON without leaking internal DB/network exception details."""
     safe_types = (
-        ValueError,
         order_service.InsufficientBalanceError,
         order_service.AccountDebtBlockedError,
         order_service.FinancialHoldBlockedError,
     )
-    msg = str(exc) if isinstance(exc, safe_types) else default_msg
+    is_safe = type(exc) is ValueError or isinstance(exc, safe_types)
+    msg = str(exc) if is_safe else default_msg
     return web.json_response({"ok": False, "error": msg}, status=400)
 
 
@@ -750,6 +751,39 @@ async def api_user_order_check_handler(request: web.Request) -> web.Response:
                         external_id=external_id,
                         paid_amount_rub=status_res.amount_rub,
                     )
+                    target_order = paid or locked
+                    target_meta = dict(target_order.metadata_ or {})
+                    is_quarantined = bool(
+                        target_meta.get("underpaid")
+                        or target_meta.get("late_payment_after_refund_on_canceled")
+                        or target_meta.get("late_payment_attempt_rejected")
+                        or target_meta.get("requires_manual_review")
+                    )
+                    if is_quarantined and not target_meta.get("mismatch_alert_sent"):
+                        reason_text = str(
+                            target_meta.get("refund_amount_mismatch")
+                            or target_meta.get("payment_mismatch_reason")
+                            or (
+                                f"late_payment_after_refund_on_canceled: {target_meta.get('late_payment_after_refund_on_canceled')}"
+                                if target_meta.get("late_payment_after_refund_on_canceled")
+                                else None
+                            )
+                            or (
+                                f"late_payment_attempt_rejected: {target_meta.get('late_payment_attempt_rejected')}"
+                                if target_meta.get("late_payment_attempt_rejected")
+                                else None
+                            )
+                            or target_meta.get("manual_review_reason")
+                            or "requires_manual_review"
+                        )
+                        target_meta["mismatch_alert_sent"] = True
+                        target_order.metadata_ = target_meta
+                        await session.flush()
+                        admin_alert_info = {
+                            "order_id": target_order.id,
+                            "amount_rub": target_order.amount_rub,
+                            "mismatch": reason_text,
+                        }
                     final_status = paid.status if paid else locked.status
                 elif is_partial_refund or mismatch_reason:
                     reason_text = str(
@@ -777,7 +811,8 @@ async def api_user_order_check_handler(request: web.Request) -> web.Response:
                 else:
                     order_service.OrderService.mark_order_canceled(
                         locked,
-                        reason=status_res.cancellation_reason or "gateway_canceled",
+                        reason="gateway_canceled",
+                        gateway_reason=status_res.cancellation_reason,
                     )
                     await order_service.OrderService.refund_reserved_mixed_debit(session, locked)
                     final_status = locked.status
@@ -801,9 +836,9 @@ async def api_user_order_check_handler(request: web.Request) -> web.Response:
                 from utils.telegram import safe_send_message
 
                 alert_text = texts.ADMIN_ALERT_ORDER_REQUIRES_MANUAL_REVIEW.format(
-                    order_id=admin_alert_info["order_id"],
-                    amount_rub=admin_alert_info["amount_rub"],
-                    mismatch=admin_alert_info["mismatch"],
+                    order_id=html.escape(str(admin_alert_info["order_id"])),
+                    amount_rub=html.escape(str(admin_alert_info["amount_rub"])),
+                    mismatch=html.escape(str(admin_alert_info["mismatch"])),
                 )
                 for aid in get_settings().ADMIN_IDS:
                     try:

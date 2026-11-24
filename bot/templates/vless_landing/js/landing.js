@@ -302,7 +302,19 @@
             }
         }
 
+        function pauseGuideVideos(scope) {
+            const root = scope || document;
+            root.querySelectorAll("video").forEach(function(v) {
+                try {
+                    if (!v.paused) v.pause();
+                } catch (e) {
+                    // Non-critical
+                }
+            });
+        }
+
         function closeGuidesTab() {
+            pauseGuideVideos();
             const main = document.getElementById("mainView");
             const guides = document.getElementById("guidesView");
             if (guides) guides.classList.add("view-hidden");
@@ -314,6 +326,7 @@
         }
 
         function switchGuideTab(tab) {
+            pauseGuideVideos();
             const tabs = ["ios", "android", "desktop", "faq"];
             tabs.forEach(function(t) {
                 const btn = document.getElementById("guideNavBtn" + t.charAt(0).toUpperCase() + t.slice(1));
@@ -328,6 +341,7 @@
         }
 
         function switchIosMethod(method) {
+            pauseGuideVideos();
             const methods = {
                 "tf": { btn: "tabBtnIosTf", sec: "iosSubGuideTf" },
                 "region": { btn: "tabBtnIosRegion", sec: "iosSubGuideRegion" },
@@ -561,4 +575,10 @@
             if (img.complete && img.naturalWidth > 0) {
                 markImgLoaded(img);
             }
+        });
+
+        document.querySelectorAll("details.guide-video-details, #guidesView details").forEach(function(det) {
+            det.addEventListener("toggle", function() {
+                if (!det.open) pauseGuideVideos(det);
+            });
         });

@@ -257,6 +257,17 @@ function _renderFaqContent(deviceLimit) {
         .join("");
 }
 
+function _pauseGuideVideos(container) {
+    if (!container) return;
+    container.querySelectorAll("video").forEach((v) => {
+        try {
+            if (!v.paused) v.pause();
+        } catch {
+            // Non-critical
+        }
+    });
+}
+
 export function renderUserGuidesView(root, state, data, onBack) {
     const validTabs = ["ios", "android", "desktop", "faq"];
     if (!validTabs.includes(state.guideTab)) {
@@ -330,10 +341,20 @@ export function renderUserGuidesView(root, state, data, onBack) {
         </div>
     `;
 
-    root.querySelector("#guidesBackBtn").addEventListener("click", onBack);
+    root.querySelector("#guidesBackBtn").addEventListener("click", () => {
+        _pauseGuideVideos(root);
+        onBack();
+    });
+
+    root.querySelectorAll("details").forEach((det) => {
+        det.addEventListener("toggle", () => {
+            if (!det.open) _pauseGuideVideos(det);
+        });
+    });
 
     root.querySelectorAll("[data-gtab]").forEach((btn) => {
         btn.addEventListener("click", () => {
+            _pauseGuideVideos(root);
             state.guideTab = btn.dataset.gtab;
             renderUserGuidesView(root, state, data, onBack);
         });
@@ -341,18 +362,21 @@ export function renderUserGuidesView(root, state, data, onBack) {
 
     root.querySelectorAll("[data-ios-m]").forEach((btn) => {
         btn.addEventListener("click", () => {
+            _pauseGuideVideos(root);
             state.guideIosMethod = btn.dataset.iosM;
             renderUserGuidesView(root, state, data, onBack);
         });
     });
     root.querySelectorAll("[data-and-m]").forEach((btn) => {
         btn.addEventListener("click", () => {
+            _pauseGuideVideos(root);
             state.guideAndroidMethod = btn.dataset.andM;
             renderUserGuidesView(root, state, data, onBack);
         });
     });
     root.querySelectorAll("[data-desk-m]").forEach((btn) => {
         btn.addEventListener("click", () => {
+            _pauseGuideVideos(root);
             state.guideDesktopMethod = btn.dataset.deskM;
             renderUserGuidesView(root, state, data, onBack);
         });

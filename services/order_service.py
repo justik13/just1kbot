@@ -485,17 +485,59 @@ class OrderService:
                 logger.exception("Failed to clean up order %s after gateway create failure", order_id)
             raise
 
+    _LOCAL_CANCEL_REASONS = frozenset({
+        "superseded_by_new_order",
+        "order_expired_24h",
+        "ambiguous_creation_timeout",
+        "gateway_create_failed",
+    })
+
     @staticmethod
-    def mark_order_canceled(order: Order, reason: str = "gateway_canceled") -> None:
+    def is_gateway_canceled(order_meta: dict | None) -> bool:
+        """Return True if an order was canceled by the payment gateway (including raw YooKassa reasons)."""
+        if not isinstance(order_meta, dict):
+            return False
+        if order_meta.get("gateway_canceled"):
+            return True
+        reason = order_meta.get("cancellation_reason")
+        if not reason:
+            return False
+        if reason == "gateway_canceled":
+            return True
+        return reason not in OrderService._LOCAL_CANCEL_REASONS
+
+    @staticmethod
+    def mark_order_canceled(
+        order: Order,
+        reason: str = "gateway_canceled",
+        *,
+        gateway_reason: str | None = None,
+    ) -> None:
         """Mark order canceled and record cancellation reason to prevent invalid revival."""
         order_meta = dict(order.metadata_ or {})
+        is_gw = reason == "gateway_canceled" or bool(gateway_reason) or (
+            reason not in OrderService._LOCAL_CANCEL_REASONS
+        )
         if order.status == "pending":
             order.status = "canceled"
             order_meta.setdefault("cancellation_reason", reason)
+            if is_gw:
+                order_meta["gateway_canceled"] = True
+            if gateway_reason:
+                order_meta["gateway_cancellation_reason"] = str(gateway_reason)
             order.metadata_ = order_meta
         elif order.status == "canceled":
+            changed = False
             if "cancellation_reason" not in order_meta:
                 order_meta["cancellation_reason"] = reason
+                changed = True
+            if is_gw and not order_meta.get("gateway_canceled"):
+                order_meta["gateway_canceled"] = True
+                changed = True
+            if gateway_reason and "gateway_cancellation_reason" not in order_meta:
+                order_meta["gateway_cancellation_reason"] = str(gateway_reason)
+                changed = True
+            if changed:
                 order.metadata_ = order_meta
 
     @staticmethod
@@ -590,13 +632,20 @@ class OrderService:
                 order._newly_paid = False
                 await session.flush()
                 return order
-            cancellation_reason = order_meta.get("cancellation_reason")
-            if cancellation_reason == "gateway_canceled":
+            if OrderService.is_gateway_canceled(order_meta):
                 logger.warning(
-                    "Cannot mark order %s paid: order was canceled by payment gateway",
+                    "Cannot mark order %s paid: order was canceled by payment gateway (reason=%s)",
                     order.id,
+                    order_meta.get("cancellation_reason"),
                 )
+                order_meta["requires_manual_review"] = True
+                order_meta["manual_review"] = True
+                order_meta["late_payment_attempt_rejected"] = (
+                    str(external_id) if external_id else True
+                )
+                order.metadata_ = order_meta
                 order._newly_paid = False
+                await session.flush()
                 return None
             logger.info(
                 "Reviving canceled order %s on valid payment received", order.id
@@ -691,6 +740,8 @@ class OrderService:
         total_original_rub = 0
         for ord_obj in paid_orders:
             meta = ord_obj.metadata_ or {}
+            if meta.get("mixed_fallback_credited") or meta.get("settlement_held"):
+                continue
             raw_value = int(Decimal(str(meta.get("total_cost_rub") or ord_obj.amount_rub or 0)))
             bonus_used = int(
                 Decimal(
@@ -1555,14 +1606,15 @@ class OrderService:
                 paid_amount_rub=result.amount_rub,
             )
             if paid_order is None:
-                cancellation_reason = (order.metadata_ or {}).get("cancellation_reason")
-                if cancellation_reason == "gateway_canceled":
+                if OrderService.is_gateway_canceled(order.metadata_):
                     logger.warning(
                         "Ignoring payment.succeeded webhook for gateway_canceled order %s (ext_id=%s)",
                         order.id,
                         result.external_id,
                     )
                     order_meta = dict(order.metadata_ or {})
+                    order_meta["requires_manual_review"] = True
+                    order_meta["manual_review"] = True
                     order_meta["late_payment_attempt_rejected"] = str(result.external_id)
                     order.metadata_ = order_meta
                     order._newly_paid = False

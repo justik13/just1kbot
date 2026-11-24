@@ -195,6 +195,14 @@ function _handlePaymentResponse(res, successMsg, onReload) {
                 checkBtn.textContent = "Платёж отменён";
                 return;
             }
+            if (st.status === "refunded") {
+                cleanup();
+                hintEl.textContent = "Платёж был возвращён. При необходимости оформите заказ заново.";
+                checkBtn.disabled = true;
+                checkBtn.textContent = "Платёж возвращён";
+                onReload();
+                return;
+            }
             if (manual) {
                 hintEl.textContent = "Платёж ещё обрабатывается банком. Попробуйте через пару секунд.";
             }
@@ -1106,6 +1114,10 @@ function _syncTopbarProfile(d, root) {
 }
 
 let _cabinetTgBackListener = null;
+
+export function clearCabinetBackButton() {
+    _setCabinetBackButton(null);
+}
 
 function _setCabinetBackButton(onBack) {
     const tg = window.Telegram && window.Telegram.WebApp;

@@ -370,6 +370,7 @@ async def get_admin_2fa_config(
             "mode": "totp",
             "secret": decrypted,
             "source": "db",
+            "is_plaintext": not db_totp.strip().startswith(_TOTP_ENC_PREFIX),
         }
 
     return {"configured": False, "mode": "setup_required", "source": "none"}
@@ -456,6 +457,22 @@ async def verify_admin_2fa(
             "verified": False,
             "error": "Этот код уже использован. Дождитесь следующего кода.",
         }
+
+    if cfg.get("source") == "db" and cfg.get("is_plaintext"):
+        try:
+            await set_system_setting(
+                session,
+                f"miniapp_admin_totp_{telegram_id}",
+                _encrypt_totp_secret(cfg["secret"]),
+                updated_by=telegram_id,
+            )
+            logger.info("Lazily encrypted legacy plaintext admin TOTP secret for %s", telegram_id)
+        except Exception as exc:
+            logger.warning(
+                "Failed to lazily encrypt legacy admin TOTP secret for %s: %s",
+                telegram_id,
+                exc,
+            )
 
     _used_totp_steps[(telegram_id, matched_step)] = True
     _2fa_failures.pop(telegram_id, None)

@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import html
 import ipaddress
 import json
 import logging
@@ -200,10 +201,15 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                     or order_meta.get("refund_payment_id_mismatch")
                     or order_meta.get("cancel_payment_id_mismatch")
                     or order_meta.get("late_payment_after_refund_on_canceled")
+                    or order_meta.get("late_payment_attempt_rejected")
                     or order_meta.get("underpaid")
                 )
             )
-            if order and has_mismatch_review:
+            if order and has_mismatch_review and not order_meta.get("mismatch_alert_sent"):
+                updated_meta = dict(order_meta)
+                updated_meta["mismatch_alert_sent"] = True
+                order.metadata_ = updated_meta
+                order_meta = updated_meta
                 admin_alert_info = {
                     "order_id": order.id,
                     "amount_rub": order.amount_rub,
@@ -216,6 +222,11 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                         or (
                             f"late_payment_after_refund_on_canceled: {order_meta.get('late_payment_after_refund_on_canceled')}"
                             if order_meta.get("late_payment_after_refund_on_canceled")
+                            else None
+                        )
+                        or (
+                            f"late_payment_attempt_rejected: {order_meta.get('late_payment_attempt_rejected')}"
+                            if order_meta.get("late_payment_attempt_rejected")
                             else None
                         )
                         or "—"
@@ -315,9 +326,9 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                 from utils.telegram import safe_send_message
                 admin_ids = get_settings().ADMIN_IDS
                 alert_text = texts.ADMIN_ALERT_ORDER_REQUIRES_MANUAL_REVIEW.format(
-                    order_id=admin_alert_info["order_id"],
-                    amount_rub=admin_alert_info["amount_rub"],
-                    mismatch=admin_alert_info["mismatch"],
+                    order_id=html.escape(str(admin_alert_info["order_id"])),
+                    amount_rub=html.escape(str(admin_alert_info["amount_rub"])),
+                    mismatch=html.escape(str(admin_alert_info["mismatch"])),
                 )
                 for aid in admin_ids:
                     try:

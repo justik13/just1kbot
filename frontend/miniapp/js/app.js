@@ -7,7 +7,7 @@ import { renderAdminUsersView } from "./views/admin_users.js?v=2.7.6";
 import { renderUserDetailView } from "./views/user_detail.js?v=2.7.6";
 import { clearBroadcastPollTimer, renderAdminBroadcastsView } from "./views/admin_broadcasts.js?v=2.7.6";
 import { renderAdminFinancesView } from "./views/admin_finances.js?v=2.7.6";
-import { loadAndRenderUserCabinet } from "./views/user_cabinet.js?v=2.7.6";
+import { clearCabinetBackButton, loadAndRenderUserCabinet } from "./views/user_cabinet.js?v=2.7.6";
 
 const appState = {
     user: null,
@@ -49,6 +49,7 @@ function _initTelegramChrome() {
 }
 
 function _updateTelegramBackButton(onBack) {
+    clearCabinetBackButton();
     const tg = window.Telegram && window.Telegram.WebApp;
     if (!tg || !tg.BackButton) return;
     try {
