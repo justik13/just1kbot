@@ -86,8 +86,10 @@ async def test_yookassa_check_payment_status_partial_refund():
     )
     with patch.object(gw, "_get_payment_result", AsyncMock(return_value=fake_result)):
         res = await gw.check_payment_status("pay_1")
-    assert res.is_refunded is True
+    assert res.is_refunded is False
+    assert res.is_partial_refund is True
     assert res.is_paid is False
+    assert res.mismatch_reason is not None
 
 
 @pytest.mark.asyncio
@@ -183,11 +185,22 @@ async def test_quote_standard_change_grace_autorenew():
 
 @pytest.mark.asyncio
 async def test_create_yookassa_order_enforces_pending_cap():
+    ambiguous_orders = [
+        SimpleNamespace(
+            id=uuid.uuid4(),
+            user_id=1,
+            status="pending",
+            metadata_={"payment_creation_ambiguous": True},
+        )
+        for _ in range(3)
+    ]
     session = AsyncMock()
     session.execute = AsyncMock(
-        return_value=SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: []))
+        side_effect=[
+            SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [])),
+            SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: ambiguous_orders)),
+        ]
     )
-    session.scalar = AsyncMock(return_value=3)
     with pytest.raises(ValueError, match="3"):
         await OrderService._create_yookassa_order(
             session,

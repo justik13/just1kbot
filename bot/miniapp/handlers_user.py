@@ -663,15 +663,9 @@ async def api_user_order_check_handler(request: web.Request) -> web.Response:
     cooldown_key = (ctx.telegram_id, str(order_uuid))
     now_mono = time.monotonic()
     last_check = _ORDER_CHECK_COOLDOWN.get(cooldown_key)
-    if last_check is not None and (now_mono - last_check) < 5.0:
-        return web.json_response(
-            {
-                "ok": False,
-                "error": "Подождите несколько секунд перед повторной проверкой.",
-            },
-            status=429,
-        )
-    _ORDER_CHECK_COOLDOWN[cooldown_key] = now_mono
+    on_cooldown = last_check is not None and (now_mono - last_check) < 5.0
+    if not on_cooldown:
+        _ORDER_CHECK_COOLDOWN[cooldown_key] = now_mono
 
     async with session_scope() as session:
         user = await _ensure_user(session, ctx)
@@ -680,7 +674,7 @@ async def api_user_order_check_handler(request: web.Request) -> web.Response:
         )
         if order is None:
             return web.json_response({"ok": False, "error": "Заказ не найден"}, status=404)
-        if order.status != "pending" or not order.external_id:
+        if on_cooldown or order.status != "pending" or not order.external_id:
             return web.json_response({
                 "ok": True,
                 "order_id": str(order.id),
@@ -705,7 +699,15 @@ async def api_user_order_check_handler(request: web.Request) -> web.Response:
         })
 
     is_refunded = bool(getattr(status_res, "is_refunded", False))
-    if not (status_res.is_paid or status_res.is_canceled or is_refunded):
+    is_partial_refund = bool(getattr(status_res, "is_partial_refund", False))
+    mismatch_reason = getattr(status_res, "mismatch_reason", None)
+    if not (
+        status_res.is_paid
+        or status_res.is_canceled
+        or is_refunded
+        or is_partial_refund
+        or mismatch_reason
+    ):
         return web.json_response({
             "ok": True,
             "order_id": str(order_uuid),
@@ -713,6 +715,7 @@ async def api_user_order_check_handler(request: web.Request) -> web.Response:
             "service_type": service_type,
         })
 
+    admin_alert_info = None
     try:
         async with session_scope() as session:
             await order_service.acquire_user_account_lock(session, user_id)
@@ -735,6 +738,23 @@ async def api_user_order_check_handler(request: web.Request) -> web.Response:
                         paid_amount_rub=status_res.amount_rub,
                     )
                     final_status = paid.status if paid else locked.status
+                elif is_partial_refund or mismatch_reason:
+                    reason_text = str(
+                        mismatch_reason or "Partial refund detected during status check"
+                    )
+                    order_meta = dict(locked.metadata_ or {})
+                    order_meta["requires_manual_review"] = True
+                    order_meta["payment_mismatch_reason"] = reason_text
+                    if not order_meta.get("mismatch_alert_sent"):
+                        order_meta["mismatch_alert_sent"] = True
+                        admin_alert_info = {
+                            "order_id": locked.id,
+                            "amount_rub": locked.amount_rub,
+                            "mismatch": reason_text,
+                        }
+                    locked.metadata_ = order_meta
+                    await session.flush()
+                    final_status = locked.status
                 elif is_refunded:
                     await order_service.OrderService.refund_reserved_mixed_debit(session, locked)
                     locked.status = OrderStatus.REFUNDED
@@ -750,15 +770,41 @@ async def api_user_order_check_handler(request: web.Request) -> web.Response:
                     final_status = locked.status
             else:
                 final_status = locked.status
-            return web.json_response({
+            response_payload = {
                 "ok": True,
                 "order_id": str(locked.id),
                 "status": final_status,
                 "service_type": locked.service_type,
-            })
+            }
     except Exception as exc:
         logger.warning("Mini App order %s check fulfillment error: %s", order_uuid, exc)
         return web.json_response({"ok": False, "error": str(exc)}, status=500)
+
+    if admin_alert_info:
+        bot = request.app.get("bot") if hasattr(request, "app") else None
+        if bot:
+            try:
+                from bot import texts
+                from utils.telegram import safe_send_message
+
+                alert_text = texts.ADMIN_ALERT_ORDER_REQUIRES_MANUAL_REVIEW.format(
+                    order_id=admin_alert_info["order_id"],
+                    amount_rub=admin_alert_info["amount_rub"],
+                    mismatch=admin_alert_info["mismatch"],
+                )
+                for aid in get_settings().ADMIN_IDS:
+                    try:
+                        await safe_send_message(bot, aid, alert_text, parse_mode="HTML")
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to send order check mismatch alert to admin %s: %s",
+                            aid,
+                            exc,
+                        )
+            except Exception as exc:
+                logger.warning("Failed to send order check mismatch alerts: %s", exc)
+
+    return web.json_response(response_payload)
 
 
 async def api_user_auto_renew_handler(request: web.Request) -> web.Response:

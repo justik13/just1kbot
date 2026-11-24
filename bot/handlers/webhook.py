@@ -170,7 +170,7 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                     inbox_status = WebhookInboxStatus.DEAD.value
                 else:
                     inbox_status = WebhookInboxStatus.PENDING.value
-            elif order_meta.get("payment_amount_mismatch"):
+            elif getattr(order, "_webhook_amount_mismatch", False):
                 logger.critical(
                     "[%s] YooKassa webhook %s for order %s flagged payment_amount_mismatch (%s); marking inbox dead",
                     request_id,
@@ -198,6 +198,8 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                     or order_meta.get("refund_amount_mismatch")
                     or order_meta.get("payment_id_mismatch")
                     or order_meta.get("refund_payment_id_mismatch")
+                    or order_meta.get("cancel_payment_id_mismatch")
+                    or order_meta.get("late_payment_after_refund_on_canceled")
                     or order_meta.get("underpaid")
                 )
             )
@@ -210,6 +212,12 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                         or order_meta.get("refund_amount_mismatch")
                         or order_meta.get("payment_id_mismatch")
                         or order_meta.get("refund_payment_id_mismatch")
+                        or order_meta.get("cancel_payment_id_mismatch")
+                        or (
+                            f"late_payment_after_refund_on_canceled: {order_meta.get('late_payment_after_refund_on_canceled')}"
+                            if order_meta.get("late_payment_after_refund_on_canceled")
+                            else None
+                        )
                         or "—"
                     ),
                 }
@@ -231,10 +239,17 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                     "service_type": order.service_type,
                     "status": order.status,
                     "amount_rub": (
-                        order_meta.get("partial_refund_amount_rub")
-                        if order.status == "partially_refunded"
-                        else order.amount_rub
+                        order_meta.get("refund_on_canceled_amount_rub")
+                        if order.status == "canceled"
+                        else (
+                            order_meta.get("partial_refund_amount_rub")
+                            if order.status == "partially_refunded"
+                            else order.amount_rub
+                        )
                     ) or order.amount_rub,
+                    "refund_received_on_canceled": bool(
+                        order_meta.get("refund_received_on_canceled")
+                    ),
                 }
 
             if existing_event:
@@ -326,17 +341,23 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                     "white_internet": "Белый интернет",
                     "topup": "Пополнение",
                 }
+                is_refund_on_canceled = (
+                    refund_alert_info["status"] == "canceled"
+                    and refund_alert_info.get("refund_received_on_canceled")
+                )
                 is_partial_refund = refund_alert_info["status"] == "partially_refunded"
-                status_label = (
-                    "Частичный возврат"
-                    if is_partial_refund
-                    else "Полный возврат"
-                )
-                footer_line = (
-                    "Требуется ручная проверка (доступ и баланс не изменялись)."
-                    if is_partial_refund
-                    else "Доступ и баланс обновлены автоматически."
-                )
+                if is_refund_on_canceled:
+                    status_label = "Возврат по отменённому заказу"
+                    footer_line = (
+                        "Требуется ручная проверка (заказ уже был отменён, доступ и баланс не изменялись; "
+                        "автоматическое восстановление заблокировано)."
+                    )
+                elif is_partial_refund:
+                    status_label = "Частичный возврат"
+                    footer_line = "Требуется ручная проверка (доступ и баланс не изменялись)."
+                else:
+                    status_label = "Полный возврат"
+                    footer_line = "Доступ и баланс обновлены автоматически."
                 refund_text = (
                     "💸 <b>Возврат ЮKassa</b>\n"
                     f"Заказ: <code>{refund_alert_info['order_id']}</code>\n"

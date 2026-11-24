@@ -506,6 +506,7 @@ class YooKassaGateway(BasePaymentGateway):
         refunded_val = refunded_obj.get("value") if isinstance(refunded_obj, dict) else None
         refunded_currency = refunded_obj.get("currency") if isinstance(refunded_obj, dict) else None
         is_refunded = False
+        is_partial_refund = False
         mismatch_reason: str | None = None
         if status == "succeeded" and amount_rub is None:
             mismatch_reason = (
@@ -514,7 +515,6 @@ class YooKassaGateway(BasePaymentGateway):
             )
         if refunded_val is not None:
             if refunded_currency is not None and refunded_currency != "RUB":
-                is_refunded = True
                 mismatch_reason = (
                     f"Non-RUB refunded_amount currency: {refunded_currency!r}"
                 )
@@ -522,25 +522,28 @@ class YooKassaGateway(BasePaymentGateway):
                 try:
                     refunded_rub = Decimal(str(refunded_val))
                     if refunded_rub > 0:
-                        # Treat any positive refund (partial or full) as refunded
-                        # so pending-order reconciliation never grants full benefits.
-                        is_refunded = True
                         if amount_rub is not None and refunded_rub < amount_rub:
+                            is_partial_refund = True
                             mismatch_reason = (
                                 f"Partial refund detected during status check: "
                                 f"{refunded_rub} / {amount_rub} RUB"
                             )
+                        else:
+                            is_refunded = True
                 except (InvalidOperation, ValueError, TypeError):
                     is_refunded = False
+                    is_partial_refund = False
         return YooKassaPaymentStatusResult(
             is_paid=(
                 status == "succeeded"
                 and not is_refunded
+                and not is_partial_refund
                 and mismatch_reason is None
                 and amount_rub is not None
                 and amount_rub > 0
             ),
             is_refunded=is_refunded,
+            is_partial_refund=is_partial_refund,
             is_canceled=(status == "canceled"),
             status_str=status,
             amount_rub=amount_rub,

@@ -16,10 +16,20 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.drop_constraint(
-        "ck_wi_subs_pending_device_limit",
-        "white_internet_subscriptions",
-        type_="check",
+    op.execute(
+        "UPDATE white_internet_subscriptions "
+        "SET pending_device_limit = 3 "
+        "WHERE pending_device_limit IS NOT NULL AND pending_device_limit > 3"
+    )
+    op.execute(
+        "UPDATE white_internet_subscriptions "
+        "SET traffic_overage_bytes = 0 "
+        "WHERE traffic_overage_bytes < 0"
+    )
+
+    op.execute(
+        "ALTER TABLE white_internet_subscriptions "
+        "DROP CONSTRAINT IF EXISTS ck_wi_subs_pending_device_limit"
     )
     op.create_check_constraint(
         "ck_wi_subs_pending_device_limit",
@@ -27,10 +37,9 @@ def upgrade() -> None:
         "pending_device_limit IS NULL OR (pending_device_limit >= 1 AND pending_device_limit <= 3)",
     )
 
-    op.drop_constraint(
-        "ck_white_internet_subscriptions_traffic_nonnegative",
-        "white_internet_subscriptions",
-        type_="check",
+    op.execute(
+        "ALTER TABLE white_internet_subscriptions "
+        "DROP CONSTRAINT IF EXISTS ck_white_internet_subscriptions_traffic_nonnegative"
     )
     op.create_check_constraint(
         "ck_white_internet_subscriptions_traffic_nonnegative",
@@ -42,10 +51,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_constraint(
-        "ck_white_internet_subscriptions_traffic_nonnegative",
-        "white_internet_subscriptions",
-        type_="check",
+    op.execute(
+        "ALTER TABLE white_internet_subscriptions "
+        "DROP CONSTRAINT IF EXISTS ck_white_internet_subscriptions_traffic_nonnegative"
     )
     op.create_check_constraint(
         "ck_white_internet_subscriptions_traffic_nonnegative",
@@ -54,10 +62,9 @@ def downgrade() -> None:
         "AND traffic_uplink_bytes >= 0 AND traffic_downlink_bytes >= 0",
     )
 
-    op.drop_constraint(
-        "ck_wi_subs_pending_device_limit",
-        "white_internet_subscriptions",
-        type_="check",
+    op.execute(
+        "ALTER TABLE white_internet_subscriptions "
+        "DROP CONSTRAINT IF EXISTS ck_wi_subs_pending_device_limit"
     )
     op.create_check_constraint(
         "ck_wi_subs_pending_device_limit",
