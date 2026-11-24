@@ -1149,6 +1149,14 @@ function _render(root) {
     const wiActive = _wiHasActivePeriod(d.wi);
     const hasAny = stdActive || wiActive;
 
+    if (wiActive && !(d.wi && String(d.wi.status || "").toUpperCase() === "EXHAUSTED")) {
+        document.body.dataset.tier = "white_internet";
+    } else if (stdActive) {
+        document.body.dataset.tier = "standard";
+    } else {
+        delete document.body.dataset.tier;
+    }
+
     const navTabs = [
         { id: "connect", label: "Доступ", icon: _ICONS.shield },
         { id: "tariffs", label: "Тарифы", icon: _ICONS.card },

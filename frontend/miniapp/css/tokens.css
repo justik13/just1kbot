@@ -31,6 +31,15 @@
 
     --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
     --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    --ambient-glow: rgba(255, 255, 255, 0.06);
+}
+
+body[data-tier="standard"] {
+    --ambient-glow: rgba(52, 211, 153, 0.07);
+}
+
+body[data-tier="white_internet"] {
+    --ambient-glow: rgba(255, 255, 255, 0.13);
 }
 
 * {
@@ -43,7 +52,7 @@ html,
 body {
     background-color: var(--bg-canvas);
     background-image:
-        radial-gradient(ellipse 90% 42% at 50% -10%, rgba(52, 211, 153, 0.10), transparent 70%),
+        radial-gradient(ellipse 90% 42% at 50% -10%, var(--ambient-glow), transparent 70%),
         radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.03) 0%, transparent 65%);
     background-attachment: fixed;
     color: var(--text-primary);

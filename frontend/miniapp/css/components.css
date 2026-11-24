@@ -112,7 +112,7 @@
 }
 
 :where(a, button, summary, input, textarea, select, [tabindex]):focus-visible {
-    outline: 2px solid var(--accent-emerald);
+    outline: 2px solid rgba(255, 255, 255, 0.75);
     outline-offset: 2px;
 }
 
@@ -261,7 +261,7 @@
 .stat-box.stat-lead .stat-val {
     font-size: 20px;
     font-weight: 600;
-    color: var(--accent-emerald);
+    color: var(--accent-white);
 }
 
 .stat-lbl {
@@ -1334,8 +1334,9 @@
     font-weight: 500;
     padding: 2px 6px;
     border-radius: 6px;
-    background: var(--accent-emerald-soft);
-    color: var(--accent-emerald);
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
 }
 
 .guide-video-meta {
