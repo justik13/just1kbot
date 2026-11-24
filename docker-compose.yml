@@ -228,7 +228,7 @@ services:
       GRPC_PORT: "10085"
       LOCATION_CODE: "de"
       DOMAIN: "dash.just1k.pro"
-      XRAY_API_KEY: ${DEV_NODE_API_KEY:?DEV_NODE_API_KEY is required when using nodes profile}
+      XRAY_API_KEY: ${DEV_NODE_API_KEY:-}
 
   node_exit_de:
     build:
@@ -246,7 +246,7 @@ services:
       GRPC_PORT: "10085"
       LOCATION_CODE: "de"
       DOMAIN: "de-1.dash.just1k.pro"
-      XRAY_API_KEY: ${DEV_NODE_API_KEY:?DEV_NODE_API_KEY is required when using nodes profile}
+      XRAY_API_KEY: ${DEV_NODE_API_KEY:-}
 
   node_eu:
     build:
@@ -264,7 +264,7 @@ services:
       GRPC_PORT: "10085"
       LOCATION_CODE: "nl"
       DOMAIN: "eu-transit.just1k.pro"
-      XRAY_API_KEY: ${DEV_NODE_API_KEY:?DEV_NODE_API_KEY is required when using nodes profile}
+      XRAY_API_KEY: ${DEV_NODE_API_KEY:-}
 
 volumes:
   postgres_data:

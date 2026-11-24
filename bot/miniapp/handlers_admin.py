@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from datetime import timedelta
@@ -64,6 +65,7 @@ from utils.datetime_helpers import now_utc
 
 SchemaT = TypeVar("SchemaT", bound=BaseModel)
 logger = logging.getLogger(__name__)
+_background_tasks: set[asyncio.Task[object]] = set()
 
 
 def _parse_server_id(request: web.Request) -> tuple[int | None, web.Response | None]:
@@ -100,6 +102,25 @@ async def _parse_json_model(
 
 def _service_error_response(exc: AdminNodeServiceError) -> web.Response:
     return web.json_response({"ok": False, "error": exc.message}, status=exc.status_code)
+
+
+def _safe_admin_error_response(
+    exc: Exception,
+    *,
+    status: int = 400,
+    default_msg: str = "Не удалось выполнить операцию",
+) -> web.Response:
+    """Return safe error JSON exposing only domain/validation errors."""
+    if isinstance(exc, AdminNodeServiceError):
+        return web.json_response({"ok": False, "error": exc.message}, status=exc.status_code)
+    if isinstance(exc, white_internet_repo.WhiteInternetError) or type(exc) in (
+        ValueError,
+        LookupError,
+    ):
+        msg = str(exc).strip() or default_msg
+        return web.json_response({"ok": False, "error": msg}, status=status)
+    logger.warning("Unexpected admin handler error (%s): %s", type(exc).__name__, exc)
+    return web.json_response({"ok": False, "error": default_msg}, status=status)
 
 
 async def api_me_handler(request: web.Request) -> web.Response:
@@ -182,22 +203,34 @@ async def api_admin_2fa_verify_handler(request: web.Request) -> web.Response:
         )
 
     if not result.get("verified"):
-        if result.get("locked"):
+        if result.get("newly_locked"):
             bot = request.app.get("bot")
             if bot is not None:
                 from config.settings import get_settings
                 from utils.telegram import safe_send_message
 
+                admin_ids = list(get_settings().ADMIN_IDS)
+                retry_after = result.get("retry_after", 300)
                 alert = (
                     "⚠️ <b>Блокировка 2FA в Mini App</b>\n"
                     f"Администратор ID: <code>{ctx.telegram_id}</code>\n"
-                    f"Причина: превышен лимит неверных кодов (блокировка на {result.get('retry_after', 300)} сек)."
+                    f"Причина: превышен лимит неверных кодов (блокировка на {retry_after} сек)."
                 )
-                for aid in get_settings().ADMIN_IDS:
-                    try:
-                        await safe_send_message(bot, aid, alert, parse_mode="HTML")
-                    except Exception:
-                        pass
+
+                async def _send_lockout_alerts() -> None:
+                    for aid in admin_ids:
+                        try:
+                            await safe_send_message(bot, aid, alert, parse_mode="HTML")
+                        except Exception as exc:
+                            logger.warning(
+                                "Failed to send 2FA lockout alert to admin %s: %s",
+                                aid,
+                                exc,
+                            )
+
+                task = asyncio.create_task(_send_lockout_alerts())
+                _background_tasks.add(task)
+                task.add_done_callback(_background_tasks.discard)
         status = 429 if result.get("locked") else 403
         return web.json_response({"ok": False, "error": result.get("error", "Неверный код")}, status=status)
     return web.json_response({"ok": True, **result})
@@ -843,7 +876,7 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                     reason=note or "miniapp_admin_grant",
                 )
             except ValueError as exc:
-                return web.json_response({"ok": False, "error": str(exc)}, status=400)
+                return _safe_admin_error_response(exc)
             if updated_user is None:
                 return web.json_response({"ok": False, "error": "Пользователь не найден"}, status=404)
             updated_vless = await vless_subscription_repo.get_subscription_by_user_id(session, updated_user.id)
@@ -886,7 +919,7 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                 try:
                     updated_sub = await white_internet_repo.reset_traffic_used_atomic(session, wi_sub.id)
                 except white_internet_repo.WhiteInternetError as exc:
-                    return web.json_response({"ok": False, "error": str(exc)}, status=400)
+                    return _safe_admin_error_response(exc)
                 await AuditService.log_action(
                     session,
                     admin_id=ctx.telegram_id,
@@ -919,7 +952,7 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                         audit_act = AdminAuditAction.WHITE_INTERNET_QUOTA_SET
                         msg_ok = f"Базовая квота установлена: {payload.gb} ГБ"
                 except white_internet_repo.WhiteInternetError as exc:
-                    return web.json_response({"ok": False, "error": str(exc)}, status=400)
+                    return _safe_admin_error_response(exc)
                 if (
                     updated_sub.status == WhiteInternetStatus.ACTIVE
                     and updated_sub.provisioning_status == WhiteInternetProvisioningStatus.PENDING_UPDATE
@@ -1429,9 +1462,9 @@ async def api_admin_user_message_handler(request: web.Request) -> web.Response:
             text=payload.text,
         )
     except LookupError as exc:
-        return web.json_response({"ok": False, "error": str(exc)}, status=404)
+        return _safe_admin_error_response(exc, status=404)
     except ValueError as exc:
-        return web.json_response({"ok": False, "error": str(exc)}, status=400)
+        return _safe_admin_error_response(exc)
 
     return web.json_response({"ok": True, **res, "message": "Сообщение отправлено"})
 
@@ -1488,7 +1521,7 @@ async def api_admin_broadcast_preview_handler(request: web.Request) -> web.Respo
                 session, payload.target_audience
             )
     except ValueError as exc:
-        return web.json_response({"ok": False, "error": str(exc)}, status=400)
+        return _safe_admin_error_response(exc)
 
     return web.json_response({
         "ok": True,
@@ -1517,7 +1550,7 @@ async def api_admin_broadcast_start_handler(request: web.Request) -> web.Respons
             media_url=payload.media_url,
         )
     except ValueError as exc:
-        return web.json_response({"ok": False, "error": str(exc)}, status=400)
+        return _safe_admin_error_response(exc)
 
     return web.json_response({"ok": True, "broadcast": item, "message": "Рассылка запущена"})
 
@@ -1557,7 +1590,7 @@ async def api_admin_mass_bonus_handler(request: web.Request) -> web.Response:
             notify_users=payload.notify_users,
         )
     except ValueError as exc:
-        return web.json_response({"ok": False, "error": str(exc)}, status=400)
+        return _safe_admin_error_response(exc)
 
     return web.json_response({
         "ok": True,
@@ -1586,7 +1619,7 @@ async def api_admin_mass_extend_handler(request: web.Request) -> web.Response:
             notify_users=payload.notify_users,
         )
     except ValueError as exc:
-        return web.json_response({"ok": False, "error": str(exc)}, status=400)
+        return _safe_admin_error_response(exc)
 
     return web.json_response({
         "ok": True,

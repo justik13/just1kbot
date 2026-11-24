@@ -12,11 +12,12 @@ from services.miniapp_auth_service import (
 from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
 
 _api_rate_limiter = HttpRateLimiter(rate_per_minute=120.0, burst=30)
+_asset_rate_limiter = HttpRateLimiter(rate_per_minute=600.0, burst=150)
 
 
-def check_miniapp_rate_limit(request: web.Request) -> web.Response | None:
+def _check_rate_limit(limiter: HttpRateLimiter, request: web.Request) -> web.Response | None:
     client_ip = get_trusted_client_ip(request)
-    allowed, retry_after = _api_rate_limiter.check(client_ip)
+    allowed, retry_after = limiter.check(client_ip)
     if not allowed:
         return web.json_response(
             {"ok": False, "error": "Too many requests"},
@@ -24,6 +25,14 @@ def check_miniapp_rate_limit(request: web.Request) -> web.Response | None:
             headers={"Retry-After": str(retry_after)},
         )
     return None
+
+
+def check_miniapp_rate_limit(request: web.Request) -> web.Response | None:
+    return _check_rate_limit(_api_rate_limiter, request)
+
+
+def check_miniapp_asset_rate_limit(request: web.Request) -> web.Response | None:
+    return _check_rate_limit(_asset_rate_limiter, request)
 
 
 def extract_miniapp_user(request: web.Request) -> MiniAppUserContext | None:
