@@ -47,11 +47,9 @@
                 const btn = document.getElementById(btnId);
                 if (panel) panel.style.display = (p === platform) ? "block" : "none";
                 if (btn) {
-                    if (p === platform) {
-                        btn.classList.add("active");
-                    } else {
-                        btn.classList.remove("active");
-                    }
+                    const isSelected = (p === platform);
+                    btn.classList.toggle("active", isSelected);
+                    btn.setAttribute("aria-selected", isSelected ? "true" : "false");
                 }
             });
             if (platform === "windows" || platform === "macos") {
@@ -227,7 +225,7 @@
 
                 const data = await response.json().catch(() => ({}));
                 if (response.ok && data.ok) {
-                    statusMsg.innerHTML = '<span>Контакты отправлены. Мы скоро свяжемся с вами!</span><br><button type="button" class="support-reset-btn" onclick="resetSupportForm()">Отправить ещё сообщение</button>';
+                    statusMsg.innerHTML = '<span>Контакты отправлены. Оператор скоро свяжется с вами</span><br><button type="button" class="support-reset-btn" onclick="resetSupportForm()">Отправить ещё сообщение</button>';
                     statusMsg.className = "support-status-msg success";
                     statusMsg.style.display = "block";
                     contactInput.disabled = true;
