@@ -257,12 +257,13 @@ export function showConfirmModal({
 
     const cancelBtn = document.createElement("button");
     cancelBtn.type = "button";
-    cancelBtn.className = "btn btn-sm";
+    cancelBtn.className = "btn";
     cancelBtn.textContent = cancelText;
+    if (isDestructive) cancelBtn.autofocus = true;
 
     const okBtn = document.createElement("button");
     okBtn.type = "button";
-    okBtn.className = `btn btn-sm ${isDestructive ? "btn-danger" : "btn-primary"}`;
+    okBtn.className = `btn ${isDestructive ? "btn-danger-filled" : "btn-primary"}`;
     okBtn.textContent = confirmText;
 
     btnGroup.append(cancelBtn, okBtn);

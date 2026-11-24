@@ -662,7 +662,7 @@
             align-items: center;
             justify-content: center;
             gap: 6px;
-            min-height: 36px;
+            min-height: 44px;
             background-color: var(--bg-surface);
             border: 1px solid var(--border-subtle);
             border-radius: var(--radius-badge);
@@ -884,8 +884,10 @@
         }
 
         .support-reset-btn {
-            display: inline-block;
-            margin-top: 8px;
+            display: inline-flex;
+            align-items: center;
+            min-height: 44px;
+            margin-top: 4px;
             background: transparent;
             border: none;
             color: var(--tier-accent);
@@ -893,7 +895,15 @@
             font-family: inherit;
             font-size: 12px;
             cursor: pointer;
-            padding: 0;
+            padding: 10px 4px;
+        }
+
+        .tab-svg-solid {
+            transform: scale(0.84);
+        }
+
+        .icon-nudge-right {
+            transform: translateX(1px);
         }
 
         /* Copy Toast */
@@ -962,7 +972,7 @@
             border: 1px solid var(--border-subtle);
             border-radius: var(--radius-control);
             padding: 8px 12px;
-            min-height: 40px;
+            min-height: 44px;
             color: var(--text-primary);
             font-family: inherit;
             font-size: 13px;

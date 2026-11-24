@@ -370,7 +370,7 @@ function _openStandardPlanModal(d, mode, onReload) {
                     </div>
                 </div>
                 <div class="field">
-                    <label>Точное число устройств</label>
+                    <label>Точное число устройств (от 2 до 10)</label>
                     <div class="stepper">
                         <button type="button" class="stepper-btn" id="stepMinus" ${devices <= 2 ? "disabled" : ""}>−</button>
                         <span class="stepper-val">${devices} устр.</span>
@@ -560,7 +560,7 @@ function _openStandardDevicesModal(d, onReload) {
                 <span>до ${formatDate(std.expires_at)}</span>
             </div>
             <div class="field">
-                <label>Новый лимит устройств</label>
+                <label>Новый лимит устройств (от 2 до 10)</label>
                 <div class="stepper">
                     <button type="button" class="stepper-btn" id="devMinus" ${targetLimit <= 2 ? "disabled" : ""}>−</button>
                     <span class="stepper-val">${targetLimit} устр.</span>

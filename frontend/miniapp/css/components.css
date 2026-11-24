@@ -413,6 +413,7 @@
 }
 
 .btn:hover:not(:disabled) {
+    background: var(--bg-hover);
     border-color: var(--border-strong);
 }
 
@@ -453,6 +454,12 @@
     border-color: #e4e4e7;
 }
 
+.btn-primary:active:not(:disabled) {
+    background: #d4d4d8;
+    border-color: #d4d4d8;
+    opacity: 1;
+}
+
 .btn-lg {
     width: 100%;
     min-height: 44px;
@@ -465,29 +472,53 @@
     border-color: rgba(248, 113, 113, 0.35);
 }
 
-.btn-danger:hover,
-.btn-danger:active {
+.btn-danger:hover:not(:disabled),
+.btn-danger:active:not(:disabled) {
     background: rgba(248, 113, 113, 0.12);
     border-color: var(--accent-red);
 }
 
+.btn-danger-filled {
+    background: var(--accent-red);
+    color: #09090b;
+    border-color: var(--accent-red);
+    font-weight: 600;
+}
+
+.btn-danger-filled:hover:not(:disabled) {
+    background: #fca5a5;
+    border-color: #fca5a5;
+}
+
+.btn-danger-filled:active:not(:disabled) {
+    background: #ef4444;
+    border-color: #ef4444;
+    opacity: 1;
+}
+
 .btn-sm {
-    min-height: 36px;
+    min-height: 40px;
     padding: 8px 12px;
     font-size: 12px;
     border-radius: 8px;
 }
 
+@media (pointer: coarse) {
+    .btn-sm {
+        min-height: 44px;
+    }
+}
+
 .btn-icon {
-    min-width: 36px;
-    min-height: 36px;
-    width: 36px;
-    height: 36px;
+    min-width: 44px;
+    min-height: 44px;
+    width: 44px;
+    height: 44px;
     padding: 0;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border-radius: 8px;
+    border-radius: 10px;
     flex-shrink: 0;
 }
 
@@ -1995,7 +2026,7 @@ body[data-tier="white_internet"] .guides-trigger-badge {
 .device-icon-box {
     width: 36px;
     height: 36px;
-    border-radius: var(--radius-sm);
+    border-radius: 10px;
     background: var(--bg-elevated);
     border: 1px solid var(--border-subtle);
     display: flex;

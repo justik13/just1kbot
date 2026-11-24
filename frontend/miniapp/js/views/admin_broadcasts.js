@@ -29,11 +29,11 @@ function _buildAudienceOptions({ includeTest = true } = {}) {
         .join("");
 }
 
-function _confirmModal(title, summaryText, onConfirm) {
+function _confirmModal(title, summaryText, onConfirm, confirmText = "Подтвердить") {
     showConfirmModal({
         title,
         message: summaryText,
-        confirmText: "Подтвердить",
+        confirmText,
         cancelText: "Отмена",
         onConfirm,
     });
@@ -224,7 +224,8 @@ export function renderAdminBroadcastsView(root, state) {
         _confirmModal(
             "Подтвердите рассылку",
             `Запустить рассылку на сегмент «${audienceLabel}»? Отменить можно в списке ниже.`,
-            runLaunch
+            runLaunch,
+            "Запустить"
         );
     });
 
@@ -266,7 +267,8 @@ export function renderAdminBroadcastsView(root, state) {
                     } catch (err) {
                         showToast(err.message || "Ошибка начисления");
                     }
-                }
+                },
+                "Начислить"
             );
         } else {
             const scope = root.querySelector("#massScopeSelect").value;
@@ -294,7 +296,8 @@ export function renderAdminBroadcastsView(root, state) {
                     } catch (err) {
                         showToast(err.message || "Ошибка продления");
                     }
-                }
+                },
+                "Продлить"
             );
         }
     });
