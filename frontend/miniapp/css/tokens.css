@@ -35,7 +35,7 @@
 }
 
 body[data-tier="standard"] {
-    --ambient-glow: rgba(56, 189, 248, 0.10);
+    --ambient-glow: rgba(16, 185, 129, 0.08);
 }
 
 body[data-tier="white_internet"] {
