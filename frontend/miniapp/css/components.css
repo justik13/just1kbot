@@ -1325,9 +1325,13 @@
 
 .seg-btn-with-icon {
     display: inline-flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 4px;
+    gap: 3px;
+    padding: 6px 4px;
+    font-size: 11.5px;
+    white-space: nowrap;
 }
 
 .seg-btn-icon {
