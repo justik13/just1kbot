@@ -33,7 +33,7 @@ from database.repositories.white_internet_repo import get_subscription_by_user_i
 from services.referral_bonus import get_referral_tier
 from services.subscription import SubscriptionService
 from utils.telegram import EFFECT_LIKE, safe, safe_send_message
-from utils.time import now_utc
+from utils.datetime_helpers import now_utc
 
 router = Router()
 logger = logging.getLogger(__name__)
