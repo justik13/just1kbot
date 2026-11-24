@@ -94,7 +94,19 @@ async def _build_start_profile_context(session, db_user) -> dict:
         and wi_sub.expires_at
         and wi_sub.expires_at > now
     )
-    if wi_has_period and wi_sub:
+    wi_active = bool(
+        wi_has_period
+        and wi_sub is not None
+        and wi_sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING)
+    )
+    wi_exhausted = bool(
+        wi_has_period
+        and wi_sub is not None
+        and wi_sub.status == WhiteInternetStatus.EXHAUSTED
+    )
+    if wi_exhausted and wi_sub and wi_sub.expires_at:
+        wi_line = f"Белый интернет: <b>трафик исчерпан</b> (до {wi_sub.expires_at.strftime('%d.%m.%Y')})"
+    elif wi_has_period and wi_sub and wi_sub.expires_at:
         total_bytes = int(wi_sub.base_traffic_bytes or 0) + int(wi_sub.extra_traffic_bytes or 0)
         used_bytes = int(wi_sub.traffic_used_bytes or 0)
         rem_gb = max(0.0, (total_bytes - used_bytes) / (1024 ** 3))
@@ -116,9 +128,9 @@ async def _build_start_profile_context(session, db_user) -> dict:
     tier = get_referral_tier(active_count)
     ref_rate_pct = int(tier.rate * 100)
     welcome_pct = int(REFERRAL_WELCOME_DISCOUNT_PERCENT * 100)
-    has_active_sub = bool(std_active or wi_has_period)
+    has_active_sub = bool(std_active or wi_active)
 
-    if has_active_sub or active_count > 0 or total_rub > 0:
+    if has_active_sub or wi_exhausted or active_count > 0 or total_rub > 0:
         ref_next_line = ""
         if tier.needed_for_next and tier.next_rate is not None:
             next_pct = int(tier.next_rate * 100)
@@ -134,11 +146,12 @@ async def _build_start_profile_context(session, db_user) -> dict:
             f"а вы — <b>{ref_rate_pct}%</b> бонусами на баланс."
         )
 
-    action_hint = (
-        "Нажмите <b>«Подключить»</b>, чтобы открыть ссылку подключения, устройства и инструкции."
-        if has_active_sub
-        else "Нажмите <b>«Открыть кабинет»</b>, чтобы выбрать тариф, пополнить баланс и подключиться."
-    )
+    if has_active_sub:
+        action_hint = "Нажмите <b>«Подключить»</b>, чтобы открыть ссылку подключения, устройства и инструкции."
+    elif wi_exhausted:
+        action_hint = "Трафик «Белого интернета» исчерпан. Нажмите <b>«Открыть кабинет»</b>, чтобы докупить пакет ГБ или выбрать тариф."
+    else:
+        action_hint = "Нажмите <b>«Открыть кабинет»</b>, чтобы выбрать тариф, пополнить баланс и подключиться."
 
     return {
         "profile_block": profile_block,

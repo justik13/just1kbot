@@ -42,7 +42,6 @@ _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 
 
 @functools.lru_cache(maxsize=1)
-@functools.lru_cache(maxsize=1)
 def get_shared_design_tokens_css() -> str:
     """Read shared Mini App design tokens as the single source of truth for all web surfaces."""
     tokens_path = Path(__file__).resolve().parents[2] / "frontend" / "miniapp" / "css" / "tokens.css"

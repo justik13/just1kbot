@@ -65,7 +65,7 @@ function _renderIosContent(method) {
             </div>
             <div class="guide-step-card">
                 <div class="guide-step-head"><span class="guide-step-num">3</span><span>Заполните оплату и адрес</span></div>
-                <p class="muted">Способ оплаты выберите <b>Нет</b>. Поля адреса можно заполнить любыми данными (например, Алматы):</p>
+                <p class="muted">Если в вашем аккаунте доступен способ оплаты <b>Нет</b>, выберите его (наличие зависит от аккаунта и региона Apple ID). Пример заполнения адреса (Алматы):</p>
                 <div class="guide-kv-list">
                     <div class="guide-kv-row"><span>Улица</span><span class="guide-kv-val"><code>ул. Абая, 1</code><button type="button" class="btn btn-sm guide-kv-copy" data-copy="ул. Абая, 1">Копировать</button></span></div>
                     <div class="guide-kv-row"><span>Город</span><span class="guide-kv-val"><code>Алматы</code><button type="button" class="btn btn-sm guide-kv-copy" data-copy="Алматы">Копировать</button></span></div>
@@ -115,8 +115,8 @@ function _renderIosContent(method) {
         `;
     }
     return `
-        <div class="notice-box">
-            <span>TestFlight доступен в российском App Store (iOS 16+) и не требует смены региона.</span>
+        <div class="notice-box notice-warn">
+            <span>В публичных тестах TestFlight Apple ограничивает число мест (приглашения часто заполнены или закрыты). Основной и надёжный способ — смена региона на <b>Казахстан</b>.</span>
         </div>
         <div class="guide-step-card">
             <div class="guide-step-head"><span class="guide-step-num">1</span><span>Установите Apple TestFlight</span></div>
@@ -124,17 +124,14 @@ function _renderIosContent(method) {
             <button type="button" class="btn btn-sm" data-ext="https://apps.apple.com/app/testflight/id899247664">Установить TestFlight</button>
         </div>
         <div class="guide-step-card">
-            <div class="guide-step-head"><span class="guide-step-num">2</span><span>Откройте приглашение и установите клиент</span></div>
+            <div class="guide-step-head"><span class="guide-step-num">2</span><span>Откройте приглашение, если есть свободные места</span></div>
             <p class="muted">В открывшемся TestFlight нажмите <b>Принять</b> (Accept), затем <b>Установить</b> (Install).</p>
-            <div class="connect-pair">
-                <button type="button" class="btn btn-primary btn-sm" data-ext="https://testflight.apple.com/join/dFw66h3a">INCY (Рекомендуется)</button>
-                <button type="button" class="btn btn-sm" data-ext="https://testflight.apple.com/join/XMls6Ckd">Happ</button>
-            </div>
+            <button type="button" class="btn btn-sm" data-ext="https://testflight.apple.com/join/XMls6Ckd">Happ (TestFlight)</button>
             <button type="button" class="guide-shot-btn" data-shot="/app/assets/guides/ios_testflight.jpg" data-shot-title="Установка в TestFlight">
                 <img src="/app/assets/guides/ios_testflight.jpg" alt="Установка в TestFlight" loading="lazy">
                 <span class="guide-shot-hint">Увеличить</span>
             </button>
-            <p class="muted" style="font-size:12px;">Если TestFlight пишет «Этот бета-тест заполнен», переключитесь выше на способ «Казахстан».</p>
+            <p class="muted" style="font-size:12px;">Если TestFlight пишет «Этот бета-тест заполнен», используйте вкладку «Казахстан» выше.</p>
         </div>
     `;
 }
@@ -287,7 +284,7 @@ export function renderUserGuidesView(root, state, data, onBack) {
         else if (state.platform === "windows" || state.platform === "macos") state.guideTab = "desktop";
         else state.guideTab = "ios";
     }
-    if (!state.guideIosMethod) state.guideIosMethod = "tf";
+    if (!state.guideIosMethod) state.guideIosMethod = "region";
     if (!state.guideAndroidMethod) state.guideAndroidMethod = "play";
     if (!state.guideDesktopMethod) {
         state.guideDesktopMethod = state.platform === "macos" ? "mac" : "win";
@@ -301,9 +298,9 @@ export function renderUserGuidesView(root, state, data, onBack) {
     if (state.guideTab === "ios") {
         subTabsHtml = `
             <div class="filter-pills">
-                <button type="button" class="pill-btn ${state.guideIosMethod === "tf" ? "active" : ""}" data-ios-m="tf">TestFlight</button>
                 <button type="button" class="pill-btn ${state.guideIosMethod === "region" ? "active" : ""}" data-ios-m="region">Казахстан</button>
                 <button type="button" class="pill-btn ${state.guideIosMethod === "newid" ? "active" : ""}" data-ios-m="newid">Второй ID</button>
+                <button type="button" class="pill-btn ${state.guideIosMethod === "tf" ? "active" : ""}" data-ios-m="tf">TestFlight</button>
             </div>
         `;
         contentHtml = _renderIosContent(state.guideIosMethod);
@@ -411,7 +408,7 @@ export function renderUserGuidesView(root, state, data, onBack) {
     });
 
     root.querySelectorAll("[data-copy]").forEach((btn) => {
-        btn.addEventListener("click", () => copyText(btn.dataset.copy, "Команда скопирована"));
+        btn.addEventListener("click", () => copyText(btn.dataset.copy, "Скопировано"));
     });
 
     root.querySelectorAll("[data-shot]").forEach((btn) => {

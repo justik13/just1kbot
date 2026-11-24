@@ -2,16 +2,8 @@
             <div id="guideSectionIos" class="guide-section" role="tabpanel" aria-labelledby="guideNavBtnIos">
                 <div class="guide-section-label">Выберите способ установки</div>
                 <div class="guide-method-tabs" role="tablist" aria-label="Способ установки iOS">
-                    <button type="button" class="guide-method-btn active" id="tabBtnIosTf" onclick="switchIosMethod('tf')" role="tab" aria-selected="true">
-                        <span class="guide-method-badge">Быстро</span>
-                        <span class="guide-method-title">
-                            <svg class="guide-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-                            <span>TestFlight</span>
-                        </span>
-                        <span class="guide-method-sub">Без смены региона</span>
-                    </button>
-                    <button type="button" class="guide-method-btn" id="tabBtnIosRegion" onclick="switchIosMethod('region')" role="tab" aria-selected="false">
-                        <span class="guide-method-badge">Навсегда</span>
+                    <button type="button" class="guide-method-btn active" id="tabBtnIosRegion" onclick="switchIosMethod('region')" role="tab" aria-selected="true">
+                        <span class="guide-method-badge">Основной</span>
                         <span class="guide-method-title">
                             <svg class="guide-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
                             <span>Казахстан</span>
@@ -26,10 +18,18 @@
                         </span>
                         <span class="guide-method-sub">Новый Apple ID</span>
                     </button>
+                    <button type="button" class="guide-method-btn" id="tabBtnIosTf" onclick="switchIosMethod('tf')" role="tab" aria-selected="false">
+                        <span class="guide-method-badge">Лимит мест</span>
+                        <span class="guide-method-title">
+                            <svg class="guide-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                            <span>TestFlight</span>
+                        </span>
+                        <span class="guide-method-sub">Если есть места</span>
+                    </button>
                 </div>
 
-                <!-- Sub-Guide 1: TestFlight (Fastest) -->
-                <div id="iosSubGuideTf">
+                <!-- Sub-Guide 1: TestFlight (Fallback) -->
+                <div id="iosSubGuideTf" style="display: none;">
                     <div class="guide-callout">
                         <svg class="guide-callout-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
                         <div><strong>Установка без смены региона:</strong> TestFlight доступен в App Store РФ (требуется iOS 16+). Тестовая сборка активна до 90 дней с момента релиза разработчика.</div>
@@ -65,23 +65,13 @@
                         <div class="guide-step-desc">
                             Нажмите на ссылку клиента для перехода в TestFlight:
                         </div>
-                        <div class="guide-store-grid">
-                            <a href="https://testflight.apple.com/join/dFw66h3a" target="_blank" rel="noopener noreferrer" class="guide-store-card">
-                                <div class="guide-store-left">
-                                    <div class="guide-store-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3.6 9h16.8M3.6 15h16.8"/><path d="M11.5 3a15 15 0 0 0 0 18M12.5 3a15 15 0 0 1 0 18"/></svg></div>
-                                    <div class="guide-store-info">
-                                        <span class="guide-store-name">INCY <span class="guide-tf-badge">Рекомендуется</span></span>
-                                        <span class="guide-store-sub">TestFlight приглашение</span>
-                                    </div>
-                                </div>
-                                <span class="guide-store-badge">Открыть <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></span>
-                            </a>
+                        <div class="guide-store-grid guide-store-grid-single">
                             <a href="https://testflight.apple.com/join/XMls6Ckd" target="_blank" rel="noopener noreferrer" class="guide-store-card">
                                 <div class="guide-store-left">
                                     <div class="guide-store-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
                                     <div class="guide-store-info">
                                         <span class="guide-store-name">Happ</span>
-                                        <span class="guide-store-sub">TestFlight приглашение</span>
+                                        <span class="guide-store-sub">TestFlight приглашение (если есть места)</span>
                                     </div>
                                 </div>
                                 <span class="guide-store-badge">Открыть <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></span>
@@ -114,8 +104,8 @@
                     </div>
                 </div>
 
-                <!-- Sub-Guide 2: Region Change to Kazakhstan -->
-                <div id="iosSubGuideRegion" style="display: none;">
+                <!-- Sub-Guide 2: Region Change to Kazakhstan (Primary) -->
+                <div id="iosSubGuideRegion">
                     <!-- Priority Video Instruction Card -->
                     <details class="guide-video-details">
                         <summary class="guide-video-summary">
@@ -186,7 +176,7 @@
                             <span class="guide-step-title">Способ оплаты «Нет» и адрес для счёта</span>
                         </div>
                         <div class="guide-step-desc">
-                            В способах оплаты выберите <strong>«Нет»</strong> (банковская карта не требуется). В поля адреса введите данные г. Алматы (нажмите «Копировать» рядом с нужным полем):
+                            Если в вашем аккаунте доступен способ оплаты <strong>«Нет»</strong>, выберите его (наличие зависит от аккаунта и региона Apple ID). Пример заполнения адреса г. Алматы (нажмите «Копировать» рядом с нужным полем):
                         </div>
                         <!-- Address Copy Fields -->
                         <div class="guide-data-card">

@@ -49,10 +49,8 @@ const _ICONS = {
 
 const _CLIENT_LINKS = {
     ios: [
-        { name: "INCY (TestFlight)", sub: "Без смены региона · Рекомендуем", url: "https://testflight.apple.com/join/dFw66h3a" },
-        { name: "INCY (App Store)", sub: "Зарубежный Apple ID", url: "https://apps.apple.com/app/incy/id6756943388" },
-        { name: "Happ (TestFlight)", sub: "Без смены региона", url: "https://testflight.apple.com/join/XMls6Ckd" },
-        { name: "Happ (App Store)", sub: "Зарубежный Apple ID", url: "https://apps.apple.com/app/happ-proxy-utility/id6504287215" },
+        { name: "INCY (App Store)", sub: "Рекомендуем · Смена региона за 2 мин", url: "https://apps.apple.com/app/incy/id6756943388" },
+        { name: "Happ (App Store)", sub: "Смена региона за 2 мин", url: "https://apps.apple.com/app/happ-proxy-utility/id6504287215" },
     ],
     android: [
         { name: "INCY (Google Play)", sub: "Официальный магазин", url: "https://play.google.com/store/apps/details?id=llc.itdev.incy" },
@@ -2184,8 +2182,6 @@ function _renderMoreTab(body, d, root) {
         if (rem10 >= 2 && rem10 <= 4 && (rem100 < 10 || rem100 >= 20)) return `${n} активных друга`;
         return `${n} активных друзей`;
     };
-
-    const hasSupportRows = Boolean(sup.tg_proxy_url || sup.support_url || sup.tos_url || sup.privacy_url);
 
     body.innerHTML = `
         <section class="hero-title-group">
