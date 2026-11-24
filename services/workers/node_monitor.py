@@ -293,17 +293,24 @@ async def check_node_resources_and_alerts(bot: Bot):
     now_m = time.monotonic()
     topology_dirty = False
 
-    from services.topology_sync_service import _extract_ipv4
+    from services.topology_sync_service import _extract_domain, _extract_ipv4
 
     eu_hubs_by_ip: dict[str, Server] = {}
-    all_active_eu_ids: set[int] = set()
+    eu_hubs_by_domain: dict[str, Server] = {}
+    all_enabled_eu_ids: set[int] = set()
+    all_online_eu_ids: set[int] = set()
     for _srv in servers:
         if get_server_role(_srv) == "eu_hub":
             _ip = _extract_ipv4(_srv)
             if _ip:
                 eu_hubs_by_ip[_ip] = _srv
-            if _srv.is_active and _srv.health_state == ServerHealthState.ONLINE:
-                all_active_eu_ids.add(_srv.id)
+            _dom = _extract_domain(_srv)
+            if _dom:
+                eu_hubs_by_domain[_dom] = _srv
+            if _srv.is_active:
+                all_enabled_eu_ids.add(_srv.id)
+                if _srv.health_state == ServerHealthState.ONLINE:
+                    all_online_eu_ids.add(_srv.id)
     probe_timeout = aiohttp.ClientTimeout(
         total=INGRESS_PROBE_TOTAL_TIMEOUT,
         connect=INGRESS_PROBE_CONNECT_TIMEOUT,
@@ -834,13 +841,13 @@ async def check_node_resources_and_alerts(bot: Bot):
                     ru_extra = dict((fresh_ru.extra_data if fresh_ru else server.extra_data) or {})
                     bh_state: dict[str, dict[str, Any]] = dict(ru_extra.get("bridge_health_state") or {})
                     prev_blocked = {int(x) for x in (ru_extra.get("blocked_eu_ids") or []) if str(x).isdigit()}
-                    new_blocked = {eid for eid in prev_blocked if eid in all_active_eu_ids}
+                    new_blocked = {eid for eid in prev_blocked if eid in all_enabled_eu_ids}
                     bh_changed = new_blocked != prev_blocked
                     now_wall = time.time()
 
-                    # Prune state entries for removed/inactive eu_hubs
+                    # Prune state entries only for deleted/admin-disabled eu_hubs (not transient WAITING_CONFIRMATION)
                     for stale_k in list(bh_state.keys()):
-                        if not stale_k.isdigit() or int(stale_k) not in all_active_eu_ids:
+                        if not stale_k.isdigit() or int(stale_k) not in all_enabled_eu_ids:
                             bh_state.pop(stale_k, None)
                             bh_changed = True
 
@@ -848,6 +855,10 @@ async def check_node_resources_and_alerts(bot: Bot):
                         if not isinstance(probe_info, dict):
                             continue
                         eu_srv = eu_hubs_by_ip.get(str(eu_ip).strip())
+                        if eu_srv is None:
+                            probe_sni = str(probe_info.get("sni") or "").strip().lower().rstrip(".")
+                            if probe_sni:
+                                eu_srv = eu_hubs_by_domain.get(probe_sni)
                         if not eu_srv or not eu_srv.is_active or eu_srv.health_state != ServerHealthState.ONLINE:
                             continue
 
@@ -856,6 +867,37 @@ async def check_node_resources_and_alerts(bot: Bot):
                         was_blocked = bool(entry.get("blocked", False))
                         probe_ok = bool(probe_info.get("ok", False))
                         err_detail = str(probe_info.get("error") or "probe failed")
+                        raw_checked_at = probe_info.get("checked_at")
+                        probe_checked_at = float(raw_checked_at) if isinstance(raw_checked_at, (int, float)) else None
+                        is_duplicate_sample = (
+                            probe_checked_at is not None
+                            and entry.get("last_checked_at") == probe_checked_at
+                        )
+
+                        if is_duplicate_sample:
+                            if was_blocked:
+                                new_blocked.add(eu_srv.id)
+                                last_rem = entry.get("last_reminder_at")
+                                if isinstance(last_rem, (int, float)) and (now_wall - float(last_rem)) >= OUTAGE_REMINDER_INTERVAL_SECONDS:
+                                    started = float(entry.get("started_at") or last_rem)
+                                    bridge_alerts_to_send.append(
+                                        ALERT_BRIDGE_TSPU_PROBLEM_REMINDER.format(
+                                            ru_name=safe(server.name),
+                                            ru_id=server.id,
+                                            eu_name=safe(eu_srv.name),
+                                            eu_id=eu_srv.id,
+                                            eu_ip=safe(eu_ip),
+                                            error_detail=safe(err_detail),
+                                            hours_text=_format_outage_duration(max(60.0, now_wall - started)),
+                                        )
+                                    )
+                                    entry["last_reminder_at"] = now_wall
+                                    bh_state[eu_key] = entry
+                                    bh_changed = True
+                            continue
+
+                        if probe_checked_at is not None:
+                            entry["last_checked_at"] = probe_checked_at
 
                         if not probe_ok:
                             fails = int(entry.get("fails", 0) or 0) + 1
@@ -869,7 +911,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 entry["started_at"] = now_wall
                                 entry["last_reminder_at"] = now_wall
                                 new_blocked.add(eu_srv.id)
-                                remaining_eu = len(all_active_eu_ids - new_blocked)
+                                remaining_eu = len(all_online_eu_ids - new_blocked)
                                 action_text = (
                                     f"Трафик автоматически переключён на резервный шлюз (доступно: {remaining_eu})."
                                     if remaining_eu >= 1
