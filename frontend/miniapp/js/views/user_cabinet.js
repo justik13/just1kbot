@@ -1363,15 +1363,18 @@ function _renderConnectTab(body, d, reload, root) {
         `;
 
     const isWiOnlyExhausted = Boolean(!std.active && wiExhausted);
+    const hasBothActive = Boolean(std.active && wiHasPeriod && !wiExhausted);
 
     body.innerHTML = `
         <section class="hero-section">
             <div class="hero-title-group">
-                <span class="hero-kicker ${isStdGrace || isWiOnlyExhausted ? "warn" : ""}">${isStdGrace ? `Льготный период · ~${graceHoursLeft} ч.` : (isWiOnlyExhausted ? "Трафик исчерпан" : "Активен · Готов к работе")}</span>
-                <h1 class="hero-headline-lg">${isStdGrace ? "Подписка закончилась" : (isWiOnlyExhausted ? "Трафик закончился" : "Доступ настроен")}</h1>
+                <span class="hero-kicker ${isStdGrace || isWiOnlyExhausted ? "warn" : ""}">${isStdGrace ? `Льготный период · ~${graceHoursLeft} ч.` : (isWiOnlyExhausted ? "Белый интернет" : "Подписка активна")}</span>
+                <h1 class="hero-headline-lg">${isStdGrace ? "Подписка закончилась" : (isWiOnlyExhausted ? "Трафик закончился" : "Подключение готово")}</h1>
                 <p class="hero-sub">${isStdGrace
                     ? `Основной срок подписки закончился, но доступ сохранён ещё на ~${graceHoursLeft} ч., чтобы вы успели продлить подписку без отключения.`
-                    : (isWiOnlyExhausted ? "Пополните пакет трафика или продлите подписку на вкладке «Тарифы»." : "Обе подписки работают по одной ссылке")}</p>
+                    : (isWiOnlyExhausted
+                        ? "Пополните пакет трафика или выберите тариф на вкладке «Тарифы»."
+                        : (hasBothActive ? "Стандарт и Белый интернет работают по одной ссылке" : "Выберите приложение ниже или скопируйте ссылку"))}</p>
             </div>
 
             ${isStdGrace ? `

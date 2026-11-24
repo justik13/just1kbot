@@ -89,6 +89,7 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
     root.innerHTML = `
         <div class="detail-header-nav">
             <button id="detailBackBtn" type="button" class="btn btn-sm btn-ghost">← Все серверы</button>
+            <span class="detail-sticky-meta">${escapeHtml(node.name)}</span>
         </div>
 
         <section class="card">

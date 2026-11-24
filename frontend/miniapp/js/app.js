@@ -1,12 +1,13 @@
-import { api } from "./api.js?v=2.7.5";
-import { escapeHtml, showToast } from "./ui.js?v=2.7.5";
-import { renderSecurity2FA } from "./views/security_2fa.js?v=2.7.5";
-import { renderNodesView, renderSubscriptionSettingsView } from "./views/nodes.js?v=2.7.5";
-import { renderNodeDetailView } from "./views/node_detail.js?v=2.7.5";
-import { renderAdminUsersView } from "./views/admin_users.js?v=2.7.5";
-import { clearBroadcastPollTimer, renderAdminBroadcastsView } from "./views/admin_broadcasts.js?v=2.7.5";
-import { renderAdminFinancesView } from "./views/admin_finances.js?v=2.7.5";
-import { loadAndRenderUserCabinet } from "./views/user_cabinet.js?v=2.7.5";
+import { api } from "./api.js?v=2.7.6";
+import { escapeHtml, showToast } from "./ui.js?v=2.7.6";
+import { renderSecurity2FA } from "./views/security_2fa.js?v=2.7.6";
+import { renderNodesView, renderSubscriptionSettingsView } from "./views/nodes.js?v=2.7.6";
+import { renderNodeDetailView } from "./views/node_detail.js?v=2.7.6";
+import { renderAdminUsersView } from "./views/admin_users.js?v=2.7.6";
+import { renderUserDetailView } from "./views/user_detail.js?v=2.7.6";
+import { clearBroadcastPollTimer, renderAdminBroadcastsView } from "./views/admin_broadcasts.js?v=2.7.6";
+import { renderAdminFinancesView } from "./views/admin_finances.js?v=2.7.6";
+import { loadAndRenderUserCabinet } from "./views/user_cabinet.js?v=2.7.6";
 
 const appState = {
     user: null,
@@ -16,8 +17,11 @@ const appState = {
     adminTab: "nodes",
     nodes: [],
     selectedNodeId: null,
+    nodesScrollY: 0,
     usersData: null,
     usersQuery: "",
+    selectedUserId: null,
+    usersScrollY: 0,
     broadcastsData: null,
     massTab: "bonus",
     finSubTab: "orders",
@@ -98,6 +102,7 @@ function _renderAdminView() {
     if (appState.mode === "cabinet") {
         clearBroadcastPollTimer();
         appState.selectedNodeId = null;
+        appState.selectedUserId = null;
         _updateTelegramBackButton(null);
         loadAndRenderUserCabinet(root);
         return;
@@ -114,12 +119,44 @@ function _renderAdminView() {
                 appState.selectedNodeId = null;
                 _updateTelegramBackButton(null);
                 _renderAdminView();
+                requestAnimationFrame(() => window.scrollTo(0, appState.nodesScrollY || 0));
             };
             _updateTelegramBackButton(onBack);
             renderNodeDetailView(root, node, onBack, _reloadNodesAndRender);
+            window.scrollTo(0, 0);
             return;
         }
         appState.selectedNodeId = null;
+    }
+
+    if (appState.adminTab === "users" && appState.selectedUserId != null) {
+        const usersList = (appState.usersData && appState.usersData.users) || [];
+        const userSummary = usersList.find((u) => u.id === appState.selectedUserId);
+        if (userSummary) {
+            const onBack = () => {
+                appState.selectedUserId = null;
+                _updateTelegramBackButton(null);
+                _renderAdminView();
+                requestAnimationFrame(() => window.scrollTo(0, appState.usersScrollY || 0));
+            };
+            const onReloadUser = async () => {
+                try {
+                    appState.usersData = await api.listUsers(
+                        appState.usersQuery || "",
+                        appState.usersOffset || 0,
+                        10,
+                        appState.usersFilter || "all"
+                    );
+                } catch (err) {
+                    showToast(err.message || "Не удалось обновить список пользователей");
+                }
+            };
+            _updateTelegramBackButton(onBack);
+            renderUserDetailView(root, userSummary, onBack, onReloadUser);
+            window.scrollTo(0, 0);
+            return;
+        }
+        appState.selectedUserId = null;
     }
 
     _updateTelegramBackButton(null);
@@ -141,6 +178,7 @@ function _renderAdminView() {
             }
             appState.adminTab = btn.dataset.atab;
             appState.selectedNodeId = null;
+            appState.selectedUserId = null;
             if (appState.adminTab === "users" && !appState.usersData) {
                 try {
                     appState.usersData = await api.listUsers(appState.usersQuery || "", appState.usersOffset || 0, 10, appState.usersFilter || "all");
@@ -178,13 +216,18 @@ function _renderAdminView() {
     const body = root.querySelector("#adminTabBody");
     if (appState.adminTab === "nodes") {
         renderNodesView(body, appState, _reloadNodesAndRender, (id) => {
+            appState.nodesScrollY = window.scrollY;
             appState.selectedNodeId = id;
             _renderAdminView();
         });
     } else if (appState.adminTab === "subscription") {
         renderSubscriptionSettingsView(body, appState, _reloadNodesAndRender);
     } else if (appState.adminTab === "users") {
-        renderAdminUsersView(body, appState);
+        renderAdminUsersView(body, appState, (u) => {
+            appState.usersScrollY = window.scrollY;
+            appState.selectedUserId = u.id;
+            _renderAdminView();
+        });
     } else if (appState.adminTab === "broadcasts") {
         renderAdminBroadcastsView(body, appState);
     } else {
