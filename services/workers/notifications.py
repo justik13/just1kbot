@@ -5,7 +5,8 @@ from datetime import datetime, timedelta
 from aiogram import Bot
 from aiogram.types import InlineKeyboardMarkup
 from cachetools import TTLCache
-from sqlalchemy import or_, select, update
+from sqlalchemy import and_, or_, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.keyboards.notifications import (
     get_action_notification_keyboard,
@@ -32,7 +33,7 @@ from config.constants import (
     WORKER_ERROR_SLEEP_INTERVAL,
 )
 from database.connection import session_scope
-from database.models import User, VlessSubscription
+from database.models import Order, User, VlessSubscription
 from utils.datetime_helpers import is_permanent_subscription, now_utc
 from utils.formatters import format_tg_time
 from utils.rate_limiter import global_send_limiter
@@ -210,6 +211,34 @@ async def _send_autorenew_notice(
             logger.warning("Failed to send auto-renew notice to %s: %s", telegram_id, exc)
 
 
+async def _has_active_pending_order(
+    session: AsyncSession,
+    user_id: int,
+    service_type: str,
+    current_time: datetime,
+) -> bool:
+    """Return True if the user has an active non-expired pending external/mixed order."""
+    pending_cutoff = current_time - timedelta(hours=24)
+    pending_id = await session.scalar(
+        select(Order.id)
+        .where(
+            Order.user_id == user_id,
+            Order.service_type == service_type,
+            Order.status == "pending",
+            Order.payment_method != "wallet",
+            or_(
+                Order.expires_at > current_time,
+                and_(
+                    Order.expires_at.is_(None),
+                    Order.created_at > pending_cutoff,
+                ),
+            ),
+        )
+        .limit(1)
+    )
+    return pending_id is not None
+
+
 async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
     """Automatically renew Standard and White Internet subscriptions from wallet balance when enabled."""
     from config.enums import WhiteInternetStatus
@@ -223,199 +252,236 @@ async def _process_auto_renewals(bot: Bot, current_time: datetime) -> None:
     window_end = current_time + timedelta(hours=24)
 
     # 1. Standard subscription auto-renewal (30 days at current device_limit)
-    async with session_scope() as session:
-        std_ids = list(
-            (
-                await session.execute(
-                    select(User.id)
-                    .join(VlessSubscription, VlessSubscription.user_id == User.id)
-                    .where(
-                        VlessSubscription.auto_renew_enabled.is_(True),
-                        User.is_deleted.is_(False),
-                        User.financial_hold.is_(False),
-                        VlessSubscription.expires_at.is_not(None),
-                        VlessSubscription.expires_at >= window_start,
-                        VlessSubscription.expires_at <= window_end,
-                    )
-                    .order_by(VlessSubscription.expires_at.asc())
-                    .limit(200)
-                )
-            ).scalars().all()
-        )
-
-    for uid in std_ids:
-        push_tg_id: int | None = None
-        push_text: str | None = None
-        push_kb: InlineKeyboardMarkup | None = None
-        try:
-            async with session_scope() as session:
-                await acquire_user_account_lock(session, uid)
-                user = await session.scalar(
-                    select(User).where(User.id == uid).with_for_update(skip_locked=True)
-                )
-                vless_sub = await session.scalar(
-                    select(VlessSubscription)
-                    .where(VlessSubscription.user_id == uid)
-                    .with_for_update(skip_locked=True)
-                )
-                if (
-                    user is None
-                    or vless_sub is None
-                    or not vless_sub.auto_renew_enabled
-                    or user.is_deleted
-                    or user.financial_hold
-                    or not vless_sub.expires_at
-                    or is_permanent_subscription(vless_sub.expires_at)
-                    or vless_sub.expires_at < window_start
-                    or vless_sub.expires_at > window_end
-                ):
-                    continue
-
-                std_limit = max(2, await SubscriptionService.get_effective_device_limit(session, user))
-                quote = await OrderService.quote_standard_change(session, user.id, std_limit, 30)
-                due_rub = int(quote["due_rub"])
-                bal = await get_account_balance(
-                    session, user_id=user.id, for_update=True, locked_user=user
-                )
-                if bal.debt > 0 or bal.available < due_rub:
-                    cycle_key = vless_sub.expires_at.strftime("%Y-%m-%d") if vless_sub.expires_at else ""
-                    cache_key = ("std", user.id)
-                    if _autorenew_fail_notified.get(cache_key) != cycle_key and not user.is_bot_blocked:
-                        _autorenew_fail_notified[cache_key] = cycle_key
-                        push_tg_id = user.telegram_id
-                        push_text = NOTIFY_AUTORENEW_INSUFFICIENT_FUNDS.format(
-                            service="Стандарт",
-                            due_rub=due_rub,
-                            available_rub=int(bal.available),
+    last_std_id = 0
+    while True:
+        async with session_scope() as session:
+            std_ids = list(
+                (
+                    await session.execute(
+                        select(User.id)
+                        .join(VlessSubscription, VlessSubscription.user_id == User.id)
+                        .where(
+                            User.id > last_std_id,
+                            VlessSubscription.auto_renew_enabled.is_(True),
+                            User.is_deleted.is_(False),
+                            User.financial_hold.is_(False),
+                            VlessSubscription.expires_at.is_not(None),
+                            VlessSubscription.expires_at >= window_start,
+                            VlessSubscription.expires_at <= window_end,
                         )
-                        push_kb = get_autorenew_failed_keyboard()
-                    continue
-
-                idem_key = f"std_autorenew:{user.id}:{int(vless_sub.expires_at.timestamp())}"
-                res = await OrderService.checkout_order(
-                    session,
-                    user_id=user.id,
-                    service_type="standard",
-                    device_limit=std_limit,
-                    duration_days=30,
-                    use_balance=True,
-                    idempotency_key=idem_key,
-                )
-                if res.get("status") == "paid" and not user.is_bot_blocked:
-                    await session.refresh(vless_sub)
-                    push_tg_id = user.telegram_id
-                    push_text = NOTIFY_STANDARD_AUTORENEWED.format(
-                        amount=res.get("charged_balance", due_rub),
-                        devices=std_limit,
-                        date=format_tg_time(vless_sub.expires_at) if vless_sub.expires_at else "",
+                        .order_by(User.id.asc())
+                        .limit(200)
                     )
-        except Exception as exc:
-            logger.warning("Standard auto-renew failed for user_id=%s: %s", uid, exc)
-            continue
+                ).scalars().all()
+            )
+        if not std_ids:
+            break
+        last_std_id = std_ids[-1]
 
-        if push_tg_id and push_text:
-            await _send_autorenew_notice(bot, push_tg_id, push_text, reply_markup=push_kb)
+        for uid in std_ids:
+            push_tg_id: int | None = None
+            push_text: str | None = None
+            push_kb: InlineKeyboardMarkup | None = None
+            try:
+                async with session_scope() as session:
+                    await acquire_user_account_lock(session, uid)
+                    user = await session.scalar(
+                        select(User).where(User.id == uid).with_for_update(skip_locked=True)
+                    )
+                    vless_sub = await session.scalar(
+                        select(VlessSubscription)
+                        .where(VlessSubscription.user_id == uid)
+                        .with_for_update(skip_locked=True)
+                    )
+                    if (
+                        user is None
+                        or vless_sub is None
+                        or not vless_sub.auto_renew_enabled
+                        or user.is_deleted
+                        or user.financial_hold
+                        or not vless_sub.expires_at
+                        or is_permanent_subscription(vless_sub.expires_at)
+                        or vless_sub.expires_at < window_start
+                        or vless_sub.expires_at > window_end
+                    ):
+                        continue
+
+                    if await _has_active_pending_order(session, user.id, "standard", current_time):
+                        continue
+
+                    std_limit = max(2, await SubscriptionService.get_effective_device_limit(session, user))
+                    quote = await OrderService.quote_standard_change(
+                        session, user.id, std_limit, 30, operation="renew"
+                    )
+                    due_rub = int(quote["due_rub"])
+                    bal = await get_account_balance(
+                        session, user_id=user.id, for_update=True, locked_user=user
+                    )
+                    if bal.debt > 0 or bal.available < due_rub:
+                        cycle_key = vless_sub.expires_at.strftime("%Y-%m-%d") if vless_sub.expires_at else ""
+                        cache_key = ("std", user.id)
+                        if _autorenew_fail_notified.get(cache_key) != cycle_key and not user.is_bot_blocked:
+                            _autorenew_fail_notified[cache_key] = cycle_key
+                            push_tg_id = user.telegram_id
+                            push_text = NOTIFY_AUTORENEW_INSUFFICIENT_FUNDS.format(
+                                service="Стандарт",
+                                due_rub=due_rub,
+                                available_rub=int(bal.available),
+                            )
+                            push_kb = get_autorenew_failed_keyboard()
+                        continue
+
+                    idem_key = f"std_autorenew:{user.id}:{int(vless_sub.expires_at.timestamp())}"
+                    res = await OrderService.checkout_order(
+                        session,
+                        user_id=user.id,
+                        service_type="standard",
+                        device_limit=std_limit,
+                        duration_days=30,
+                        operation="renew",
+                        use_balance=True,
+                        idempotency_key=idem_key,
+                    )
+                    if (
+                        res.get("status") == "paid"
+                        and not res.get("fulfillment_failed")
+                        and not res.get("idempotent")
+                        and not user.is_bot_blocked
+                    ):
+                        await session.refresh(vless_sub)
+                        push_tg_id = user.telegram_id
+                        push_text = NOTIFY_STANDARD_AUTORENEWED.format(
+                            amount=res.get("charged_balance", due_rub),
+                            devices=std_limit,
+                            date=format_tg_time(vless_sub.expires_at) if vless_sub.expires_at else "",
+                        )
+            except Exception as exc:
+                logger.warning("Standard auto-renew failed for user_id=%s: %s", uid, exc)
+                continue
+
+            if push_tg_id and push_text:
+                await _send_autorenew_notice(bot, push_tg_id, push_text, reply_markup=push_kb)
+
+        if len(std_ids) < 200:
+            break
 
     # 2. White Internet auto-renewal (30 days at effective device_limit)
-    async with session_scope() as session:
-        wi_items = (
-            await session.execute(
-                select(WhiteInternetSubscription.id, WhiteInternetSubscription.user_id)
-                .join(User, User.id == WhiteInternetSubscription.user_id)
-                .where(
-                    WhiteInternetSubscription.auto_renew_enabled.is_(True),
-                    WhiteInternetSubscription.status.in_([
-                        WhiteInternetStatus.ACTIVE,
-                        WhiteInternetStatus.EXHAUSTED,
-                        WhiteInternetStatus.EXPIRED,
-                    ]),
-                    WhiteInternetSubscription.expires_at.is_not(None),
-                    WhiteInternetSubscription.expires_at >= window_start,
-                    WhiteInternetSubscription.expires_at <= window_end,
-                    User.is_deleted.is_(False),
-                    User.financial_hold.is_(False),
-                )
-                .order_by(WhiteInternetSubscription.expires_at.asc())
-                .limit(200)
-            )
-        ).all()
-
-    for sid, uid in wi_items:
-        push_tg_id = None
-        push_text = None
-        push_kb = None
-        try:
-            async with session_scope() as session:
-                await acquire_user_account_lock(session, uid)
-                user = await session.scalar(
-                    select(User).where(User.id == uid).with_for_update(skip_locked=True)
-                )
-                if user is None or user.is_deleted or user.financial_hold:
-                    continue
-
-                sub = await session.scalar(
-                    select(WhiteInternetSubscription)
-                    .where(WhiteInternetSubscription.id == sid)
-                    .with_for_update(skip_locked=True)
-                )
-                if (
-                    sub is None
-                    or not sub.auto_renew_enabled
-                    or not sub.expires_at
-                    or sub.expires_at < window_start
-                    or sub.expires_at > window_end
-                    or sub.status not in (
-                        WhiteInternetStatus.ACTIVE,
-                        WhiteInternetStatus.EXHAUSTED,
-                        WhiteInternetStatus.EXPIRED,
+    last_wi_id = 0
+    while True:
+        async with session_scope() as session:
+            wi_items = (
+                await session.execute(
+                    select(WhiteInternetSubscription.id, WhiteInternetSubscription.user_id)
+                    .join(User, User.id == WhiteInternetSubscription.user_id)
+                    .where(
+                        WhiteInternetSubscription.id > last_wi_id,
+                        WhiteInternetSubscription.auto_renew_enabled.is_(True),
+                        WhiteInternetSubscription.status.in_([
+                            WhiteInternetStatus.ACTIVE,
+                            WhiteInternetStatus.EXHAUSTED,
+                            WhiteInternetStatus.EXPIRED,
+                        ]),
+                        WhiteInternetSubscription.expires_at.is_not(None),
+                        WhiteInternetSubscription.expires_at >= window_start,
+                        WhiteInternetSubscription.expires_at <= window_end,
+                        User.is_deleted.is_(False),
+                        User.financial_hold.is_(False),
                     )
-                ):
-                    continue
-
-                eff_limit = int(sub.pending_device_limit or sub.device_limit or 1)
-                due_rub = get_white_internet_tier_price(eff_limit)
-                bal = await get_account_balance(
-                    session, user_id=user.id, for_update=True, locked_user=user
+                    .order_by(WhiteInternetSubscription.id.asc())
+                    .limit(200)
                 )
-                if bal.debt > 0 or bal.available < due_rub:
-                    cycle_key = sub.expires_at.strftime("%Y-%m-%d") if sub.expires_at else ""
-                    cache_key = ("wi", user.id)
-                    if _autorenew_fail_notified.get(cache_key) != cycle_key and not user.is_bot_blocked:
-                        _autorenew_fail_notified[cache_key] = cycle_key
-                        push_tg_id = user.telegram_id
-                        push_text = NOTIFY_AUTORENEW_INSUFFICIENT_FUNDS.format(
-                            service="Белый Интернет",
-                            due_rub=int(due_rub),
-                            available_rub=int(bal.available),
+            ).all()
+        if not wi_items:
+            break
+        last_wi_id = wi_items[-1][0]
+
+        for sid, uid in wi_items:
+            push_tg_id = None
+            push_text = None
+            push_kb = None
+            try:
+                async with session_scope() as session:
+                    await acquire_user_account_lock(session, uid)
+                    user = await session.scalar(
+                        select(User).where(User.id == uid).with_for_update(skip_locked=True)
+                    )
+                    if user is None or user.is_deleted or user.financial_hold:
+                        continue
+
+                    sub = await session.scalar(
+                        select(WhiteInternetSubscription)
+                        .where(WhiteInternetSubscription.id == sid)
+                        .with_for_update(skip_locked=True)
+                    )
+                    if (
+                        sub is None
+                        or not sub.auto_renew_enabled
+                        or not sub.expires_at
+                        or sub.expires_at < window_start
+                        or sub.expires_at > window_end
+                        or sub.status not in (
+                            WhiteInternetStatus.ACTIVE,
+                            WhiteInternetStatus.EXHAUSTED,
+                            WhiteInternetStatus.EXPIRED,
                         )
-                        push_kb = get_autorenew_failed_keyboard()
-                    continue
+                    ):
+                        continue
 
-                wi_idem_key = f"wi_autorenew:{user.id}:{int(sub.expires_at.timestamp())}"
-                res = await OrderService.checkout_order(
-                    session,
-                    user_id=user.id,
-                    service_type="white_internet",
-                    device_limit=eff_limit,
-                    operation="renew",
-                    use_balance=True,
-                    allow_early_downgrade=True,
-                    idempotency_key=wi_idem_key,
-                )
-                if res.get("status") == "paid" and not user.is_bot_blocked:
-                    await session.refresh(sub)
-                    push_tg_id = user.telegram_id
-                    push_text = NOTIFY_WI_AUTORENEWED.format(
-                        amount=res.get("charged_balance", int(due_rub)),
-                        devices=eff_limit,
-                        date=format_tg_time(sub.expires_at) if sub.expires_at else "",
+                    if await _has_active_pending_order(session, user.id, "white_internet", current_time):
+                        continue
+
+                    eff_limit = int(sub.pending_device_limit or sub.device_limit or 1)
+                    due_rub = get_white_internet_tier_price(eff_limit)
+                    bal = await get_account_balance(
+                        session, user_id=user.id, for_update=True, locked_user=user
                     )
-        except Exception as exc:
-            logger.warning("WI auto-renew failed for sub_id=%s: %s", sid, exc)
-            continue
+                    if bal.debt > 0 or bal.available < due_rub:
+                        cycle_key = sub.expires_at.strftime("%Y-%m-%d") if sub.expires_at else ""
+                        cache_key = ("wi", user.id)
+                        if _autorenew_fail_notified.get(cache_key) != cycle_key and not user.is_bot_blocked:
+                            _autorenew_fail_notified[cache_key] = cycle_key
+                            push_tg_id = user.telegram_id
+                            push_text = NOTIFY_AUTORENEW_INSUFFICIENT_FUNDS.format(
+                                service="Белый Интернет",
+                                due_rub=int(due_rub),
+                                available_rub=int(bal.available),
+                            )
+                            push_kb = get_autorenew_failed_keyboard()
+                        continue
 
-        if push_tg_id and push_text:
-            await _send_autorenew_notice(bot, push_tg_id, push_text, reply_markup=push_kb)
+                    wi_idem_key = f"wi_autorenew:{user.id}:{int(sub.expires_at.timestamp())}"
+                    res = await OrderService.checkout_order(
+                        session,
+                        user_id=user.id,
+                        service_type="white_internet",
+                        device_limit=eff_limit,
+                        operation="renew",
+                        use_balance=True,
+                        allow_early_downgrade=True,
+                        idempotency_key=wi_idem_key,
+                    )
+                    if (
+                        res.get("status") == "paid"
+                        and not res.get("fulfillment_failed")
+                        and not res.get("idempotent")
+                        and not user.is_bot_blocked
+                    ):
+                        await session.refresh(sub)
+                        push_tg_id = user.telegram_id
+                        push_text = NOTIFY_WI_AUTORENEWED.format(
+                            amount=res.get("charged_balance", int(due_rub)),
+                            devices=eff_limit,
+                            date=format_tg_time(sub.expires_at) if sub.expires_at else "",
+                        )
+            except Exception as exc:
+                logger.warning("WI auto-renew failed for sub_id=%s: %s", sid, exc)
+                continue
+
+            if push_tg_id and push_text:
+                await _send_autorenew_notice(bot, push_tg_id, push_text, reply_markup=push_kb)
+
+        if len(wi_items) < 200:
+            break
 
 
 async def _send_pre_expiry_notifications(

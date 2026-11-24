@@ -2,6 +2,7 @@ from datetime import timedelta
 import uuid
 
 from sqlalchemy import and_, case, false, func, or_, select, text, union_all, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
@@ -88,10 +89,17 @@ async def create_user(
         first_name=first_name,
         referred_by=referred_by,
     )
-    session.add(user)
-    await session.flush()
-    await session.refresh(user)
-    return user
+    try:
+        async with session.begin_nested():
+            session.add(user)
+            await session.flush()
+        await session.refresh(user)
+        return user
+    except IntegrityError:
+        existing = await get_user_by_telegram_id_any(session, telegram_id)
+        if existing is not None:
+            return existing
+        raise
 
 
 async def update_user(session: AsyncSession, user: User, **kwargs) -> User:
@@ -402,9 +410,11 @@ async def is_eligible_for_referral_first_discount(
             Order.status == OrderStatus.PENDING,
             Order.service_type.in_(("standard", "white_internet")),
             or_(
-                Order.created_at > now - timedelta(hours=24),
-                Order.expires_at.is_(None),
                 Order.expires_at > now,
+                and_(
+                    Order.expires_at.is_(None),
+                    Order.created_at > now - timedelta(hours=24),
+                ),
             ),
         )
     )

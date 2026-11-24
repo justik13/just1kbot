@@ -24,8 +24,8 @@ def test_alembic_single_head_and_migration_parent():
     heads = script.get_heads()
     assert len(heads) == 1, f"Expected exactly 1 Alembic head, found {heads}"
     head_rev = script.get_revision(heads[0])
-    assert head_rev.revision == "0047_device_std_priority"
-    assert head_rev.down_revision == "0046_device_registration_events"
+    assert head_rev.revision == "0048_wi_constraints"
+    assert head_rev.down_revision == "0047_device_std_priority"
 
 
 def test_models_orm_columns_and_defaults():

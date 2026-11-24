@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import secrets
+from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -307,8 +308,14 @@ async def add_device_slot_atomic(
         )
 
     new_device_limit = current_limit + 1
+    new_base_bytes = (sub.base_traffic_bytes or 0) + extra_bytes
+    max_base_allowed = new_device_limit * max_quota_bytes
+    if new_base_bytes > max_base_allowed:
+        raise WhiteInternetQuotaCapExceededError(
+            f"Base quota ({new_base_bytes} bytes) exceeds maximum allowed limit ({max_base_allowed} bytes)"
+        )
     sub.device_limit = new_device_limit
-    sub.base_traffic_bytes = (sub.base_traffic_bytes or 0) + extra_bytes
+    sub.base_traffic_bytes = new_base_bytes
     if sub.pending_device_limit is not None and sub.pending_device_limit >= new_device_limit:
         sub.pending_device_limit = None
         sub.pending_from = None
@@ -592,22 +599,30 @@ async def reset_subscription_token_atomic(
     *,
     new_token: str | None = None,
     reset_hwids: bool = True,
-    now: datetime | None = None,
 ) -> str:
-    """Atomically regenerates the subscription token under row-level lock.
+    """Atomically regenerates the subscription token (and optionally rotates UUID) under row-level lock.
 
     Returns the new token string.
     """
-    sub = await session.get(
-        WhiteInternetSubscription,
-        subscription_id,
-        with_for_update=True,
-    )
+    sub = await get_subscription_with_lock(session, subscription_id)
     if sub is None:
         raise WhiteInternetSubscriptionNotFoundError(f"Subscription {subscription_id} not found")
 
     token = new_token or secrets.token_hex(32)
     sub.token = token
+    if reset_hwids:
+        old_uuid = sub.uuid
+        if old_uuid:
+            pending = list(getattr(sub, "pending_revoked_uuids", None) or [])
+            clean_old = str(old_uuid).strip().lower()
+            if clean_old and clean_old not in pending:
+                pending.append(clean_old)
+                sub.pending_revoked_uuids = pending
+                flag_modified(sub, "pending_revoked_uuids")
+        sub.uuid = str(uuid4())
+        sub.desired_version = (sub.desired_version or 1) + 1
+        if sub.status == WhiteInternetStatus.ACTIVE:
+            sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
     await session.flush()
     return token
 

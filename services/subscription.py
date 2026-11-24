@@ -248,9 +248,29 @@ class SubscriptionService:
                 )
 
             if ref_id is not None and user.referred_by is None:
-                locked_user = await session.scalar(
-                    select(User).where(User.id == user.id).with_for_update()
+                ref_user_id = await session.scalar(
+                    select(User.id).where(
+                        User.telegram_id == ref_id,
+                        User.is_deleted.is_(False),
+                    )
                 )
+                if ref_user_id is not None and ref_user_id != user.id:
+                    first_id, second_id = (
+                        (user.id, ref_user_id)
+                        if user.id < ref_user_id
+                        else (ref_user_id, user.id)
+                    )
+                    locked_first = await session.scalar(
+                        select(User).where(User.id == first_id).with_for_update()
+                    )
+                    locked_second = await session.scalar(
+                        select(User).where(User.id == second_id).with_for_update()
+                    )
+                    locked_user = locked_first if user.id == first_id else locked_second
+                else:
+                    locked_user = await session.scalar(
+                        select(User).where(User.id == user.id).with_for_update()
+                    )
                 if isinstance(locked_user, User):
                     user = locked_user
                 if user.referred_by is None:
