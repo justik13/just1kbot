@@ -24,6 +24,17 @@ function _renderIosContent(method) {
             <div class="notice-box">
                 <span>В App Store Казахстана интерфейс на русском языке, а карта для скачивания не требуется. После установки можно сразу вернуть регион РФ.</span>
             </div>
+            <details class="guide-details">
+                <summary class="guide-summary">
+                    <span>Видеоинструкция (38 сек · 8,4 МБ)</span>
+                    <span class="muted" style="font-size:12px;">▾</span>
+                </summary>
+                <div class="guide-body">
+                    <video class="guide-video" controls playsinline preload="none" poster="/app/assets/guides/ios_02_kazakhstan.jpg">
+                        <source src="/app/assets/guides/happ_guide.mp4" type="video/mp4">
+                    </video>
+                </div>
+            </details>
             <div class="guide-step-card">
                 <div class="guide-step-head"><span class="guide-step-num">1</span><span>Откройте меню смены страны в App Store</span></div>
                 <p class="muted">Откройте <b>App Store</b> → иконка профиля в правом верхнем углу → первая строка (имя и Apple ID) → <b>Страна/регион</b> → <b>Изменить страну или регион</b>.</p>

@@ -68,6 +68,7 @@ _MIME_TYPES = {
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
     ".png": "image/png",
+    ".mp4": "video/mp4",
 }
 
 _NO_CACHE_HEADERS = {
@@ -124,7 +125,12 @@ async def miniapp_asset_handler(request: web.Request) -> web.Response:
     if not content_type:
         return web.Response(status=404, text="Not Found")
 
-    return web.FileResponse(target, headers=_ASSET_CACHE_HEADERS)
+    headers = (
+        {"Cache-Control": "public, max-age=604800"}
+        if rel_path.startswith("guides/")
+        else _ASSET_CACHE_HEADERS
+    )
+    return web.FileResponse(target, headers=headers)
 
 
 def setup_miniapp_routes(app: web.Application) -> None:

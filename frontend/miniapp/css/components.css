@@ -711,6 +711,14 @@
     color: var(--text-primary);
 }
 
+.guide-video {
+    width: 100%;
+    max-height: 440px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-black);
+    display: block;
+}
+
 .btn-ghost {
     background: transparent;
     border: 1px solid var(--border-subtle);

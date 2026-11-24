@@ -1384,8 +1384,23 @@ async def vless_report_handler(request: web.Request) -> web.Response:
     return web.json_response({"ok": True}, headers={"Cache-Control": "no-store"})
 
 
+async def vless_guide_video_handler(request: web.Request) -> web.Response:
+    """Serve the iOS region-change video guide with HTTP Range support and long cache."""
+    video_path = (_TEMPLATES_DIR / "vless_landing" / "assets" / "happ_guide.mp4").resolve()
+    if not video_path.is_file():
+        return web.Response(status=404, text="Not Found")
+    return web.FileResponse(
+        video_path,
+        headers={
+            "Content-Type": "video/mp4",
+            "Cache-Control": "public, max-age=604800",
+        },
+    )
+
+
 def setup_vless_web_routes(app: web.Application) -> None:
     """Register HTTP subscription feed route for unified and legacy VLESS access."""
+    app.router.add_get("/sub/assets/happ_guide.mp4", vless_guide_video_handler)
     app.router.add_get("/sub/access/{token}", vless_subscription_feed_handler)
     app.router.add_get("/sub/vless/{token}", vless_subscription_feed_handler)
     app.router.add_get("/sub/{token}", vless_subscription_feed_handler)
