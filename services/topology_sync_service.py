@@ -209,10 +209,29 @@ def build_v2_topology_links(servers: list[Server]) -> dict[int, dict[str, Any]]:
         std_bridges: list[dict[str, Any]] = []
         bi_bridges: list[dict[str, Any]] = []
         bi_locations: list[dict[str, str]] = []
+        probe_bridges: list[dict[str, Any]] = []
         seen_bi_locs: set[str] = set()
 
-        multi_eu = len(valid_eu) > 1
-        for eu, eu_ip, eu_dom, eu_uid in valid_eu:
+        rh_extra = rh.extra_data if isinstance(rh.extra_data, dict) else {}
+        raw_blocked = rh_extra.get("blocked_eu_ids") or []
+        blocked_eu_ids: set[int] = set()
+        for raw_bid in raw_blocked:
+            try:
+                blocked_eu_ids.add(int(raw_bid))
+            except (TypeError, ValueError):
+                pass
+
+        available_eu = [item for item in valid_eu if item[0].id not in blocked_eu_ids]
+        if available_eu:
+            routed_eu = available_eu
+            excluded_eu = [item for item in valid_eu if item[0].id in blocked_eu_ids]
+        else:
+            # Fail-safe: never leave ru_hub with zero bridges when all eu_hubs are flagged
+            routed_eu = valid_eu
+            excluded_eu = []
+
+        multi_eu = len(routed_eu) > 1
+        for eu, eu_ip, eu_dom, eu_uid in routed_eu:
             for ex, _ex_ip, _ex_dom, _ex_uid, loc_code in valid_exit:
                 ex_extra = ex.extra_data if isinstance(ex.extra_data, dict) else {}
                 r_uid = _deterministic_route_uuid(eu.id, ex.id, eu_uid)
@@ -241,7 +260,21 @@ def build_v2_topology_links(servers: list[Server]) -> dict[int, dict[str, Any]]:
                         seen_bi_locs.add(loc_code)
                         bi_locations.append({"code": loc_code, "bridge_code": loc_code})
 
-        payloads[rh.id] = {
+        if excluded_eu and valid_exit:
+            first_ex, _fip, _fdom, _fuid, first_loc = valid_exit[0]
+            for eu, eu_ip, eu_dom, eu_uid in excluded_eu:
+                r_uid = _deterministic_route_uuid(eu.id, first_ex.id, eu_uid)
+                probe_bridges.append({
+                    "code": f"{first_loc}-eu{eu.id}",
+                    "location_code": first_loc,
+                    "ip": eu_ip,
+                    "port": 443,
+                    "sni": eu_dom,
+                    "uuid": r_uid,
+                    "is_default": False,
+                })
+
+        rh_payload: dict[str, Any] = {
             "standard": {
                 "bridges": std_bridges,
             },
@@ -250,6 +283,9 @@ def build_v2_topology_links(servers: list[Server]) -> dict[int, dict[str, Any]]:
                 "locations": bi_locations,
             },
         }
+        if probe_bridges:
+            rh_payload["probe_bridges"] = probe_bridges
+        payloads[rh.id] = rh_payload
 
     return payloads
 

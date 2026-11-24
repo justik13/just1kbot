@@ -19,6 +19,9 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from bot.texts.backend import TIME_HOURS_LEFT
 from bot.texts.runtime.alerts import (
+    ALERT_BRIDGE_TSPU_PROBLEM,
+    ALERT_BRIDGE_TSPU_PROBLEM_REMINDER,
+    ALERT_BRIDGE_TSPU_RESTORED,
     ALERT_CDN_INGRESS_PROBLEM,
     ALERT_CDN_INGRESS_PROBLEM_REMINDER,
     ALERT_CDN_INGRESS_RESTORED,
@@ -73,6 +76,8 @@ DISK_ALERT_COOLDOWN_SECONDS = 3600.0  # 1 час между повторными
 REQUIRED_INGRESS_FAILS = 3  # Требуется 3 цикла сбоя подряд (>= 3 мин) перед отправкой алерта
 REQUIRED_CDN_FAILS = 5  # Требуется 5 циклов сбоя подряд (~5 мин) для фильтрации трансграничного шума
 REQUIRED_INGRESS_SUCCESSES = 2  # Требуется 2 цикла успеха подряд для подтверждения восстановления
+REQUIRED_BRIDGE_FAILS = 2  # Требуется 2 цикла сбоя моста подряд (~2 мин) перед переключением и алертом
+REQUIRED_BRIDGE_SUCCESSES = 2  # Требуется 2 цикла успеха моста подряд для возврата в топологию
 INGRESS_RETRY_DELAY = 1.5  # Базовая задержка перед повторным запросом зонда при ошибке/таймауте
 INGRESS_PROBE_TOTAL_TIMEOUT = 30.0  # Максимальное время синтетического ingress-зонда
 INGRESS_PROBE_CONNECT_TIMEOUT = 25.0  # Запас на трансграничный TLS handshake при пиках нагрузки
@@ -287,6 +292,18 @@ async def check_node_resources_and_alerts(bot: Bot):
 
     now_m = time.monotonic()
     topology_dirty = False
+
+    from services.topology_sync_service import _extract_ipv4
+
+    eu_hubs_by_ip: dict[str, Server] = {}
+    all_active_eu_ids: set[int] = set()
+    for _srv in servers:
+        if get_server_role(_srv) == "eu_hub":
+            _ip = _extract_ipv4(_srv)
+            if _ip:
+                eu_hubs_by_ip[_ip] = _srv
+            if _srv.is_active and _srv.health_state == ServerHealthState.ONLINE:
+                all_active_eu_ids.add(_srv.id)
     probe_timeout = aiohttp.ClientTimeout(
         total=INGRESS_PROBE_TOTAL_TIMEOUT,
         connect=INGRESS_PROBE_CONNECT_TIMEOUT,
@@ -295,6 +312,7 @@ async def check_node_resources_and_alerts(bot: Bot):
     shared_probe_sess = aiohttp.ClientSession(timeout=probe_timeout, connector=probe_connector)
 
     async def _check_one(server):
+        nonlocal topology_dirty
         st = get_server_monitor_state(server.id, server)
 
         # 1. Если сервер отключён — проверяем причину; при HOSTING_TRAFFIC_LIMIT и новом цикле (< 90%) включаем обратно
@@ -350,7 +368,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 reset_server_monitor_state(server.id, ServerHealthState.ONLINE)
                                 st = get_server_monitor_state(server.id, server)
                                 re_enabled = True
-                                nonlocal topology_dirty
                                 topology_dirty = True
                     if re_enabled:
                         try:
@@ -798,6 +815,138 @@ async def check_node_resources_and_alerts(bot: Bot):
                     )
                 except Exception as e:
                     logger.error("Failed to deliver %s alert for server %d: %s", alert_kind, server.id, e)
+
+        if is_healthy and get_server_role(server) == "ru_hub" and isinstance(xray_data, dict) and isinstance(xray_data.get("bridge_health"), dict):
+            bridge_health_map = xray_data["bridge_health"]
+            bridge_alerts_to_send: list[str] = []
+            bridge_lock_key = 9_000_000_000 + int(server.id)
+            async with session_scope() as session:
+                bind = getattr(session, "bind", None)
+                if not bind and hasattr(session, "sync_session"):
+                    bind = getattr(session.sync_session, "bind", None)
+                if bind and getattr(bind, "dialect", None) and getattr(bind.dialect, "name", None) == "postgresql":
+                    got_bridge_lock = bool(await session.scalar(select(func.pg_try_advisory_xact_lock(bridge_lock_key))))
+                else:
+                    got_bridge_lock = True
+
+                if got_bridge_lock:
+                    fresh_ru = await get_server_by_id(session, server.id, for_update=True)
+                    ru_extra = dict((fresh_ru.extra_data if fresh_ru else server.extra_data) or {})
+                    bh_state: dict[str, dict[str, Any]] = dict(ru_extra.get("bridge_health_state") or {})
+                    prev_blocked = {int(x) for x in (ru_extra.get("blocked_eu_ids") or []) if str(x).isdigit()}
+                    new_blocked = {eid for eid in prev_blocked if eid in all_active_eu_ids}
+                    bh_changed = new_blocked != prev_blocked
+                    now_wall = time.time()
+
+                    # Prune state entries for removed/inactive eu_hubs
+                    for stale_k in list(bh_state.keys()):
+                        if not stale_k.isdigit() or int(stale_k) not in all_active_eu_ids:
+                            bh_state.pop(stale_k, None)
+                            bh_changed = True
+
+                    for eu_ip, probe_info in bridge_health_map.items():
+                        if not isinstance(probe_info, dict):
+                            continue
+                        eu_srv = eu_hubs_by_ip.get(str(eu_ip).strip())
+                        if not eu_srv or not eu_srv.is_active or eu_srv.health_state != ServerHealthState.ONLINE:
+                            continue
+
+                        eu_key = str(eu_srv.id)
+                        entry = dict(bh_state.get(eu_key) or {})
+                        was_blocked = bool(entry.get("blocked", False))
+                        probe_ok = bool(probe_info.get("ok", False))
+                        err_detail = str(probe_info.get("error") or "probe failed")
+
+                        if not probe_ok:
+                            fails = int(entry.get("fails", 0) or 0) + 1
+                            entry["fails"] = fails
+                            entry["successes"] = 0
+                            entry["last_error"] = err_detail
+                            bh_changed = True
+
+                            if not was_blocked and fails >= REQUIRED_BRIDGE_FAILS:
+                                entry["blocked"] = True
+                                entry["started_at"] = now_wall
+                                entry["last_reminder_at"] = now_wall
+                                new_blocked.add(eu_srv.id)
+                                remaining_eu = len(all_active_eu_ids - new_blocked)
+                                action_text = (
+                                    f"Трафик автоматически переключён на резервный шлюз (доступно: {remaining_eu})."
+                                    if remaining_eu >= 1
+                                    else "Резервных шлюзов нет — маршрут оставлен в качестве fallback."
+                                )
+                                bridge_alerts_to_send.append(
+                                    ALERT_BRIDGE_TSPU_PROBLEM.format(
+                                        ru_name=safe(server.name),
+                                        ru_id=server.id,
+                                        eu_name=safe(eu_srv.name),
+                                        eu_id=eu_srv.id,
+                                        eu_ip=safe(eu_ip),
+                                        error_detail=safe(err_detail),
+                                        action_text=action_text,
+                                    )
+                                )
+                            elif was_blocked:
+                                new_blocked.add(eu_srv.id)
+                                last_rem = entry.get("last_reminder_at")
+                                if not isinstance(last_rem, (int, float)):
+                                    entry["last_reminder_at"] = now_wall
+                                elif (now_wall - float(last_rem)) >= OUTAGE_REMINDER_INTERVAL_SECONDS:
+                                    started = float(entry.get("started_at") or last_rem)
+                                    bridge_alerts_to_send.append(
+                                        ALERT_BRIDGE_TSPU_PROBLEM_REMINDER.format(
+                                            ru_name=safe(server.name),
+                                            ru_id=server.id,
+                                            eu_name=safe(eu_srv.name),
+                                            eu_id=eu_srv.id,
+                                            eu_ip=safe(eu_ip),
+                                            error_detail=safe(err_detail),
+                                            hours_text=_format_outage_duration(max(60.0, now_wall - started)),
+                                        )
+                                    )
+                                    entry["last_reminder_at"] = now_wall
+                        else:
+                            succs = int(entry.get("successes", 0) or 0) + 1
+                            entry["successes"] = succs
+                            entry["fails"] = 0
+                            entry["last_error"] = None
+                            if was_blocked and succs >= REQUIRED_BRIDGE_SUCCESSES:
+                                entry["blocked"] = False
+                                entry["started_at"] = None
+                                entry["last_reminder_at"] = None
+                                new_blocked.discard(eu_srv.id)
+                                bridge_alerts_to_send.append(
+                                    ALERT_BRIDGE_TSPU_RESTORED.format(
+                                        ru_name=safe(server.name),
+                                        ru_id=server.id,
+                                        eu_name=safe(eu_srv.name),
+                                        eu_id=eu_srv.id,
+                                        eu_ip=safe(eu_ip),
+                                    )
+                                )
+                            elif was_blocked:
+                                new_blocked.add(eu_srv.id)
+                            bh_changed = True
+
+                        bh_state[eu_key] = entry
+
+                    if bh_changed and fresh_ru:
+                        sorted_blocked = sorted(new_blocked)
+                        if sorted_blocked != sorted(prev_blocked):
+                            topology_dirty = True
+                        ru_extra["bridge_health_state"] = bh_state
+                        if sorted_blocked:
+                            ru_extra["blocked_eu_ids"] = sorted_blocked
+                        else:
+                            ru_extra.pop("blocked_eu_ids", None)
+                        await update_server(session, fresh_ru, extra_data=ru_extra)
+                        server.extra_data = ru_extra
+
+            for b_alert in bridge_alerts_to_send:
+                try:
+                    await _send_admin_alert_msg(bot, b_alert)
+                except Exception as exc:
+                    logger.error("Failed to deliver bridge TSPU alert for ru_hub %d: %s", server.id, exc)
 
         if is_healthy:
             if st.health_state == ServerHealthState.WAITING_CONFIRMATION:
