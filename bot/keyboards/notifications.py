@@ -66,4 +66,4 @@ def get_broadcast_action_keyboard(
 
 
 def get_traffic_alert_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
-    return get_action_notification_keyboard(texts.BTN_OPEN_CABINET, tab="connect")
+    return get_action_notification_keyboard(texts.BTN_TOPUP_TRAFFIC, tab="tariffs")

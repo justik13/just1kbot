@@ -2,11 +2,11 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Just1k</title>
     <script src="/app/assets/js/telegram-web-app.js?v=2.7.5"></script>
-    <link rel="stylesheet" href="/app/assets/css/tokens.css?v=2.7.7">
-    <link rel="stylesheet" href="/app/assets/css/components.css?v=2.7.7">
+    <link rel="stylesheet" href="/app/assets/css/tokens.css?v=2.7.8">
+    <link rel="stylesheet" href="/app/assets/css/components.css?v=2.7.8">
 </head>
 <body>
     <div class="app-shell">
@@ -21,9 +21,10 @@
                     <button type="button" class="mode-btn" data-mode="cabinet">Кабинет</button>
                     <button type="button" class="mode-btn active" data-mode="admin">Админка</button>
                 </div>
-                <button type="button" id="profilePillBtn" class="profile-pill" hidden>
+                <button type="button" id="profilePillBtn" class="profile-pill" aria-label="Открыть профиль и историю операций" hidden>
                     <span id="profileAvatar" class="avatar-circle">J</span>
                     <span id="profileBalanceText">0 ₽</span>
+                    <svg class="profile-pill-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
                 </button>
                 <div id="userChip" class="user-meta" hidden></div>
             </div>
@@ -39,6 +40,6 @@
     <div id="modalRoot" class="modal-backdrop" hidden></div>
     <div id="toastRoot" class="toast" role="status" aria-live="polite" hidden></div>
 
-    <script type="module" src="/app/assets/js/app.js?v=2.7.7"></script>
+    <script type="module" src="/app/assets/js/app.js?v=2.7.8"></script>
 </body>
 </html>

@@ -42,6 +42,13 @@ _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 
 
 @functools.lru_cache(maxsize=1)
+def get_shared_design_tokens_css() -> str:
+    """Read shared Mini App design tokens as the single source of truth for all web surfaces."""
+    tokens_path = Path(__file__).resolve().parents[2] / "frontend" / "miniapp" / "css" / "tokens.css"
+    return tokens_path.read_text(encoding="utf-8")
+
+
+@functools.lru_cache(maxsize=1)
 def get_vless_landing_active_html() -> str:
     """Assemble modular landing template with inline Base64 real screenshots into memory."""
     landing_dir = _TEMPLATES_DIR / "vless_landing"
@@ -87,7 +94,8 @@ def get_vless_landing_active_html() -> str:
     )
 
     rendered = (
-        base.replace("/* {{LANDING_CSS}} */", css)
+        base.replace("/* {{SHARED_TOKENS_CSS}} */", get_shared_design_tokens_css())
+        .replace("/* {{LANDING_CSS}} */", css)
         .replace("<!-- {{CONNECT_VIEW}} -->", connect_view)
         .replace("<!-- {{GUIDES_VIEW}} -->", guides_view)
         .replace("// {{LANDING_JS}}", js)
@@ -103,7 +111,18 @@ def get_vless_landing_active_html() -> str:
 
 @functools.lru_cache(maxsize=1)
 def get_vless_landing_inactive_html() -> str:
-    return (_TEMPLATES_DIR / "vless_landing_inactive.html").read_text(encoding="utf-8")
+    return (
+        (_TEMPLATES_DIR / "vless_landing_status.html")
+        .read_text(encoding="utf-8")
+        .replace("/* {{SHARED_TOKENS_CSS}} */", get_shared_design_tokens_css())
+        .replace("{page_title}", "Подключение к сервису")
+        .replace("{head_extra}", "")
+        .replace(
+            "{extra_hint}",
+            '<p class="hint-note">Если Telegram не открывается, напишите нам через форму поддержки ниже</p>',
+        )
+        .replace("{extra_script}", "")
+    )
 
 
 _ip_rate_limiter = HttpRateLimiter(rate_per_minute=60.0, burst=15)

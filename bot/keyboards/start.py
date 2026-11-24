@@ -15,12 +15,13 @@ def build_start_inline_keyboard(
     miniapp_url: str,
     mtproto_url: str | None = None,
     referral_share_url: str | None = None,
+    connect_btn_text: str = texts.BTN_MINIAPP_CONNECT,
 ) -> InlineKeyboardMarkup:
-    """Inline keyboard with Mini App Connect button, optional referral share, and MTProto proxy button."""
+    """Inline keyboard with Mini App entry button, optional referral share, and MTProto proxy button."""
     rows = [
         [
             InlineKeyboardButton(
-                text=texts.BTN_MINIAPP_CONNECT,
+                text=connect_btn_text,
                 web_app=WebAppInfo(url=miniapp_url),
             )
         ]

@@ -1,5 +1,5 @@
-import { api } from "../api.js?v=2.7.7";
-import { escapeHtml, formatDate, renderPagination, showConfirmModal, showToast } from "../ui.js?v=2.7.7";
+import { api } from "../api.js?v=2.7.8";
+import { escapeHtml, formatDate, renderPagination, showConfirmModal, showToast } from "../ui.js?v=2.7.8";
 
 function _financeStatusChip(status) {
     if (status === "paid") {
@@ -59,7 +59,7 @@ export function renderAdminFinancesView(root, state) {
                     <div style="font-weight:600; display:flex; align-items:center; gap:8px;">
                         <span>Техработы платежей</span>
                         <span id="paymentsMaintBadge" class="chip ${state.paymentsMaintenance ? "chip-warn" : "chip-ok"}">
-                            ${state.paymentsMaintenance ? "ВКЛЮЧЕНЫ (оплата заблокирована)" : "ВЫКЛЮЧЕНЫ (оплата активна)"}
+                            ${state.paymentsMaintenance ? "Включены (оплата заблокирована)" : "Выключены (оплата активна)"}
                         </span>
                     </div>
                     <div class="muted" style="font-size:12px; margin-top:4px;">

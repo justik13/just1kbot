@@ -1,5 +1,5 @@
-import { api, setAdminSessionToken } from "../api.js?v=2.7.7";
-import { copyText, escapeHtml, showToast } from "../ui.js?v=2.7.7";
+import { api, setAdminSessionToken } from "../api.js?v=2.7.8";
+import { copyText, escapeHtml, showToast } from "../ui.js?v=2.7.8";
 
 function _applyClipCode(input, rawText) {
     const digits = String(rawText || "").replace(/\D+/g, "").slice(0, 6);

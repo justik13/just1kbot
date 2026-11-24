@@ -1,13 +1,13 @@
-import { api } from "./api.js?v=2.7.7";
-import { escapeHtml, showToast } from "./ui.js?v=2.7.7";
-import { renderSecurity2FA } from "./views/security_2fa.js?v=2.7.7";
-import { renderNodesView, renderSubscriptionSettingsView } from "./views/nodes.js?v=2.7.7";
-import { renderNodeDetailView } from "./views/node_detail.js?v=2.7.7";
-import { renderAdminUsersView } from "./views/admin_users.js?v=2.7.7";
-import { renderUserDetailView } from "./views/user_detail.js?v=2.7.7";
-import { clearBroadcastPollTimer, renderAdminBroadcastsView } from "./views/admin_broadcasts.js?v=2.7.7";
-import { renderAdminFinancesView } from "./views/admin_finances.js?v=2.7.7";
-import { clearCabinetBackButton, loadAndRenderUserCabinet } from "./views/user_cabinet.js?v=2.7.7";
+import { api } from "./api.js?v=2.7.8";
+import { escapeHtml, showToast } from "./ui.js?v=2.7.8";
+import { renderSecurity2FA } from "./views/security_2fa.js?v=2.7.8";
+import { renderNodesView, renderSubscriptionSettingsView } from "./views/nodes.js?v=2.7.8";
+import { renderNodeDetailView } from "./views/node_detail.js?v=2.7.8";
+import { renderAdminUsersView } from "./views/admin_users.js?v=2.7.8";
+import { renderUserDetailView } from "./views/user_detail.js?v=2.7.8";
+import { clearBroadcastPollTimer, renderAdminBroadcastsView } from "./views/admin_broadcasts.js?v=2.7.8";
+import { renderAdminFinancesView } from "./views/admin_finances.js?v=2.7.8";
+import { clearCabinetBackButton, loadAndRenderUserCabinet } from "./views/user_cabinet.js?v=2.7.8";
 
 const appState = {
     user: null,
@@ -41,8 +41,8 @@ function _initTelegramChrome() {
     try {
         tg.ready();
         tg.expand();
-        tg.setHeaderColor("#050505");
-        tg.setBackgroundColor("#050505");
+        tg.setHeaderColor("#000000");
+        tg.setBackgroundColor("#000000");
     } catch {
         // Non-critical in older Telegram clients
     }

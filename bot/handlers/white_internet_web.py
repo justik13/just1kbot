@@ -21,9 +21,34 @@ logger = logging.getLogger(__name__)
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 
 
+_PENDING_REFRESH_SCRIPT = """let refreshTimer = setTimeout(function() { location.reload(); }, 5000);
+        function pauseAutoRefresh() {
+            if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = null; }
+        }
+        function resumeAutoRefresh() {
+            if (!refreshTimer) { refreshTimer = setTimeout(function() { location.reload(); }, 5000); }
+        }"""
+
+
 @functools.lru_cache(maxsize=1)
 def get_white_internet_pending_html() -> str:
-    return (_TEMPLATES_DIR / "vless_landing_pending.html").read_text(encoding="utf-8")
+    from bot.handlers.vless_web import get_shared_design_tokens_css
+
+    return (
+        (_TEMPLATES_DIR / "vless_landing_status.html")
+        .read_text(encoding="utf-8")
+        .replace("/* {{SHARED_TOKENS_CSS}} */", get_shared_design_tokens_css())
+        .replace("{page_title}", "Настройка подключения")
+        .replace("{head_extra}", '<noscript><meta http-equiv="refresh" content="5"></noscript>')
+        .replace("{status_badge}", "Настройка доступа")
+        .replace("{status_title}", "Настройка шлюза")
+        .replace(
+            "{status_description}",
+            "Идёт подготовка защищённого шлюза. Обычно это занимает несколько секунд. Страница проверяет статус каждые 5 секунд.",
+        )
+        .replace("{extra_hint}", "")
+        .replace("{extra_script}", _PENDING_REFRESH_SCRIPT)
+    )
 
 
 def _render_white_internet_pending_landing_html(bot_username: str = "") -> str:

@@ -1,4 +1,4 @@
-import { copyText, escapeHtml, openModal } from "../ui.js?v=2.7.7";
+import { copyText, escapeHtml, openModal } from "../ui.js?v=2.7.8";
 
 function _openExternal(url) {
     if (!url) return;
@@ -21,13 +21,19 @@ function _openImageModal(src, title) {
 function _renderIosContent(method) {
     if (method === "region") {
         return `
-            <div class="notice-box">
-                <span>В App Store Казахстана интерфейс на русском языке, а карта для скачивания не требуется. После установки можно сразу вернуть регион РФ.</span>
-            </div>
-            <details class="guide-details">
-                <summary class="guide-summary">
-                    <span>Видеоинструкция (38 сек · 2,0 МБ)</span>
-                    <span class="muted" style="font-size:12px;">▾</span>
+            <details class="guide-details guide-video-priority">
+                <summary class="guide-summary guide-video-summary">
+                    <span class="guide-video-play" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+                    </span>
+                    <span class="guide-video-info">
+                        <span class="guide-video-title-row">
+                            <span class="guide-video-title">Видеоинструкция: смена региона за 2 минуты</span>
+                            <span class="guide-video-tag">Рекомендуем</span>
+                        </span>
+                        <span class="guide-video-meta">38 сек · 2,0 МБ · наглядный показ без банковской карты</span>
+                    </span>
+                    <span class="disclosure-pill"><span>Смотреть</span><svg class="guide-video-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></span>
                 </summary>
                 <div class="guide-body">
                     <video class="guide-video" controls playsinline preload="none" poster="/app/assets/guides/ios_02_kazakhstan.jpg">
@@ -35,6 +41,12 @@ function _renderIosContent(method) {
                     </video>
                 </div>
             </details>
+            <div class="notice-box">
+                <span>В App Store Казахстана интерфейс на русском языке, а карта для скачивания не требуется. После установки можно сразу вернуть регион РФ.</span>
+            </div>
+            <div class="notice-box notice-warn">
+                <span><b>Условия смены:</b> на балансе Apple ID не должно быть остатка (0 ₽), действующих подписок Apple, незавершённых заказов и семейного доступа.</span>
+            </div>
             <div class="guide-step-card">
                 <div class="guide-step-head"><span class="guide-step-num">1</span><span>Откройте меню смены страны в App Store</span></div>
                 <p class="muted">Откройте <b>App Store</b> → иконка профиля в правом верхнем углу → первая строка (имя и Apple ID) → <b>Страна/регион</b> → <b>Изменить страну или регион</b>.</p>
@@ -53,12 +65,12 @@ function _renderIosContent(method) {
             </div>
             <div class="guide-step-card">
                 <div class="guide-step-head"><span class="guide-step-num">3</span><span>Заполните оплату и адрес</span></div>
-                <p class="muted">Способ оплаты выберите <b>Нет</b>. Поля адреса можно заполнить любыми данными (например, Алматы):</p>
+                <p class="muted">Если в вашем аккаунте доступен способ оплаты <b>Нет</b>, выберите его (наличие зависит от аккаунта и региона Apple ID). Пример заполнения адреса (Алматы):</p>
                 <div class="guide-kv-list">
-                    <div class="guide-kv-row"><span>Улица</span><code>Abay 10</code></div>
-                    <div class="guide-kv-row"><span>Город</span><code>Almaty</code></div>
-                    <div class="guide-kv-row"><span>Индекс</span><code>050000</code></div>
-                    <div class="guide-kv-row"><span>Телефон</span><code>701 0000000</code></div>
+                    <div class="guide-kv-row"><span>Улица</span><span class="guide-kv-val"><code>ул. Абая, 1</code><button type="button" class="btn btn-sm guide-kv-copy" data-copy="ул. Абая, 1">Копировать</button></span></div>
+                    <div class="guide-kv-row"><span>Город</span><span class="guide-kv-val"><code>Алматы</code><button type="button" class="btn btn-sm guide-kv-copy" data-copy="Алматы">Копировать</button></span></div>
+                    <div class="guide-kv-row"><span>Индекс</span><span class="guide-kv-val"><code>050000</code><button type="button" class="btn btn-sm guide-kv-copy" data-copy="050000">Копировать</button></span></div>
+                    <div class="guide-kv-row"><span>Телефон</span><span class="guide-kv-val"><code>(701) 123-4567</code><button type="button" class="btn btn-sm guide-kv-copy" data-copy="7011234567">Копировать</button></span></div>
                 </div>
                 <button type="button" class="guide-shot-btn" data-shot="/app/assets/guides/ios_03_payment.jpg" data-shot-title="Способ оплаты и адрес">
                     <img src="/app/assets/guides/ios_03_payment.jpg" alt="Способ оплаты и адрес" loading="lazy">
@@ -103,8 +115,8 @@ function _renderIosContent(method) {
         `;
     }
     return `
-        <div class="notice-box">
-            <span>TestFlight доступен в российском App Store (iOS 16+) и не требует смены региона.</span>
+        <div class="notice-box notice-warn">
+            <span>В публичных тестах TestFlight Apple ограничивает число мест (приглашения часто заполнены или закрыты). Основной и надёжный способ — смена региона на <b>Казахстан</b>.</span>
         </div>
         <div class="guide-step-card">
             <div class="guide-step-head"><span class="guide-step-num">1</span><span>Установите Apple TestFlight</span></div>
@@ -112,17 +124,14 @@ function _renderIosContent(method) {
             <button type="button" class="btn btn-sm" data-ext="https://apps.apple.com/app/testflight/id899247664">Установить TestFlight</button>
         </div>
         <div class="guide-step-card">
-            <div class="guide-step-head"><span class="guide-step-num">2</span><span>Откройте приглашение и установите клиент</span></div>
+            <div class="guide-step-head"><span class="guide-step-num">2</span><span>Откройте приглашение, если есть свободные места</span></div>
             <p class="muted">В открывшемся TestFlight нажмите <b>Принять</b> (Accept), затем <b>Установить</b> (Install).</p>
-            <div class="connect-pair">
-                <button type="button" class="btn btn-primary btn-sm" data-ext="https://testflight.apple.com/join/dFw66h3a">INCY (Рекомендуется)</button>
-                <button type="button" class="btn btn-sm" data-ext="https://testflight.apple.com/join/XMls6Ckd">Happ</button>
-            </div>
+            <button type="button" class="btn btn-sm" data-ext="https://testflight.apple.com/join/XMls6Ckd">Happ (TestFlight)</button>
             <button type="button" class="guide-shot-btn" data-shot="/app/assets/guides/ios_testflight.jpg" data-shot-title="Установка в TestFlight">
                 <img src="/app/assets/guides/ios_testflight.jpg" alt="Установка в TestFlight" loading="lazy">
                 <span class="guide-shot-hint">Увеличить</span>
             </button>
-            <p class="muted" style="font-size:12px;">Если TestFlight пишет «Этот бета-тест заполнен», переключитесь выше на способ «Казахстан».</p>
+            <p class="muted" style="font-size:12px;">Если TestFlight пишет «Этот бета-тест заполнен», используйте вкладку «Казахстан» выше.</p>
         </div>
     `;
 }
@@ -147,7 +156,7 @@ function _renderAndroidContent(method) {
             </div>
             <div class="guide-step-card">
                 <div class="guide-step-head"><span class="guide-step-num">2</span><span>Подключите профиль</span></div>
-                <p class="muted">Вернитесь на вкладку «Доступ» и нажмите кнопку «Подключить в INCY» или «Открыть в Happ», либо вставьте скопированную ссылку в приложении через «+».</p>
+                <p class="muted">Вернитесь на вкладку «Доступ» и нажмите кнопку «Подключить в INCY» или «Подключить в Happ», либо вставьте скопированную ссылку в приложении через «+».</p>
             </div>
         `;
     }
@@ -192,7 +201,7 @@ function _renderDesktopContent(method) {
                 <div class="sub-url-box" style="font-size:12px;">${escapeHtml(cmd)}</div>
                 <div class="connect-pair">
                     <button type="button" class="btn btn-sm" data-copy="${escapeHtml(cmd)}">Копировать команду</button>
-                    <button type="button" class="btn btn-sm" data-ext="https://github.com/Happ-proxy/happ-desktop/releases">Релизы GitHub</button>
+                    <button type="button" class="btn btn-sm" data-ext="https://github.com/Happ-proxy/happ-desktop/releases/latest">Релизы GitHub</button>
                 </div>
             </div>
         `;
@@ -246,7 +255,7 @@ function _renderFaqContent(deviceLimit) {
             <details class="guide-details" ${idx === 0 ? "open" : ""}>
                 <summary class="guide-summary">
                     <span>${escapeHtml(item.q)}</span>
-                    <span class="muted" style="font-size:12px;">▾</span>
+                    <span class="disclosure-pill"><span>Ответ</span><svg class="guide-video-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></span>
                 </summary>
                 <div class="guide-body">
                     <p class="muted">${escapeHtml(item.a)}</p>
@@ -275,7 +284,7 @@ export function renderUserGuidesView(root, state, data, onBack) {
         else if (state.platform === "windows" || state.platform === "macos") state.guideTab = "desktop";
         else state.guideTab = "ios";
     }
-    if (!state.guideIosMethod) state.guideIosMethod = "tf";
+    if (!state.guideIosMethod) state.guideIosMethod = "region";
     if (!state.guideAndroidMethod) state.guideAndroidMethod = "play";
     if (!state.guideDesktopMethod) {
         state.guideDesktopMethod = state.platform === "macos" ? "mac" : "win";
@@ -289,9 +298,9 @@ export function renderUserGuidesView(root, state, data, onBack) {
     if (state.guideTab === "ios") {
         subTabsHtml = `
             <div class="filter-pills">
-                <button type="button" class="pill-btn ${state.guideIosMethod === "tf" ? "active" : ""}" data-ios-m="tf">TestFlight</button>
                 <button type="button" class="pill-btn ${state.guideIosMethod === "region" ? "active" : ""}" data-ios-m="region">Казахстан</button>
                 <button type="button" class="pill-btn ${state.guideIosMethod === "newid" ? "active" : ""}" data-ios-m="newid">Второй ID</button>
+                <button type="button" class="pill-btn ${state.guideIosMethod === "tf" ? "active" : ""}" data-ios-m="tf">TestFlight</button>
             </div>
         `;
         contentHtml = _renderIosContent(state.guideIosMethod);
@@ -327,11 +336,23 @@ export function renderUserGuidesView(root, state, data, onBack) {
             <p class="hero-sub">Пошаговая установка и настройка на вашем устройстве</p>
         </section>
 
-        <div class="seg-group">
-            <button type="button" class="seg-btn ${state.guideTab === "ios" ? "active" : ""}" data-gtab="ios">iOS</button>
-            <button type="button" class="seg-btn ${state.guideTab === "android" ? "active" : ""}" data-gtab="android">Android</button>
-            <button type="button" class="seg-btn ${state.guideTab === "desktop" ? "active" : ""}" data-gtab="desktop">ПК / Mac</button>
-            <button type="button" class="seg-btn ${state.guideTab === "faq" ? "active" : ""}" data-gtab="faq">Вопросы</button>
+        <div class="seg-group" role="tablist" aria-label="Платформы">
+            <button type="button" class="seg-btn seg-btn-with-icon ${state.guideTab === "ios" ? "active" : ""}" role="tab" aria-selected="${state.guideTab === "ios" ? "true" : "false"}" data-gtab="ios">
+                <svg class="seg-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="2.5"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+                <span>iOS</span>
+            </button>
+            <button type="button" class="seg-btn seg-btn-with-icon ${state.guideTab === "android" ? "active" : ""}" role="tab" aria-selected="${state.guideTab === "android" ? "true" : "false"}" data-gtab="android">
+                <svg class="seg-btn-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 18c0 .55.45 1 1 1h1v3.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5V19h2v3.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5V19h1c.55 0 1-.45 1-1V8H6v10zM3.5 8C2.67 8 2 8.67 2 9.5v7c0 .83.67 1.5 1.5 1.5S5 17.33 5 16.5v-7C5 8.67 4.33 8 3.5 8zm17 0c-.83 0-1.5.67-1.5 1.5v7c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5v-7c0-.83-.67-1.5-1.5-1.5zm-4.97-4.84l1.3-1.3c.2-.2.2-.51 0-.71-.2-.2-.51-.2-.71 0l-1.48 1.48C13.85 2.23 12.95 2 12 2c-.96 0-1.86.23-2.66.63L7.85 1.15c-.2-.2-.51-.2-.71 0-.2.2-.2.51 0 .71l1.31 1.31C6.97 4.26 6 5.92 6 7.8h12c0-1.88-.97-3.54-2.47-4.64zM9 6c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm6 0c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1z"/></svg>
+                <span>Android</span>
+            </button>
+            <button type="button" class="seg-btn seg-btn-with-icon ${state.guideTab === "desktop" ? "active" : ""}" role="tab" aria-selected="${state.guideTab === "desktop" ? "true" : "false"}" data-gtab="desktop">
+                <svg class="seg-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><line x1="2" y1="20" x2="22" y2="20"/></svg>
+                <span>ПК / Mac</span>
+            </button>
+            <button type="button" class="seg-btn seg-btn-with-icon ${state.guideTab === "faq" ? "active" : ""}" role="tab" aria-selected="${state.guideTab === "faq" ? "true" : "false"}" data-gtab="faq">
+                <svg class="seg-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                <span>Вопросы</span>
+            </button>
         </div>
 
         ${subTabsHtml}
@@ -387,7 +408,7 @@ export function renderUserGuidesView(root, state, data, onBack) {
     });
 
     root.querySelectorAll("[data-copy]").forEach((btn) => {
-        btn.addEventListener("click", () => copyText(btn.dataset.copy, "Команда скопирована"));
+        btn.addEventListener("click", () => copyText(btn.dataset.copy, "Скопировано"));
     });
 
     root.querySelectorAll("[data-shot]").forEach((btn) => {
