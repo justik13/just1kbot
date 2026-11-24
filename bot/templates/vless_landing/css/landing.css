@@ -1,37 +1,39 @@
         :root {
-            /* Surface ramp (graphite dark) */
-            --bg-page: #0f0f10;
-            --bg-card: #141415;
-            --bg-surface: #19191b;
-            --bg-raised: #232325;
-            --bg-input: #111113;
+            /* Surface ramp (OLED dark — original palette) */
+            --bg-page: #050505;
+            --bg-card: #0c0c0e;
+            --bg-surface: #131316;
+            --bg-raised: #1c1c22;
+            --bg-input: #08080a;
 
-            /* Borders (quiet hairlines 8% / 16%) */
-            --border-subtle: rgba(237, 237, 237, 0.08);
-            --border-strong: rgba(237, 237, 237, 0.16);
+            /* Borders (hairlines 8% / 18%) */
+            --border-subtle: rgba(255, 255, 255, 0.08);
+            --border-strong: rgba(255, 255, 255, 0.18);
 
-            /* Text roles (all >= 4.5:1 WCAG 2.2 AA on card/surface) */
-            --text-primary: #ededed;
-            --text-secondary: #a8a8b0;
-            --text-muted: #94949e;
+            /* Text roles */
+            --text-primary: #f4f4f5;
+            --text-secondary: #a1a1aa;
+            --text-muted: #8e8e96;
 
             /* Primary CTA */
-            --cta-bg: #ededed;
-            --cta-hover: #ffffff;
-            --cta-text: #0f0f10;
+            --cta-bg: #ffffff;
+            --cta-hover: #e4e4e7;
+            --cta-text: #09090b;
 
             /* Semantic colors */
-            --positive: #4cc38a;
-            --positive-tint: rgba(76, 195, 138, 0.12);
-            --positive-border: rgba(76, 195, 138, 0.32);
-            --negative: #e5484d;
-            --negative-tint: rgba(229, 72, 77, 0.12);
-            --negative-border: rgba(229, 72, 77, 0.36);
+            --positive: #34d399;
+            --positive-tint: rgba(16, 185, 129, 0.10);
+            --positive-border: rgba(52, 211, 153, 0.28);
+            --negative: #ef4444;
+            --negative-tint: rgba(239, 68, 68, 0.10);
+            --negative-border: rgba(239, 68, 68, 0.32);
 
             /* Tier accent (default: standard / emerald) */
-            --tier-accent: #4cc38a;
-            --tier-tint: rgba(76, 195, 138, 0.12);
-            --tier-border: rgba(76, 195, 138, 0.36);
+            --tier-glow-color: rgba(16, 185, 129, 0.07);
+            --tier-highlight-line: rgba(52, 211, 153, 0.32);
+            --tier-accent: #34d399;
+            --tier-tint: rgba(16, 185, 129, 0.14);
+            --tier-border: rgba(52, 211, 153, 0.34);
 
             /* Radii (nested system: 16 -> 12 -> 8 -> 6) */
             --radius-card: 16px;
@@ -46,21 +48,27 @@
         }
 
         body[data-tier="pro"] {
+            --tier-glow-color: rgba(56, 189, 248, 0.08);
+            --tier-highlight-line: rgba(56, 189, 248, 0.32);
             --tier-accent: #38bdf8;
-            --tier-tint: rgba(56, 189, 248, 0.12);
-            --tier-border: rgba(56, 189, 248, 0.36);
+            --tier-tint: rgba(56, 189, 248, 0.14);
+            --tier-border: rgba(56, 189, 248, 0.34);
         }
 
         body[data-tier="family"] {
+            --tier-glow-color: rgba(59, 130, 246, 0.08);
+            --tier-highlight-line: rgba(96, 165, 250, 0.35);
             --tier-accent: #60a5fa;
-            --tier-tint: rgba(96, 165, 250, 0.12);
-            --tier-border: rgba(96, 165, 250, 0.36);
+            --tier-tint: rgba(59, 130, 246, 0.14);
+            --tier-border: rgba(96, 165, 250, 0.35);
         }
 
         body[data-tier="white_internet"] {
-            --tier-accent: #ededed;
-            --tier-tint: rgba(237, 237, 237, 0.10);
-            --tier-border: rgba(237, 237, 237, 0.28);
+            --tier-glow-color: rgba(255, 255, 255, 0.08);
+            --tier-highlight-line: rgba(255, 255, 255, 0.40);
+            --tier-accent: #ffffff;
+            --tier-tint: rgba(255, 255, 255, 0.12);
+            --tier-border: rgba(255, 255, 255, 0.34);
         }
 
         *, *::before, *::after {
@@ -74,6 +82,9 @@
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
             background-color: var(--bg-page);
+            background-image:
+                radial-gradient(ellipse 90% 50% at 50% -10%, var(--tier-glow-color), transparent 70%),
+                radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.025) 0%, transparent 70%);
             color: var(--text-primary);
             min-height: 100vh;
             min-height: 100dvh;
@@ -91,6 +102,7 @@
         }
 
         .card {
+            position: relative;
             width: 100%;
             max-width: 440px;
             background-color: var(--bg-card);
@@ -99,6 +111,19 @@
             padding: 20px;
             text-align: left;
             margin: auto 0;
+            overflow: clip;
+            box-shadow: 0 24px 48px -12px rgba(0, 0, 0, 0.85), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 15%;
+            right: 15%;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--tier-highlight-line), transparent);
+            pointer-events: none;
         }
 
         /* Header */

@@ -1240,12 +1240,12 @@
 }
 
 .guide-details.guide-video-priority {
-    border-color: rgba(76, 195, 138, 0.36);
+    border-color: rgba(52, 211, 153, 0.34);
     background: var(--bg-surface);
 }
 
 .guide-details.guide-video-priority[open] {
-    border-color: #4cc38a;
+    border-color: var(--accent-emerald);
 }
 
 .guide-video-summary {
@@ -1258,9 +1258,9 @@
     width: 36px;
     height: 36px;
     border-radius: 8px;
-    background: rgba(76, 195, 138, 0.12);
-    border: 1px solid rgba(76, 195, 138, 0.36);
-    color: #4cc38a;
+    background: var(--accent-emerald-soft);
+    border: 1px solid rgba(52, 211, 153, 0.34);
+    color: var(--accent-emerald);
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1301,8 +1301,8 @@
     font-weight: 500;
     padding: 2px 6px;
     border-radius: 6px;
-    background: rgba(76, 195, 138, 0.12);
-    color: #4cc38a;
+    background: var(--accent-emerald-soft);
+    color: var(--accent-emerald);
 }
 
 .guide-video-meta {
@@ -1314,7 +1314,7 @@
 .guide-video-chevron {
     width: 16px;
     height: 16px;
-    color: #4cc38a;
+    color: var(--accent-emerald);
     flex-shrink: 0;
     transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -1331,6 +1331,18 @@
 }
 
 .seg-btn-icon {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+}
+
+.pill-btn-with-icon {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.pill-btn-icon {
     width: 14px;
     height: 14px;
     flex-shrink: 0;

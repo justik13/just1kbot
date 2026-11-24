@@ -1222,6 +1222,12 @@ function _render(root) {
 
 function _buildGuideHtml(subUrl, backupSubUrl, isActive) {
     const platformLabels = { ios: "iOS", android: "Android", windows: "Windows", macos: "macOS" };
+    const platformIcons = {
+        ios: `<svg class="pill-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="2.5"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>`,
+        android: `<svg class="pill-btn-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 18c0 .55.45 1 1 1h1v3.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5V19h2v3.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5V19h1c.55 0 1-.45 1-1V8H6v10zM3.5 8C2.67 8 2 8.67 2 9.5v7c0 .83.67 1.5 1.5 1.5S5 17.33 5 16.5v-7C5 8.67 4.33 8 3.5 8zm17 0c-.83 0-1.5.67-1.5 1.5v7c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5v-7c0-.83-.67-1.5-1.5-1.5zm-4.97-4.84l1.3-1.3c.2-.2.2-.51 0-.71-.2-.2-.51-.2-.71 0l-1.48 1.48C13.85 2.23 12.95 2 12 2c-.96 0-1.86.23-2.66.63L7.85 1.15c-.2-.2-.51-.2-.71 0-.2.2-.2.51 0 .71l1.31 1.31C6.97 4.26 6 5.92 6 7.8h12c0-1.88-.97-3.54-2.47-4.64zM9 6c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm6 0c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1z"/></svg>`,
+        windows: `<svg class="pill-btn-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.45L10.5 4.36V11.27H3V5.45ZM10.5 12.73V19.64L3 18.55V12.73H10.5ZM12 4.14L21 2.85V11.27H12V4.14ZM21 12.73V21.15L12 19.86V12.73H21Z"/></svg>`,
+        macos: `<svg class="pill-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><line x1="2" y1="20" x2="22" y2="20"/></svg>`,
+    };
     const clients = _CLIENT_LINKS[_state.platform] || _CLIENT_LINKS.ios;
 
     return `
@@ -1233,7 +1239,7 @@ function _buildGuideHtml(subUrl, backupSubUrl, isActive) {
             <div class="guide-body">
                 <div class="filter-pills">
                     ${Object.entries(platformLabels).map(([key, label]) => `
-                        <button type="button" class="pill-btn ${_state.platform === key ? "active" : ""}" data-platform="${key}">${label}</button>
+                        <button type="button" class="pill-btn pill-btn-with-icon ${_state.platform === key ? "active" : ""}" data-platform="${key}">${platformIcons[key] || ""}<span>${label}</span></button>
                     `).join("")}
                 </div>
                 <div class="field" style="gap:6px;">
