@@ -1,17 +1,17 @@
         :root {
-            /* Surface ramp (OLED dark — original palette) */
-            --bg-page: #050505;
-            --bg-card: #0c0c0e;
-            --bg-surface: #131316;
-            --bg-raised: #1c1c22;
-            --bg-input: #08080a;
+            /* Surface ramp (Pure AMOLED #000000 + Apple translucent glass) */
+            --bg-page: #000000;
+            --bg-card: rgba(18, 18, 22, 0.76);
+            --bg-surface: rgba(255, 255, 255, 0.045);
+            --bg-raised: rgba(255, 255, 255, 0.085);
+            --bg-input: rgba(0, 0, 0, 0.55);
 
-            /* Borders (hairlines 8% / 18%) */
-            --border-subtle: rgba(255, 255, 255, 0.08);
-            --border-strong: rgba(255, 255, 255, 0.18);
+            /* Borders (Apple glass hairlines) */
+            --border-subtle: rgba(255, 255, 255, 0.10);
+            --border-strong: rgba(255, 255, 255, 0.20);
 
             /* Text roles */
-            --text-primary: #f4f4f5;
+            --text-primary: #f5f5f7;
             --text-secondary: #a1a1aa;
             --text-muted: #8e8e96;
 
@@ -22,24 +22,24 @@
 
             /* Semantic colors */
             --positive: #34d399;
-            --positive-tint: rgba(16, 185, 129, 0.10);
+            --positive-tint: rgba(16, 185, 129, 0.12);
             --positive-border: rgba(52, 211, 153, 0.28);
             --negative: #ef4444;
-            --negative-tint: rgba(239, 68, 68, 0.10);
+            --negative-tint: rgba(239, 68, 68, 0.12);
             --negative-border: rgba(239, 68, 68, 0.32);
 
-            /* Tier accent (default: standard / emerald) */
-            --tier-glow-color: rgba(16, 185, 129, 0.07);
-            --tier-highlight-line: rgba(52, 211, 153, 0.32);
+            /* Tier ambient illumination (Apple glow) */
+            --tier-glow-color: rgba(16, 185, 129, 0.12);
+            --tier-highlight-line: rgba(52, 211, 153, 0.45);
             --tier-accent: #34d399;
             --tier-tint: rgba(16, 185, 129, 0.14);
             --tier-border: rgba(52, 211, 153, 0.34);
 
-            /* Radii (nested system: 16 -> 12 -> 8 -> 6) */
-            --radius-card: 16px;
-            --radius-panel: 12px;
-            --radius-control: 8px;
-            --radius-badge: 6px;
+            /* Radii (Apple smooth corners) */
+            --radius-card: 22px;
+            --radius-panel: 14px;
+            --radius-control: 11px;
+            --radius-badge: 7px;
 
             /* Motion */
             --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
@@ -48,24 +48,24 @@
         }
 
         body[data-tier="pro"] {
-            --tier-glow-color: rgba(56, 189, 248, 0.08);
-            --tier-highlight-line: rgba(56, 189, 248, 0.32);
+            --tier-glow-color: rgba(56, 189, 248, 0.14);
+            --tier-highlight-line: rgba(56, 189, 248, 0.45);
             --tier-accent: #38bdf8;
             --tier-tint: rgba(56, 189, 248, 0.14);
             --tier-border: rgba(56, 189, 248, 0.34);
         }
 
         body[data-tier="family"] {
-            --tier-glow-color: rgba(59, 130, 246, 0.08);
-            --tier-highlight-line: rgba(96, 165, 250, 0.35);
+            --tier-glow-color: rgba(59, 130, 246, 0.14);
+            --tier-highlight-line: rgba(96, 165, 250, 0.48);
             --tier-accent: #60a5fa;
             --tier-tint: rgba(59, 130, 246, 0.14);
             --tier-border: rgba(96, 165, 250, 0.35);
         }
 
         body[data-tier="white_internet"] {
-            --tier-glow-color: rgba(255, 255, 255, 0.08);
-            --tier-highlight-line: rgba(255, 255, 255, 0.40);
+            --tier-glow-color: rgba(255, 255, 255, 0.12);
+            --tier-highlight-line: rgba(255, 255, 255, 0.50);
             --tier-accent: #ffffff;
             --tier-tint: rgba(255, 255, 255, 0.12);
             --tier-border: rgba(255, 255, 255, 0.34);
@@ -78,13 +78,13 @@
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', 'Segoe UI', Roboto, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Inter', 'Segoe UI', Roboto, sans-serif;
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
             background-color: var(--bg-page);
             background-image:
-                radial-gradient(ellipse 90% 50% at 50% -10%, var(--tier-glow-color), transparent 70%),
-                radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.025) 0%, transparent 70%);
+                radial-gradient(ellipse 85% 45% at 50% -10%, var(--tier-glow-color), transparent 70%),
+                radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.04) 0%, transparent 65%);
             color: var(--text-primary);
             min-height: 100vh;
             min-height: 100dvh;
@@ -106,21 +106,26 @@
             width: 100%;
             max-width: 440px;
             background-color: var(--bg-card);
+            backdrop-filter: blur(28px) saturate(180%);
+            -webkit-backdrop-filter: blur(28px) saturate(180%);
             border: 1px solid var(--border-subtle);
             border-radius: var(--radius-card);
             padding: 20px;
             text-align: left;
             margin: auto 0;
             overflow: clip;
-            box-shadow: 0 24px 48px -12px rgba(0, 0, 0, 0.85), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+            box-shadow:
+                0 24px 60px rgba(0, 0, 0, 0.92),
+                0 0 40px -12px var(--tier-glow-color),
+                inset 0 1px 0 rgba(255, 255, 255, 0.12);
         }
 
         .card::before {
             content: '';
             position: absolute;
             top: 0;
-            left: 15%;
-            right: 15%;
+            left: 12%;
+            right: 12%;
             height: 1px;
             background: linear-gradient(90deg, transparent, var(--tier-highlight-line), transparent);
             pointer-events: none;
@@ -155,6 +160,7 @@
             height: 6px;
             border-radius: 50%;
             background-color: var(--positive);
+            box-shadow: 0 0 10px var(--positive);
             flex-shrink: 0;
         }
 
@@ -576,6 +582,7 @@
         .btn-primary {
             background-color: var(--cta-bg);
             color: var(--cta-text);
+            box-shadow: 0 0 24px rgba(255, 255, 255, 0.14), inset 0 1px 0 #ffffff;
         }
 
         .btn-primary:hover {
@@ -1181,6 +1188,7 @@
             border-radius: var(--radius-control);
             background-color: var(--cta-bg);
             color: var(--cta-text);
+            box-shadow: 0 0 20px rgba(255, 255, 255, 0.25);
             display: flex;
             align-items: center;
             justify-content: center;

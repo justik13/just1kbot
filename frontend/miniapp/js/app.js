@@ -41,8 +41,8 @@ function _initTelegramChrome() {
     try {
         tg.ready();
         tg.expand();
-        tg.setHeaderColor("#050505");
-        tg.setBackgroundColor("#050505");
+        tg.setHeaderColor("#000000");
+        tg.setBackgroundColor("#000000");
     } catch {
         // Non-critical in older Telegram clients
     }

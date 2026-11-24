@@ -170,7 +170,10 @@
 
 .card {
     background: var(--bg-surface);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
     border: 1px solid var(--border-subtle);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
     border-radius: var(--radius-card);
     padding: 16px;
     display: flex;
@@ -1018,7 +1021,10 @@
 /* MVP Product Cabinet Additions */
 .balance-card {
     background: var(--bg-surface);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
     border: 1px solid var(--border-subtle);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
     border-radius: var(--radius-card);
     padding: 16px;
     display: flex;
@@ -1284,9 +1290,10 @@
 .guide-video-play {
     width: 36px;
     height: 36px;
-    border-radius: 8px;
+    border-radius: 10px;
     background: var(--accent-white);
     color: #09090b;
+    box-shadow: 0 0 18px rgba(255, 255, 255, 0.22);
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1497,7 +1504,10 @@
 
 .plan-card {
     background: var(--bg-surface);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
     border: 1px solid var(--border-subtle);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
     border-radius: var(--radius-card);
     padding: 16px;
     display: flex;
@@ -1954,10 +1964,11 @@
     transform: translateX(-50%);
     width: 100%;
     max-width: 560px;
-    background: rgba(14, 14, 17, 0.92);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    background: rgba(10, 10, 14, 0.76);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
     border-top: 1px solid var(--border-subtle);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px));

@@ -1,21 +1,21 @@
 :root {
     --bg-black: #000000;
-    --bg-canvas: #050505;
-    --bg-surface: #0e0e11;
-    --bg-elevated: #17171c;
-    --bg-hover: #1f1f26;
-    --bg-input: #09090b;
+    --bg-canvas: #000000;
+    --bg-surface: rgba(20, 20, 25, 0.74);
+    --bg-elevated: rgba(30, 30, 38, 0.78);
+    --bg-hover: rgba(44, 44, 54, 0.85);
+    --bg-input: rgba(10, 10, 14, 0.82);
 
-    --border-subtle: rgba(255, 255, 255, 0.08);
-    --border-strong: rgba(255, 255, 255, 0.18);
+    --border-subtle: rgba(255, 255, 255, 0.10);
+    --border-strong: rgba(255, 255, 255, 0.20);
 
-    --text-primary: #f4f4f5;
+    --text-primary: #f5f5f7;
     --text-secondary: #a1a1aa;
-    --text-muted: #71717a;
+    --text-muted: #8e8e96;
 
-    --accent-white: #f4f4f5;
+    --accent-white: #ffffff;
     --accent-white-border: rgba(255, 255, 255, 0.32);
-    --accent-white-soft: rgba(255, 255, 255, 0.06);
+    --accent-white-soft: rgba(255, 255, 255, 0.07);
     --accent-emerald: #34d399;
     --accent-emerald-soft: rgba(52, 211, 153, 0.12);
     --accent-sky: #38bdf8;
@@ -24,12 +24,12 @@
     --accent-warn: #fbbf24;
     --accent-red: #f87171;
 
-    --radius-card: 16px;
+    --radius-card: 18px;
     --radius-control: 12px;
     --radius-sm: 8px;
     --radius-pill: 999px;
 
-    --font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", system-ui, sans-serif;
+    --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
     --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
@@ -42,6 +42,10 @@
 html,
 body {
     background-color: var(--bg-canvas);
+    background-image:
+        radial-gradient(ellipse 90% 42% at 50% -10%, rgba(52, 211, 153, 0.10), transparent 70%),
+        radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.03) 0%, transparent 65%);
+    background-attachment: fixed;
     color: var(--text-primary);
     font-family: var(--font-sans);
     font-size: 14px;
