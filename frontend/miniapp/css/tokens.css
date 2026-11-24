@@ -2,6 +2,7 @@
     --bg-black: #000000;
     --bg-canvas: #000000;
     --bg-surface: rgba(20, 20, 25, 0.74);
+    --bg-tile: rgba(255, 255, 255, 0.045);
     --bg-elevated: rgba(30, 30, 38, 0.78);
     --bg-hover: rgba(44, 44, 54, 0.85);
     --bg-input: rgba(10, 10, 14, 0.82);

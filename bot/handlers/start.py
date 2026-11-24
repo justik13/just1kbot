@@ -99,6 +99,11 @@ async def _build_start_profile_context(session, db_user) -> dict:
         and wi_sub is not None
         and wi_sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING)
     )
+    wi_pending = bool(
+        wi_has_period
+        and wi_sub is not None
+        and wi_sub.status == WhiteInternetStatus.PENDING
+    )
     wi_exhausted = bool(
         wi_has_period
         and wi_sub is not None
@@ -106,6 +111,8 @@ async def _build_start_profile_context(session, db_user) -> dict:
     )
     if wi_exhausted and wi_sub and wi_sub.expires_at:
         wi_line = f"Белый интернет: <b>трафик исчерпан</b> (до {wi_sub.expires_at.strftime('%d.%m.%Y')})"
+    elif wi_pending and wi_sub and wi_sub.expires_at:
+        wi_line = f"Белый интернет: <b>настраивается</b> (до {wi_sub.expires_at.strftime('%d.%m.%Y')})"
     elif wi_has_period and wi_sub and wi_sub.expires_at:
         total_bytes = int(wi_sub.base_traffic_bytes or 0) + int(wi_sub.extra_traffic_bytes or 0)
         used_bytes = int(wi_sub.traffic_used_bytes or 0)

@@ -19,7 +19,7 @@ const _state = {
     guidesReturnTab: "connect",
     guidesReturnScrollY: 0,
     guideTab: null,
-    guideIosMethod: "tf",
+    guideIosMethod: "region",
     guideAndroidMethod: "play",
     guideDesktopMethod: null,
 };
