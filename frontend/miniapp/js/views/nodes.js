@@ -595,8 +595,9 @@ function _nodeDiagnosticBadges(node) {
     }
     const ssl = node.ssl_cert && typeof node.ssl_cert === "object" ? node.ssl_cert : null;
     if (ssl && ssl.days_left != null && Number.isFinite(Number(ssl.days_left)) && Number(ssl.days_left) < 14) {
-        const daysLeft = Math.max(0, Math.floor(Number(ssl.days_left)));
-        badges.push(`<span class="chip ${daysLeft < 7 ? "chip-err" : "chip-warn"}">SSL: ${daysLeft} дн.</span>`);
+        const rawDays = Math.floor(Number(ssl.days_left));
+        const sslLabel = rawDays <= 0 ? "SSL: истёк" : `SSL: ${rawDays} дн.`;
+        badges.push(`<span class="chip ${rawDays < 7 ? "chip-err" : "chip-warn"}">${sslLabel}</span>`);
     }
     if (_isLastApplyFailed(node)) {
         badges.push(`<span class="chip chip-err">Ошибка apply</span>`);

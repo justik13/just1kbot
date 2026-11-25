@@ -209,8 +209,19 @@ function _parseDate(value) {
     if (value instanceof Date) {
         return Number.isFinite(value.getTime()) ? value : null;
     }
+    if (typeof value === "number") {
+        if (!Number.isFinite(value) || value <= 0) return null;
+        const d = new Date(value < 1e12 ? value * 1000 : value);
+        return Number.isFinite(d.getTime()) ? d : null;
+    }
     let raw = String(value || "").trim();
     if (!raw) return null;
+    if (/^\d+(\.\d+)?$/.test(raw)) {
+        const num = Number(raw);
+        if (!Number.isFinite(num) || num <= 0) return null;
+        const d = new Date(num < 1e12 ? num * 1000 : num);
+        return Number.isFinite(d.getTime()) ? d : null;
+    }
     if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(raw)) {
         raw += "Z";
     }
