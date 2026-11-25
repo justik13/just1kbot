@@ -1,4 +1,4 @@
-import { copyText, escapeHtml, openModal } from "../ui.js?v=2.7.8";
+import { copyText, escapeHtml, openModal } from "../ui.js?v=2.8.0";
 
 function _openExternal(url) {
     if (!url) return;

@@ -406,6 +406,14 @@ async def create_and_start_broadcast(
         raise ValueError("Bot instance is unavailable for broadcast")
 
     async with session_scope() as session:
+        existing_id = await session.scalar(
+            select(BroadcastProgress.id)
+            .where(BroadcastProgress.status == "in_progress")
+            .limit(1)
+        )
+        if existing_id is not None:
+            raise ValueError("Уже выполняется другая рассылка. Дождитесь завершения или остановите её.")
+
         total_count = await count_broadcast_audience(
             session,
             target_audience,

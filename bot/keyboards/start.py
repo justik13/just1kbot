@@ -16,8 +16,9 @@ def build_start_inline_keyboard(
     mtproto_url: str | None = None,
     referral_share_url: str | None = None,
     connect_btn_text: str = texts.BTN_MINIAPP_CONNECT,
+    admin_url: str | None = None,
 ) -> InlineKeyboardMarkup:
-    """Inline keyboard with Mini App entry button, optional referral share, and MTProto proxy button."""
+    """Inline keyboard with Mini App entry button, optional referral share, MTProto proxy, and admin panel."""
     rows = [
         [
             InlineKeyboardButton(
@@ -26,6 +27,15 @@ def build_start_inline_keyboard(
             )
         ]
     ]
+    if admin_url and str(admin_url).strip():
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="🛠 Админ-панель",
+                    web_app=WebAppInfo(url=str(admin_url).strip()),
+                )
+            ]
+        )
     if referral_share_url and str(referral_share_url).strip():
         rows.append(
             [

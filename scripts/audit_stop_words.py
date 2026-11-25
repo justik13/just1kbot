@@ -128,6 +128,11 @@ def run_audit() -> list[str]:
                     .replace("vpn://", "")
                     .replace("vless_name", "")
                     .replace('caps.includes("vless")', "")
+                    .replace("VLESS_HWID_RESET", "")
+                    .replace("VLESS_TOKEN_RESET", "")
+                    .replace("vless_synced_epoch", "")
+                    .replace("xray_instance_epoch", "")
+                    .replace("monthly_vless_bytes", "")
                 )
                 rel_path = fpath.relative_to(REPO_ROOT).as_posix()
                 if re.search(r"(?<![A-Za-zА-Яа-я])VPN(?![A-Za-zА-Яа-я])", clean_content, re.IGNORECASE):

@@ -1328,6 +1328,7 @@ async def vless_report_handler(request: web.Request) -> web.Response:
                     status=404,
                     headers={"Cache-Control": "no-store"},
                 )
+            target_user_id = user.id
 
             user_tag = f"@{html.escape(user.username)}" if user.username else "—"
             user_info = f"ID: <code>{user.telegram_id}</code> ({user_tag})"
@@ -1378,14 +1379,20 @@ async def vless_report_handler(request: web.Request) -> web.Response:
     bot = request.app.get("bot")
     delivered = False
     if bot:
+        from bot.keyboards.notifications import get_admin_user_keyboard
         from config.settings import get_settings
         from utils.telegram import safe_send_message
 
         admin_ids = get_settings().ADMIN_IDS
+        reply_markup = get_admin_user_keyboard(target_user_id)
         for aid in admin_ids:
             try:
                 msg_id = await safe_send_message(
-                    bot, aid, admin_text, parse_mode="HTML"
+                    bot,
+                    aid,
+                    admin_text,
+                    reply_markup=reply_markup,
+                    parse_mode="HTML",
                 )
                 if msg_id is not None:
                     delivered = True

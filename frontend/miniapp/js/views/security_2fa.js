@@ -1,14 +1,15 @@
-import { api, setAdminSessionToken } from "../api.js?v=2.7.8";
-import { copyText, escapeHtml, showToast } from "../ui.js?v=2.7.8";
+import { api, setAdminSessionToken } from "../api.js?v=2.8.0";
+import { copyText, escapeHtml, showToast } from "../ui.js?v=2.8.0";
 
 function _applyClipCode(input, rawText) {
     const digits = String(rawText || "").replace(/\D+/g, "").slice(0, 6);
     if (!digits) {
-        showToast("В буфере нет цифр кода");
+        showToast("В буфере нет цифр кода", "warn");
         return false;
     }
     input.value = digits;
-    input.focus();
+    input.focus({ preventScroll: true });
+    input.dispatchEvent(new Event("input", { bubbles: true }));
     return true;
 }
 
@@ -68,6 +69,97 @@ async function _tryNavigatorClipboard(input) {
     showToast("Доступ к буферу ограничен — удерживайте поле и нажмите «Вставить»");
 }
 
+function _bindTotpForm({ form, input, btn, submitLabel, onSubmit }) {
+    if (!form || !input || !btn) return;
+    let submitting = false;
+    let retryTimer = null;
+
+    const clearRetryTimer = () => {
+        if (retryTimer) {
+            clearInterval(retryTimer);
+            retryTimer = null;
+        }
+    };
+
+    const startRetryCountdown = (seconds) => {
+        clearRetryTimer();
+        let left = Math.max(1, Math.ceil(Number(seconds) || 0));
+        btn.disabled = true;
+        btn.textContent = `Повторите через ${left} с`;
+        retryTimer = setInterval(() => {
+            if (!document.contains(btn)) {
+                clearRetryTimer();
+                return;
+            }
+            left -= 1;
+            if (left <= 0) {
+                clearRetryTimer();
+                btn.disabled = false;
+                btn.textContent = submitLabel;
+                input.focus({ preventScroll: true });
+                return;
+            }
+            btn.textContent = `Повторите через ${left} с`;
+        }, 1000);
+    };
+
+    requestAnimationFrame(() => {
+        if (document.contains(input)) {
+            input.focus({ preventScroll: true });
+        }
+    });
+
+    input.addEventListener("input", () => {
+        const cleaned = input.value.replace(/\D+/g, "").slice(0, 6);
+        if (input.value !== cleaned) {
+            input.value = cleaned;
+        }
+        if (cleaned.length === 6 && !submitting && !retryTimer) {
+            if (typeof form.requestSubmit === "function") {
+                form.requestSubmit();
+            } else {
+                form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+            }
+        }
+    });
+
+    form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        if (submitting || retryTimer) return;
+        const code = input.value.replace(/\D+/g, "").slice(0, 6);
+        if (code.length !== 6) {
+            showToast("Введите 6 цифр кода", "warn");
+            input.focus({ preventScroll: true });
+            return;
+        }
+        submitting = true;
+        btn.disabled = true;
+        btn.textContent = "Проверка...";
+        try {
+            await onSubmit(code);
+            clearRetryTimer();
+        } catch (err) {
+            showToast((err && err.message) || "Неверный код", "error");
+            const retryAfter = err && ((err.data && err.data.retry_after) || (err.payload && err.payload.retry_after));
+            input.select();
+            input.focus({ preventScroll: true });
+            if (retryAfter && Number(retryAfter) > 0) {
+                startRetryCountdown(retryAfter);
+            } else {
+                btn.disabled = false;
+                btn.textContent = submitLabel;
+            }
+            return;
+        } finally {
+            submitting = false;
+        }
+        if (!retryTimer) {
+            btn.disabled = false;
+            btn.textContent = submitLabel;
+        }
+    });
+}
+
 export function renderSecurity2FA(root, securityMeta, onVerified) {
     const mode = (securityMeta && securityMeta.two_factor_mode) || "totp";
     const configured = Boolean(securityMeta && securityMeta.two_factor_configured);
@@ -106,21 +198,19 @@ export function renderSecurity2FA(root, securityMeta, onVerified) {
     const input = root.querySelector("#twoFaCodeInput");
     _bindPasteCodeButton(root.querySelector("#twoFaPasteBtn"), input);
 
-    form.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        btn.disabled = true;
-        try {
-            const res = await api.verify2FA(input.value.trim());
+    _bindTotpForm({
+        form,
+        input,
+        btn,
+        submitLabel: "Войти в панель",
+        onSubmit: async (code) => {
+            const res = await api.verify2FA(code);
             if (res.verified && res.session_token) {
                 setAdminSessionToken(res.session_token);
                 showToast("Доступ подтверждён");
-                onVerified();
+                onVerified(res);
             }
-        } catch (err) {
-            showToast(err.message || "Неверный код");
-        } finally {
-            btn.disabled = false;
-        }
+        },
     });
 }
 
@@ -150,7 +240,7 @@ function _renderSetupScreen(root, onVerified) {
                     setupState = await api.setup2FA();
                     draw();
                 } catch (err) {
-                    showToast(err.message || "Ошибка генерации ключа");
+                    showToast(err.message || "Ошибка генерации ключа", "error");
                 } finally {
                     genBtn.disabled = false;
                 }
@@ -170,25 +260,22 @@ function _renderSetupScreen(root, onVerified) {
         const verifyForm = root.querySelector("#verifyTotpSetupForm");
         if (verifyForm && setupState) {
             const setupInput = root.querySelector("#setupTotpCodeInput");
+            const confirmBtn = root.querySelector("#confirmTotpBtn");
             _bindPasteCodeButton(root.querySelector("#setupTotpPasteBtn"), setupInput);
 
-            verifyForm.addEventListener("submit", async (e) => {
-                e.preventDefault();
-                const btn = root.querySelector("#confirmTotpBtn");
-                const code = setupInput.value.trim();
-                btn.disabled = true;
-                try {
+            _bindTotpForm({
+                form: verifyForm,
+                input: setupInput,
+                btn: confirmBtn,
+                submitLabel: "Подтвердить и войти",
+                onSubmit: async (code) => {
                     const res = await api.verify2FA(code, setupState.setup_token);
                     if (res.verified && res.session_token) {
                         setAdminSessionToken(res.session_token);
                         showToast("TOTP 2FA включена");
-                        onVerified();
+                        onVerified(res);
                     }
-                } catch (err) {
-                    showToast(err.message || "Неверный код");
-                } finally {
-                    btn.disabled = false;
-                }
+                },
             });
         }
     }

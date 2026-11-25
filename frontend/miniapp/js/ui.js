@@ -29,40 +29,89 @@ let _toastTimer = null;
 export function showToast(message, type = "success") {
     const toast = document.getElementById("toastRoot");
     if (!toast) return;
+    const normalized = type === "error" ? "error" : type === "warn" || type === "warning" ? "warn" : "success";
     toast.textContent = String(message || "");
+    toast.className = `toast toast-${normalized}`;
     toast.hidden = false;
-    triggerHaptic(type);
+    toast.onclick = () => {
+        if (_toastTimer) {
+            clearTimeout(_toastTimer);
+            _toastTimer = null;
+        }
+        toast.hidden = true;
+    };
+    const hapticType = normalized === "error" ? "error" : normalized === "warn" ? "warning" : "success";
+    triggerHaptic(hapticType);
     if (_toastTimer) clearTimeout(_toastTimer);
+    const duration = normalized === "error" ? 4500 : 3200;
     _toastTimer = setTimeout(() => {
         toast.hidden = true;
-    }, 3200);
+        _toastTimer = null;
+    }, duration);
 }
 
 export async function copyText(text, successMsg = "Скопировано") {
     const val = String(text || "");
-    if (!val) return;
+    if (!val) return false;
     try {
         if (navigator.clipboard && navigator.clipboard.writeText) {
             await navigator.clipboard.writeText(val);
             showToast(successMsg);
-            return;
+            return true;
         }
     } catch {
         // Fallback below
     }
     const ta = document.createElement("textarea");
     ta.value = val;
+    ta.readOnly = true;
     ta.style.position = "fixed";
     ta.style.opacity = "0";
     document.body.appendChild(ta);
     ta.select();
     try {
-        document.execCommand("copy");
-        showToast(successMsg);
+        const ok = document.execCommand("copy");
+        if (ok) {
+            showToast(successMsg);
+            return true;
+        }
+        showToast("Не удалось скопировать", "error");
+        return false;
     } catch {
-        showToast("Не удалось скопировать");
+        showToast("Не удалось скопировать", "error");
+        return false;
     } finally {
         document.body.removeChild(ta);
+    }
+}
+
+export function formatRelativeTime(iso) {
+    if (!iso) return "—";
+    const ts = new Date(iso).getTime();
+    if (!Number.isFinite(ts)) return String(iso);
+    const diffSec = Math.floor((Date.now() - ts) / 1000);
+    if (diffSec < 0) return formatDate(iso);
+    if (diffSec < 60) return "только что";
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin} мин назад`;
+    const diffHours = Math.floor(diffMin / 60);
+    if (diffHours < 24) return `${diffHours} ч назад`;
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays < 30) return `${diffDays} дн назад`;
+    return formatDate(iso);
+}
+
+export async function withButtonLoading(btn, loadingText, fn) {
+    if (!btn) return fn();
+    const prevDisabled = btn.disabled;
+    const prevText = btn.textContent;
+    btn.disabled = true;
+    if (loadingText) btn.textContent = loadingText;
+    try {
+        return await fn();
+    } finally {
+        btn.disabled = prevDisabled;
+        btn.textContent = prevText;
     }
 }
 
@@ -118,6 +167,40 @@ export function formatBytesGb(bytes) {
 
 let _modalStack = [];
 let _modalTitleSeq = 0;
+let _modalBackBtnWasVisible = false;
+let _modalBackListenerBound = false;
+
+function _onTelegramModalBack() {
+    const backdrop = document.getElementById("modalRoot");
+    if (backdrop && !backdrop.hidden && typeof backdrop._activeClose === "function") {
+        backdrop._activeClose();
+    }
+}
+
+function _syncModalBackButton(isOpening) {
+    const tg = window.Telegram && window.Telegram.WebApp;
+    if (!tg || !tg.BackButton) return;
+    try {
+        if (isOpening) {
+            if (!_modalBackListenerBound) {
+                _modalBackBtnWasVisible = Boolean(tg.BackButton.isVisible);
+                tg.BackButton.onClick(_onTelegramModalBack);
+                _modalBackListenerBound = true;
+            }
+            tg.BackButton.show();
+        } else {
+            if (_modalBackListenerBound) {
+                tg.BackButton.offClick(_onTelegramModalBack);
+                _modalBackListenerBound = false;
+            }
+            if (!_modalBackBtnWasVisible) {
+                tg.BackButton.hide();
+            }
+        }
+    } catch {
+        // Safe fallback if BackButton API is unsupported
+    }
+}
 
 const _FOCUSABLE_SELECTOR =
     "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
@@ -137,18 +220,45 @@ function _focusFirstInModal(card) {
     }
 }
 
-export function openModal(title, bodyNode, { showCloseBtn = true } = {}) {
+export function closeAllModals() {
+    const backdrop = document.getElementById("modalRoot");
+    if (!backdrop) return;
+    if (backdrop._activeKeyDown) {
+        document.removeEventListener("keydown", backdrop._activeKeyDown);
+    }
+    for (const item of _modalStack) {
+        if (item.onKeyDown) {
+            document.removeEventListener("keydown", item.onKeyDown);
+        }
+    }
+    _modalStack = [];
+    backdrop._activeKeyDown = null;
+    backdrop._activeClose = null;
+    backdrop.onclick = null;
+    document.body.style.overflow = "";
+    backdrop.hidden = true;
+    backdrop.innerHTML = "";
+    _syncModalBackButton(false);
+}
+
+export function openModal(title, bodyNode, { showCloseBtn = true, canClose = null } = {}) {
     const backdrop = document.getElementById("modalRoot");
     if (!backdrop) return () => {};
 
     const prevCard = backdrop.querySelector(".modal-card");
     const prevKeyDown = backdrop._activeKeyDown || null;
+    const prevClose = backdrop._activeClose || null;
     const prevTrigger = document.activeElement;
     if (prevCard && !backdrop.hidden) {
         if (prevKeyDown) {
             document.removeEventListener("keydown", prevKeyDown);
         }
-        _modalStack.push({ card: prevCard, onKeyDown: prevKeyDown, trigger: prevTrigger });
+        _modalStack.push({
+            card: prevCard,
+            onKeyDown: prevKeyDown,
+            onClose: prevClose,
+            trigger: prevTrigger,
+        });
     } else {
         _modalStack = [];
     }
@@ -197,8 +307,9 @@ export function openModal(title, bodyNode, { showCloseBtn = true } = {}) {
         }
     };
 
-    const close = () => {
+    const close = ({ force = false } = {}) => {
         if (closed) return;
+        if (!force && canClose && !canClose()) return;
         closed = true;
         document.removeEventListener("keydown", onKeyDown);
 
@@ -207,12 +318,13 @@ export function openModal(title, bodyNode, { showCloseBtn = true } = {}) {
             backdrop.innerHTML = "";
             backdrop.appendChild(parent.card);
             backdrop._activeKeyDown = parent.onKeyDown;
+            backdrop._activeClose = parent.onClose;
             if (parent.onKeyDown) {
                 document.addEventListener("keydown", parent.onKeyDown);
             }
             backdrop.onclick = (e) => {
-                if (e.target === backdrop && parent.onKeyDown) {
-                    parent.onKeyDown({ key: "Escape" });
+                if (e.target === backdrop && parent.onClose) {
+                    parent.onClose();
                 }
             };
             if (parent.trigger && parent.card.contains(parent.trigger) && typeof parent.trigger.focus === "function") {
@@ -225,9 +337,12 @@ export function openModal(title, bodyNode, { showCloseBtn = true } = {}) {
 
         _modalStack = [];
         backdrop._activeKeyDown = null;
+        backdrop._activeClose = null;
+        backdrop.onclick = null;
         document.body.style.overflow = "";
         backdrop.hidden = true;
         backdrop.innerHTML = "";
+        _syncModalBackButton(false);
         if (prevTrigger && document.contains(prevTrigger) && typeof prevTrigger.focus === "function") {
             prevTrigger.focus({ preventScroll: true });
         }
@@ -240,7 +355,7 @@ export function openModal(title, bodyNode, { showCloseBtn = true } = {}) {
         closeBtn.type = "button";
         closeBtn.className = "btn btn-sm";
         closeBtn.textContent = "Закрыть";
-        closeBtn.addEventListener("click", close);
+        closeBtn.addEventListener("click", () => close());
         header.appendChild(closeBtn);
     }
 
@@ -252,8 +367,10 @@ export function openModal(title, bodyNode, { showCloseBtn = true } = {}) {
     backdrop.appendChild(card);
     backdrop.hidden = false;
     backdrop._activeKeyDown = onKeyDown;
+    backdrop._activeClose = close;
     document.body.style.overflow = "hidden";
     document.addEventListener("keydown", onKeyDown);
+    _syncModalBackButton(true);
     _focusFirstInModal(card);
     return close;
 }
@@ -299,20 +416,31 @@ export function showConfirmModal({
     btnGroup.append(cancelBtn, okBtn);
     box.append(p, btnGroup);
 
-    const close = openModal(title, box, { showCloseBtn: false });
-    cancelBtn.addEventListener("click", close);
+    let busy = false;
+    const close = openModal(title, box, {
+        showCloseBtn: false,
+        canClose: () => !busy,
+    });
+    cancelBtn.addEventListener("click", () => {
+        if (!busy) close();
+    });
 
     okBtn.addEventListener("click", async () => {
+        if (busy) return;
+        busy = true;
         okBtn.disabled = true;
         cancelBtn.disabled = true;
+        okBtn.textContent = "Выполнение...";
         try {
-            close();
             if (onConfirm) await onConfirm();
+            busy = false;
+            close({ force: true });
         } catch (err) {
-            console.error("Modal confirmation error:", err);
-        } finally {
+            busy = false;
             okBtn.disabled = false;
             cancelBtn.disabled = false;
+            okBtn.textContent = confirmText;
+            showToast((err && err.message) || "Ошибка", "error");
         }
     });
 
@@ -332,6 +460,15 @@ export function roleLabel(role) {
 export function healthChipInfo(node) {
     if (!node.is_active || node.health_state === "MANUAL_DISABLED") {
         return { text: "Отключена", cls: "chip-muted" };
+    }
+    if (node.lifecycle_status === "decommissioning") {
+        return { text: "Выводится", cls: "chip-warn" };
+    }
+    if (node.disabled_reason === "HOSTING_TRAFFIC_LIMIT") {
+        return { text: "Лимит трафика", cls: "chip-err" };
+    }
+    if (node.ingress_problem || node.cdn_problem) {
+        return { text: "Проблема CDN/Ingress", cls: "chip-warn" };
     }
     if (node.health_state === "ONLINE") {
         return { text: "Онлайн", cls: "chip-ok" };

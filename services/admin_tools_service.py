@@ -447,6 +447,25 @@ async def start_mass_extend(
     }
 
 
+_ANOMALY_METADATA_KEYS: tuple[str, ...] = (
+    "requires_manual_review",
+    "settlement_held",
+    "paid_after_cancel",
+    "amount_mismatch",
+    "currency_mismatch",
+    "refund_debt",
+    "dispute_open",
+    "chargeback",
+)
+
+
+def extract_order_metadata_flags(metadata: object) -> list[str]:
+    """Extract truthy anomaly/attention flag names from Order.metadata_."""
+    if not isinstance(metadata, dict):
+        return []
+    return [key for key in _ANOMALY_METADATA_KEYS if bool(metadata.get(key))]
+
+
 async def _revenue_for_period(session: AsyncSession, since: Any) -> Decimal:
     # Exclude internal wallet spends to avoid double-counting topups.
     external_orders_sum = await session.scalar(
@@ -459,12 +478,38 @@ async def _revenue_for_period(session: AsyncSession, since: Any) -> Decimal:
     return Decimal(str(external_orders_sum or 0))
 
 
+async def get_overview_finances_summary(session: AsyncSession) -> dict[str, Any]:
+    """Return compact revenue and attention-order counts for admin overview."""
+    now = now_utc()
+    rev_24h = await _revenue_for_period(session, now - timedelta(hours=24))
+    rev_7d = await _revenue_for_period(session, now - timedelta(days=7))
+    attention_count = int(
+        (
+            await session.scalar(
+                select(func.count(Order.id)).where(
+                    or_(
+                        Order.metadata_["requires_manual_review"].as_boolean().is_(True),
+                        Order.metadata_["settlement_held"].as_boolean().is_(True),
+                    )
+                )
+            )
+        )
+        or 0
+    )
+    return {
+        "revenue_24h": float(rev_24h),
+        "revenue_7d": float(rev_7d),
+        "attention_orders_count": attention_count,
+    }
+
+
 async def list_finances(
     session: AsyncSession,
     *,
     kind: str = "orders",
     status: str = "",
     q: str = "",
+    attention_only: bool = False,
     offset: int = 0,
     limit: int = 25,
 ) -> dict[str, Any]:
@@ -500,12 +545,21 @@ async def list_finances(
     if clean_status:
         stmt = stmt.where(Order.status == clean_status)
         count_stmt = count_stmt.where(Order.status == clean_status)
+    if attention_only:
+        attn_cond = or_(
+            Order.metadata_["requires_manual_review"].as_boolean().is_(True),
+            Order.metadata_["settlement_held"].as_boolean().is_(True),
+        )
+        stmt = stmt.where(attn_cond)
+        count_stmt = count_stmt.where(attn_cond)
     if clean_q:
+        clean_user_q = clean_q.lstrip("@")
         conds = [
             cast(Order.id, String).ilike(f"%{clean_q}%"),
             Order.external_id.ilike(f"%{clean_q}%"),
             Order.description.ilike(f"%{clean_q}%"),
-            User.username.ilike(f"%{clean_q}%"),
+            User.username.ilike(f"%{clean_user_q}%"),
+            User.first_name.ilike(f"%{clean_user_q}%"),
         ]
         try:
             conds.append(Order.id == UUID(clean_q))
@@ -540,9 +594,13 @@ async def list_finances(
             "duration_days": order.duration_days,
             "device_limit": order.device_limit,
             "payment_method": order.payment_method,
+            "external_id": order.external_id,
             "reference": order.external_id or order.description or "",
+            "metadata_flags": extract_order_metadata_flags(order.metadata_),
             "created_at": order.created_at.isoformat() if order.created_at else None,
             "paid_at": order.paid_at.isoformat() if order.paid_at else None,
+            "refunded_at": order.refunded_at.isoformat() if order.refunded_at else None,
+            "expires_at": order.expires_at.isoformat() if order.expires_at else None,
         }
         for order, usr in rows
     ]
@@ -565,6 +623,7 @@ async def list_audit_logs(
     session: AsyncSession,
     *,
     action: str = "",
+    target_type: str = "",
     q: str = "",
     offset: int = 0,
     limit: int = 40,
@@ -572,11 +631,15 @@ async def list_audit_logs(
     stmt = select(AuditLog)
     count_stmt = select(func.count(AuditLog.id))
     clean_action = (action or "").strip()
+    clean_target_type = (target_type or "").strip()
     clean_q = (q or "").strip()
 
     if clean_action:
         stmt = stmt.where(AuditLog.action == clean_action)
         count_stmt = count_stmt.where(AuditLog.action == clean_action)
+    if clean_target_type:
+        stmt = stmt.where(func.lower(AuditLog.target_type) == clean_target_type.lower())
+        count_stmt = count_stmt.where(func.lower(AuditLog.target_type) == clean_target_type.lower())
     if clean_q:
         conds = [AuditLog.details.ilike(f"%{clean_q}%"), AuditLog.action.ilike(f"%{clean_q}%")]
         if clean_q.isdigit():

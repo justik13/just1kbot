@@ -1,8 +1,46 @@
-import { api } from "../api.js?v=2.7.8";
-import { escapeHtml, formatDate, renderPagination, showToast } from "../ui.js?v=2.7.8";
+import { api } from "../api.js?v=2.8.0";
+import {
+    escapeHtml,
+    formatDate,
+    renderPagination,
+    showToast,
+    withButtonLoading,
+} from "../ui.js?v=2.8.0";
+
+const USERS_PAGE_SIZE = 25;
+let _usersReqId = 0;
+
+function _formatShortDate(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (!Number.isFinite(d.getTime())) return "";
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    return `${dd}.${mm}`;
+}
+
+function _formatUserTitle(u) {
+    if (u.first_name && u.username) {
+        return `${escapeHtml(u.first_name)} <span class="muted" style="font-weight:400;">@${escapeHtml(u.username)}</span>`;
+    }
+    if (u.username) {
+        return `@${escapeHtml(u.username)}`;
+    }
+    if (u.first_name) {
+        return escapeHtml(u.first_name);
+    }
+    return `ID ${escapeHtml(u.telegram_id)}`;
+}
 
 export function renderAdminUsersView(root, state, onOpenUser) {
-    const data = state.usersData || { stats: {}, filter_counts: {}, users: [], total: 0, offset: 0, limit: 10 };
+    const data = state.usersData || {
+        stats: {},
+        filter_counts: {},
+        users: [],
+        total: 0,
+        offset: 0,
+        limit: USERS_PAGE_SIZE,
+    };
     const stats = data.stats || {};
     const fc = data.filter_counts || {};
     const users = data.users || [];
@@ -26,11 +64,13 @@ export function renderAdminUsersView(root, state, onOpenUser) {
                 <button type="button" class="pill-btn ${activeFilter === "all" ? "active" : ""}" data-ufilter="all">Все (${fc.all ?? stats.total_users ?? 0})</button>
                 <button type="button" class="pill-btn ${activeFilter === "active_standard" ? "active" : ""}" data-ufilter="active_standard">Стандарт (${fc.active_standard ?? stats.active_standard ?? 0})</button>
                 <button type="button" class="pill-btn ${activeFilter === "active_wi" ? "active" : ""}" data-ufilter="active_wi">Белый интернет (${fc.active_wi ?? stats.active_wi ?? 0})</button>
+                <button type="button" class="pill-btn ${activeFilter === "expiring_3d" ? "active" : ""}" data-ufilter="expiring_3d">Истекают 3д (${fc.expiring_3d ?? 0})</button>
                 <button type="button" class="pill-btn ${activeFilter === "expired" ? "active" : ""}" data-ufilter="expired">Истекли (${fc.expired ?? 0})</button>
                 <button type="button" class="pill-btn ${activeFilter === "never" ? "active" : ""}" data-ufilter="never">Без подписки (${fc.never ?? 0})</button>
+                <button type="button" class="pill-btn ${activeFilter === "banned" ? "active" : ""}" data-ufilter="banned">Бот забл. (${fc.banned ?? 0})</button>
             </div>
             <form id="userSearchForm" class="row" style="flex-wrap:nowrap;">
-                <input id="userSearchInput" class="input" type="search" value="${escapeHtml(query)}" placeholder="Telegram ID, @username или имя">
+                <input id="userSearchInput" class="input" type="search" value="${escapeHtml(query)}" placeholder="ID, @username, имя, HWID, UUID">
                 <button type="submit" class="btn btn-primary btn-sm">Найти</button>
             </form>
             <div id="usersPagerTop"></div>
@@ -39,41 +79,56 @@ export function renderAdminUsersView(root, state, onOpenUser) {
         </section>
     `;
 
+    const searchInput = root.querySelector("#userSearchInput");
+    const getLiveQuery = () => (searchInput ? searchInput.value.trim() : state.usersQuery || "");
+
     const reload = async (qVal, filterVal = state.usersFilter || "all", offsetVal = 0) => {
+        const reqId = ++_usersReqId;
         try {
+            const nextData = await api.listUsers(qVal, offsetVal, USERS_PAGE_SIZE, filterVal);
+            if (reqId !== _usersReqId) return;
             state.usersQuery = qVal;
             state.usersFilter = filterVal;
             state.usersOffset = offsetVal;
-            state.usersData = await api.listUsers(qVal, offsetVal, 10, filterVal);
+            state.usersData = nextData;
             renderAdminUsersView(root, state, onOpenUser);
         } catch (err) {
-            showToast(err.message || "Не удалось загрузить пользователей");
+            if (reqId !== _usersReqId) return;
+            showToast(err.message || "Не удалось загрузить пользователей", "error");
         }
     };
 
     root.querySelectorAll("[data-ufilter]").forEach((btn) => {
         btn.addEventListener("click", () => {
-            reload(state.usersQuery || "", btn.dataset.ufilter, 0);
+            reload(getLiveQuery(), btn.dataset.ufilter, 0);
         });
     });
 
-    root.querySelector("#reloadUsersBtn").addEventListener("click", () => {
-        reload(state.usersQuery || "", state.usersFilter || "all", state.usersOffset || 0);
+    const reloadBtn = root.querySelector("#reloadUsersBtn");
+    reloadBtn.addEventListener("click", () => {
+        withButtonLoading(reloadBtn, "Обновление...", () =>
+            reload(getLiveQuery(), state.usersFilter || "all", state.usersOffset || 0)
+        );
     });
+
     root.querySelector("#userSearchForm").addEventListener("submit", (e) => {
         e.preventDefault();
-        const val = root.querySelector("#userSearchInput").value.trim();
-        reload(val, state.usersFilter || "all", 0);
+        reload(getLiveQuery(), state.usersFilter || "all", 0);
+    });
+
+    searchInput.addEventListener("search", () => {
+        reload(getLiveQuery(), state.usersFilter || "all", 0);
     });
 
     const searchFormEl = root.querySelector("#userSearchForm");
-    const onUserPage = (newOffset) => reload(state.usersQuery || "", state.usersFilter || "all", newOffset);
+    const onUserPage = (newOffset) =>
+        reload(getLiveQuery(), state.usersFilter || "all", newOffset);
 
     renderPagination({
         container: root.querySelector("#usersPagerTop"),
         total: Number(data.total ?? users.length),
         offset: Number(data.offset ?? state.usersOffset ?? 0),
-        limit: Number(data.limit || 10),
+        limit: Number(data.limit || USERS_PAGE_SIZE),
         onPage: onUserPage,
         scrollTarget: searchFormEl,
         entityName: "пользователей",
@@ -83,7 +138,7 @@ export function renderAdminUsersView(root, state, onOpenUser) {
         container: root.querySelector("#usersPagerBottom"),
         total: Number(data.total ?? users.length),
         offset: Number(data.offset ?? state.usersOffset ?? 0),
-        limit: Number(data.limit || 10),
+        limit: Number(data.limit || USERS_PAGE_SIZE),
         onPage: onUserPage,
         scrollTarget: searchFormEl,
         entityName: "пользователей",
@@ -101,21 +156,24 @@ export function renderAdminUsersView(root, state, onOpenUser) {
         card.setAttribute("role", "button");
         card.setAttribute("tabindex", "0");
 
-        const uname = u.username ? `@${u.username}` : (u.first_name || `ID ${u.telegram_id}`);
+        const stdShort = _formatShortDate(u.standard_end);
+        const wiShort = _formatShortDate(u.wi_end);
         const stdBadge = u.standard_active
-            ? `<span class="chip chip-ok">Стандарт: ${u.standard_device_limit} устр.</span>`
+            ? `<span class="chip chip-ok">Стандарт: ${u.standard_device_limit} устр.${stdShort ? ` · до ${stdShort}` : ""}</span>`
             : `<span class="chip chip-muted">Стандарт: нет</span>`;
         const wiBadge = u.wi_active
-            ? `<span class="chip chip-wi">Белый интернет: ${u.wi_device_limit} сл.</span>`
+            ? `<span class="chip chip-wi">Белый интернет: ${u.wi_device_limit} сл.${wiShort ? ` · до ${wiShort}` : ""}</span>`
             : `<span class="chip chip-muted">Белый интернет: нет</span>`;
         const holdBadge = u.financial_hold
             ? `<span class="chip chip-err">Заморожен</span>`
-            : (u.topup_blocked ? `<span class="chip chip-warn">Блок оплат</span>` : "");
+            : u.topup_blocked
+              ? `<span class="chip chip-warn">Блок оплат</span>`
+              : "";
 
         card.innerHTML = `
             <div class="row">
                 <div>
-                    <span style="font-weight:600;">${escapeHtml(uname)}</span>
+                    <span style="font-weight:600;">${_formatUserTitle(u)}</span>
                     <span class="mono muted" style="margin-left:6px;">${u.telegram_id}</span>
                 </div>
                 <div style="display:flex; align-items:center; gap:8px;">

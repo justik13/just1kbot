@@ -7,12 +7,15 @@ import logging
 import os
 from datetime import timedelta
 from decimal import Decimal
-from typing import TypeVar
+from typing import Any, TypeVar
+from urllib.parse import unquote
 from uuid import uuid4
 
+from aiogram.exceptions import TelegramForbiddenError
 from aiohttp import web
 from pydantic import BaseModel, ValidationError
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.miniapp.auth import require_admin_user, require_authenticated_user
 from bot.miniapp.handlers_user import _build_backup_sub_url, _build_sub_url
@@ -20,11 +23,13 @@ from bot.miniapp.schemas import (
     AddNodePayload,
     AdminDirectMessagePayload,
     AdminUserAdjustPayload,
+    AdminUserOptionalNotifyPayload,
     BroadcastPreviewPayload,
     BroadcastStartPayload,
     IncyGlobalSettingsPayload,
     MassBonusPayload,
     MassExtendPayload,
+    NodeLifecyclePayload,
     PaymentsMaintenancePayload,
     ToggleNodePayload,
     UpdateNodePayload,
@@ -33,35 +38,53 @@ from bot.miniapp.schemas import (
 from config import constants
 from config.enums import (
     AdminAuditAction,
+    ServerHealthState,
+    WebhookInboxStatus,
     WhiteInternetProvisioningStatus,
     WhiteInternetStatus,
 )
-from database.connection import session_scope
-from database.models import AccountLedgerEntry, Order, User, UserDevice, VlessSubscription, WhiteInternetSubscription
-from database.repositories import users_repo, vless_subscription_repo, white_internet_repo
+from database.connection import queue_post_commit_task, session_scope
+from database.models import (
+    AccountLedgerEntry,
+    AuditLog,
+    BroadcastProgress,
+    DeviceRegistrationEvent,
+    Order,
+    User,
+    UserDevice,
+    VlessSubscription,
+    WebhookInbox,
+    WhiteInternetSubscription,
+)
+from database.repositories import user_devices_repo, users_repo, vless_subscription_repo, white_internet_repo
 from database.repositories.account_ledger_repo import (
     create_admin_adjustment,
     get_account_balance,
     get_account_balances_batch,
+    get_account_history,
 )
 from database.repositories.system_settings_repo import get_system_setting, set_system_setting
 from database.repositories.vless_subscription_repo import get_or_create_subscription
 from database.repositories.white_internet_repo import get_subscription_by_user_id
 from services import admin_nodes_service, admin_tools_service, broadcast_service
-from services.audit_service import AuditService
-from services.vless_subscription_service import VlessSubscriptionService
 from services.admin_nodes_service import AdminNodeServiceError
+from services.audit_service import AuditService
 from services.miniapp_auth_service import (
     build_totp_uri,
     generate_totp_secret,
     get_admin_2fa_config,
     issue_totp_setup_token,
+    revoke_all_admin_sessions,
     verify_admin_2fa,
     verify_admin_session_token,
 )
+from services.order_service import OrderService, acquire_user_account_lock
 from services.subscription import SubscriptionService
+from services.vless_subscription_service import VlessSubscriptionService
 from services.white_internet_service import WhiteInternetService
+from services.workers import get_worker_health_snapshot
 from utils.datetime_helpers import now_utc
+from utils.telegram import safe_send_message
 
 SchemaT = TypeVar("SchemaT", bound=BaseModel)
 logger = logging.getLogger(__name__)
@@ -102,6 +125,76 @@ async def _parse_json_model(
 
 def _service_error_response(exc: AdminNodeServiceError) -> web.Response:
     return web.json_response({"ok": False, "error": exc.message}, status=exc.status_code)
+
+
+async def _queue_wi_inline_sync(
+    session: AsyncSession,
+    wi_sub: WhiteInternetSubscription,
+    reason: str,
+) -> None:
+    """Queue post-commit inline sync to WI hub nodes when provisioning state requires it."""
+    if (
+        wi_sub.status not in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING)
+        or wi_sub.provisioning_status
+        not in (
+            WhiteInternetProvisioningStatus.PENDING_CREATE,
+            WhiteInternetProvisioningStatus.PENDING_UPDATE,
+        )
+    ):
+        return
+    hubs = await WhiteInternetService.get_hub_nodes(session)
+    target_hubs = [
+        (h.id, h.api_url, h.api_key, h.xray_instance_epoch)
+        for h in hubs
+        if h.api_url and h.api_key
+    ]
+    if not target_hubs:
+        return
+
+    sub_id_snap = wi_sub.id
+    ver_snap = wi_sub.desired_version
+
+    async def _sync_wi_after_admin_op() -> None:
+        async with session_scope() as bg_sess:
+            bg_sub = await white_internet_repo.get_subscription_by_id(bg_sess, sub_id_snap)
+            if bg_sub is not None:
+                await WhiteInternetService._try_inline_sync_multi(
+                    bg_sess,
+                    bg_sub,
+                    target_hubs,
+                    idempotency_key=f"admin_{reason}:{sub_id_snap}:{ver_snap}",
+                )
+
+    queue_post_commit_task(session, _sync_wi_after_admin_op)
+
+
+def _queue_user_notification(
+    session: AsyncSession,
+    bot: Any,
+    *,
+    user_id: int,
+    telegram_id: int,
+    text: str,
+) -> None:
+    """Queue a post-commit Telegram DM using safe_send_message, marking is_bot_blocked on 403."""
+    if bot is None or not text:
+        return
+
+    async def _send() -> None:
+        try:
+            await safe_send_message(bot, telegram_id, text, raise_forbidden=True)
+        except TelegramForbiddenError:
+            try:
+                async with session_scope() as bg_sess:
+                    await bg_sess.execute(
+                        update(User).where(User.id == user_id).values(is_bot_blocked=True)
+                    )
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    queue_post_commit_task(session, _send)
 
 
 def _safe_admin_error_response(
@@ -201,13 +294,25 @@ async def api_admin_2fa_verify_handler(request: web.Request) -> web.Response:
             payload.code,
             setup_token=payload.setup_token,
         )
+        if not result.get("verified"):
+            await AuditService.log_action(
+                session,
+                admin_id=ctx.telegram_id,
+                action="ADMIN_2FA_LOCKED" if result.get("locked") else "ADMIN_2FA_VERIFY_FAILED",
+                target_type="admin",
+                target_id=ctx.telegram_id,
+                details={
+                    "locked": bool(result.get("locked")),
+                    "newly_locked": bool(result.get("newly_locked")),
+                    "retry_after": result.get("retry_after"),
+                },
+            )
 
     if not result.get("verified"):
         if result.get("newly_locked"):
             bot = request.app.get("bot")
             if bot is not None:
                 from config.settings import get_settings
-                from utils.telegram import safe_send_message
 
                 admin_ids = list(get_settings().ADMIN_IDS)
                 retry_after = result.get("retry_after", 300)
@@ -231,9 +336,38 @@ async def api_admin_2fa_verify_handler(request: web.Request) -> web.Response:
                 task = asyncio.create_task(_send_lockout_alerts())
                 _background_tasks.add(task)
                 task.add_done_callback(_background_tasks.discard)
-        status = 429 if result.get("locked") else 403
-        return web.json_response({"ok": False, "error": result.get("error", "Неверный код")}, status=status)
+        if result.get("locked"):
+            retry_after = int(result.get("retry_after") or 300)
+            return web.json_response(
+                {
+                    "ok": False,
+                    "locked": True,
+                    "retry_after": retry_after,
+                    "error": result.get("error", "Слишком много попыток"),
+                },
+                status=429,
+                headers={"Retry-After": str(retry_after)},
+            )
+        return web.json_response({"ok": False, "error": result.get("error", "Неверный код")}, status=403)
     return web.json_response({"ok": True, **result})
+
+
+async def api_admin_2fa_logout_handler(request: web.Request) -> web.Response:
+    """Revoke all active admin 2FA sessions and write audit log."""
+    ctx, err_resp = require_admin_user(request)
+    if err_resp is not None or ctx is None:
+        return err_resp  # type: ignore[return-value]
+
+    async with session_scope() as session:
+        await revoke_all_admin_sessions(session)
+        await AuditService.log_action(
+            session,
+            admin_id=ctx.telegram_id,
+            action="ADMIN_2FA_LOGOUT_ALL",
+            target_type="admin",
+            target_id=ctx.telegram_id,
+        )
+    return web.json_response({"ok": True, "message": "Все сессии администратора завершены"})
 
 
 async def api_admin_nodes_list_handler(request: web.Request) -> web.Response:
@@ -256,16 +390,14 @@ async def api_admin_nodes_add_handler(request: web.Request) -> web.Response:
         return parse_err  # type: ignore[return-value]
 
     try:
-        async with session_scope() as session:
-            result = await admin_nodes_service.discover_and_add_node(
-                session,
-                admin_id=ctx.telegram_id,
-                api_url=payload.api_url,
-                api_key=payload.api_key,
-                name=payload.name,
-                country_flag=payload.country_flag,
-            )
-            return web.json_response({"ok": True, **result}, status=201)
+        result = await admin_nodes_service.discover_and_add_node(
+            admin_id=ctx.telegram_id,
+            api_url=payload.api_url,
+            api_key=payload.api_key,
+            name=payload.name,
+            country_flag=payload.country_flag,
+        )
+        return web.json_response({"ok": True, **result}, status=201)
     except AdminNodeServiceError as exc:
         return _service_error_response(exc)
 
@@ -280,13 +412,11 @@ async def api_admin_nodes_refresh_handler(request: web.Request) -> web.Response:
         return id_err  # type: ignore[return-value]
 
     try:
-        async with session_scope() as session:
-            node = await admin_nodes_service.refresh_node(
-                session,
-                admin_id=ctx.telegram_id,
-                server_id=server_id,
-            )
-            return web.json_response({"ok": True, "node": node})
+        node = await admin_nodes_service.refresh_node(
+            admin_id=ctx.telegram_id,
+            server_id=server_id,
+        )
+        return web.json_response({"ok": True, "node": node})
     except AdminNodeServiceError as exc:
         return _service_error_response(exc)
 
@@ -305,25 +435,23 @@ async def api_admin_nodes_patch_handler(request: web.Request) -> web.Response:
         return parse_err  # type: ignore[return-value]
 
     try:
-        async with session_scope() as session:
-            node = await admin_nodes_service.update_node_settings(
-                session,
-                admin_id=ctx.telegram_id,
-                server_id=server_id,
-                name=payload.name,
-                country_flag=payload.country_flag,
-                api_url=payload.api_url,
-                api_key=payload.api_key,
-                in_standard=payload.in_standard,
-                in_white_internet=payload.in_white_internet,
-                vless_name=payload.vless_name,
-                server_description=payload.server_description,
-                wi_yandex_name=payload.wi_yandex_name,
-                wi_yandex_badge=payload.wi_yandex_badge,
-                wi_turboflare_name=payload.wi_turboflare_name,
-                wi_turboflare_badge=payload.wi_turboflare_badge,
-            )
-            return web.json_response({"ok": True, "node": node})
+        node = await admin_nodes_service.update_node_settings(
+            admin_id=ctx.telegram_id,
+            server_id=server_id,
+            name=payload.name,
+            country_flag=payload.country_flag,
+            api_url=payload.api_url,
+            api_key=payload.api_key,
+            in_standard=payload.in_standard,
+            in_white_internet=payload.in_white_internet,
+            vless_name=payload.vless_name,
+            server_description=payload.server_description,
+            wi_yandex_name=payload.wi_yandex_name,
+            wi_yandex_badge=payload.wi_yandex_badge,
+            wi_turboflare_name=payload.wi_turboflare_name,
+            wi_turboflare_badge=payload.wi_turboflare_badge,
+        )
+        return web.json_response({"ok": True, "node": node})
     except AdminNodeServiceError as exc:
         return _service_error_response(exc)
 
@@ -391,79 +519,79 @@ def _as_bool_setting(val: object, default: bool) -> bool:
     return bool(val)
 
 
+async def _read_incy_settings_dict(session: AsyncSession) -> dict[str, Any]:
+    default_interval = os.getenv("VLESS_PROFILE_UPDATE_INTERVAL", "6").strip()
+    if not (default_interval.isdigit() and int(default_interval) > 0):
+        default_interval = "6"
+
+    profile_title = await get_system_setting(
+        session,
+        "vless_profile_title",
+        constants.DEFAULT_VLESS_PROFILE_TITLE,
+    )
+    announce = await get_system_setting(session, "vless_announce", "")
+    announce_url = await get_system_setting(session, "vless_announce_url", "")
+    show_devices_raw = await get_system_setting(session, "vless_profile_show_devices", "false")
+    interval_raw = await get_system_setting(session, "vless_profile_update_interval", default_interval)
+    support_url = await get_system_setting(session, "vless_support_url", "")
+    web_page_url = await get_system_setting(session, "vless_web_page_url", "")
+    sort_order = await get_system_setting(session, "vless_sort_order", "none")
+    hide_url_raw = await get_system_setting(session, "vless_hide_url", "true")
+    hide_check_raw = await get_system_setting(session, "vless_hide_check", "false")
+    frag_raw = await get_system_setting(session, "vless_fragmentation_enabled", "true")
+    frag_packets = await get_system_setting(session, "vless_fragmentation_packets", "tlshello")
+    frag_length = await get_system_setting(session, "vless_fragmentation_length", "10-30")
+    frag_interval = await get_system_setting(session, "vless_fragmentation_interval", "10-30")
+    no_limit_mode = await get_system_setting(session, "vless_no_limit_mode", "all")
+    dns_resolve_raw = await get_system_setting(session, "vless_dns_resolve_enabled", "true")
+    dns_resolve_domain = await get_system_setting(session, "vless_dns_resolve_domain", "https://common.dot.dns.yandex.net/dns-query")
+    dns_resolve_ip = await get_system_setting(session, "vless_dns_resolve_ip", "77.88.8.8")
+    per_app_raw = await get_system_setting(session, "vless_per_app_proxy_enabled", "false")
+    per_app_mode = await get_system_setting(session, "vless_per_app_proxy_mode", "bypass")
+    per_app_list = await get_system_setting(session, "vless_per_app_proxy_list", "")
+    cdn_label_mode = await get_system_setting(session, "bi_cdn_label_mode", "name")
+    cdn_yandex_label = await get_system_setting(session, "bi_cdn_yandex_label", "Yandex")
+    cdn_turboflare_label = await get_system_setting(session, "bi_cdn_turboflare_label", "Turboflare")
+    mtproto_proxy_url = await get_system_setting(session, "mtproto_proxy_url", "")
+
+    interval_val = int(interval_raw) if str(interval_raw or "").strip().isdigit() else int(default_interval)
+    return {
+        "profile_title": str(profile_title or constants.DEFAULT_VLESS_PROFILE_TITLE),
+        "announce": str(announce or ""),
+        "announce_url": str(announce_url or ""),
+        "profile_show_devices": _as_bool_setting(show_devices_raw, False),
+        "profile_update_interval": max(1, min(720, interval_val)),
+        "support_url": str(support_url or ""),
+        "web_page_url": str(web_page_url or ""),
+        "sort_order": str(sort_order or "none"),
+        "hide_url": _as_bool_setting(hide_url_raw, True),
+        "hide_check": _as_bool_setting(hide_check_raw, False),
+        "fragmentation_enabled": _as_bool_setting(frag_raw, True),
+        "fragmentation_packets": str(frag_packets or "tlshello"),
+        "fragmentation_length": str(frag_length or "10-30"),
+        "fragmentation_interval": str(frag_interval or "10-30"),
+        "no_limit_mode": str(no_limit_mode or "all"),
+        "dns_resolve_enabled": _as_bool_setting(dns_resolve_raw, True),
+        "dns_resolve_domain": str(dns_resolve_domain or "https://common.dot.dns.yandex.net/dns-query"),
+        "dns_resolve_ip": str(dns_resolve_ip or "77.88.8.8"),
+        "per_app_proxy_enabled": _as_bool_setting(per_app_raw, False),
+        "per_app_proxy_mode": str(per_app_mode or "bypass"),
+        "per_app_proxy_list": str(per_app_list or ""),
+        "cdn_label_mode": str(cdn_label_mode or "name"),
+        "cdn_yandex_label": str(cdn_yandex_label or "Yandex"),
+        "cdn_turboflare_label": str(cdn_turboflare_label or "Turboflare"),
+        "mtproto_proxy_url": str(mtproto_proxy_url or ""),
+    }
+
+
 async def api_admin_incy_get_handler(request: web.Request) -> web.Response:
     ctx, err_resp = require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
-    default_interval = os.getenv("VLESS_PROFILE_UPDATE_INTERVAL", "6").strip()
-    if not (default_interval.isdigit() and int(default_interval) > 0):
-        default_interval = "6"
-
     async with session_scope() as session:
-        profile_title = await get_system_setting(
-            session,
-            "vless_profile_title",
-            constants.DEFAULT_VLESS_PROFILE_TITLE,
-        )
-        announce = await get_system_setting(session, "vless_announce", "")
-        announce_url = await get_system_setting(session, "vless_announce_url", "")
-        show_devices_raw = await get_system_setting(session, "vless_profile_show_devices", "false")
-        interval_raw = await get_system_setting(session, "vless_profile_update_interval", default_interval)
-        support_url = await get_system_setting(session, "vless_support_url", "")
-        web_page_url = await get_system_setting(session, "vless_web_page_url", "")
-        sort_order = await get_system_setting(session, "vless_sort_order", "none")
-        hide_url_raw = await get_system_setting(session, "vless_hide_url", "true")
-        hide_check_raw = await get_system_setting(session, "vless_hide_check", "false")
-        frag_raw = await get_system_setting(session, "vless_fragmentation_enabled", "true")
-        frag_packets = await get_system_setting(session, "vless_fragmentation_packets", "tlshello")
-        frag_length = await get_system_setting(session, "vless_fragmentation_length", "10-30")
-        frag_interval = await get_system_setting(session, "vless_fragmentation_interval", "10-30")
-        no_limit_mode = await get_system_setting(session, "vless_no_limit_mode", "all")
-        dns_resolve_raw = await get_system_setting(session, "vless_dns_resolve_enabled", "true")
-        dns_resolve_domain = await get_system_setting(session, "vless_dns_resolve_domain", "https://common.dot.dns.yandex.net/dns-query")
-        dns_resolve_ip = await get_system_setting(session, "vless_dns_resolve_ip", "77.88.8.8")
-        per_app_raw = await get_system_setting(session, "vless_per_app_proxy_enabled", "false")
-        per_app_mode = await get_system_setting(session, "vless_per_app_proxy_mode", "bypass")
-        per_app_list = await get_system_setting(session, "vless_per_app_proxy_list", "")
-        cdn_label_mode = await get_system_setting(session, "bi_cdn_label_mode", "name")
-        cdn_yandex_label = await get_system_setting(session, "bi_cdn_yandex_label", "Yandex")
-        cdn_turboflare_label = await get_system_setting(session, "bi_cdn_turboflare_label", "Turboflare")
-        mtproto_proxy_url = await get_system_setting(session, "mtproto_proxy_url", "")
-
-    interval_val = int(interval_raw) if str(interval_raw or "").strip().isdigit() else int(default_interval)
-    return web.json_response(
-        {
-            "ok": True,
-            "settings": {
-                "profile_title": str(profile_title or constants.DEFAULT_VLESS_PROFILE_TITLE),
-                "announce": str(announce or ""),
-                "announce_url": str(announce_url or ""),
-                "profile_show_devices": _as_bool_setting(show_devices_raw, False),
-                "profile_update_interval": max(1, min(720, interval_val)),
-                "support_url": str(support_url or ""),
-                "web_page_url": str(web_page_url or ""),
-                "sort_order": str(sort_order or "none"),
-                "hide_url": _as_bool_setting(hide_url_raw, True),
-                "hide_check": _as_bool_setting(hide_check_raw, False),
-                "fragmentation_enabled": _as_bool_setting(frag_raw, True),
-                "fragmentation_packets": str(frag_packets or "tlshello"),
-                "fragmentation_length": str(frag_length or "10-30"),
-                "fragmentation_interval": str(frag_interval or "10-30"),
-                "no_limit_mode": str(no_limit_mode or "all"),
-                "dns_resolve_enabled": _as_bool_setting(dns_resolve_raw, True),
-                "dns_resolve_domain": str(dns_resolve_domain or "https://common.dot.dns.yandex.net/dns-query"),
-                "dns_resolve_ip": str(dns_resolve_ip or "77.88.8.8"),
-                "per_app_proxy_enabled": _as_bool_setting(per_app_raw, False),
-                "per_app_proxy_mode": str(per_app_mode or "bypass"),
-                "per_app_proxy_list": str(per_app_list or ""),
-                "cdn_label_mode": str(cdn_label_mode or "name"),
-                "cdn_yandex_label": str(cdn_yandex_label or "Yandex"),
-                "cdn_turboflare_label": str(cdn_turboflare_label or "Turboflare"),
-                "mtproto_proxy_url": str(mtproto_proxy_url or ""),
-            },
-        }
-    )
+        settings_payload = await _read_incy_settings_dict(session)
+    return web.json_response({"ok": True, "settings": settings_payload})
 
 
 async def api_admin_incy_put_handler(request: web.Request) -> web.Response:
@@ -539,12 +667,14 @@ async def api_admin_incy_put_handler(request: web.Request) -> web.Response:
             await AuditService.log_action(
                 session,
                 admin_id=ctx.telegram_id,
-                action="INCY_SETTINGS_UPDATED",
+                action=AdminAuditAction.INCY_SETTINGS_UPDATED,
                 target_type="system",
                 details=changed,
             )
 
-    return await api_admin_incy_get_handler(request)
+        settings_payload = await _read_incy_settings_dict(session)
+
+    return web.json_response({"ok": True, "settings": settings_payload})
 
 
 async def api_admin_users_handler(request: web.Request) -> web.Response:
@@ -572,11 +702,18 @@ async def api_admin_users_handler(request: web.Request) -> web.Response:
         active_standard = filter_counts.get("active_standard", 0)
         active_wi = filter_counts.get("active_wi", 0)
         total_balance_rub = Decimal(
-            await session.scalar(select(func.coalesce(func.sum(AccountLedgerEntry.amount), 0))) or 0
+            await session.scalar(
+                select(func.coalesce(func.sum(AccountLedgerEntry.amount), 0))
+                .join(User, User.id == AccountLedgerEntry.user_id)
+                .where(User.is_deleted.is_(False))
+            )
+            or 0
         )
 
         stmt = select(User).where(User.is_deleted.is_(False))
-        if flt == "active_standard":
+        if flt == "active":
+            stmt = stmt.where(users_repo.get_effective_active_condition(now))
+        elif flt == "active_standard":
             stmt = stmt.where(
                 User.id.in_(
                     select(VlessSubscription.user_id).where(VlessSubscription.expires_at > now)
@@ -584,10 +721,16 @@ async def api_admin_users_handler(request: web.Request) -> web.Response:
             )
         elif flt == "active_wi":
             stmt = stmt.where(users_repo.get_effective_wi_active_condition(now))
+        elif flt == "expiring_3d":
+            stmt = stmt.where(users_repo.get_effective_expiring_3d_condition(now))
+        elif flt == "new_7d":
+            stmt = stmt.where(User.created_at >= now - timedelta(days=7))
         elif flt == "expired":
             stmt = stmt.where(users_repo.get_effective_expired_condition(now))
         elif flt == "never":
             stmt = stmt.where(users_repo.get_effective_never_condition())
+        elif flt == "banned":
+            stmt = stmt.where(User.is_bot_blocked.is_(True))
 
         if q:
             if q.isdigit():
@@ -602,6 +745,25 @@ async def api_admin_users_handler(request: web.Request) -> web.Response:
                     or_(
                         User.username.ilike(pattern),
                         User.first_name.ilike(pattern),
+                        User.id.in_(
+                            select(UserDevice.user_id).where(UserDevice.hwid.ilike(pattern))
+                        ),
+                        User.id.in_(
+                            select(VlessSubscription.user_id).where(
+                                or_(
+                                    VlessSubscription.uuid.ilike(pattern),
+                                    VlessSubscription.token.ilike(pattern),
+                                )
+                            )
+                        ),
+                        User.id.in_(
+                            select(WhiteInternetSubscription.user_id).where(
+                                or_(
+                                    WhiteInternetSubscription.uuid.ilike(pattern),
+                                    WhiteInternetSubscription.token.ilike(pattern),
+                                )
+                            )
+                        ),
                     )
                 )
 
@@ -722,13 +884,13 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
 
         if payload.action == "balance":
             assert payload.amount_rub is not None
-            if payload.amount_rub < 0:
-                bal_before = await get_account_balance(session, user_id=user.id, for_update=True)
-                if abs(payload.amount_rub) > bal_before.bonus_available:
-                    return web.json_response(
-                        {"ok": False, "error": "Недостаточно бонусных средств на балансе пользователя"},
-                        status=400,
-                    )
+            await acquire_user_account_lock(session, user.id)
+            bal_before = await get_account_balance(session, user_id=user.id, for_update=True)
+            if payload.amount_rub < 0 and abs(payload.amount_rub) > bal_before.bonus_available:
+                return web.json_response(
+                    {"ok": False, "error": "Недостаточно бонусных средств на балансе пользователя"},
+                    status=400,
+                )
             default_desc = "Бонусное пополнение (админ)" if payload.amount_rub > 0 else "Списание администратором"
             await create_admin_adjustment(
                 session,
@@ -741,36 +903,50 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                     "description": note or default_desc,
                 },
             )
+            bal_after = await get_account_balance(session, user_id=user.id)
             await AuditService.log_action(
                 session,
                 admin_id=ctx.telegram_id,
-                action=AdminAuditAction.ADMIN_BALANCE_TOPUP if payload.amount_rub >= 0 else AdminAuditAction.REDUCE,
+                action=(
+                    AdminAuditAction.ADMIN_BALANCE_TOPUP
+                    if payload.amount_rub >= 0
+                    else AdminAuditAction.ADMIN_BALANCE_DEDUCT
+                ),
                 target_type="user",
                 target_id=user.id,
-                details={"amount_rub": payload.amount_rub, "note": note or default_desc},
+                details={
+                    "amount_rub": payload.amount_rub,
+                    "before": {
+                        "real_balance": int(bal_before.real_available),
+                        "bonus_balance": int(bal_before.bonus_available),
+                        "total_balance": int(bal_before.available),
+                    },
+                    "after": {
+                        "real_balance": int(bal_after.real_available),
+                        "bonus_balance": int(bal_after.bonus_available),
+                        "total_balance": int(bal_after.available),
+                    },
+                    "note": note or default_desc,
+                },
             )
-            bal_after = await get_account_balance(session, user_id=user.id)
             bot = request.app.get("bot")
-            if bot is not None and payload.amount_rub != 0:
-                from database.connection import queue_post_commit_task
-
-                target_tg_id = user.telegram_id
+            should_notify = True if payload.notify_user is None else bool(payload.notify_user)
+            if should_notify and bot is not None and payload.amount_rub != 0:
                 sign_word = "начислено" if payload.amount_rub > 0 else "списано"
                 msg_text = (
                     f"💳 Администратор изменил ваш бонусный баланс: "
                     f"{sign_word} {abs(payload.amount_rub)} ₽.\n"
                     f"Текущий баланс: {int(bal_after.available)} ₽."
                 )
-                if note:
+                if payload.send_note_to_user and note:
                     msg_text += f"\nКомментарий: {note}"
-
-                async def _notify_balance_adj() -> None:
-                    try:
-                        await bot.send_message(target_tg_id, msg_text)
-                    except Exception:
-                        pass
-
-                queue_post_commit_task(session, _notify_balance_adj)
+                _queue_user_notification(
+                    session,
+                    bot,
+                    user_id=user.id,
+                    telegram_id=user.telegram_id,
+                    text=msg_text,
+                )
             return web.json_response({
                 "ok": True,
                 "action": "balance",
@@ -780,9 +956,66 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                 "message": f"Баланс обновлён ({payload.amount_rub:+d} ₽)",
             })
 
+        if payload.action == "forgive_debt":
+            await acquire_user_account_lock(session, user.id)
+            bal_before = await get_account_balance(session, user_id=user.id, for_update=True)
+            if bal_before.debt <= 0:
+                return web.json_response(
+                    {"ok": False, "error": "У пользователя нет задолженности"},
+                    status=400,
+                )
+            forgive_amount = bal_before.debt.quantize(Decimal("1.00"))
+            if payload.amount_rub is not None:
+                forgive_amount = min(forgive_amount, Decimal(payload.amount_rub).quantize(Decimal("1.00")))
+            session.add(
+                AccountLedgerEntry(
+                    user_id=user.id,
+                    entry_type="payment_credit",
+                    bucket="real",
+                    amount=forgive_amount,
+                    currency="RUB",
+                    order_id=None,
+                    idempotency_key=f"miniapp:admin:forgive_debt:{ctx.telegram_id}:{user.id}:{uuid4().hex}",
+                    metadata_={
+                        "source": "miniapp_admin_forgive_debt",
+                        "admin_telegram_id": ctx.telegram_id,
+                        "description": note or "Списание задолженности (админ)",
+                    },
+                )
+            )
+            await session.flush()
+            bal_after = await get_account_balance(session, user_id=user.id)
+            await AuditService.log_action(
+                session,
+                admin_id=ctx.telegram_id,
+                action=AdminAuditAction.ADMIN_BALANCE_TOPUP,
+                target_type="user",
+                target_id=user.id,
+                details={
+                    "action": "forgive_debt",
+                    "forgiven_rub": int(forgive_amount),
+                    "debt_before": int(bal_before.debt),
+                    "debt_after": int(bal_after.debt),
+                    "note": note,
+                },
+            )
+            return web.json_response({
+                "ok": True,
+                "action": "forgive_debt",
+                "forgiven_rub": int(forgive_amount),
+                "debt": int(bal_after.debt),
+                "real_position": int(bal_after.real_position),
+                "real_balance": int(bal_after.real_available),
+                "bonus_balance": int(bal_after.bonus_available),
+                "total_balance": int(bal_after.available),
+                "message": f"Задолженность уменьшена на {int(forgive_amount)} ₽",
+            })
+
         if payload.action == "grant_standard":
             if payload.days is None:
                 return web.json_response({"ok": False, "error": "Укажите количество дней"}, status=400)
+            if payload.days == 0 and payload.device_limit is None:
+                return web.json_response({"ok": False, "error": "Укажите дни или лимит устройств"}, status=400)
             if payload.device_limit is not None and not (
                 constants.STANDARD_MIN_DEVICES <= payload.device_limit <= constants.STANDARD_MAX_DEVICES
             ):
@@ -796,16 +1029,18 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                     },
                     status=400,
                 )
+            await acquire_user_account_lock(session, user.id)
+            locked_user = (
+                await session.execute(
+                    select(User)
+                    .where(User.id == user.id, User.is_deleted.is_(False))
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
+            if locked_user is None:
+                return web.json_response({"ok": False, "error": "Пользователь не найден"}, status=404)
+
             if payload.days < 0:
-                locked_user = (
-                    await session.execute(
-                        select(User)
-                        .where(User.id == user.id, User.is_deleted.is_(False))
-                        .with_for_update()
-                    )
-                ).scalar_one_or_none()
-                if locked_user is None:
-                    return web.json_response({"ok": False, "error": "Пользователь не найден"}, status=404)
                 vless_sub = await vless_subscription_repo.get_subscription_by_user_id(
                     session, user.id
                 )
@@ -815,6 +1050,8 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                         {"ok": False, "error": "У пользователя нет активной подписки «Стандарт»"},
                         status=400,
                     )
+                before_end = vless_sub.expires_at.isoformat() if vless_sub.expires_at else None
+                before_limit = int(vless_sub.device_limit or 0)
                 if payload.device_limit is not None:
                     slot_usage = await SubscriptionService.get_device_slot_usage(
                         session, locked_user, vless_sub=vless_sub, now=now
@@ -844,7 +1081,16 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                     action=AdminAuditAction.REDUCE,
                     target_type="user",
                     target_id=user.id,
-                    details={"service": "standard", "days": payload.days, "note": note},
+                    details={
+                        "service": "standard",
+                        "days": payload.days,
+                        "before": {"expires_at": before_end, "device_limit": before_limit},
+                        "after": {
+                            "expires_at": vless_sub.expires_at.isoformat() if vless_sub.expires_at else None,
+                            "device_limit": int(vless_sub.device_limit or 0),
+                        },
+                        "note": note,
+                    },
                 )
                 if new_end <= now:
                     vless_sub.is_active = False
@@ -852,6 +1098,14 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                     await session.flush()
                     VlessSubscriptionService.ensure_synced_background(
                         user.id, is_active=False, session=session
+                    )
+                if payload.notify_user is True:
+                    _queue_user_notification(
+                        session,
+                        request.app.get("bot"),
+                        user_id=user.id,
+                        telegram_id=user.telegram_id,
+                        text=f"⚡ Параметры вашей подписки «Стандарт» обновлены (сокращение на {abs(payload.days)} дн.).",
                     )
                 return web.json_response({
                     "ok": True,
@@ -861,11 +1115,10 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                     "message": f"Подписка «Стандарт» сокращена на {abs(payload.days)} дн.",
                 })
 
-            await get_or_create_subscription(session, user.id)
-
-            cur_vless = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
-            cur_limit = int(getattr(cur_vless, "device_limit", 0) or 0) if cur_vless else 0
-            target_limit = payload.device_limit or (cur_limit if cur_limit >= 2 else 2)
+            cur_vless = await get_or_create_subscription(session, user.id)
+            before_end = cur_vless.expires_at.isoformat() if cur_vless.expires_at else None
+            before_limit = int(getattr(cur_vless, "device_limit", 0) or 0)
+            target_limit = payload.device_limit or (before_limit if before_limit >= 2 else 2)
             try:
                 updated_user = await SubscriptionService.extend_subscription(
                     session,
@@ -894,6 +1147,11 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                     "service": "standard",
                     "days": payload.days,
                     "device_limit": target_limit,
+                    "before": {"expires_at": before_end, "device_limit": before_limit},
+                    "after": {
+                        "expires_at": updated_vless.expires_at.isoformat() if updated_vless and updated_vless.expires_at else None,
+                        "device_limit": int(updated_vless.device_limit or 0) if updated_vless else 0,
+                    },
                     "note": note,
                 },
             )
@@ -902,6 +1160,19 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                 if payload.days == 0
                 else f"Подписка «Стандарт» выдана/продлена на {payload.days} дн."
             )
+            if payload.notify_user is True:
+                dm_text = (
+                    f"⚡ Лимит устройств вашей подписки «Стандарт» обновлён: {target_limit}."
+                    if payload.days == 0
+                    else f"🎁 Ваша подписка «Стандарт» продлена на +{payload.days} дн."
+                )
+                _queue_user_notification(
+                    session,
+                    request.app.get("bot"),
+                    user_id=user.id,
+                    telegram_id=user.telegram_id,
+                    text=dm_text,
+                )
             return web.json_response({
                 "ok": True,
                 "action": "grant_standard",
@@ -911,23 +1182,50 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
             })
 
         if payload.action == "wi_traffic":
+            await acquire_user_account_lock(session, user.id)
+            locked_user = (
+                await session.execute(
+                    select(User)
+                    .where(User.id == user.id, User.is_deleted.is_(False))
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
+            if locked_user is None:
+                return web.json_response({"ok": False, "error": "Пользователь не найден"}, status=404)
             wi_sub = await get_subscription_by_user_id(session, user.id)
             if wi_sub is None:
                 return web.json_response({"ok": False, "error": "Подписка «Белый интернет» не найдена"}, status=404)
+            before_used = int(wi_sub.traffic_used_bytes or 0)
+            before_base = int(wi_sub.base_traffic_bytes or 0)
+            before_extra = int(wi_sub.extra_traffic_bytes or 0)
             t_action = payload.traffic_action
             if t_action == "reset_used":
                 try:
                     updated_sub = await white_internet_repo.reset_traffic_used_atomic(session, wi_sub.id)
                 except white_internet_repo.WhiteInternetError as exc:
                     return _safe_admin_error_response(exc)
+                await _queue_wi_inline_sync(session, updated_sub, "wi_traffic_reset")
                 await AuditService.log_action(
                     session,
                     admin_id=ctx.telegram_id,
                     action=AdminAuditAction.WHITE_INTERNET_TRAFFIC_RESET,
                     target_type="user",
                     target_id=user.id,
-                    details={"subscription_id": wi_sub.id, "note": note},
+                    details={
+                        "subscription_id": wi_sub.id,
+                        "before": {"traffic_used_bytes": before_used},
+                        "after": {"traffic_used_bytes": int(updated_sub.traffic_used_bytes or 0)},
+                        "note": note,
+                    },
                 )
+                if payload.notify_user is True:
+                    _queue_user_notification(
+                        session,
+                        request.app.get("bot"),
+                        user_id=user.id,
+                        telegram_id=user.telegram_id,
+                        text="🔄 Счётчик трафика вашей подписки «Белый интернет» сброшен.",
+                    )
                 return web.json_response({
                     "ok": True,
                     "action": "wi_traffic",
@@ -945,49 +1243,45 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                         )
                         audit_act = AdminAuditAction.WHITE_INTERNET_TRAFFIC_ADDED
                         msg_ok = f"Добавлено +{payload.gb} ГБ трафика"
+                        dm_text = f"🎁 Вам добавлено +{payload.gb} ГБ трафика в подписке «Белый интернет»."
                     else:
                         updated_sub = await white_internet_repo.set_base_traffic_quota_atomic(
                             session, wi_sub.id, bytes_val
                         )
                         audit_act = AdminAuditAction.WHITE_INTERNET_QUOTA_SET
                         msg_ok = f"Базовая квота установлена: {payload.gb} ГБ"
+                        dm_text = f"⚡ Базовая квота трафика «Белый интернет» обновлена: {payload.gb} ГБ."
                 except white_internet_repo.WhiteInternetError as exc:
                     return _safe_admin_error_response(exc)
-                if (
-                    updated_sub.status == WhiteInternetStatus.ACTIVE
-                    and updated_sub.provisioning_status == WhiteInternetProvisioningStatus.PENDING_UPDATE
-                ):
-                    hubs = await WhiteInternetService.get_hub_nodes(session)
-                    target_hubs = [
-                        (h.id, h.api_url, h.api_key, h.xray_instance_epoch)
-                        for h in hubs
-                        if h.api_url and h.api_key
-                    ]
-                    if target_hubs:
-                        from database.connection import queue_post_commit_task
-
-                        sub_id_snap = updated_sub.id
-
-                        async def _sync_wi_after_traffic_adj() -> None:
-                            async with session_scope() as bg_sess:
-                                bg_sub = await white_internet_repo.get_subscription_by_id(bg_sess, sub_id_snap)
-                                if bg_sub is not None:
-                                    await WhiteInternetService._try_inline_sync_multi(
-                                        bg_sess,
-                                        bg_sub,
-                                        target_hubs,
-                                        idempotency_key=f"admin_wi_traffic:{sub_id_snap}:{bg_sub.desired_version}",
-                                    )
-
-                        queue_post_commit_task(session, _sync_wi_after_traffic_adj)
+                await _queue_wi_inline_sync(session, updated_sub, "wi_traffic")
                 await AuditService.log_action(
                     session,
                     admin_id=ctx.telegram_id,
                     action=audit_act,
                     target_type="user",
                     target_id=user.id,
-                    details={"subscription_id": wi_sub.id, "gb": payload.gb, "note": note},
+                    details={
+                        "subscription_id": wi_sub.id,
+                        "gb": payload.gb,
+                        "before": {
+                            "base_traffic_bytes": before_base,
+                            "extra_traffic_bytes": before_extra,
+                        },
+                        "after": {
+                            "base_traffic_bytes": int(updated_sub.base_traffic_bytes or 0),
+                            "extra_traffic_bytes": int(updated_sub.extra_traffic_bytes or 0),
+                        },
+                        "note": note,
+                    },
                 )
+                if payload.notify_user is True:
+                    _queue_user_notification(
+                        session,
+                        request.app.get("bot"),
+                        user_id=user.id,
+                        telegram_id=user.telegram_id,
+                        text=dm_text,
+                    )
                 return web.json_response({
                     "ok": True,
                     "action": "wi_traffic",
@@ -998,8 +1292,6 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
             return web.json_response({"ok": False, "error": "Укажите traffic_action"}, status=400)
 
         if payload.action == "restrictions":
-            from services.order_service import OrderService, acquire_user_account_lock
-
             await acquire_user_account_lock(session, user.id)
             locked_user = (
                 await session.execute(
@@ -1010,12 +1302,40 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
             ).scalar_one_or_none()
             if locked_user is None:
                 return web.json_response({"ok": False, "error": "Пользователь не найден"}, status=404)
+            before_state = {
+                "financial_hold": bool(locked_user.financial_hold),
+                "topup_blocked": bool(locked_user.topup_blocked),
+                "financial_block_reason": locked_user.financial_block_reason,
+            }
             if payload.financial_hold is not None:
                 locked_user.financial_hold = bool(payload.financial_hold)
+                if not locked_user.financial_hold:
+                    locked_user.financial_block_reason = None
             if payload.topup_blocked is not None:
                 locked_user.topup_blocked = bool(payload.topup_blocked)
             await session.flush()
             await SubscriptionService.sync_access_state(session, locked_user)
+
+            now = now_utc()
+            wi_reactivated = False
+            wi_sub = await get_subscription_by_user_id(session, user.id)
+            if wi_sub is not None and not locked_user.financial_hold:
+                should_reactivate_wi = bool(payload.reactivate_wi) or (
+                    payload.financial_hold is False
+                    and wi_sub.status == WhiteInternetStatus.DISABLED
+                    and bool(wi_sub.expires_at and wi_sub.expires_at > now)
+                )
+                if should_reactivate_wi and wi_sub.status == WhiteInternetStatus.DISABLED and wi_sub.expires_at and wi_sub.expires_at > now:
+                    locked_wi = await white_internet_repo.get_subscription_with_lock(session, wi_sub.id)
+                    if locked_wi is not None:
+                        locked_wi.status = WhiteInternetStatus.PENDING
+                        locked_wi.status_reason = None
+                        locked_wi.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+                        locked_wi.desired_version = (locked_wi.desired_version or 1) + 1
+                        await session.flush()
+                        await _queue_wi_inline_sync(session, locked_wi, "restrictions_reactivate_wi")
+                        wi_reactivated = True
+
             if not locked_user.financial_hold and not locked_user.topup_blocked:
                 held_orders = (
                     await session.scalars(
@@ -1039,8 +1359,13 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                 target_type="user",
                 target_id=user.id,
                 details={
-                    "financial_hold": bool(locked_user.financial_hold),
-                    "topup_blocked": bool(locked_user.topup_blocked),
+                    "before": before_state,
+                    "after": {
+                        "financial_hold": bool(locked_user.financial_hold),
+                        "topup_blocked": bool(locked_user.topup_blocked),
+                        "financial_block_reason": locked_user.financial_block_reason,
+                        "wi_reactivated": wi_reactivated,
+                    },
                     "note": note,
                 },
             )
@@ -1049,12 +1374,15 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                 "action": "restrictions",
                 "financial_hold": bool(locked_user.financial_hold),
                 "topup_blocked": bool(locked_user.topup_blocked),
+                "wi_reactivated": wi_reactivated,
                 "message": "Ограничения пользователя обновлены",
             })
 
         # grant_wi
         if payload.days is None:
             return web.json_response({"ok": False, "error": "Укажите количество дней"}, status=400)
+        if payload.days == 0 and payload.device_limit is None:
+            return web.json_response({"ok": False, "error": "Укажите дни или лимит устройств"}, status=400)
         if payload.device_limit is not None and not (
             1 <= payload.device_limit <= constants.WHITE_INTERNET_MAX_DEVICE_LIMIT
         ):
@@ -1065,6 +1393,16 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                 },
                 status=400,
             )
+        await acquire_user_account_lock(session, user.id)
+        locked_user = (
+            await session.execute(
+                select(User)
+                .where(User.id == user.id, User.is_deleted.is_(False))
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if locked_user is None:
+            return web.json_response({"ok": False, "error": "Пользователь не найден"}, status=404)
         wi_sub = await get_subscription_by_user_id(session, user.id)
         if wi_sub is None or (
             wi_sub.status == WhiteInternetStatus.DISABLED and payload.days > 0
@@ -1090,6 +1428,14 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                 target_id=user.id,
                 details={"days": payload.days, "device_limit": payload.device_limit or 1, "note": note},
             )
+            if payload.notify_user is True:
+                _queue_user_notification(
+                    session,
+                    request.app.get("bot"),
+                    user_id=user.id,
+                    telegram_id=user.telegram_id,
+                    text=f"🎁 Вам активирована подписка «Белый интернет» на {payload.days} дн.",
+                )
             end_iso = created.expires_at.isoformat() if created and created.expires_at else None
             return web.json_response({
                 "ok": True,
@@ -1102,6 +1448,8 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
         if locked_wi is None:
             return web.json_response({"ok": False, "error": "Подписка не найдена"}, status=404)
         wi_sub = locked_wi
+        before_wi_end = wi_sub.expires_at.isoformat() if wi_sub.expires_at else None
+        before_wi_limit = int(wi_sub.device_limit or 0)
         now = now_utc()
 
         # Validate days before applying any device_limit ORM mutations so HTTP 400 never commits partial changes.
@@ -1120,7 +1468,9 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
             if updated is not None:
                 wi_sub = updated
 
+        devlimit_changed = False
         if payload.device_limit is not None and payload.device_limit != wi_sub.device_limit:
+            devlimit_changed = True
             wi_sub.device_limit = payload.device_limit
             wi_sub.base_traffic_bytes = payload.device_limit * constants.WHITE_INTERNET_BASE_TRAFFIC_BYTES
             wi_sub.pending_device_limit = None
@@ -1149,10 +1499,24 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                 action=AdminAuditAction.WHITE_INTERNET_DEVLIMIT_SET,
                 target_type="user",
                 target_id=user.id,
-                details={"device_limit": payload.device_limit, "note": note},
+                details={
+                    "before": {"device_limit": before_wi_limit},
+                    "after": {"device_limit": payload.device_limit},
+                    "note": note,
+                },
             )
 
         if payload.days == 0:
+            if devlimit_changed:
+                await _queue_wi_inline_sync(session, wi_sub, "grant_wi_devlimit")
+            if payload.notify_user is True:
+                _queue_user_notification(
+                    session,
+                    request.app.get("bot"),
+                    user_id=user.id,
+                    telegram_id=user.telegram_id,
+                    text=f"⚡ Лимит устройств вашей подписки «Белый интернет» обновлён: {wi_sub.device_limit}.",
+                )
             end_iso = wi_sub.expires_at.isoformat() if wi_sub.expires_at else None
             return web.json_response({
                 "ok": True,
@@ -1198,8 +1562,22 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                 action=AdminAuditAction.REDUCE,
                 target_type="user",
                 target_id=user.id,
-                details={"service": "white_internet", "days": payload.days, "note": note},
+                details={
+                    "service": "white_internet",
+                    "days": payload.days,
+                    "before": {"expires_at": before_wi_end},
+                    "after": {"expires_at": wi_sub.expires_at.isoformat() if wi_sub.expires_at else None},
+                    "note": note,
+                },
             )
+            if payload.notify_user is True:
+                _queue_user_notification(
+                    session,
+                    request.app.get("bot"),
+                    user_id=user.id,
+                    telegram_id=user.telegram_id,
+                    text=f"⚡ Параметры вашей подписки «Белый интернет» обновлены (сокращение на {abs(payload.days)} дн.).",
+                )
             return web.json_response({
                 "ok": True,
                 "action": "grant_wi",
@@ -1213,8 +1591,21 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
             action=AdminAuditAction.WHITE_INTERNET_EXTEND,
             target_type="user",
             target_id=user.id,
-            details={"days": payload.days, "note": note},
+            details={
+                "days": payload.days,
+                "before": {"expires_at": before_wi_end},
+                "after": {"expires_at": wi_sub.expires_at.isoformat() if wi_sub and wi_sub.expires_at else None},
+                "note": note,
+            },
         )
+        if payload.notify_user is True:
+            _queue_user_notification(
+                session,
+                request.app.get("bot"),
+                user_id=user.id,
+                telegram_id=user.telegram_id,
+                text=f"🎁 Ваша подписка «Белый интернет» продлена на +{payload.days} дн.",
+            )
         end_iso = wi_sub.expires_at.isoformat() if wi_sub and wi_sub.expires_at else None
         return web.json_response({
             "ok": True,
@@ -1257,6 +1648,51 @@ async def api_admin_user_details_handler(request: web.Request) -> web.Response:
                     "first_name": ref_user.first_name,
                 }
 
+        now = now_utc()
+        churn_events_24h = int(
+            (
+                await session.scalar(
+                    select(func.count(DeviceRegistrationEvent.id)).where(
+                        DeviceRegistrationEvent.user_id == user.id,
+                        DeviceRegistrationEvent.created_at >= now - timedelta(hours=24),
+                    )
+                )
+            )
+            or 0
+        )
+
+        recent_orders_rows = (
+            await session.scalars(
+                select(Order)
+                .where(Order.user_id == user.id)
+                .order_by(Order.created_at.desc(), Order.id.desc())
+                .limit(20)
+            )
+        ).all()
+        recent_ledger_rows = await get_account_history(session, user_id=user.id, limit=25)
+        recent_device_event_rows = (
+            await session.scalars(
+                select(DeviceRegistrationEvent)
+                .where(DeviceRegistrationEvent.user_id == user.id)
+                .order_by(DeviceRegistrationEvent.created_at.desc(), DeviceRegistrationEvent.id.desc())
+                .limit(20)
+            )
+        ).all()
+        recent_audit_rows = (
+            await session.scalars(
+                select(AuditLog)
+                .where(or_(AuditLog.target_id == user.id, AuditLog.target_id == user.telegram_id))
+                .order_by(AuditLog.id.desc())
+                .limit(20)
+            )
+        ).all()
+
+        device_meta_by_hwid = {
+            str(d.get("hwid")): d
+            for d in devices
+            if d.get("hwid")
+        }
+
         sub_token = vless_sub.token if vless_sub and vless_sub.token else (wi_sub.token if wi_sub else None)
         return web.json_response({
             "ok": True,
@@ -1266,22 +1702,49 @@ async def api_admin_user_details_handler(request: web.Request) -> web.Response:
                 "username": user.username,
                 "first_name": user.first_name,
                 "created_at": user.created_at.isoformat() if user.created_at else None,
+                "last_payment_at": user.last_payment_at.isoformat() if user.last_payment_at else None,
+                "is_bot_blocked": bool(getattr(user, "is_bot_blocked", False)),
                 "real_balance": int(bal.real_available),
                 "bonus_balance": int(bal.bonus_available),
                 "total_balance": int(bal.available),
+                "debt": int(bal.debt),
+                "real_position": int(bal.real_position),
                 "standard_end": vless_sub.expires_at.isoformat() if vless_sub and vless_sub.expires_at else None,
                 "standard_device_limit": int(vless_sub.device_limit or 0) if vless_sub else 0,
+                "standard": (
+                    {
+                        "is_active": bool(vless_sub.is_active),
+                        "auto_renew_enabled": bool(vless_sub.auto_renew_enabled),
+                        "last_synced_at": vless_sub.last_synced_at.isoformat() if vless_sub.last_synced_at else None,
+                    }
+                    if vless_sub
+                    else None
+                ),
                 "financial_hold": bool(getattr(user, "financial_hold", False)),
                 "topup_blocked": bool(getattr(user, "topup_blocked", False)),
+                "financial_block_reason": user.financial_block_reason,
+                "monthly_vless_bytes": int(getattr(user, "monthly_vless_bytes", 0) or 0),
+                "total_traffic_bytes": int(getattr(user, "total_traffic_bytes", 0) or 0),
+                "monthly_wi_bytes": int(getattr(user, "monthly_wi_bytes", 0) or 0),
+                "total_wi_traffic_bytes": int(getattr(user, "total_wi_traffic_bytes", 0) or 0),
+                "churn_events_24h": churn_events_24h,
                 "subscription_url": _build_sub_url(sub_token) if sub_token else None,
                 "subscription_backup_url": _build_backup_sub_url(sub_token) if sub_token else None,
                 "wi": (
                     {
                         "id": wi_sub.id,
                         "status": str(wi_sub.status),
+                        "status_reason": wi_sub.status_reason,
                         "provisioning_status": str(wi_sub.provisioning_status),
                         "expires_at": wi_sub.expires_at.isoformat() if wi_sub.expires_at else None,
                         "device_limit": int(wi_sub.device_limit or 0),
+                        "pending_device_limit": wi_sub.pending_device_limit,
+                        "auto_renew_enabled": bool(wi_sub.auto_renew_enabled),
+                        "desired_version": int(wi_sub.desired_version or 1),
+                        "actual_version": int(wi_sub.actual_version or 0),
+                        "node_sync_state": wi_sub.node_sync_state if isinstance(wi_sub.node_sync_state, dict) else {},
+                        "last_synced_at": wi_sub.last_synced_at.isoformat() if wi_sub.last_synced_at else None,
+                        "last_sync_error": wi_sub.last_sync_error,
                         "base_traffic_bytes": int(wi_sub.base_traffic_bytes or 0),
                         "extra_traffic_bytes": int(wi_sub.extra_traffic_bytes or 0),
                         "traffic_used_bytes": int(wi_sub.traffic_used_bytes or 0),
@@ -1304,6 +1767,56 @@ async def api_admin_user_details_handler(request: web.Request) -> web.Response:
                     }
                     for d in devices
                 ],
+                "recent_orders": [
+                    {
+                        "id": str(o.id),
+                        "status": o.status,
+                        "kind": o.service_type,
+                        "amount_rub": float(o.amount_rub),
+                        "description": o.description or "",
+                        "external_id": o.external_id,
+                        "created_at": o.created_at.isoformat() if o.created_at else None,
+                        "paid_at": o.paid_at.isoformat() if o.paid_at else None,
+                        "refunded_at": o.refunded_at.isoformat() if o.refunded_at else None,
+                        "metadata_flags": admin_tools_service.extract_order_metadata_flags(o.metadata_),
+                    }
+                    for o in recent_orders_rows
+                ],
+                "recent_ledger": [
+                    {
+                        "id": entry.id,
+                        "entry_type": entry.entry_type,
+                        "bucket": entry.bucket,
+                        "amount": int(entry.amount),
+                        "description": (
+                            (entry.metadata_.get("description") or entry.metadata_.get("reason") or "")
+                            if isinstance(entry.metadata_, dict)
+                            else ""
+                        ),
+                        "created_at": entry.created_at.isoformat() if entry.created_at else None,
+                    }
+                    for entry in recent_ledger_rows
+                ],
+                "recent_device_events": [
+                    {
+                        "id": ev.id,
+                        "hwid": ev.hwid,
+                        "device_model": (device_meta_by_hwid.get(ev.hwid) or {}).get("device_name"),
+                        "platform": (device_meta_by_hwid.get(ev.hwid) or {}).get("platform"),
+                        "created_at": ev.created_at.isoformat() if ev.created_at else None,
+                    }
+                    for ev in recent_device_event_rows
+                ],
+                "recent_audit": [
+                    {
+                        "id": a.id,
+                        "action": a.action,
+                        "admin_telegram_id": a.admin_id,
+                        "details": a.details or "",
+                        "created_at": a.created_at.isoformat() if a.created_at else None,
+                    }
+                    for a in recent_audit_rows
+                ],
             },
         })
 
@@ -1317,7 +1830,16 @@ async def api_admin_user_devices_reset_handler(request: web.Request) -> web.Resp
     if id_err is not None or target_user_id is None:
         return id_err  # type: ignore[return-value]
 
+    notify_user = False
+    raw_text = await request.text()
+    if raw_text.strip():
+        opt_payload, parse_err = await _parse_json_model(request, AdminUserOptionalNotifyPayload)
+        if parse_err is not None or opt_payload is None:
+            return parse_err  # type: ignore[return-value]
+        notify_user = bool(opt_payload.notify_user)
+
     async with session_scope() as session:
+        await acquire_user_account_lock(session, target_user_id)
         user = await session.scalar(
             select(User).where(User.id == target_user_id).with_for_update()
         )
@@ -1338,8 +1860,11 @@ async def api_admin_user_devices_reset_handler(request: web.Request) -> web.Resp
         sub_ver = getattr(vless_sub, "version", None) if vless_sub else None
         sub_id = vless_sub.id if vless_sub else None
 
-        await session.execute(
+        dev_del_res = await session.execute(
             delete(UserDevice).where(UserDevice.user_id == user.id)
+        )
+        events_del_res = await session.execute(
+            delete(DeviceRegistrationEvent).where(DeviceRegistrationEvent.user_id == user.id)
         )
         for u_uuid in dev_uuids:
             VlessSubscriptionService.deprovision_background(
@@ -1353,9 +1878,136 @@ async def api_admin_user_devices_reset_handler(request: web.Request) -> web.Resp
             action=AdminAuditAction.VLESS_HWID_RESET,
             target_type="user",
             target_id=user.id,
+            details={
+                "deleted_devices": int(dev_del_res.rowcount or 0),
+                "deleted_churn_events": int(events_del_res.rowcount or 0),
+            },
         )
+        if notify_user:
+            _queue_user_notification(
+                session,
+                request.app.get("bot"),
+                user_id=user.id,
+                telegram_id=user.telegram_id,
+                text="🔄 Привязки устройств к вашей подписке сброшены администратором. Подключите устройства заново.",
+            )
 
     return web.json_response({"ok": True, "message": "Привязки устройств сброшены"})
+
+
+async def api_admin_user_device_delete_handler(request: web.Request) -> web.Response:
+    """Delete a single bound HWID device for a user and queue deprovisioning/sync."""
+    ctx, err_resp = require_admin_user(request)
+    if err_resp is not None or ctx is None:
+        return err_resp  # type: ignore[return-value]
+
+    target_user_id, id_err = _parse_user_id(request)
+    if id_err is not None or target_user_id is None:
+        return id_err  # type: ignore[return-value]
+
+    hwid = unquote(request.match_info.get("hwid", "")).strip()
+    if not hwid or len(hwid) > 128:
+        return web.json_response({"ok": False, "error": "Invalid HWID"}, status=400)
+
+    async with session_scope() as session:
+        await acquire_user_account_lock(session, target_user_id)
+        user = await session.scalar(
+            select(User).where(User.id == target_user_id).with_for_update()
+        )
+        if user is None or getattr(user, "is_deleted", False):
+            return web.json_response({"ok": False, "error": "Пользователь не найден"}, status=404)
+
+        deleted = await user_devices_repo.delete_user_device(session, user.id, hwid)
+        if deleted is None:
+            return web.json_response({"ok": False, "error": "Устройство не найдено"}, status=404)
+
+        deleted_uuid = getattr(deleted, "device_uuid", None)
+        if deleted_uuid:
+            vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+            sub_id = vless_sub.id if vless_sub else None
+            if vless_sub is not None:
+                await vless_subscription_repo.add_pending_revocation_uuids(session, vless_sub.id, [deleted_uuid])
+            sub_ver = getattr(vless_sub, "version", None) if vless_sub else None
+
+            VlessSubscriptionService.deprovision_background(
+                deleted_uuid,
+                version=sub_ver,
+                sub_id=sub_id,
+                session=session,
+                services=("vless",),
+            )
+            VlessSubscriptionService.ensure_synced_background(user.id, session=session)
+
+            wi_sub = await get_subscription_by_user_id(session, user.id)
+            if wi_sub is not None:
+                wi_sub = await white_internet_repo.get_subscription_with_lock(session, wi_sub.id) or wi_sub
+                await white_internet_repo.add_pending_revocation_uuids(session, wi_sub.id, [deleted_uuid])
+                wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
+                wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+                await session.flush()
+                VlessSubscriptionService.deprovision_background(
+                    deleted_uuid,
+                    version=wi_sub.desired_version,
+                    sub_id=None,
+                    session=session,
+                    services=("white_internet",),
+                )
+                await _queue_wi_inline_sync(session, wi_sub, "device_delete")
+
+        await AuditService.log_action(
+            session,
+            admin_id=ctx.telegram_id,
+            action=AdminAuditAction.VLESS_HWID_RESET,
+            target_type="user",
+            target_id=user.id,
+            details={"action": "delete_device", "hwid": hwid},
+        )
+
+    return web.json_response({"ok": True, "hwid": hwid, "message": "Устройство удалено"})
+
+
+async def api_admin_user_resync_handler(request: web.Request) -> web.Response:
+    """Manually trigger background/inline sync for user's Standard and WI subscriptions."""
+    ctx, err_resp = require_admin_user(request)
+    if err_resp is not None or ctx is None:
+        return err_resp  # type: ignore[return-value]
+
+    target_user_id, id_err = _parse_user_id(request)
+    if id_err is not None or target_user_id is None:
+        return id_err  # type: ignore[return-value]
+
+    async with session_scope() as session:
+        user = await session.get(User, target_user_id)
+        if user is None or getattr(user, "is_deleted", False):
+            return web.json_response({"ok": False, "error": "Пользователь не найден"}, status=404)
+
+        vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+        wi_sub = await get_subscription_by_user_id(session, user.id)
+        synced_standard = False
+        synced_wi = False
+
+        if vless_sub is not None:
+            VlessSubscriptionService.ensure_synced_background(user.id, session=session)
+            synced_standard = True
+        if wi_sub is not None:
+            await _queue_wi_inline_sync(session, wi_sub, "manual_resync")
+            synced_wi = True
+
+        await AuditService.log_action(
+            session,
+            admin_id=ctx.telegram_id,
+            action=AdminAuditAction.ADMIN_SUB_CHANGE,
+            target_type="user",
+            target_id=user.id,
+            details={"action": "manual_resync", "standard": synced_standard, "wi": synced_wi},
+        )
+
+    return web.json_response({
+        "ok": True,
+        "synced_standard": synced_standard,
+        "synced_wi": synced_wi,
+        "message": "Синхронизация запущена",
+    })
 
 
 async def api_admin_user_token_rotate_handler(request: web.Request) -> web.Response:
@@ -1367,7 +2019,16 @@ async def api_admin_user_token_rotate_handler(request: web.Request) -> web.Respo
     if id_err is not None or target_user_id is None:
         return id_err  # type: ignore[return-value]
 
+    notify_user = False
+    raw_text = await request.text()
+    if raw_text.strip():
+        opt_payload, parse_err = await _parse_json_model(request, AdminUserOptionalNotifyPayload)
+        if parse_err is not None or opt_payload is None:
+            return parse_err  # type: ignore[return-value]
+        notify_user = bool(opt_payload.notify_user)
+
     async with session_scope() as session:
+        await acquire_user_account_lock(session, target_user_id)
         user = await session.scalar(
             select(User).where(User.id == target_user_id).with_for_update()
         )
@@ -1386,6 +2047,7 @@ async def api_admin_user_token_rotate_handler(request: web.Request) -> web.Respo
                 session, wi_sub.id, new_token=new_token, reset_hwids=True
             )
             new_token = new_token or wi_token
+            wi_sub = await white_internet_repo.get_subscription_by_id(session, wi_sub.id) or wi_sub
 
         existing_devs = (await session.scalars(select(UserDevice).where(UserDevice.user_id == user.id))).all()
         dev_uuids = [d.device_uuid for d in existing_devs if getattr(d, "device_uuid", None)]
@@ -1405,6 +2067,10 @@ async def api_admin_user_token_rotate_handler(request: web.Request) -> web.Respo
         await session.execute(
             delete(UserDevice).where(UserDevice.user_id == user.id)
         )
+        if vless_sub is not None:
+            VlessSubscriptionService.ensure_synced_background(user.id, session=session)
+        if wi_sub is not None:
+            await _queue_wi_inline_sync(session, wi_sub, "token_rotate")
         await AuditService.log_action(
             session,
             admin_id=ctx.telegram_id,
@@ -1412,9 +2078,15 @@ async def api_admin_user_token_rotate_handler(request: web.Request) -> web.Respo
             target_type="user",
             target_id=user.id,
         )
+        if notify_user:
+            _queue_user_notification(
+                session,
+                request.app.get("bot"),
+                user_id=user.id,
+                telegram_id=user.telegram_id,
+                text="🔑 Ссылка вашей подписки перевыпущена администратором. Откройте приложение для обновления.",
+            )
 
-    if vless_sub is not None:
-        VlessSubscriptionService.ensure_synced_background(user.id)
     return web.json_response({
         "ok": True,
         "subscription_url": _build_sub_url(new_token) if new_token else None,
@@ -1425,9 +2097,12 @@ async def api_admin_user_token_rotate_handler(request: web.Request) -> web.Respo
 
 def _parse_positive_int(request: web.Request, name: str) -> tuple[int | None, web.Response | None]:
     raw = request.match_info.get(name, "")
-    if not raw.isdigit() or int(raw) <= 0:
+    if not raw.isdigit():
         return None, web.json_response({"ok": False, "error": f"Invalid {name}"}, status=400)
-    return int(raw), None
+    val = int(raw)
+    if val <= 0 or val > 2_147_483_647:
+        return None, web.json_response({"ok": False, "error": f"Invalid {name}"}, status=400)
+    return val, None
 
 
 async def api_admin_user_message_handler(request: web.Request) -> web.Response:
@@ -1627,6 +2302,7 @@ async def api_admin_finances_handler(request: web.Request) -> web.Response:
         kind = "orders"
     status = request.query.get("status", "").strip()
     query_str = request.query.get("q", "").strip()
+    attention_only = request.query.get("attention_only", "").strip().lower() in ("1", "true", "yes")
     offset = max(0, int(request.query.get("offset", "0") or 0) if request.query.get("offset", "0").isdigit() else 0)
     raw_limit = int(request.query.get("limit", "25") or 25) if request.query.get("limit", "25").isdigit() else 25
     limit = min(100, max(1, raw_limit))
@@ -1637,6 +2313,7 @@ async def api_admin_finances_handler(request: web.Request) -> web.Response:
             kind=kind,
             status=status,
             q=query_str,
+            attention_only=attention_only,
             offset=offset,
             limit=limit,
         )
@@ -1649,6 +2326,7 @@ async def api_admin_audit_logs_handler(request: web.Request) -> web.Response:
         return err_resp  # type: ignore[return-value]
 
     action = request.query.get("action", "").strip()
+    target_type = request.query.get("target_type", "").strip()
     query_str = request.query.get("q", "").strip()
     offset = max(0, int(request.query.get("offset", "0") or 0) if request.query.get("offset", "0").isdigit() else 0)
     raw_limit = int(request.query.get("limit", "40") or 40) if request.query.get("limit", "40").isdigit() else 40
@@ -1658,6 +2336,7 @@ async def api_admin_audit_logs_handler(request: web.Request) -> web.Response:
         data = await admin_tools_service.list_audit_logs(
             session,
             action=action,
+            target_type=target_type,
             q=query_str,
             offset=offset,
             limit=limit,
@@ -1707,4 +2386,210 @@ async def api_admin_payments_maintenance_post_handler(request: web.Request) -> w
 
     logger.info("Payments maintenance mode toggled to %s by admin %s", payload.enabled, ctx.telegram_id)
     return web.json_response({"ok": True, "enabled": payload.enabled})
+
+
+async def api_admin_overview_handler(request: web.Request) -> web.Response:
+    """Return compact system pulse for admin overview dashboard."""
+    ctx, err_resp = require_admin_user(request)
+    if err_resp is not None or ctx is None:
+        return err_resp  # type: ignore[return-value]
+
+    async with session_scope() as session:
+        nodes = await admin_nodes_service.list_nodes(session)
+        online = 0
+        degraded = 0
+        offline = 0
+        disabled = 0
+        problems: list[dict[str, Any]] = []
+        for n in nodes:
+            is_active = bool(n.get("is_active", False))
+            h_state = str(n.get("health_state") or "")
+            if not is_active or h_state == ServerHealthState.MANUAL_DISABLED:
+                disabled += 1
+            elif h_state == ServerHealthState.ONLINE:
+                online += 1
+            elif h_state == ServerHealthState.WAITING_CONFIRMATION:
+                degraded += 1
+            elif h_state == ServerHealthState.PROBLEM:
+                offline += 1
+
+            err_count = int(n.get("module_errors_count") or 0)
+            ingress_prob = bool(n.get("ingress_problem", False))
+            cdn_prob = bool(n.get("cdn_problem", False))
+            disabled_reason = n.get("disabled_reason")
+            if (
+                not is_active
+                or h_state != ServerHealthState.ONLINE
+                or bool(disabled_reason)
+                or ingress_prob
+                or cdn_prob
+                or err_count > 0
+            ):
+                problems.append({
+                    "id": n.get("id"),
+                    "name": n.get("name"),
+                    "role": n.get("role"),
+                    "health_state": h_state,
+                    "disabled_reason": disabled_reason,
+                    "ingress_problem": ingress_prob,
+                    "cdn_problem": cdn_prob,
+                    "module_errors_count": err_count,
+                })
+
+        maint_val = await get_system_setting(session, "payments_maintenance_enabled", "false")
+        payments_maintenance_enabled = str(maint_val or "").strip().lower() in ("true", "1", "yes")
+
+        finances_summary = await admin_tools_service.get_overview_finances_summary(session)
+        user_counts = await users_repo.get_user_filter_counts(session)
+
+        active_bp = await session.scalar(
+            select(BroadcastProgress)
+            .where(BroadcastProgress.status == "in_progress")
+            .order_by(BroadcastProgress.id.desc())
+            .limit(1)
+        )
+        active_broadcast = broadcast_service.serialize_broadcast(active_bp) if active_bp is not None else None
+
+        pending_wh = int(
+            (
+                await session.scalar(
+                    select(func.count(WebhookInbox.id)).where(
+                        WebhookInbox.status.in_([WebhookInboxStatus.PENDING, WebhookInboxStatus.RETRY])
+                    )
+                )
+            )
+            or 0
+        )
+        dead_wh = int(
+            (
+                await session.scalar(
+                    select(func.count(WebhookInbox.id)).where(
+                        WebhookInbox.status == WebhookInboxStatus.DEAD
+                    )
+                )
+            )
+            or 0
+        )
+
+    return web.json_response({
+        "ok": True,
+        "nodes": {
+            "total": len(nodes),
+            "online": online,
+            "degraded": degraded,
+            "offline": offline,
+            "disabled": disabled,
+            "problems": problems,
+        },
+        "payments_maintenance_enabled": payments_maintenance_enabled,
+        "finances": finances_summary,
+        "users": {
+            "total": user_counts.get("all", 0),
+            "active_standard": user_counts.get("active_standard", 0),
+            "active_wi": user_counts.get("active_wi", 0),
+            "expiring_3d": user_counts.get("expiring_3d", 0),
+        },
+        "active_broadcast": active_broadcast,
+        "workers": get_worker_health_snapshot(),
+        "webhooks": {
+            "pending": pending_wh,
+            "dead": dead_wh,
+        },
+    })
+
+
+async def api_admin_nodes_sync_topology_handler(request: web.Request) -> web.Response:
+    """Trigger immediate topology sync across active nodes."""
+    ctx, err_resp = require_admin_user(request)
+    if err_resp is not None or ctx is None:
+        return err_resp  # type: ignore[return-value]
+
+    try:
+        res = await admin_nodes_service.trigger_topology_sync(ctx.telegram_id)
+        return web.json_response({"ok": True, **res})
+    except AdminNodeServiceError as exc:
+        return _service_error_response(exc)
+
+
+async def api_admin_nodes_resync_clients_handler(request: web.Request) -> web.Response:
+    """Trigger immediate client resync on a specific node."""
+    ctx, err_resp = require_admin_user(request)
+    if err_resp is not None or ctx is None:
+        return err_resp  # type: ignore[return-value]
+
+    server_id, id_err = _parse_server_id(request)
+    if id_err is not None or server_id is None:
+        return id_err  # type: ignore[return-value]
+
+    try:
+        res = await admin_nodes_service.trigger_node_clients_resync(server_id, ctx.telegram_id)
+        return web.json_response({"ok": True, **res})
+    except AdminNodeServiceError as exc:
+        return _service_error_response(exc)
+
+
+async def api_admin_nodes_lifecycle_handler(request: web.Request) -> web.Response:
+    """Set node lifecycle_status (active | decommissioning)."""
+    ctx, err_resp = require_admin_user(request)
+    if err_resp is not None or ctx is None:
+        return err_resp  # type: ignore[return-value]
+
+    server_id, id_err = _parse_server_id(request)
+    if id_err is not None or server_id is None:
+        return id_err  # type: ignore[return-value]
+
+    payload, parse_err = await _parse_json_model(request, NodeLifecyclePayload)
+    if parse_err is not None or payload is None:
+        return parse_err  # type: ignore[return-value]
+
+    try:
+        node = await admin_nodes_service.set_node_lifecycle(
+            server_id,
+            payload.lifecycle_status,
+            ctx.telegram_id,
+        )
+        return web.json_response({"ok": True, "node": node})
+    except AdminNodeServiceError as exc:
+        return _service_error_response(exc)
+
+
+async def api_admin_webhooks_handler(request: web.Request) -> web.Response:
+    """Return latest 30 pending/retry/dead rows from WebhookInbox."""
+    ctx, err_resp = require_admin_user(request)
+    if err_resp is not None or ctx is None:
+        return err_resp  # type: ignore[return-value]
+
+    async with session_scope() as session:
+        rows = (
+            await session.scalars(
+                select(WebhookInbox)
+                .where(
+                    WebhookInbox.status.in_([
+                        WebhookInboxStatus.PENDING,
+                        WebhookInboxStatus.RETRY,
+                        WebhookInboxStatus.DEAD,
+                    ])
+                )
+                .order_by(WebhookInbox.received_at.desc(), WebhookInbox.id.desc())
+                .limit(30)
+            )
+        ).all()
+
+    items = [
+        {
+            "id": row.id,
+            "event_id": row.event_key,
+            "provider": row.provider,
+            "event_type": row.event_type,
+            "public_order_id": row.public_order_id,
+            "payment_external_id": row.payment_external_id,
+            "status": row.status,
+            "attempts": int(row.payload.get("attempts", 0)) if isinstance(row.payload, dict) else 0,
+            "last_error": row.payload.get("last_error") if isinstance(row.payload, dict) else None,
+            "created_at": row.received_at.isoformat() if row.received_at else None,
+            "updated_at": row.received_at.isoformat() if row.received_at else None,
+        }
+        for row in rows
+    ]
+    return web.json_response({"ok": True, "webhooks": items})
 

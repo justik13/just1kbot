@@ -9,6 +9,7 @@ from aiohttp import web
 
 from bot.miniapp.auth import check_miniapp_asset_rate_limit, check_miniapp_rate_limit
 from bot.miniapp.handlers_admin import (
+    api_admin_2fa_logout_handler,
     api_admin_2fa_setup_handler,
     api_admin_2fa_verify_handler,
     api_admin_audit_logs_handler,
@@ -23,18 +24,25 @@ from bot.miniapp.handlers_admin import (
     api_admin_mass_extend_handler,
     api_admin_nodes_add_handler,
     api_admin_nodes_delete_handler,
+    api_admin_nodes_lifecycle_handler,
     api_admin_nodes_list_handler,
     api_admin_nodes_patch_handler,
     api_admin_nodes_refresh_handler,
+    api_admin_nodes_resync_clients_handler,
+    api_admin_nodes_sync_topology_handler,
     api_admin_nodes_toggle_handler,
+    api_admin_overview_handler,
     api_admin_payments_maintenance_get_handler,
     api_admin_payments_maintenance_post_handler,
     api_admin_user_adjust_handler,
     api_admin_user_details_handler,
+    api_admin_user_device_delete_handler,
     api_admin_user_devices_reset_handler,
     api_admin_user_message_handler,
+    api_admin_user_resync_handler,
     api_admin_user_token_rotate_handler,
     api_admin_users_handler,
+    api_admin_webhooks_handler,
     api_me_handler,
 )
 from bot.miniapp.handlers_user import (
@@ -148,19 +156,29 @@ def setup_miniapp_routes(app: web.Application) -> None:
     # Admin 2FA & session
     app.router.add_post("/api/app/admin/2fa/setup", api_admin_2fa_setup_handler)
     app.router.add_post("/api/app/admin/2fa/verify", api_admin_2fa_verify_handler)
+    app.router.add_post("/api/app/admin/2fa/logout", api_admin_2fa_logout_handler)
+
+    # Admin overview & webhooks
+    app.router.add_get("/api/app/admin/overview", api_admin_overview_handler)
+    app.router.add_get("/api/app/admin/webhooks", api_admin_webhooks_handler)
 
     # Admin nodes & users
     app.router.add_get("/api/app/admin/nodes", api_admin_nodes_list_handler)
     app.router.add_get("/api/app/admin/incy-settings", api_admin_incy_get_handler)
     app.router.add_put("/api/app/admin/incy-settings", api_admin_incy_put_handler)
     app.router.add_post("/api/app/admin/nodes/add", api_admin_nodes_add_handler)
+    app.router.add_post("/api/app/admin/nodes/sync-topology", api_admin_nodes_sync_topology_handler)
     app.router.add_post("/api/app/admin/nodes/{server_id}/refresh", api_admin_nodes_refresh_handler)
+    app.router.add_post("/api/app/admin/nodes/{server_id}/resync-clients", api_admin_nodes_resync_clients_handler)
+    app.router.add_post("/api/app/admin/nodes/{server_id}/lifecycle", api_admin_nodes_lifecycle_handler)
     app.router.add_patch("/api/app/admin/nodes/{server_id}", api_admin_nodes_patch_handler)
     app.router.add_post("/api/app/admin/nodes/{server_id}/toggle", api_admin_nodes_toggle_handler)
     app.router.add_delete("/api/app/admin/nodes/{server_id}", api_admin_nodes_delete_handler)
     app.router.add_get("/api/app/admin/users", api_admin_users_handler)
     app.router.add_get("/api/app/admin/users/{user_id}/details", api_admin_user_details_handler)
+    app.router.add_delete("/api/app/admin/users/{user_id}/devices/{hwid}", api_admin_user_device_delete_handler)
     app.router.add_post("/api/app/admin/users/{user_id}/devices/reset", api_admin_user_devices_reset_handler)
+    app.router.add_post("/api/app/admin/users/{user_id}/resync", api_admin_user_resync_handler)
     app.router.add_post("/api/app/admin/users/{user_id}/token/rotate", api_admin_user_token_rotate_handler)
     app.router.add_post("/api/app/admin/users/{user_id}/adjust", api_admin_user_adjust_handler)
     app.router.add_post("/api/app/admin/users/{user_id}/message", api_admin_user_message_handler)

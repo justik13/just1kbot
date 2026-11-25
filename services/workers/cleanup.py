@@ -380,6 +380,7 @@ async def _send_reconciliation_admin_alert(
     """Send a one-time admin alert for a payment mismatch or partial refund."""
     try:
         from aiogram import Bot
+        from bot.keyboards.notifications import get_admin_finances_keyboard
         from config.settings import get_settings
         from utils.telegram import safe, safe_send_message
 
@@ -401,10 +402,17 @@ async def _send_reconciliation_admin_alert(
             f"Платеж: <code>{safe(external_id)}</code>\n"
             f"Причина: <code>{safe(reason)}</code>"
         )
+        reply_markup = get_admin_finances_keyboard(str(order_id))
         async with Bot(token=bot_token) as alert_bot:
             for aid in admin_ids:
                 try:
-                    await safe_send_message(alert_bot, aid, text, parse_mode="HTML")
+                    await safe_send_message(
+                        alert_bot,
+                        aid,
+                        text,
+                        reply_markup=reply_markup,
+                        parse_mode="HTML",
+                    )
                 except Exception as exc:
                     logger.warning(
                         "Failed to send reconciliation alert to admin %s for order %s: %s",

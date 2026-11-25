@@ -286,6 +286,7 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
         if admin_alert_info:
             try:
                 from bot import texts
+                from bot.keyboards.notifications import get_admin_finances_keyboard
                 from config.settings import get_settings
                 from utils.telegram import safe_send_message
                 admin_ids = get_settings().ADMIN_IDS
@@ -294,12 +295,14 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                     amount_rub=html.escape(str(admin_alert_info["amount_rub"])),
                     mismatch=html.escape(str(admin_alert_info["mismatch"])),
                 )
+                reply_markup = get_admin_finances_keyboard(str(admin_alert_info["order_id"]))
                 for aid in admin_ids:
                     try:
                         await safe_send_message(
                             bot,
                             aid,
                             alert_text,
+                            reply_markup=reply_markup,
                             parse_mode="HTML",
                         )
                     except Exception as exc:
@@ -308,6 +311,7 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                 logger.warning("[%s] Failed to send admin alerts: %s", request_id, exc)
         if refund_alert_info:
             try:
+                from bot.keyboards.notifications import get_admin_finances_keyboard
                 from config.settings import get_settings
                 from utils.telegram import safe_send_message
 
@@ -341,9 +345,18 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                     f"Сумма: {refund_alert_info['amount_rub']} ₽ ({status_label})\n"
                     f"{footer_line}"
                 )
+                refund_reply_markup = get_admin_finances_keyboard(
+                    str(refund_alert_info["order_id"])
+                )
                 for aid in get_settings().ADMIN_IDS:
                     try:
-                        await safe_send_message(bot, aid, refund_text, parse_mode="HTML")
+                        await safe_send_message(
+                            bot,
+                            aid,
+                            refund_text,
+                            reply_markup=refund_reply_markup,
+                            parse_mode="HTML",
+                        )
                     except Exception as exc:
                         logger.warning("Failed to send refund notice to admin %s: %s", aid, exc)
             except Exception as exc:

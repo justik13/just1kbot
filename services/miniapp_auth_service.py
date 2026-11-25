@@ -32,6 +32,13 @@ MAX_2FA_ATTEMPTS = 5
 ATTEMPT_WINDOW_SECONDS = 300
 LOCKOUT_SECONDS = 300
 TOTP_REPLAY_TTL_SECONDS = 90
+ADMIN_SESSION_EPOCH_KEY = "miniapp_admin_session_epoch"
+
+_cached_admin_session_epoch: str = "1"
+
+
+class InitDataExpiredError(Exception):
+    """Raised when Telegram WebApp initData has valid signature but expired auth_date."""
 
 # In-memory per-admin TOTP brute-force tracker: admin_id -> (fail_count, window_start, locked_until)
 _2fa_failures: dict[int, tuple[int, float, float]] = {}
@@ -59,6 +66,7 @@ def validate_telegram_init_data(
     bot_token: str,
     *,
     max_age_seconds: int = DEFAULT_INIT_DATA_MAX_AGE_SECONDS,
+    raise_on_expired: bool = False,
 ) -> dict[str, Any] | None:
     """Validate Telegram WebApp initData HMAC-SHA256 signature and auth_date freshness."""
     if not init_data or not bot_token:
@@ -83,9 +91,6 @@ def validate_telegram_init_data(
     if auth_date > now_ts + MAX_FUTURE_SKEW_SECONDS:
         logger.warning("MiniApp initData auth_date is too far in the future")
         return None
-    if max_age_seconds > 0 and (now_ts - auth_date) > max_age_seconds:
-        logger.warning("MiniApp initData expired (age=%ss)", now_ts - auth_date)
-        return None
 
     data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(parsed_data.items()))
     secret_key = hmac.new(
@@ -101,6 +106,12 @@ def validate_telegram_init_data(
 
     if not hmac.compare_digest(received_hash, calculated_hash):
         logger.warning("Telegram WebApp initData signature mismatch")
+        return None
+
+    if max_age_seconds > 0 and (now_ts - auth_date) > max_age_seconds:
+        logger.warning("MiniApp initData expired (age=%ss)", now_ts - auth_date)
+        if raise_on_expired:
+            raise InitDataExpiredError("Telegram WebApp initData expired")
         return None
 
     user_raw = parsed_data.get("user")
@@ -119,13 +130,21 @@ def validate_telegram_init_data(
     return user_obj
 
 
-def authenticate_miniapp_request(init_data: str | None) -> MiniAppUserContext | None:
+def authenticate_miniapp_request(
+    init_data: str | None,
+    *,
+    raise_on_expired: bool = False,
+) -> MiniAppUserContext | None:
     """Validate initData against configured BOT_TOKEN and resolve admin permissions."""
     if not init_data:
         return None
 
     settings = get_settings()
-    user_info = validate_telegram_init_data(init_data, settings.BOT_TOKEN)
+    user_info = validate_telegram_init_data(
+        init_data,
+        settings.BOT_TOKEN,
+        raise_on_expired=raise_on_expired,
+    )
     if not user_info:
         return None
 
@@ -145,33 +164,83 @@ def _derive_signing_key(purpose: bytes) -> bytes:
     return hmac.new(purpose, settings.BOT_TOKEN.encode("utf-8"), hashlib.sha256).digest()
 
 
+async def get_admin_session_epoch(session: AsyncSession) -> str:
+    """Fetch current admin session epoch from SystemSetting (default '1') and update cache."""
+    global _cached_admin_session_epoch
+    raw = await get_system_setting(session, ADMIN_SESSION_EPOCH_KEY)
+    epoch = (raw or "1").strip() or "1"
+    _cached_admin_session_epoch = epoch
+    return epoch
+
+
+async def revoke_all_admin_sessions(
+    session: AsyncSession,
+    admin_telegram_id: int | None = None,
+) -> str:
+    """Increment miniapp_admin_session_epoch so all existing admin session tokens become invalid."""
+    global _cached_admin_session_epoch
+    current = await get_admin_session_epoch(session)
+    try:
+        new_epoch = str(int(current) + 1)
+    except ValueError:
+        new_epoch = "2"
+    await set_system_setting(
+        session,
+        ADMIN_SESSION_EPOCH_KEY,
+        new_epoch,
+        updated_by=admin_telegram_id,
+    )
+    _cached_admin_session_epoch = new_epoch
+    return new_epoch
+
+
 def issue_admin_session_token(
     telegram_id: int,
     *,
     ttl_seconds: int = ADMIN_SESSION_TTL_SECONDS,
+    epoch: str | None = None,
 ) -> tuple[str, int]:
     """Issue an HMAC-SHA256 signed short-lived admin session token."""
     exp_ts = int(time.time()) + max(60, ttl_seconds)
     nonce = secrets.token_hex(8)
-    payload = f"{telegram_id}:{exp_ts}:{nonce}".encode("utf-8")
+    epoch_val = (epoch or _cached_admin_session_epoch or "1").strip() or "1"
+    payload = f"{telegram_id}:{exp_ts}:{nonce}:{epoch_val}".encode("utf-8")
     sig = hmac.new(_derive_signing_key(b"MiniAppAdminSession"), payload, hashlib.sha256).hexdigest()
-    return f"{exp_ts}.{nonce}.{sig}", exp_ts
+    return f"{exp_ts}.{nonce}.{epoch_val}.{sig}", exp_ts
 
 
-def verify_admin_session_token(token: str | None, telegram_id: int) -> bool:
-    """Verify HMAC-SHA256 signature and expiration of an admin session token."""
+def verify_admin_session_token(
+    token: str | None,
+    telegram_id: int,
+    *,
+    expected_epoch: str | None = None,
+) -> bool:
+    """Verify HMAC-SHA256 signature, epoch, and expiration of an admin session token."""
     if not token or not is_admin(telegram_id):
         return False
     parts = token.strip().split(".")
-    if len(parts) != 3:
+    current_epoch = (expected_epoch or _cached_admin_session_epoch or "1").strip() or "1"
+    if len(parts) == 3:
+        if current_epoch != "1":
+            return False
+        exp_raw, nonce, sig = parts
+        token_epoch: str | None = None
+    elif len(parts) == 4:
+        exp_raw, nonce, token_epoch, sig = parts
+        if token_epoch != current_epoch:
+            return False
+    else:
         return False
-    exp_raw, nonce, sig = parts
+
     if not exp_raw.isdigit() or not nonce or not sig:
         return False
     exp_ts = int(exp_raw)
     if exp_ts < int(time.time()):
         return False
-    payload = f"{telegram_id}:{exp_ts}:{nonce}".encode("utf-8")
+    if token_epoch is None:
+        payload = f"{telegram_id}:{exp_ts}:{nonce}".encode("utf-8")
+    else:
+        payload = f"{telegram_id}:{exp_ts}:{nonce}:{token_epoch}".encode("utf-8")
     expected_sig = hmac.new(
         _derive_signing_key(b"MiniAppAdminSession"),
         payload,
@@ -418,15 +487,23 @@ async def verify_admin_2fa(
                     "error": f"Слишком много неверных попыток. Повторите через {lockout} сек.",
                 }
             return {"verified": False, "error": "Неверный 6-значный код подтверждения"}
+        try:
+            encrypted_secret = _encrypt_totp_secret(pending_secret)
+        except RuntimeError:
+            return {
+                "verified": False,
+                "error": "Ключ шифрования БД (DB_ENCRYPTION_KEY) не настроен на сервере.",
+            }
         await set_system_setting(
             session,
             f"miniapp_admin_totp_{telegram_id}",
-            _encrypt_totp_secret(pending_secret),
+            encrypted_secret,
             updated_by=telegram_id,
         )
         _used_totp_steps[(telegram_id, matched_step)] = True
         _2fa_failures.pop(telegram_id, None)
-        token, exp_ts = issue_admin_session_token(telegram_id)
+        epoch = await get_admin_session_epoch(session)
+        token, exp_ts = issue_admin_session_token(telegram_id, epoch=epoch)
         return {
             "verified": True,
             "mode": "totp",
@@ -476,7 +553,8 @@ async def verify_admin_2fa(
 
     _used_totp_steps[(telegram_id, matched_step)] = True
     _2fa_failures.pop(telegram_id, None)
-    token, exp_ts = issue_admin_session_token(telegram_id)
+    epoch = await get_admin_session_epoch(session)
+    token, exp_ts = issue_admin_session_token(telegram_id, epoch=epoch)
     return {
         "verified": True,
         "mode": "totp",

@@ -28,7 +28,7 @@ from database.repositories.servers_repo import (
     merge_v2_extra_data,
     update_server,
 )
-from database.connection import queue_post_commit_task
+from database.connection import queue_post_commit_task, session_scope
 from services.audit_service import AuditService
 from services.workers.node_monitor import reset_server_monitor_state
 from services.xray_node_client import XrayNodeClient
@@ -157,6 +157,8 @@ async def auto_detect_node_geo(
     api_url: str,
     status_data: dict[str, Any] | None = None,
     role: str | None = None,
+    *,
+    resolved_ip: str | None = None,
 ) -> tuple[str, str]:
     """Auto-detect localized country name and flag emoji from node metadata or IP geolocation."""
     detected_flag = ""
@@ -169,18 +171,21 @@ async def auto_detect_node_geo(
             if code_val:
                 detected_flag = country_code_to_flag(code_val)
 
-    hostname = urlparse(api_url).hostname or ""
-    if hostname:
-        resolved_ip = await _resolve_hostname_ipv4(hostname)
-        if resolved_ip:
-            geo = await _fetch_ip_geo_info(resolved_ip)
-            country = geo.get("country") or ""
-            flag = geo.get("flag") or (country_code_to_flag(geo.get("code")) if geo.get("code") else "")
-            if country or flag:
-                final_flag = detected_flag or flag or (
-                    "🇷🇺" if role == "ru_hub" else "🌐"
-                )
-                return country, final_flag
+    ip_to_lookup = (resolved_ip or "").strip()
+    if not ip_to_lookup:
+        hostname = urlparse(api_url).hostname or ""
+        if hostname:
+            ip_to_lookup = await _resolve_hostname_ipv4(hostname)
+
+    if ip_to_lookup:
+        geo = await _fetch_ip_geo_info(ip_to_lookup)
+        country = geo.get("country") or ""
+        flag = geo.get("flag") or (country_code_to_flag(geo.get("code")) if geo.get("code") else "")
+        if country or flag:
+            final_flag = detected_flag or flag or (
+                "🇷🇺" if role == "ru_hub" else "🌐"
+            )
+            return country, final_flag
 
     final_flag = detected_flag or ("🇷🇺" if role == "ru_hub" else "🌐")
     return "", final_flag
@@ -203,6 +208,7 @@ def serialize_server_node(server: Server) -> dict[str, Any]:
     if role == "exit_node" and not location_code:
         location_code = f"exit{server.id}"
 
+    module_errors = extra.get("module_errors") if isinstance(extra.get("module_errors"), dict) else {}
     return {
         "id": server.id,
         "name": server.name,
@@ -214,6 +220,19 @@ def serialize_server_node(server: Server) -> dict[str, Any]:
         "is_active": bool(server.is_active),
         "health_state": server.health_state,
         "lifecycle_status": server.lifecycle_status,
+        "disabled_reason": server.disabled_reason,
+        "consecutive_fails": int(server.consecutive_fails or 0),
+        "consecutive_ingress_fails": int(extra.get("consecutive_ingress_fails", 0) or 0),
+        "consecutive_cdn_fails": int(extra.get("consecutive_cdn_fails", 0) or 0),
+        "ingress_problem": bool(extra.get("ingress_problem", False)),
+        "cdn_problem": bool(extra.get("cdn_problem", False)),
+        "problem_started_at": (
+            server.problem_started_at.isoformat() if server.problem_started_at else None
+        ),
+        "vless_synced_epoch": extra.get("vless_synced_epoch") or None,
+        "xray_instance_epoch": server.xray_instance_epoch,
+        "system_load": extra.get("system_load") if isinstance(extra.get("system_load"), dict) else None,
+        "disk_usage": extra.get("disk_usage") if isinstance(extra.get("disk_usage"), dict) else None,
         "capabilities": caps,
         "in_standard": in_standard,
         "in_white_internet": in_white_internet,
@@ -231,8 +250,10 @@ def serialize_server_node(server: Server) -> dict[str, Any]:
         "secret_base_path": extra.get("secret_base_path") or "",
         "bridge_uuid": extra.get("bridge_uuid") or "",
         "modules": extra.get("modules") if isinstance(extra.get("modules"), dict) else {},
-        "module_errors": extra.get("module_errors") if isinstance(extra.get("module_errors"), dict) else {},
+        "module_errors": module_errors,
+        "module_errors_count": len(module_errors),
         "links": extra.get("links") if isinstance(extra.get("links"), dict) else {},
+        "sni_routes": extra.get("sni_routes") if isinstance(extra.get("sni_routes"), list) else [],
         "xhttp_locations": extra.get("xhttp_locations") if isinstance(extra.get("xhttp_locations"), list) else [],
         "inbounds": extra.get("inbounds") if isinstance(extra.get("inbounds"), list) else [],
         "traffic_limit": (
@@ -240,6 +261,11 @@ def serialize_server_node(server: Server) -> dict[str, Any]:
                 "used_bytes": usage.host_bytes,
                 "limit_bytes": usage.limit_gb * (1024 ** 3) if usage.limit_gb and usage.limit_gb > 0 else 0,
                 "pct": round(usage.pct, 1),
+                "exceeded": bool(
+                    usage.limit_gb and usage.limit_gb > 0
+                    and usage.host_bytes >= usage.limit_gb * (1024 ** 3)
+                ),
+                "reset_day": usage.reset_day,
             }
             if (usage := get_server_hosting_usage(extra)) and (usage.host_bytes > 0 or (usage.limit_gb and usage.limit_gb > 0))
             else None
@@ -298,8 +324,15 @@ async def _ensure_unique_exit_location_code(
     return f"exit{server_id}"
 
 
+async def _run_in_session(session: AsyncSession | None, fn):
+    if session is not None:
+        return await fn(session)
+    async with session_scope() as scoped:
+        return await fn(scoped)
+
+
 async def discover_and_add_node(
-    session: AsyncSession,
+    session: AsyncSession | None = None,
     *,
     admin_id: int,
     api_url: str,
@@ -307,18 +340,21 @@ async def discover_and_add_node(
     name: str = "",
     country_flag: str | None = None,
 ) -> dict[str, Any]:
-    """Validate URL, probe bare v2 node for auto-discovery, persist Server, and write audit log."""
+    """Validate URL, probe bare v2 node outside DB transaction, persist Server, and write audit log."""
     clean_url = _normalize_api_url(api_url)
     clean_key = (api_key or "").strip()
     if not clean_key:
         raise AdminNodeServiceError("api_key is required", status_code=400)
 
-    existing = await get_server_by_api_url(session, clean_url)
-    if existing is not None:
-        raise AdminNodeServiceError(
-            f"Node with api_url already exists (id={existing.id})",
-            status_code=409,
-        )
+    async def _check_duplicate(s: AsyncSession) -> None:
+        existing = await get_server_by_api_url(s, clean_url)
+        if existing is not None:
+            raise AdminNodeServiceError(
+                f"Node with api_url already exists (id={existing.id})",
+                status_code=409,
+            )
+
+    await _run_in_session(session, _check_duplicate)
 
     status_data, health_data, probe_ok, probe_error = await _probe_v2_node(
         clean_url,
@@ -347,7 +383,9 @@ async def discover_and_add_node(
             "Допустимые роли: ru_hub, eu_hub, exit_node. Завершите настройку узла перед добавлением в бот.",
             status_code=400,
         )
-    detected_name, detected_flag = await auto_detect_node_geo(clean_url, status_data, role)
+    detected_name, detected_flag = await auto_detect_node_geo(
+        clean_url, status_data, role, resolved_ip=resolved_ip
+    )
 
     clean_name = (name or "").strip()[:255]
     resolved_name = clean_name or detected_name or _derive_default_name(clean_url, status_data, role)
@@ -359,60 +397,64 @@ async def discover_and_add_node(
         resolved_flag = detected_flag
     protocol = _derive_protocol(caps, role)
 
-    server = await create_server(
-        session=session,
-        name=resolved_name,
-        role=role,
-        api_url=clean_url,
-        api_key=clean_key,
-        country_flag=resolved_flag,
-        protocol=protocol,
-        capabilities=caps,
-        lifecycle_status=ServerLifecycleStatus.ACTIVE,
-        extra_data=extra,
-        is_active=False,
-    )
-    # Новая нода добавляется выключенной (как после ручного «Выключить»):
-    # админ включает её сам, когда роль, TLS и связи готовы.
-    server.health_state = ServerHealthState.MANUAL_DISABLED
-    server.disabled_reason = "manual"
-    server.disabled_at = now_utc()
-    if role == "exit_node":
-        unique_loc = await _ensure_unique_exit_location_code(
-            session, server.id, extra.get("location_code")
+    async def _persist_new_node(s: AsyncSession) -> dict[str, Any]:
+        await _check_duplicate(s)
+        server = await create_server(
+            session=s,
+            name=resolved_name,
+            role=role,
+            api_url=clean_url,
+            api_key=clean_key,
+            country_flag=resolved_flag,
+            protocol=protocol,
+            capabilities=caps,
+            lifecycle_status=ServerLifecycleStatus.ACTIVE,
+            extra_data=extra,
+            is_active=False,
         )
-        if extra.get("location_code") != unique_loc:
-            extra["location_code"] = unique_loc
-            server.extra_data = dict(extra)
-            from sqlalchemy.orm.attributes import flag_modified
-            flag_modified(server, "extra_data")
-    if isinstance(health_data, dict) and health_data.get("status") == "ok":
-        server.last_successful_check = now_utc()
-        if health_data.get("node_epoch"):
-            server.xray_instance_epoch = str(health_data.get("node_epoch"))
-        if health_data.get("boot_id"):
-            server.xray_instance_boot_id = str(health_data.get("boot_id"))
-        if health_data.get("starttime") is not None:
-            server.xray_instance_starttime = int(health_data["starttime"])
-    await session.flush()
-    await session.refresh(server)
+        # Новая нода добавляется выключенной (как после ручного «Выключить»):
+        # админ включает её сам, когда роль, TLS и связи готовы.
+        server.health_state = ServerHealthState.MANUAL_DISABLED
+        server.disabled_reason = "manual"
+        server.disabled_at = now_utc()
+        if role == "exit_node":
+            unique_loc = await _ensure_unique_exit_location_code(
+                s, server.id, extra.get("location_code")
+            )
+            if extra.get("location_code") != unique_loc:
+                extra["location_code"] = unique_loc
+                server.extra_data = dict(extra)
+                from sqlalchemy.orm.attributes import flag_modified
+                flag_modified(server, "extra_data")
+        if isinstance(health_data, dict) and health_data.get("status") == "ok":
+            server.last_successful_check = now_utc()
+            if health_data.get("node_epoch"):
+                server.xray_instance_epoch = str(health_data.get("node_epoch"))
+            if health_data.get("boot_id"):
+                server.xray_instance_boot_id = str(health_data.get("boot_id"))
+            if health_data.get("starttime") is not None:
+                server.xray_instance_starttime = int(health_data["starttime"])
+        await s.flush()
+        await s.refresh(server)
 
-    await AuditService.log_action(
-        session,
-        admin_id=admin_id,
-        action=AdminAuditAction.ADD_SERVER,
-        target_type="server",
-        target_id=server.id,
-        details={
-            "name": server.name,
-            "role": role,
-            "capabilities": caps,
-        },
-    )
-    return {
-        "node": serialize_server_node(server),
-        "probe_ok": True,
-    }
+        await AuditService.log_action(
+            s,
+            admin_id=admin_id,
+            action=AdminAuditAction.ADD_SERVER,
+            target_type="server",
+            target_id=server.id,
+            details={
+                "name": server.name,
+                "role": role,
+                "capabilities": caps,
+            },
+        )
+        return {
+            "node": serialize_server_node(server),
+            "probe_ok": True,
+        }
+
+    return await _run_in_session(session, _persist_new_node)
 
 
 def _queue_topology_sync(session: AsyncSession) -> None:
@@ -428,18 +470,19 @@ def _queue_topology_sync(session: AsyncSession) -> None:
 
 
 async def refresh_node(
-    session: AsyncSession,
+    session: AsyncSession | None = None,
     *,
     admin_id: int,
     server_id: int,
 ) -> dict[str, Any]:
-    """Re-query /v1/node/status and /v1/health and synchronize DB metadata."""
-    server_ro = await get_server_by_id(session, server_id, for_update=False)
-    if server_ro is None:
-        raise AdminNodeServiceError("Node not found", status_code=404)
+    """Re-query /v1/node/status and /v1/health outside DB transaction and synchronize DB metadata."""
+    async def _read_creds(s: AsyncSession) -> tuple[str, str]:
+        server_ro = await get_server_by_id(s, server_id, for_update=False)
+        if server_ro is None:
+            raise AdminNodeServiceError("Node not found", status_code=404)
+        return server_ro.api_url, server_ro.api_key
 
-    api_url = server_ro.api_url
-    api_key = server_ro.api_key
+    api_url, api_key = await _run_in_session(session, _read_creds)
     status_data, health_data, probe_ok, probe_error = await _probe_v2_node(
         api_url,
         api_key,
@@ -455,51 +498,62 @@ async def refresh_node(
         host = urlparse(api_url).hostname or ""
         resolved_ip = await _resolve_hostname_ipv4(host) if host else ""
 
-    server = await get_server_by_id(session, server_id, for_update=True)
-    if server is None:
-        raise AdminNodeServiceError("Node not found", status_code=404)
+    async def _apply_refresh(s: AsyncSession) -> dict[str, Any]:
+        server = await get_server_by_id(s, server_id, for_update=True)
+        if server is None:
+            raise AdminNodeServiceError("Node not found", status_code=404)
 
-    extra_cur = server.extra_data if isinstance(server.extra_data, dict) else {}
-    caps = derive_v2_capabilities(status_data, health_data)
-    extra = merge_v2_extra_data(extra_cur, status_data, health_data)
-    if resolved_ip:
-        extra["ip"] = resolved_ip
-    role = extra.get("role")
-    if role == "exit_node":
-        extra["location_code"] = await _ensure_unique_exit_location_code(
-            session, server.id, extra.get("location_code")
+        extra_cur = server.extra_data if isinstance(server.extra_data, dict) else {}
+        caps = derive_v2_capabilities(status_data, health_data)
+        extra = merge_v2_extra_data(extra_cur, status_data, health_data)
+        if resolved_ip:
+            extra["ip"] = resolved_ip
+        role = extra.get("role")
+        if role == "exit_node":
+            extra["location_code"] = await _ensure_unique_exit_location_code(
+                s, server.id, extra.get("location_code")
+            )
+        updates: dict[str, Any] = {
+            "capabilities": caps or list(server.capabilities or []),
+            "extra_data": extra,
+            "protocol": _derive_protocol(caps, role),
+        }
+        if isinstance(status_data, dict):
+            cc = str(status_data.get("country_code") or "").strip()
+            if cc and (not server.country_flag or server.country_flag == "🌐"):
+                cc_flag = country_code_to_flag(cc)
+                if cc_flag:
+                    updates["country_flag"] = cc_flag
+        if isinstance(health_data, dict) and health_data.get("status") == "ok":
+            if server.is_active:
+                updates["health_state"] = ServerHealthState.ONLINE
+            updates["last_successful_check"] = now_utc()
+            updates["consecutive_fails"] = 0
+            if health_data.get("node_epoch"):
+                updates["xray_instance_epoch"] = str(health_data.get("node_epoch"))
+            if health_data.get("boot_id"):
+                updates["xray_instance_boot_id"] = str(health_data.get("boot_id"))
+            if health_data.get("starttime") is not None:
+                updates["xray_instance_starttime"] = int(health_data["starttime"])
+
+        updated = await update_server(s, server, **updates)
+        _queue_topology_sync(s)
+        await AuditService.log_action(
+            s,
+            admin_id=admin_id,
+            action=AdminAuditAction.EDIT_SERVER,
+            target_type="server",
+            target_id=updated.id,
+            details={"action": "refresh", "role": role},
         )
-    updates: dict[str, Any] = {
-        "capabilities": caps or list(server.capabilities or []),
-        "extra_data": extra,
-        "protocol": _derive_protocol(caps, role),
-    }
-    if isinstance(status_data, dict):
-        cc = str(status_data.get("country_code") or "").strip()
-        if cc and (not server.country_flag or server.country_flag == "🌐"):
-            cc_flag = country_code_to_flag(cc)
-            if cc_flag:
-                updates["country_flag"] = cc_flag
-    if isinstance(health_data, dict) and health_data.get("status") == "ok":
-        if server.is_active:
-            updates["health_state"] = ServerHealthState.ONLINE
-        updates["last_successful_check"] = now_utc()
-        updates["consecutive_fails"] = 0
-        if health_data.get("node_epoch"):
-            updates["xray_instance_epoch"] = str(health_data.get("node_epoch"))
-        if health_data.get("boot_id"):
-            updates["xray_instance_boot_id"] = str(health_data.get("boot_id"))
-        if health_data.get("starttime") is not None:
-            updates["xray_instance_starttime"] = int(health_data["starttime"])
+        logger.info("Admin %s refreshed v2 node %s (role=%s)", admin_id, server.id, role)
+        return serialize_server_node(updated)
 
-    updated = await update_server(session, server, **updates)
-    _queue_topology_sync(session)
-    logger.info("Admin %s refreshed v2 node %s (role=%s)", admin_id, server.id, role)
-    return serialize_server_node(updated)
+    return await _run_in_session(session, _apply_refresh)
 
 
 async def update_node_settings(
-    session: AsyncSession,
+    session: AsyncSession | None = None,
     *,
     admin_id: int,
     server_id: int,
@@ -516,95 +570,136 @@ async def update_node_settings(
     wi_turboflare_name: str | None = None,
     wi_turboflare_badge: str | None = None,
 ) -> dict[str, Any]:
-    """Update admin-editable node metadata and credentials."""
+    """Update admin-editable node metadata and credentials, probing changed endpoints outside DB tx."""
     clean_url: str | None = None
-    resolved_ip = ""
     if api_url is not None:
         clean_url = _normalize_api_url(api_url)
         if not await is_safe_url(clean_url):
             raise AdminNodeServiceError("Unsafe or forbidden node URL", status_code=400)
-        host = urlparse(clean_url).hostname or ""
-        resolved_ip = await _resolve_hostname_ipv4(host) if host else ""
 
-    server = await get_server_by_id(session, server_id, for_update=True)
-    if server is None:
-        raise AdminNodeServiceError("Node not found", status_code=404)
-
-    updates: dict[str, Any] = {}
-    if name is not None:
-        clean_name = name.strip()[:255]
-        if not clean_name:
-            raise AdminNodeServiceError("name cannot be empty", status_code=400)
-        updates["name"] = clean_name
-    if country_flag is not None:
-        raw_flag = country_flag.strip()[:10]
-        if raw_flag:
-            updates["country_flag"] = country_code_to_flag(raw_flag) or raw_flag
-        else:
-            updates["country_flag"] = None
-    if clean_url is not None:
-        existing = await get_server_by_api_url(session, clean_url)
-        if existing is not None and existing.id != server_id:
-            raise AdminNodeServiceError("Node with this api_url already exists", status_code=409)
-        updates["api_url"] = clean_url
-        if resolved_ip:
-            extra_for_ip = updates.get("extra_data") or (dict(server.extra_data) if isinstance(server.extra_data, dict) else {})
-            extra_for_ip["ip"] = resolved_ip
-            updates["extra_data"] = extra_for_ip
+    clean_key: str | None = None
     if api_key is not None:
         clean_key = api_key.strip()
         if not clean_key:
             raise AdminNodeServiceError("api_key cannot be empty", status_code=400)
-        updates["api_key"] = clean_key
 
-    extra_fields = (
-        in_standard,
-        in_white_internet,
-        vless_name,
-        server_description,
-        wi_yandex_name,
-        wi_yandex_badge,
-        wi_turboflare_name,
-        wi_turboflare_badge,
-    )
-    if any(v is not None for v in extra_fields):
-        base_extra = updates.get("extra_data")
-        extra = dict(base_extra) if isinstance(base_extra, dict) else (dict(server.extra_data) if isinstance(server.extra_data, dict) else {})
-        if in_standard is not None:
-            extra["in_standard"] = bool(in_standard)
-        if in_white_internet is not None:
-            extra["in_white_internet"] = bool(in_white_internet)
-        for key, raw_val, max_len in (
-            ("vless_name", vless_name, 120),
-            ("server_description", server_description, 30),
-            ("wi_yandex_name", wi_yandex_name, 120),
-            ("wi_yandex_badge", wi_yandex_badge, 30),
-            ("wi_turboflare_name", wi_turboflare_name, 120),
-            ("wi_turboflare_badge", wi_turboflare_badge, 30),
+    async def _read_current(s: AsyncSession) -> tuple[str, str]:
+        server_ro = await get_server_by_id(s, server_id, for_update=False)
+        if server_ro is None:
+            raise AdminNodeServiceError("Node not found", status_code=404)
+        return server_ro.api_url, server_ro.api_key
+
+    cur_url, cur_key = await _run_in_session(session, _read_current)
+    url_changed = clean_url is not None and clean_url != cur_url
+    key_changed = clean_key is not None and clean_key != cur_key
+
+    if url_changed or key_changed:
+        target_url = clean_url if clean_url is not None else cur_url
+        target_key = clean_key if clean_key is not None else cur_key
+        _status, _health, probe_ok, probe_err = await _probe_v2_node(target_url, target_key)
+        if not probe_ok:
+            raise AdminNodeServiceError(
+                f"Узел недоступен по новым параметрам: {probe_err or 'unreachable'}",
+                status_code=400,
+            )
+
+    resolved_ip = ""
+    if clean_url is not None:
+        host = urlparse(clean_url).hostname or ""
+        resolved_ip = await _resolve_hostname_ipv4(host) if host else ""
+
+    async def _apply_update(s: AsyncSession) -> dict[str, Any]:
+        server = await get_server_by_id(s, server_id, for_update=True)
+        if server is None:
+            raise AdminNodeServiceError("Node not found", status_code=404)
+
+        updates: dict[str, Any] = {}
+        ip_changed = False
+        if name is not None:
+            clean_name = name.strip()[:255]
+            if not clean_name:
+                raise AdminNodeServiceError("name cannot be empty", status_code=400)
+            updates["name"] = clean_name
+        if country_flag is not None:
+            raw_flag = country_flag.strip()[:10]
+            if raw_flag:
+                updates["country_flag"] = country_code_to_flag(raw_flag) or raw_flag
+            else:
+                updates["country_flag"] = None
+        if clean_url is not None:
+            existing = await get_server_by_api_url(s, clean_url)
+            if existing is not None and existing.id != server_id:
+                raise AdminNodeServiceError("Node with this api_url already exists", status_code=409)
+            if clean_url != server.api_url:
+                updates["api_url"] = clean_url
+            if resolved_ip:
+                cur_extra = server.extra_data if isinstance(server.extra_data, dict) else {}
+                if cur_extra.get("ip") != resolved_ip:
+                    extra_for_ip = dict(cur_extra)
+                    extra_for_ip["ip"] = resolved_ip
+                    updates["extra_data"] = extra_for_ip
+                    ip_changed = True
+        if clean_key is not None and clean_key != server.api_key:
+            updates["api_key"] = clean_key
+
+        extra_fields = (
+            in_standard,
+            in_white_internet,
+            vless_name,
+            server_description,
+            wi_yandex_name,
+            wi_yandex_badge,
+            wi_turboflare_name,
+            wi_turboflare_badge,
+        )
+        if any(v is not None for v in extra_fields):
+            base_extra = updates.get("extra_data")
+            extra = (
+                dict(base_extra)
+                if isinstance(base_extra, dict)
+                else (dict(server.extra_data) if isinstance(server.extra_data, dict) else {})
+            )
+            if in_standard is not None:
+                extra["in_standard"] = bool(in_standard)
+            if in_white_internet is not None:
+                extra["in_white_internet"] = bool(in_white_internet)
+            for key, raw_val, max_len in (
+                ("vless_name", vless_name, 120),
+                ("server_description", server_description, 30),
+                ("wi_yandex_name", wi_yandex_name, 120),
+                ("wi_yandex_badge", wi_yandex_badge, 30),
+                ("wi_turboflare_name", wi_turboflare_name, 120),
+                ("wi_turboflare_badge", wi_turboflare_badge, 30),
+            ):
+                if raw_val is not None:
+                    clean_val = raw_val.strip()[:max_len]
+                    if clean_val:
+                        extra[key] = clean_val
+                    else:
+                        extra.pop(key, None)
+            updates["extra_data"] = extra
+
+        if not updates:
+            return serialize_server_node(server)
+
+        updated = await update_server(s, server, **updates)
+        if (
+            "api_url" in updates
+            or ip_changed
+            or any(v is not None for v in (in_standard, in_white_internet))
         ):
-            if raw_val is not None:
-                clean_val = raw_val.strip()[:max_len]
-                if clean_val:
-                    extra[key] = clean_val
-                else:
-                    extra.pop(key, None)
-        updates["extra_data"] = extra
+            _queue_topology_sync(s)
+        await AuditService.log_action(
+            s,
+            admin_id=admin_id,
+            action=AdminAuditAction.EDIT_SERVER,
+            target_type="server",
+            target_id=updated.id,
+            details={"updated_fields": sorted(updates.keys())},
+        )
+        return serialize_server_node(updated)
 
-    if not updates:
-        return serialize_server_node(server)
-
-    updated = await update_server(session, server, **updates)
-    if any(v is not None for v in (in_standard, in_white_internet)):
-        _queue_topology_sync(session)
-    await AuditService.log_action(
-        session,
-        admin_id=admin_id,
-        action=AdminAuditAction.EDIT_SERVER,
-        target_type="server",
-        target_id=updated.id,
-        details={"updated_fields": sorted(updates.keys())},
-    )
-    return serialize_server_node(updated)
+    return await _run_in_session(session, _apply_update)
 
 
 async def toggle_node(
@@ -672,10 +767,23 @@ async def delete_node(
     server_id: int,
     force: bool = False,
 ) -> dict[str, Any]:
-    """Delete a server record from DB."""
+    """Delete a server record from DB, guarding active nodes unless force=True."""
     server = await get_server_by_id(session, server_id, for_update=True)
     if server is None:
         raise AdminNodeServiceError("Node not found", status_code=404)
+
+    if not force and server.is_active:
+        role = get_server_role(server)
+        all_srvs = await get_all_servers(session)
+        other_active_same_role = [
+            s
+            for s in all_srvs
+            if s.id != server.id and s.is_active and get_server_role(s) == role
+        ]
+        msg = "Сервер сейчас активен. Выключите его или подтвердите принудительное удаление."
+        if not other_active_same_role:
+            msg += f" Внимание: это последний активный узел роли {role}."
+        raise AdminNodeServiceError(msg, status_code=409)
 
     deleted_name = server.name
     await delete_server(session, server)
@@ -691,3 +799,93 @@ async def delete_node(
         details={"name": deleted_name, "force": force},
     )
     return {"deleted_id": server_id, "name": deleted_name}
+
+
+async def set_node_lifecycle(
+    server_id: int,
+    lifecycle_status: str,
+    admin_telegram_id: int,
+) -> dict[str, Any]:
+    """Set node lifecycle_status to ACTIVE or DECOMMISSIONING and queue topology sync."""
+    normalized = (lifecycle_status or "").strip().upper()
+    allowed = {ServerLifecycleStatus.ACTIVE.value, ServerLifecycleStatus.DECOMMISSIONING.value}
+    if normalized not in allowed:
+        raise AdminNodeServiceError(
+            f"Недопустимый lifecycle_status: {lifecycle_status!r}. Допустимые: ACTIVE, DECOMMISSIONING.",
+            status_code=400,
+        )
+
+    async with session_scope() as session:
+        server = await get_server_by_id(session, server_id, for_update=True)
+        if server is None:
+            raise AdminNodeServiceError("Node not found", status_code=404)
+
+        updated = await update_server(session, server, lifecycle_status=normalized)
+        _queue_topology_sync(session)
+        await AuditService.log_action(
+            session,
+            admin_id=admin_telegram_id,
+            action=AdminAuditAction.EDIT_SERVER,
+            target_type="server",
+            target_id=updated.id,
+            details={"lifecycle_status": normalized},
+        )
+        return serialize_server_node(updated)
+
+
+async def trigger_topology_sync(admin_telegram_id: int) -> dict[str, Any]:
+    """Trigger immediate v2 topology sync across all eligible nodes and log to AuditLog."""
+    from services.topology_sync_service import sync_v2_topology_to_nodes
+
+    async with session_scope() as session:
+        raw_results = await sync_v2_topology_to_nodes(session)
+        results = {str(k): bool(v) for k, v in raw_results.items()}
+        synced = sum(1 for v in raw_results.values() if v)
+        failed = sum(1 for v in raw_results.values() if not v)
+        await AuditService.log_action(
+            session,
+            admin_id=admin_telegram_id,
+            action=AdminAuditAction.EDIT_SERVER,
+            target_type="server",
+            target_id=0,
+            details={"action": "topology_sync", "synced": synced, "failed": failed},
+        )
+        return {"results": results, "synced": synced, "failed": failed}
+
+
+async def trigger_node_clients_resync(
+    server_id: int,
+    admin_telegram_id: int,
+) -> dict[str, Any]:
+    """Queue VLESS client resync for an active ru_hub or exit_node and log to AuditLog."""
+    async with session_scope() as session:
+        server = await get_server_by_id(session, server_id, for_update=False)
+        if server is None:
+            raise AdminNodeServiceError("Node not found", status_code=404)
+        if not server.is_active:
+            raise AdminNodeServiceError(
+                "Сервер выключен. Включите его перед синхронизацией клиентов.",
+                status_code=400,
+            )
+        role = get_server_role(server)
+        if role not in ("ru_hub", "exit_node"):
+            raise AdminNodeServiceError(
+                f"Синхронизация VLESS-клиентов поддерживается только для ru_hub и exit_node (роль: {role}).",
+                status_code=400,
+            )
+
+        from services.vless_subscription_service import VlessSubscriptionService
+
+        queue_post_commit_task(
+            session,
+            lambda sid=server_id: VlessSubscriptionService.sync_all_active_to_server_background(sid),
+        )
+        await AuditService.log_action(
+            session,
+            admin_id=admin_telegram_id,
+            action=AdminAuditAction.EDIT_SERVER,
+            target_type="server",
+            target_id=server_id,
+            details={"action": "clients_resync", "role": role},
+        )
+        return {"ok": True, "server_id": server_id}

@@ -1,7 +1,8 @@
-import { api } from "../api.js?v=2.7.8";
-import { escapeHtml, formatDate, openModal, renderPagination, showConfirmModal, showToast } from "../ui.js?v=2.7.8";
+import { api } from "../api.js?v=2.8.0";
+import { escapeHtml, formatDate, renderPagination, showConfirmModal, showToast, withButtonLoading } from "../ui.js?v=2.8.0";
 
 let _pollTimer = null;
+let _bcReqId = 0;
 
 export function clearBroadcastPollTimer() {
     if (_pollTimer !== null) {
@@ -10,7 +11,7 @@ export function clearBroadcastPollTimer() {
     }
 }
 
-function _buildAudienceOptions({ includeTest = true } = {}) {
+function _buildAudienceOptions({ includeTest = true, includeEmptyPlaceholder = false, defaultValue = "" } = {}) {
     const base = [
         { value: "all", label: "Все пользователи" },
         { value: "active", label: "С активной подпиской" },
@@ -24,17 +25,26 @@ function _buildAudienceOptions({ includeTest = true } = {}) {
     if (includeTest) {
         base.push({ value: "test", label: "Тест (только мне)" });
     }
-    return base
-        .map((opt) => `<option value="${escapeHtml(opt.value)}">${escapeHtml(opt.label)}</option>`)
+    const items = includeEmptyPlaceholder
+        ? [{ value: "", label: "— Выберите аудиторию —" }, ...base]
+        : base;
+    return items
+        .map(
+            (opt) =>
+                `<option value="${escapeHtml(opt.value)}" ${opt.value === defaultValue ? "selected" : ""}>${escapeHtml(
+                    opt.label
+                )}</option>`
+        )
         .join("");
 }
 
-function _confirmModal(title, summaryText, onConfirm, confirmText = "Подтвердить") {
+function _confirmModal(title, summaryText, onConfirm, confirmText = "Подтвердить", isDestructive = false) {
     showConfirmModal({
         title,
         message: summaryText,
         confirmText,
         cancelText: "Отмена",
+        isDestructive,
         onConfirm,
     });
 }
@@ -46,12 +56,79 @@ function _statusChip(status) {
     return `<span class="chip chip-err">Ошибка</span>`;
 }
 
+function _renderMassOpFormHtml(state) {
+    const massTab = state.massTab || "bonus";
+    const massAudienceHtml = _buildAudienceOptions({
+        includeTest: false,
+        includeEmptyPlaceholder: true,
+        defaultValue: "",
+    });
+    return `
+        <div class="field">
+            <label for="massAudienceSelect">Аудитория</label>
+            <select id="massAudienceSelect" class="select">${massAudienceHtml}</select>
+        </div>
+        ${
+            massTab === "bonus"
+                ? `
+            <div class="grid-2">
+                <div class="field">
+                    <label for="massAmountInput">Сумма бонуса (₽)</label>
+                    <input id="massAmountInput" class="input tabular" type="number" min="1" max="50000" step="1" value="100" required>
+                </div>
+                <div class="field">
+                    <label for="massReasonInput">Комментарий</label>
+                    <input id="massReasonInput" class="input" type="text" maxlength="200" placeholder="Компенсация">
+                </div>
+            </div>
+        `
+                : `
+            <div class="grid-2">
+                <div class="field">
+                    <label for="massScopeSelect">Сервис</label>
+                    <select id="massScopeSelect" class="select">
+                        <option value="standard">Стандарт</option>
+                        <option value="white_internet">Белый интернет</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="massDaysInput">Дней (+)</label>
+                    <input id="massDaysInput" class="input tabular" type="number" min="1" max="365" step="1" value="3" required>
+                </div>
+            </div>
+            <div class="field">
+                <label for="massReasonInput">Комментарий</label>
+                <input id="massReasonInput" class="input" type="text" maxlength="200" placeholder="Продление">
+            </div>
+        `
+        }
+        <label class="muted" style="display:flex; align-items:center; gap:8px; font-size:12px;">
+            <input id="massNotifyCheckbox" type="checkbox" checked>
+            Отправить уведомление пользователям в бот
+        </label>
+        <button id="massSubmitBtn" type="submit" class="btn btn-primary">Применить массово</button>
+    `;
+}
+
+function _updateCharCounter(root) {
+    const textInput = root.querySelector("#bcTextInput");
+    const mediaInput = root.querySelector("#bcMediaInput");
+    const counterEl = root.querySelector("#bcCharCounter");
+    if (!textInput || !counterEl) return;
+    const len = textInput.value.length;
+    const hasMedia = Boolean(mediaInput && mediaInput.value.trim());
+    if (hasMedia && len > 1024) {
+        counterEl.innerHTML = `<span style="color:var(--warn, #f59e0b); font-weight:600;">${len} / 4096 · С фото > 1024 симв. — сообщение будет разбито на 2 части</span>`;
+    } else {
+        counterEl.textContent = `${len} / 4096`;
+    }
+}
+
 export function renderAdminBroadcastsView(root, state) {
     clearBroadcastPollTimer();
     const broadcasts = state.broadcastsData || [];
     const massTab = state.massTab || "bonus";
-    const audienceHtml = _buildAudienceOptions({ includeTest: true });
-    const massAudienceHtml = _buildAudienceOptions({ includeTest: false });
+    const audienceHtml = _buildAudienceOptions({ includeTest: true, defaultValue: "test" });
 
     root.innerHTML = `
         <section class="card">
@@ -72,6 +149,7 @@ export function renderAdminBroadcastsView(root, state) {
                     <label for="bcTextInput">Текст сообщения (HTML: &lt;b&gt;, &lt;i&gt;, &lt;code&gt;, &lt;a&gt;)</label>
                     <textarea id="bcTextInput" class="textarea" rows="5" maxlength="4096" required
                         placeholder="Текст рассылки..."></textarea>
+                    <div id="bcCharCounter" class="muted" style="font-size:11px;">0 / 4096</div>
                 </div>
                 <div class="field">
                     <label for="bcMediaInput">Фото (необязательно: https://... или file_id)</label>
@@ -91,49 +169,7 @@ export function renderAdminBroadcastsView(root, state) {
                 </div>
             </div>
             <form id="massOpForm" class="field" style="gap:10px;">
-                <div class="field">
-                    <label for="massAudienceSelect">Аудитория</label>
-                    <select id="massAudienceSelect" class="select">${massAudienceHtml}</select>
-                </div>
-                ${
-                    massTab === "bonus"
-                        ? `
-                    <div class="grid-2">
-                        <div class="field">
-                            <label for="massAmountInput">Сумма бонуса (₽)</label>
-                            <input id="massAmountInput" class="input tabular" type="number" min="1" max="50000" step="1" value="100" required>
-                        </div>
-                        <div class="field">
-                            <label for="massReasonInput">Комментарий</label>
-                            <input id="massReasonInput" class="input" type="text" maxlength="200" placeholder="Компенсация">
-                        </div>
-                    </div>
-                `
-                        : `
-                    <div class="grid-2">
-                        <div class="field">
-                            <label for="massScopeSelect">Сервис</label>
-                            <select id="massScopeSelect" class="select">
-                                <option value="standard">Стандарт</option>
-                                <option value="white_internet">Белый интернет</option>
-                            </select>
-                        </div>
-                        <div class="field">
-                            <label for="massDaysInput">Дней (+)</label>
-                            <input id="massDaysInput" class="input tabular" type="number" min="1" max="365" step="1" value="3" required>
-                        </div>
-                    </div>
-                    <div class="field">
-                        <label for="massReasonInput">Комментарий</label>
-                        <input id="massReasonInput" class="input" type="text" maxlength="200" placeholder="Продление">
-                    </div>
-                `
-                }
-                <label class="muted" style="display:flex; align-items:center; gap:8px; font-size:12px;">
-                    <input id="massNotifyCheckbox" type="checkbox" checked>
-                    Отправить уведомление пользователям в бот
-                </label>
-                <button type="submit" class="btn btn-primary">Применить массово</button>
+                ${_renderMassOpFormHtml(state)}
             </form>
         </section>
 
@@ -149,15 +185,16 @@ export function renderAdminBroadcastsView(root, state) {
     `;
 
     const reloadBroadcasts = async (silent = false, offset = state.broadcastsOffset || 0) => {
+        const reqId = ++_bcReqId;
         try {
-            state.broadcastsOffset = offset;
             const res = await api.listBroadcasts(offset, 15);
+            if (reqId !== _bcReqId) return;
             state.broadcastsData = res.broadcasts || [];
             state.broadcastsTotal = res.total || 0;
             state.broadcastsOffset = res.offset || 0;
             state.broadcastsLimit = res.limit || 15;
             if (state.adminTab === "broadcasts" && state.mode === "admin") {
-                _renderHistoryList(root.querySelector("#bcListContainer"), state, reloadBroadcasts);
+                _renderHistoryList(root, root.querySelector("#bcListContainer"), state, reloadBroadcasts);
                 _renderBcPagination(root, state, reloadBroadcasts);
                 const hasRunning = state.broadcastsData.some((b) => b.status === "in_progress");
                 if (hasRunning && _pollTimer === null) {
@@ -167,9 +204,21 @@ export function renderAdminBroadcastsView(root, state) {
                 }
             }
         } catch (err) {
-            if (!silent) showToast(err.message || "Не удалось обновить список рассылок");
+            if (reqId !== _bcReqId) return;
+            if (!silent) showToast(err.message || "Не удалось обновить список рассылок", "error");
         }
     };
+
+    const bcTextInput = root.querySelector("#bcTextInput");
+    const bcMediaInput = root.querySelector("#bcMediaInput");
+    bcTextInput.addEventListener("input", () => _updateCharCounter(root));
+    bcMediaInput.addEventListener("input", () => _updateCharCounter(root));
+    _updateCharCounter(root);
+
+    root.querySelector("#bcAudienceSelect").addEventListener("change", () => {
+        const hintEl = root.querySelector("#bcPreviewHint");
+        if (hintEl) hintEl.textContent = "";
+    });
 
     root.querySelector("#reloadBcBtn").addEventListener("click", () => reloadBroadcasts(false, state.broadcastsOffset || 0));
 
@@ -182,7 +231,7 @@ export function renderAdminBroadcastsView(root, state) {
             hintEl.textContent = `Аудитория «${res.label}»: получат ${res.reachable_count} (всего в сегменте ${res.total_count})`;
         } catch (err) {
             hintEl.textContent = "";
-            showToast(err.message || "Ошибка предпросмотра");
+            showToast(err.message || "Ошибка предпросмотра", "error");
         }
     });
 
@@ -194,115 +243,151 @@ export function renderAdminBroadcastsView(root, state) {
         const text = root.querySelector("#bcTextInput").value.trim();
         const mediaUrl = root.querySelector("#bcMediaInput").value.trim() || null;
         if (!text) {
-            showToast("Введите текст рассылки");
+            showToast("Введите текст рассылки", "error");
             return;
         }
+        const launchBtn = root.querySelector("#bcLaunchBtn");
         const runLaunch = async () => {
-            const btn = root.querySelector("#bcLaunchBtn");
-            btn.disabled = true;
-            try {
-                const res = await api.startBroadcast({
-                    target_audience: audience,
-                    text,
-                    media_url: mediaUrl,
-                });
-                showToast(res.message || "Рассылка запущена");
-                root.querySelector("#bcTextInput").value = "";
-                root.querySelector("#bcMediaInput").value = "";
-                await reloadBroadcasts(false);
-            } catch (err) {
-                showToast(err.message || "Ошибка запуска рассылки");
-            } finally {
-                btn.disabled = false;
-            }
+            await withButtonLoading(launchBtn, "Запуск…", async () => {
+                try {
+                    const res = await api.startBroadcast({
+                        target_audience: audience,
+                        text,
+                        media_url: mediaUrl,
+                    });
+                    showToast(res.message || "Рассылка запущена");
+                    if (audience !== "test") {
+                        root.querySelector("#bcTextInput").value = "";
+                        root.querySelector("#bcMediaInput").value = "";
+                        _updateCharCounter(root);
+                    }
+                    state.broadcastsOffset = 0;
+                    await reloadBroadcasts(false, 0);
+                } catch (err) {
+                    showToast(err.message || "Ошибка запуска рассылки", "error");
+                }
+            });
         };
 
         if (audience === "test") {
             await runLaunch();
             return;
         }
-        _confirmModal(
-            "Подтвердите рассылку",
-            `Запустить рассылку на сегмент «${audienceLabel}»? Отменить можно в списке ниже.`,
-            runLaunch,
-            "Запустить"
-        );
+
+        try {
+            const preview = await withButtonLoading(launchBtn, "Подсчёт…", () => api.previewBroadcast(audience));
+            const snippet = text.length > 120 ? `${text.slice(0, 120)}…` : text;
+            _confirmModal(
+                "Подтвердите рассылку",
+                `Аудитория «${preview.label || audienceLabel}»: получат ${preview.reachable_count} чел.\n\nТекст: «${snippet}»\n\nЗапустить рассылку? Отменить можно в списке ниже.`,
+                runLaunch,
+                "Запустить",
+                true
+            );
+        } catch (err) {
+            showToast(err.message || "Ошибка предпросмотра аудитории", "error");
+        }
     });
 
     root.querySelectorAll("[data-masstab]").forEach((btn) => {
         btn.addEventListener("click", () => {
             state.massTab = btn.dataset.masstab;
-            renderAdminBroadcastsView(root, state);
+            root.querySelectorAll("[data-masstab]").forEach((b) => {
+                b.classList.toggle("active", b.dataset.masstab === state.massTab);
+            });
+            const form = root.querySelector("#massOpForm");
+            if (form) {
+                form.innerHTML = _renderMassOpFormHtml(state);
+            }
         });
     });
 
-    root.querySelector("#massOpForm").addEventListener("submit", (e) => {
+    root.querySelector("#massOpForm").addEventListener("submit", async (e) => {
         e.preventDefault();
+        const activeMassTab = state.massTab || "bonus";
         const massSelect = root.querySelector("#massAudienceSelect");
         const audience = massSelect.value;
+        if (!audience) {
+            showToast("Выберите аудиторию", "error");
+            return;
+        }
         const audienceLabel = massSelect.selectedOptions[0]?.textContent || audience;
         const reason = root.querySelector("#massReasonInput").value.trim();
         const notifyUsers = root.querySelector("#massNotifyCheckbox").checked;
+        const submitBtn = root.querySelector("#massSubmitBtn");
 
-        if (massTab === "bonus") {
+        if (activeMassTab === "bonus") {
             const amount = Number(root.querySelector("#massAmountInput").value);
             if (!Number.isInteger(amount) || amount < 1 || amount > 50000) {
-                showToast("Сумма должна быть от 1 до 50000 ₽");
+                showToast("Сумма должна быть от 1 до 50000 ₽", "error");
                 return;
             }
-            _confirmModal(
-                "Массовое начисление бонуса",
-                `Начислить +${amount} ₽ сегменту «${audienceLabel}»? Действие необратимо.`,
-                async () => {
-                    try {
-                        const res = await api.massBonus({
-                            target_audience: audience,
-                            amount_rub: amount,
-                            reason,
-                            notify_users: notifyUsers,
-                        });
-                        state.usersData = null;
-                        state.financesData = null;
-                        showToast(res.message || "Массовое начисление запущено");
-                    } catch (err) {
-                        showToast(err.message || "Ошибка начисления");
-                    }
-                },
-                "Начислить"
-            );
+            try {
+                const preview = await withButtonLoading(submitBtn, "Подсчёт…", () => api.previewBroadcast(audience));
+                const totalRub = amount * Number(preview.reachable_count || 0);
+                _confirmModal(
+                    "Массовое начисление бонуса",
+                    `Начислить +${amount} ₽ сегменту «${preview.label || audienceLabel}»?\nПолучателей: ${preview.reachable_count} · Итого: ${totalRub} ₽.\nДействие необратимо.`,
+                    async () => {
+                        try {
+                            const res = await api.massBonus({
+                                target_audience: audience,
+                                amount_rub: amount,
+                                reason,
+                                notify_users: notifyUsers,
+                            });
+                            state.usersData = null;
+                            state.financesData = null;
+                            showToast(res.message || "Массовое начисление запущено");
+                        } catch (err) {
+                            showToast(err.message || "Ошибка начисления", "error");
+                        }
+                    },
+                    "Начислить",
+                    true
+                );
+            } catch (err) {
+                showToast(err.message || "Ошибка предпросмотра аудитории", "error");
+            }
         } else {
             const scope = root.querySelector("#massScopeSelect").value;
             const days = Number(root.querySelector("#massDaysInput").value);
             if (!Number.isInteger(days) || days < 1 || days > 365) {
-                showToast("Срок должен быть от 1 до 365 дней");
+                showToast("Срок должен быть от 1 до 365 дней", "error");
                 return;
             }
             const scopeLabel = scope === "white_internet" ? "Белый интернет" : "Стандарт";
-            _confirmModal(
-                "Массовое продление подписки",
-                `Продлить «${scopeLabel}» на +${days} дн. для сегмента «${audienceLabel}»?`,
-                async () => {
-                    try {
-                        const res = await api.massExtend({
-                            service_scope: scope,
-                            target_audience: audience,
-                            days,
-                            reason,
-                            notify_users: notifyUsers,
-                        });
-                        state.usersData = null;
-                        state.financesData = null;
-                        showToast(res.message || "Массовое продление запущено");
-                    } catch (err) {
-                        showToast(err.message || "Ошибка продления");
-                    }
-                },
-                "Продлить"
-            );
+            try {
+                const preview = await withButtonLoading(submitBtn, "Подсчёт…", () => api.previewBroadcast(audience));
+                _confirmModal(
+                    "Массовое продление подписки",
+                    `Продлить «${scopeLabel}» на +${days} дн. для сегмента «${preview.label || audienceLabel}»?\nПолучателей: ${preview.reachable_count}.`,
+                    async () => {
+                        try {
+                            const res = await api.massExtend({
+                                service_scope: scope,
+                                target_audience: audience,
+                                days,
+                                reason,
+                                notify_users: notifyUsers,
+                            });
+                            state.usersData = null;
+                            state.financesData = null;
+                            showToast(res.message || "Массовое продление запущено");
+                        } catch (err) {
+                            showToast(err.message || "Ошибка продления", "error");
+                        }
+                    },
+                    "Продлить",
+                    true
+                );
+            } catch (err) {
+                showToast(err.message || "Ошибка предпросмотра аудитории", "error");
+            }
         }
     });
 
-    _renderHistoryList(root.querySelector("#bcListContainer"), state, reloadBroadcasts);
+    _renderHistoryList(root, root.querySelector("#bcListContainer"), state, reloadBroadcasts);
     _renderBcPagination(root, state, reloadBroadcasts);
     if (broadcasts.some((b) => b.status === "in_progress")) {
         _pollTimer = setInterval(() => reloadBroadcasts(true, state.broadcastsOffset || 0), 4000);
@@ -332,7 +417,7 @@ function _renderBcPagination(root, state, reloadBroadcasts) {
     });
 }
 
-function _renderHistoryList(container, state, reloadBroadcasts) {
+function _renderHistoryList(root, container, state, reloadBroadcasts) {
     if (!container) return;
     const broadcasts = state.broadcastsData || [];
     container.innerHTML = "";
@@ -346,37 +431,63 @@ function _renderHistoryList(container, state, reloadBroadcasts) {
         row.className = "item-row";
         row.innerHTML = `
             <div class="row">
-                <div>
+                <div style="display:flex; align-items:center; flex-wrap:wrap; gap:6px;">
                     <span style="font-weight:600;">#${b.id} · ${escapeHtml(b.label)}</span>
-                    <span class="muted" style="font-size:11px; margin-left:6px;">${formatDate(b.created_at)}</span>
+                    ${b.has_media ? `<span class="chip chip-muted">📷 Фото</span>` : ""}
+                    <span class="muted" style="font-size:11px;">${formatDate(b.created_at)}</span>
                 </div>
                 ${_statusChip(b.status)}
             </div>
             <div class="muted" style="font-size:12px; word-break:break-word;">${escapeHtml(b.text_preview)}</div>
-            <div class="row">
+            <div class="row" style="gap:6px; flex-wrap:wrap;">
                 <span class="tabular muted" style="font-size:12px;">
                     Успешно: <b>${b.success_count}</b> / ${b.total_count} (${b.progress_pct}%) · Ошибок: ${b.fail_count}
                 </span>
-                ${
-                    b.status === "in_progress"
-                        ? `<button type="button" class="btn btn-danger btn-sm" data-cancel-bc="${b.id}">Остановить</button>`
-                        : ""
-                }
+                <div style="display:flex; gap:6px; align-items:center;">
+                    <button type="button" class="btn btn-sm" data-repeat-bc="${b.id}">Повторить</button>
+                    ${
+                        b.status === "in_progress"
+                            ? `<button type="button" class="btn btn-danger btn-sm" data-cancel-bc="${b.id}">Остановить</button>`
+                            : ""
+                    }
+                </div>
             </div>
         `;
+
+        const repeatBtn = row.querySelector(`[data-repeat-bc="${b.id}"]`);
+        if (repeatBtn) {
+            repeatBtn.addEventListener("click", () => {
+                const textInput = root.querySelector("#bcTextInput");
+                if (textInput) {
+                    textInput.value = b.text_preview || "";
+                    _updateCharCounter(root);
+                    textInput.focus();
+                    textInput.scrollIntoView({ behavior: "smooth", block: "center" });
+                    showToast("Текст скопирован в редактор");
+                }
+            });
+        }
+
         const cancelBtn = row.querySelector(`[data-cancel-bc="${b.id}"]`);
         if (cancelBtn) {
-            cancelBtn.addEventListener("click", async () => {
-                cancelBtn.disabled = true;
-                try {
-                    const res = await api.cancelBroadcast(b.id);
-                    showToast(res.message || "Рассылка остановлена");
-                    await reloadBroadcasts(false);
-                } catch (err) {
-                    showToast(err.message || "Ошибка остановки");
-                } finally {
-                    cancelBtn.disabled = false;
-                }
+            cancelBtn.addEventListener("click", () => {
+                _confirmModal(
+                    "Остановить рассылку?",
+                    `Остановить рассылку #${b.id} («${b.label}»)? Уже отправленные сообщения не будут удалены.`,
+                    async () => {
+                        await withButtonLoading(cancelBtn, "Остановка…", async () => {
+                            try {
+                                const res = await api.cancelBroadcast(b.id);
+                                showToast(res.message || "Рассылка остановлена");
+                                await reloadBroadcasts(false);
+                            } catch (err) {
+                                showToast(err.message || "Ошибка остановки", "error");
+                            }
+                        });
+                    },
+                    "Остановить",
+                    true
+                );
             });
         }
         container.appendChild(row);

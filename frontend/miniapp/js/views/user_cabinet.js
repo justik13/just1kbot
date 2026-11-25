@@ -1,4 +1,4 @@
-import { api } from "../api.js?v=2.7.8";
+import { api } from "../api.js?v=2.8.0";
 import {
     copyText,
     escapeHtml,
@@ -8,8 +8,8 @@ import {
     openModal,
     showConfirmModal,
     showToast,
-} from "../ui.js?v=2.7.8";
-import { renderUserGuidesView } from "./user_guides.js?v=2.7.8";
+} from "../ui.js?v=2.8.0";
+import { renderUserGuidesView } from "./user_guides.js?v=2.8.0";
 
 const _state = {
     tab: null,

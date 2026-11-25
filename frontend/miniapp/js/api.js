@@ -1,11 +1,28 @@
 const ADMIN_SESSION_KEY = "just1k_admin_session";
 
+let _on2FARequired = null;
+let _onInitDataExpired = null;
+
+export function setOn2FARequired(cb) {
+    _on2FARequired = typeof cb === "function" ? cb : null;
+}
+
+export function setOnInitDataExpired(cb) {
+    _onInitDataExpired = typeof cb === "function" ? cb : null;
+}
+
 function getInitData() {
     const tg = window.Telegram && window.Telegram.WebApp;
     return tg && tg.initData ? tg.initData : "";
 }
 
 export function getAdminSessionToken() {
+    try {
+        const val = localStorage.getItem(ADMIN_SESSION_KEY);
+        if (val) return val;
+    } catch {
+        // Fallback to sessionStorage
+    }
     try {
         return sessionStorage.getItem(ADMIN_SESSION_KEY) || "";
     } catch {
@@ -14,6 +31,15 @@ export function getAdminSessionToken() {
 }
 
 export function setAdminSessionToken(token) {
+    try {
+        if (token) {
+            localStorage.setItem(ADMIN_SESSION_KEY, token);
+        } else {
+            localStorage.removeItem(ADMIN_SESSION_KEY);
+        }
+    } catch {
+        // Fallback to sessionStorage
+    }
     try {
         if (token) {
             sessionStorage.setItem(ADMIN_SESSION_KEY, token);
@@ -26,17 +52,39 @@ export function setAdminSessionToken(token) {
 }
 
 async function requestJson(path, options = {}) {
+    const { timeoutMs = 15000, ...fetchOptions } = options;
     const adminToken = getAdminSessionToken();
     const headers = {
         "Content-Type": "application/json",
         "X-Telegram-Init-Data": getInitData(),
         ...(adminToken ? { "X-Admin-Session": adminToken } : {}),
-        ...(options.headers || {}),
+        ...(fetchOptions.headers || {}),
     };
-    const resp = await fetch(path, {
-        ...options,
-        headers,
-    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let resp;
+    try {
+        resp = await fetch(path, {
+            ...fetchOptions,
+            headers,
+            signal: controller.signal,
+        });
+    } catch (err) {
+        if (err && err.name === "AbortError") {
+            const timeoutErr = new Error("Превышено время ожидания ответа сервера");
+            timeoutErr.code = "timeout";
+            throw timeoutErr;
+        }
+        if (err instanceof TypeError) {
+            const netErr = new Error("Нет связи с сервером");
+            netErr.code = "network_error";
+            throw netErr;
+        }
+        throw err;
+    } finally {
+        clearTimeout(timer);
+    }
+
     let data = {};
     try {
         data = await resp.json();
@@ -44,14 +92,18 @@ async function requestJson(path, options = {}) {
         data = { ok: false, error: `HTTP ${resp.status}` };
     }
     if (!resp.ok || data.ok === false) {
-        if (resp.status === 403 && data.code === "2fa_required") {
-            setAdminSessionToken("");
-        }
         const msg = data.error || `HTTP ${resp.status}`;
         const err = new Error(msg);
         err.status = resp.status;
         err.code = data.code || "";
+        err.data = data;
         err.payload = data;
+        if (resp.status === 403 && data.code === "2fa_required") {
+            setAdminSessionToken("");
+            if (_on2FARequired) _on2FARequired(err);
+        } else if (resp.status === 401 && data.code === "init_data_expired") {
+            if (_onInitDataExpired) _onInitDataExpired(err);
+        }
         throw err;
     }
     return data;
@@ -67,8 +119,14 @@ export const api = {
             method: "POST",
             body: JSON.stringify(setupToken ? { code, setup_token: setupToken } : { code }),
         }),
+    adminLogout: () =>
+        requestJson("/api/app/admin/2fa/logout", {
+            method: "POST",
+        }),
 
-    // Admin nodes & users
+    // Admin overview, nodes & users
+    getAdminOverview: () => requestJson("/api/app/admin/overview"),
+    getAdminWebhooks: () => requestJson("/api/app/admin/webhooks"),
     getIncySettings: () => requestJson("/api/app/admin/incy-settings"),
     updateIncySettings: (payload) =>
         requestJson("/api/app/admin/incy-settings", {
@@ -80,15 +138,32 @@ export const api = {
         requestJson("/api/app/admin/nodes/add", {
             method: "POST",
             body: JSON.stringify(payload),
+            timeoutMs: 25000,
         }),
     refreshNode: (id) =>
         requestJson(`/api/app/admin/nodes/${id}/refresh`, {
             method: "POST",
+            timeoutMs: 25000,
         }),
     patchNode: (id, payload) =>
         requestJson(`/api/app/admin/nodes/${id}`, {
             method: "PATCH",
             body: JSON.stringify(payload),
+            timeoutMs: 25000,
+        }),
+    syncTopology: () =>
+        requestJson("/api/app/admin/nodes/sync-topology", {
+            method: "POST",
+            timeoutMs: 25000,
+        }),
+    resyncNodeClients: (serverId) =>
+        requestJson(`/api/app/admin/nodes/${serverId}/resync-clients`, {
+            method: "POST",
+        }),
+    setNodeLifecycle: (serverId, lifecycleStatus) =>
+        requestJson(`/api/app/admin/nodes/${serverId}/lifecycle`, {
+            method: "POST",
+            body: JSON.stringify({ lifecycle_status: lifecycleStatus }),
         }),
     toggleNode: (id, isActive = null) =>
         requestJson(`/api/app/admin/nodes/${id}/toggle`, {
@@ -105,13 +180,23 @@ export const api = {
         ),
     getUserDetails: (userId) =>
         requestJson(`/api/app/admin/users/${userId}/details`),
-    resetUserDevices: (userId) =>
-        requestJson(`/api/app/admin/users/${userId}/devices/reset`, {
+    deleteUserDevice: (userId, hwid) =>
+        requestJson(`/api/app/admin/users/${userId}/devices/${encodeURIComponent(hwid)}`, {
+            method: "DELETE",
+        }),
+    resyncUser: (userId) =>
+        requestJson(`/api/app/admin/users/${userId}/resync`, {
             method: "POST",
         }),
-    rotateUserToken: (userId) =>
+    resetUserDevices: (userId, payload = {}) =>
+        requestJson(`/api/app/admin/users/${userId}/devices/reset`, {
+            method: "POST",
+            body: JSON.stringify(payload),
+        }),
+    rotateUserToken: (userId, payload = {}) =>
         requestJson(`/api/app/admin/users/${userId}/token/rotate`, {
             method: "POST",
+            body: JSON.stringify(payload),
         }),
     adjustUser: (userId, payload) =>
         requestJson(`/api/app/admin/users/${userId}/adjust`, {
@@ -148,18 +233,20 @@ export const api = {
             method: "POST",
             body: JSON.stringify(payload),
         }),
-    listFinances: (kind = "orders", status = "", q = "", offset = 0, limit = 25) =>
+    listFinances: (kind = "orders", status = "", q = "", offset = 0, limit = 25, attentionOnly = false) =>
         requestJson(
             `/api/app/admin/finances?kind=${encodeURIComponent(kind)}&status=${encodeURIComponent(
                 status
-            )}&q=${encodeURIComponent(q)}&offset=${offset}&limit=${limit}`
+            )}&q=${encodeURIComponent(q)}&offset=${offset}&limit=${limit}${attentionOnly ? "&attention_only=1" : ""}`
         ),
-    listAuditLogs: (action = "", q = "", offset = 0, limit = 40) =>
+    getAdminFinances: (...args) => api.listFinances(...args),
+    listAuditLogs: (action = "", q = "", offset = 0, limit = 40, targetType = "") =>
         requestJson(
             `/api/app/admin/audit-logs?action=${encodeURIComponent(action)}&q=${encodeURIComponent(
                 q
-            )}&offset=${offset}&limit=${limit}`
+            )}&offset=${offset}&limit=${limit}${targetType ? `&target_type=${encodeURIComponent(targetType)}` : ""}`
         ),
+    getAdminAudit: (...args) => api.listAuditLogs(...args),
     getPaymentsMaintenance: () => requestJson("/api/app/admin/settings/payments-maintenance"),
     setPaymentsMaintenance: (enabled) =>
         requestJson("/api/app/admin/settings/payments-maintenance", {

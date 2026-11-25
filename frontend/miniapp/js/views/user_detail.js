@@ -1,5 +1,79 @@
-import { api } from "../api.js?v=2.7.8";
-import { copyText, escapeHtml, formatDate, showConfirmModal, showToast } from "../ui.js?v=2.7.8";
+import { api } from "../api.js?v=2.8.0";
+import {
+    copyText,
+    escapeHtml,
+    formatBytesGb,
+    formatDate,
+    formatRelativeTime,
+    showConfirmModal,
+    showToast,
+    withButtonLoading,
+} from "../ui.js?v=2.8.0";
+
+let _detailReqId = 0;
+
+const ORDER_STATUS_MAP = {
+    paid: { text: "Оплачен", cls: "chip-ok" },
+    pending: { text: "Ожидает", cls: "chip-warn" },
+    refunded: { text: "Возврат", cls: "chip-warn" },
+    partially_refunded: { text: "Част. возврат", cls: "chip-warn" },
+    canceled: { text: "Отменён", cls: "chip-muted" },
+};
+
+const ORDER_KIND_MAP = {
+    standard: "Стандарт",
+    white_internet: "Белый интернет",
+    topup: "Пополнение",
+};
+
+const METADATA_FLAG_MAP = {
+    requires_manual_review: { text: "Ручная проверка", cls: "chip-err" },
+    settlement_held: { text: "Холд", cls: "chip-warn" },
+    payment_amount_mismatch: { text: "Расхождение суммы", cls: "chip-err" },
+    fulfillment_error: { text: "Ошибка выдачи", cls: "chip-err" },
+};
+
+const LEDGER_ENTRY_TYPE_MAP = {
+    payment_credit: "Зачисление",
+    bonus_credit: "Бонус",
+    admin_credit: "Коррекция (+)",
+    admin_debit: "Коррекция (−)",
+    purchase_debit: "Оплата подписки",
+    refund_debit: "Возврат",
+    referral_bonus: "Реферальный бонус",
+};
+
+const AUDIT_ACTION_MAP = {
+    admin_balance_topup: "Изменение баланса",
+    admin_sub_extend: "Продление подписки",
+    admin_sub_change: "Изменение подписки",
+    reduce: "Сокращение подписки",
+    white_internet_extend: "Продление БИ",
+    white_internet_traffic_added: "Добавлен трафик БИ",
+    white_internet_quota_set: "Установлена квота БИ",
+    white_internet_traffic_reset: "Сброс трафика БИ",
+    user_devices_reset: "Сброс всех HWID",
+    user_device_deleted: "Удаление устройства",
+    user_token_rotated: "Перевыпуск токена",
+    user_resync: "Пересинхронизация узлов",
+    user_restrictions: "Изменение ограничений",
+    user_message: "Сообщение пользователю",
+};
+
+function _formatDisplayName(u) {
+    if (u.first_name && u.username) {
+        return `${u.first_name} (@${u.username})`;
+    }
+    if (u.username) return `@${u.username}`;
+    if (u.first_name) return u.first_name;
+    return `ID ${u.telegram_id}`;
+}
+
+function _formatShortHwid(hwid) {
+    const raw = String(hwid || "");
+    if (raw.length <= 20) return raw;
+    return `${raw.slice(0, 10)}…${raw.slice(-8)}`;
+}
 
 function _renderDevicesHtml(devices) {
     if (!devices.length) {
@@ -14,44 +88,234 @@ function _renderDevicesHtml(devices) {
             if (d.is_bi_assigned) {
                 slotChips.push(`<span class="chip chip-wi">Белый интернет</span>`);
             }
+            if (d.is_std_priority) {
+                slotChips.push(`<span class="chip chip-ok">Приоритет Стандарт</span>`);
+            }
+            if (d.is_bi_priority) {
+                slotChips.push(`<span class="chip chip-wi">Приоритет БИ</span>`);
+            }
             if (!slotChips.length) {
                 slotChips.push(`<span class="chip chip-muted">Без слота</span>`);
             }
+            const metaParts = [d.platform, d.app_version ? `v${d.app_version}` : ""].filter(Boolean);
+            const metaText = metaParts.join(" · ");
             return `
                 <div class="item-row" style="padding:8px 12px;">
                     <div class="row">
                         <span style="font-weight:600; font-size:13px;">${escapeHtml(d.device_model || d.platform || "Устройство")}</span>
-                        <span class="muted" style="font-size:12px;">${d.last_seen_at ? formatDate(d.last_seen_at) : "—"}</span>
+                        <span class="muted" style="font-size:12px;">${d.last_seen_at ? formatRelativeTime(d.last_seen_at) : "—"}</span>
                     </div>
-                    <div class="mono muted" style="font-size:12px; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(d.hwid)}</div>
-                    <div class="row" style="gap:8px; justify-content:flex-start; margin-top:4px;">${slotChips.join("")}</div>
+                    ${metaText ? `<div class="muted" style="font-size:11px;">${escapeHtml(metaText)}</div>` : ""}
+                    <div class="row" style="gap:8px; margin-top:4px;">
+                        <button type="button" class="mono-copy" data-copy-hwid="${escapeHtml(d.hwid)}" title="Копировать HWID">${escapeHtml(d.hwid)}</button>
+                        <button type="button" class="btn btn-sm btn-danger" data-del-hwid="${escapeHtml(d.hwid)}" style="flex-shrink:0;">Удалить</button>
+                    </div>
+                    <div class="filter-pills" style="margin-top:4px;">${slotChips.join("")}</div>
                 </div>
             `;
         })
         .join("");
 }
 
-export async function renderUserDetailView(root, userSummary, onBack, onReloadUser) {
-    const fallbackName = userSummary.username
-        ? `@${userSummary.username}`
-        : (userSummary.first_name || `ID ${userSummary.telegram_id}`);
+function _renderWiDiagnosticsHtml(wi) {
+    if (!wi) return "";
+    const provStatus = wi.provisioning_status ? String(wi.provisioning_status) : "—";
+    const syncStateEntries =
+        wi.node_sync_state && typeof wi.node_sync_state === "object"
+            ? Object.entries(wi.node_sync_state)
+            : [];
+    const syncNodesHtml = syncStateEntries.length
+        ? syncStateEntries
+              .map(([nodeId, st]) => {
+                  const stText = typeof st === "object" && st !== null ? st.status || JSON.stringify(st) : String(st);
+                  return `<span class="chip chip-muted">${escapeHtml(nodeId)}: ${escapeHtml(stText)}</span>`;
+              })
+              .join("")
+        : `<span class="muted">Нет данных по нодам</span>`;
 
-    root.innerHTML = `
-        <div class="detail-header-nav">
-            <button id="userDetailBackBtn" type="button" class="btn btn-sm btn-ghost">← Все пользователи</button>
-            <span class="detail-sticky-meta">${escapeHtml(fallbackName)}</span>
+    return `
+        <div class="detail-grid" style="padding-top:8px; border-top:1px solid var(--border-subtle);">
+            <div class="detail-item"><span class="detail-label">Провижининг</span><span class="mono">${escapeHtml(provStatus)}</span></div>
+            <div class="detail-item"><span class="detail-label">Автопродление</span><span>${wi.auto_renew_enabled ? "Включено" : "Выключено"}</span></div>
+            <div class="detail-item"><span class="detail-label">Версия конфига</span><span class="mono tabular">${wi.actual_version ?? 0} / ${wi.desired_version ?? 1}</span></div>
+            <div class="detail-item"><span class="detail-label">Синхронизация</span><span>${wi.last_synced_at ? formatRelativeTime(wi.last_synced_at) : "—"}</span></div>
+            ${
+                wi.status_reason
+                    ? `<div class="detail-item" style="grid-column:1 / -1;"><span class="detail-label">Причина статуса</span><span>${escapeHtml(wi.status_reason)}</span></div>`
+                    : ""
+            }
         </div>
-        <section class="card card-center">
-            <div class="muted">Загрузка профиля...</div>
-        </section>
+        <div class="filter-pills" style="margin-top:4px;">${syncNodesHtml}</div>
+        ${
+            wi.last_sync_error
+                ? `<div style="margin-top:6px; padding:8px 10px; border-radius:8px; background:var(--accent-red-soft); border:1px solid rgba(248,113,113,0.32); color:var(--accent-red); font-size:12px; white-space:pre-wrap;">${escapeHtml(wi.last_sync_error)}</div>`
+                : ""
+        }
     `;
-    root.querySelector("#userDetailBackBtn").addEventListener("click", onBack);
+}
+
+function _renderHistoryTabContent(tab, details) {
+    if (tab === "orders") {
+        const orders = details.recent_orders || [];
+        if (!orders.length) {
+            return `<div class="muted" style="text-align:center; padding:12px;">Заказов нет</div>`;
+        }
+        return orders
+            .map((o) => {
+                const stInfo = ORDER_STATUS_MAP[o.status] || {
+                    text: o.status || "—",
+                    cls: "chip-muted",
+                };
+                const kindLabel = ORDER_KIND_MAP[o.kind] || o.kind || "";
+                const flags = Array.isArray(o.metadata_flags) ? o.metadata_flags : [];
+                const flagsHtml = flags
+                    .map((flag) => {
+                        const info = METADATA_FLAG_MAP[flag] || { text: flag, cls: "chip-warn" };
+                        return `<span class="chip ${info.cls}">${escapeHtml(info.text)}</span>`;
+                    })
+                    .join("");
+                return `
+                    <div class="item-row">
+                        <div class="row">
+                            <span style="font-weight:600; font-size:13px;">${escapeHtml(kindLabel)}${o.description ? ` · ${escapeHtml(o.description)}` : ""}</span>
+                            <span class="tabular" style="font-weight:600;">${o.amount_rub} ₽</span>
+                        </div>
+                        <div class="history-row-meta">
+                            <span>${formatDate(o.created_at)}</span>
+                            <span class="chip ${stInfo.cls}">${escapeHtml(stInfo.text)}</span>
+                        </div>
+                        <div class="filter-pills" style="margin-top:2px;">
+                            <button type="button" class="mono-copy" data-copy-val="${escapeHtml(o.id)}" data-copy-msg="ID заказа скопирован">ID: ${escapeHtml(String(o.id).slice(0, 8))}…</button>
+                            ${
+                                o.external_id
+                                    ? `<button type="button" class="mono-copy" data-copy-val="${escapeHtml(o.external_id)}" data-copy-msg="ID ЮKassa скопирован">ЮKassa: ${escapeHtml(String(o.external_id).slice(0, 12))}…</button>`
+                                    : ""
+                            }
+                            ${flagsHtml}
+                        </div>
+                    </div>
+                `;
+            })
+            .join("");
+    }
+
+    if (tab === "ledger") {
+        const entries = details.recent_ledger || [];
+        if (!entries.length) {
+            return `<div class="muted" style="text-align:center; padding:12px;">Операций по балансу нет</div>`;
+        }
+        return entries
+            .map((entry) => {
+                const amt = Number(entry.amount || 0);
+                const signStr = amt > 0 ? `+${amt} ₽` : `${amt} ₽`;
+                const amtColor =
+                    amt > 0 ? "var(--accent-green, #4ade80)" : amt < 0 ? "var(--accent-red, #f87171)" : "inherit";
+                const bucketLabel = entry.bucket === "bonus" ? "бонус" : "реал";
+                const typeLabel = LEDGER_ENTRY_TYPE_MAP[entry.entry_type] || entry.entry_type || "Операция";
+                return `
+                    <div class="item-row">
+                        <div class="row">
+                            <span style="font-weight:600; font-size:13px;">${escapeHtml(typeLabel)} <span class="chip chip-muted">${bucketLabel}</span></span>
+                            <span class="tabular" style="font-weight:600; color:${amtColor};">${escapeHtml(signStr)}</span>
+                        </div>
+                        ${
+                            entry.description
+                                ? `<div class="muted" style="font-size:12px;">${escapeHtml(entry.description)}</div>`
+                                : ""
+                        }
+                        <div class="history-row-meta">
+                            <span>${formatDate(entry.created_at)}</span>
+                        </div>
+                    </div>
+                `;
+            })
+            .join("");
+    }
+
+    if (tab === "devices") {
+        const events = details.recent_device_events || [];
+        if (!events.length) {
+            return `<div class="muted" style="text-align:center; padding:12px;">Событий устройств нет</div>`;
+        }
+        return events
+            .map((ev) => {
+                const title = [ev.device_model, ev.platform].filter(Boolean).join(" · ") || "Устройство";
+                return `
+                    <div class="item-row">
+                        <div class="row">
+                            <span style="font-weight:600; font-size:13px;">${escapeHtml(title)}</span>
+                            <span class="muted" style="font-size:11px;">${formatDate(ev.created_at)}</span>
+                        </div>
+                        ${
+                            ev.hwid
+                                ? `<div style="margin-top:2px;"><button type="button" class="mono-copy" data-copy-val="${escapeHtml(ev.hwid)}" data-copy-msg="HWID скопирован">${escapeHtml(_formatShortHwid(ev.hwid))}</button></div>`
+                                : ""
+                        }
+                    </div>
+                `;
+            })
+            .join("");
+    }
+
+    const audits = details.recent_audit || [];
+    if (!audits.length) {
+        return `<div class="muted" style="text-align:center; padding:12px;">Записей аудита нет</div>`;
+    }
+    return audits
+        .map((a) => {
+            const actionLabel = AUDIT_ACTION_MAP[a.action] || a.action || "Действие";
+            const detailsStr =
+                typeof a.details === "string"
+                    ? a.details
+                    : a.details
+                      ? JSON.stringify(a.details)
+                      : "";
+            return `
+                <div class="item-row">
+                    <div class="row">
+                        <span class="chip chip-muted">${escapeHtml(actionLabel)}</span>
+                        <span class="muted" style="font-size:11px;">${formatDate(a.created_at)}</span>
+                    </div>
+                    ${
+                        detailsStr
+                            ? `<div class="mono muted" style="font-size:11px; white-space:pre-wrap; word-break:break-word;">${escapeHtml(detailsStr)}</div>`
+                            : ""
+                    }
+                </div>
+            `;
+        })
+        .join("");
+}
+
+export async function renderUserDetailView(root, userSummary, onBack, onReloadUser, state = null, options = {}) {
+    const reqId = ++_detailReqId;
+    const preserveScroll = Boolean(options && options.preserveScroll);
+    const savedScrollY = options && Number.isFinite(options.scrollY) ? options.scrollY : null;
+    const fallbackName = _formatDisplayName(userSummary);
+
+    if (!preserveScroll) {
+        root.innerHTML = `
+            <div class="detail-header-nav">
+                <button id="userDetailBackBtn" type="button" class="btn btn-sm btn-ghost">← Все пользователи</button>
+                <span class="detail-sticky-meta">${escapeHtml(fallbackName)}</span>
+            </div>
+            <section class="card card-center">
+                <div class="muted">Загрузка профиля...</div>
+            </section>
+        `;
+        root.querySelector("#userDetailBackBtn").addEventListener("click", onBack);
+    }
+
+    const sentinelBtn = root.querySelector("#userDetailBackBtn");
 
     let details;
     try {
         const res = await api.getUserDetails(userSummary.id);
         details = res.user;
     } catch (err) {
+        if (reqId !== _detailReqId) return;
+        if (state && state.selectedUserId !== userSummary.id) return;
+        if (sentinelBtn && !root.contains(sentinelBtn)) return;
         root.innerHTML = `
             <div class="detail-header-nav">
                 <button id="userDetailBackBtn" type="button" class="btn btn-sm btn-ghost">← Все пользователи</button>
@@ -65,12 +329,16 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         `;
         root.querySelector("#userDetailBackBtn").addEventListener("click", onBack);
         root.querySelector("#userRetryBtn").addEventListener("click", () => {
-            renderUserDetailView(root, userSummary, onBack, onReloadUser);
+            renderUserDetailView(root, userSummary, onBack, onReloadUser, state);
         });
         return;
     }
 
-    const uname = details.username ? `@${details.username}` : (details.first_name || `ID ${details.telegram_id}`);
+    if (reqId !== _detailReqId) return;
+    if (state && state.selectedUserId !== userSummary.id) return;
+    if (sentinelBtn && !root.contains(sentinelBtn)) return;
+
+    const uname = _formatDisplayName(details);
     const inviterStr = details.inviter
         ? (details.inviter.username ? `@${details.inviter.username}` : `ID ${details.inviter.telegram_id}`)
         : "—";
@@ -81,12 +349,17 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
     const totalBal = details.total_balance ?? userSummary.total_balance ?? 0;
     const realBal = details.real_balance ?? userSummary.real_balance ?? 0;
     const bonusBal = details.bonus_balance ?? userSummary.bonus_balance ?? 0;
+    const debt = Number(details.debt || 0);
     const stdLimit = details.standard_device_limit ?? userSummary.standard_device_limit ?? 2;
     const wiLimit = (wi && wi.device_limit) ?? userSummary.wi_device_limit ?? 1;
 
+    const stdInfo = details.standard || null;
+    const stdEndTs = details.standard_end ? new Date(details.standard_end).getTime() : 0;
+    const stdExpired = Boolean(details.standard_end && stdEndTs <= Date.now());
     const stdSummary = details.standard_end
-        ? `До ${formatDate(details.standard_end)} · ${stdLimit} устр.`
+        ? `До ${formatDate(details.standard_end)} · ${stdLimit} устр.${stdInfo ? ` · автопродл.: ${stdInfo.auto_renew_enabled ? "вкл" : "выкл"}` : ""}`
         : "Не подключён";
+
     const wiStatusMap = {
         active: "Активен",
         expired: "Истёк",
@@ -105,6 +378,8 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         ? `${wiEffectiveStatus ? `${wiEffectiveStatus} · ` : ""}До ${formatDate(wi.expires_at)} · ${wiUsedGb} / ${wiTotalGb} ГБ · ${wiLimit} сл.`
         : (wi && wiEffectiveStatus ? `${wiEffectiveStatus} · ${wiUsedGb} / ${wiTotalGb} ГБ · ${wiLimit} сл.` : "Не подключён");
 
+    let activeHistoryTab = "orders";
+
     root.innerHTML = `
         <div class="detail-header-nav">
             <button id="userDetailBackBtn" type="button" class="btn btn-sm btn-ghost">← Все пользователи</button>
@@ -118,6 +393,12 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
                     <button id="copyTgIdBtn" type="button" class="btn-ghost" style="border:none; padding:0; margin-top:4px; font-size:12px; color:var(--text-secondary); cursor:pointer; font-family:var(--font-mono);">
                         ID ${details.telegram_id} · Копировать
                     </button>
+                    <div class="filter-pills" style="margin-top:6px;">
+                        ${details.is_bot_blocked ? `<span class="chip chip-err">Бот заблокирован</span>` : ""}
+                        ${Number(details.churn_events_24h || 0) > 0 ? `<span class="chip chip-warn">Смены устр. 24ч: ${details.churn_events_24h}</span>` : ""}
+                        ${details.financial_hold ? `<span class="chip chip-err">Финансовая блокировка</span>` : ""}
+                        ${details.topup_blocked ? `<span class="chip chip-warn">Блок пополнений</span>` : ""}
+                    </div>
                 </div>
                 <div style="text-align:right;">
                     <div class="tabular" style="font-size:18px; font-weight:600;">${totalBal} ₽</div>
@@ -126,9 +407,35 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
             </div>
             <div class="detail-grid" style="padding-top:8px; border-top:1px solid var(--border-subtle);">
                 <div class="detail-item"><span class="detail-label">Регистрация</span><span>${formatDate(details.created_at || userSummary.created_at)}</span></div>
+                <div class="detail-item"><span class="detail-label">Последняя оплата</span><span>${details.last_payment_at ? formatDate(details.last_payment_at) : "—"}</span></div>
                 <div class="detail-item"><span class="detail-label">Пригласил</span><span>${escapeHtml(inviterStr)}</span></div>
+                <div class="detail-item"><span class="detail-label">Трафик Стандарт</span><span class="tabular">${formatBytesGb(details.monthly_vless_bytes)} ГБ / всего ${formatBytesGb(details.total_traffic_bytes)} ГБ</span></div>
+            </div>
+            <div class="actions-row" style="padding-top:8px; border-top:1px solid var(--border-subtle);">
+                <button id="detResyncUserBtn" type="button" class="btn btn-sm">Пересинхронизировать узлы</button>
+                <button id="detOpenFinancesBtn" type="button" class="btn btn-sm">Заказы в Финансах</button>
+                <button id="detOpenAuditBtn" type="button" class="btn btn-sm">Аудит</button>
             </div>
         </section>
+
+        ${
+            debt > 0
+                ? `
+        <section class="danger-card">
+            <div class="row">
+                <div>
+                    <div class="danger-card-title">Долг: ${debt} ₽</div>
+                    ${
+                        details.financial_block_reason
+                            ? `<div class="muted" style="font-size:12px; margin-top:4px;">${escapeHtml(details.financial_block_reason)}</div>`
+                            : ""
+                    }
+                </div>
+                <button id="detForgiveDebtBtn" type="button" class="btn btn-sm btn-danger-filled" style="flex-shrink:0;">Погасить долг</button>
+            </div>
+        </section>`
+                : ""
+        }
 
         <section class="card">
             <div class="row">
@@ -143,10 +450,25 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
                     <button type="button" class="pill-btn" data-add="-100">-100 ₽</button>
                 </div>
                 <div class="row" style="flex-wrap:nowrap;">
-                    <input name="amount_rub" class="input tabular" type="number" min="-100000" max="100000" step="1" value="500" aria-label="Сумма коррекции в рублях">
+                    <input name="amount_rub" class="input tabular" type="number" min="-100000" max="100000" step="1" value="" placeholder="Сумма ₽ (напр. 100 или -100)" aria-label="Сумма коррекции в рублях">
                     <button type="submit" class="btn btn-primary btn-sm" style="flex-shrink:0;">Применить</button>
                 </div>
                 <input name="note" class="input" type="text" maxlength="120" placeholder="Комментарий (необязательно)">
+                <label class="toggle-row">
+                    <span class="toggle-label">Уведомить в Telegram</span>
+                    <span class="switch">
+                        <input name="notify_user" type="checkbox" checked>
+                        <span class="switch-track"></span>
+                    </span>
+                </label>
+                <label class="toggle-row">
+                    <span class="toggle-label">Отправить комментарий пользователю</span>
+                    <span class="switch">
+                        <input name="send_note_to_user" type="checkbox">
+                        <span class="switch-track"></span>
+                    </span>
+                </label>
+                <div class="muted" style="font-size:11px;">Если переключатель выключен, комментарий сохранится только в аудит-логе.</div>
             </form>
         </section>
 
@@ -156,7 +478,10 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
             <div class="user-sub-box">
                 <div class="row">
                     <div>
-                        <div style="font-weight:600; font-size:13px;">Стандарт</div>
+                        <div style="font-weight:600; font-size:13px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                            <span>Стандарт</span>
+                            ${stdExpired ? `<span class="chip chip-err">Истекла</span>` : stdInfo && !stdInfo.is_active ? `<span class="chip chip-warn">Отключена</span>` : ""}
+                        </div>
                         <div class="muted" style="font-size:12px;">${escapeHtml(stdSummary)}</div>
                     </div>
                     <button id="toggleStdEditBtn" type="button" class="btn btn-sm">Изменить</button>
@@ -179,6 +504,13 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
                         <button type="button" class="pill-btn" data-std-days="90">+90 дн.</button>
                         <button type="button" class="pill-btn" data-std-days="-7">-7 дн.</button>
                     </div>
+                    <label class="toggle-row">
+                        <span class="toggle-label">Уведомить пользователя</span>
+                        <span class="switch">
+                            <input name="notify_user" type="checkbox">
+                            <span class="switch-track"></span>
+                        </span>
+                    </label>
                     <button type="submit" class="btn btn-primary btn-sm">Сохранить Стандарт</button>
                 </form>
             </div>
@@ -194,6 +526,7 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
                         <button id="toggleWiTrafficBtn" type="button" class="btn btn-sm">Трафик</button>
                     </div>
                 </div>
+                ${_renderWiDiagnosticsHtml(wi)}
 
                 <form id="wiEditForm" class="field" style="gap:8px; padding-top:8px; border-top:1px solid var(--border-subtle);" hidden>
                     <div class="grid-2">
@@ -212,6 +545,13 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
                         <button type="button" class="pill-btn" data-wi-days="30">+30 дн.</button>
                         <button type="button" class="pill-btn" data-wi-days="-7">-7 дн.</button>
                     </div>
+                    <label class="toggle-row">
+                        <span class="toggle-label">Уведомить пользователя</span>
+                        <span class="switch">
+                            <input name="notify_user" type="checkbox">
+                            <span class="switch-track"></span>
+                        </span>
+                    </label>
                     <button type="submit" class="btn btn-primary btn-sm">Сохранить Белый интернет</button>
                 </form>
 
@@ -228,6 +568,13 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
                         <label>Объём (ГБ)</label>
                         <input name="gb" class="input tabular" type="number" min="1" max="5000" step="1" value="50">
                     </div>
+                    <label class="toggle-row">
+                        <span class="toggle-label">Уведомить пользователя</span>
+                        <span class="switch">
+                            <input name="notify_user" type="checkbox">
+                            <span class="switch-track"></span>
+                        </span>
+                    </label>
                     <button type="submit" class="btn btn-primary btn-sm">Применить трафик</button>
                 </form>
             </div>
@@ -266,34 +613,67 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
             <div class="row">
                 <div class="card-title">Устройства (${devices.length})</div>
             </div>
-            <div class="field" style="gap:8px;">
+            <div id="detDevicesList" class="field" style="gap:8px;">
                 ${_renderDevicesHtml(devices)}
             </div>
+        </section>
 
-            <form id="userRestrictionsForm" class="field" style="gap:8px; padding-top:8px; border-top:1px solid var(--border-subtle);">
+        <section class="card">
+            <div class="card-title">Ограничения</div>
+            <form id="userRestrictionsForm" class="field" style="gap:8px;">
                 <label class="toggle-row">
-                    <span class="toggle-label">Заморозка доступа и оплат (financial_hold)</span>
+                    <span class="toggle-label">Финансовая блокировка</span>
                     <span class="switch">
                         <input name="financial_hold" type="checkbox" ${details.financial_hold ? "checked" : ""}>
                         <span class="switch-track"></span>
                     </span>
                 </label>
                 <label class="toggle-row">
-                    <span class="toggle-label">Блокировка внешних пополнений (topup_blocked)</span>
+                    <span class="toggle-label">Блокировка пополнений</span>
                     <span class="switch">
                         <input name="topup_blocked" type="checkbox" ${details.topup_blocked ? "checked" : ""}>
                         <span class="switch-track"></span>
                     </span>
                 </label>
+                <input name="note" class="input" type="text" maxlength="120" placeholder="Причина / комментарий (необязательно)">
                 <button type="submit" class="btn btn-sm">Сохранить ограничения</button>
             </form>
+        </section>
 
-            <div class="actions-row" style="padding-top:8px; border-top:1px solid var(--border-subtle);">
-                <button id="detResetHwidBtn" type="button" class="btn btn-sm">Сбросить HWID</button>
+        <section class="card">
+            <div class="row">
+                <div class="card-title">История</div>
+            </div>
+            <div class="seg-group" id="userHistoryTabs">
+                <button type="button" class="seg-btn active" data-htab="orders">Заказы</button>
+                <button type="button" class="seg-btn" data-htab="ledger">Баланс</button>
+                <button type="button" class="seg-btn" data-htab="devices">Устройства</button>
+                <button type="button" class="seg-btn" data-htab="audit">Админ-лог</button>
+            </div>
+            <div id="userHistoryList" class="field" style="gap:8px;">
+                ${_renderHistoryTabContent(activeHistoryTab, details)}
+            </div>
+        </section>
+
+        <section class="danger-card">
+            <div class="danger-card-title">Опасная зона</div>
+            <label class="toggle-row">
+                <span class="toggle-label">Уведомить пользователя</span>
+                <span class="switch">
+                    <input id="dangerNotifyUser" type="checkbox">
+                    <span class="switch-track"></span>
+                </span>
+            </label>
+            <div class="actions-row">
+                <button id="detResetHwidBtn" type="button" class="btn btn-sm" ${devices.length === 0 ? "disabled" : ""}>Сбросить все HWID</button>
                 <button id="detRotateTokenBtn" type="button" class="btn btn-sm btn-danger">Перевыпустить токен</button>
             </div>
         </section>
     `;
+
+    if (preserveScroll && savedScrollY !== null) {
+        requestAnimationFrame(() => window.scrollTo(0, savedScrollY));
+    }
 
     root.querySelector("#userDetailBackBtn").addEventListener("click", onBack);
     root.querySelector("#copyTgIdBtn").addEventListener("click", () => {
@@ -310,9 +690,52 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
     }
 
     const refreshAll = async () => {
-        await onReloadUser();
-        await renderUserDetailView(root, userSummary, onBack, onReloadUser);
+        const currentScrollY = window.scrollY;
+        void onReloadUser?.();
+        await renderUserDetailView(root, userSummary, onBack, onReloadUser, state, {
+            preserveScroll: true,
+            scrollY: currentScrollY,
+        });
     };
+
+    const resyncBtn = root.querySelector("#detResyncUserBtn");
+    resyncBtn.addEventListener("click", () => {
+        withButtonLoading(resyncBtn, "Синхронизация...", async () => {
+            try {
+                const res = await api.resyncUser(details.id);
+                showToast(res.message || "Синхронизация запущена");
+                await refreshAll();
+            } catch (err) {
+                showToast(err.message || "Ошибка пересинхронизации", "error");
+            }
+        });
+    });
+
+    root.querySelector("#detOpenFinancesBtn").addEventListener("click", () => {
+        state?.onOpenFinances?.(String(details.telegram_id));
+    });
+
+    root.querySelector("#detOpenAuditBtn").addEventListener("click", () => {
+        state?.onOpenAudit?.(String(details.telegram_id));
+    });
+
+    const forgiveDebtBtn = root.querySelector("#detForgiveDebtBtn");
+    if (forgiveDebtBtn) {
+        forgiveDebtBtn.addEventListener("click", () => {
+            showConfirmModal({
+                title: "Погасить задолженность?",
+                message: `Списать долг ${debt} ₽ пользователю ${uname}?`,
+                confirmText: "Погасить долг",
+                cancelText: "Отмена",
+                isDestructive: true,
+                onConfirm: async () => {
+                    const res = await api.adjustUser(details.id, { action: "forgive_debt" });
+                    showToast(res.message || "Задолженность списана");
+                    await refreshAll();
+                },
+            });
+        });
+    }
 
     const bonusForm = root.querySelector("#userBonusForm");
     bonusForm.querySelectorAll("[data-add]").forEach((b) => {
@@ -320,25 +743,35 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
             bonusForm.querySelector("input[name='amount_rub']").value = b.dataset.add;
         });
     });
-    bonusForm.addEventListener("submit", async (e) => {
+    bonusForm.addEventListener("submit", (e) => {
         e.preventDefault();
         const amount = Number(bonusForm.querySelector("input[name='amount_rub']").value);
         if (!Number.isInteger(amount) || amount === 0) {
-            showToast("Укажите ненулевую целую сумму в рублях");
+            showToast("Укажите ненулевую целую сумму в рублях", "error");
             return;
         }
         const note = bonusForm.querySelector("input[name='note']").value.trim() || null;
-        const btn = bonusForm.querySelector("button[type='submit']");
-        btn.disabled = true;
-        try {
-            const res = await api.adjustUser(details.id, { action: "balance", amount_rub: amount, note });
-            showToast(res.message || "Баланс обновлён");
-            await refreshAll();
-        } catch (err) {
-            showToast(err.message || "Ошибка обновления баланса");
-        } finally {
-            btn.disabled = false;
-        }
+        const notifyUser = Boolean(bonusForm.querySelector("input[name='notify_user']")?.checked);
+        const sendNoteToUser = Boolean(bonusForm.querySelector("input[name='send_note_to_user']")?.checked);
+        const isNegative = amount < 0;
+        showConfirmModal({
+            title: isNegative ? "Списать средства с баланса?" : "Начислить бонус на баланс?",
+            message: `${isNegative ? "Списание" : "Начисление"}: ${amount > 0 ? `+${amount}` : amount} ₽ для ${uname}.${notifyUser ? " Пользователь получит уведомление в Telegram." : ""}`,
+            confirmText: isNegative ? "Списать" : "Начислить",
+            cancelText: "Отмена",
+            isDestructive: isNegative,
+            onConfirm: async () => {
+                const res = await api.adjustUser(details.id, {
+                    action: "balance",
+                    amount_rub: amount,
+                    note,
+                    notify_user: notifyUser,
+                    send_note_to_user: sendNoteToUser,
+                });
+                showToast(res.message || "Баланс обновлён");
+                await refreshAll();
+            },
+        });
     });
 
     const stdForm = root.querySelector("#stdEditForm");
@@ -355,23 +788,39 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         const days = Number(stdForm.querySelector("input[name='days']").value);
         const deviceLimit = Number(stdForm.querySelector("input[name='device_limit']").value);
         if (!Number.isInteger(days) || days < -3650 || days > 3650) {
-            showToast("Укажите корректное количество дней");
+            showToast("Укажите корректное количество дней", "error");
             return;
         }
-        const payload = { action: "grant_standard", days };
+        const notifyUser = Boolean(stdForm.querySelector("input[name='notify_user']")?.checked);
+        const payload = { action: "grant_standard", days, notify_user: notifyUser };
         if (days >= 0 || deviceLimit !== Number(stdLimit)) {
             payload.device_limit = deviceLimit;
         }
-        const btn = stdForm.querySelector("button[type='submit']");
-        btn.disabled = true;
+        const execute = async () => {
+            const btn = stdForm.querySelector("button[type='submit']");
+            await withButtonLoading(btn, "Сохранение...", async () => {
+                const res = await api.adjustUser(details.id, payload);
+                showToast(res.message || "Подписка Стандарт обновлена");
+                await refreshAll();
+            });
+        };
+
+        if (days < 0) {
+            showConfirmModal({
+                title: "Сократить подписку Стандарт?",
+                message: `Срок подписки Стандарт пользователя ${uname} будет уменьшен на ${Math.abs(days)} дн. Если срок истечёт, доступ будет отключён.`,
+                confirmText: "Сократить",
+                cancelText: "Отмена",
+                isDestructive: true,
+                onConfirm: execute,
+            });
+            return;
+        }
+
         try {
-            const res = await api.adjustUser(details.id, payload);
-            showToast(res.message || "Подписка Стандарт обновлена");
-            await refreshAll();
+            await execute();
         } catch (err) {
-            showToast(err.message || "Ошибка обновления подписки");
-        } finally {
-            btn.disabled = false;
+            showToast(err.message || "Ошибка обновления подписки", "error");
         }
     });
 
@@ -395,23 +844,39 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         const days = Number(wiForm.querySelector("input[name='days']").value);
         const deviceLimit = Number(wiForm.querySelector("input[name='device_limit']").value);
         if (!Number.isInteger(days) || days < -3650 || days > 3650) {
-            showToast("Укажите корректное количество дней");
+            showToast("Укажите корректное количество дней", "error");
             return;
         }
-        const payload = { action: "grant_wi", days };
+        const notifyUser = Boolean(wiForm.querySelector("input[name='notify_user']")?.checked);
+        const payload = { action: "grant_wi", days, notify_user: notifyUser };
         if (days >= 0 || deviceLimit !== Number(wiLimit)) {
             payload.device_limit = deviceLimit;
         }
-        const btn = wiForm.querySelector("button[type='submit']");
-        btn.disabled = true;
+        const execute = async () => {
+            const btn = wiForm.querySelector("button[type='submit']");
+            await withButtonLoading(btn, "Сохранение...", async () => {
+                const res = await api.adjustUser(details.id, payload);
+                showToast(res.message || "Белый интернет обновлён");
+                await refreshAll();
+            });
+        };
+
+        if (days < 0) {
+            showConfirmModal({
+                title: "Сократить Белый интернет?",
+                message: `Срок подписки «Белый интернет» пользователя ${uname} будет уменьшен на ${Math.abs(days)} дн. Если срок истечёт, доступ будет отозван.`,
+                confirmText: "Сократить",
+                cancelText: "Отмена",
+                isDestructive: true,
+                onConfirm: execute,
+            });
+            return;
+        }
+
         try {
-            const res = await api.adjustUser(details.id, payload);
-            showToast(res.message || "Белый интернет обновлён");
-            await refreshAll();
+            await execute();
         } catch (err) {
-            showToast(err.message || "Ошибка обновления подписки");
-        } finally {
-            btn.disabled = false;
+            showToast(err.message || "Ошибка обновления подписки", "error");
         }
     });
 
@@ -422,25 +887,45 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
     });
     wiTrafficForm.addEventListener("submit", async (e) => {
         e.preventDefault();
-        const payload = { action: "wi_traffic", traffic_action: trafficSelect.value };
+        const notifyUser = Boolean(wiTrafficForm.querySelector("input[name='notify_user']")?.checked);
+        const payload = {
+            action: "wi_traffic",
+            traffic_action: trafficSelect.value,
+            notify_user: notifyUser,
+        };
         if (payload.traffic_action !== "reset_used") {
             const gb = Number(wiTrafficForm.querySelector("input[name='gb']").value);
             if (!Number.isInteger(gb) || gb < 1) {
-                showToast("Укажите объём в ГБ (>= 1)");
+                showToast("Укажите объём в ГБ (>= 1)", "error");
                 return;
             }
             payload.gb = gb;
         }
-        const btn = wiTrafficForm.querySelector("button[type='submit']");
-        btn.disabled = true;
+        const execute = async () => {
+            const btn = wiTrafficForm.querySelector("button[type='submit']");
+            await withButtonLoading(btn, "Применение...", async () => {
+                const res = await api.adjustUser(details.id, payload);
+                showToast(res.message || "Трафик обновлён");
+                await refreshAll();
+            });
+        };
+
+        if (payload.traffic_action === "reset_used") {
+            showConfirmModal({
+                title: "Сбросить использованный трафик?",
+                message: `Счётчик использованного трафика «Белый интернет» пользователя ${uname} будет обнулён.`,
+                confirmText: "Сбросить",
+                cancelText: "Отмена",
+                isDestructive: true,
+                onConfirm: execute,
+            });
+            return;
+        }
+
         try {
-            const res = await api.adjustUser(details.id, payload);
-            showToast(res.message || "Трафик обновлён");
-            await refreshAll();
+            await execute();
         } catch (err) {
-            showToast(err.message || "Ошибка обновления трафика");
-        } finally {
-            btn.disabled = false;
+            showToast(err.message || "Ошибка обновления трафика", "error");
         }
     });
 
@@ -449,44 +934,95 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         e.preventDefault();
         const text = dmForm.querySelector("textarea[name='text']").value.trim();
         if (!text) {
-            showToast("Введите текст сообщения");
+            showToast("Введите текст сообщения", "error");
             return;
         }
         const btn = dmForm.querySelector("button[type='submit']");
-        btn.disabled = true;
         try {
-            const res = await api.sendUserMessage(details.id, text);
-            dmForm.reset();
-            showToast(res.message || "Сообщение отправлено");
+            await withButtonLoading(btn, "Отправка...", async () => {
+                const res = await api.sendUserMessage(details.id, text);
+                dmForm.reset();
+                showToast(res.message || "Сообщение отправлено");
+            });
         } catch (err) {
-            showToast(err.message || "Ошибка отправки сообщения");
-        } finally {
-            btn.disabled = false;
+            showToast(err.message || "Ошибка отправки сообщения", "error");
         }
+    });
+
+    const devicesContainer = root.querySelector("#detDevicesList");
+    devicesContainer.querySelectorAll("[data-copy-hwid]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            copyText(btn.dataset.copyHwid, "HWID скопирован");
+        });
+    });
+    devicesContainer.querySelectorAll("[data-del-hwid]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            const hwid = btn.dataset.delHwid;
+            showConfirmModal({
+                title: "Удалить устройство?",
+                message: `Устройство ${_formatShortHwid(hwid)} будет отвязано от аккаунта ${uname}.`,
+                confirmText: "Удалить",
+                cancelText: "Отмена",
+                isDestructive: true,
+                onConfirm: async () => {
+                    const res = await api.deleteUserDevice(details.id, hwid);
+                    showToast(res.message || "Устройство удалено");
+                    await refreshAll();
+                },
+            });
+        });
     });
 
     const restrForm = root.querySelector("#userRestrictionsForm");
-    restrForm.addEventListener("submit", async (e) => {
+    restrForm.addEventListener("submit", (e) => {
         e.preventDefault();
-        const btn = restrForm.querySelector("button[type='submit']");
-        btn.disabled = true;
-        try {
-            const res = await api.adjustUser(details.id, {
-                action: "restrictions",
-                financial_hold: Boolean(restrForm.querySelector("input[name='financial_hold']")?.checked),
-                topup_blocked: Boolean(restrForm.querySelector("input[name='topup_blocked']")?.checked),
-            });
-            showToast(res.message || "Ограничения сохранены");
-            await refreshAll();
-        } catch (err) {
-            showToast(err.message || "Ошибка сохранения ограничений");
-        } finally {
-            btn.disabled = false;
-        }
+        const financialHold = Boolean(restrForm.querySelector("input[name='financial_hold']")?.checked);
+        const topupBlocked = Boolean(restrForm.querySelector("input[name='topup_blocked']")?.checked);
+        const note = restrForm.querySelector("input[name='note']")?.value.trim() || null;
+        showConfirmModal({
+            title: "Сохранить ограничения?",
+            message: `Применить настройки ограничений для ${uname}?${financialHold ? " Финансовая блокировка ограничит доступ." : ""}`,
+            confirmText: "Сохранить",
+            cancelText: "Отмена",
+            isDestructive: financialHold,
+            onConfirm: async () => {
+                const res = await api.adjustUser(details.id, {
+                    action: "restrictions",
+                    financial_hold: financialHold,
+                    topup_blocked: topupBlocked,
+                    note,
+                });
+                showToast(res.message || "Ограничения сохранены");
+                await refreshAll();
+            },
+        });
     });
 
-    root.querySelector("#detResetHwidBtn").addEventListener("click", (e) => {
-        const b = e.currentTarget;
+    const historyTabsEl = root.querySelector("#userHistoryTabs");
+    const historyListEl = root.querySelector("#userHistoryList");
+    const wireHistoryCopyButtons = () => {
+        historyListEl.querySelectorAll("[data-copy-val]").forEach((btn) => {
+            btn.addEventListener("click", () => {
+                copyText(btn.dataset.copyVal, btn.dataset.copyMsg || "Скопировано");
+            });
+        });
+    };
+    wireHistoryCopyButtons();
+    historyTabsEl.querySelectorAll("[data-htab]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            activeHistoryTab = btn.dataset.htab;
+            historyTabsEl.querySelectorAll("[data-htab]").forEach((b) => {
+                b.classList.toggle("active", b.dataset.htab === activeHistoryTab);
+            });
+            historyListEl.innerHTML = _renderHistoryTabContent(activeHistoryTab, details);
+            wireHistoryCopyButtons();
+        });
+    });
+
+    const getDangerNotify = () => Boolean(root.querySelector("#dangerNotifyUser")?.checked);
+
+    root.querySelector("#detResetHwidBtn").addEventListener("click", () => {
+        const notifyUser = getDangerNotify();
         showConfirmModal({
             title: "Сбросить привязку устройств?",
             message: `Все привязанные устройства пользователя ${uname} будут отвязаны. Ему потребуется заново обновить подписку в приложении.`,
@@ -494,22 +1030,15 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
             cancelText: "Отмена",
             isDestructive: true,
             onConfirm: async () => {
-                b.disabled = true;
-                try {
-                    const res = await api.resetUserDevices(details.id);
-                    showToast(res.message || "Устройства сброшены");
-                    await refreshAll();
-                } catch (err) {
-                    showToast(err.message || "Ошибка сброса");
-                } finally {
-                    b.disabled = false;
-                }
+                const res = await api.resetUserDevices(details.id, { notify_user: notifyUser });
+                showToast(res.message || "Устройства сброшены");
+                await refreshAll();
             },
         });
     });
 
-    root.querySelector("#detRotateTokenBtn").addEventListener("click", (e) => {
-        const b = e.currentTarget;
+    root.querySelector("#detRotateTokenBtn").addEventListener("click", () => {
+        const notifyUser = getDangerNotify();
         showConfirmModal({
             title: "Перевыпустить токен подписки?",
             message: "Старая ссылка подключения перестанет работать. Пользователю нужно будет заново добавить подписку.",
@@ -517,16 +1046,9 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
             cancelText: "Отмена",
             isDestructive: true,
             onConfirm: async () => {
-                b.disabled = true;
-                try {
-                    const res = await api.rotateUserToken(details.id);
-                    showToast(res.message || "Токен перевыпущен");
-                    await refreshAll();
-                } catch (err) {
-                    showToast(err.message || "Ошибка перевыпуска");
-                } finally {
-                    b.disabled = false;
-                }
+                const res = await api.rotateUserToken(details.id, { notify_user: notifyUser });
+                showToast(res.message || "Токен перевыпущен");
+                await refreshAll();
             },
         });
     });

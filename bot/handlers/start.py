@@ -254,6 +254,8 @@ async def cmd_start(message: Message) -> None:
 
     settings = get_settings()
     app_url = f"https://{settings.DOMAIN}/app"
+    is_admin = tg_user.id in (getattr(settings, "ADMIN_IDS", None) or [])
+    admin_url = f"https://{settings.DOMAIN}/app?mode=admin" if is_admin else None
     bot_username = (await resolve_bot_username(message.bot) or DEFAULT_FALLBACK_BOT_USERNAME).lstrip("@")
     ref_link = f"https://t.me/{bot_username}?start=ref_{db_user.telegram_id}"
     share_text = f"Держи приглашение: скидка {profile_ctx['welcome_discount_pct']}% на первый заказ"
@@ -277,6 +279,7 @@ async def cmd_start(message: Message) -> None:
         connect_btn_text=(
             texts.BTN_MINIAPP_CONNECT if profile_ctx["has_active_sub"] else texts.BTN_OPEN_CABINET
         ),
+        admin_url=admin_url,
     )
     msg_text = texts.START_HUB_MESSAGE.format(
         name=safe_name,
@@ -304,7 +307,9 @@ async def cmd_fallback(message: Message) -> None:
 
     settings = get_settings()
     app_url = f"https://{settings.DOMAIN}/app"
-    kb = build_start_inline_keyboard(app_url)
+    is_admin = message.from_user.id in (getattr(settings, "ADMIN_IDS", None) or [])
+    admin_url = f"https://{settings.DOMAIN}/app?mode=admin" if is_admin else None
+    kb = build_start_inline_keyboard(app_url, admin_url=admin_url)
     await safe_send_message(
         message.bot,
         message.chat.id,
@@ -325,7 +330,12 @@ async def cb_legacy_fallback(callback: CallbackQuery) -> None:
         return
     settings = get_settings()
     app_url = f"https://{settings.DOMAIN}/app"
-    kb = build_start_inline_keyboard(app_url)
+    is_admin = bool(
+        callback.from_user
+        and callback.from_user.id in (getattr(settings, "ADMIN_IDS", None) or [])
+    )
+    admin_url = f"https://{settings.DOMAIN}/app?mode=admin" if is_admin else None
+    kb = build_start_inline_keyboard(app_url, admin_url=admin_url)
     try:
         await callback.answer("Меню обновлено. Откройте кабинет.", show_alert=False)
     except Exception as exc:

@@ -17,6 +17,7 @@ from aiogram import Bot
 from sqlalchemy import func, select
 from sqlalchemy.orm.attributes import flag_modified
 
+from bot.keyboards.notifications import get_admin_node_keyboard
 from bot.texts.backend import TIME_HOURS_LEFT
 from bot.texts.runtime.alerts import (
     ALERT_CDN_INGRESS_PROBLEM,
@@ -360,6 +361,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                                     server_name=safe(server.name),
                                     cycle=usage.current_cycle,
                                 ),
+                                reply_markup=get_admin_node_keyboard(server.id),
                             )
                         except Exception as exc:
                             logger.error(
@@ -795,6 +797,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                     await _send_admin_alert_msg(
                         bot,
                         alert_text,
+                        reply_markup=get_admin_node_keyboard(server.id),
                     )
                 except Exception as e:
                     logger.error("Failed to deliver %s alert for server %d: %s", alert_kind, server.id, e)
@@ -906,6 +909,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                             sent_ok = await _send_admin_alert_msg(
                                 bot,
                                 hosting_alert_to_send["text"],
+                                reply_markup=get_admin_node_keyboard(server.id),
                             )
                         except Exception as e:
                             logger.error("Failed to deliver hosting traffic alert for server %d: %s", server.id, e)
@@ -1162,6 +1166,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                     sent_ok = await _send_admin_alert_msg(
                         bot,
                         alert_to_send["text"],
+                        reply_markup=get_admin_node_keyboard(server.id),
                     )
                 except Exception as e:
                     logger.error("Failed to deliver node monitor alert: %s", e)

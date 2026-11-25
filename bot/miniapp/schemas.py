@@ -6,15 +6,6 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from utils.security import normalize_public_domain
-
-
-def _validate_fqdn(value: str) -> str:
-    cleaned = normalize_public_domain(value, require_fqdn=True)
-    if not cleaned:
-        raise ValueError("SNI domain must be a valid public FQDN")
-    return cleaned
-
 
 class Verify2FAPayload(BaseModel):
     code: str = Field(..., min_length=1, max_length=32)
@@ -144,7 +135,14 @@ def _validate_audience(value: str) -> str:
 
 
 class AdminUserAdjustPayload(BaseModel):
-    action: Literal["balance", "grant_standard", "grant_wi", "wi_traffic", "restrictions"]
+    action: Literal[
+        "balance",
+        "forgive_debt",
+        "grant_standard",
+        "grant_wi",
+        "wi_traffic",
+        "restrictions",
+    ]
     amount_rub: int | None = Field(default=None, ge=-100000, le=100000)
     days: int | None = Field(default=None, ge=-3650, le=3650)
     device_limit: int | None = Field(default=None, ge=1, le=20)
@@ -152,6 +150,9 @@ class AdminUserAdjustPayload(BaseModel):
     gb: int | None = Field(default=None, ge=1, le=5000)
     financial_hold: bool | None = None
     topup_blocked: bool | None = None
+    reactivate_wi: bool = False
+    notify_user: bool | None = None
+    send_note_to_user: bool = False
     note: str | None = Field(default=None, max_length=120)
 
     @model_validator(mode="after")
@@ -159,14 +160,21 @@ class AdminUserAdjustPayload(BaseModel):
         if self.action == "balance":
             if self.amount_rub is None or self.amount_rub == 0:
                 raise ValueError("amount_rub must be non-zero for balance adjustment")
+        elif self.action == "forgive_debt":
+            if self.amount_rub is not None and self.amount_rub <= 0:
+                raise ValueError("amount_rub must be positive for forgive_debt")
         elif self.action == "grant_standard":
             if self.days is None:
                 raise ValueError("days is required for grant_standard")
+            if self.days == 0 and self.device_limit is None:
+                raise ValueError("Укажите дни или лимит устройств")
             if self.device_limit is not None and not (2 <= self.device_limit <= 10):
                 raise ValueError("device_limit must be between 2 and 10 for standard")
         elif self.action == "grant_wi":
             if self.days is None:
                 raise ValueError("days is required for grant_wi")
+            if self.days == 0 and self.device_limit is None:
+                raise ValueError("Укажите дни или лимит устройств")
             if self.device_limit is not None and not (1 <= self.device_limit <= 3):
                 raise ValueError("device_limit must be between 1 and 3 for wi")
         elif self.action == "wi_traffic":
@@ -175,9 +183,21 @@ class AdminUserAdjustPayload(BaseModel):
             if self.traffic_action in ("add_gb", "set_base_gb") and (self.gb is None or self.gb < 1):
                 raise ValueError("gb (>= 1) is required for add_gb/set_base_gb")
         elif self.action == "restrictions":
-            if self.financial_hold is None and self.topup_blocked is None:
-                raise ValueError("financial_hold or topup_blocked is required for restrictions")
+            if (
+                self.financial_hold is None
+                and self.topup_blocked is None
+                and not self.reactivate_wi
+            ):
+                raise ValueError("financial_hold, topup_blocked or reactivate_wi is required for restrictions")
         return self
+
+
+class NodeLifecyclePayload(BaseModel):
+    lifecycle_status: Literal["active", "decommissioning"]
+
+
+class AdminUserOptionalNotifyPayload(BaseModel):
+    notify_user: bool = False
 
 
 class AdminDirectMessagePayload(BaseModel):

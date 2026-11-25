@@ -5,7 +5,7 @@ from typing import Any
 from aiogram import Bot
 from bot import texts
 from bot.keyboards.notifications import (
-    get_traffic_alert_keyboard,
+    get_admin_user_keyboard,
 )
 from bot.texts.runtime.alerts import ALERT_TRAFFIC_OVERUSAGE
 from cachetools import TTLCache
@@ -169,7 +169,7 @@ async def _send_quota_alert(
             total_traffic=format_traffic(total_bytes),
             vless_traffic=format_traffic(vless_bytes),
         )
-        reply_markup = get_traffic_alert_keyboard(telegram_id)
+        reply_markup = get_admin_user_keyboard(user_id) if user_id else None
 
         any_sent = False
         for admin_id in admin_ids:

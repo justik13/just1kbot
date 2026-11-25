@@ -1,25 +1,80 @@
-import { api } from "./api.js?v=2.7.8";
-import { escapeHtml, showToast } from "./ui.js?v=2.7.8";
-import { renderSecurity2FA } from "./views/security_2fa.js?v=2.7.8";
-import { renderNodesView, renderSubscriptionSettingsView } from "./views/nodes.js?v=2.7.8";
-import { renderNodeDetailView } from "./views/node_detail.js?v=2.7.8";
-import { renderAdminUsersView } from "./views/admin_users.js?v=2.7.8";
-import { renderUserDetailView } from "./views/user_detail.js?v=2.7.8";
-import { clearBroadcastPollTimer, renderAdminBroadcastsView } from "./views/admin_broadcasts.js?v=2.7.8";
-import { renderAdminFinancesView } from "./views/admin_finances.js?v=2.7.8";
-import { clearCabinetBackButton, loadAndRenderUserCabinet } from "./views/user_cabinet.js?v=2.7.8";
+import { api, setOn2FARequired, setOnInitDataExpired } from "./api.js?v=2.8.0";
+import { closeAllModals, escapeHtml, showToast } from "./ui.js?v=2.8.0";
+import { clearCabinetBackButton, loadAndRenderUserCabinet } from "./views/user_cabinet.js?v=2.8.0";
+
+const _ADMIN_TABS = [
+    { id: "overview", label: "Обзор" },
+    { id: "nodes", label: "Ноды" },
+    { id: "users", label: "Пользователи" },
+    { id: "finances", label: "Финансы" },
+    { id: "broadcasts", label: "Рассылки" },
+    { id: "subscription", label: "Подписка" },
+];
+const _VALID_ADMIN_TABS = new Set(_ADMIN_TABS.map((t) => t.id));
+
+let _broadcastsMod = null;
+let _tabSwitchSeq = 0;
+let _tgBackListener = null;
+
+function _clearBroadcastPollTimerIfLoaded() {
+    if (_broadcastsMod && typeof _broadcastsMod.clearBroadcastPollTimer === "function") {
+        _broadcastsMod.clearBroadcastPollTimer();
+    }
+}
+
+function _parseDeepLink() {
+    try {
+        const params = new URLSearchParams(window.location.search || "");
+        const mode = params.get("mode") || "";
+        if (mode !== "admin") return null;
+        const rawTab = params.get("tab") || "";
+        const nodeIdRaw = params.get("node_id");
+        const userIdRaw = params.get("user_id");
+        const q = (params.get("q") || "").trim();
+        const nodeId = nodeIdRaw && Number.isFinite(Number(nodeIdRaw)) ? Number(nodeIdRaw) : null;
+        const userId = userIdRaw && Number.isFinite(Number(userIdRaw)) ? Number(userIdRaw) : null;
+        let tab = _VALID_ADMIN_TABS.has(rawTab) ? rawTab : "";
+        if (!tab) {
+            if (nodeId != null) tab = "nodes";
+            else if (userId != null) tab = "users";
+            else tab = "overview";
+        }
+        return { mode: "admin", tab, nodeId, userId, q };
+    } catch {
+        return null;
+    }
+}
+
+function _applyDeepLink(target) {
+    if (!target) return;
+    appState.adminTab = target.tab || "overview";
+    appState.selectedNodeId = target.nodeId ?? null;
+    appState.selectedUserId = target.userId ?? null;
+    if (target.q) {
+        if (appState.adminTab === "finances") {
+            appState.finQuery = target.q;
+            appState.financesData = null;
+        } else {
+            appState.usersQuery = target.q;
+            appState.usersData = null;
+        }
+    }
+}
 
 const appState = {
     user: null,
     security: null,
     twoFactorPassed: false,
     mode: "cabinet",
-    adminTab: "nodes",
+    adminTab: "overview",
+    overviewData: null,
     nodes: [],
     selectedNodeId: null,
     nodesScrollY: 0,
     usersData: null,
     usersQuery: "",
+    usersFilter: "all",
+    usersOffset: 0,
     selectedUserId: null,
     usersScrollY: 0,
     broadcastsData: null,
@@ -28,12 +83,86 @@ const appState = {
     financesData: null,
     finQuery: "",
     finStatus: "",
+    finAttentionOnly: false,
     auditLogsData: null,
     auditAction: "",
+    auditTargetType: "",
     auditQuery: "",
+    pendingDeepLink: _parseDeepLink(),
+    onOpenUser: (userId) => {
+        if (userId == null) return;
+        closeAllModals();
+        appState.mode = "admin";
+        appState.adminTab = "users";
+        appState.selectedNodeId = null;
+        appState.selectedUserId = Number(userId);
+        _renderAdminView();
+    },
+    onOpenNode: (nodeId) => {
+        closeAllModals();
+        appState.mode = "admin";
+        appState.adminTab = "nodes";
+        appState.selectedUserId = null;
+        appState.selectedNodeId = nodeId != null ? Number(nodeId) : null;
+        if (appState.selectedNodeId != null && !appState.nodes.length) {
+            _reloadNodesAndRender();
+            return;
+        }
+        _renderAdminView();
+    },
+    onOpenFinances: (query = "", attentionOnly = false) => {
+        closeAllModals();
+        appState.mode = "admin";
+        appState.adminTab = "finances";
+        appState.finSubTab = "orders";
+        appState.finQuery = String(query || "");
+        appState.finAttentionOnly = Boolean(attentionOnly);
+        appState.financesData = null;
+        appState.selectedNodeId = null;
+        appState.selectedUserId = null;
+        _renderAdminView();
+    },
+    onOpenAudit: (query = "", targetType = "") => {
+        closeAllModals();
+        appState.mode = "admin";
+        appState.adminTab = "finances";
+        appState.finSubTab = "audit";
+        appState.auditQuery = String(query || "");
+        appState.auditTargetType = String(targetType || "");
+        appState.auditLogsData = null;
+        appState.selectedNodeId = null;
+        appState.selectedUserId = null;
+        _renderAdminView();
+    },
+    onOpenUsersFilter: (filter = "all", query = "") => {
+        closeAllModals();
+        appState.mode = "admin";
+        appState.adminTab = "users";
+        appState.usersFilter = String(filter || "all");
+        appState.usersQuery = String(query || "");
+        appState.usersOffset = 0;
+        appState.usersData = null;
+        appState.selectedNodeId = null;
+        appState.selectedUserId = null;
+        _renderAdminView();
+    },
+    onOpenBroadcasts: () => {
+        closeAllModals();
+        appState.mode = "admin";
+        appState.adminTab = "broadcasts";
+        appState.selectedNodeId = null;
+        appState.selectedUserId = null;
+        _renderAdminView();
+    },
+    onRequire2FA: () => {
+        closeAllModals();
+        appState.twoFactorPassed = false;
+        const root = document.getElementById("appRoot");
+        if (root && appState.mode === "admin") {
+            _openAdmin2FAGate(root);
+        }
+    },
 };
-
-let _tgBackListener = null;
 
 function _initTelegramChrome() {
     const tg = window.Telegram && window.Telegram.WebApp;
@@ -41,6 +170,7 @@ function _initTelegramChrome() {
     try {
         tg.ready();
         tg.expand();
+        tg.disableVerticalSwipes?.();
         tg.setHeaderColor("#000000");
         tg.setBackgroundColor("#000000");
     } catch {
@@ -69,22 +199,32 @@ function _updateTelegramBackButton(onBack) {
     }
 }
 
-function _renderErrorCard(root, title, desc) {
+function _renderErrorCard(root, title, desc, showRetry = false) {
     root.innerHTML = `
         <section class="card card-center">
             <span class="chip chip-muted">Доступ</span>
             <div class="card-title">${escapeHtml(title)}</div>
             <p class="muted">${escapeHtml(desc)}</p>
+            ${showRetry ? '<button id="bootstrapRetryBtn" type="button" class="btn btn-primary btn-sm">Повторить</button>' : ""}
         </section>
     `;
+    if (showRetry) {
+        root.querySelector("#bootstrapRetryBtn")?.addEventListener("click", () => {
+            root.innerHTML = `<section class="card card-center"><div class="muted">Проверка доступа...</div></section>`;
+            bootstrap();
+        });
+    }
 }
 
 function _syncModeSwitch() {
     const modeSwitch = document.getElementById("modeSwitch");
     const profilePill = document.getElementById("profilePillBtn");
     const userChip = document.getElementById("userChip");
+    const shell = document.querySelector(".app-shell");
     const isAdmin = Boolean(appState.user && appState.user.is_admin);
-    const inCabinet = !isAdmin || appState.mode === "cabinet";
+    const inAdminMode = isAdmin && appState.mode === "admin";
+    const inCabinet = !inAdminMode;
+    if (shell) shell.classList.toggle("mode-admin", inAdminMode);
     if (profilePill) profilePill.hidden = !inCabinet;
     if (userChip) userChip.hidden = inCabinet;
     if (!modeSwitch) return;
@@ -95,27 +235,43 @@ function _syncModeSwitch() {
     });
 }
 
-function _renderAdminView() {
+async function _renderAdminView() {
     const root = document.getElementById("appRoot");
     if (!root) return;
+    const seq = ++_tabSwitchSeq;
     _syncModeSwitch();
 
     if (appState.mode === "cabinet") {
-        clearBroadcastPollTimer();
+        _clearBroadcastPollTimerIfLoaded();
         appState.selectedNodeId = null;
         appState.selectedUserId = null;
         _updateTelegramBackButton(null);
-        loadAndRenderUserCabinet(root);
+        await loadAndRenderUserCabinet(root);
         return;
     }
 
     if (appState.adminTab !== "broadcasts") {
-        clearBroadcastPollTimer();
+        _clearBroadcastPollTimerIfLoaded();
     }
 
     if (appState.adminTab === "nodes" && appState.selectedNodeId != null) {
+        if (!appState.nodes.length) {
+            root.innerHTML = `<section class="card card-center"><div class="muted">Загрузка ноды...</div></section>`;
+            try {
+                const res = await api.listNodes();
+                if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
+                appState.nodes = res.nodes || [];
+            } catch (err) {
+                if (seq !== _tabSwitchSeq) return;
+                if (err && err.code === "2fa_required") return;
+                showToast(err.message || "Не удалось загрузить ноды", "error");
+            }
+        }
         const node = appState.nodes.find((n) => n.id === appState.selectedNodeId);
         if (node) {
+            root.innerHTML = `<section class="card card-center"><div class="muted">Загрузка...</div></section>`;
+            const { renderNodeDetailView } = await import("./views/node_detail.js?v=2.8.0");
+            if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
             const onBack = () => {
                 appState.selectedNodeId = null;
                 _updateTelegramBackButton(null);
@@ -132,107 +288,156 @@ function _renderAdminView() {
 
     if (appState.adminTab === "users" && appState.selectedUserId != null) {
         const usersList = (appState.usersData && appState.usersData.users) || [];
-        const userSummary = usersList.find((u) => u.id === appState.selectedUserId);
-        if (userSummary) {
-            const onBack = () => {
-                appState.selectedUserId = null;
-                _updateTelegramBackButton(null);
-                _renderAdminView();
-                requestAnimationFrame(() => window.scrollTo(0, appState.usersScrollY || 0));
-            };
-            const onReloadUser = async () => {
-                try {
-                    appState.usersData = await api.listUsers(
-                        appState.usersQuery || "",
-                        appState.usersOffset || 0,
-                        10,
-                        appState.usersFilter || "all"
-                    );
-                } catch (err) {
-                    showToast(err.message || "Не удалось обновить список пользователей");
-                }
-            };
-            _updateTelegramBackButton(onBack);
-            renderUserDetailView(root, userSummary, onBack, onReloadUser);
-            window.scrollTo(0, 0);
-            return;
-        }
-        appState.selectedUserId = null;
+        const userSummary = usersList.find((u) => u.id === appState.selectedUserId) || {
+            id: appState.selectedUserId,
+            telegram_id: appState.selectedUserId,
+        };
+        root.innerHTML = `<section class="card card-center"><div class="muted">Загрузка профиля...</div></section>`;
+        const { renderUserDetailView } = await import("./views/user_detail.js?v=2.8.0");
+        if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
+        const onBack = () => {
+            appState.selectedUserId = null;
+            _updateTelegramBackButton(null);
+            _renderAdminView();
+            requestAnimationFrame(() => window.scrollTo(0, appState.usersScrollY || 0));
+        };
+        const onReloadUser = async () => {
+            try {
+                appState.usersData = await api.listUsers(
+                    appState.usersQuery || "",
+                    appState.usersOffset || 0,
+                    10,
+                    appState.usersFilter || "all"
+                );
+            } catch (err) {
+                showToast(err.message || "Не удалось обновить список пользователей", "error");
+            }
+        };
+        _updateTelegramBackButton(onBack);
+        renderUserDetailView(root, userSummary, onBack, onReloadUser);
+        window.scrollTo(0, 0);
+        return;
     }
 
     _updateTelegramBackButton(null);
+    const tabsHtml = _ADMIN_TABS
+        .map(
+            (t) =>
+                `<button type="button" class="tab-btn ${appState.adminTab === t.id ? "active" : ""}" data-atab="${t.id}">${t.label}</button>`
+        )
+        .join("");
+
     root.innerHTML = `
-        <nav class="tabs-bar">
-            <button type="button" class="tab-btn ${appState.adminTab === "nodes" ? "active" : ""}" data-atab="nodes">Ноды</button>
-            <button type="button" class="tab-btn ${appState.adminTab === "subscription" ? "active" : ""}" data-atab="subscription">Подписка</button>
-            <button type="button" class="tab-btn ${appState.adminTab === "users" ? "active" : ""}" data-atab="users">Пользователи</button>
-            <button type="button" class="tab-btn ${appState.adminTab === "broadcasts" ? "active" : ""}" data-atab="broadcasts">Рассылки</button>
-            <button type="button" class="tab-btn ${appState.adminTab === "finances" ? "active" : ""}" data-atab="finances">Финансы</button>
-        </nav>
-        <div id="adminTabBody" class="app-main"></div>
+        <nav class="tabs-bar">${tabsHtml}</nav>
+        <div id="adminTabBody" class="app-main">
+            <section class="card card-center"><div class="muted">Загрузка...</div></section>
+        </div>
     `;
 
+    const activeBtn = root.querySelector(".tabs-bar .tab-btn.active");
+    activeBtn?.scrollIntoView({ inline: "center", block: "nearest", behavior: "instant" });
+
     root.querySelectorAll("[data-atab]").forEach((btn) => {
-        btn.addEventListener("click", async () => {
-            if (appState.adminTab === "broadcasts" && btn.dataset.atab !== "broadcasts") {
-                clearBroadcastPollTimer();
+        btn.addEventListener("click", () => {
+            const nextTab = btn.dataset.atab;
+            if (!nextTab || nextTab === appState.adminTab) return;
+            closeAllModals();
+            if (appState.adminTab === "broadcasts" && nextTab !== "broadcasts") {
+                _clearBroadcastPollTimerIfLoaded();
             }
-            appState.adminTab = btn.dataset.atab;
+            appState.adminTab = nextTab;
             appState.selectedNodeId = null;
             appState.selectedUserId = null;
-            if (appState.adminTab === "users" && !appState.usersData) {
-                try {
-                    appState.usersData = await api.listUsers(appState.usersQuery || "", appState.usersOffset || 0, 10, appState.usersFilter || "all");
-                } catch (err) {
-                    showToast(err.message || "Не удалось загрузить пользователей");
-                }
-            } else if (appState.adminTab === "broadcasts" && !appState.broadcastsData) {
-                try {
-                    const res = await api.listBroadcasts();
-                    appState.broadcastsData = res.broadcasts || [];
-                    appState.broadcastsTotal = res.total ?? appState.broadcastsData.length;
-                    appState.broadcastsOffset = res.offset ?? 0;
-                    appState.broadcastsLimit = res.limit ?? 20;
-                } catch (err) {
-                    showToast(err.message || "Не удалось загрузить рассылки");
-                }
-            } else if (appState.adminTab === "finances" && !appState.financesData) {
-                try {
-                    const validTabs = ["orders", "subscriptions", "topups"];
-                    appState.financesData = await api.listFinances(
-                        validTabs.includes(appState.finSubTab) ? appState.finSubTab : "orders",
-                        appState.finStatus || "",
-                        appState.finQuery || "",
-                        0,
-                        25
-                    );
-                } catch (err) {
-                    showToast(err.message || "Не удалось загрузить финансы");
-                }
-            }
             _renderAdminView();
         });
     });
 
     const body = root.querySelector("#adminTabBody");
-    if (appState.adminTab === "nodes") {
-        renderNodesView(body, appState, _reloadNodesAndRender, (id) => {
-            appState.nodesScrollY = window.scrollY;
-            appState.selectedNodeId = id;
-            _renderAdminView();
-        });
-    } else if (appState.adminTab === "subscription") {
-        renderSubscriptionSettingsView(body, appState, _reloadNodesAndRender);
-    } else if (appState.adminTab === "users") {
-        renderAdminUsersView(body, appState, (u) => {
-            appState.usersScrollY = window.scrollY;
-            appState.selectedUserId = u.id;
-            _renderAdminView();
-        });
-    } else if (appState.adminTab === "broadcasts") {
-        renderAdminBroadcastsView(body, appState);
-    } else {
-        renderAdminFinancesView(body, appState);
+    if (!body) return;
+
+    try {
+        if (appState.adminTab === "overview") {
+            const { renderAdminOverviewView } = await import("./views/admin_overview.js?v=2.8.0");
+            if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
+            await renderAdminOverviewView(body, appState);
+        } else if (appState.adminTab === "nodes") {
+            if (!appState.nodes.length) {
+                const res = await api.listNodes();
+                if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
+                appState.nodes = res.nodes || [];
+            }
+            const { renderNodesView } = await import("./views/nodes.js?v=2.8.0");
+            if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
+            renderNodesView(body, appState, _reloadNodesAndRender, (id) => {
+                appState.nodesScrollY = window.scrollY;
+                appState.selectedNodeId = id;
+                _renderAdminView();
+            });
+        } else if (appState.adminTab === "subscription") {
+            const { renderSubscriptionSettingsView } = await import("./views/nodes.js?v=2.8.0");
+            if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
+            await renderSubscriptionSettingsView(body, appState, _reloadNodesAndRender);
+        } else if (appState.adminTab === "users") {
+            const [usersMod] = await Promise.all([
+                import("./views/admin_users.js?v=2.8.0"),
+                appState.usersData
+                    ? Promise.resolve(null)
+                    : api.listUsers(appState.usersQuery || "", appState.usersOffset || 0, 10, appState.usersFilter || "all")
+                        .then((res) => {
+                            appState.usersData = res;
+                        })
+                        .catch((err) => {
+                            if (err && err.code === "2fa_required") throw err;
+                            showToast(err.message || "Не удалось загрузить пользователей", "error");
+                        }),
+            ]);
+            if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
+            usersMod.renderAdminUsersView(body, appState, (u) => {
+                appState.usersScrollY = window.scrollY;
+                appState.selectedUserId = u.id;
+                _renderAdminView();
+            });
+        } else if (appState.adminTab === "broadcasts") {
+            const [bcMod] = await Promise.all([
+                import("./views/admin_broadcasts.js?v=2.8.0"),
+                appState.broadcastsData
+                    ? Promise.resolve(null)
+                    : api.listBroadcasts()
+                        .then((res) => {
+                            appState.broadcastsData = res.broadcasts || [];
+                            appState.broadcastsTotal = res.total ?? appState.broadcastsData.length;
+                            appState.broadcastsOffset = res.offset ?? 0;
+                            appState.broadcastsLimit = res.limit ?? 20;
+                        })
+                        .catch((err) => {
+                            if (err && err.code === "2fa_required") throw err;
+                            showToast(err.message || "Не удалось загрузить рассылки", "error");
+                        }),
+            ]);
+            _broadcastsMod = bcMod;
+            if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
+            bcMod.renderAdminBroadcastsView(body, appState);
+        } else {
+            const [finMod] = await Promise.all([
+                import("./views/admin_finances.js?v=2.8.0"),
+                appState.financesData || appState.finSubTab !== "orders"
+                    ? Promise.resolve(null)
+                    : api.listFinances("orders", appState.finStatus || "", appState.finQuery || "", 0, 25, Boolean(appState.finAttentionOnly))
+                        .then((res) => {
+                            appState.financesData = res;
+                        })
+                        .catch((err) => {
+                            if (err && err.code === "2fa_required") throw err;
+                            showToast(err.message || "Не удалось загрузить финансы", "error");
+                        }),
+            ]);
+            if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
+            finMod.renderAdminFinancesView(body, appState);
+        }
+    } catch (err) {
+        if (seq !== _tabSwitchSeq) return;
+        if (err && err.code === "2fa_required") return;
+        showToast(err.message || "Ошибка загрузки раздела", "error");
     }
 }
 
@@ -241,25 +446,23 @@ async function _reloadNodesAndRender() {
         const res = await api.listNodes();
         appState.nodes = res.nodes || [];
     } catch (err) {
-        if (err && err.code === "2fa_required") {
-            appState.twoFactorPassed = false;
-            const root = document.getElementById("appRoot");
-            if (root && appState.mode === "admin") {
-                _openAdmin2FAGate(root);
-            }
-            return;
-        }
-        showToast(err.message || "Не удалось загрузить ноды");
+        if (err && err.code === "2fa_required") return;
+        showToast(err.message || "Не удалось загрузить ноды", "error");
     }
     _renderAdminView();
 }
 
-function _openAdmin2FAGate(root) {
+async function _openAdmin2FAGate(root) {
+    const seq = ++_tabSwitchSeq;
     _syncModeSwitch();
     _updateTelegramBackButton(() => {
+        closeAllModals();
         appState.mode = "cabinet";
         _renderAdminView();
     });
+    root.innerHTML = `<section class="card card-center"><div class="muted">Проверка доступа...</div></section>`;
+    const { renderSecurity2FA } = await import("./views/security_2fa.js?v=2.8.0");
+    if (seq !== _tabSwitchSeq || appState.mode !== "admin" || appState.twoFactorPassed) return;
     renderSecurity2FA(root, appState.security, async (res) => {
         const isConfigured = Boolean(
             !res || res.totp_configured || res.configured || res.two_factor_configured || res.verified
@@ -276,9 +479,35 @@ function _openAdmin2FAGate(root) {
         };
         appState.twoFactorPassed = true;
         appState.mode = "admin";
-        await _reloadNodesAndRender();
+        if (appState.pendingDeepLink) {
+            _applyDeepLink(appState.pendingDeepLink);
+            appState.pendingDeepLink = null;
+        }
+        await _renderAdminView();
     });
 }
+
+setOn2FARequired(() => {
+    closeAllModals();
+    appState.twoFactorPassed = false;
+    const root = document.getElementById("appRoot");
+    if (root && appState.mode === "admin") {
+        _openAdmin2FAGate(root);
+    }
+});
+
+setOnInitDataExpired(() => {
+    closeAllModals();
+    showToast("Сессия Telegram устарела. Закройте и откройте Mini App заново.", "error");
+    const root = document.getElementById("appRoot");
+    if (root && !appState.user) {
+        _renderErrorCard(
+            root,
+            "Сессия устарела",
+            "Закройте и откройте Mini App заново через Telegram-бота."
+        );
+    }
+});
 
 async function bootstrap() {
     _initTelegramChrome();
@@ -294,14 +523,11 @@ async function bootstrap() {
             btn.addEventListener("click", async () => {
                 const nextMode = btn.dataset.mode;
                 if (nextMode === appState.mode) return;
+                closeAllModals();
                 appState.mode = nextMode;
                 if (nextMode === "admin") {
                     if (!appState.twoFactorPassed) {
                         _openAdmin2FAGate(root);
-                        return;
-                    }
-                    if (!appState.nodes.length) {
-                        await _reloadNodesAndRender();
                         return;
                     }
                 }
@@ -326,15 +552,30 @@ async function bootstrap() {
 
         roleChip.hidden = true;
         appState.twoFactorPassed = Boolean(me.security && me.security.two_factor_verified);
+
+        if (appState.pendingDeepLink && appState.pendingDeepLink.mode === "admin") {
+            _applyDeepLink(appState.pendingDeepLink);
+            appState.pendingDeepLink = null;
+            appState.mode = "admin";
+            if (!appState.twoFactorPassed) {
+                await _openAdmin2FAGate(root);
+                return;
+            }
+            await _renderAdminView();
+            return;
+        }
+
         appState.mode = "cabinet";
-        _renderAdminView();
+        await _renderAdminView();
     } catch (err) {
+        const isUnauthorized = Boolean(err && err.status === 401);
         _renderErrorCard(
             root,
             "Вход через Telegram",
-            err && err.status === 401
+            isUnauthorized
                 ? "Откройте панель через кнопку внутри Telegram-бота."
-                : "Сервис временно недоступен."
+                : "Сервис временно недоступен.",
+            !isUnauthorized
         );
     }
 }
