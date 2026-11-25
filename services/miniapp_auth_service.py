@@ -496,6 +496,11 @@ async def verify_admin_2fa(
                     "error": f"Слишком много неверных попыток. Повторите через {lockout} сек.",
                 }
             return {"verified": False, "error": "Неверный 6-значный код подтверждения"}
+        if _used_totp_steps.get((telegram_id, matched_step)):
+            return {
+                "verified": False,
+                "error": "Этот код уже использован. Дождитесь следующего кода.",
+            }
         try:
             encrypted_secret = _encrypt_totp_secret(pending_secret)
         except RuntimeError:
@@ -503,13 +508,13 @@ async def verify_admin_2fa(
                 "verified": False,
                 "error": "Ключ шифрования БД (DB_ENCRYPTION_KEY) не настроен на сервере.",
             }
+        _used_totp_steps[(telegram_id, matched_step)] = True
         await set_system_setting(
             session,
             f"miniapp_admin_totp_{telegram_id}",
             encrypted_secret,
             updated_by=telegram_id,
         )
-        _used_totp_steps[(telegram_id, matched_step)] = True
         _2fa_failures.pop(telegram_id, None)
         epoch = await get_admin_session_epoch(session)
         token, exp_ts = issue_admin_session_token(telegram_id, epoch=epoch)

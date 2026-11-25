@@ -62,6 +62,12 @@ class User(Base):
             postgresql_ops={"username": "gin_trgm_ops"},
         ),
         Index(
+            "ix_users_first_name_trgm",
+            "first_name",
+            postgresql_using="gin",
+            postgresql_ops={"first_name": "gin_trgm_ops"},
+        ),
+        Index(
             "ix_users_username_lower",
             text("lower(username)"),
             postgresql_where=text("username IS NOT NULL AND is_deleted = false"),
@@ -215,6 +221,23 @@ class Order(Base):
             postgresql_where=text("idempotency_key IS NOT NULL"),
         ),
         Index("ix_orders_status", "status"),
+        Index(
+            "ix_orders_attention_flag",
+            "created_at",
+            "id",
+            postgresql_where=text(
+                "(metadata ->> 'requires_manual_review') = 'true' "
+                "OR (metadata ->> 'settlement_held') = 'true'"
+            ),
+            postgresql_ops={"created_at": "DESC", "id": "DESC"},
+        ),
+        Index(
+            "ix_orders_user_settlement_held",
+            "user_id",
+            postgresql_where=text(
+                "status = 'paid' AND (metadata ->> 'settlement_held') = 'true'"
+            ),
+        ),
         CheckConstraint(
             sql_enum_in("status", OrderStatus),
             name="ck_orders_status",
@@ -365,6 +388,13 @@ class WebhookInbox(Base):
             "id",
             postgresql_where=text("status IN ('succeeded', 'dead')"),
         ),
+        Index(
+            "ix_webhook_inbox_attention_recent",
+            "received_at",
+            "id",
+            postgresql_where=text("status IN ('pending', 'retry', 'dead')"),
+            postgresql_ops={"received_at": "DESC", "id": "DESC"},
+        ),
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     provider: Mapped[str] = mapped_column(String(30))
@@ -390,6 +420,14 @@ class AuditLog(Base):
             func.lower(text("target_type")),
             text("target_id"),
             text("created_at DESC"),
+        ),
+        Index("ix_audit_logs_admin_id_id_desc", "admin_id", "id", postgresql_ops={"id": "DESC"}),
+        Index("ix_audit_logs_action_id_desc", "action", "id", postgresql_ops={"id": "DESC"}),
+        Index(
+            "ix_audit_logs_details_trgm",
+            "details",
+            postgresql_using="gin",
+            postgresql_ops={"details": "gin_trgm_ops"},
         ),
     )
 
@@ -690,6 +728,12 @@ class UserDevice(Base):
         UniqueConstraint("user_id", "hwid", name="uq_user_devices_user_hwid"),
         Index("ix_user_devices_user_priority", "user_id", "bi_priority", "first_seen_at"),
         Index("ix_user_devices_user_std_priority", "user_id", "std_priority", "first_seen_at"),
+        Index(
+            "ix_user_devices_hwid_trgm",
+            "hwid",
+            postgresql_using="gin",
+            postgresql_ops={"hwid": "gin_trgm_ops"},
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

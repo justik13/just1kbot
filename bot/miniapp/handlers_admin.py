@@ -113,6 +113,42 @@ def _parse_positive_int(
     return val, None
 
 
+def _parse_bounded_int_query(
+    request: web.Request,
+    name: str,
+    *,
+    default: int,
+    min_value: int,
+    max_value: int,
+) -> int:
+    raw = (request.query.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        val = int(raw)
+    except ValueError:
+        return default
+    return min(max_value, max(min_value, val))
+
+
+def _is_pre_reactivation_held_order(order: Order) -> bool:
+    """Return True if a held order must settle before manual WI reactivation."""
+    if getattr(order, "service_type", None) != "white_internet":
+        return True
+    meta = getattr(order, "metadata_", None) or {}
+    op = meta.get("operation")
+    if op == "purchase":
+        return True
+    if op in ("renew", "topup", "topup_gb", "add_device_slot"):
+        return False
+    t_bytes = int(getattr(order, "traffic_bytes", 0) or 0)
+    d_days = int(getattr(order, "duration_days", 0) or 0)
+    d_limit = getattr(order, "device_limit", None)
+    if (d_limit and not t_bytes and d_days == 0) or (t_bytes > 0 and d_days == 0):
+        return False
+    return True
+
+
 async def _parse_json_model(
     request: web.Request,
     model_cls: type[SchemaT],
@@ -759,14 +795,8 @@ async def api_admin_users_handler(request: web.Request) -> web.Response:
 
     q = (request.query.get("q") or "").strip()
     flt = (request.query.get("filter") or "all").strip()
-    try:
-        limit = min(50, max(1, int(request.query.get("limit", "10"))))
-    except ValueError:
-        limit = 10
-    try:
-        offset = max(0, int(request.query.get("offset", "0")))
-    except ValueError:
-        offset = 0
+    limit = _parse_bounded_int_query(request, "limit", default=10, min_value=1, max_value=50)
+    offset = _parse_bounded_int_query(request, "offset", default=0, min_value=0, max_value=_MAX_INT32)
 
     now = now_utc()
 
@@ -1375,12 +1405,37 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                 locked_user.financial_hold = bool(payload.financial_hold)
                 if not locked_user.financial_hold:
                     locked_user.financial_block_reason = None
+                elif note:
+                    locked_user.financial_block_reason = note
             if payload.topup_blocked is not None:
                 locked_user.topup_blocked = bool(payload.topup_blocked)
             await session.flush()
             await SubscriptionService.sync_access_state(session, locked_user)
 
             now = now_utc()
+            pre_orders: list[Order] = []
+            post_orders: list[Order] = []
+            if not locked_user.financial_hold:
+                held_stmt = select(Order).where(
+                    Order.user_id == locked_user.id,
+                    Order.status == "paid",
+                    Order.metadata_["settlement_held"].astext == "true",
+                )
+                if locked_user.topup_blocked:
+                    held_stmt = held_stmt.where(Order.service_type != "topup")
+                held_orders = list((await session.scalars(held_stmt)).all())
+                held_orders.sort(
+                    key=lambda o: 0 if getattr(o, "service_type", None) == "topup" else 1
+                )
+                for held_order in held_orders:
+                    if _is_pre_reactivation_held_order(held_order):
+                        pre_orders.append(held_order)
+                    else:
+                        post_orders.append(held_order)
+
+            for held_order in pre_orders:
+                await OrderService.mark_order_paid(session, held_order.id)
+
             wi_reactivated = False
             hold_cleared = (
                 before_state["financial_hold"] is True
@@ -1448,17 +1503,8 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                                 )
                                 await session.flush()
 
-            if not locked_user.financial_hold:
-                held_stmt = select(Order).where(
-                    Order.user_id == locked_user.id,
-                    Order.status == "paid",
-                    Order.metadata_["settlement_held"].astext == "true",
-                )
-                if locked_user.topup_blocked:
-                    held_stmt = held_stmt.where(Order.service_type != "topup")
-                held_orders = (await session.scalars(held_stmt)).all()
-                for held_order in held_orders:
-                    await OrderService.mark_order_paid(session, held_order.id)
+            for held_order in post_orders:
+                await OrderService.mark_order_paid(session, held_order.id)
             await AuditService.log_action(
                 session,
                 admin_id=ctx.telegram_id,
@@ -2038,8 +2084,8 @@ async def api_admin_user_devices_reset_handler(request: web.Request) -> web.Resp
             await white_internet_repo.add_pending_revocation_uuids(
                 session, wi_sub.id, dev_uuids
             )
+            wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
             if wi_sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING):
-                wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
                 wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
             await session.flush()
             await _queue_wi_revoke_uuids(
@@ -2117,8 +2163,8 @@ async def api_admin_user_device_delete_handler(request: web.Request) -> web.Resp
             if wi_sub is not None:
                 wi_sub = await white_internet_repo.get_subscription_with_lock(session, wi_sub.id) or wi_sub
                 await white_internet_repo.add_pending_revocation_uuids(session, wi_sub.id, [deleted_uuid])
+                wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
                 if wi_sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING):
-                    wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
                     wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
                 await session.flush()
                 await _queue_wi_revoke_uuids(
@@ -2278,7 +2324,6 @@ async def api_admin_user_token_rotate_handler(request: web.Request) -> web.Respo
                     session, wi_sub.id, wi_rev_uuids
                 )
                 if wi_sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING):
-                    wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
                     wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
                 await session.flush()
                 await _queue_wi_revoke_uuids(
@@ -2349,14 +2394,8 @@ async def api_admin_broadcasts_list_handler(request: web.Request) -> web.Respons
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
-    try:
-        limit = min(50, max(1, int(request.query.get("limit", "15"))))
-    except ValueError:
-        limit = 15
-    try:
-        offset = max(0, int(request.query.get("offset", "0")))
-    except ValueError:
-        offset = 0
+    limit = _parse_bounded_int_query(request, "limit", default=15, min_value=1, max_value=50)
+    offset = _parse_bounded_int_query(request, "offset", default=0, min_value=0, max_value=_MAX_INT32)
 
     async with session_scope() as session:
         items, total = await broadcast_service.list_broadcasts(session, limit=limit, offset=offset)
@@ -2516,9 +2555,8 @@ async def api_admin_finances_handler(request: web.Request) -> web.Response:
     status = request.query.get("status", "").strip()
     query_str = request.query.get("q", "").strip()
     attention_only = request.query.get("attention_only", "").strip().lower() in ("1", "true", "yes")
-    offset = max(0, int(request.query.get("offset", "0") or 0) if request.query.get("offset", "0").isdigit() else 0)
-    raw_limit = int(request.query.get("limit", "25") or 25) if request.query.get("limit", "25").isdigit() else 25
-    limit = min(100, max(1, raw_limit))
+    offset = _parse_bounded_int_query(request, "offset", default=0, min_value=0, max_value=_MAX_INT32)
+    limit = _parse_bounded_int_query(request, "limit", default=25, min_value=1, max_value=100)
 
     async with session_scope() as session:
         data = await admin_tools_service.list_finances(
@@ -2541,9 +2579,8 @@ async def api_admin_audit_logs_handler(request: web.Request) -> web.Response:
     action = request.query.get("action", "").strip()
     target_type = request.query.get("target_type", "").strip()
     query_str = request.query.get("q", "").strip()
-    offset = max(0, int(request.query.get("offset", "0") or 0) if request.query.get("offset", "0").isdigit() else 0)
-    raw_limit = int(request.query.get("limit", "40") or 40) if request.query.get("limit", "40").isdigit() else 40
-    limit = min(100, max(1, raw_limit))
+    offset = _parse_bounded_int_query(request, "offset", default=0, min_value=0, max_value=_MAX_INT32)
+    limit = _parse_bounded_int_query(request, "limit", default=40, min_value=1, max_value=100)
 
     async with session_scope() as session:
         data = await admin_tools_service.list_audit_logs(

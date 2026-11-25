@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from typing import Literal
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+_TG_FILE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,256}$")
 
 
 class Verify2FAPayload(BaseModel):
@@ -246,9 +250,19 @@ class BroadcastStartPayload(BaseModel):
         clean = value.strip()
         if not clean:
             return None
-        if clean.lower().startswith("http://"):
+        lowered = clean.lower()
+        if lowered.startswith("http://"):
             raise ValueError("URL изображения должен использовать HTTPS")
-        return clean
+        if lowered.startswith("https://"):
+            if any(ch.isspace() for ch in clean):
+                raise ValueError("Некорректный HTTPS URL изображения")
+            parsed = urlparse(clean)
+            if parsed.scheme != "https" or not parsed.netloc:
+                raise ValueError("Некорректный HTTPS URL изображения")
+            return clean
+        if _TG_FILE_ID_RE.fullmatch(clean):
+            return clean
+        raise ValueError("Укажите корректный HTTPS URL или Telegram file_id изображения")
 
 
 class MassBonusPayload(BaseModel):

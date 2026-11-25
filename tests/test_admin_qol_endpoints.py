@@ -262,17 +262,18 @@ async def test_api_admin_user_device_delete_handler_wi_expired_vs_active():
 
         return resp, wi_sub, queue_wi_mock, deprovision_mock, wi_dispatch_mock
 
-    # Case 1: EXPIRED WI subscription must stay SYNCED_INACTIVE and not queue inline sync
+    # Case 1: EXPIRED WI subscription must stay SYNCED_INACTIVE, bump desired_version for revocation fence, and not queue inline sync
     resp_exp, wi_exp, queue_exp, deprov_exp, wi_disp_exp = await _run_case(
         WhiteInternetStatus.EXPIRED,
         WhiteInternetProvisioningStatus.SYNCED_INACTIVE,
     )
     assert resp_exp.status == 200
     assert wi_exp.provisioning_status == WhiteInternetProvisioningStatus.SYNCED_INACTIVE
-    assert wi_exp.desired_version == 5
+    assert wi_exp.desired_version == 6
     queue_exp.assert_not_awaited()
     assert deprov_exp.call_count == 1
     assert wi_disp_exp.call_count == 1
+    assert wi_disp_exp.call_args.args[2] == 6
 
     # Case 2: ACTIVE WI subscription bumps desired_version, sets PENDING_UPDATE, and queues sync
     resp_act, wi_act, queue_act, deprov_act, wi_disp_act = await _run_case(
@@ -525,8 +526,36 @@ async def test_api_admin_user_restrictions_wi_reactivation_before_held_orders_an
     admin_ctx = SimpleNamespace(telegram_id=1001)
     now = now_utc()
 
-    # Case 1: WI subscription is reactivated to ACTIVE BEFORE held orders are released
-    user_1 = SimpleNamespace(
+    # Case 0: Enabling financial_hold persists financial_block_reason from note
+    user_0 = SimpleNamespace(
+        id=50,
+        telegram_id=5000,
+        is_deleted=False,
+        financial_hold=False,
+        topup_blocked=False,
+        financial_block_reason=None,
+    )
+    session_0 = AsyncMock()
+    session_0.get = AsyncMock(return_value=user_0)
+    session_0.execute = AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: user_0))
+    req_0 = SimpleNamespace(
+        match_info={"user_id": "50"},
+        json=AsyncMock(return_value={"action": "restrictions", "financial_hold": True, "note": "chargeback #42"}),
+    )
+    with (
+        patch.object(handlers_admin, "require_admin_user", return_value=(admin_ctx, None)),
+        patch.object(handlers_admin, "session_scope", _make_session_scope(session_0)),
+        patch.object(handlers_admin, "acquire_user_account_lock", AsyncMock()),
+        patch.object(handlers_admin.SubscriptionService, "sync_access_state", AsyncMock()),
+        patch.object(handlers_admin.AuditService, "log_action", AsyncMock()),
+    ):
+        resp_0 = await handlers_admin.api_admin_user_adjust_handler(req_0)
+    assert resp_0.status == 200
+    assert user_0.financial_hold is True
+    assert user_0.financial_block_reason == "chargeback #42"
+
+    # Case 1a: Held wallet topup + held WI purchase settle BEFORE manual WI reactivation (purchase sees DISABLED)
+    user_1a = SimpleNamespace(
         id=51,
         telegram_id=5100,
         is_deleted=False,
@@ -534,7 +563,7 @@ async def test_api_admin_user_restrictions_wi_reactivation_before_held_orders_an
         topup_blocked=False,
         financial_block_reason="dispute",
     )
-    wi_1 = SimpleNamespace(
+    wi_1a = SimpleNamespace(
         id=501,
         user_id=51,
         status=WhiteInternetStatus.DISABLED,
@@ -547,23 +576,98 @@ async def test_api_admin_user_restrictions_wi_reactivation_before_held_orders_an
         desired_version=2,
         provisioning_status=WhiteInternetProvisioningStatus.SYNCED_INACTIVE,
     )
-    held_order = SimpleNamespace(id="ord-held-1", service_type="white_internet")
+    held_topup_wallet = SimpleNamespace(id="ord-topup-1", service_type="topup", metadata_={"operation": "topup"})
+    held_wi_purchase = SimpleNamespace(id="ord-purchase-1", service_type="white_internet", metadata_={"operation": "purchase"})
+
+    session_1a = AsyncMock()
+    session_1a.get = AsyncMock(return_value=user_1a)
+    session_1a.execute = AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: user_1a))
+    session_1a.scalar = AsyncMock(return_value=None)
+    session_1a.scalars = AsyncMock(return_value=SimpleNamespace(all=lambda: [held_wi_purchase, held_topup_wallet]))
+
+    release_log_1a: list[tuple[str, str]] = []
+
+    async def _fake_mark_paid_1a(_sess, order_id):
+        release_log_1a.append((str(order_id), str(wi_1a.status)))
+        if order_id == "ord-purchase-1":
+            wi_1a.status = WhiteInternetStatus.PENDING
+        return held_wi_purchase
+
+    queue_wi_1a = AsyncMock()
+    req_1a = SimpleNamespace(
+        match_info={"user_id": "51"},
+        json=AsyncMock(return_value={"action": "restrictions", "financial_hold": False}),
+    )
+
+    with (
+        patch.object(handlers_admin, "require_admin_user", return_value=(admin_ctx, None)),
+        patch.object(handlers_admin, "session_scope", _make_session_scope(session_1a)),
+        patch.object(handlers_admin, "acquire_user_account_lock", AsyncMock()),
+        patch.object(handlers_admin.SubscriptionService, "sync_access_state", AsyncMock()),
+        patch.object(handlers_admin, "get_subscription_by_user_id", AsyncMock(return_value=wi_1a)),
+        patch.object(
+            handlers_admin.white_internet_repo,
+            "get_subscription_with_lock",
+            AsyncMock(return_value=wi_1a),
+        ),
+        patch.object(handlers_admin, "_queue_wi_inline_sync", queue_wi_1a),
+        patch.object(handlers_admin.OrderService, "mark_order_paid", AsyncMock(side_effect=_fake_mark_paid_1a)),
+        patch.object(handlers_admin.AuditService, "log_action", AsyncMock()),
+    ):
+        resp_1a = await handlers_admin.api_admin_user_adjust_handler(req_1a)
+
+    assert resp_1a.status == 200
+    data_1a = json.loads(resp_1a.text)
+    assert data_1a["ok"] is True
+    assert data_1a["wi_reactivated"] is False
+    assert release_log_1a == [
+        ("ord-topup-1", WhiteInternetStatus.DISABLED.value),
+        ("ord-purchase-1", WhiteInternetStatus.DISABLED.value),
+    ]
+    assert wi_1a.status == WhiteInternetStatus.PENDING
+    assert user_1a.financial_block_reason is None
+    queue_wi_1a.assert_not_awaited()
+
+    # Case 1b: DISABLED WI sub from hold + held WI renew/topup reactivates WI to ACTIVE BEFORE settling renew/topup
+    user_1 = SimpleNamespace(
+        id=53,
+        telegram_id=5300,
+        is_deleted=False,
+        financial_hold=True,
+        topup_blocked=False,
+        financial_block_reason="dispute",
+    )
+    wi_1 = SimpleNamespace(
+        id=503,
+        user_id=53,
+        status=WhiteInternetStatus.DISABLED,
+        status_reason="financial_hold",
+        expires_at=now + timedelta(days=10),
+        base_traffic_bytes=50 * 1024**3,
+        extra_traffic_bytes=0,
+        traffic_used_bytes=1024,
+        traffic_overage_bytes=0,
+        desired_version=2,
+        provisioning_status=WhiteInternetProvisioningStatus.SYNCED_INACTIVE,
+    )
+    held_renew = SimpleNamespace(id="ord-held-renew", service_type="white_internet", metadata_={"operation": "renew"})
+    held_wi_topup = SimpleNamespace(id="ord-held-topup", service_type="white_internet", metadata_={"operation": "topup"})
 
     session_1 = AsyncMock()
     session_1.get = AsyncMock(return_value=user_1)
     session_1.execute = AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: user_1))
     session_1.scalar = AsyncMock(return_value=None)
-    session_1.scalars = AsyncMock(return_value=SimpleNamespace(all=lambda: [held_order]))
+    session_1.scalars = AsyncMock(return_value=SimpleNamespace(all=lambda: [held_renew, held_wi_topup]))
 
-    status_at_order_release: list[str] = []
+    status_at_order_release: list[tuple[str, str]] = []
 
-    async def _fake_mark_paid(_sess, _order_id):
-        status_at_order_release.append(str(wi_1.status))
-        return held_order
+    async def _fake_mark_paid(_sess, order_id):
+        status_at_order_release.append((str(order_id), str(wi_1.status)))
+        return held_renew
 
     queue_wi_1 = AsyncMock()
     req_1 = SimpleNamespace(
-        match_info={"user_id": "51"},
+        match_info={"user_id": "53"},
         json=AsyncMock(return_value={"action": "restrictions", "financial_hold": False}),
     )
 
@@ -588,7 +692,10 @@ async def test_api_admin_user_restrictions_wi_reactivation_before_held_orders_an
     data_1 = json.loads(resp_1.text)
     assert data_1["ok"] is True
     assert data_1["wi_reactivated"] is True
-    assert status_at_order_release == [WhiteInternetStatus.ACTIVE.value]
+    assert status_at_order_release == [
+        ("ord-held-renew", WhiteInternetStatus.ACTIVE.value),
+        ("ord-held-topup", WhiteInternetStatus.ACTIVE.value),
+    ]
     assert wi_1.status == WhiteInternetStatus.ACTIVE
     assert wi_1.status_reason is None
     assert wi_1.provisioning_status == WhiteInternetProvisioningStatus.PENDING_UPDATE
@@ -785,3 +892,397 @@ async def test_admin_ledger_debt_forgiveness_and_token_rotate_expired_wi():
     assert wi_exp.provisioning_status == WhiteInternetProvisioningStatus.SYNCED_INACTIVE
     wi_dispatch_mock.assert_called_once()
     queue_wi_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_wi_devices_reset_exhausted_bumps_version_and_token_rotate_active_no_double_bump():
+    admin_ctx = SimpleNamespace(telegram_id=1001)
+    user = SimpleNamespace(id=72, telegram_id=7200, is_deleted=False)
+    wi_hub = SimpleNamespace(id=89, api_url="https://wi-hub.example", api_key="k", protocol="xray")
+
+    # 1. devices_reset on EXHAUSTED WI bumps desired_version (5 -> 6) without switching to PENDING_UPDATE or inline sync
+    wi_exh = SimpleNamespace(
+        id=702,
+        user_id=72,
+        uuid="wi-uuid-exh",
+        status=WhiteInternetStatus.EXHAUSTED,
+        desired_version=5,
+        provisioning_status=WhiteInternetProvisioningStatus.SYNCED_INACTIVE,
+    )
+    devs = [SimpleNamespace(device_uuid="dev-uuid-exh-1")]
+    session_reset = AsyncMock()
+    session_reset.scalar = AsyncMock(return_value=user)
+    session_reset.scalars = AsyncMock(return_value=SimpleNamespace(all=lambda: devs))
+    session_reset.execute = AsyncMock(return_value=SimpleNamespace(rowcount=1))
+    wi_dispatch_reset = MagicMock()
+    queue_wi_reset = AsyncMock()
+    req_reset = SimpleNamespace(app={}, match_info={"user_id": "72"}, text=AsyncMock(return_value=""))
+
+    with (
+        patch.object(handlers_admin, "require_admin_user", return_value=(admin_ctx, None)),
+        patch.object(handlers_admin, "session_scope", _make_session_scope(session_reset)),
+        patch.object(handlers_admin, "acquire_user_account_lock", AsyncMock()),
+        patch.object(handlers_admin.vless_subscription_repo, "get_subscription_by_user_id", AsyncMock(return_value=None)),
+        patch.object(handlers_admin, "get_subscription_by_user_id", AsyncMock(return_value=wi_exh)),
+        patch.object(handlers_admin.white_internet_repo, "get_subscription_with_lock", AsyncMock(return_value=wi_exh)),
+        patch.object(handlers_admin.white_internet_repo, "add_pending_revocation_uuids", AsyncMock()),
+        patch.object(handlers_admin.servers_repo, "get_wi_revocation_ru_hubs", AsyncMock(return_value=[wi_hub])),
+        patch.object(white_internet_service, "_dispatch_deprovision", wi_dispatch_reset),
+        patch.object(handlers_admin, "_queue_wi_inline_sync", queue_wi_reset),
+        patch.object(handlers_admin.AuditService, "log_action", AsyncMock()),
+    ):
+        resp_reset = await handlers_admin.api_admin_user_devices_reset_handler(req_reset)
+
+    assert resp_reset.status == 200
+    assert wi_exh.desired_version == 6
+    assert wi_exh.provisioning_status == WhiteInternetProvisioningStatus.SYNCED_INACTIVE
+    wi_dispatch_reset.assert_called_once()
+    assert wi_dispatch_reset.call_args.args[2] == 6
+    queue_wi_reset.assert_not_awaited()
+
+    # 2. token_rotate on ACTIVE WI does not double-increment desired_version after reset_subscription_token_atomic
+    wi_act = SimpleNamespace(
+        id=703,
+        user_id=72,
+        uuid="wi-uuid-old",
+        status=WhiteInternetStatus.ACTIVE,
+        desired_version=7,
+        provisioning_status=WhiteInternetProvisioningStatus.ACTIVE,
+    )
+
+    async def _fake_reset_token(_sess, _sub_id, **_kw):
+        wi_act.desired_version += 1
+        wi_act.uuid = "wi-uuid-new"
+        wi_act.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+        return "tok-new"
+
+    session_rot = AsyncMock()
+    session_rot.scalar = AsyncMock(return_value=user)
+    session_rot.scalars = AsyncMock(return_value=SimpleNamespace(all=lambda: []))
+    wi_dispatch_rot = MagicMock()
+    queue_wi_rot = AsyncMock()
+    req_rot = SimpleNamespace(app={}, match_info={"user_id": "72"}, text=AsyncMock(return_value=""))
+
+    with (
+        patch.object(handlers_admin, "require_admin_user", return_value=(admin_ctx, None)),
+        patch.object(handlers_admin, "session_scope", _make_session_scope(session_rot)),
+        patch.object(handlers_admin, "acquire_user_account_lock", AsyncMock()),
+        patch.object(handlers_admin.vless_subscription_repo, "get_subscription_by_user_id", AsyncMock(return_value=None)),
+        patch.object(handlers_admin, "get_subscription_by_user_id", AsyncMock(return_value=wi_act)),
+        patch.object(handlers_admin.white_internet_repo, "reset_subscription_token_atomic", AsyncMock(side_effect=_fake_reset_token)),
+        patch.object(handlers_admin.white_internet_repo, "get_subscription_with_lock", AsyncMock(return_value=wi_act)),
+        patch.object(handlers_admin.white_internet_repo, "add_pending_revocation_uuids", AsyncMock()),
+        patch.object(handlers_admin.servers_repo, "get_wi_revocation_ru_hubs", AsyncMock(return_value=[wi_hub])),
+        patch.object(white_internet_service, "_dispatch_deprovision", wi_dispatch_rot),
+        patch.object(handlers_admin, "_queue_wi_inline_sync", queue_wi_rot),
+        patch.object(handlers_admin, "_build_sub_url", return_value="https://sub.example/tok-new"),
+        patch.object(handlers_admin, "_build_backup_sub_url", return_value="https://backup.example/tok-new"),
+        patch.object(handlers_admin.AuditService, "log_action", AsyncMock()),
+    ):
+        resp_rot = await handlers_admin.api_admin_user_token_rotate_handler(req_rot)
+
+    assert resp_rot.status == 200
+    assert wi_act.desired_version == 8
+    assert wi_act.provisioning_status == WhiteInternetProvisioningStatus.PENDING_UPDATE
+    wi_dispatch_rot.assert_called_once()
+    assert wi_dispatch_rot.call_args.args[2] == 8
+    queue_wi_rot.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_api_admin_pagination_offset_clamping():
+    admin_ctx = SimpleNamespace(telegram_id=1001)
+    huge_offset = "999999999999999999999"
+
+    # 1. users
+    sess_users = AsyncMock()
+    sess_users.scalar = AsyncMock(side_effect=[Decimal("0"), 0])
+    sess_users.scalars = AsyncMock(return_value=SimpleNamespace(all=lambda: []))
+    req_users = SimpleNamespace(query={"offset": huge_offset, "limit": "10"})
+    with (
+        patch.object(handlers_admin, "require_admin_user", return_value=(admin_ctx, None)),
+        patch.object(handlers_admin, "session_scope", _make_session_scope(sess_users)),
+        patch.object(handlers_admin.users_repo, "get_user_filter_counts", AsyncMock(return_value={"all": 0})),
+    ):
+        resp_users = await handlers_admin.api_admin_users_handler(req_users)
+    assert resp_users.status == 200
+    assert json.loads(resp_users.text)["offset"] == 2_147_483_647
+
+    # 2. broadcasts
+    sess_bc = AsyncMock()
+    req_bc = SimpleNamespace(query={"offset": huge_offset, "limit": "15"})
+    list_bc_mock = AsyncMock(return_value=([], 0))
+    with (
+        patch.object(handlers_admin, "require_admin_user", return_value=(admin_ctx, None)),
+        patch.object(handlers_admin, "session_scope", _make_session_scope(sess_bc)),
+        patch.object(handlers_admin.broadcast_service, "list_broadcasts", list_bc_mock),
+    ):
+        resp_bc = await handlers_admin.api_admin_broadcasts_list_handler(req_bc)
+    assert resp_bc.status == 200
+    assert json.loads(resp_bc.text)["offset"] == 2_147_483_647
+    assert list_bc_mock.call_args.kwargs["offset"] == 2_147_483_647
+
+    # 3. finances & 4. audit-logs
+    sess_tools = AsyncMock()
+    fin_mock = AsyncMock(return_value={"total": 0, "offset": 2_147_483_647, "limit": 25, "items": []})
+    audit_mock = AsyncMock(return_value={"total": 0, "offset": 0, "limit": 40, "actions": [], "items": []})
+    with (
+        patch.object(handlers_admin, "require_admin_user", return_value=(admin_ctx, None)),
+        patch.object(handlers_admin, "session_scope", _make_session_scope(sess_tools)),
+        patch.object(handlers_admin.admin_tools_service, "list_finances", fin_mock),
+        patch.object(handlers_admin.admin_tools_service, "list_audit_logs", audit_mock),
+    ):
+        resp_fin = await handlers_admin.api_admin_finances_handler(
+            SimpleNamespace(query={"offset": huge_offset})
+        )
+        resp_aud = await handlers_admin.api_admin_audit_logs_handler(
+            SimpleNamespace(query={"offset": "-50"})
+        )
+    assert resp_fin.status == 200
+    assert fin_mock.call_args.kwargs["offset"] == 2_147_483_647
+    assert resp_aud.status == 200
+    assert audit_mock.call_args.kwargs["offset"] == 0
+
+
+@pytest.mark.asyncio
+async def test_node_monitor_nonblocking_topology_and_health_fields():
+    from services.workers import node_monitor
+
+    existing = {
+        "role": "ru_hub",
+        "ingress_problem": True,
+        "hosting_alert_level": 80,
+        "module_errors": {"xray": "old"},
+    }
+    health_data = {
+        "disk_usage": {"used_percent": 41.2, "free_gb": 22.5},
+        "module_errors": {},
+        "traffic_limit": {"used_bytes": 1000, "limit_bytes": 5000, "exceeded": False},
+        "system_load": {"cpu_percent": 12.0, "ram_percent": 33.0},
+    }
+    patch_extra = node_monitor._build_v2_extra_patch(existing, None, health_data)
+    assert patch_extra["disk_usage"] == {"used_percent": 41.2, "free_gb": 22.5}
+    assert patch_extra["module_errors"] == {}
+    assert patch_extra["traffic_limit"] == {"used_bytes": 1000, "limit_bytes": 5000, "exceeded": False}
+    assert patch_extra["system_load"] == {"cpu_percent": 12.0, "ram_percent": 33.0}
+    assert "ingress_problem" not in patch_extra
+    assert "hosting_alert_level" not in patch_extra
+    assert "role" not in patch_extra
+
+    # Verify check_node_resources_and_alerts uses sync_v2_topology_to_nodes_nonblocking on health change
+    srv = SimpleNamespace(
+        id=1,
+        name="Hub 1",
+        role="ru_hub",
+        protocol="xray",
+        api_url="https://hub1.example",
+        api_key="key",
+        is_active=True,
+        health_state=ServerHealthState.ONLINE,
+        consecutive_fails=0,
+        consecutive_successes=0,
+        last_alert_sent_state=None,
+        problem_started_at=None,
+        next_check_at=None,
+        disabled_reason=None,
+        last_successful_check=None,
+        capabilities=["ru_hub"],
+        extra_data={"role": "ru_hub"},
+        xray_instance_epoch="ep1",
+        xray_instance_boot_id="b1",
+        xray_instance_starttime=100,
+    )
+    node_monitor._server_states.clear()
+    sess = AsyncMock()
+    nonblocking_mock = AsyncMock(return_value={1: True})
+    fake_xray_client = SimpleNamespace(
+        check_health=AsyncMock(return_value=(False, None, None)),
+    )
+
+    @asynccontextmanager
+    async def _xray_ctx(*_a, **_kw):
+        yield fake_xray_client
+
+    with (
+        patch.object(node_monitor, "session_scope", _make_session_scope(sess)),
+        patch.object(node_monitor, "get_all_servers", AsyncMock(return_value=[srv])),
+        patch("services.xray_node_client.XrayNodeClient", _xray_ctx),
+        patch.object(
+            node_monitor,
+            "update_server_health_snapshot",
+            AsyncMock(return_value=(srv, True)),
+        ),
+        patch("services.topology_sync_service.sync_v2_topology_to_nodes_nonblocking", nonblocking_mock),
+    ):
+        await node_monitor.check_node_resources_and_alerts(bot=None)
+
+    nonblocking_mock.assert_awaited_once()
+    node_monitor._server_states.clear()
+
+
+@pytest.mark.asyncio
+async def test_wi_reconciler_excludes_decommissioning_from_active_provisioning():
+    from services.workers.white_internet_reconciliation import WhiteInternetReconciliationWorker
+
+    now = now_utc()
+    hub_active = SimpleNamespace(
+        id=1,
+        api_url="https://hub1.example",
+        api_key="k1",
+        capabilities=["ru_hub", "white_internet"],
+        lifecycle_status=ServerLifecycleStatus.ACTIVE,
+        xray_instance_epoch="ep1",
+        extra_data={"xhttp_locations": [{"inbound_tag": "just1k-wl-default"}]},
+    )
+    hub_decomm = SimpleNamespace(
+        id=2,
+        api_url="https://hub2.example",
+        api_key="k2",
+        capabilities=["ru_hub", "white_internet"],
+        lifecycle_status=ServerLifecycleStatus.DECOMMISSIONING,
+        xray_instance_epoch="ep2",
+        extra_data={"xhttp_locations": [{"inbound_tag": "just1k-wl-default"}]},
+    )
+    sub_active = SimpleNamespace(
+        id=10,
+        user_id=100,
+        uuid="uuid-active",
+        status=WhiteInternetStatus.ACTIVE,
+        expires_at=now + timedelta(days=10),
+        device_limit=1,
+        desired_version=2,
+        actual_version=1,
+        node_sync_state={},
+        pending_revoked_uuids=[],
+    )
+    sub_disabled = SimpleNamespace(
+        id=11,
+        user_id=101,
+        uuid="uuid-disabled",
+        status=WhiteInternetStatus.DISABLED,
+        expires_at=now + timedelta(days=10),
+        device_limit=1,
+        desired_version=3,
+        actual_version=2,
+        node_sync_state={},
+        pending_revoked_uuids=["rev-uuid-1"],
+    )
+
+    sync_calls: list[tuple[str, str, bool]] = []
+
+    async def _fake_sync_client(api_url, _api_key, client_uuid, *, is_active, **_kw):
+        sync_calls.append((api_url, client_uuid, bool(is_active)))
+        return SimpleNamespace(
+            result="applied",
+            error=None,
+            verified_epoch="ep1" if api_url == "https://hub1.example" else "ep2",
+            verified_inbounds=["just1k-wl-default"],
+        )
+
+    fake_client = SimpleNamespace(sync_client=AsyncMock(side_effect=_fake_sync_client))
+
+    sess = AsyncMock()
+    sess.execute = AsyncMock(
+        side_effect=[
+            SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [hub_active, hub_decomm])),
+            SimpleNamespace(all=lambda: [(sub_active, False, False), (sub_disabled, False, False)]),
+            SimpleNamespace(all=lambda: []),
+            SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [sub_disabled])),
+        ]
+    )
+    lock_sub_map = {10: sub_active, 11: sub_disabled}
+
+    async def _fake_get_with_lock(_s, sub_id):
+        return lock_sub_map.get(sub_id)
+
+    worker = WhiteInternetReconciliationWorker(
+        node_client=fake_client,
+        session_factory=_make_session_scope(sess),
+    )
+
+    with (
+        patch("services.workers.white_internet_reconciliation.flag_modified", MagicMock()),
+        patch("services.workers.white_internet_reconciliation.user_devices_repo.list_user_devices", AsyncMock(return_value=[])),
+        patch("services.workers.white_internet_reconciliation.white_internet_repo.get_subscription_with_lock", AsyncMock(side_effect=_fake_get_with_lock)),
+        patch("services.workers.white_internet_reconciliation.white_internet_repo.pop_pending_revoked_uuid", AsyncMock()),
+    ):
+        synced = await worker.run_reconciliation_cycle()
+
+    assert synced >= 1
+    assert ("https://hub1.example", "uuid-active", True) in sync_calls
+    assert ("https://hub2.example", "uuid-active", True) not in sync_calls
+    assert ("https://hub1.example", "uuid-disabled", False) in sync_calls
+    assert ("https://hub2.example", "uuid-disabled", False) in sync_calls
+    assert ("https://hub1.example", "rev-uuid-1", False) in sync_calls
+    assert ("https://hub2.example", "rev-uuid-1", False) in sync_calls
+    assert sub_active.actual_version == 2
+    assert sub_disabled.actual_version == 3
+
+
+@pytest.mark.asyncio
+async def test_2fa_setup_token_step_replay_and_broadcast_media_url():
+    import time
+    from pydantic import ValidationError
+    from bot.miniapp.schemas import BroadcastStartPayload
+    from services import miniapp_auth_service
+
+    # 1. BroadcastStartPayload.media_url validation
+    ok_https = BroadcastStartPayload(target_audience="all", text="hi", media_url="https://cdn.example.com/a.png")
+    assert ok_https.media_url == "https://cdn.example.com/a.png"
+    ok_tg = BroadcastStartPayload(target_audience="all", text="hi", media_url="AgACAgIAAxkBAAIBB2c1234567890abcdef")
+    assert ok_tg.media_url == "AgACAgIAAxkBAAIBB2c1234567890abcdef"
+    for bad_url in (
+        "http://cdn.example.com/a.png",
+        "ftp://files.example.com/a.png",
+        "file:///etc/passwd",
+        "javascript:alert(1)",
+        "data:image/png;base64,AAAA",
+    ):
+        with pytest.raises(ValidationError):
+            BroadcastStartPayload(target_audience="all", text="hi", media_url=bad_url)
+
+    # 2. 2FA setup_token step replay guard
+    admin_id = 987654
+    secret = miniapp_auth_service.generate_totp_secret()
+    step = int(time.time()) // 30
+    code = miniapp_auth_service._compute_hotp(secret, step)
+
+    miniapp_auth_service._used_totp_steps.pop((admin_id, step), None)
+    miniapp_auth_service._2fa_failures.pop(admin_id, None)
+    set_mock = AsyncMock()
+    sess = AsyncMock()
+
+    with (
+        patch.object(miniapp_auth_service, "is_admin", return_value=True),
+        patch.object(miniapp_auth_service, "_derive_signing_key", return_value=b"test-signing-key-for-totp-setup!"),
+        patch.object(miniapp_auth_service, "get_admin_2fa_config", AsyncMock(return_value={"configured": False, "mode": "unconfigured"})),
+        patch.object(miniapp_auth_service, "_encrypt_totp_secret", return_value="enc-secret"),
+        patch.object(miniapp_auth_service, "set_system_setting", set_mock),
+        patch.object(miniapp_auth_service, "get_admin_session_epoch", AsyncMock(return_value="1")),
+        patch.object(miniapp_auth_service, "issue_admin_session_token", return_value=("tok", 9999999999)),
+    ):
+        setup_token = miniapp_auth_service.issue_totp_setup_token(admin_id, secret)
+        res_first = await miniapp_auth_service.verify_admin_2fa(sess, admin_id, code, setup_token=setup_token)
+        res_replay = await miniapp_auth_service.verify_admin_2fa(sess, admin_id, code, setup_token=setup_token)
+
+    assert res_first["verified"] is True
+    assert set_mock.await_count == 1
+    assert res_replay["verified"] is False
+    assert "использован" in res_replay["error"]
+    miniapp_auth_service._used_totp_steps.pop((admin_id, step), None)
+
+
+def test_db_models_targeted_indexes_present():
+    from database.models import AuditLog, Order, User, UserDevice, WebhookInbox
+
+    assert "ix_users_first_name_trgm" in {i.name for i in User.__table__.indexes}
+    assert "ix_user_devices_hwid_trgm" in {i.name for i in UserDevice.__table__.indexes}
+    assert {"ix_orders_attention_flag", "ix_orders_user_settlement_held"}.issubset(
+        {i.name for i in Order.__table__.indexes}
+    )
+    assert "ix_webhook_inbox_attention_recent" in {i.name for i in WebhookInbox.__table__.indexes}
+    assert {
+        "ix_audit_logs_admin_id_id_desc",
+        "ix_audit_logs_action_id_desc",
+        "ix_audit_logs_details_trgm",
+    }.issubset({i.name for i in AuditLog.__table__.indexes})

@@ -580,6 +580,7 @@ class WhiteInternetReconciliationWorker:
             servers = (await sess.execute(stmt_servers)).scalars().all()
 
             active_server_targets: list[tuple[int, str, str, str, list]] = []
+            decommissioning_server_ids: set[int] = set()
             for s in servers:
                 if WHITE_INTERNET_CAPABILITY not in (s.capabilities or []):
                     continue
@@ -597,6 +598,8 @@ class WhiteInternetReconciliationWorker:
                     except Exception as e:
                         logger.debug("Failed initializing epoch for WI server %d: %s", s.id, e)
                 if epoch:
+                    if str(getattr(s, "lifecycle_status", "") or "").upper() == ServerLifecycleStatus.DECOMMISSIONING.value:
+                        decommissioning_server_ids.add(s.id)
                     active_server_targets.append((
                         s.id,
                         s.api_url,
@@ -609,6 +612,7 @@ class WhiteInternetReconciliationWorker:
             return 0
 
         all_server_ids = {t[0] for t in active_server_targets}
+        active_only_server_ids = all_server_ids - decommissioning_server_ids
         server_epochs = {t[0]: t[3] for t in active_server_targets}
 
         async with sf() as sess:
@@ -693,7 +697,11 @@ class WhiteInternetReconciliationWorker:
         synced_count = 0
         for server_id, api_url, api_key, target_epoch, xhttp_locs in active_server_targets:
             per_server_tasks = []
+            is_decommissioning = server_id in decommissioning_server_ids
             for task in sub_tasks:
+                if is_decommissioning and task["desired_active"]:
+                    continue
+                task_server_ids = active_only_server_ids if task["desired_active"] else all_server_ids
                 n_state = task["node_sync_state"].get(str(server_id)) or {}
                 if (
                     n_state.get("version") != task["target_version"]
@@ -709,7 +717,7 @@ class WhiteInternetReconciliationWorker:
                             target_epoch,
                             xhttp_locs,
                             task,
-                            all_server_ids,
+                            task_server_ids,
                             sf,
                             server_epochs=server_epochs,
                         )

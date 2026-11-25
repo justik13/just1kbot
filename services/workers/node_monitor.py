@@ -57,6 +57,7 @@ from database.repositories.servers_repo import (
     is_vless_capable_server,
     is_vless_sync_target_server,
     is_white_internet_hub_server,
+    merge_v2_extra_data,
     update_server,
     update_server_health_snapshot,
     update_server_xray_epoch_cas,
@@ -82,6 +83,42 @@ OUTAGE_REMINDER_INTERVAL_SECONDS = 3600.0  # 1 час между повторн�
 # bounded parallel batches keeps one degraded node from freezing alerts for
 # every other node in the cycle.
 CHECK_PARALLELISM = 6
+
+
+def _build_v2_extra_patch(
+    existing_extra: dict[str, Any] | None,
+    status_data: dict[str, Any] | None,
+    health_data: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Compute changed v2 discovery and health metadata keys without clobbering probe state."""
+    base = dict(existing_extra) if isinstance(existing_extra, dict) else {}
+    merged = merge_v2_extra_data(base, status_data, health_data)
+    if isinstance(health_data, dict):
+        if isinstance(health_data.get("system_load"), dict):
+            merged["system_load"] = health_data["system_load"]
+        if "cdn_domain" in health_data and health_data["cdn_domain"] is None:
+            merged["cdn_domain"] = ""
+        if "sub_path_prefix" in health_data and not health_data["sub_path_prefix"]:
+            if "sub_path_prefix" in base:
+                merged["sub_path_prefix"] = base["sub_path_prefix"]
+            else:
+                merged.pop("sub_path_prefix", None)
+
+    has_reported_role = (
+        (isinstance(status_data, dict) and status_data.get("role") is not None)
+        or (isinstance(health_data, dict) and health_data.get("role") is not None)
+    )
+    if not has_reported_role:
+        if "role" in base:
+            merged["role"] = base["role"]
+        else:
+            merged.pop("role", None)
+
+    patch: dict[str, Any] = {}
+    for k, v in merged.items():
+        if k not in base or base[k] != v:
+            patch[k] = v
+    return patch
 
 
 def _format_outage_duration(seconds: float) -> str:
@@ -1040,27 +1077,14 @@ async def check_node_resources_and_alerts(bot: Bot):
             "last_alert_sent_state": st.last_alert_sent_state,
         }
 
+        if is_xray_node and isinstance(xray_data, dict) and xray_data:
+            extra_update = _build_v2_extra_patch(server.extra_data, node_status_data, xray_data)
+            if extra_update:
+                update_kwargs["extra_data"] = extra_update
+
         if is_healthy:
             update_kwargs["last_successful_check"] = now_utc()
             if is_xray_node and xray_data:
-                extra_update = {}
-                if "secret_base_path" in xray_data:
-                    extra_update["secret_base_path"] = xray_data["secret_base_path"]
-                if "sub_path_prefix" in xray_data and xray_data["sub_path_prefix"]:
-                    extra_update["sub_path_prefix"] = xray_data["sub_path_prefix"]
-                if "cdn_domain" in xray_data:
-                    extra_update["cdn_domain"] = xray_data["cdn_domain"] or ""
-                if "cdn_domains" in xray_data and isinstance(xray_data["cdn_domains"], dict):
-                    extra_update["cdn_domains"] = xray_data["cdn_domains"]
-                    tf_dom = xray_data["cdn_domains"].get("cdn_turboflare")
-                    if tf_dom:
-                        extra_update["turboflare_domain"] = tf_dom
-                if "xhttp_locations" in xray_data and isinstance(xray_data["xhttp_locations"], list):
-                    extra_update["xhttp_locations"] = xray_data["xhttp_locations"]
-                if "links" in xray_data and isinstance(xray_data["links"], dict):
-                    extra_update["links"] = xray_data["links"]
-                if extra_update:
-                    update_kwargs["extra_data"] = extra_update
                 if xray_data.get("role") or xray_data.get("capabilities"):
                     derived_caps = derive_v2_capabilities(node_status_data, xray_data)
                     if derived_caps and sorted(derived_caps) != sorted(server.capabilities or []):
@@ -1099,37 +1123,19 @@ async def check_node_resources_and_alerts(bot: Bot):
                     server.xray_instance_boot_id = updated_srv.xray_instance_boot_id
                     server.xray_instance_starttime = updated_srv.xray_instance_starttime
 
-                    # Синхронизация динамических метаданных (cdn_domain, cdn_domains, xhttp_locations) при изменениях на ноде
+                    # Синхронизация динамических метаданных и health-полей при изменениях на ноде
                     if xray_data and isinstance(xray_data, dict):
+                        extra_patch = _build_v2_extra_patch(
+                            updated_srv.extra_data, node_status_data, xray_data
+                        )
                         extra = dict(updated_srv.extra_data or {})
-                        extra_changed = False
-                        for key in ("cdn_domain", "cdn_domains", "xhttp_locations", "links", "secret_base_path", "system_load"):
-                            if key in xray_data:
-                                val = xray_data[key]
-                                if key == "cdn_domain":
-                                    norm_val = val or ""
-                                    if extra.get(key, "") != norm_val:
-                                        extra[key] = norm_val
-                                        extra_changed = True
-                                elif key == "system_load":
-                                    if isinstance(val, dict) and extra.get("system_load") != val:
-                                        extra["system_load"] = val
-                                        extra_changed = True
-                                elif val is not None and extra.get(key) != val:
-                                    if key == "secret_base_path" and not val:
-                                        continue
-                                    extra[key] = val
-                                    extra_changed = True
+                        extra_changed = bool(extra_patch)
+                        if extra_patch:
+                            extra.update(extra_patch)
                         cdn_domains = xray_data.get("cdn_domains")
-                        if isinstance(cdn_domains, dict):
-                            tf_dom = cdn_domains.get("cdn_turboflare")
-                            if tf_dom:
-                                if extra.get("turboflare_domain") != tf_dom:
-                                    extra["turboflare_domain"] = tf_dom
-                                    extra_changed = True
-                            elif "turboflare_domain" in extra:
-                                extra.pop("turboflare_domain", None)
-                                extra_changed = True
+                        if isinstance(cdn_domains, dict) and not cdn_domains.get("cdn_turboflare") and "turboflare_domain" in extra:
+                            extra.pop("turboflare_domain", None)
+                            extra_changed = True
                         if extra_changed:
                             updated_srv.extra_data = extra
                             flag_modified(updated_srv, "extra_data")
@@ -1199,9 +1205,9 @@ async def check_node_resources_and_alerts(bot: Bot):
 
     if topology_dirty:
         try:
-            async with session_scope() as topo_session:
-                from services.topology_sync_service import sync_v2_topology_to_nodes
-                await sync_v2_topology_to_nodes(topo_session)
+            from services.topology_sync_service import sync_v2_topology_to_nodes_nonblocking
+
+            await sync_v2_topology_to_nodes_nonblocking()
         except Exception as topo_exc:
             logger.warning("Failed to sync v2 topology after health state transition: %s", topo_exc)
 
@@ -1209,10 +1215,10 @@ async def check_node_resources_and_alerts(bot: Bot):
 async def node_monitor_loop(bot: Bot, shutdown_event: asyncio.Event):
     logger.info("Starting node_monitor_loop background worker...")
     try:
-        async with session_scope() as init_session:
-            from services.topology_sync_service import sync_v2_topology_to_nodes
-            await sync_v2_topology_to_nodes(init_session)
-            logger.info("Initial v2 topology sync to all nodes completed on worker startup.")
+        from services.topology_sync_service import sync_v2_topology_to_nodes_nonblocking
+
+        await sync_v2_topology_to_nodes_nonblocking()
+        logger.info("Initial v2 topology sync to all nodes completed on worker startup.")
     except Exception as init_topo_exc:
         logger.warning("Initial v2 topology sync on worker startup failed: %s", init_topo_exc)
 
