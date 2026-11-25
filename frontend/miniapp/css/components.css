@@ -588,31 +588,6 @@ label:not(.switch):has(> input[type="checkbox"]) > input[type="checkbox"] {
     border-radius: 8px;
 }
 
-@media (pointer: coarse) {
-    .btn,
-    .btn-sm,
-    .btn-ghost-inline,
-    .tab-btn,
-    .pill-btn,
-    .mode-btn,
-    .seg-btn,
-    .mono-copy,
-    .profile-pill,
-    .stepper-btn,
-    .nav-item,
-    .guide-kv-copy,
-    .checkbox-row,
-    label:not(.switch):has(input[type="checkbox"]) {
-        min-height: 44px;
-    }
-
-    .stepper-btn {
-        min-width: 44px;
-        width: 44px;
-        height: 44px;
-    }
-}
-
 .btn-icon {
     min-width: 44px;
     min-height: 44px;
@@ -2589,6 +2564,31 @@ button.pulse-card {
 
 .metric-fill.err {
     background: var(--accent-red);
+}
+
+@media (pointer: coarse) {
+    .btn,
+    .btn-sm,
+    .btn-ghost-inline,
+    .tab-btn,
+    .pill-btn,
+    .mode-btn,
+    .seg-btn,
+    .mono-copy,
+    .profile-pill,
+    .stepper-btn,
+    .nav-item,
+    .guide-kv-copy,
+    .checkbox-row,
+    label:not(.switch):has(input[type="checkbox"]) {
+        min-height: 44px;
+    }
+
+    .stepper-btn {
+        min-width: 44px;
+        width: 44px;
+        height: 44px;
+    }
 }
 
 @media (hover: hover) and (pointer: fine) {
