@@ -25,29 +25,125 @@ export function triggerHaptic(type = "light") {
 }
 
 let _toastTimer = null;
+let _toastRemainingMs = 0;
+let _toastShownAt = 0;
+let _toastEscapeBound = false;
+
+function _announceToast(msg, isAssertive) {
+    const politeEl = document.getElementById("toastLivePolite");
+    const assertiveEl = document.getElementById("toastLiveAssertive");
+    const fallbackEl = document.getElementById("toastLiveRegion");
+    if (politeEl) politeEl.textContent = "";
+    if (assertiveEl) assertiveEl.textContent = "";
+    if (!politeEl && !assertiveEl && fallbackEl) {
+        fallbackEl.setAttribute("aria-live", isAssertive ? "assertive" : "polite");
+        fallbackEl.textContent = "";
+    }
+    const target = isAssertive ? assertiveEl : politeEl;
+    const apply = () => {
+        if (target) {
+            target.textContent = msg;
+        } else if (fallbackEl) {
+            fallbackEl.textContent = msg;
+        }
+    };
+    if (typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(apply);
+    } else {
+        setTimeout(apply, 0);
+    }
+}
+
+function _hideToast() {
+    const toast = document.getElementById("toastRoot");
+    if (_toastTimer) {
+        clearTimeout(_toastTimer);
+        _toastTimer = null;
+    }
+    _toastRemainingMs = 0;
+    if (toast) {
+        toast.hidden = true;
+    }
+}
+
+function _startToastTimer(ms) {
+    if (_toastTimer) {
+        clearTimeout(_toastTimer);
+        _toastTimer = null;
+    }
+    const delay = Math.max(800, Number(ms) || 3200);
+    _toastRemainingMs = delay;
+    _toastShownAt = Date.now();
+    _toastTimer = setTimeout(_hideToast, delay);
+}
+
+function _pauseToastTimer() {
+    if (!_toastTimer) return;
+    clearTimeout(_toastTimer);
+    _toastTimer = null;
+    const elapsed = Date.now() - _toastShownAt;
+    _toastRemainingMs = Math.max(800, _toastRemainingMs - elapsed);
+}
 
 export function showToast(message, type = "success") {
     const toast = document.getElementById("toastRoot");
     if (!toast) return;
     const normalized = type === "error" ? "error" : type === "warn" || type === "warning" ? "warn" : "success";
-    toast.textContent = String(message || "");
+    const msgText = String(message || "");
+
+    toast.innerHTML = "";
+    const msgSpan = document.createElement("span");
+    msgSpan.className = "toast-msg";
+    msgSpan.textContent = msgText;
+
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "toast-close";
+    closeBtn.setAttribute("aria-label", "Закрыть уведомление");
+    closeBtn.textContent = "×";
+    closeBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        _hideToast();
+    });
+
+    toast.append(msgSpan, closeBtn);
     toast.className = `toast toast-${normalized}`;
     toast.hidden = false;
-    toast.onclick = () => {
-        if (_toastTimer) {
-            clearTimeout(_toastTimer);
-            _toastTimer = null;
+    toast.onclick = _hideToast;
+    toast.onmouseenter = _pauseToastTimer;
+    toast.onmouseleave = () => {
+        if (!toast.hidden && !toast.contains(document.activeElement)) {
+            _startToastTimer(_toastRemainingMs);
         }
-        toast.hidden = true;
     };
+    toast.onfocusin = _pauseToastTimer;
+    toast.onfocusout = (e) => {
+        if (!toast.hidden && !toast.contains(e.relatedTarget)) {
+            _startToastTimer(_toastRemainingMs);
+        }
+    };
+
+    if (!_toastEscapeBound) {
+        _toastEscapeBound = true;
+        document.addEventListener("keydown", (e) => {
+            if (e.key !== "Escape") return;
+            const curToast = document.getElementById("toastRoot");
+            if (!curToast || curToast.hidden) return;
+            if (curToast.contains(document.activeElement)) {
+                e.stopPropagation();
+                _hideToast();
+            } else if (!_hasOpenModal()) {
+                _hideToast();
+            }
+        });
+    }
+
+    _announceToast(msgText, normalized === "error");
+
     const hapticType = normalized === "error" ? "error" : normalized === "warn" ? "warning" : "success";
     triggerHaptic(hapticType);
-    if (_toastTimer) clearTimeout(_toastTimer);
     const duration = normalized === "error" ? 4500 : 3200;
-    _toastTimer = setTimeout(() => {
-        toast.hidden = true;
-        _toastTimer = null;
-    }, duration);
+    _startToastTimer(duration);
 }
 
 export async function copyText(text, successMsg = "Скопировано") {
@@ -85,11 +181,32 @@ export async function copyText(text, successMsg = "Скопировано") {
     }
 }
 
+const _DATE_FMT = new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+});
+
+function _parseDate(value) {
+    if (value instanceof Date) {
+        return Number.isFinite(value.getTime()) ? value : null;
+    }
+    let raw = String(value || "").trim();
+    if (!raw) return null;
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(raw)) {
+        raw += "Z";
+    }
+    const d = new Date(raw);
+    return Number.isFinite(d.getTime()) ? d : null;
+}
+
 export function formatRelativeTime(iso) {
     if (!iso) return "—";
-    const ts = new Date(iso).getTime();
-    if (!Number.isFinite(ts)) return String(iso);
-    const diffSec = Math.floor((Date.now() - ts) / 1000);
+    const d = _parseDate(iso);
+    if (!d) return "—";
+    const diffSec = Math.floor((Date.now() - d.getTime()) / 1000);
     if (diffSec < 0) return formatDate(iso);
     if (diffSec < 60) return "только что";
     const diffMin = Math.floor(diffSec / 60);
@@ -105,12 +222,19 @@ export async function withButtonLoading(btn, loadingText, fn) {
     if (!btn) return fn();
     const prevDisabled = btn.disabled;
     const prevText = btn.textContent;
+    const prevAriaBusy = btn.getAttribute("aria-busy");
     btn.disabled = true;
+    btn.setAttribute("aria-busy", "true");
     if (loadingText) btn.textContent = loadingText;
     try {
         return await fn();
     } finally {
         btn.disabled = prevDisabled;
+        if (prevAriaBusy === null) {
+            btn.removeAttribute("aria-busy");
+        } else {
+            btn.setAttribute("aria-busy", prevAriaBusy);
+        }
         btn.textContent = prevText;
     }
 }
@@ -118,12 +242,14 @@ export async function withButtonLoading(btn, loadingText, fn) {
 export function openExternalLink(url) {
     if (!url) return;
     let target = String(url).trim();
+    if (!/^(https?:|tg:)/i.test(target)) return;
     if (/^tg:\/\/resolve\?domain=/i.test(target)) {
         const m = target.match(/domain=([^&]+)/i);
         if (m && m[1]) {
             target = `https://t.me/${m[1].replace(/^@/, "")}`;
         }
     }
+    if (!/^(https?:\/\/|tg:)/i.test(target)) return;
     const tg = window.Telegram && window.Telegram.WebApp;
     const isTgLink = /^https?:\/\/t\.me\//i.test(target);
     if (isTgLink && tg && typeof tg.openTelegramLink === "function") {
@@ -146,17 +272,13 @@ export function openExternalLink(url) {
 }
 
 export function formatDate(iso) {
-    if (!iso) return "—";
+    if (iso == null || iso === "") return "—";
+    const d = _parseDate(iso);
+    if (!d) return "—";
     try {
-        return new Date(iso).toLocaleString("ru-RU", {
-            day: "2-digit",
-            month: "2-digit",
-            year: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-        });
+        return _DATE_FMT.format(d);
     } catch {
-        return String(iso);
+        return "—";
     }
 }
 
@@ -213,7 +335,7 @@ export function setPageBackButton(fn) {
 }
 
 const _FOCUSABLE_SELECTOR =
-    "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
+    "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex='-1'])";
 
 function _getModalFocusable(card) {
     return Array.from(card.querySelectorAll(_FOCUSABLE_SELECTOR)).filter(
@@ -240,20 +362,58 @@ function _focusFirstInModal(card) {
     }
 }
 
+function _focusElementSafe(el) {
+    if (!el || typeof el.focus !== "function") return false;
+    if (!el.hasAttribute("tabindex") && el.tabIndex < 0) {
+        el.tabIndex = -1;
+    }
+    el.focus({ preventScroll: true });
+    return true;
+}
+
+function _restoreModalFocus(prevTrigger, restoreFocusSelector) {
+    if (prevTrigger && document.contains(prevTrigger) && typeof prevTrigger.focus === "function") {
+        prevTrigger.focus({ preventScroll: true });
+        return;
+    }
+    if (restoreFocusSelector) {
+        const target = document.querySelector(restoreFocusSelector);
+        if (target && _focusElementSafe(target)) return;
+    }
+    const fallback = document.querySelector("#appRoot h1, #appRoot button");
+    _focusElementSafe(fallback);
+}
+
 export function closeAllModals() {
     const backdrop = document.getElementById("modalRoot");
     if (!backdrop) return;
     if (backdrop._activeKeyDown) {
         document.removeEventListener("keydown", backdrop._activeKeyDown);
     }
+    if (typeof backdrop._activeCleanup === "function") {
+        try {
+            backdrop._activeCleanup();
+        } catch {
+            // ignore cleanup errors on forced teardown
+        }
+    }
     for (const item of _modalStack) {
         if (item.onKeyDown) {
             document.removeEventListener("keydown", item.onKeyDown);
+        }
+        if (typeof item.onCleanup === "function") {
+            try {
+                item.onCleanup();
+            } catch {
+                // ignore cleanup errors on forced teardown
+            }
         }
     }
     _modalStack = [];
     backdrop._activeKeyDown = null;
     backdrop._activeClose = null;
+    backdrop._activeCleanup = null;
+    backdrop._activeRestoreFocusSelector = null;
     backdrop.onclick = null;
     document.body.style.overflow = "";
     _setBackgroundInert(false);
@@ -262,13 +422,19 @@ export function closeAllModals() {
     _syncTelegramBackButton();
 }
 
-export function openModal(title, bodyNode, { showCloseBtn = true, canClose = null } = {}) {
+export function openModal(
+    title,
+    bodyNode,
+    { showCloseBtn = true, canClose = null, onClose = null, restoreFocusSelector = null } = {}
+) {
     const backdrop = document.getElementById("modalRoot");
     if (!backdrop) return () => {};
 
     const prevCard = backdrop.querySelector(".modal-card");
     const prevKeyDown = backdrop._activeKeyDown || null;
     const prevClose = backdrop._activeClose || null;
+    const prevCleanup = backdrop._activeCleanup || null;
+    const prevRestoreFocusSelector = backdrop._activeRestoreFocusSelector || null;
     const prevTrigger = document.activeElement;
     if (prevCard && !backdrop.hidden) {
         if (prevKeyDown) {
@@ -277,7 +443,9 @@ export function openModal(title, bodyNode, { showCloseBtn = true, canClose = nul
         _modalStack.push({
             card: prevCard,
             onKeyDown: prevKeyDown,
-            onClose: prevClose,
+            closeFn: prevClose,
+            onCleanup: prevCleanup,
+            restoreFocusSelector: prevRestoreFocusSelector,
             trigger: prevTrigger,
         });
     } else {
@@ -328,11 +496,22 @@ export function openModal(title, bodyNode, { showCloseBtn = true, canClose = nul
         }
     };
 
+    const runCleanup = () => {
+        if (typeof onClose === "function") {
+            try {
+                onClose();
+            } catch {
+                // ignore user cleanup errors
+            }
+        }
+    };
+
     const close = ({ force = false } = {}) => {
         if (closed) return;
         if (!force && canClose && !canClose()) return;
         closed = true;
         document.removeEventListener("keydown", onKeyDown);
+        runCleanup();
 
         if (!backdrop.contains(card)) {
             const idx = _modalStack.findIndex((item) => item.card === card);
@@ -348,13 +527,15 @@ export function openModal(title, bodyNode, { showCloseBtn = true, canClose = nul
             backdrop.innerHTML = "";
             backdrop.appendChild(parent.card);
             backdrop._activeKeyDown = parent.onKeyDown;
-            backdrop._activeClose = parent.onClose;
+            backdrop._activeClose = parent.closeFn;
+            backdrop._activeCleanup = parent.onCleanup;
+            backdrop._activeRestoreFocusSelector = parent.restoreFocusSelector;
             if (parent.onKeyDown) {
                 document.addEventListener("keydown", parent.onKeyDown);
             }
             backdrop.onclick = (e) => {
-                if (e.target === backdrop && parent.onClose) {
-                    parent.onClose();
+                if (e.target === backdrop && parent.closeFn) {
+                    parent.closeFn();
                 }
             };
             _syncTelegramBackButton();
@@ -369,15 +550,15 @@ export function openModal(title, bodyNode, { showCloseBtn = true, canClose = nul
         _modalStack = [];
         backdrop._activeKeyDown = null;
         backdrop._activeClose = null;
+        backdrop._activeCleanup = null;
+        backdrop._activeRestoreFocusSelector = null;
         backdrop.onclick = null;
         document.body.style.overflow = "";
         _setBackgroundInert(false);
         backdrop.hidden = true;
         backdrop.innerHTML = "";
         _syncTelegramBackButton();
-        if (prevTrigger && document.contains(prevTrigger) && typeof prevTrigger.focus === "function") {
-            prevTrigger.focus({ preventScroll: true });
-        }
+        _restoreModalFocus(prevTrigger, restoreFocusSelector);
     };
 
     header.appendChild(h);
@@ -400,6 +581,8 @@ export function openModal(title, bodyNode, { showCloseBtn = true, canClose = nul
     backdrop.hidden = false;
     backdrop._activeKeyDown = onKeyDown;
     backdrop._activeClose = close;
+    backdrop._activeCleanup = runCleanup;
+    backdrop._activeRestoreFocusSelector = restoreFocusSelector;
     document.body.style.overflow = "hidden";
     _setBackgroundInert(true);
     document.addEventListener("keydown", onKeyDown);
@@ -415,6 +598,8 @@ export function showConfirmModal({
     cancelText = "Отмена",
     isDestructive = false,
     onConfirm,
+    onClose = null,
+    restoreFocusSelector = null,
 }) {
     const box = document.createElement("div");
     box.className = "confirm-modal-box";
@@ -456,6 +641,8 @@ export function showConfirmModal({
     const close = openModal(title, box, {
         showCloseBtn: false,
         canClose: () => !busy,
+        onClose,
+        restoreFocusSelector,
     });
     cancelBtn.addEventListener("click", () => {
         if (!busy) close();
@@ -662,8 +849,10 @@ function _extractCountryCode(flagOrCode) {
 export function renderFlagHtml(flagOrCode, width = 20) {
     const code = _extractCountryCode(flagOrCode);
     const height = Math.round((width * 15) / 21);
-    const wrap = (inner) =>
-        `<svg width="${width}" height="${height}" viewBox="0 0 21 15" aria-label="${escapeHtml(code)}" style="display:inline-block; vertical-align:-2px; border-radius:2px; flex-shrink:0; outline:1px solid rgba(255,255,255,0.12);">${inner}</svg>`;
+    const wrap = (inner) => {
+        const a11yAttr = code ? `role="img" aria-label="${escapeHtml(code)}"` : `aria-hidden="true"`;
+        return `<svg width="${width}" height="${height}" viewBox="0 0 21 15" ${a11yAttr} style="display:inline-block; vertical-align:-2px; border-radius:2px; flex-shrink:0; outline:1px solid rgba(255,255,255,0.12);">${inner}</svg>`;
+    };
     const hStripes = (c1, c2, c3) =>
         wrap(
             `<rect width="21" height="5" fill="${c1}"/><rect y="5" width="21" height="5" fill="${c2}"/><rect y="10" width="21" height="5" fill="${c3}"/>`
@@ -744,13 +933,24 @@ export function renderPagination({
         </div>
     `;
 
+    const scrollBehavior = () => {
+        try {
+            if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+                return "auto";
+            }
+        } catch {
+            // ignore
+        }
+        return "smooth";
+    };
+
     const prevBtn = container.querySelector('[data-pg="prev"]');
     if (prevBtn && hasPrev) {
         prevBtn.addEventListener("click", () => {
             const nextOffset = Math.max(0, curOffset - curLimit);
             onPage(nextOffset);
             if (scrollTarget) {
-                scrollTarget.scrollIntoView({ behavior: "smooth", block: "start" });
+                scrollTarget.scrollIntoView({ behavior: scrollBehavior(), block: "start" });
             }
         });
     }
@@ -761,7 +961,7 @@ export function renderPagination({
             const nextOffset = curOffset + curLimit;
             onPage(nextOffset);
             if (scrollTarget) {
-                scrollTarget.scrollIntoView({ behavior: "smooth", block: "start" });
+                scrollTarget.scrollIntoView({ behavior: scrollBehavior(), block: "start" });
             }
         });
     }

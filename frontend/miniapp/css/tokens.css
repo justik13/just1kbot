@@ -2,6 +2,8 @@
     color-scheme: dark;
     --bg-black: #000000;
     --bg-canvas: #000000;
+    --bg-card: #121216;
+    --bg-modal: #141419;
     --bg-surface: rgba(20, 20, 25, 0.74);
     --bg-tile: rgba(255, 255, 255, 0.045);
     --bg-elevated: rgba(30, 30, 38, 0.78);

@@ -38,7 +38,11 @@
     </div>
 
     <div id="modalRoot" class="modal-backdrop" hidden></div>
-    <div id="toastRoot" class="toast" role="status" aria-live="polite" hidden></div>
+    <div id="toastLiveRegion" class="visually-hidden">
+        <div id="toastLivePolite" role="status" aria-live="polite" aria-atomic="true"></div>
+        <div id="toastLiveAssertive" role="alert" aria-live="assertive" aria-atomic="true"></div>
+    </div>
+    <div id="toastRoot" class="toast" hidden></div>
 
     <script type="module" src="/app/assets/js/app.js?v=2.8.0"></script>
 </body>
