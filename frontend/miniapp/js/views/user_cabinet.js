@@ -1453,7 +1453,7 @@ function _renderConnectTab(body, d, reload, root) {
         body.innerHTML = `
             <section class="hero-section">
                 <div class="hero-title-group">
-                    <span class="hero-kicker err">Ограничение доступа</span>
+                    <span class="hero-status err">Ограничение доступа</span>
                     <h1 class="hero-headline-lg" style="color:var(--accent-red);">Обслуживание приостановлено</h1>
                     <p class="hero-sub">Доступ к сервису временно ограничен администратором. Если у вас возникли вопросы по оплате или настройке, напишите нам в поддержку.</p>
                 </div>
@@ -1483,7 +1483,7 @@ function _renderConnectTab(body, d, reload, root) {
         body.innerHTML = `
             <section class="hero-section">
                 <div class="hero-title-group">
-                    <span class="hero-kicker muted">Не подключено</span>
+                    <span class="hero-status muted">Не подключено</span>
                     <h1 class="hero-headline-lg">Нет активных подписок</h1>
                     <p class="hero-sub">Оформите «Стандарт» или «Белый интернет»: ссылка подключения активируется сразу после оплаты.</p>
                 </div>
@@ -1616,7 +1616,7 @@ function _renderConnectTab(body, d, reload, root) {
     body.innerHTML = `
         <section class="hero-section">
             <div class="hero-title-group">
-                <span class="hero-kicker ${isStdGrace || isWiOnlyExhausted ? "warn" : ""}">${isStdGrace ? `Льготный период · ~${graceHoursLeft} ч.` : (isWiOnlyExhausted ? "Белый интернет" : "Подписка активна")}</span>
+                <span class="hero-status ${isStdGrace || isWiOnlyExhausted ? "warn" : ""}">${isStdGrace ? `Льготный период · ~${graceHoursLeft} ч.` : (isWiOnlyExhausted ? "Белый интернет" : "Подписка активна")}</span>
                 <h1 class="hero-headline-lg">${isStdGrace ? "Подписка закончилась" : (isWiOnlyExhausted ? "Трафик закончился" : "Подключение готово")}</h1>
                 <p class="hero-sub">${isStdGrace
                     ? `Основной срок подписки закончился, но доступ сохранён ещё на ~${graceHoursLeft} ч., чтобы вы успели продлить подписку без отключения.`
@@ -1779,8 +1779,8 @@ function _renderTariffsTab(body, d, reload) {
 
     body.innerHTML = `
         <section class="hero-title-group">
-            <span class="hero-kicker muted">Управление подписками</span>
             <h1 class="hero-headline-lg">Тарифы</h1>
+            <p class="hero-sub">Две независимые подписки на одну ссылку: выберите нужную или подключите обе.</p>
         </section>
 
         ${d.financial_hold ? `
@@ -1801,10 +1801,6 @@ function _renderTariffsTab(body, d, reload) {
             </div>
             <button id="topupBtn" type="button" class="btn btn-secondary btn-sm">${_ICONS.plus} Пополнить</button>
         </section>
-
-        <div class="muted" style="font-size:12px; padding:0 2px;">
-            Две независимые подписки на одну ссылку: выберите нужную или подключите обе.
-        </div>
 
         <section class="plan-card ${std.active && !isStdGrace ? "plan-active" : ""}" ${isStdGrace ? 'style="border-color: rgba(245, 158, 11, 0.4);"' : ""}>
             <div class="row">
@@ -2351,8 +2347,8 @@ function _renderMoreTab(body, d, root) {
 
     body.innerHTML = `
         <section class="hero-title-group">
-            <span class="hero-kicker muted">Помощь, инструкции и рефералы</span>
             <h1 class="hero-headline-lg">Ещё</h1>
+            <p class="hero-sub">Помощь, инструкции и рефералы</p>
         </section>
 
         <section class="section-block">
