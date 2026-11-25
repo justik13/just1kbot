@@ -84,6 +84,20 @@ export const AUDIT_ACTION_MAP = {
     WHITE_INTERNET_TRAFFIC_RESET: "Сброс трафика БИ",
 };
 
+export const LEDGER_ENTRY_TYPE_MAP = {
+    payment_credit: "Зачисление",
+    purchase_debit: "Оплата подписки",
+    refund_debit: "Возврат",
+    admin_adjustment: "Коррекция админом",
+    debt_forgiveness: "Погашение долга",
+};
+
+export function formatLedgerEntryType(entryType) {
+    const val = LEDGER_ENTRY_TYPE_MAP[entryType];
+    if (val && typeof val === "object") return val.label || String(entryType || "Операция");
+    return val || entryType || "Операция";
+}
+
 export function formatMetadataFlag(flag) {
     return METADATA_FLAG_MAP[flag] || { text: String(flag || ""), cls: "chip-warn" };
 }

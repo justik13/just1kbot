@@ -3,6 +3,7 @@ import {
     ORDER_KIND_MAP,
     ORDER_STATUS_MAP,
     formatAuditAction,
+    formatLedgerEntryType,
     formatMetadataFlag,
 } from "../admin_labels.js?v=2.8.0";
 import {
@@ -17,13 +18,6 @@ import {
 } from "../ui.js?v=2.8.0";
 
 let _detailReqId = 0;
-
-const LEDGER_ENTRY_TYPE_MAP = {
-    payment_credit: "Зачисление",
-    purchase_debit: "Оплата подписки",
-    refund_debit: "Возврат",
-    admin_adjustment: "Коррекция админом",
-};
 
 function _formatDisplayName(u) {
     if (u.first_name && u.username) {
@@ -177,7 +171,7 @@ function _renderHistoryTabContent(tab, details) {
                 const amtColor =
                     amt > 0 ? "var(--accent-emerald, #34d399)" : amt < 0 ? "var(--accent-red, #f87171)" : "inherit";
                 const bucketLabel = entry.bucket === "bonus" ? "бонус" : "реал";
-                const typeLabel = LEDGER_ENTRY_TYPE_MAP[entry.entry_type] || entry.entry_type || "Операция";
+                const typeLabel = formatLedgerEntryType(entry.entry_type);
                 return `
                     <div class="item-row">
                         <div class="row">

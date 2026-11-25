@@ -57,7 +57,7 @@ from database.models import (
     WebhookInbox,
     WhiteInternetSubscription,
 )
-from database.repositories import user_devices_repo, users_repo, vless_subscription_repo, white_internet_repo
+from database.repositories import servers_repo, user_devices_repo, users_repo, vless_subscription_repo, white_internet_repo
 from database.repositories.account_ledger_repo import (
     create_admin_adjustment,
     forgive_real_debt,
@@ -188,6 +188,34 @@ async def _queue_wi_inline_sync(
     queue_post_commit_task(session, _sync_wi_after_admin_op)
 
 
+async def _queue_wi_revoke_uuids(
+    session: AsyncSession,
+    wi_sub: WhiteInternetSubscription,
+    uuids: list[str] | tuple[str, ...],
+    *,
+    context: str,
+) -> None:
+    """Queue post-commit deprovisioning of specific UUIDs on all WI revocation ru_hubs."""
+    clean_uuids = list(dict.fromkeys(str(u) for u in uuids if u))
+    if not clean_uuids:
+        return
+    wi_hubs = await servers_repo.get_wi_revocation_ru_hubs(session)
+    if not wi_hubs:
+        return
+    from services import white_internet_service
+
+    version = wi_sub.desired_version
+    for hub in wi_hubs:
+        for rev_u in clean_uuids:
+            white_internet_service._dispatch_deprovision(
+                hub,
+                rev_u,
+                version,
+                session=session,
+                context=context,
+            )
+
+
 async def _queue_wi_deprovision_all(
     session: AsyncSession,
     user_id: int,
@@ -196,9 +224,6 @@ async def _queue_wi_deprovision_all(
     context: str,
 ) -> None:
     """Queue post-commit deprovisioning of subscription and all bound device UUIDs on WI hubs."""
-    wi_hubs = await WhiteInternetService.get_hub_nodes(session)
-    if not wi_hubs:
-        return
     dev_rows = (
         await session.scalars(
             select(UserDevice.device_uuid).where(
@@ -207,18 +232,8 @@ async def _queue_wi_deprovision_all(
             )
         )
     ).all()
-    uuids_to_revoke = list(dict.fromkeys([wi_sub.uuid, *[str(u) for u in dev_rows if u]]))
-    from services.white_internet_service import _dispatch_deprovision
-
-    for hub in wi_hubs:
-        for rev_u in uuids_to_revoke:
-            _dispatch_deprovision(
-                hub,
-                rev_u,
-                wi_sub.desired_version,
-                session=session,
-                context=context,
-            )
+    uuids_to_revoke = [wi_sub.uuid, *[str(u) for u in dev_rows if u]]
+    await _queue_wi_revoke_uuids(session, wi_sub, uuids_to_revoke, context=context)
 
 
 def _queue_user_notification(
@@ -259,10 +274,7 @@ def _safe_admin_error_response(
     """Return safe error JSON exposing only domain/validation errors."""
     if isinstance(exc, AdminNodeServiceError):
         return web.json_response({"ok": False, "error": exc.message}, status=exc.status_code)
-    if isinstance(exc, white_internet_repo.WhiteInternetError) or type(exc) in (
-        ValueError,
-        LookupError,
-    ):
+    if isinstance(exc, (white_internet_repo.WhiteInternetError, ValueError, LookupError)):
         msg = str(exc).strip() or default_msg
         return web.json_response({"ok": False, "error": msg}, status=status)
     logger.warning("Unexpected admin handler error (%s): %s", type(exc).__name__, exc)
@@ -1368,18 +1380,6 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
             await session.flush()
             await SubscriptionService.sync_access_state(session, locked_user)
 
-            if not locked_user.financial_hold:
-                held_stmt = select(Order).where(
-                    Order.user_id == locked_user.id,
-                    Order.status == "paid",
-                    Order.metadata_["settlement_held"].astext == "true",
-                )
-                if locked_user.topup_blocked:
-                    held_stmt = held_stmt.where(Order.service_type != "topup")
-                held_orders = (await session.scalars(held_stmt)).all()
-                for held_order in held_orders:
-                    await OrderService.mark_order_paid(session, held_order.id)
-
             now = now_utc()
             wi_reactivated = False
             hold_cleared = (
@@ -1429,7 +1429,7 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                                 - (locked_wi.traffic_overage_bytes or 0),
                             )
                             if total_quota > 0 and used_quota < total_quota:
-                                locked_wi.status = WhiteInternetStatus.PENDING
+                                locked_wi.status = WhiteInternetStatus.ACTIVE
                                 locked_wi.status_reason = None
                                 locked_wi.provisioning_status = (
                                     WhiteInternetProvisioningStatus.PENDING_UPDATE
@@ -1440,6 +1440,25 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                                     session, locked_wi, "restrictions_reactivate_wi"
                                 )
                                 wi_reactivated = True
+                            elif total_quota > 0 and used_quota >= total_quota:
+                                locked_wi.status = WhiteInternetStatus.EXHAUSTED
+                                locked_wi.status_reason = "quota_exhausted"
+                                locked_wi.provisioning_status = (
+                                    WhiteInternetProvisioningStatus.SYNCED_INACTIVE
+                                )
+                                await session.flush()
+
+            if not locked_user.financial_hold:
+                held_stmt = select(Order).where(
+                    Order.user_id == locked_user.id,
+                    Order.status == "paid",
+                    Order.metadata_["settlement_held"].astext == "true",
+                )
+                if locked_user.topup_blocked:
+                    held_stmt = held_stmt.where(Order.service_type != "topup")
+                held_orders = (await session.scalars(held_stmt)).all()
+                for held_order in held_orders:
+                    await OrderService.mark_order_paid(session, held_order.id)
             await AuditService.log_action(
                 session,
                 admin_id=ctx.telegram_id,
@@ -1495,7 +1514,23 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
         ).scalar_one_or_none()
         if locked_user is None:
             return web.json_response({"ok": False, "error": "Пользователь не найден"}, status=404)
+        if locked_user.financial_hold:
+            return web.json_response(
+                {
+                    "ok": False,
+                    "error": "На аккаунте установлена финансовая блокировка. Сначала снимите её.",
+                },
+                status=400,
+            )
         wi_sub = await get_subscription_by_user_id(session, user.id)
+        if wi_sub is not None and wi_sub.status == WhiteInternetStatus.DISABLED and payload.days <= 0:
+            return web.json_response(
+                {
+                    "ok": False,
+                    "error": "Подписка «Белый интернет» отключена. Для активации укажите положительное число дней.",
+                },
+                status=400,
+            )
         if wi_sub is None or (
             wi_sub.status == WhiteInternetStatus.DISABLED and payload.days > 0
         ):
@@ -1707,6 +1742,26 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
         })
 
 
+def _serialize_admin_ledger_entry(entry: AccountLedgerEntry) -> dict[str, Any]:
+    """Serialize an AccountLedgerEntry for admin user details."""
+    meta = entry.metadata_ if isinstance(entry.metadata_, dict) else {}
+    entry_type = entry.entry_type
+    if entry_type == "payment_credit" and meta.get("source") == "admin_debt_forgiveness":
+        entry_type = "debt_forgiveness"
+        note = str(meta.get("note") or "").strip()
+        description = "Погашение долга" + (f" · {note}" if note else "")
+    else:
+        description = str(meta.get("description") or meta.get("reason") or "")
+    return {
+        "id": entry.id,
+        "entry_type": entry_type,
+        "bucket": entry.bucket,
+        "amount": int(entry.amount),
+        "description": description,
+        "created_at": entry.created_at.isoformat() if entry.created_at else None,
+    }
+
+
 async def api_admin_user_details_handler(request: web.Request) -> web.Response:
     ctx, err_resp = require_admin_user(request)
     if err_resp is not None or ctx is None:
@@ -1878,18 +1933,7 @@ async def api_admin_user_details_handler(request: web.Request) -> web.Response:
                     for o in recent_orders_rows
                 ],
                 "recent_ledger": [
-                    {
-                        "id": entry.id,
-                        "entry_type": entry.entry_type,
-                        "bucket": entry.bucket,
-                        "amount": int(entry.amount),
-                        "description": (
-                            (entry.metadata_.get("description") or entry.metadata_.get("reason") or "")
-                            if isinstance(entry.metadata_, dict)
-                            else ""
-                        ),
-                        "created_at": entry.created_at.isoformat() if entry.created_at else None,
-                    }
+                    _serialize_admin_ledger_entry(entry)
                     for entry in recent_ledger_rows
                 ],
                 "recent_device_events": [
@@ -1994,19 +2038,15 @@ async def api_admin_user_devices_reset_handler(request: web.Request) -> web.Resp
             await white_internet_repo.add_pending_revocation_uuids(
                 session, wi_sub.id, dev_uuids
             )
-            wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
             if wi_sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING):
+                wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
                 wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
             await session.flush()
-            wi_ver = wi_sub.desired_version
-            for u_uuid in dev_uuids:
-                VlessSubscriptionService.deprovision_background(
-                    u_uuid,
-                    version=wi_ver,
-                    sub_id=None,
-                    session=session,
-                    services=("white_internet",),
-                )
+            await _queue_wi_revoke_uuids(
+                session, wi_sub, dev_uuids, context="admin_devices_reset"
+            )
+            if wi_sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING):
+                await _queue_wi_inline_sync(session, wi_sub, "devices_reset")
         await AuditService.log_action(
             session,
             admin_id=ctx.telegram_id,
@@ -2081,12 +2121,8 @@ async def api_admin_user_device_delete_handler(request: web.Request) -> web.Resp
                     wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
                     wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
                 await session.flush()
-                VlessSubscriptionService.deprovision_background(
-                    deleted_uuid,
-                    version=wi_sub.desired_version,
-                    sub_id=None,
-                    session=session,
-                    services=("white_internet",),
+                await _queue_wi_revoke_uuids(
+                    session, wi_sub, [deleted_uuid], context="admin_device_delete"
                 )
                 if wi_sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING):
                     await _queue_wi_inline_sync(session, wi_sub, "device_delete")
@@ -2241,19 +2277,13 @@ async def api_admin_user_token_rotate_handler(request: web.Request) -> web.Respo
                 await white_internet_repo.add_pending_revocation_uuids(
                     session, wi_sub.id, wi_rev_uuids
                 )
-                wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
                 if wi_sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING):
+                    wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
                     wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
                 await session.flush()
-                wi_ver = wi_sub.desired_version
-                for u_uuid in wi_rev_uuids:
-                    VlessSubscriptionService.deprovision_background(
-                        u_uuid,
-                        version=wi_ver,
-                        sub_id=None,
-                        session=session,
-                        services=("white_internet",),
-                    )
+                await _queue_wi_revoke_uuids(
+                    session, wi_sub, wi_rev_uuids, context="admin_token_rotate"
+                )
 
         await session.execute(
             delete(UserDevice).where(UserDevice.user_id == user.id)

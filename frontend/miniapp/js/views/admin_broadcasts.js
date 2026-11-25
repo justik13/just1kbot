@@ -254,28 +254,28 @@ export function renderAdminBroadcastsView(root, state) {
         const launchBtn = root.querySelector("#bcLaunchBtn");
         const runLaunch = async () => {
             await withButtonLoading(launchBtn, "Запуск…", async () => {
-                try {
-                    const res = await api.startBroadcast({
-                        target_audience: audience,
-                        text,
-                        media_url: mediaUrl,
-                    });
-                    showToast(res.message || "Рассылка запущена");
-                    if (audience !== "test") {
-                        root.querySelector("#bcTextInput").value = "";
-                        root.querySelector("#bcMediaInput").value = "";
-                        _updateCharCounter(root);
-                    }
-                    state.broadcastsOffset = 0;
-                    await reloadBroadcasts(false, 0);
-                } catch (err) {
-                    showToast(err.message || "Ошибка запуска рассылки", "error");
+                const res = await api.startBroadcast({
+                    target_audience: audience,
+                    text,
+                    media_url: mediaUrl,
+                });
+                showToast(res.message || "Рассылка запущена");
+                if (audience !== "test") {
+                    root.querySelector("#bcTextInput").value = "";
+                    root.querySelector("#bcMediaInput").value = "";
+                    _updateCharCounter(root);
                 }
+                state.broadcastsOffset = 0;
+                await reloadBroadcasts(false, 0);
             });
         };
 
         if (audience === "test") {
-            await runLaunch();
+            try {
+                await runLaunch();
+            } catch (err) {
+                showToast(err.message || "Ошибка запуска рассылки", "error");
+            }
             return;
         }
 
@@ -344,6 +344,7 @@ export function renderAdminBroadcastsView(root, state) {
                         });
                         state.usersData = null;
                         state.financesData = null;
+                        state.financesLoadAttempted = false;
                         showToast(res.message || "Массовое начисление запущено");
                     },
                     "Начислить",
@@ -377,6 +378,7 @@ export function renderAdminBroadcastsView(root, state) {
                         });
                         state.usersData = null;
                         state.financesData = null;
+                        state.financesLoadAttempted = false;
                         showToast(res.message || "Массовое продление запущено");
                     },
                     "Продлить",

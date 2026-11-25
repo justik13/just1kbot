@@ -127,12 +127,17 @@ const appState = {
         appState.adminTab = "finances";
         appState.finSubTab = subTab || "orders";
         appState.finQuery = String(query || "");
+        appState.finStatus = "";
         appState.finAttentionOnly = Boolean(attentionOnly);
         appState.financesData = null;
         appState.financesLoadAttempted = false;
         if (appState.finSubTab === "webhooks") {
             appState.webhooksData = null;
             appState.webhooksLoadAttempted = false;
+        } else if (appState.finSubTab === "audit") {
+            appState.auditAction = "";
+            appState.auditLogsData = null;
+            appState.auditLoadAttempted = false;
         }
         appState.selectedNodeId = null;
         appState.selectedUserId = null;
@@ -143,6 +148,7 @@ const appState = {
         appState.mode = "admin";
         appState.adminTab = "finances";
         appState.finSubTab = "audit";
+        appState.auditAction = "";
         appState.auditQuery = String(query || "");
         appState.auditTargetType = String(targetType || "");
         appState.auditLogsData = null;
@@ -239,6 +245,10 @@ function _syncModeSwitch() {
 async function _renderAdminView() {
     const root = document.getElementById("appRoot");
     if (!root) return;
+    if (appState.mode === "admin" && !appState.twoFactorPassed) {
+        _openAdmin2FAGate(root);
+        return;
+    }
     const seq = ++_tabSwitchSeq;
     _syncModeSwitch();
 
@@ -247,7 +257,7 @@ async function _renderAdminView() {
         appState.selectedNodeId = null;
         appState.selectedUserId = null;
         _updateTelegramBackButton(null);
-        await loadAndRenderUserCabinet(root);
+        await loadAndRenderUserCabinet(root, { isActive: () => appState.mode === "cabinet" });
         return;
     }
 

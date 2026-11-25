@@ -72,7 +72,9 @@ function _renderTelemetryCard(node) {
     const diskExtra =
         disk && disk.used_gb != null && disk.total_gb != null
             ? `${disk.used_gb} / ${disk.total_gb} ГБ`
-            : "";
+            : disk && disk.used_bytes != null && disk.total_bytes != null
+                ? `${(Number(disk.used_bytes) / 1024 ** 3).toFixed(1)} / ${(Number(disk.total_bytes) / 1024 ** 3).toFixed(1)} ГБ`
+                : "";
 
     const trafficUsedGb = tl ? (Number(tl.monthly_bytes || tl.used_bytes || 0) / (1024 ** 3)).toFixed(2) : null;
     const trafficLimitGb = tl && tl.limit_bytes ? (Number(tl.limit_bytes) / (1024 ** 3)).toFixed(0) : null;
@@ -169,6 +171,13 @@ function _renderTelemetryCard(node) {
     `;
 }
 
+function _formatLinkItem(item) {
+    if (item && typeof item === "object") {
+        return item.name || item.domain || item.ip || item.host || item.id || JSON.stringify(item);
+    }
+    return String(item ?? "—");
+}
+
 function _formatCascadeLinks(links) {
     if (!links || typeof links !== "object") return "";
     const entries = Object.entries(links);
@@ -178,13 +187,20 @@ function _formatCascadeLinks(links) {
             if (val && typeof val === "object" && !Array.isArray(val)) {
                 const sub = Object.entries(val)
                     .map(([k, v]) => {
-                        const txt = typeof v === "object" && v !== null ? JSON.stringify(v) : String(v ?? "—");
+                        const txt = Array.isArray(v)
+                            ? v.map(_formatLinkItem).join(", ") || "—"
+                            : typeof v === "object" && v !== null
+                              ? _formatLinkItem(v)
+                              : String(v ?? "—");
                         return `<span class="chip chip-muted">${escapeHtml(k)}: ${escapeHtml(txt)}</span>`;
                     })
                     .join(" ");
                 return `<div class="detail-item"><span class="detail-label">${escapeHtml(group)}</span><div class="filter-pills">${sub || "—"}</div></div>`;
             }
-            return `<div class="detail-item"><span class="detail-label">${escapeHtml(group)}</span><span class="mono">${escapeHtml(Array.isArray(val) ? val.join(", ") : String(val ?? "—"))}</span></div>`;
+            const formatted = Array.isArray(val)
+                ? val.map(_formatLinkItem).join(", ") || "—"
+                : String(val ?? "—");
+            return `<div class="detail-item"><span class="detail-label">${escapeHtml(group)}</span><span class="mono">${escapeHtml(formatted)}</span></div>`;
         })
         .join("");
 }
@@ -342,9 +358,9 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
                 </button>
                 <button type="button" id="detailRefreshBtn" class="btn btn-sm">Опросить ноду</button>
                 ${canResyncClients ? `<button type="button" id="detailResyncBtn" class="btn btn-sm">Пересинхронизировать клиентов</button>` : ""}
-                <button type="button" id="detailLifecycleBtn" class="btn btn-sm">
+                ${node.role === "ru_hub" ? `<button type="button" id="detailLifecycleBtn" class="btn btn-sm">
                     ${isDecommissioning ? "Вернуть в ACTIVE" : "Вывести из работы (Drain)"}
-                </button>
+                </button>` : ""}
                 ${node.role === "exit_node" ? `<button type="button" id="detailSubLocBtn" class="btn btn-sm">Настроить в подписке</button>` : ""}
             </div>
         </section>
@@ -480,30 +496,33 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
         });
     }
 
-    root.querySelector("#detailLifecycleBtn").addEventListener("click", (e) => {
-        const b = e.currentTarget;
-        const targetStatus = isDecommissioning ? "active" : "decommissioning";
-        showConfirmModal({
-            title: isDecommissioning ? `Вернуть ноду #${node.id} в ACTIVE?` : `Вывести ноду #${node.id} из работы?`,
-            message: isDecommissioning
-                ? `Нода «${node.name}» снова начнёт принимать новых клиентов и трафик.`
-                : `Нода «${node.name}» перейдёт в режим вывода (DECOMMISSIONING) и перестанет выдаваться новым клиентам.`,
-            confirmText: isDecommissioning ? "Вернуть в ACTIVE" : "Вывести (Drain)",
-            cancelText: "Отмена",
-            isDestructive: !isDecommissioning,
-            onConfirm: async () => {
-                await withButtonLoading(b, "Применение...", async () => {
-                    await api.setNodeLifecycle(node.id, targetStatus);
-                    showToast(
-                        isDecommissioning
-                            ? `Нода #${node.id} возвращена в ACTIVE`
-                            : `Нода #${node.id} переведена в Drain (DECOMMISSIONING)`
-                    );
-                    await onReload();
-                });
-            },
+    const lifecycleBtn = root.querySelector("#detailLifecycleBtn");
+    if (lifecycleBtn) {
+        lifecycleBtn.addEventListener("click", (e) => {
+            const b = e.currentTarget;
+            const targetStatus = isDecommissioning ? "active" : "decommissioning";
+            showConfirmModal({
+                title: isDecommissioning ? `Вернуть ноду #${node.id} в ACTIVE?` : `Вывести ноду #${node.id} из работы?`,
+                message: isDecommissioning
+                    ? `Нода «${node.name}» снова начнёт принимать новых клиентов и трафик.`
+                    : `Нода «${node.name}» перейдёт в режим вывода (DECOMMISSIONING) и перестанет выдаваться новым клиентам.`,
+                confirmText: isDecommissioning ? "Вернуть в ACTIVE" : "Вывести (Drain)",
+                cancelText: "Отмена",
+                isDestructive: !isDecommissioning,
+                onConfirm: async () => {
+                    await withButtonLoading(b, "Применение...", async () => {
+                        await api.setNodeLifecycle(node.id, targetStatus);
+                        showToast(
+                            isDecommissioning
+                                ? `Нода #${node.id} возвращена в ACTIVE`
+                                : `Нода #${node.id} переведена в Drain (DECOMMISSIONING)`
+                        );
+                        await onReload();
+                    });
+                },
+            });
         });
-    });
+    }
 
     const subLocBtn = root.querySelector("#detailSubLocBtn");
     if (subLocBtn) {

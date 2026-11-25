@@ -62,9 +62,11 @@ export function renderAdminUsersView(root, state, onOpenUser) {
             </div>
             <div class="filter-pills">
                 <button type="button" class="pill-btn ${activeFilter === "all" ? "active" : ""}" data-ufilter="all">Все (${fc.all ?? stats.total_users ?? 0})</button>
+                <button type="button" class="pill-btn ${activeFilter === "active" ? "active" : ""}" data-ufilter="active">Активные (${fc.active ?? 0})</button>
                 <button type="button" class="pill-btn ${activeFilter === "active_standard" ? "active" : ""}" data-ufilter="active_standard">Стандарт (${fc.active_standard ?? stats.active_standard ?? 0})</button>
                 <button type="button" class="pill-btn ${activeFilter === "active_wi" ? "active" : ""}" data-ufilter="active_wi">Белый интернет (${fc.active_wi ?? stats.active_wi ?? 0})</button>
                 <button type="button" class="pill-btn ${activeFilter === "expiring_3d" ? "active" : ""}" data-ufilter="expiring_3d">Истекают 3д (${fc.expiring_3d ?? 0})</button>
+                <button type="button" class="pill-btn ${activeFilter === "new_7d" ? "active" : ""}" data-ufilter="new_7d">Новые 7д (${fc.new_7d ?? 0})</button>
                 <button type="button" class="pill-btn ${activeFilter === "expired" ? "active" : ""}" data-ufilter="expired">Истекли (${fc.expired ?? 0})</button>
                 <button type="button" class="pill-btn ${activeFilter === "never" ? "active" : ""}" data-ufilter="never">Без подписки (${fc.never ?? 0})</button>
                 <button type="button" class="pill-btn ${activeFilter === "banned" ? "active" : ""}" data-ufilter="banned">Бот забл. (${fc.banned ?? 0})</button>

@@ -1031,9 +1031,11 @@ function _wiHasActivePeriod(wi) {
     );
 }
 
-export async function loadAndRenderUserCabinet(root) {
+export async function loadAndRenderUserCabinet(root, options = {}) {
+    const isActive = () => (typeof options.isActive === "function" ? options.isActive() : true);
     try {
         const data = await api.getUserDashboard();
+        if (!isActive()) return;
         _state.data = data;
         const stdActive = Boolean(data.standard && data.standard.active);
         const wiActive = _wiHasActivePeriod(data.wi);
@@ -1048,6 +1050,7 @@ export async function loadAndRenderUserCabinet(root) {
         }
         _render(root);
     } catch (err) {
+        if (!isActive()) return;
         root.innerHTML = `
             <section class="card card-center">
                 <div class="card-title">Не удалось загрузить кабинет</div>
@@ -1056,7 +1059,7 @@ export async function loadAndRenderUserCabinet(root) {
             </section>
         `;
         const retry = root.querySelector("#retryDashBtn");
-        if (retry) retry.addEventListener("click", () => loadAndRenderUserCabinet(root));
+        if (retry) retry.addEventListener("click", () => loadAndRenderUserCabinet(root, options));
     }
 }
 

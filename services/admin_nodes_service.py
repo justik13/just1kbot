@@ -828,15 +828,27 @@ async def set_node_lifecycle(
         if server is None:
             raise AdminNodeServiceError("Node not found", status_code=404)
 
-        if normalized == ServerLifecycleStatus.ACTIVE.value and (
-            server.health_state == ServerHealthState.MANUAL_DISABLED or not server.is_active
+        if (
+            normalized == ServerLifecycleStatus.ACTIVE.value
+            and server.lifecycle_status != ServerLifecycleStatus.DECOMMISSIONING.value
+            and (
+                server.health_state == ServerHealthState.MANUAL_DISABLED
+                or not server.is_active
+            )
         ):
             raise AdminNodeServiceError(
                 "Сначала включите сервер через переключатель активности.",
                 status_code=400,
             )
 
-        update_kwargs: dict[str, Any] = {"lifecycle_status": normalized}
+        # Preserve active/manual-disabled state across lifecycle transitions; never silently re-enable.
+        preserve_active = bool(
+            server.is_active and server.health_state != ServerHealthState.MANUAL_DISABLED
+        )
+        update_kwargs: dict[str, Any] = {
+            "lifecycle_status": normalized,
+            "is_active": preserve_active,
+        }
         if normalized == ServerLifecycleStatus.DECOMMISSIONING.value:
             role = get_server_role(server)
             if role != "ru_hub":
@@ -844,10 +856,6 @@ async def set_node_lifecycle(
                     "Плавный вывод (Drain) поддерживается только для ru_hub.",
                     status_code=400,
                 )
-            # Preserve active state for WI client draining; never silently re-enable MANUAL_DISABLED nodes.
-            update_kwargs["is_active"] = bool(
-                server.is_active and server.health_state != ServerHealthState.MANUAL_DISABLED
-            )
 
         updated = await update_server(session, server, **update_kwargs)
         _queue_topology_sync(session)

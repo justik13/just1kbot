@@ -299,7 +299,9 @@ async def _traffic_sync_once(bot: Bot | None = None):
             select(Server)
             .where(
                 Server.is_active.is_(True),
-                Server.lifecycle_status == ServerLifecycleStatus.ACTIVE,
+                Server.lifecycle_status.in_(
+                    [ServerLifecycleStatus.ACTIVE, ServerLifecycleStatus.DECOMMISSIONING]
+                ),
                 Server.health_state.in_(
                     [ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION]
                 ),

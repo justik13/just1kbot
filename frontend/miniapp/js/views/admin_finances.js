@@ -238,8 +238,12 @@ export function renderAdminFinancesView(root, state) {
             renderAdminFinancesView(root, state);
         } catch (err) {
             if (reqId !== _finViewReqId) return;
+            if (err && err.code === "2fa_required") return;
             state.financesLoadAttempted = true;
             showToast(err.message || "Ошибка загрузки финансов", "error");
+            if (state.financesData == null && state.adminTab === "finances" && state.mode === "admin") {
+                renderAdminFinancesView(root, state);
+            }
         }
     };
 
@@ -259,8 +263,12 @@ export function renderAdminFinancesView(root, state) {
             renderAdminFinancesView(root, state);
         } catch (err) {
             if (reqId !== _finViewReqId) return;
+            if (err && err.code === "2fa_required") return;
             state.auditLoadAttempted = true;
             showToast(err.message || "Ошибка загрузки аудит-лога", "error");
+            if (state.auditLogsData == null && state.adminTab === "finances" && state.mode === "admin") {
+                renderAdminFinancesView(root, state);
+            }
         }
     };
 
@@ -274,8 +282,12 @@ export function renderAdminFinancesView(root, state) {
             renderAdminFinancesView(root, state);
         } catch (err) {
             if (reqId !== _finViewReqId) return;
+            if (err && err.code === "2fa_required") return;
             state.webhooksLoadAttempted = true;
             showToast(err.message || "Ошибка загрузки вебхуков", "error");
+            if (state.webhooksData == null && state.adminTab === "finances" && state.mode === "admin") {
+                renderAdminFinancesView(root, state);
+            }
         }
     };
 
@@ -343,15 +355,33 @@ export function renderAdminFinancesView(root, state) {
     }
 
     root.querySelectorAll("[data-fintab]").forEach((btn) => {
-        btn.addEventListener("click", async () => {
-            state.finSubTab = btn.dataset.fintab;
-            if (state.finSubTab === "audit") {
-                await loadAudit(0);
-            } else if (state.finSubTab === "webhooks") {
-                await loadWebhooks();
+        btn.addEventListener("click", () => {
+            const nextSubTab = btn.dataset.fintab;
+            if (!nextSubTab) return;
+            state.finSubTab = nextSubTab;
+            if (nextSubTab === "audit") {
+                const hadData = state.auditLogsData != null;
+                if (!hadData) {
+                    state.auditLoadAttempted = false;
+                }
+                renderAdminFinancesView(root, state);
+                if (hadData) {
+                    loadAudit(0);
+                }
+            } else if (nextSubTab === "webhooks") {
+                const hadData = state.webhooksData != null;
+                if (!hadData) {
+                    state.webhooksLoadAttempted = false;
+                }
+                renderAdminFinancesView(root, state);
+                if (hadData) {
+                    loadWebhooks();
+                }
             } else {
+                state.financesData = null;
+                state.financesLoadAttempted = false;
                 state.finStatus = "";
-                await loadFinances(0);
+                renderAdminFinancesView(root, state);
             }
         });
     });

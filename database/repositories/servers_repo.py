@@ -173,6 +173,7 @@ def merge_v2_extra_data(
         "xhttp_locations",
         "inbounds",
         "traffic_limit",
+        "disk_usage",
     ):
         val = _pick(key)
         if val is not None:
@@ -323,6 +324,25 @@ async def get_wi_capable_ru_hubs(session: AsyncSession) -> list[Server]:
     eligible = [srv for srv in candidates if _is_wi_hub_eligible(srv)]
     eligible.sort(key=_server_load_score)
     return eligible
+
+
+async def get_wi_revocation_ru_hubs(session: AsyncSession) -> list[Server]:
+    """Return all WI-capable ru_hub servers (ACTIVE or DECOMMISSIONING), including disabled/degraded hubs, for UUID revocation."""
+    candidates = (
+        await session.scalars(
+            select(Server)
+            .where(
+                Server.protocol.in_([XRAY_PROTOCOL, VLESS_PROTOCOL]),
+                Server.lifecycle_status.in_(
+                    [ServerLifecycleStatus.ACTIVE, ServerLifecycleStatus.DECOMMISSIONING]
+                ),
+                Server.api_url.is_not(None),
+                Server.api_key.is_not(None),
+            )
+            .order_by(Server.id.asc())
+        )
+    ).all()
+    return [srv for srv in candidates if _is_wi_hub_eligible(srv)]
 
 
 async def has_available_service_capacity(

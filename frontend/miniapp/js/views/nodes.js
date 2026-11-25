@@ -510,7 +510,8 @@ function _openAddNodeModal(onReload, onSelectNode) {
                 });
                 showToast("Нода добавлена и выключена. Откройте её для включения.");
                 close();
-                await onReload({ skipRender: true });
+                const ok = await onReload({ skipRender: true });
+                if (!ok) return;
                 if (res && res.node && res.node.id && typeof onSelectNode === "function") {
                     onSelectNode(res.node.id);
                 }
