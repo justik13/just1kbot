@@ -1,5 +1,5 @@
 import { api } from "../api.js?v=2.8.0";
-import { formatAuditAction, formatMetadataFlag } from "../admin_labels.js?v=2.8.0";
+import { formatAuditAction, formatAuditTarget, formatMetadataFlag } from "../admin_labels.js?v=2.8.0";
 import {
     copyText,
     escapeHtml,
@@ -105,7 +105,17 @@ function _renderMaintenanceCard(state) {
     return `<section id="paymentsMaintCard" class="card">${_renderMaintenanceCardInner(state)}</section>`;
 }
 
+function _renderFinStatsInner(summary) {
+    return `
+        <div class="stat-box"><div class="stat-val tabular">${Math.round(summary.revenue_24h ?? 0)} ₽</div><div class="stat-lbl">Внеш. оплаты 24ч</div></div>
+        <div class="stat-box"><div class="stat-val tabular">${Math.round(summary.revenue_7d ?? 0)} ₽</div><div class="stat-lbl">Внеш. оплаты 7д</div></div>
+        <div class="stat-box"><div class="stat-val tabular">${Math.round(summary.revenue_30d ?? 0)} ₽</div><div class="stat-lbl">Внеш. оплаты 30д</div></div>
+        <div class="stat-box"><div class="stat-val tabular">${summary.paid_orders_count ?? 0}</div><div class="stat-lbl">Всего оплачено</div></div>
+    `;
+}
+
 export function renderAdminFinancesView(root, state) {
+    ++_finViewReqId;
     const subTab = state.finSubTab || "orders";
     const finData = state.financesData || {
         summary: { revenue_24h: 0, revenue_7d: 0, revenue_30d: 0, paid_orders_count: 0 },
@@ -119,25 +129,21 @@ export function renderAdminFinancesView(root, state) {
     const summary = finData.summary || {};
 
     root.innerHTML = `
-        <section class="stats-strip">
-            <div class="stat-box"><div class="stat-val tabular">${Math.round(summary.revenue_24h ?? 0)} ₽</div><div class="stat-lbl">Внеш. оплаты 24ч</div></div>
-            <div class="stat-box"><div class="stat-val tabular">${Math.round(summary.revenue_7d ?? 0)} ₽</div><div class="stat-lbl">Внеш. оплаты 7д</div></div>
-            <div class="stat-box"><div class="stat-val tabular">${Math.round(summary.revenue_30d ?? 0)} ₽</div><div class="stat-lbl">Внеш. оплаты 30д</div></div>
-            <div class="stat-box"><div class="stat-val tabular">${summary.paid_orders_count ?? 0}</div><div class="stat-lbl">Всего оплачено</div></div>
-        </section>
+        <section id="finStatsStrip" class="stats-strip">${_renderFinStatsInner(summary)}</section>
 
         ${_renderMaintenanceCard(state)}
 
         <section class="card">
-            <div class="row" style="gap:8px; align-items:center; justify-content:space-between; flex-wrap:wrap;">
-                <div class="seg-group" style="flex:1 1 auto;">
-                    <button type="button" class="seg-btn ${subTab === "orders" ? "active" : ""}" data-fintab="orders">Все</button>
-                    <button type="button" class="seg-btn ${subTab === "subscriptions" ? "active" : ""}" data-fintab="subscriptions">Подписки</button>
-                    <button type="button" class="seg-btn ${subTab === "topups" ? "active" : ""}" data-fintab="topups">Пополнения</button>
-                    <button type="button" class="seg-btn ${subTab === "audit" ? "active" : ""}" data-fintab="audit">Аудит</button>
-                    <button type="button" class="seg-btn ${subTab === "webhooks" ? "active" : ""}" data-fintab="webhooks">Вебхуки</button>
-                </div>
+            <div class="row" style="gap:8px; align-items:center; justify-content:space-between;">
+                <h2 class="card-title">Операции и логи</h2>
                 <button type="button" id="finRefreshBtn" class="btn btn-sm">Обновить</button>
+            </div>
+            <div class="seg-group" style="overflow-x:auto; flex-wrap:nowrap; scrollbar-width:none; -webkit-overflow-scrolling:touch; gap:6px;">
+                <button type="button" class="seg-btn ${subTab === "orders" ? "active" : ""}" style="flex:1 0 auto; min-width:max-content; white-space:nowrap; padding:8px 10px;" data-fintab="orders" aria-pressed="${subTab === "orders" ? "true" : "false"}">Все</button>
+                <button type="button" class="seg-btn ${subTab === "subscriptions" ? "active" : ""}" style="flex:1 0 auto; min-width:max-content; white-space:nowrap; padding:8px 10px;" data-fintab="subscriptions" aria-pressed="${subTab === "subscriptions" ? "true" : "false"}">Подписки</button>
+                <button type="button" class="seg-btn ${subTab === "topups" ? "active" : ""}" style="flex:1 0 auto; min-width:max-content; white-space:nowrap; padding:8px 10px;" data-fintab="topups" aria-pressed="${subTab === "topups" ? "true" : "false"}">Пополнения</button>
+                <button type="button" class="seg-btn ${subTab === "audit" ? "active" : ""}" style="flex:1 0 auto; min-width:max-content; white-space:nowrap; padding:8px 10px;" data-fintab="audit" aria-pressed="${subTab === "audit" ? "true" : "false"}">Аудит</button>
+                <button type="button" class="seg-btn ${subTab === "webhooks" ? "active" : ""}" style="flex:1 0 auto; min-width:max-content; white-space:nowrap; padding:8px 10px;" data-fintab="webhooks" aria-pressed="${subTab === "webhooks" ? "true" : "false"}">Вебхуки</button>
             </div>
 
             ${
@@ -185,7 +191,7 @@ export function renderAdminFinancesView(root, state) {
                     : subTab === "webhooks"
                     ? `
                 <div class="meta-text">
-                    Последние 30 входящих вебхуков ЮKassa со статусами <span class="mono">pending / retry / dead</span>.
+                    Последние 30 входящих вебхуков ЮKassa со статусами <span class="mono" style="word-break:normal; white-space:nowrap;">pending / retry / dead</span>.
                 </div>
                 <div id="finListContainer" class="stack-sm"></div>
             `
@@ -223,6 +229,72 @@ export function renderAdminFinancesView(root, state) {
         </section>
     `;
 
+    const isStillActive = (reqId) =>
+        reqId === _finViewReqId &&
+        root.isConnected &&
+        state.adminTab === "finances" &&
+        state.mode === "admin";
+
+    const listContainer = root.querySelector("#finListContainer");
+
+    const renderRetryList = (message, onRetry) => {
+        const pagerTop = root.querySelector("#finPagerTop");
+        const pagerBottom = root.querySelector("#finPagerBottom");
+        if (pagerTop) pagerTop.innerHTML = "";
+        if (pagerBottom) pagerBottom.innerHTML = "";
+        if (!listContainer) return;
+        listContainer.innerHTML = `
+            <div class="card card-center">
+                <div class="muted">${escapeHtml(message)}</div>
+                <button id="finListRetryBtn" type="button" class="btn btn-primary btn-sm">Повторить</button>
+            </div>
+        `;
+        listContainer.querySelector("#finListRetryBtn")?.addEventListener("click", onRetry);
+    };
+
+    const syncDynamicFinances = () => {
+        const curFin = state.financesData || { summary: {}, items: [], total: 0, offset: 0, limit: 25 };
+        const statsStrip = root.querySelector("#finStatsStrip");
+        if (statsStrip) {
+            statsStrip.innerHTML = _renderFinStatsInner(curFin.summary || {});
+        }
+        const attBtn = root.querySelector("#finAttentionToggleBtn");
+        if (attBtn) {
+            attBtn.classList.toggle("btn-primary", Boolean(state.finAttentionOnly));
+            attBtn.setAttribute("aria-pressed", state.finAttentionOnly ? "true" : "false");
+        }
+        listContainer.innerHTML = "";
+        _renderFinanceRows(listContainer, curFin.items || [], state);
+        _renderPager(root, curFin, loadFinances, "заказов");
+    };
+
+    const syncDynamicAudit = () => {
+        const curAudit = state.auditLogsData || { items: [], actions: [], total: 0, offset: 0, limit: 40 };
+        const actionSel = root.querySelector("#auditActionSelect");
+        if (actionSel && Array.isArray(curAudit.actions)) {
+            const curVal = state.auditAction || "";
+            actionSel.innerHTML = `
+                <option value="">Все действия</option>
+                ${curAudit.actions
+                    .map(
+                        (act) =>
+                            `<option value="${escapeHtml(act)}" ${
+                                curVal === act ? "selected" : ""
+                            }>${escapeHtml(formatAuditAction(act))}</option>`
+                    )
+                    .join("")}
+            `;
+        }
+        listContainer.innerHTML = "";
+        _renderAuditRows(listContainer, curAudit.items || [], state);
+        _renderPager(root, curAudit, loadAudit, "событий");
+    };
+
+    const syncDynamicWebhooks = () => {
+        listContainer.innerHTML = "";
+        _renderWebhookRows(listContainer, state.webhooksData || []);
+    };
+
     const loadFinances = async (offset = 0) => {
         const reqId = ++_finViewReqId;
         try {
@@ -237,18 +309,16 @@ export function renderAdminFinancesView(root, state) {
                 25,
                 Boolean(state.finAttentionOnly)
             );
-            if (reqId !== _finViewReqId) return;
+            if (!isStillActive(reqId)) return;
             state.financesData = data;
             state.financesLoadAttempted = true;
-            renderAdminFinancesView(root, state);
+            syncDynamicFinances();
         } catch (err) {
-            if (reqId !== _finViewReqId) return;
+            if (!isStillActive(reqId)) return;
             if (err && err.code === "2fa_required") return;
             state.financesLoadAttempted = true;
             showToast(err.message || "Ошибка загрузки финансов", "error");
-            if (state.financesData == null && state.adminTab === "finances" && state.mode === "admin") {
-                renderAdminFinancesView(root, state);
-            }
+            renderRetryList(err.message || "Не удалось загрузить финансы", () => loadFinances(offset));
         }
     };
 
@@ -262,18 +332,16 @@ export function renderAdminFinancesView(root, state) {
                 40,
                 state.auditTargetType || ""
             );
-            if (reqId !== _finViewReqId) return;
+            if (!isStillActive(reqId)) return;
             state.auditLogsData = data;
             state.auditLoadAttempted = true;
-            renderAdminFinancesView(root, state);
+            syncDynamicAudit();
         } catch (err) {
-            if (reqId !== _finViewReqId) return;
+            if (!isStillActive(reqId)) return;
             if (err && err.code === "2fa_required") return;
             state.auditLoadAttempted = true;
             showToast(err.message || "Ошибка загрузки аудит-лога", "error");
-            if (state.auditLogsData == null && state.adminTab === "finances" && state.mode === "admin") {
-                renderAdminFinancesView(root, state);
-            }
+            renderRetryList(err.message || "Не удалось загрузить аудит-лог", () => loadAudit(offset));
         }
     };
 
@@ -281,25 +349,22 @@ export function renderAdminFinancesView(root, state) {
         const reqId = ++_finViewReqId;
         try {
             const res = await api.getAdminWebhooks();
-            if (reqId !== _finViewReqId) return;
+            if (!isStillActive(reqId)) return;
             state.webhooksData = res.webhooks || [];
             state.webhooksLoadAttempted = true;
-            renderAdminFinancesView(root, state);
+            syncDynamicWebhooks();
         } catch (err) {
-            if (reqId !== _finViewReqId) return;
+            if (!isStillActive(reqId)) return;
             if (err && err.code === "2fa_required") return;
             state.webhooksLoadAttempted = true;
             showToast(err.message || "Ошибка загрузки вебхуков", "error");
-            if (state.webhooksData == null && state.adminTab === "finances" && state.mode === "admin") {
-                renderAdminFinancesView(root, state);
-            }
+            renderRetryList(err.message || "Не удалось загрузить вебхуки", () => loadWebhooks());
         }
     };
 
     const syncMaintenanceCard = () => {
-        const maintCard = root.isConnected
-            ? root.querySelector("#paymentsMaintCard")
-            : document.getElementById("paymentsMaintCard");
+        if (!root.isConnected) return;
+        const maintCard = root.querySelector("#paymentsMaintCard");
         if (!maintCard) return;
         maintCard.innerHTML = _renderMaintenanceCardInner(state);
         bindMaintenanceToggle(maintCard);
@@ -321,7 +386,7 @@ export function renderAdminFinancesView(root, state) {
             })
             .finally(() => {
                 _maintInFlight = null;
-                if (state.adminTab === "finances" && state.mode === "admin") {
+                if (root.isConnected && state.adminTab === "finances" && state.mode === "admin") {
                     syncMaintenanceCard();
                 }
             });
@@ -348,6 +413,7 @@ export function renderAdminFinancesView(root, state) {
                 confirmText: nextVal ? "Приостановить" : "Возобновить",
                 cancelText: "Отмена",
                 isDestructive: nextVal,
+                restoreFocusSelector: "#togglePaymentsMaintBtn",
                 onConfirm: async () => {
                     const res = await api.setPaymentsMaintenance(nextVal);
                     state.paymentsMaintenance = Boolean(res.enabled);
@@ -362,7 +428,7 @@ export function renderAdminFinancesView(root, state) {
     root.querySelectorAll("[data-fintab]").forEach((btn) => {
         btn.addEventListener("click", () => {
             const nextSubTab = btn.dataset.fintab;
-            if (!nextSubTab) return;
+            if (!nextSubTab || nextSubTab === state.finSubTab) return;
             state.finSubTab = nextSubTab;
             if (nextSubTab === "audit") {
                 const hadData = state.auditLogsData != null;
@@ -398,13 +464,13 @@ export function renderAdminFinancesView(root, state) {
                 if (subTab === "audit") {
                     const qInput = root.querySelector("#auditQueryInput");
                     if (qInput) state.auditQuery = _cleanQuery(qInput.value);
-                    await loadAudit(auditData.offset || 0);
+                    await loadAudit((state.auditLogsData && state.auditLogsData.offset) || 0);
                 } else if (subTab === "webhooks") {
                     await loadWebhooks();
                 } else {
                     const qInput = root.querySelector("#finQueryInput");
                     if (qInput) state.finQuery = _cleanQuery(qInput.value);
-                    await loadFinances(finData.offset || 0);
+                    await loadFinances((state.financesData && state.financesData.offset) || 0);
                 }
             });
         });
@@ -416,8 +482,6 @@ export function renderAdminFinancesView(root, state) {
         loadPaymentsMaintenance();
     }
 
-    const listContainer = root.querySelector("#finListContainer");
-
     if (subTab === "audit") {
         const auditQueryInput = root.querySelector("#auditQueryInput");
         const syncAuditFilters = () => {
@@ -425,6 +489,9 @@ export function renderAdminFinancesView(root, state) {
             state.auditTargetType = root.querySelector("#auditTargetTypeSelect").value;
             state.auditQuery = _cleanQuery(auditQueryInput.value);
         };
+        auditQueryInput.addEventListener("input", () => {
+            state.auditQuery = _cleanQuery(auditQueryInput.value);
+        });
         root.querySelector("#auditFilterForm").addEventListener("submit", async (e) => {
             e.preventDefault();
             syncAuditFilters();
@@ -446,10 +513,10 @@ export function renderAdminFinancesView(root, state) {
         });
         if (state.auditLogsData == null) {
             if (!state.auditLoadAttempted) {
-                listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:16px;">Загрузка</div>`;
+                listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:16px;">Загрузка...</div>`;
                 loadAudit(0);
             } else {
-                listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:16px;">Не удалось загрузить аудит-лог. Нажмите «Обновить».</div>`;
+                renderRetryList("Не удалось загрузить аудит-лог", () => loadAudit(0));
             }
         } else {
             _renderAuditRows(listContainer, auditData.items || [], state);
@@ -458,10 +525,10 @@ export function renderAdminFinancesView(root, state) {
     } else if (subTab === "webhooks") {
         if (state.webhooksData == null) {
             if (!state.webhooksLoadAttempted) {
-                listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:16px;">Загрузка</div>`;
+                listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:16px;">Загрузка...</div>`;
                 loadWebhooks();
             } else {
-                listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:16px;">Не удалось загрузить вебхуки. Нажмите «Обновить».</div>`;
+                renderRetryList("Не удалось загрузить вебхуки", () => loadWebhooks());
             }
         } else {
             _renderWebhookRows(listContainer, webhooksData);
@@ -472,6 +539,9 @@ export function renderAdminFinancesView(root, state) {
             state.finQuery = _cleanQuery(finQueryInput.value);
             state.finStatus = root.querySelector("#finStatusSelect").value;
         };
+        finQueryInput.addEventListener("input", () => {
+            state.finQuery = _cleanQuery(finQueryInput.value);
+        });
         root.querySelector("#finFilterForm").addEventListener("submit", async (e) => {
             e.preventDefault();
             syncFinFilters();
@@ -494,10 +564,10 @@ export function renderAdminFinancesView(root, state) {
         });
         if (state.financesData == null) {
             if (!state.financesLoadAttempted) {
-                listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:16px;">Загрузка</div>`;
+                listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:16px;">Загрузка...</div>`;
                 loadFinances(0);
             } else {
-                listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:16px;">Не удалось загрузить финансы. Нажмите «Обновить».</div>`;
+                renderRetryList("Не удалось загрузить финансы", () => loadFinances(0));
             }
         } else {
             _renderFinanceRows(listContainer, finData.items || [], state);
@@ -536,14 +606,14 @@ function _renderFinanceRows(container, items, state) {
         if (item.refunded_at) timeDetails.push(`Возврат: ${formatDate(item.refunded_at)}`);
 
         row.innerHTML = `
-            <div class="row">
-                <div style="display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
-                    <span class="mono" style="font-weight:600;">#${escapeHtml(shortId)}</span>
-                    <button type="button" class="btn btn-sm btn-ghost-inline" data-open-user="${item.user_id}">
-                        ${escapeHtml(uname)} · <span class="mono">${escapeHtml(item.telegram_id)}</span>
+            <div class="row" style="align-items:flex-start; flex-wrap:nowrap; gap:8px;">
+                <div style="display:flex; align-items:center; flex-wrap:wrap; gap:6px; min-width:0; flex:1;">
+                    <span class="mono" style="font-weight:600; word-break:normal; white-space:nowrap;">#${escapeHtml(shortId)}</span>
+                    <button type="button" class="btn btn-sm btn-ghost-inline" style="min-width:0; max-width:100%; text-align:left;" data-open-user="${item.user_id}">
+                        <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(uname)}</span> · <span class="mono" style="word-break:normal; white-space:nowrap;">${escapeHtml(item.telegram_id)}</span>
                     </button>
                 </div>
-                <span class="tabular" style="font-weight:600;">${item.amount_rub} ₽</span>
+                <span class="tabular" style="font-weight:600; flex-shrink:0; white-space:nowrap;">${item.amount_rub} ₽</span>
             </div>
             <div class="row meta-text">
                 <span>${escapeHtml(metaParts.filter(Boolean).join(" · "))}</span>
@@ -567,7 +637,7 @@ function _renderFinanceRows(container, items, state) {
                     ${
                         item.external_id
                             ? `<button type="button" class="mono-copy" data-copy-ext="${escapeHtml(item.external_id)}">
-                                Копировать ext_id
+                                Копировать внешний ID
                             </button>`
                             : ""
                     }
@@ -630,14 +700,12 @@ function _renderAuditRows(container, items, state) {
         row.className = "item-row";
         const targetType = String(item.target_type || "").toLowerCase();
         const hasTargetId = item.target_id !== null && item.target_id !== undefined && item.target_id !== "";
-        const targetText = item.target_type
-            ? `${item.target_type}${hasTargetId ? `#${item.target_id}` : ""}`
-            : "—";
+        const targetText = formatAuditTarget(item.target_type, item.target_id);
         const isClickableTarget = hasTargetId && (targetType === "user" || targetType === "server");
 
         const targetHtml = isClickableTarget
             ? `<button type="button" class="btn btn-sm btn-ghost-inline" data-open-target>${escapeHtml(targetText)}</button>`
-            : `<span class="mono">${escapeHtml(targetText)}</span>`;
+            : `<span>${escapeHtml(targetText)}</span>`;
 
         row.innerHTML = `
             <div class="row">
@@ -645,7 +713,7 @@ function _renderAuditRows(container, items, state) {
                 <span class="meta-text">${formatDate(item.created_at)}</span>
             </div>
             <div class="row meta-text" style="align-items:center;">
-                <span>Админ: <span class="mono">${escapeHtml(item.admin_id)}</span></span>
+                <span>Админ: <span class="mono" style="word-break:normal; white-space:nowrap;">${escapeHtml(item.admin_id)}</span></span>
                 <span>Цель: ${targetHtml}</span>
             </div>
             ${_formatAuditDetails(item.details)}

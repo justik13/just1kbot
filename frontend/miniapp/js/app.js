@@ -210,17 +210,30 @@ function _renderErrorCard(root, title, desc, showRetry = false) {
     root.innerHTML = `
         <section class="card card-center">
             <span class="chip chip-muted">Доступ</span>
-            <div class="card-title">${escapeHtml(title)}</div>
+            <h1 class="card-title">${escapeHtml(title)}</h1>
             <p class="muted">${escapeHtml(desc)}</p>
             ${showRetry ? '<button id="bootstrapRetryBtn" type="button" class="btn btn-primary btn-sm">Повторить</button>' : ""}
         </section>
     `;
     if (showRetry) {
         root.querySelector("#bootstrapRetryBtn")?.addEventListener("click", () => {
-            root.innerHTML = `<section class="card card-center"><div class="muted">Проверка доступа</div></section>`;
+            root.innerHTML = `<section class="card card-center"><div class="muted">Проверка доступа...</div></section>`;
             bootstrap();
         });
     }
+}
+
+function _renderTabErrorCard(container, title, message, onRetry) {
+    container.innerHTML = `
+        <section class="card card-center">
+            <h2 class="card-title">${escapeHtml(title)}</h2>
+            <p class="muted">${escapeHtml(message || "Ошибка запроса")}</p>
+            <button id="adminTabRetryBtn" type="button" class="btn btn-primary btn-sm">Повторить</button>
+        </section>
+    `;
+    container.querySelector("#adminTabRetryBtn")?.addEventListener("click", () => {
+        if (typeof onRetry === "function") onRetry();
+    });
 }
 
 function _syncModeSwitch() {
@@ -238,7 +251,13 @@ function _syncModeSwitch() {
     modeSwitch.hidden = !isAdmin;
     if (!isAdmin) return;
     modeSwitch.querySelectorAll("[data-mode]").forEach((btn) => {
-        btn.classList.toggle("active", btn.dataset.mode === appState.mode);
+        const isCurrent = btn.dataset.mode === appState.mode;
+        btn.classList.toggle("active", isCurrent);
+        if (isCurrent) {
+            btn.setAttribute("aria-current", "page");
+        } else {
+            btn.removeAttribute("aria-current");
+        }
     });
 }
 
@@ -257,7 +276,9 @@ async function _renderAdminView() {
         appState.selectedNodeId = null;
         appState.selectedUserId = null;
         _updateTelegramBackButton(null);
-        await loadAndRenderUserCabinet(root, { isActive: () => appState.mode === "cabinet" });
+        await loadAndRenderUserCabinet(root, {
+            isActive: () => seq === _tabSwitchSeq && appState.mode === "cabinet",
+        });
         return;
     }
 
@@ -266,10 +287,11 @@ async function _renderAdminView() {
     }
 
     let nodesFetchedThisRender = false;
+    let nodesFetchError = null;
 
     if (appState.adminTab === "nodes" && appState.selectedNodeId != null) {
         if (!appState.nodesLoaded) {
-            root.innerHTML = `<section class="card card-center"><div class="muted">Загрузка ноды</div></section>`;
+            root.innerHTML = `<section class="card card-center"><div class="muted">Загрузка ноды...</div></section>`;
             nodesFetchedThisRender = true;
             try {
                 const res = await api.listNodes();
@@ -277,14 +299,37 @@ async function _renderAdminView() {
                 appState.nodes = res.nodes || [];
                 appState.nodesLoaded = true;
             } catch (err) {
-                if (seq !== _tabSwitchSeq) return;
+                if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
                 if (err && err.code === "2fa_required") return;
+                nodesFetchError = err;
                 showToast(err.message || "Не удалось загрузить ноды", "error");
             }
         }
+        if (nodesFetchError && !appState.nodesLoaded) {
+            const onBack = () => {
+                appState.selectedNodeId = null;
+                _updateTelegramBackButton(null);
+                _renderAdminView();
+            };
+            _updateTelegramBackButton(onBack);
+            root.innerHTML = `
+                <div class="detail-header-nav">
+                    <button id="nodeLinkErrorBackBtn" type="button" class="btn btn-sm btn-ghost" style="white-space:nowrap; flex-shrink:0;">← Все ноды</button>
+                </div>
+                <div id="nodeLinkErrorBody"></div>
+            `;
+            root.querySelector("#nodeLinkErrorBackBtn")?.addEventListener("click", onBack);
+            _renderTabErrorCard(
+                root.querySelector("#nodeLinkErrorBody"),
+                "Не удалось загрузить ноду",
+                nodesFetchError.message || "Ошибка запроса",
+                () => _renderAdminView()
+            );
+            return;
+        }
         const node = appState.nodes.find((n) => n.id === appState.selectedNodeId);
         if (node) {
-            root.innerHTML = `<section class="card card-center"><div class="muted">Загрузка</div></section>`;
+            root.innerHTML = `<section class="card card-center"><div class="muted">Загрузка...</div></section>`;
             const { renderNodeDetailView } = await import("./views/node_detail.js?v=2.8.0");
             if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
             const onBack = () => {
@@ -307,7 +352,7 @@ async function _renderAdminView() {
             id: appState.selectedUserId,
             telegram_id: null,
         };
-        root.innerHTML = `<section class="card card-center"><div class="muted">Загрузка профиля</div></section>`;
+        root.innerHTML = `<section class="card card-center"><div class="muted">Загрузка профиля...</div></section>`;
         const { renderUserDetailView } = await import("./views/user_detail.js?v=2.8.0");
         if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
         const onBack = () => {
@@ -316,15 +361,20 @@ async function _renderAdminView() {
             _renderAdminView();
             requestAnimationFrame(() => window.scrollTo(0, appState.usersScrollY || 0));
         };
+        const reloadSeq = seq;
         const onReloadUser = async () => {
             try {
-                appState.usersData = await api.listUsers(
+                const nextUsers = await api.listUsers(
                     appState.usersQuery || "",
                     appState.usersOffset || 0,
                     25,
                     appState.usersFilter || "all"
                 );
+                if (reloadSeq !== _tabSwitchSeq || appState.mode !== "admin") return;
+                appState.usersData = nextUsers;
             } catch (err) {
+                if (reloadSeq !== _tabSwitchSeq || appState.mode !== "admin") return;
+                if (err && err.code === "2fa_required") return;
                 showToast(err.message || "Не удалось обновить список пользователей", "error");
             }
         };
@@ -337,10 +387,10 @@ async function _renderAdminView() {
     _updateTelegramBackButton(null);
     const activeTabMeta = _ADMIN_TABS.find((t) => t.id === appState.adminTab) || _ADMIN_TABS[0];
     const tabsHtml = _ADMIN_TABS
-        .map(
-            (t) =>
-                `<button type="button" class="tab-btn ${appState.adminTab === t.id ? "active" : ""}" data-atab="${t.id}">${t.label}</button>`
-        )
+        .map((t) => {
+            const isActive = appState.adminTab === t.id;
+            return `<button type="button" class="tab-btn ${isActive ? "active" : ""}" data-atab="${t.id}"${isActive ? ' aria-current="page"' : ""}>${t.label}</button>`;
+        })
         .join("");
 
     root.innerHTML = `
@@ -349,7 +399,7 @@ async function _renderAdminView() {
             <h1 class="admin-page-title">${escapeHtml(activeTabMeta.label)}</h1>
         </div>
         <div id="adminTabBody" class="app-main">
-            <section class="card card-center"><div class="muted">Загрузка</div></section>
+            <section class="card card-center"><div class="muted">Загрузка...</div></section>
         </div>
     `;
 
@@ -381,10 +431,26 @@ async function _renderAdminView() {
             await renderAdminOverviewView(body, appState);
         } else if (appState.adminTab === "nodes") {
             if (!appState.nodesLoaded && !nodesFetchedThisRender) {
-                const res = await api.listNodes();
-                if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
-                appState.nodes = res.nodes || [];
-                appState.nodesLoaded = true;
+                try {
+                    const res = await api.listNodes();
+                    if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
+                    appState.nodes = res.nodes || [];
+                    appState.nodesLoaded = true;
+                } catch (err) {
+                    if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
+                    if (err && err.code === "2fa_required") return;
+                    nodesFetchError = err;
+                    showToast(err.message || "Не удалось загрузить ноды", "error");
+                }
+            }
+            if (nodesFetchError && !appState.nodesLoaded) {
+                _renderTabErrorCard(
+                    body,
+                    "Не удалось загрузить ноды",
+                    nodesFetchError.message || "Ошибка запроса",
+                    () => _renderAdminView()
+                );
+                return;
             }
             const { renderNodesView } = await import("./views/nodes.js?v=2.8.0");
             if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
@@ -394,49 +460,75 @@ async function _renderAdminView() {
                 _renderAdminView();
             });
         } else if (appState.adminTab === "subscription") {
+            let subNodesErr = null;
             const [nodesMod] = await Promise.all([
                 import("./views/nodes.js?v=2.8.0"),
                 appState.nodesLoaded
                     ? Promise.resolve(null)
                     : api.listNodes()
                         .then((res) => {
+                            if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
                             appState.nodes = res.nodes || [];
                             appState.nodesLoaded = true;
                         })
                         .catch((err) => {
                             if (err && err.code === "2fa_required") throw err;
-                            showToast(err.message || "Не удалось загрузить ноды", "error");
+                            subNodesErr = err;
                         }),
             ]);
             if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
+            if (subNodesErr && !appState.nodesLoaded) {
+                showToast(subNodesErr.message || "Не удалось загрузить ноды", "error");
+                _renderTabErrorCard(
+                    body,
+                    "Не удалось загрузить локации подписки",
+                    subNodesErr.message || "Ошибка запроса",
+                    () => _renderAdminView()
+                );
+                return;
+            }
             await nodesMod.renderSubscriptionSettingsView(body, appState, _reloadNodesAndRender);
         } else if (appState.adminTab === "users") {
+            let usersErr = null;
             const [usersMod] = await Promise.all([
                 import("./views/admin_users.js?v=2.8.0"),
                 appState.usersData
                     ? Promise.resolve(null)
                     : api.listUsers(appState.usersQuery || "", appState.usersOffset || 0, 25, appState.usersFilter || "all")
                         .then((res) => {
+                            if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
                             appState.usersData = res;
                         })
                         .catch((err) => {
                             if (err && err.code === "2fa_required") throw err;
-                            showToast(err.message || "Не удалось загрузить пользователей", "error");
+                            usersErr = err;
                         }),
             ]);
             if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
+            if (usersErr && !appState.usersData) {
+                showToast(usersErr.message || "Не удалось загрузить пользователей", "error");
+                _renderTabErrorCard(
+                    body,
+                    "Не удалось загрузить пользователей",
+                    usersErr.message || "Ошибка запроса",
+                    () => _renderAdminView()
+                );
+                return;
+            }
             usersMod.renderAdminUsersView(body, appState, (u) => {
                 appState.usersScrollY = window.scrollY;
                 appState.selectedUserId = u.id;
                 _renderAdminView();
             });
         } else if (appState.adminTab === "broadcasts") {
+            let bcErr = null;
             const [bcMod] = await Promise.all([
                 import("./views/admin_broadcasts.js?v=2.8.0"),
                 appState.broadcastsData
                     ? Promise.resolve(null)
                     : api.listBroadcasts()
                         .then((res) => {
+                            if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
                             appState.broadcastsData = res.broadcasts || [];
                             appState.broadcastsTotal = res.total ?? appState.broadcastsData.length;
                             appState.broadcastsOffset = res.offset ?? 0;
@@ -444,11 +536,21 @@ async function _renderAdminView() {
                         })
                         .catch((err) => {
                             if (err && err.code === "2fa_required") throw err;
-                            showToast(err.message || "Не удалось загрузить рассылки", "error");
+                            bcErr = err;
                         }),
             ]);
             _broadcastsMod = bcMod;
             if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
+            if (bcErr && !appState.broadcastsData) {
+                showToast(bcErr.message || "Не удалось загрузить рассылки", "error");
+                _renderTabErrorCard(
+                    body,
+                    "Не удалось загрузить рассылки",
+                    bcErr.message || "Ошибка запроса",
+                    () => _renderAdminView()
+                );
+                return;
+            }
             bcMod.renderAdminBroadcastsView(body, appState);
         } else {
             const subTab = appState.finSubTab || "orders";
@@ -464,6 +566,7 @@ async function _renderAdminView() {
                             appState.auditTargetType || ""
                         )
                         .then((res) => {
+                            if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
                             appState.auditLogsData = res;
                             appState.auditLoadAttempted = true;
                         })
@@ -478,6 +581,7 @@ async function _renderAdminView() {
                     dataPromise = api
                         .getAdminWebhooks()
                         .then((res) => {
+                            if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
                             appState.webhooksData = res.webhooks || [];
                             appState.webhooksLoadAttempted = true;
                         })
@@ -499,6 +603,7 @@ async function _renderAdminView() {
                         Boolean(appState.finAttentionOnly)
                     )
                     .then((res) => {
+                        if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
                         appState.financesData = res;
                         appState.financesLoadAttempted = true;
                     })
@@ -516,9 +621,15 @@ async function _renderAdminView() {
             finMod.renderAdminFinancesView(body, appState);
         }
     } catch (err) {
-        if (seq !== _tabSwitchSeq) return;
+        if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
         if (err && err.code === "2fa_required") return;
         showToast(err.message || "Ошибка загрузки раздела", "error");
+        _renderTabErrorCard(
+            body,
+            "Ошибка загрузки раздела",
+            err.message || "Попробуйте повторить запрос",
+            () => _renderAdminView()
+        );
     }
 }
 
@@ -528,13 +639,15 @@ async function _reloadNodesAndRender({ skipRender = false, removeNodeId = null }
     }
     try {
         const res = await api.listNodes();
+        if (appState.mode !== "admin") return false;
         appState.nodes = res.nodes || [];
         appState.nodesLoaded = true;
     } catch (err) {
         if (err && err.code === "2fa_required") return false;
+        if (appState.mode !== "admin") return false;
         showToast(err.message || "Не удалось загрузить ноды", "error");
     }
-    if (!skipRender) {
+    if (!skipRender && appState.mode === "admin") {
         _renderAdminView();
     }
     return true;
@@ -549,7 +662,7 @@ async function _openAdmin2FAGate(root) {
         appState.mode = "cabinet";
         _renderAdminView();
     });
-    root.innerHTML = `<section class="card card-center"><div class="muted">Проверка доступа</div></section>`;
+    root.innerHTML = `<section class="card card-center"><div class="muted">Проверка доступа...</div></section>`;
     const { renderSecurity2FA } = await import("./views/security_2fa.js?v=2.8.0");
     if (seq !== _tabSwitchSeq || appState.mode !== "admin" || appState.twoFactorPassed) return;
     renderSecurity2FA(root, appState.security, async (res) => {

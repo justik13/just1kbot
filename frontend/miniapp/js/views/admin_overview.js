@@ -1,4 +1,5 @@
 import { api, setAdminSessionToken } from "../api.js?v=2.8.0";
+import { formatNodeDisabledReason, formatNodeHealthState } from "../admin_labels.js?v=2.8.0";
 import {
     escapeHtml,
     roleLabel,
@@ -8,6 +9,39 @@ import {
 } from "../ui.js?v=2.8.0";
 
 let _overviewReqId = 0;
+
+function _translateWorkerState(state) {
+    const s = String(state || "").trim().toLowerCase();
+    const map = {
+        ok: "ОК",
+        healthy: "ОК",
+        running: "Работает",
+        idle: "Ожидание",
+        starting: "Запуск",
+        restarting: "Перезапуск",
+        degraded: "Сбой",
+        stale: "Устарел",
+        cooldown: "Пауза",
+        warn: "Внимание",
+        warning: "Внимание",
+        error: "Ошибка",
+        failed: "Ошибка",
+        dead: "Остановлен",
+        stopped: "Остановлен",
+    };
+    return map[s] || state || "—";
+}
+
+function _translateBroadcastStatus(status) {
+    const s = String(status || "").trim().toLowerCase();
+    const map = {
+        in_progress: "выполняется",
+        completed: "завершена",
+        cancelled: "остановлена",
+        failed: "ошибка",
+    };
+    return map[s] || status || "выполняется";
+}
 
 function _normalizeWorkers(workersPayload) {
     if (!workersPayload) return [];
@@ -36,25 +70,26 @@ function _normalizeWorkers(workersPayload) {
 function _workerStatusChip(state, failures) {
     const s = String(state || "").toLowerCase();
     const failCount = Number(failures || 0);
+    const label = _translateWorkerState(state);
     if (failCount > 0 || s === "error" || s === "failed" || s === "dead" || s === "stopped") {
-        return `<span class="chip chip-err">${escapeHtml(state || "Ошибка")}</span>`;
+        return `<span class="chip chip-err">${escapeHtml(label === "—" ? "Ошибка" : label)}</span>`;
     }
     if (s === "degraded" || s === "warn" || s === "warning" || s === "stale" || s === "cooldown" || s === "starting" || s === "restarting") {
-        return `<span class="chip chip-warn">${escapeHtml(state || "Внимание")}</span>`;
+        return `<span class="chip chip-warn">${escapeHtml(label === "—" ? "Внимание" : label)}</span>`;
     }
     if (s === "ok" || s === "running" || s === "healthy" || s === "idle") {
-        return `<span class="chip chip-ok">${escapeHtml(state || "ОК")}</span>`;
+        return `<span class="chip chip-ok">${escapeHtml(label === "—" ? "ОК" : label)}</span>`;
     }
-    return `<span class="chip chip-muted">${escapeHtml(state || "—")}</span>`;
+    return `<span class="chip chip-muted">${escapeHtml(label)}</span>`;
 }
 
 function _problemLabel(p) {
     const parts = [];
-    if (p.disabled_reason) parts.push(p.disabled_reason);
+    if (p.disabled_reason) parts.push(formatNodeDisabledReason(p.disabled_reason));
     if (p.ingress_problem) parts.push("проблема Ingress");
     if (p.cdn_problem) parts.push("проблема CDN");
     if (Number(p.module_errors_count || 0) > 0) parts.push(`ошибки модулей: ${p.module_errors_count}`);
-    if (!parts.length && p.health_state) parts.push(p.health_state);
+    if (!parts.length && p.health_state) parts.push(formatNodeHealthState(p.health_state));
     return parts.join(" · ");
 }
 
@@ -71,36 +106,36 @@ function _renderOverviewContent(root, state, data) {
     if (data.payments_maintenance_enabled) {
         banners.push(`
             <button type="button" class="alert-banner warn" data-nav="finances">
-                <span>Техническое обслуживание платежей включено</span>
-                <span class="chip chip-warn">Финансы →</span>
+                <span style="min-width:0; flex:1;">Техническое обслуживание платежей включено</span>
+                <span class="chip chip-warn" style="white-space:nowrap; flex-shrink:0;">Финансы →</span>
             </button>
         `);
     }
     for (const p of problems) {
         banners.push(`
             <button type="button" class="alert-banner err" data-open-node="${escapeHtml(p.id)}">
-                <div>
+                <div style="min-width:0; flex:1;">
                     <strong>${escapeHtml(p.name || `Нода #${p.id}`)}</strong>
                     <span class="muted">(${escapeHtml(roleLabel(p.role))})</span>
                     <div class="pulse-sub">${escapeHtml(_problemLabel(p))}</div>
                 </div>
-                <span class="chip chip-err">Открыть →</span>
+                <span class="chip chip-err" style="white-space:nowrap; flex-shrink:0;">Открыть →</span>
             </button>
         `);
     }
     if (Number(finances.attention_orders_count || 0) > 0) {
         banners.push(`
             <button type="button" class="alert-banner warn" data-nav="attention-orders">
-                <span>Заказы требуют внимания: <strong>${Number(finances.attention_orders_count)}</strong></span>
-                <span class="chip chip-warn">Проверить →</span>
+                <span style="min-width:0; flex:1;">Заказы требуют внимания: <strong>${Number(finances.attention_orders_count)}</strong></span>
+                <span class="chip chip-warn" style="white-space:nowrap; flex-shrink:0;">Проверить →</span>
             </button>
         `);
     }
     if (Number(webhooks.dead || 0) > 0) {
         banners.push(`
             <button type="button" class="alert-banner err" data-nav="webhooks">
-                <span>Ошибки доставки вебхуков: <strong>${Number(webhooks.dead)}</strong></span>
-                <span class="chip chip-err">Вебхуки →</span>
+                <span style="min-width:0; flex:1;">Ошибки доставки вебхуков: <strong>${Number(webhooks.dead)}</strong></span>
+                <span class="chip chip-err" style="white-space:nowrap; flex-shrink:0;">Вебхуки →</span>
             </button>
         `);
     }
@@ -115,11 +150,11 @@ function _renderOverviewContent(root, state, data) {
         : null;
     const fatalShutdown = workerSnapshot ? Boolean(workerSnapshot.fatal_shutdown) : false;
     const supervisorBadgeHtml = fatalShutdown
-        ? `<span class="chip chip-err">Fatal shutdown</span>`
+        ? `<span class="chip chip-err">Аварийная остановка</span>`
         : supervisorHealthy === true
-            ? `<span class="chip chip-ok">Supervisor OK</span>`
+            ? `<span class="chip chip-ok">Воркеры ОК</span>`
             : supervisorHealthy === false
-                ? `<span class="chip chip-warn">Degraded</span>`
+                ? `<span class="chip chip-warn">Сбой</span>`
                 : "";
     const workersWithErrors = workers.filter((w) => {
         const st = String(w.state || "").toLowerCase();
@@ -141,7 +176,7 @@ function _renderOverviewContent(root, state, data) {
             <button type="button" class="pulse-card" data-nav="broadcasts">
                 <span class="pulse-label">Активная рассылка</span>
                 <span class="pulse-val">${activeProcessed} / ${Number(activeBroadcast.total_count || 0)}</span>
-                <span class="pulse-sub">Статус: ${escapeHtml(activeBroadcast.status || "в процессе")}</span>
+                <span class="pulse-sub">Статус: ${escapeHtml(_translateBroadcastStatus(activeBroadcast.status))}</span>
             </button>
         `
         : `
@@ -157,9 +192,10 @@ function _renderOverviewContent(root, state, data) {
             .map((w) => {
                 const fails = Number(w.consecutive_failures || 0);
                 const stateVal = w.state || "—";
+                const stateLabel = _translateWorkerState(stateVal);
                 const errorType = w.last_error_type || "";
                 const criticalBadge = w.critical
-                    ? ` <span class="chip chip-muted">critical</span>`
+                    ? ` <span class="chip chip-muted">критич.</span>`
                     : "";
                 return `
                     <div class="history-row">
@@ -168,7 +204,7 @@ function _renderOverviewContent(root, state, data) {
                             ${_workerStatusChip(stateVal, fails)}
                         </div>
                         <div class="history-row-meta">
-                            <span>Состояние: ${escapeHtml(stateVal)}</span>
+                            <span>Состояние: ${escapeHtml(stateLabel)}</span>
                             <span>Сбоев подряд: ${fails}</span>
                         </div>
                         ${errorType ? `<div class="pulse-sub text-err">Последняя ошибка: ${escapeHtml(errorType)}</div>` : ""}
@@ -282,7 +318,7 @@ function _renderOverviewContent(root, state, data) {
     const refreshBtn = root.querySelector("#overviewRefreshBtn");
     if (refreshBtn) {
         refreshBtn.addEventListener("click", () => {
-            withButtonLoading(refreshBtn, "Обновление", () => renderAdminOverviewView(root, state));
+            withButtonLoading(refreshBtn, "Обновление...", () => renderAdminOverviewView(root, state));
         });
     }
 
@@ -310,24 +346,24 @@ export async function renderAdminOverviewView(root, state) {
     if (!state.overviewData) {
         root.innerHTML = `
             <section class="card card-center">
-                <div class="muted">Загрузка обзора</div>
+                <div class="muted">Загрузка обзора...</div>
             </section>
         `;
     }
     try {
         const data = await api.getAdminOverview();
-        if (reqId !== _overviewReqId) return;
+        if (reqId !== _overviewReqId || !root.isConnected || state.adminTab !== "overview" || state.mode !== "admin") return;
         state.overviewData = data;
         _renderOverviewContent(root, state, data);
     } catch (err) {
-        if (reqId !== _overviewReqId) return;
+        if (reqId !== _overviewReqId || !root.isConnected || state.adminTab !== "overview" || state.mode !== "admin") return;
         if (err && err.code === "2fa_required") return;
         showToast(err.message || "Не удалось загрузить обзор", "error");
         root.innerHTML = `
             <section class="card card-center">
-                <div class="card-title">Не удалось загрузить обзор</div>
+                <h2 class="card-title">Не удалось загрузить обзор</h2>
                 <p class="muted">${escapeHtml(err.message || "Ошибка запроса")}</p>
-                <button id="overviewRetryBtn" type="button" class="btn btn-sm">Повторить</button>
+                <button id="overviewRetryBtn" type="button" class="btn btn-primary btn-sm">Повторить</button>
             </section>
         `;
         root.querySelector("#overviewRetryBtn")?.addEventListener("click", () => {

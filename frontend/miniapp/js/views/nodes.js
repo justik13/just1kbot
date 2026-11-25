@@ -14,6 +14,7 @@ import {
 
 let currentFilter = "all";
 let lastReloadedAt = null;
+let _subSettingsReqId = 0;
 
 function _isProblemNode(node) {
     if (!node) return false;
@@ -185,26 +186,43 @@ function _renderSubLocationsList(locListEl, exitNodes, onLocationSaved) {
 }
 
 export async function renderSubscriptionSettingsView(body, state = null, onReloadNodes = null) {
-    body.innerHTML = `<section class="card card-center"><div class="muted">Загрузка настроек подписки</div></section>`;
+    const reqId = ++_subSettingsReqId;
+    body.innerHTML = `<section class="card card-center"><div class="muted">Загрузка настроек подписки...</div></section>`;
     let current;
     try {
         const res = await api.getIncySettings();
+        if (reqId !== _subSettingsReqId || !body.isConnected || (state && (state.adminTab !== "subscription" || state.mode !== "admin"))) {
+            return;
+        }
         current = res.settings || {};
     } catch (err) {
+        if (reqId !== _subSettingsReqId || !body.isConnected || (state && (state.adminTab !== "subscription" || state.mode !== "admin"))) {
+            return;
+        }
+        if (err && err.code === "2fa_required") return;
         showToast(err.message || "Не удалось загрузить настройки подписки", "error");
-        body.innerHTML = `<section class="card"><div class="muted">${escapeHtml(err.message || "Не удалось загрузить настройки подписки")}</div></section>`;
+        body.innerHTML = `
+            <section class="card card-center">
+                <h2 class="card-title">Не удалось загрузить настройки подписки</h2>
+                <p class="muted">${escapeHtml(err.message || "Ошибка запроса")}</p>
+                <button id="subSettingsRetryBtn" type="button" class="btn btn-primary btn-sm">Повторить</button>
+            </section>
+        `;
+        body.querySelector("#subSettingsRetryBtn")?.addEventListener("click", () => {
+            renderSubscriptionSettingsView(body, state, onReloadNodes);
+        });
         return;
     }
 
-    const exitNodes = (state && Array.isArray(state.nodes) ? state.nodes : []).filter(
-        (n) => n.role === "exit_node"
-    );
+    const getExitNodes = () =>
+        (state && Array.isArray(state.nodes) ? state.nodes : []).filter((n) => n.role === "exit_node");
+    const exitNodes = getExitNodes();
 
     body.innerHTML = `
         <section class="card">
             <div class="row">
                 <h2 class="card-title">Локации в подписке (Exit Nodes)</h2>
-                <span class="chip chip-muted">${exitNodes.length}</span>
+                <span id="subLocationsCount" class="chip chip-muted">${exitNodes.length}</span>
             </div>
             <div id="subLocationsList" class="nodes-list"></div>
         </section>
@@ -225,7 +243,7 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                     </div>
                     <div class="field">
                         <label for="subUpdateInterval">Автообновление (часы)</label>
-                        <input id="subUpdateInterval" name="profile_update_interval" class="input tabular" type="number" min="1" max="720" value="${escapeHtml(String(current.profile_update_interval || 6))}">
+                        <input id="subUpdateInterval" name="profile_update_interval" class="input tabular" type="number" min="1" max="720" step="1" required value="${escapeHtml(String(current.profile_update_interval || 6))}">
                     </div>
                 </div>
                 <label for="subShowDevices" class="checkbox-row">
@@ -378,20 +396,26 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
     `;
 
     const locListEl = body.querySelector("#subLocationsList");
+    const locCountEl = body.querySelector("#subLocationsCount");
     const handleLocationSaved = async () => {
         // Re-render only #subLocationsList so unsaved edits in #subSettingsForm stay intact
-        _renderSubLocationsList(locListEl, exitNodes, handleLocationSaved);
+        _renderSubLocationsList(locListEl, getExitNodes(), handleLocationSaved);
         if (state && Array.isArray(state.nodes)) {
-            api.listNodes()
-                .then((res) => {
-                    if (res && Array.isArray(res.nodes)) {
-                        state.nodes = res.nodes;
-                    }
-                })
-                .catch(() => {});
+            try {
+                const res = await api.listNodes();
+                if (!body.isConnected || state.adminTab !== "subscription" || state.mode !== "admin") return;
+                if (res && Array.isArray(res.nodes)) {
+                    state.nodes = res.nodes;
+                    state.nodesLoaded = true;
+                    const updatedExitNodes = getExitNodes();
+                    if (locCountEl) locCountEl.textContent = String(updatedExitNodes.length);
+                    _renderSubLocationsList(locListEl, updatedExitNodes, handleLocationSaved);
+                }
+            } catch {
+                // Local updated node fields are already rendered above
+            }
         } else if (typeof onReloadNodes === "function") {
-            // Fallback if no shared state array was provided
-            await onReloadNodes();
+            await onReloadNodes({ skipRender: true });
         }
     };
     _renderSubLocationsList(locListEl, exitNodes, handleLocationSaved);
@@ -400,6 +424,19 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
     form.addEventListener("submit", async (e) => {
         e.preventDefault();
         const fd = new FormData(form);
+        const intervalInput = form.querySelector("#subUpdateInterval");
+        const rawInterval = String(fd.get("profile_update_interval") ?? "").trim();
+        if (!/^\d+$/.test(rawInterval)) {
+            showToast("Интервал автообновления должен быть целым числом от 1 до 720 часов", "error");
+            intervalInput?.focus();
+            return;
+        }
+        const intervalVal = Number(rawInterval);
+        if (!Number.isInteger(intervalVal) || intervalVal < 1 || intervalVal > 720) {
+            showToast("Интервал автообновления должен быть от 1 до 720 часов", "error");
+            intervalInput?.focus();
+            return;
+        }
         const btn = form.querySelector("button[type='submit']");
         await withButtonLoading(btn, "Сохранение...", async () => {
             try {
@@ -408,10 +445,9 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                 const fragEnabled = Boolean(fd.get("fragmentation_enabled"));
                 const dnsEnabled = Boolean(fd.get("dns_resolve_enabled"));
                 const perAppEnabled = Boolean(fd.get("per_app_proxy_enabled"));
-                const intervalRaw = parseInt(String(fd.get("profile_update_interval") || "6"), 10);
                 await api.updateIncySettings({
                     profile_title: String(fd.get("profile_title") || "").trim(),
-                    profile_update_interval: Number.isFinite(intervalRaw) ? Math.max(1, Math.min(720, intervalRaw)) : 6,
+                    profile_update_interval: intervalVal,
                     profile_show_devices: Boolean(fd.get("profile_show_devices")),
                     announce: String(fd.get("announce") || "").trim(),
                     announce_url: String(fd.get("announce_url") || "").trim(),
@@ -589,11 +625,11 @@ export function renderNodesView(root, state, onReload, onSelectNode) {
                 </div>
             </div>
             <div class="filter-pills">
-                <button type="button" class="pill-btn ${currentFilter === "all" ? "active" : ""}" data-filter="all">Все (${counts.all})</button>
-                <button type="button" class="pill-btn ${currentFilter === "problems" ? "active" : ""}" data-filter="problems">Проблемы (${counts.problems})</button>
-                <button type="button" class="pill-btn ${currentFilter === "ru_hub" ? "active" : ""}" data-filter="ru_hub">RU Hub (${counts.ru_hub})</button>
-                <button type="button" class="pill-btn ${currentFilter === "eu_hub" ? "active" : ""}" data-filter="eu_hub">EU Hub (${counts.eu_hub})</button>
-                <button type="button" class="pill-btn ${currentFilter === "exit_node" ? "active" : ""}" data-filter="exit_node">Exit Node (${counts.exit_node})</button>
+                <button type="button" class="pill-btn ${currentFilter === "all" ? "active" : ""}" data-filter="all" aria-pressed="${currentFilter === "all" ? "true" : "false"}">Все (${counts.all})</button>
+                <button type="button" class="pill-btn ${currentFilter === "problems" ? "active" : ""}" data-filter="problems" aria-pressed="${currentFilter === "problems" ? "true" : "false"}">Проблемы (${counts.problems})</button>
+                <button type="button" class="pill-btn ${currentFilter === "ru_hub" ? "active" : ""}" data-filter="ru_hub" aria-pressed="${currentFilter === "ru_hub" ? "true" : "false"}">RU Hub (${counts.ru_hub})</button>
+                <button type="button" class="pill-btn ${currentFilter === "eu_hub" ? "active" : ""}" data-filter="eu_hub" aria-pressed="${currentFilter === "eu_hub" ? "true" : "false"}">EU Hub (${counts.eu_hub})</button>
+                <button type="button" class="pill-btn ${currentFilter === "exit_node" ? "active" : ""}" data-filter="exit_node" aria-pressed="${currentFilter === "exit_node" ? "true" : "false"}">Exit Node (${counts.exit_node})</button>
             </div>
             <div id="nodesListContainer" class="nodes-list"></div>
         </section>

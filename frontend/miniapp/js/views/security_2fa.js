@@ -109,7 +109,8 @@ function _bindTotpForm({ form, input, btn, submitLabel, onSubmit }) {
         }
     });
 
-    input.addEventListener("input", () => {
+    input.addEventListener("input", (e) => {
+        if (e && e.isComposing) return;
         const cleaned = input.value.replace(/\D+/g, "").slice(0, 6);
         if (input.value !== cleaned) {
             input.value = cleaned;
@@ -237,12 +238,17 @@ function _renderSetupScreen(root, onVerified) {
             genBtn.addEventListener("click", async () => {
                 genBtn.disabled = true;
                 try {
-                    setupState = await api.setup2FA();
+                    const nextSetup = await api.setup2FA();
+                    if (!root.isConnected || !document.contains(genBtn)) return;
+                    setupState = nextSetup;
                     draw();
                 } catch (err) {
+                    if (!root.isConnected) return;
                     showToast(err.message || "Ошибка генерации ключа", "error");
                 } finally {
-                    genBtn.disabled = false;
+                    if (document.contains(genBtn)) {
+                        genBtn.disabled = false;
+                    }
                 }
             });
         }

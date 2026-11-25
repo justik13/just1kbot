@@ -5,6 +5,8 @@ import {
     formatAuditAction,
     formatLedgerEntryType,
     formatMetadataFlag,
+    formatWiNodeSyncStatus,
+    formatWiProvisioningStatus,
 } from "../admin_labels.js?v=2.8.0";
 import {
     copyText,
@@ -66,8 +68,8 @@ function _renderDevicesHtml(devices) {
                         <span class="meta-text">${d.last_seen_at ? formatRelativeTime(d.last_seen_at) : "—"}</span>
                     </div>
                     ${metaText ? `<div class="meta-text">${escapeHtml(metaText)}</div>` : ""}
-                    <div class="row" style="gap:8px; margin-top:4px;">
-                        <button type="button" class="mono-copy" data-copy-hwid="${escapeHtml(d.hwid)}" title="Копировать HWID">${escapeHtml(d.hwid)}</button>
+                    <div class="row" style="gap:8px; margin-top:4px; flex-wrap:nowrap;">
+                        <button type="button" class="mono-copy" style="min-width:0; flex:1 1 auto; text-align:left;" data-copy-hwid="${escapeHtml(d.hwid)}" title="Копировать HWID">${escapeHtml(d.hwid)}</button>
                         <button type="button" class="btn btn-sm btn-danger" data-del-hwid="${escapeHtml(d.hwid)}" style="flex-shrink:0;">Удалить</button>
                     </div>
                     <div class="filter-pills" style="margin-top:4px;">${slotChips.join("")}</div>
@@ -79,7 +81,7 @@ function _renderDevicesHtml(devices) {
 
 function _renderWiDiagnosticsHtml(wi) {
     if (!wi) return "";
-    const provStatus = wi.provisioning_status ? String(wi.provisioning_status) : "—";
+    const provStatus = formatWiProvisioningStatus(wi.provisioning_status);
     const syncStateEntries =
         wi.node_sync_state && typeof wi.node_sync_state === "object"
             ? Object.entries(wi.node_sync_state)
@@ -87,15 +89,35 @@ function _renderWiDiagnosticsHtml(wi) {
     const syncNodesHtml = syncStateEntries.length
         ? syncStateEntries
               .map(([nodeId, st]) => {
-                  const stText = typeof st === "object" && st !== null ? st.status || JSON.stringify(st) : String(st);
-                  return `<span class="chip chip-muted">${escapeHtml(nodeId)}: ${escapeHtml(stText)}</span>`;
+                  let stText = "";
+                  let chipCls = "chip-muted";
+                  if (typeof st === "object" && st !== null) {
+                      if (st.status) {
+                          const rawStatus = String(st.status).toLowerCase();
+                          stText = formatWiNodeSyncStatus(st.status);
+                          if (rawStatus === "active" || rawStatus === "synced" || rawStatus === "synced_active") {
+                              chipCls = "chip-ok";
+                          } else if (rawStatus === "error" || rawStatus === "failed") {
+                              chipCls = "chip-err";
+                          }
+                      } else if ("active" in st) {
+                          stText = st.active ? "активен" : "отключён";
+                          if (st.version != null) stText += ` · v${st.version}`;
+                          chipCls = st.active ? "chip-ok" : "chip-muted";
+                      } else {
+                          stText = JSON.stringify(st);
+                      }
+                  } else {
+                      stText = formatWiNodeSyncStatus(st);
+                  }
+                  return `<span class="chip ${chipCls}">Нода #${escapeHtml(nodeId)}: ${escapeHtml(stText)}</span>`;
               })
               .join("")
         : `<span class="muted">Нет данных по нодам</span>`;
 
     return `
         <div class="detail-grid" style="padding-top:8px; border-top:1px solid var(--border-subtle);">
-            <div class="detail-item"><span class="detail-label">Провижининг</span><span class="mono">${escapeHtml(provStatus)}</span></div>
+            <div class="detail-item"><span class="detail-label">Провижининг</span><span>${escapeHtml(provStatus)}</span></div>
             <div class="detail-item"><span class="detail-label">Автопродление</span><span>${wi.auto_renew_enabled ? "Включено" : "Выключено"}</span></div>
             <div class="detail-item"><span class="detail-label">Версия конфига</span><span class="mono tabular">${wi.actual_version ?? 0} / ${wi.desired_version ?? 1}</span></div>
             <div class="detail-item"><span class="detail-label">Синхронизация</span><span>${wi.last_synced_at ? formatRelativeTime(wi.last_synced_at) : "—"}</span></div>
@@ -169,7 +191,7 @@ function _renderHistoryTabContent(tab, details) {
                 const amt = Number(entry.amount || 0);
                 const signStr = amt > 0 ? `+${amt} ₽` : `${amt} ₽`;
                 const amtCls = amt > 0 ? "amount-pos" : amt < 0 ? "amount-err" : "tabular";
-                const bucketLabel = entry.bucket === "bonus" ? "бонус" : "реал";
+                const bucketLabel = entry.bucket === "bonus" ? "бонус" : "основной";
                 const typeLabel = formatLedgerEntryType(entry.entry_type);
                 return `
                     <div class="item-row">
@@ -250,16 +272,17 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
     const reqId = ++_detailReqId;
     const preserveScroll = Boolean(options && options.preserveScroll);
     const savedScrollY = options && Number.isFinite(options.scrollY) ? options.scrollY : null;
+    const drafts = (options && options.drafts) || null;
     const fallbackName = _formatDisplayName(userSummary);
 
     if (!preserveScroll) {
         root.innerHTML = `
             <div class="detail-header-nav">
-                <button id="userDetailBackBtn" type="button" class="btn btn-sm btn-ghost">← Все пользователи</button>
+                <button id="userDetailBackBtn" type="button" class="btn btn-sm btn-ghost" style="white-space:nowrap; flex-shrink:0;">← Все пользователи</button>
                 <span class="detail-sticky-meta">${escapeHtml(fallbackName)}</span>
             </div>
             <section class="card card-center">
-                <div class="muted">Загрузка профиля</div>
+                <div class="muted">Загрузка профиля...</div>
             </section>
         `;
         root.querySelector("#userDetailBackBtn").addEventListener("click", onBack);
@@ -274,16 +297,21 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
     } catch (err) {
         if (reqId !== _detailReqId) return;
         if (state && state.selectedUserId !== userSummary.id) return;
-        if (sentinelBtn && !root.contains(sentinelBtn)) return;
+        if (!root.isConnected || (sentinelBtn && !root.contains(sentinelBtn))) return;
+        if (err && err.code === "2fa_required") return;
+        if (preserveScroll) {
+            showToast(err.message || "Не удалось обновить профиль", "error");
+            return;
+        }
         root.innerHTML = `
             <div class="detail-header-nav">
-                <button id="userDetailBackBtn" type="button" class="btn btn-sm btn-ghost">← Все пользователи</button>
+                <button id="userDetailBackBtn" type="button" class="btn btn-sm btn-ghost" style="white-space:nowrap; flex-shrink:0;">← Все пользователи</button>
                 <span class="detail-sticky-meta">${escapeHtml(fallbackName)}</span>
             </div>
             <section class="card card-center">
                 <h1 class="card-title">Не удалось загрузить профиль</h1>
                 <div class="muted">${escapeHtml(err.message || "Ошибка запроса")}</div>
-                <button id="userRetryBtn" type="button" class="btn btn-sm">Повторить</button>
+                <button id="userRetryBtn" type="button" class="btn btn-primary btn-sm">Повторить</button>
             </section>
         `;
         root.querySelector("#userDetailBackBtn").addEventListener("click", onBack);
@@ -295,7 +323,7 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
 
     if (reqId !== _detailReqId) return;
     if (state && state.selectedUserId !== userSummary.id) return;
-    if (sentinelBtn && !root.contains(sentinelBtn)) return;
+    if (!root.isConnected || (sentinelBtn && !root.contains(sentinelBtn))) return;
 
     const uname = _formatDisplayName(details);
     const inviterStr = details.inviter
@@ -338,11 +366,14 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         ? `${wiEffectiveStatus ? `${wiEffectiveStatus} · ` : ""}До ${formatDate(wi.expires_at)} · ${wiUsedGb} / ${wiTotalGb} ГБ · ${wiLimit} сл.`
         : (wi && wiEffectiveStatus ? `${wiEffectiveStatus} · ${wiUsedGb} / ${wiTotalGb} ГБ · ${wiLimit} сл.` : "Не подключён");
 
-    let activeHistoryTab = "orders";
+    let activeHistoryTab = (drafts && drafts.activeHistoryTab) || "orders";
+    if (!["orders", "ledger", "devices", "audit"].includes(activeHistoryTab)) {
+        activeHistoryTab = "orders";
+    }
 
     root.innerHTML = `
         <div class="detail-header-nav">
-            <button id="userDetailBackBtn" type="button" class="btn btn-sm btn-ghost">← Все пользователи</button>
+            <button id="userDetailBackBtn" type="button" class="btn btn-sm btn-ghost" style="white-space:nowrap; flex-shrink:0;">← Все пользователи</button>
             <span class="detail-sticky-meta">${escapeHtml(uname)}</span>
         </div>
 
@@ -411,7 +442,7 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
                 </div>
                 <div class="row-nowrap">
                     <label for="userBonusAmount" class="visually-hidden">Сумма коррекции в рублях</label>
-                    <input id="userBonusAmount" name="amount_rub" class="input tabular" type="number" min="-100000" max="100000" step="1" value="" placeholder="Сумма ₽ (напр. 100 или -100)">
+                    <input id="userBonusAmount" name="amount_rub" class="input tabular" type="number" min="-100000" max="100000" step="1" required value="" placeholder="Сумма ₽ (напр. 100 или -100)">
                     <button type="submit" class="btn btn-primary btn-sm" style="flex-shrink:0;">Применить</button>
                 </div>
                 <label for="userBonusNote" class="visually-hidden">Комментарий к коррекции</label>
@@ -555,18 +586,18 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         <section class="card">
             <h2 class="card-title">Ссылки подключения</h2>
             ${details.subscription_url ? `
-            <div class="field">
+            <div class="field" style="min-width:0;">
                 <label for="detMainSubInput">Основная (CDN)</label>
-                <div class="row-nowrap">
-                    <input id="detMainSubInput" class="input mono" readonly value="${escapeHtml(details.subscription_url)}">
+                <div class="row-nowrap" style="min-width:0;">
+                    <input id="detMainSubInput" class="input mono" style="min-width:0; text-overflow:ellipsis;" readonly value="${escapeHtml(details.subscription_url)}">
                     <button id="detCopySubBtn" type="button" class="btn btn-sm" style="flex-shrink:0;">Копировать</button>
                 </div>
             </div>` : ""}
             ${details.subscription_backup_url ? `
-            <div class="field">
+            <div class="field" style="min-width:0;">
                 <label for="detBackupSubInput">Резервная (Прямая)</label>
-                <div class="row-nowrap">
-                    <input id="detBackupSubInput" class="input mono" readonly value="${escapeHtml(details.subscription_backup_url)}">
+                <div class="row-nowrap" style="min-width:0;">
+                    <input id="detBackupSubInput" class="input mono" style="min-width:0; text-overflow:ellipsis;" readonly value="${escapeHtml(details.subscription_backup_url)}">
                     <button id="detCopyBackupSubBtn" type="button" class="btn btn-sm" style="flex-shrink:0;">Копировать</button>
                 </div>
             </div>` : ""}
@@ -613,13 +644,13 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
             <div class="row">
                 <h2 class="card-title">История</h2>
             </div>
-            <div class="seg-group" id="userHistoryTabs">
-                <button type="button" class="seg-btn active" data-htab="orders">Заказы</button>
-                <button type="button" class="seg-btn" data-htab="ledger">Баланс</button>
-                <button type="button" class="seg-btn" data-htab="devices">Устройства</button>
-                <button type="button" class="seg-btn" data-htab="audit">Админ-лог</button>
+            <div class="seg-group" id="userHistoryTabs" role="tablist" aria-label="История операций">
+                <button type="button" id="htab-orders" role="tab" aria-selected="${activeHistoryTab === "orders" ? "true" : "false"}" aria-controls="userHistoryList" tabindex="${activeHistoryTab === "orders" ? "0" : "-1"}" class="seg-btn ${activeHistoryTab === "orders" ? "active" : ""}" data-htab="orders">Заказы</button>
+                <button type="button" id="htab-ledger" role="tab" aria-selected="${activeHistoryTab === "ledger" ? "true" : "false"}" aria-controls="userHistoryList" tabindex="${activeHistoryTab === "ledger" ? "0" : "-1"}" class="seg-btn ${activeHistoryTab === "ledger" ? "active" : ""}" data-htab="ledger">Баланс</button>
+                <button type="button" id="htab-devices" role="tab" aria-selected="${activeHistoryTab === "devices" ? "true" : "false"}" aria-controls="userHistoryList" tabindex="${activeHistoryTab === "devices" ? "0" : "-1"}" class="seg-btn ${activeHistoryTab === "devices" ? "active" : ""}" data-htab="devices">Устройства</button>
+                <button type="button" id="htab-audit" role="tab" aria-selected="${activeHistoryTab === "audit" ? "true" : "false"}" aria-controls="userHistoryList" tabindex="${activeHistoryTab === "audit" ? "0" : "-1"}" class="seg-btn ${activeHistoryTab === "audit" ? "active" : ""}" data-htab="audit">Админ-лог</button>
             </div>
-            <div id="userHistoryList" class="field" style="gap:8px;">
+            <div id="userHistoryList" role="tabpanel" aria-labelledby="htab-${activeHistoryTab}" class="field" style="gap:8px;">
                 ${_renderHistoryTabContent(activeHistoryTab, details)}
             </div>
         </section>
@@ -640,8 +671,85 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         </section>
     `;
 
+    const bonusForm = root.querySelector("#userBonusForm");
+    const stdForm = root.querySelector("#stdEditForm");
+    const wiForm = root.querySelector("#wiEditForm");
+    const wiTrafficForm = root.querySelector("#wiTrafficForm");
+    const trafficSelect = wiTrafficForm.querySelector("select[name='traffic_action']");
+    const wiGbField = wiTrafficForm.querySelector("#wiGbField");
+    const dmForm = root.querySelector("#userDmForm");
+    const restrForm = root.querySelector("#userRestrictionsForm");
+    const origFinancialHold = Boolean(details.financial_hold);
+    const origTopupBlocked = Boolean(details.topup_blocked);
+
+    if (drafts) {
+        if (drafts.dmText != null) {
+            const dmInput = dmForm.querySelector("textarea[name='text']");
+            if (dmInput) dmInput.value = drafts.dmText;
+        }
+        if (drafts.bonus) {
+            const amtEl = bonusForm.querySelector("input[name='amount_rub']");
+            const noteEl = bonusForm.querySelector("input[name='note']");
+            const notifyEl = bonusForm.querySelector("input[name='notify_user']");
+            const sendNoteEl = bonusForm.querySelector("input[name='send_note_to_user']");
+            if (amtEl && drafts.bonus.amount != null) amtEl.value = drafts.bonus.amount;
+            if (noteEl && drafts.bonus.note != null) noteEl.value = drafts.bonus.note;
+            if (notifyEl && drafts.bonus.notify != null) notifyEl.checked = drafts.bonus.notify;
+            if (sendNoteEl && drafts.bonus.sendNote != null) sendNoteEl.checked = drafts.bonus.sendNote;
+        }
+        if (drafts.std) {
+            stdForm.hidden = !drafts.std.open;
+            const daysEl = stdForm.querySelector("input[name='days']");
+            const limitEl = stdForm.querySelector("input[name='device_limit']");
+            const notifyEl = stdForm.querySelector("input[name='notify_user']");
+            if (daysEl && drafts.std.days != null) daysEl.value = drafts.std.days;
+            if (limitEl && drafts.std.deviceLimit != null) limitEl.value = drafts.std.deviceLimit;
+            if (notifyEl && drafts.std.notify != null) notifyEl.checked = drafts.std.notify;
+        }
+        if (drafts.wi) {
+            wiForm.hidden = !drafts.wi.open;
+            const daysEl = wiForm.querySelector("input[name='days']");
+            const limitEl = wiForm.querySelector("input[name='device_limit']");
+            const notifyEl = wiForm.querySelector("input[name='notify_user']");
+            if (daysEl && drafts.wi.days != null) daysEl.value = drafts.wi.days;
+            if (limitEl && drafts.wi.deviceLimit != null) limitEl.value = drafts.wi.deviceLimit;
+            if (notifyEl && drafts.wi.notify != null) notifyEl.checked = drafts.wi.notify;
+        }
+        if (drafts.wiTraffic) {
+            wiTrafficForm.hidden = !drafts.wiTraffic.open;
+            const gbEl = wiTrafficForm.querySelector("input[name='gb']");
+            const notifyEl = wiTrafficForm.querySelector("input[name='notify_user']");
+            if (trafficSelect && drafts.wiTraffic.action) {
+                trafficSelect.value = drafts.wiTraffic.action;
+                wiGbField.hidden = trafficSelect.value === "reset_used";
+            }
+            if (gbEl && drafts.wiTraffic.gb != null) gbEl.value = drafts.wiTraffic.gb;
+            if (notifyEl && drafts.wiTraffic.notify != null) notifyEl.checked = drafts.wiTraffic.notify;
+        }
+        if (drafts.restr) {
+            const holdEl = restrForm.querySelector("input[name='financial_hold']");
+            const topupEl = restrForm.querySelector("input[name='topup_blocked']");
+            const noteEl = restrForm.querySelector("input[name='note']");
+            if (holdEl && drafts.restr.holdDirty) holdEl.checked = drafts.restr.hold;
+            if (topupEl && drafts.restr.topupDirty) topupEl.checked = drafts.restr.topup;
+            if (noteEl && drafts.restr.note != null) noteEl.value = drafts.restr.note;
+        }
+        if (drafts.dangerNotify != null) {
+            const dangerEl = root.querySelector("#dangerNotifyUser");
+            if (dangerEl) dangerEl.checked = drafts.dangerNotify;
+        }
+    }
+
     if (preserveScroll && savedScrollY !== null) {
         requestAnimationFrame(() => window.scrollTo(0, savedScrollY));
+    }
+
+    if (options && options.focusSelector) {
+        const modalOpen = Boolean(document.querySelector(".modal-backdrop:not([hidden])"));
+        if (!modalOpen) {
+            const target = root.querySelector(options.focusSelector) || root.querySelector("#userDetailBackBtn");
+            target?.focus({ preventScroll: true });
+        }
     }
 
     root.querySelector("#userDetailBackBtn").addEventListener("click", onBack);
@@ -658,12 +766,81 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         copyBackupBtn.addEventListener("click", () => copyText(details.subscription_backup_url, "Резервная ссылка скопирована"));
     }
 
-    const refreshAll = async () => {
+    const collectDrafts = (clearDraft = null) => {
+        const holdChecked = Boolean(restrForm.querySelector("input[name='financial_hold']")?.checked);
+        const topupChecked = Boolean(restrForm.querySelector("input[name='topup_blocked']")?.checked);
+        return {
+            activeHistoryTab,
+            dmText: dmForm.querySelector("textarea[name='text']")?.value ?? "",
+            bonus:
+                clearDraft === "bonus"
+                    ? null
+                    : {
+                          amount: bonusForm.querySelector("input[name='amount_rub']")?.value ?? "",
+                          note: bonusForm.querySelector("input[name='note']")?.value ?? "",
+                          notify: Boolean(bonusForm.querySelector("input[name='notify_user']")?.checked),
+                          sendNote: Boolean(bonusForm.querySelector("input[name='send_note_to_user']")?.checked),
+                      },
+            std:
+                clearDraft === "std"
+                    ? null
+                    : {
+                          open: !stdForm.hidden,
+                          days: stdForm.querySelector("input[name='days']")?.value ?? "30",
+                          deviceLimit: stdForm.querySelector("input[name='device_limit']")?.value ?? String(stdLimit),
+                          notify: Boolean(stdForm.querySelector("input[name='notify_user']")?.checked),
+                      },
+            wi:
+                clearDraft === "wi"
+                    ? null
+                    : {
+                          open: !wiForm.hidden,
+                          days: wiForm.querySelector("input[name='days']")?.value ?? "30",
+                          deviceLimit: wiForm.querySelector("input[name='device_limit']")?.value ?? String(wiLimit),
+                          notify: Boolean(wiForm.querySelector("input[name='notify_user']")?.checked),
+                      },
+            wiTraffic:
+                clearDraft === "wiTraffic"
+                    ? null
+                    : {
+                          open: !wiTrafficForm.hidden,
+                          action: trafficSelect?.value ?? "add_gb",
+                          gb: wiTrafficForm.querySelector("input[name='gb']")?.value ?? "50",
+                          notify: Boolean(wiTrafficForm.querySelector("input[name='notify_user']")?.checked),
+                      },
+            restr:
+                clearDraft === "restr"
+                    ? null
+                    : {
+                          holdDirty: holdChecked !== origFinancialHold,
+                          hold: holdChecked,
+                          topupDirty: topupChecked !== origTopupBlocked,
+                          topup: topupChecked,
+                          note: restrForm.querySelector("input[name='note']")?.value ?? "",
+                      },
+            dangerNotify: Boolean(root.querySelector("#dangerNotifyUser")?.checked),
+        };
+    };
+
+    const schedulePostModalFocus = (selector) => {
+        setTimeout(() => {
+            if (document.querySelector(".modal-backdrop:not([hidden])")) return;
+            if (!document.activeElement || document.activeElement === document.body || !root.contains(document.activeElement)) {
+                const target = (selector && root.querySelector(selector)) || root.querySelector("#userDetailBackBtn");
+                target?.focus({ preventScroll: true });
+            }
+        }, 0);
+    };
+
+    const refreshAll = async ({ clearDraft = null, focusSelector = null } = {}) => {
         const currentScrollY = window.scrollY;
+        const capturedDrafts = collectDrafts(clearDraft);
         void onReloadUser?.();
         await renderUserDetailView(root, userSummary, onBack, onReloadUser, state, {
             preserveScroll: true,
             scrollY: currentScrollY,
+            drafts: capturedDrafts,
+            focusSelector,
         });
     };
 
@@ -673,7 +850,7 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
             try {
                 const res = await api.resyncUser(details.id);
                 showToast(res.message || "Синхронизация запущена");
-                await refreshAll();
+                await refreshAll({ focusSelector: "#detResyncUserBtn" });
             } catch (err) {
                 showToast(err.message || "Ошибка пересинхронизации", "error");
             }
@@ -697,26 +874,33 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
                 confirmText: "Погасить долг",
                 cancelText: "Отмена",
                 isDestructive: true,
+                restoreFocusSelector: "#userDetailBackBtn",
                 onConfirm: async () => {
                     const res = await api.adjustUser(details.id, { action: "forgive_debt" });
                     showToast(res.message || "Задолженность списана");
                     await refreshAll();
+                    schedulePostModalFocus("#userDetailBackBtn");
                 },
             });
         });
     }
 
-    const bonusForm = root.querySelector("#userBonusForm");
+    const bonusAmountInput = bonusForm.querySelector("input[name='amount_rub']");
+    bonusAmountInput.addEventListener("input", () => bonusAmountInput.removeAttribute("aria-invalid"));
     bonusForm.querySelectorAll("[data-add]").forEach((b) => {
         b.addEventListener("click", () => {
-            bonusForm.querySelector("input[name='amount_rub']").value = b.dataset.add;
+            bonusAmountInput.value = b.dataset.add;
+            bonusAmountInput.removeAttribute("aria-invalid");
         });
     });
     bonusForm.addEventListener("submit", (e) => {
         e.preventDefault();
-        const amount = Number(bonusForm.querySelector("input[name='amount_rub']").value);
-        if (!Number.isInteger(amount) || amount === 0) {
-            showToast("Укажите ненулевую целую сумму в рублях", "error");
+        const rawAmount = bonusAmountInput.value.trim();
+        const amount = /^-?\d+$/.test(rawAmount) ? Number(rawAmount) : NaN;
+        if (!Number.isInteger(amount) || amount === 0 || amount < -100000 || amount > 100000) {
+            bonusAmountInput.setAttribute("aria-invalid", "true");
+            bonusAmountInput.focus();
+            showToast("Укажите ненулевое целое число от -100000 до 100000 ₽", "error");
             return;
         }
         const note = bonusForm.querySelector("input[name='note']").value.trim() || null;
@@ -729,6 +913,7 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
             confirmText: isNegative ? "Списать" : "Начислить",
             cancelText: "Отмена",
             isDestructive: isNegative,
+            restoreFocusSelector: "#userBonusAmount",
             onConfirm: async () => {
                 const res = await api.adjustUser(details.id, {
                     action: "balance",
@@ -738,36 +923,54 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
                     send_note_to_user: sendNoteToUser,
                 });
                 showToast(res.message || "Баланс обновлён");
-                await refreshAll();
+                await refreshAll({ clearDraft: "bonus" });
+                schedulePostModalFocus("#userBonusAmount");
             },
         });
     });
 
-    const stdForm = root.querySelector("#stdEditForm");
+    const stdDaysInput = stdForm.querySelector("input[name='days']");
+    const stdLimitInput = stdForm.querySelector("input[name='device_limit']");
+    stdDaysInput.addEventListener("input", () => stdDaysInput.removeAttribute("aria-invalid"));
+    stdLimitInput.addEventListener("input", () => stdLimitInput.removeAttribute("aria-invalid"));
     root.querySelector("#toggleStdEditBtn").addEventListener("click", () => {
         stdForm.hidden = !stdForm.hidden;
     });
     stdForm.querySelectorAll("[data-std-days]").forEach((b) => {
         b.addEventListener("click", () => {
-            stdForm.querySelector("input[name='days']").value = b.dataset.stdDays;
+            stdDaysInput.value = b.dataset.stdDays;
+            stdDaysInput.removeAttribute("aria-invalid");
         });
     });
     stdForm.addEventListener("submit", async (e) => {
         e.preventDefault();
-        const rawDays = stdForm.querySelector("input[name='days']").value.trim();
-        const deviceLimit = Number(stdForm.querySelector("input[name='device_limit']").value);
-        const limitChanged = deviceLimit !== Number(stdLimit);
-        if (rawDays === "" && !limitChanged) {
-            showToast("Укажите количество дней или измените лимит устройств", "error");
+        const rawDays = stdDaysInput.value.trim();
+        const rawLimit = stdLimitInput.value.trim();
+        if (rawDays !== "" && !/^-?\d+$/.test(rawDays)) {
+            stdDaysInput.setAttribute("aria-invalid", "true");
+            stdDaysInput.focus();
+            showToast("Укажите целое количество дней (от -3650 до 3650)", "error");
             return;
         }
         const days = rawDays === "" ? 0 : Number(rawDays);
         if (!Number.isInteger(days) || days < -3650 || days > 3650) {
-            showToast("Укажите корректное количество дней", "error");
+            stdDaysInput.setAttribute("aria-invalid", "true");
+            stdDaysInput.focus();
+            showToast("Укажите корректное количество дней (от -3650 до 3650)", "error");
             return;
         }
+        const deviceLimit = /^\d+$/.test(rawLimit) ? Number(rawLimit) : NaN;
         if (!Number.isInteger(deviceLimit) || deviceLimit < 2 || deviceLimit > 10) {
-            showToast("Лимит устройств должен быть от 2 до 10", "error");
+            stdLimitInput.setAttribute("aria-invalid", "true");
+            stdLimitInput.focus();
+            showToast("Лимит устройств должен быть целым числом от 2 до 10", "error");
+            return;
+        }
+        const limitChanged = deviceLimit !== Number(stdLimit);
+        if (days === 0 && !limitChanged) {
+            stdDaysInput.setAttribute("aria-invalid", "true");
+            stdDaysInput.focus();
+            showToast("Укажите ненулевое количество дней или измените лимит устройств", "error");
             return;
         }
         const notifyUser = Boolean(stdForm.querySelector("input[name='notify_user']")?.checked);
@@ -775,12 +978,16 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         if (days >= 0 || limitChanged) {
             payload.device_limit = deviceLimit;
         }
-        const execute = async () => {
+        const execute = async (fromModal = false) => {
             const btn = stdForm.querySelector("button[type='submit']");
             await withButtonLoading(btn, "Сохранение...", async () => {
                 const res = await api.adjustUser(details.id, payload);
                 showToast(res.message || "Подписка Стандарт обновлена");
-                await refreshAll();
+                await refreshAll({
+                    clearDraft: "std",
+                    focusSelector: fromModal ? null : "#toggleStdEditBtn",
+                });
+                if (fromModal) schedulePostModalFocus("#toggleStdEditBtn");
             });
         };
 
@@ -791,20 +998,23 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
                 confirmText: "Сократить",
                 cancelText: "Отмена",
                 isDestructive: true,
-                onConfirm: execute,
+                restoreFocusSelector: "#toggleStdEditBtn",
+                onConfirm: () => execute(true),
             });
             return;
         }
 
         try {
-            await execute();
+            await execute(false);
         } catch (err) {
             showToast(err.message || "Ошибка обновления подписки", "error");
         }
     });
 
-    const wiForm = root.querySelector("#wiEditForm");
-    const wiTrafficForm = root.querySelector("#wiTrafficForm");
+    const wiDaysInput = wiForm.querySelector("input[name='days']");
+    const wiLimitInput = wiForm.querySelector("input[name='device_limit']");
+    wiDaysInput.addEventListener("input", () => wiDaysInput.removeAttribute("aria-invalid"));
+    wiLimitInput.addEventListener("input", () => wiLimitInput.removeAttribute("aria-invalid"));
     root.querySelector("#toggleWiEditBtn").addEventListener("click", () => {
         wiForm.hidden = !wiForm.hidden;
         if (!wiForm.hidden) wiTrafficForm.hidden = true;
@@ -815,25 +1025,39 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
     });
     wiForm.querySelectorAll("[data-wi-days]").forEach((b) => {
         b.addEventListener("click", () => {
-            wiForm.querySelector("input[name='days']").value = b.dataset.wiDays;
+            wiDaysInput.value = b.dataset.wiDays;
+            wiDaysInput.removeAttribute("aria-invalid");
         });
     });
     wiForm.addEventListener("submit", async (e) => {
         e.preventDefault();
-        const rawDays = wiForm.querySelector("input[name='days']").value.trim();
-        const deviceLimit = Number(wiForm.querySelector("input[name='device_limit']").value);
-        const limitChanged = deviceLimit !== Number(wiLimit);
-        if (rawDays === "" && !limitChanged) {
-            showToast("Укажите количество дней или измените количество слотов", "error");
+        const rawDays = wiDaysInput.value.trim();
+        const rawLimit = wiLimitInput.value.trim();
+        if (rawDays !== "" && !/^-?\d+$/.test(rawDays)) {
+            wiDaysInput.setAttribute("aria-invalid", "true");
+            wiDaysInput.focus();
+            showToast("Укажите целое количество дней (от -3650 до 3650)", "error");
             return;
         }
         const days = rawDays === "" ? 0 : Number(rawDays);
         if (!Number.isInteger(days) || days < -3650 || days > 3650) {
-            showToast("Укажите корректное количество дней", "error");
+            wiDaysInput.setAttribute("aria-invalid", "true");
+            wiDaysInput.focus();
+            showToast("Укажите корректное количество дней (от -3650 до 3650)", "error");
             return;
         }
+        const deviceLimit = /^\d+$/.test(rawLimit) ? Number(rawLimit) : NaN;
         if (!Number.isInteger(deviceLimit) || deviceLimit < 1 || deviceLimit > 3) {
-            showToast("Количество слотов должно быть от 1 до 3", "error");
+            wiLimitInput.setAttribute("aria-invalid", "true");
+            wiLimitInput.focus();
+            showToast("Количество слотов должно быть целым числом от 1 до 3", "error");
+            return;
+        }
+        const limitChanged = deviceLimit !== Number(wiLimit);
+        if (days === 0 && !limitChanged) {
+            wiDaysInput.setAttribute("aria-invalid", "true");
+            wiDaysInput.focus();
+            showToast("Укажите ненулевое количество дней или измените количество слотов", "error");
             return;
         }
         const notifyUser = Boolean(wiForm.querySelector("input[name='notify_user']")?.checked);
@@ -841,12 +1065,16 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         if (days >= 0 || limitChanged) {
             payload.device_limit = deviceLimit;
         }
-        const execute = async () => {
+        const execute = async (fromModal = false) => {
             const btn = wiForm.querySelector("button[type='submit']");
             await withButtonLoading(btn, "Сохранение...", async () => {
                 const res = await api.adjustUser(details.id, payload);
                 showToast(res.message || "Белый интернет обновлён");
-                await refreshAll();
+                await refreshAll({
+                    clearDraft: "wi",
+                    focusSelector: fromModal ? null : "#toggleWiEditBtn",
+                });
+                if (fromModal) schedulePostModalFocus("#toggleWiEditBtn");
             });
         };
 
@@ -857,20 +1085,21 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
                 confirmText: "Сократить",
                 cancelText: "Отмена",
                 isDestructive: true,
-                onConfirm: execute,
+                restoreFocusSelector: "#toggleWiEditBtn",
+                onConfirm: () => execute(true),
             });
             return;
         }
 
         try {
-            await execute();
+            await execute(false);
         } catch (err) {
             showToast(err.message || "Ошибка обновления подписки", "error");
         }
     });
 
-    const trafficSelect = wiTrafficForm.querySelector("select[name='traffic_action']");
-    const wiGbField = wiTrafficForm.querySelector("#wiGbField");
+    const wiGbInput = wiTrafficForm.querySelector("input[name='gb']");
+    wiGbInput.addEventListener("input", () => wiGbInput.removeAttribute("aria-invalid"));
     trafficSelect.addEventListener("change", () => {
         wiGbField.hidden = trafficSelect.value === "reset_used";
     });
@@ -883,19 +1112,26 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
             notify_user: notifyUser,
         };
         if (payload.traffic_action !== "reset_used") {
-            const gb = Number(wiTrafficForm.querySelector("input[name='gb']").value);
-            if (!Number.isInteger(gb) || gb < 1) {
-                showToast("Укажите объём в ГБ (>= 1)", "error");
+            const rawGb = wiGbInput.value.trim();
+            const gb = /^\d+$/.test(rawGb) ? Number(rawGb) : NaN;
+            if (!Number.isInteger(gb) || gb < 1 || gb > 5000) {
+                wiGbInput.setAttribute("aria-invalid", "true");
+                wiGbInput.focus();
+                showToast("Укажите целое число ГБ от 1 до 5000", "error");
                 return;
             }
             payload.gb = gb;
         }
-        const execute = async () => {
+        const execute = async (fromModal = false) => {
             const btn = wiTrafficForm.querySelector("button[type='submit']");
             await withButtonLoading(btn, "Применение...", async () => {
                 const res = await api.adjustUser(details.id, payload);
                 showToast(res.message || "Трафик обновлён");
-                await refreshAll();
+                await refreshAll({
+                    clearDraft: "wiTraffic",
+                    focusSelector: fromModal ? null : "#toggleWiTrafficBtn",
+                });
+                if (fromModal) schedulePostModalFocus("#toggleWiTrafficBtn");
             });
         };
 
@@ -906,19 +1142,19 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
                 confirmText: "Сбросить",
                 cancelText: "Отмена",
                 isDestructive: true,
-                onConfirm: execute,
+                restoreFocusSelector: "#toggleWiTrafficBtn",
+                onConfirm: () => execute(true),
             });
             return;
         }
 
         try {
-            await execute();
+            await execute(false);
         } catch (err) {
             showToast(err.message || "Ошибка обновления трафика", "error");
         }
     });
 
-    const dmForm = root.querySelector("#userDmForm");
     dmForm.addEventListener("submit", async (e) => {
         e.preventDefault();
         const text = dmForm.querySelector("textarea[name='text']").value.trim();
@@ -953,18 +1189,17 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
                 confirmText: "Удалить",
                 cancelText: "Отмена",
                 isDestructive: true,
+                restoreFocusSelector: "#detDevicesList",
                 onConfirm: async () => {
                     const res = await api.deleteUserDevice(details.id, hwid);
                     showToast(res.message || "Устройство удалено");
                     await refreshAll();
+                    schedulePostModalFocus("#detDevicesList button, #detResetHwidBtn");
                 },
             });
         });
     });
 
-    const restrForm = root.querySelector("#userRestrictionsForm");
-    const origFinancialHold = Boolean(details.financial_hold);
-    const origTopupBlocked = Boolean(details.topup_blocked);
     restrForm.addEventListener("submit", (e) => {
         e.preventDefault();
         const financialHold = Boolean(restrForm.querySelector("input[name='financial_hold']")?.checked);
@@ -986,10 +1221,12 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
             confirmText: "Сохранить",
             cancelText: "Отмена",
             isDestructive: enablingRestriction,
+            restoreFocusSelector: "#restrHoldInput",
             onConfirm: async () => {
                 const res = await api.adjustUser(details.id, payload);
                 showToast(res.message || "Ограничения сохранены");
-                await refreshAll();
+                await refreshAll({ clearDraft: "restr" });
+                schedulePostModalFocus("#restrHoldInput");
             },
         });
     });
@@ -1004,14 +1241,43 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         });
     };
     wireHistoryCopyButtons();
-    historyTabsEl.querySelectorAll("[data-htab]").forEach((btn) => {
+
+    const historyTabButtons = Array.from(historyTabsEl.querySelectorAll("[data-htab]"));
+    const activateHistoryTab = (nextTab, focusTab = false) => {
+        activeHistoryTab = nextTab;
+        historyTabButtons.forEach((b) => {
+            const isActive = b.dataset.htab === activeHistoryTab;
+            b.classList.toggle("active", isActive);
+            b.setAttribute("aria-selected", isActive ? "true" : "false");
+            b.setAttribute("tabindex", isActive ? "0" : "-1");
+            if (isActive && focusTab) {
+                b.focus({ preventScroll: true });
+            }
+        });
+        historyListEl.setAttribute("aria-labelledby", `htab-${activeHistoryTab}`);
+        historyListEl.innerHTML = _renderHistoryTabContent(activeHistoryTab, details);
+        wireHistoryCopyButtons();
+    };
+
+    historyTabButtons.forEach((btn, idx) => {
         btn.addEventListener("click", () => {
-            activeHistoryTab = btn.dataset.htab;
-            historyTabsEl.querySelectorAll("[data-htab]").forEach((b) => {
-                b.classList.toggle("active", b.dataset.htab === activeHistoryTab);
-            });
-            historyListEl.innerHTML = _renderHistoryTabContent(activeHistoryTab, details);
-            wireHistoryCopyButtons();
+            activateHistoryTab(btn.dataset.htab, false);
+        });
+        btn.addEventListener("keydown", (e) => {
+            let targetIdx = null;
+            if (e.key === "ArrowRight") {
+                targetIdx = (idx + 1) % historyTabButtons.length;
+            } else if (e.key === "ArrowLeft") {
+                targetIdx = (idx - 1 + historyTabButtons.length) % historyTabButtons.length;
+            } else if (e.key === "Home") {
+                targetIdx = 0;
+            } else if (e.key === "End") {
+                targetIdx = historyTabButtons.length - 1;
+            }
+            if (targetIdx !== null) {
+                e.preventDefault();
+                activateHistoryTab(historyTabButtons[targetIdx].dataset.htab, true);
+            }
         });
     });
 
@@ -1025,10 +1291,12 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
             confirmText: "Сбросить HWID",
             cancelText: "Отмена",
             isDestructive: true,
+            restoreFocusSelector: "#detResetHwidBtn",
             onConfirm: async () => {
                 const res = await api.resetUserDevices(details.id, { notify_user: notifyUser });
                 showToast(res.message || "Устройства сброшены");
                 await refreshAll();
+                schedulePostModalFocus("#detResetHwidBtn");
             },
         });
     });
@@ -1041,10 +1309,12 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
             confirmText: "Перевыпустить",
             cancelText: "Отмена",
             isDestructive: true,
+            restoreFocusSelector: "#detRotateTokenBtn",
             onConfirm: async () => {
                 const res = await api.rotateUserToken(details.id, { notify_user: notifyUser });
                 showToast(res.message || "Токен перевыпущен");
                 await refreshAll();
+                schedulePostModalFocus("#detRotateTokenBtn");
             },
         });
     });

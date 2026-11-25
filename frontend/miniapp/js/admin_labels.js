@@ -106,3 +106,87 @@ export function formatAuditAction(action) {
     const key = String(action || "").toUpperCase();
     return AUDIT_ACTION_MAP[key] || action || "—";
 }
+
+export const AUDIT_TARGET_TYPE_MAP = {
+    user: "Пользователь",
+    server: "Нода",
+    broadcast: "Рассылка",
+    system_setting: "Настройки",
+    system: "Система",
+    admin: "Админ",
+    mass_bonus: "Массовый бонус",
+    mass_extend: "Массовое продление",
+};
+
+export function formatAuditTarget(targetType, targetId = null) {
+    if (!targetType) return "—";
+    const key = String(targetType).toLowerCase();
+    const label = AUDIT_TARGET_TYPE_MAP[key] || targetType;
+    const hasId = targetId !== null && targetId !== undefined && targetId !== "";
+    return hasId ? `${label} #${targetId}` : label;
+}
+
+export const NODE_DISABLED_REASON_MAP = {
+    HOSTING_TRAFFIC_LIMIT: "Лимит трафика хостинга",
+    MANUAL: "Отключена вручную",
+    PROBLEM: "Недоступна",
+};
+
+export const NODE_HEALTH_STATE_MAP = {
+    ONLINE: "Онлайн",
+    WAITING_CONFIRMATION: "Проверка",
+    PROBLEM: "Проблема",
+    MANUAL_DISABLED: "Отключена вручную",
+    DEGRADED: "Сбой",
+    OFFLINE: "Недоступна",
+};
+
+export function formatNodeDisabledReason(reason) {
+    if (!reason) return "";
+    const key = String(reason).trim().toUpperCase();
+    return NODE_DISABLED_REASON_MAP[key] || String(reason);
+}
+
+export function formatNodeHealthState(state) {
+    if (!state) return "";
+    const key = String(state).trim().toUpperCase();
+    return NODE_HEALTH_STATE_MAP[key] || String(state);
+}
+
+export const WI_PROVISIONING_STATUS_MAP = {
+    PENDING_CREATE: "Ожидает создания",
+    ACTIVE: "Активен",
+    PENDING_UPDATE: "Ожидает обновления",
+    PENDING_DELETE: "Ожидает удаления",
+    SYNCED_INACTIVE: "Отключён",
+    FAILED: "Ошибка синхронизации",
+};
+
+export const WI_NODE_SYNC_STATUS_MAP = {
+    active: "активен",
+    synced: "синхронизирован",
+    synced_active: "активен",
+    synced_inactive: "отключён",
+    disabled: "отключён",
+    inactive: "неактивен",
+    pending: "ожидает",
+    pending_create: "ожидает создания",
+    pending_update: "ожидает обновления",
+    pending_delete: "ожидает удаления",
+    already_newer: "актуально",
+    not_found: "не найден",
+    error: "ошибка",
+    failed: "ошибка",
+};
+
+export function formatWiProvisioningStatus(status) {
+    if (!status) return "—";
+    const key = String(status).trim().toUpperCase();
+    return WI_PROVISIONING_STATUS_MAP[key] || String(status);
+}
+
+export function formatWiNodeSyncStatus(status) {
+    if (!status) return "—";
+    const key = String(status).trim().toLowerCase();
+    return WI_NODE_SYNC_STATUS_MAP[key] || String(status);
+}

@@ -1,7 +1,9 @@
 import { api } from "../api.js?v=2.8.0";
+import { formatNodeDisabledReason } from "../admin_labels.js?v=2.8.0";
 import {
     copyText,
     escapeHtml,
+    formatDate,
     formatRelativeTime,
     healthChipInfo,
     openModal,
@@ -128,7 +130,7 @@ function _renderTelemetryCard(node) {
                 ${node.disabled_reason ? `
                 <div class="detail-item">
                     <span class="detail-label">Причина отключения</span>
-                    <span class="chip chip-err">${escapeHtml(node.disabled_reason)}</span>
+                    <span class="chip chip-err">${escapeHtml(formatNodeDisabledReason(node.disabled_reason))}</span>
                 </div>` : ""}
                 ${node.ingress_problem || Number(node.consecutive_ingress_fails || 0) > 0 ? `
                 <div class="detail-item">
@@ -152,7 +154,7 @@ function _renderTelemetryCard(node) {
                 ${node.problem_started_at ? `
                 <div class="detail-item">
                     <span class="detail-label">Начало проблемы</span>
-                    <span>${escapeHtml(formatRelativeTime(node.problem_started_at))} <span class="muted">(${escapeHtml(new Date(node.problem_started_at).toLocaleString("ru-RU"))})</span></span>
+                    <span>${escapeHtml(formatRelativeTime(node.problem_started_at))} <span class="muted">(${escapeHtml(formatDate(node.problem_started_at))})</span></span>
                 </div>` : ""}
                 ${hasEpochs ? `
                 <div class="detail-item">
@@ -164,7 +166,7 @@ function _renderTelemetryCard(node) {
                 </div>` : ""}
                 <div class="detail-item">
                     <span class="detail-label">Последняя проверка</span>
-                    <span>${escapeHtml(formatRelativeTime(node.last_successful_check))}${node.last_successful_check ? ` <span class="muted">(${escapeHtml(new Date(node.last_successful_check).toLocaleString("ru-RU"))})</span>` : ""}</span>
+                    <span>${escapeHtml(formatRelativeTime(node.last_successful_check))}${node.last_successful_check ? ` <span class="muted">(${escapeHtml(formatDate(node.last_successful_check))})</span>` : ""}</span>
                 </div>
                 ${!bars && !hasOutageInfo && !hasEpochs ? `<div class="muted" style="font-size:12px;">Метрики нагрузки пока не поступали.</div>` : ""}
             </div>
@@ -228,7 +230,7 @@ function _renderTopologyCard(node) {
                 `).join("")}
                 ${xhttpLocs.length ? `
                     <div class="detail-item">
-                        <span class="detail-label">XHTTP Locations</span>
+                        <span class="detail-label" title="XHTTP Locations">Пути XHTTP</span>
                         <div class="filter-pills">
                             ${xhttpLocs.map((loc) => `<span class="chip chip-muted">${escapeHtml(typeof loc === "object" && loc !== null ? (loc.path || loc.location || JSON.stringify(loc)) : String(loc))}</span>`).join("")}
                         </div>
@@ -236,7 +238,7 @@ function _renderTopologyCard(node) {
                 ` : ""}
                 ${sniRoutes.length ? `
                     <div class="detail-item">
-                        <span class="detail-label">SNI Routes</span>
+                        <span class="detail-label" title="SNI Routes">Маршруты SNI</span>
                         <div class="filter-pills">
                             ${sniRoutes.map((r) => `<span class="chip chip-muted">${escapeHtml(typeof r === "object" && r !== null ? (r.sni || r.domain || JSON.stringify(r)) : String(r))}</span>`).join("")}
                         </div>
@@ -334,7 +336,7 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
 
     root.innerHTML = `
         <div class="detail-header-nav">
-            <button id="detailBackBtn" type="button" class="btn btn-sm btn-ghost">← Все серверы</button>
+            <button id="detailBackBtn" type="button" class="btn btn-sm btn-ghost" style="white-space:nowrap; flex-shrink:0;">← Все серверы</button>
             <span class="detail-sticky-meta">${escapeHtml(node.name)}</span>
         </div>
 
@@ -359,8 +361,8 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
                 </button>
                 <button type="button" id="detailRefreshBtn" class="btn btn-sm">Опросить ноду</button>
                 ${canResyncClients ? `<button type="button" id="detailResyncBtn" class="btn btn-sm">Пересинхронизировать клиентов</button>` : ""}
-                ${node.role === "ru_hub" ? `<button type="button" id="detailLifecycleBtn" class="btn btn-sm">
-                    ${isDecommissioning ? "Вернуть в ACTIVE" : "Вывести из работы (Drain)"}
+                ${node.role === "ru_hub" ? `<button type="button" id="detailLifecycleBtn" class="btn btn-sm" title="${isDecommissioning ? "Вернуть ноду в активное обслуживание" : "Перевести ноду в режим вывода из эксплуатации"}">
+                    ${isDecommissioning ? "Вернуть в работу" : "Вывести из работы"}
                 </button>` : ""}
                 ${node.role === "exit_node" ? `<button type="button" id="detailSubLocBtn" class="btn btn-sm">Настроить в подписке</button>` : ""}
             </div>
@@ -411,7 +413,7 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
             <div class="filter-pills" style="margin-bottom:8px;">${_renderModules(node)}</div>
             ${node.inbounds && node.inbounds.length ? `
                 <div class="detail-item" style="margin-top:8px;">
-                    <span class="detail-label">Inbounds</span>
+                    <span class="detail-label" title="Inbounds">Входящие (Inbounds)</span>
                     <span class="mono">${node.inbounds.map((ib) => escapeHtml(ib)).join(", ")}</span>
                 </div>
             ` : ""}
@@ -503,11 +505,11 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
             const b = e.currentTarget;
             const targetStatus = isDecommissioning ? "active" : "decommissioning";
             showConfirmModal({
-                title: isDecommissioning ? `Вернуть ноду #${node.id} в ACTIVE?` : `Вывести ноду #${node.id} из работы?`,
+                title: isDecommissioning ? `Вернуть ноду #${node.id} в работу?` : `Вывести ноду #${node.id} из работы?`,
                 message: isDecommissioning
                     ? `Нода «${node.name}» снова начнёт принимать новых клиентов и трафик.`
-                    : `Нода «${node.name}» перейдёт в режим вывода (DECOMMISSIONING) и перестанет выдаваться новым клиентам.`,
-                confirmText: isDecommissioning ? "Вернуть в ACTIVE" : "Вывести (Drain)",
+                    : `Нода «${node.name}» перейдёт в режим вывода из эксплуатации и перестанет выдаваться новым клиентам.`,
+                confirmText: isDecommissioning ? "Вернуть в работу" : "Вывести из работы",
                 cancelText: "Отмена",
                 isDestructive: !isDecommissioning,
                 onConfirm: async () => {
@@ -515,8 +517,8 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
                         await api.setNodeLifecycle(node.id, targetStatus);
                         showToast(
                             isDecommissioning
-                                ? `Нода #${node.id} возвращена в ACTIVE`
-                                : `Нода #${node.id} переведена в Drain (DECOMMISSIONING)`
+                                ? `Нода #${node.id} возвращена в работу`
+                                : `Нода #${node.id} переведена в режим вывода из работы`
                         );
                         await onReload();
                     });

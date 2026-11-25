@@ -56,13 +56,18 @@ function _statusChip(status) {
     return `<span class="chip chip-err">Ошибка</span>`;
 }
 
-function _renderMassOpFormHtml(state) {
+function _renderMassOpFormHtml(state, draft = {}) {
     const massTab = state.massTab || "bonus";
     const massAudienceHtml = _buildAudienceOptions({
         includeTest: false,
         includeEmptyPlaceholder: true,
-        defaultValue: "",
+        defaultValue: draft.audience ?? "",
     });
+    const reasonVal = escapeHtml(draft.reason ?? "");
+    const notifyChecked = draft.notify !== undefined ? Boolean(draft.notify) : true;
+    const amountVal = escapeHtml(draft.amount ?? "100");
+    const scopeVal = draft.scope ?? "standard";
+    const daysVal = escapeHtml(draft.days ?? "3");
     return `
         <div class="field">
             <label for="massAudienceSelect">Аудитория</label>
@@ -74,11 +79,11 @@ function _renderMassOpFormHtml(state) {
             <div class="grid-2">
                 <div class="field">
                     <label for="massAmountInput">Сумма бонуса (₽)</label>
-                    <input id="massAmountInput" class="input tabular" type="number" min="1" max="50000" step="1" value="100" required>
+                    <input id="massAmountInput" class="input tabular" type="number" min="1" max="50000" step="1" value="${amountVal}" required>
                 </div>
                 <div class="field">
                     <label for="massReasonInput">Комментарий</label>
-                    <input id="massReasonInput" class="input" type="text" maxlength="200" placeholder="Компенсация">
+                    <input id="massReasonInput" class="input" type="text" maxlength="200" value="${reasonVal}" placeholder="Компенсация">
                 </div>
             </div>
         `
@@ -87,23 +92,23 @@ function _renderMassOpFormHtml(state) {
                 <div class="field">
                     <label for="massScopeSelect">Сервис</label>
                     <select id="massScopeSelect" class="select">
-                        <option value="standard">Стандарт</option>
-                        <option value="white_internet">Белый интернет</option>
+                        <option value="standard" ${scopeVal === "standard" ? "selected" : ""}>Стандарт</option>
+                        <option value="white_internet" ${scopeVal === "white_internet" ? "selected" : ""}>Белый интернет</option>
                     </select>
                 </div>
                 <div class="field">
                     <label for="massDaysInput">Дней (+)</label>
-                    <input id="massDaysInput" class="input tabular" type="number" min="1" max="365" step="1" value="3" required>
+                    <input id="massDaysInput" class="input tabular" type="number" min="1" max="365" step="1" value="${daysVal}" required>
                 </div>
             </div>
             <div class="field">
                 <label for="massReasonInput">Комментарий</label>
-                <input id="massReasonInput" class="input" type="text" maxlength="200" placeholder="Продление">
+                <input id="massReasonInput" class="input" type="text" maxlength="200" value="${reasonVal}" placeholder="Продление">
             </div>
         `
         }
         <label for="massNotifyCheckbox" class="checkbox-row">
-            <input id="massNotifyCheckbox" type="checkbox" checked>
+            <input id="massNotifyCheckbox" type="checkbox" ${notifyChecked ? "checked" : ""}>
             <span>Отправить уведомление пользователям в бот</span>
         </label>
         <button id="massSubmitBtn" type="submit" class="btn btn-primary">Применить массово</button>
@@ -126,9 +131,19 @@ function _updateCharCounter(root) {
 
 export function renderAdminBroadcastsView(root, state) {
     clearBroadcastPollTimer();
+    const viewReqId = ++_bcReqId;
     const broadcasts = state.broadcastsData || [];
     const massTab = state.massTab || "bonus";
     const audienceHtml = _buildAudienceOptions({ includeTest: true, defaultValue: "test" });
+    const massDraft = state.massDraft || {
+        audience: "",
+        amount: "100",
+        scope: "standard",
+        days: "3",
+        reason: "",
+        notify: true,
+    };
+    state.massDraft = massDraft;
 
     root.innerHTML = `
         <section class="card">
@@ -161,15 +176,15 @@ export function renderAdminBroadcastsView(root, state) {
         </section>
 
         <section class="card">
-            <div class="row">
+            <div class="row" style="gap:8px; flex-wrap:wrap;">
                 <h2 class="card-title">Массовые операции</h2>
-                <div class="seg-group" style="max-width:240px;">
-                    <button type="button" class="seg-btn ${massTab === "bonus" ? "active" : ""}" data-masstab="bonus">Бонус ₽</button>
-                    <button type="button" class="seg-btn ${massTab === "extend" ? "active" : ""}" data-masstab="extend">Продление</button>
+                <div class="seg-group" style="width:auto; flex:0 0 auto;">
+                    <button type="button" class="seg-btn ${massTab === "bonus" ? "active" : ""}" style="white-space:nowrap; min-width:max-content; padding:8px 14px;" data-masstab="bonus" aria-pressed="${massTab === "bonus" ? "true" : "false"}">Бонус ₽</button>
+                    <button type="button" class="seg-btn ${massTab === "extend" ? "active" : ""}" style="white-space:nowrap; min-width:max-content; padding:8px 14px;" data-masstab="extend" aria-pressed="${massTab === "extend" ? "true" : "false"}">Продление</button>
                 </div>
             </div>
             <form id="massOpForm" class="field" style="gap:12px;">
-                ${_renderMassOpFormHtml(state)}
+                ${_renderMassOpFormHtml(state, massDraft)}
             </form>
         </section>
 
@@ -184,24 +199,37 @@ export function renderAdminBroadcastsView(root, state) {
         </section>
     `;
 
+    const isStillActive = (reqId) =>
+        reqId === _bcReqId &&
+        root.isConnected &&
+        state.adminTab === "broadcasts" &&
+        state.mode === "admin";
+
     const reloadBroadcasts = async (silent = false, offset = state.broadcastsOffset || 0) => {
         const reqId = ++_bcReqId;
         try {
             const res = await api.listBroadcasts(offset, 15);
-            if (reqId !== _bcReqId) return;
+            if (!isStillActive(reqId)) {
+                if (reqId === _bcReqId) clearBroadcastPollTimer();
+                return;
+            }
             state.broadcastsData = res.broadcasts || [];
             state.broadcastsTotal = res.total || 0;
             state.broadcastsOffset = res.offset || 0;
             state.broadcastsLimit = res.limit || 15;
-            if (state.adminTab === "broadcasts" && state.mode === "admin") {
-                _renderHistoryList(root, root.querySelector("#bcListContainer"), state, reloadBroadcasts);
-                _renderBcPagination(root, state, reloadBroadcasts);
-                const hasRunning = state.broadcastsData.some((b) => b.status === "in_progress");
-                if (hasRunning && _pollTimer === null) {
-                    _pollTimer = setInterval(() => reloadBroadcasts(true, state.broadcastsOffset || 0), 4000);
-                } else if (!hasRunning) {
-                    clearBroadcastPollTimer();
-                }
+            _renderHistoryList(root, root.querySelector("#bcListContainer"), state, reloadBroadcasts);
+            _renderBcPagination(root, state, reloadBroadcasts);
+            const hasRunning = state.broadcastsData.some((b) => b.status === "in_progress");
+            if (hasRunning && _pollTimer === null) {
+                _pollTimer = setInterval(() => {
+                    if (!root.isConnected || state.adminTab !== "broadcasts" || state.mode !== "admin") {
+                        clearBroadcastPollTimer();
+                        return;
+                    }
+                    reloadBroadcasts(true, state.broadcastsOffset || 0);
+                }, 4000);
+            } else if (!hasRunning) {
+                clearBroadcastPollTimer();
             }
         } catch (err) {
             if (err && err.code === "2fa_required") {
@@ -210,6 +238,7 @@ export function renderAdminBroadcastsView(root, state) {
             }
             if (reqId !== _bcReqId) return;
             clearBroadcastPollTimer();
+            if (!root.isConnected || state.adminTab !== "broadcasts" || state.mode !== "admin") return;
             if (!silent) showToast(err.message || "Не удалось обновить список рассылок", "error");
         }
     };
@@ -230,11 +259,13 @@ export function renderAdminBroadcastsView(root, state) {
     root.querySelector("#bcPreviewBtn").addEventListener("click", async () => {
         const audience = root.querySelector("#bcAudienceSelect").value;
         const hintEl = root.querySelector("#bcPreviewHint");
-        hintEl.textContent = "Подсчёт";
+        hintEl.textContent = "Подсчёт...";
         try {
             const res = await api.previewBroadcast(audience);
+            if (!isStillActive(viewReqId) && !root.isConnected) return;
             hintEl.textContent = `Аудитория «${res.label}»: получат ${res.reachable_count} (всего в сегменте ${res.total_count})`;
         } catch (err) {
+            if (!root.isConnected) return;
             hintEl.textContent = "";
             showToast(err.message || "Ошибка предпросмотра", "error");
         }
@@ -260,9 +291,11 @@ export function renderAdminBroadcastsView(root, state) {
                     media_url: mediaUrl,
                 });
                 showToast(res.message || "Рассылка запущена");
-                if (audience !== "test") {
-                    root.querySelector("#bcTextInput").value = "";
-                    root.querySelector("#bcMediaInput").value = "";
+                if (root.isConnected && audience !== "test") {
+                    const tEl = root.querySelector("#bcTextInput");
+                    const mEl = root.querySelector("#bcMediaInput");
+                    if (tEl) tEl.value = "";
+                    if (mEl) mEl.value = "";
                     _updateCharCounter(root);
                 }
                 state.broadcastsOffset = 0;
@@ -281,6 +314,7 @@ export function renderAdminBroadcastsView(root, state) {
 
         try {
             const preview = await withButtonLoading(launchBtn, "Подсчёт…", () => api.previewBroadcast(audience));
+            if (!root.isConnected || state.adminTab !== "broadcasts" || state.mode !== "admin") return;
             const snippet = text.length > 120 ? `${text.slice(0, 120)}…` : text;
             _confirmModal(
                 "Подтвердите рассылку",
@@ -294,21 +328,43 @@ export function renderAdminBroadcastsView(root, state) {
         }
     });
 
+    const syncMassDraft = () => {
+        const audEl = root.querySelector("#massAudienceSelect");
+        const amtEl = root.querySelector("#massAmountInput");
+        const scopeEl = root.querySelector("#massScopeSelect");
+        const daysEl = root.querySelector("#massDaysInput");
+        const reasonEl = root.querySelector("#massReasonInput");
+        const notifyEl = root.querySelector("#massNotifyCheckbox");
+        if (audEl) massDraft.audience = audEl.value;
+        if (amtEl) massDraft.amount = amtEl.value;
+        if (scopeEl) massDraft.scope = scopeEl.value;
+        if (daysEl) massDraft.days = daysEl.value;
+        if (reasonEl) massDraft.reason = reasonEl.value;
+        if (notifyEl) massDraft.notify = notifyEl.checked;
+    };
+
+    const massForm = root.querySelector("#massOpForm");
+    massForm.addEventListener("input", syncMassDraft);
+    massForm.addEventListener("change", syncMassDraft);
+
     root.querySelectorAll("[data-masstab]").forEach((btn) => {
         btn.addEventListener("click", () => {
+            syncMassDraft();
             state.massTab = btn.dataset.masstab;
             root.querySelectorAll("[data-masstab]").forEach((b) => {
-                b.classList.toggle("active", b.dataset.masstab === state.massTab);
+                const isActive = b.dataset.masstab === state.massTab;
+                b.classList.toggle("active", isActive);
+                b.setAttribute("aria-pressed", isActive ? "true" : "false");
             });
-            const form = root.querySelector("#massOpForm");
-            if (form) {
-                form.innerHTML = _renderMassOpFormHtml(state);
+            if (massForm) {
+                massForm.innerHTML = _renderMassOpFormHtml(state, massDraft);
             }
         });
     });
 
-    root.querySelector("#massOpForm").addEventListener("submit", async (e) => {
+    massForm.addEventListener("submit", async (e) => {
         e.preventDefault();
+        syncMassDraft();
         const activeMassTab = state.massTab || "bonus";
         const massSelect = root.querySelector("#massAudienceSelect");
         const audience = massSelect.value;
@@ -322,13 +378,15 @@ export function renderAdminBroadcastsView(root, state) {
         const submitBtn = root.querySelector("#massSubmitBtn");
 
         if (activeMassTab === "bonus") {
-            const amount = Number(root.querySelector("#massAmountInput").value);
+            const rawAmount = root.querySelector("#massAmountInput").value.trim();
+            const amount = /^\d+$/.test(rawAmount) ? Number(rawAmount) : NaN;
             if (!Number.isInteger(amount) || amount < 1 || amount > 50000) {
-                showToast("Сумма должна быть от 1 до 50000 ₽", "error");
+                showToast("Сумма должна быть целым числом от 1 до 50000 ₽", "error");
                 return;
             }
             try {
                 const preview = await withButtonLoading(submitBtn, "Подсчёт…", () => api.previewBroadcast(audience));
+                if (!root.isConnected || state.adminTab !== "broadcasts" || state.mode !== "admin") return;
                 const totalCount = Number(preview.total_count ?? preview.reachable_count ?? 0);
                 const reachableCount = Number(preview.reachable_count ?? 0);
                 const totalRub = amount * totalCount;
@@ -355,14 +413,16 @@ export function renderAdminBroadcastsView(root, state) {
             }
         } else {
             const scope = root.querySelector("#massScopeSelect").value;
-            const days = Number(root.querySelector("#massDaysInput").value);
+            const rawDays = root.querySelector("#massDaysInput").value.trim();
+            const days = /^\d+$/.test(rawDays) ? Number(rawDays) : NaN;
             if (!Number.isInteger(days) || days < 1 || days > 365) {
-                showToast("Срок должен быть от 1 до 365 дней", "error");
+                showToast("Срок должен быть целым числом от 1 до 365 дней", "error");
                 return;
             }
             const scopeLabel = scope === "white_internet" ? "Белый интернет" : "Стандарт";
             try {
                 const preview = await withButtonLoading(submitBtn, "Подсчёт…", () => api.previewBroadcast(audience));
+                if (!root.isConnected || state.adminTab !== "broadcasts" || state.mode !== "admin") return;
                 const totalCount = Number(preview.total_count ?? preview.reachable_count ?? 0);
                 const reachableCount = Number(preview.reachable_count ?? 0);
                 _confirmModal(
@@ -393,7 +453,13 @@ export function renderAdminBroadcastsView(root, state) {
     _renderHistoryList(root, root.querySelector("#bcListContainer"), state, reloadBroadcasts);
     _renderBcPagination(root, state, reloadBroadcasts);
     if (broadcasts.some((b) => b.status === "in_progress")) {
-        _pollTimer = setInterval(() => reloadBroadcasts(true, state.broadcastsOffset || 0), 4000);
+        _pollTimer = setInterval(() => {
+            if (!root.isConnected || state.adminTab !== "broadcasts" || state.mode !== "admin") {
+                clearBroadcastPollTimer();
+                return;
+            }
+            reloadBroadcasts(true, state.broadcastsOffset || 0);
+        }, 4000);
     }
 }
 
@@ -471,7 +537,9 @@ function _renderHistoryList(root, container, state, reloadBroadcasts) {
                     }
                     _updateCharCounter(root);
                     textInput.focus();
-                    textInput.scrollIntoView({ behavior: "smooth", block: "center" });
+                    const prefersReduced =
+                        window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+                    textInput.scrollIntoView({ behavior: prefersReduced ? "auto" : "smooth", block: "center" });
                     const looksTruncated =
                         !hasFullText &&
                         (textToCopy.endsWith("...") ||

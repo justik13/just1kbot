@@ -12,7 +12,11 @@ let _usersReqId = 0;
 
 function _formatShortDate(iso) {
     if (!iso) return "";
-    const d = new Date(iso);
+    let raw = String(iso).trim();
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(raw)) {
+        raw += "Z";
+    }
+    const d = new Date(raw);
     if (!Number.isFinite(d.getTime())) return "";
     const dd = String(d.getDate()).padStart(2, "0");
     const mm = String(d.getMonth() + 1).padStart(2, "0");
@@ -32,124 +36,37 @@ function _formatUserTitle(u) {
     return `ID ${escapeHtml(u.telegram_id)}`;
 }
 
-export function renderAdminUsersView(root, state, onOpenUser) {
-    const data = state.usersData || {
-        stats: {},
-        filter_counts: {},
-        users: [],
-        total: 0,
-        offset: 0,
-        limit: USERS_PAGE_SIZE,
-    };
-    const stats = data.stats || {};
-    const fc = data.filter_counts || {};
-    const users = data.users || [];
-    const query = state.usersQuery || "";
-    const activeFilter = state.usersFilter || "all";
-
-    root.innerHTML = `
-        <section class="stats-strip">
-            <div class="stat-box"><div class="stat-val">${stats.total_users ?? 0}</div><div class="stat-lbl">Всего</div></div>
-            <div class="stat-box"><div class="stat-val">${stats.active_standard ?? 0}</div><div class="stat-lbl">Стандарт</div></div>
-            <div class="stat-box"><div class="stat-val">${stats.active_wi ?? 0}</div><div class="stat-lbl">Белый интернет</div></div>
-            <div class="stat-box"><div class="stat-val">${stats.total_balance_rub ?? 0} ₽</div><div class="stat-lbl">Балансы</div></div>
-        </section>
-
-        <section class="card">
-            <div class="row">
-                <h2 class="card-title">Пользователи и балансы</h2>
-                <button id="reloadUsersBtn" type="button" class="btn btn-sm">Обновить</button>
-            </div>
-            <div class="filter-pills">
-                <button type="button" class="pill-btn ${activeFilter === "all" ? "active" : ""}" data-ufilter="all">Все (${fc.all ?? stats.total_users ?? 0})</button>
-                <button type="button" class="pill-btn ${activeFilter === "active" ? "active" : ""}" data-ufilter="active">Активные (${fc.active ?? 0})</button>
-                <button type="button" class="pill-btn ${activeFilter === "active_standard" ? "active" : ""}" data-ufilter="active_standard">Стандарт (${fc.active_standard ?? stats.active_standard ?? 0})</button>
-                <button type="button" class="pill-btn ${activeFilter === "active_wi" ? "active" : ""}" data-ufilter="active_wi">Белый интернет (${fc.active_wi ?? stats.active_wi ?? 0})</button>
-                <button type="button" class="pill-btn ${activeFilter === "expiring_3d" ? "active" : ""}" data-ufilter="expiring_3d">Истекают 3д (${fc.expiring_3d ?? 0})</button>
-                <button type="button" class="pill-btn ${activeFilter === "new_7d" ? "active" : ""}" data-ufilter="new_7d">Новые 7д (${fc.new_7d ?? 0})</button>
-                <button type="button" class="pill-btn ${activeFilter === "expired" ? "active" : ""}" data-ufilter="expired">Истекли (${fc.expired ?? 0})</button>
-                <button type="button" class="pill-btn ${activeFilter === "never" ? "active" : ""}" data-ufilter="never">Без подписки (${fc.never ?? 0})</button>
-                <button type="button" class="pill-btn ${activeFilter === "banned" ? "active" : ""}" data-ufilter="banned">Бот заблокирован (${fc.banned ?? 0})</button>
-            </div>
-            <form id="userSearchForm" class="row-nowrap">
-                <label for="userSearchInput" class="visually-hidden">Поиск пользователей</label>
-                <input id="userSearchInput" class="input" type="search" value="${escapeHtml(query)}" placeholder="ID, @username, имя, HWID, UUID">
-                <button type="submit" class="btn btn-primary btn-sm">Найти</button>
-            </form>
-            <div id="usersPagerTop"></div>
-            <div id="usersListContainer" class="stack-sm"></div>
-            <div id="usersPagerBottom"></div>
-        </section>
+function _renderStatsHtml(stats) {
+    return `
+        <div class="stat-box"><div class="stat-val">${stats.total_users ?? 0}</div><div class="stat-lbl">Всего</div></div>
+        <div class="stat-box"><div class="stat-val">${stats.active_standard ?? 0}</div><div class="stat-lbl">Стандарт</div></div>
+        <div class="stat-box"><div class="stat-val">${stats.active_wi ?? 0}</div><div class="stat-lbl">Белый интернет</div></div>
+        <div class="stat-box"><div class="stat-val">${stats.total_balance_rub ?? 0} ₽</div><div class="stat-lbl">Балансы</div></div>
     `;
+}
 
-    const searchInput = root.querySelector("#userSearchInput");
-    const getLiveQuery = () => (searchInput ? searchInput.value.trim() : state.usersQuery || "");
+function _renderFilterPillsHtml(fc, stats, activeFilter) {
+    const items = [
+        { id: "all", label: `Все (${fc.all ?? stats.total_users ?? 0})` },
+        { id: "active", label: `Активные (${fc.active ?? 0})` },
+        { id: "active_standard", label: `Стандарт (${fc.active_standard ?? stats.active_standard ?? 0})` },
+        { id: "active_wi", label: `Белый интернет (${fc.active_wi ?? stats.active_wi ?? 0})` },
+        { id: "expiring_3d", label: `Истекают 3д (${fc.expiring_3d ?? 0})` },
+        { id: "new_7d", label: `Новые 7д (${fc.new_7d ?? 0})` },
+        { id: "expired", label: `Истекли (${fc.expired ?? 0})` },
+        { id: "never", label: `Без подписки (${fc.never ?? 0})` },
+        { id: "banned", label: `Бот заблокирован (${fc.banned ?? 0})` },
+    ];
+    return items
+        .map((it) => {
+            const active = activeFilter === it.id;
+            return `<button type="button" class="pill-btn ${active ? "active" : ""}" data-ufilter="${it.id}" aria-pressed="${active ? "true" : "false"}">${escapeHtml(it.label)}</button>`;
+        })
+        .join("");
+}
 
-    const reload = async (qVal, filterVal = state.usersFilter || "all", offsetVal = 0) => {
-        const reqId = ++_usersReqId;
-        try {
-            const nextData = await api.listUsers(qVal, offsetVal, USERS_PAGE_SIZE, filterVal);
-            if (reqId !== _usersReqId) return;
-            state.usersQuery = qVal;
-            state.usersFilter = filterVal;
-            state.usersOffset = offsetVal;
-            state.usersData = nextData;
-            renderAdminUsersView(root, state, onOpenUser);
-        } catch (err) {
-            if (reqId !== _usersReqId) return;
-            showToast(err.message || "Не удалось загрузить пользователей", "error");
-        }
-    };
-
-    root.querySelectorAll("[data-ufilter]").forEach((btn) => {
-        btn.addEventListener("click", () => {
-            reload(getLiveQuery(), btn.dataset.ufilter, 0);
-        });
-    });
-
-    const reloadBtn = root.querySelector("#reloadUsersBtn");
-    reloadBtn.addEventListener("click", () => {
-        withButtonLoading(reloadBtn, "Обновление", () =>
-            reload(getLiveQuery(), state.usersFilter || "all", state.usersOffset || 0)
-        );
-    });
-
-    root.querySelector("#userSearchForm").addEventListener("submit", (e) => {
-        e.preventDefault();
-        reload(getLiveQuery(), state.usersFilter || "all", 0);
-    });
-
-    searchInput.addEventListener("search", () => {
-        if (searchInput.value === "") {
-            reload("", state.usersFilter || "all", 0);
-        }
-    });
-
-    const searchFormEl = root.querySelector("#userSearchForm");
-    const onUserPage = (newOffset) =>
-        reload(getLiveQuery(), state.usersFilter || "all", newOffset);
-
-    renderPagination({
-        container: root.querySelector("#usersPagerTop"),
-        total: Number(data.total ?? users.length),
-        offset: Number(data.offset ?? state.usersOffset ?? 0),
-        limit: Number(data.limit || USERS_PAGE_SIZE),
-        onPage: onUserPage,
-        scrollTarget: searchFormEl,
-        entityName: "пользователей",
-    });
-
-    renderPagination({
-        container: root.querySelector("#usersPagerBottom"),
-        total: Number(data.total ?? users.length),
-        offset: Number(data.offset ?? state.usersOffset ?? 0),
-        limit: Number(data.limit || USERS_PAGE_SIZE),
-        onPage: onUserPage,
-        scrollTarget: searchFormEl,
-        entityName: "пользователей",
-    });
-
-    const listEl = root.querySelector("#usersListContainer");
+function _renderUsersListContent(listEl, users, onOpenUser) {
+    listEl.innerHTML = "";
     if (!users.length) {
         listEl.innerHTML = `<div class="muted" style="text-align:center; padding:16px;">Пользователи не найдены</div>`;
         return;
@@ -178,7 +95,7 @@ export function renderAdminUsersView(root, state, onOpenUser) {
             <div class="row">
                 <div>
                     <span style="font-weight:600;">${_formatUserTitle(u)}</span>
-                    <span class="mono muted" style="margin-left:8px;">${u.telegram_id}</span>
+                    <span class="mono muted" style="margin-left:8px; word-break:normal;">${escapeHtml(u.telegram_id)}</span>
                 </div>
                 <div style="display:flex; align-items:center; gap:8px;">
                     <span class="tabular" style="font-weight:600;">${u.total_balance} ₽</span>
@@ -201,4 +118,193 @@ export function renderAdminUsersView(root, state, onOpenUser) {
         });
         listEl.appendChild(card);
     });
+}
+
+export function renderAdminUsersView(root, state, onOpenUser) {
+    ++_usersReqId;
+    const data = state.usersData || {
+        stats: {},
+        filter_counts: {},
+        users: [],
+        total: 0,
+        offset: 0,
+        limit: USERS_PAGE_SIZE,
+    };
+    const stats = data.stats || {};
+    const fc = data.filter_counts || {};
+    const users = data.users || [];
+    const query = state.usersQuery || "";
+    const activeFilter = state.usersFilter || "all";
+
+    root.innerHTML = `
+        <section id="usersStatsStrip" class="stats-strip">${_renderStatsHtml(stats)}</section>
+
+        <section class="card">
+            <div class="row">
+                <h2 class="card-title">Пользователи и балансы</h2>
+                <button id="reloadUsersBtn" type="button" class="btn btn-sm">Обновить</button>
+            </div>
+            <div id="usersFilterPills" class="filter-pills">${_renderFilterPillsHtml(fc, stats, activeFilter)}</div>
+            <form id="userSearchForm" class="row-nowrap">
+                <label for="userSearchInput" class="visually-hidden">Поиск пользователей</label>
+                <input id="userSearchInput" class="input" type="search" value="${escapeHtml(query)}" placeholder="ID, @username, имя, HWID, UUID">
+                <button type="submit" class="btn btn-primary btn-sm">Найти</button>
+            </form>
+            <div id="usersPagerTop"></div>
+            <div id="usersListContainer" class="stack-sm"></div>
+            <div id="usersPagerBottom"></div>
+        </section>
+    `;
+
+    const searchInput = root.querySelector("#userSearchInput");
+    const searchFormEl = root.querySelector("#userSearchForm");
+    const statsEl = root.querySelector("#usersStatsStrip");
+    const pillsEl = root.querySelector("#usersFilterPills");
+    const pagerTopEl = root.querySelector("#usersPagerTop");
+    const listEl = root.querySelector("#usersListContainer");
+    const pagerBottomEl = root.querySelector("#usersPagerBottom");
+
+    const getLiveQuery = () => {
+        const raw = searchInput ? searchInput.value : state.usersQuery || "";
+        return String(raw).trim().replace(/^@+/, "");
+    };
+
+    const isStillActive = (reqId) =>
+        reqId === _usersReqId &&
+        root.isConnected &&
+        state.selectedUserId == null &&
+        state.adminTab === "users" &&
+        state.mode === "admin";
+
+    const updateDynamicSections = (curData) => {
+        const curStats = curData.stats || {};
+        const curFc = curData.filter_counts || {};
+        const curUsers = curData.users || [];
+        const curFilter = state.usersFilter || "all";
+
+        statsEl.innerHTML = _renderStatsHtml(curStats);
+
+        const activeEl = document.activeElement;
+        const focusedFilter =
+            activeEl && pillsEl.contains(activeEl) ? activeEl.getAttribute("data-ufilter") : null;
+        pillsEl.innerHTML = _renderFilterPillsHtml(curFc, curStats, curFilter);
+        bindFilterPills();
+        if (focusedFilter) {
+            pillsEl.querySelector(`[data-ufilter="${CSS.escape(focusedFilter)}"]`)?.focus({ preventScroll: true });
+        }
+
+        const onUserPage = (newOffset) =>
+            reload(getLiveQuery(), state.usersFilter || "all", newOffset);
+        const total = Number(curData.total ?? curUsers.length);
+        const offset = Number(curData.offset ?? state.usersOffset ?? 0);
+        const limit = Number(curData.limit || USERS_PAGE_SIZE);
+
+        renderPagination({
+            container: pagerTopEl,
+            total,
+            offset,
+            limit,
+            onPage: onUserPage,
+            scrollTarget: searchFormEl,
+            entityName: "пользователей",
+        });
+        renderPagination({
+            container: pagerBottomEl,
+            total,
+            offset,
+            limit,
+            onPage: onUserPage,
+            scrollTarget: searchFormEl,
+            entityName: "пользователей",
+        });
+        _renderUsersListContent(listEl, curUsers, onOpenUser);
+    };
+
+    const reload = async (qVal, filterVal = state.usersFilter || "all", offsetVal = 0) => {
+        const reqId = ++_usersReqId;
+        const cleanQ = String(qVal || "").trim().replace(/^@+/, "");
+        try {
+            const nextData = await api.listUsers(cleanQ, offsetVal, USERS_PAGE_SIZE, filterVal);
+            if (!isStillActive(reqId)) return;
+            state.usersQuery = cleanQ;
+            state.usersFilter = filterVal;
+            state.usersOffset = offsetVal;
+            state.usersData = nextData;
+            updateDynamicSections(nextData);
+        } catch (err) {
+            if (!isStillActive(reqId)) return;
+            if (err && err.code === "2fa_required") return;
+            showToast(err.message || "Не удалось загрузить пользователей", "error");
+            pagerTopEl.innerHTML = "";
+            pagerBottomEl.innerHTML = "";
+            listEl.innerHTML = `
+                <div class="card card-center">
+                    <div class="card-title">Не удалось загрузить пользователей</div>
+                    <p class="muted">${escapeHtml(err.message || "Ошибка запроса")}</p>
+                    <button id="usersRetryBtn" type="button" class="btn btn-primary btn-sm">Повторить</button>
+                </div>
+            `;
+            listEl.querySelector("#usersRetryBtn")?.addEventListener("click", () => {
+                reload(cleanQ, filterVal, offsetVal);
+            });
+        }
+    };
+
+    function bindFilterPills() {
+        pillsEl.querySelectorAll("[data-ufilter]").forEach((btn) => {
+            btn.addEventListener("click", () => {
+                reload(getLiveQuery(), btn.dataset.ufilter, 0);
+            });
+        });
+    }
+
+    bindFilterPills();
+
+    const reloadBtn = root.querySelector("#reloadUsersBtn");
+    reloadBtn.addEventListener("click", () => {
+        withButtonLoading(reloadBtn, "Обновление...", () =>
+            reload(getLiveQuery(), state.usersFilter || "all", state.usersOffset || 0)
+        );
+    });
+
+    searchFormEl.addEventListener("submit", (e) => {
+        e.preventDefault();
+        reload(getLiveQuery(), state.usersFilter || "all", 0);
+    });
+
+    searchInput.addEventListener("input", () => {
+        state.usersQuery = getLiveQuery();
+    });
+
+    searchInput.addEventListener("search", () => {
+        if (searchInput.value === "") {
+            reload("", state.usersFilter || "all", 0);
+        }
+    });
+
+    const onUserPage = (newOffset) =>
+        reload(getLiveQuery(), state.usersFilter || "all", newOffset);
+    const total = Number(data.total ?? users.length);
+    const offset = Number(data.offset ?? state.usersOffset ?? 0);
+    const limit = Number(data.limit || USERS_PAGE_SIZE);
+
+    renderPagination({
+        container: pagerTopEl,
+        total,
+        offset,
+        limit,
+        onPage: onUserPage,
+        scrollTarget: searchFormEl,
+        entityName: "пользователей",
+    });
+    renderPagination({
+        container: pagerBottomEl,
+        total,
+        offset,
+        limit,
+        onPage: onUserPage,
+        scrollTarget: searchFormEl,
+        entityName: "пользователей",
+    });
+    _renderUsersListContent(listEl, users, onOpenUser);
 }
