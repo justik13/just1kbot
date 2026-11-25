@@ -25,9 +25,10 @@ from bot.middlewares import (
 )
 from config.constants import WHITE_INTERNET_SUB_PATH_PREFIX
 from config.settings import get_settings
-from database.connection import close_db, init_db
+from database.connection import close_db, init_db, session_scope
 from services.admin_tools_service import stop_admin_bulk_tasks
 from services.broadcast_service import resume_pending_broadcasts, stop_broadcast_tasks
+from services.miniapp_auth_service import get_admin_session_epoch
 from services.workers import (
     shutdown_event,
     start_background_workers,
@@ -372,6 +373,9 @@ async def main():
 
         logger.info("Инициализация БД...")
         await init_db()
+
+        async with session_scope() as session:
+            await get_admin_session_epoch(session)
 
         bot, dp = await setup_bot()
 

@@ -167,39 +167,48 @@ export function formatBytesGb(bytes) {
 
 let _modalStack = [];
 let _modalTitleSeq = 0;
-let _modalBackBtnWasVisible = false;
-let _modalBackListenerBound = false;
+let _pageBackHandler = null;
+let _globalBackListenerBound = false;
 
-function _onTelegramModalBack() {
+function _hasOpenModal() {
     const backdrop = document.getElementById("modalRoot");
-    if (backdrop && !backdrop.hidden && typeof backdrop._activeClose === "function") {
-        backdrop._activeClose();
+    return Boolean(backdrop && !backdrop.hidden && typeof backdrop._activeClose === "function");
+}
+
+function _handleGlobalBackButton() {
+    if (_hasOpenModal()) {
+        const backdrop = document.getElementById("modalRoot");
+        if (backdrop && typeof backdrop._activeClose === "function") {
+            backdrop._activeClose();
+        }
+        return;
+    }
+    if (typeof _pageBackHandler === "function") {
+        _pageBackHandler();
     }
 }
 
-function _syncModalBackButton(isOpening) {
+function _syncTelegramBackButton() {
     const tg = window.Telegram && window.Telegram.WebApp;
     if (!tg || !tg.BackButton) return;
     try {
-        if (isOpening) {
-            if (!_modalBackListenerBound) {
-                _modalBackBtnWasVisible = Boolean(tg.BackButton.isVisible);
-                tg.BackButton.onClick(_onTelegramModalBack);
-                _modalBackListenerBound = true;
-            }
+        if (!_globalBackListenerBound) {
+            tg.BackButton.onClick(_handleGlobalBackButton);
+            _globalBackListenerBound = true;
+        }
+        if (_hasOpenModal() || Boolean(_pageBackHandler)) {
             tg.BackButton.show();
         } else {
-            if (_modalBackListenerBound) {
-                tg.BackButton.offClick(_onTelegramModalBack);
-                _modalBackListenerBound = false;
-            }
-            if (!_modalBackBtnWasVisible) {
-                tg.BackButton.hide();
-            }
+            tg.BackButton.hide();
         }
     } catch {
         // Safe fallback if BackButton API is unsupported
     }
+}
+
+export function setPageBackButton(fn) {
+    _pageBackHandler = typeof fn === "function" ? fn : null;
+    _syncTelegramBackButton();
 }
 
 const _FOCUSABLE_SELECTOR =
@@ -238,7 +247,7 @@ export function closeAllModals() {
     document.body.style.overflow = "";
     backdrop.hidden = true;
     backdrop.innerHTML = "";
-    _syncModalBackButton(false);
+    _syncTelegramBackButton();
 }
 
 export function openModal(title, bodyNode, { showCloseBtn = true, canClose = null } = {}) {
@@ -313,7 +322,16 @@ export function openModal(title, bodyNode, { showCloseBtn = true, canClose = nul
         closed = true;
         document.removeEventListener("keydown", onKeyDown);
 
-        if (_modalStack.length > 0 && backdrop.contains(card)) {
+        if (!backdrop.contains(card)) {
+            const idx = _modalStack.findIndex((item) => item.card === card);
+            if (idx !== -1) {
+                _modalStack.splice(idx, 1);
+            }
+            _syncTelegramBackButton();
+            return;
+        }
+
+        if (_modalStack.length > 0) {
             const parent = _modalStack.pop();
             backdrop.innerHTML = "";
             backdrop.appendChild(parent.card);
@@ -327,6 +345,7 @@ export function openModal(title, bodyNode, { showCloseBtn = true, canClose = nul
                     parent.onClose();
                 }
             };
+            _syncTelegramBackButton();
             if (parent.trigger && parent.card.contains(parent.trigger) && typeof parent.trigger.focus === "function") {
                 parent.trigger.focus({ preventScroll: true });
             } else {
@@ -342,7 +361,7 @@ export function openModal(title, bodyNode, { showCloseBtn = true, canClose = nul
         document.body.style.overflow = "";
         backdrop.hidden = true;
         backdrop.innerHTML = "";
-        _syncModalBackButton(false);
+        _syncTelegramBackButton();
         if (prevTrigger && document.contains(prevTrigger) && typeof prevTrigger.focus === "function") {
             prevTrigger.focus({ preventScroll: true });
         }
@@ -370,7 +389,7 @@ export function openModal(title, bodyNode, { showCloseBtn = true, canClose = nul
     backdrop._activeClose = close;
     document.body.style.overflow = "hidden";
     document.addEventListener("keydown", onKeyDown);
-    _syncModalBackButton(true);
+    _syncTelegramBackButton();
     _focusFirstInModal(card);
     return close;
 }
@@ -458,11 +477,11 @@ export function roleLabel(role) {
 }
 
 export function healthChipInfo(node) {
+    if (String(node.lifecycle_status || "").toUpperCase() === "DECOMMISSIONING") {
+        return { text: "Выводится", cls: "chip-warn" };
+    }
     if (!node.is_active || node.health_state === "MANUAL_DISABLED") {
         return { text: "Отключена", cls: "chip-muted" };
-    }
-    if (node.lifecycle_status === "decommissioning") {
-        return { text: "Выводится", cls: "chip-warn" };
     }
     if (node.disabled_reason === "HOSTING_TRAFFIC_LIMIT") {
         return { text: "Лимит трафика", cls: "chip-err" };

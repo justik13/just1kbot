@@ -1,7 +1,6 @@
 import { api, setAdminSessionToken } from "../api.js?v=2.8.0";
 import {
     escapeHtml,
-    formatRelativeTime,
     roleLabel,
     showConfirmModal,
     showToast,
@@ -10,36 +9,43 @@ import {
 
 let _overviewReqId = 0;
 
-function _normalizeWorkers(workers) {
-    if (!workers) return [];
-    if (Array.isArray(workers)) {
-        return workers.map((w, idx) => ({
+function _normalizeWorkers(workersPayload) {
+    if (!workersPayload) return [];
+    const inner =
+        typeof workersPayload === "object" &&
+        !Array.isArray(workersPayload) &&
+        workersPayload.workers !== undefined
+            ? workersPayload.workers
+            : workersPayload;
+    if (!inner) return [];
+    if (Array.isArray(inner)) {
+        return inner.map((w, idx) => ({
             name: w.name || w.worker || `worker-${idx + 1}`,
             ...w,
         }));
     }
-    if (typeof workers === "object") {
-        return Object.entries(workers).map(([name, info]) => ({
+    if (typeof inner === "object") {
+        return Object.entries(inner).map(([name, info]) => ({
             name,
-            ...(info && typeof info === "object" ? info : { status: String(info ?? "") }),
+            ...(info && typeof info === "object" ? info : { state: String(info ?? "") }),
         }));
     }
     return [];
 }
 
-function _workerStatusChip(status, failures) {
-    const s = String(status || "").toLowerCase();
+function _workerStatusChip(state, failures) {
+    const s = String(state || "").toLowerCase();
     const failCount = Number(failures || 0);
-    if (failCount > 0 || s === "error" || s === "failed" || s === "dead") {
-        return `<span class="chip chip-err">${escapeHtml(status || "Ошибка")}</span>`;
+    if (failCount > 0 || s === "error" || s === "failed" || s === "dead" || s === "stopped") {
+        return `<span class="chip chip-err">${escapeHtml(state || "Ошибка")}</span>`;
     }
-    if (s === "degraded" || s === "warn" || s === "warning" || s === "stale") {
-        return `<span class="chip chip-warn">${escapeHtml(status || "Внимание")}</span>`;
+    if (s === "degraded" || s === "warn" || s === "warning" || s === "stale" || s === "cooldown" || s === "starting" || s === "restarting") {
+        return `<span class="chip chip-warn">${escapeHtml(state || "Внимание")}</span>`;
     }
     if (s === "ok" || s === "running" || s === "healthy" || s === "idle") {
-        return `<span class="chip chip-ok">${escapeHtml(status || "ОК")}</span>`;
+        return `<span class="chip chip-ok">${escapeHtml(state || "ОК")}</span>`;
     }
-    return `<span class="chip chip-muted">${escapeHtml(status || "—")}</span>`;
+    return `<span class="chip chip-muted">${escapeHtml(state || "—")}</span>`;
 }
 
 function _problemLabel(p) {
@@ -100,15 +106,41 @@ function _renderOverviewContent(root, state, data) {
     }
 
     const degradedOrOffline = Number(nodes.degraded || 0) + Number(nodes.offline || 0);
-    const workersWithErrors = workers.filter(
-        (w) => Number(w.consecutive_failures || 0) > 0 || Boolean(w.last_error)
-    ).length;
+    const workerSnapshot =
+        data.workers && typeof data.workers === "object" && !Array.isArray(data.workers)
+            ? data.workers
+            : null;
+    const supervisorHealthy = workerSnapshot && "supervisor_healthy" in workerSnapshot
+        ? Boolean(workerSnapshot.supervisor_healthy)
+        : null;
+    const fatalShutdown = workerSnapshot ? Boolean(workerSnapshot.fatal_shutdown) : false;
+    const supervisorBadgeHtml = fatalShutdown
+        ? `<span class="chip chip-err">Fatal shutdown</span>`
+        : supervisorHealthy === true
+            ? `<span class="chip chip-ok">Supervisor OK</span>`
+            : supervisorHealthy === false
+                ? `<span class="chip chip-warn">Degraded</span>`
+                : "";
+    const workersWithErrors = workers.filter((w) => {
+        const st = String(w.state || "").toLowerCase();
+        return (
+            Number(w.consecutive_failures || 0) > 0 ||
+            Boolean(w.last_error_type) ||
+            st === "failed" ||
+            st === "error" ||
+            st === "dead" ||
+            st === "cooldown"
+        );
+    }).length;
 
+    const activeProcessed = activeBroadcast
+        ? Number(activeBroadcast.processed_count ?? activeBroadcast.success_count ?? 0)
+        : 0;
     const fourthTileHtml = activeBroadcast
         ? `
             <div class="pulse-card" data-nav="broadcasts" role="button" tabindex="0">
                 <span class="pulse-label">Активная рассылка</span>
-                <span class="pulse-val">${Number(activeBroadcast.sent_count || 0)} / ${Number(activeBroadcast.total_count || 0)}</span>
+                <span class="pulse-val">${activeProcessed} / ${Number(activeBroadcast.total_count || 0)}</span>
                 <span class="pulse-sub">Статус: ${escapeHtml(activeBroadcast.status || "в процессе")}</span>
             </div>
         `
@@ -124,18 +156,22 @@ function _renderOverviewContent(root, state, data) {
         ? workers
             .map((w) => {
                 const fails = Number(w.consecutive_failures || 0);
-                const lastRun = w.last_run_at || w.updated_at || w.last_success_at || "";
+                const stateVal = w.state || "—";
+                const errorType = w.last_error_type || "";
+                const criticalBadge = w.critical
+                    ? ` <span class="chip chip-muted" style="font-size:10px; padding:2px 6px;">critical</span>`
+                    : "";
                 return `
                     <div class="history-row">
                         <div class="history-row-head">
-                            <strong>${escapeHtml(w.name)}</strong>
-                            ${_workerStatusChip(w.status, fails)}
+                            <span><strong>${escapeHtml(w.name)}</strong>${criticalBadge}</span>
+                            ${_workerStatusChip(stateVal, fails)}
                         </div>
                         <div class="history-row-meta">
+                            <span>Состояние: ${escapeHtml(stateVal)}</span>
                             <span>Сбоев подряд: ${fails}</span>
-                            <span>${lastRun ? escapeHtml(formatRelativeTime(lastRun)) : "—"}</span>
                         </div>
-                        ${w.last_error ? `<div class="pulse-sub" style="color:#fecaca;">${escapeHtml(w.last_error)}</div>` : ""}
+                        ${errorType ? `<div class="pulse-sub" style="color:#fecaca;">Последняя ошибка: ${escapeHtml(errorType)}</div>` : ""}
                     </div>
                 `;
             })
@@ -169,7 +205,7 @@ function _renderOverviewContent(root, state, data) {
             </div>
 
             <section class="card">
-                <form id="overviewQuickSearchForm" class="row" style="gap:8px;">
+                <form id="overviewQuickSearchForm" class="row" style="gap:8px; flex-wrap:nowrap;">
                     <input
                         id="overviewQuickSearchInput"
                         class="input"
@@ -184,6 +220,7 @@ function _renderOverviewContent(root, state, data) {
             <details class="guide-details">
                 <summary class="guide-summary">
                     <span>Фоновые воркеры (${workers.length})${workersWithErrors ? ` · Ошибки: ${workersWithErrors}` : ""}</span>
+                    ${supervisorBadgeHtml}
                 </summary>
                 <div class="history-list" style="margin-top:10px;">
                     ${workersHtml}
@@ -225,7 +262,7 @@ function _renderOverviewContent(root, state, data) {
                 state.onOpenUsersFilter?.("all", "");
             } else if (target === "expiring-users") {
                 e.stopPropagation();
-                state.onOpenUsersFilter?.("expiring", "");
+                state.onOpenUsersFilter?.("expiring_3d", "");
             } else if (target === "broadcasts") {
                 state.onOpenBroadcasts?.();
             }

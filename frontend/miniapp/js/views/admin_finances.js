@@ -16,14 +16,16 @@ let _maintInFlight = null;
 const _METADATA_FLAG_MAP = {
     requires_manual_review: { label: "Ручная проверка", cls: "chip-err" },
     settlement_held: { label: "Холд", cls: "chip-warn" },
-    payment_amount_mismatch: { label: "Расхождение суммы", cls: "chip-err" },
-    amount_mismatch: { label: "Расхождение суммы", cls: "chip-err" },
+    payment_amount_mismatch: { label: "Расхождение суммы оплаты", cls: "chip-err" },
+    refund_amount_mismatch: { label: "Расхождение суммы возврата", cls: "chip-err" },
+    payment_id_mismatch: { label: "Несовпадение ID платежа", cls: "chip-err" },
+    refund_payment_id_mismatch: { label: "Несовпадение ID возврата", cls: "chip-err" },
+    late_payment_after_refund_on_canceled: { label: "Оплата после отмены/возврата", cls: "chip-err" },
+    underpaid: { label: "Недоплата", cls: "chip-err" },
+    mixed_fallback_credited: { label: "Возврат на баланс (fallback)", cls: "chip-warn" },
     fulfillment_error: { label: "Ошибка выдачи", cls: "chip-err" },
-    paid_after_cancel: { label: "Оплата после отмены", cls: "chip-err" },
-    currency_mismatch: { label: "Расхождение валюты", cls: "chip-err" },
-    refund_debt: { label: "Долг возврата", cls: "chip-err" },
-    dispute_open: { label: "Открыт спор", cls: "chip-err" },
-    chargeback: { label: "Чарджбэк", cls: "chip-err" },
+    negative_balance_rub: { label: "Отрицательный баланс", cls: "chip-err" },
+    partial_refund_amount_rub: { label: "Частичный возврат", cls: "chip-warn" },
 };
 
 const _AUDIT_ACTION_LABELS = {
@@ -66,6 +68,7 @@ const _AUDIT_ACTION_LABELS = {
     REDUCE: "Сокращение срока",
     REFERRAL_ATTACHED: "Привязка реферала",
     REFERRAL_BONUS_GRANTED: "Реферальный бонус",
+    SERVER_FORCE_PURGE: "Принудительное удаление ноды",
     TOGGLE_MAINTENANCE: "Техработы платежей",
     TOGGLE_SERVER: "Переключение ноды",
     USER_REGISTER: "Регистрация",
@@ -83,7 +86,8 @@ const _AUDIT_ACTION_LABELS = {
 };
 
 function _auditActionLabel(action) {
-    return _AUDIT_ACTION_LABELS[action] || action || "—";
+    const key = String(action || "").toUpperCase();
+    return _AUDIT_ACTION_LABELS[key] || action || "—";
 }
 
 function _financeStatusChip(status) {
@@ -107,7 +111,9 @@ function _financeStatusChip(status) {
 
 function _webhookStatusChip(status) {
     if (status === "pending") return `<span class="chip chip-warn">Ожидает</span>`;
+    if (status === "processing") return `<span class="chip chip-warn">Обработка</span>`;
     if (status === "retry") return `<span class="chip chip-warn">Повтор</span>`;
+    if (status === "succeeded") return `<span class="chip chip-ok">Обработан</span>`;
     if (status === "dead") return `<span class="chip chip-err">Ошибка (dead)</span>`;
     return `<span class="chip chip-muted">${escapeHtml(status || "—")}</span>`;
 }
@@ -129,7 +135,7 @@ function _cleanQuery(val) {
     return String(val || "").trim().replace(/^@+/, "");
 }
 
-function _renderMaintenanceCard(state) {
+function _renderMaintenanceCardInner(state) {
     const isLoading = typeof state.paymentsMaintenance === "undefined" && !state.paymentsMaintenanceError;
     const isError = Boolean(state.paymentsMaintenanceError);
     const enabled = Boolean(state.paymentsMaintenance);
@@ -154,23 +160,25 @@ function _renderMaintenanceCard(state) {
     }
 
     return `
-        <section class="card" style="margin-bottom:12px;">
-            <div class="row" style="align-items:center; justify-content:space-between; gap:12px;">
-                <div>
-                    <div style="font-weight:600; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                        <span>Техработы платежей</span>
-                        <span id="paymentsMaintBadge" class="chip ${badgeCls}">${escapeHtml(badgeText)}</span>
-                    </div>
-                    <div class="muted" style="font-size:12px; margin-top:4px;">
-                        Блокирует создание новых заказов и пополнение баланса. Действующие подписки продолжают работать.
-                    </div>
+        <div class="row" style="align-items:center; justify-content:space-between; gap:12px;">
+            <div>
+                <div style="font-weight:600; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                    <span>Техработы платежей</span>
+                    <span id="paymentsMaintBadge" class="chip ${badgeCls}">${escapeHtml(badgeText)}</span>
                 </div>
-                <button type="button" id="togglePaymentsMaintBtn" class="btn ${btnCls}" style="white-space:nowrap;" ${btnDisabled}>
-                    ${escapeHtml(btnText)}
-                </button>
+                <div class="muted" style="font-size:12px; margin-top:4px;">
+                    Блокирует создание новых заказов и пополнение баланса. Действующие подписки продолжают работать.
+                </div>
             </div>
-        </section>
+            <button type="button" id="togglePaymentsMaintBtn" class="btn ${btnCls}" style="white-space:nowrap;" ${btnDisabled}>
+                ${escapeHtml(btnText)}
+            </button>
+        </div>
     `;
+}
+
+function _renderMaintenanceCard(state) {
+    return `<section id="paymentsMaintCard" class="card" style="margin-bottom:12px;">${_renderMaintenanceCardInner(state)}</section>`;
 }
 
 export function renderAdminFinancesView(root, state) {
@@ -230,6 +238,10 @@ export function renderAdminFinancesView(root, state) {
                             <option value="server" ${state.auditTargetType === "server" ? "selected" : ""}>Нода</option>
                             <option value="broadcast" ${state.auditTargetType === "broadcast" ? "selected" : ""}>Рассылка</option>
                             <option value="system_setting" ${state.auditTargetType === "system_setting" ? "selected" : ""}>Настройки</option>
+                            <option value="system" ${state.auditTargetType === "system" ? "selected" : ""}>Система</option>
+                            <option value="admin" ${state.auditTargetType === "admin" ? "selected" : ""}>Админ</option>
+                            <option value="mass_bonus" ${state.auditTargetType === "mass_bonus" ? "selected" : ""}>Массовый бонус</option>
+                            <option value="mass_extend" ${state.auditTargetType === "mass_extend" ? "selected" : ""}>Массовое продление</option>
                         </select>
                     </div>
                     <div class="row" style="flex-wrap:nowrap;">
@@ -337,6 +349,13 @@ export function renderAdminFinancesView(root, state) {
         }
     };
 
+    const syncMaintenanceCard = () => {
+        const maintCard = root.querySelector("#paymentsMaintCard");
+        if (!maintCard) return;
+        maintCard.innerHTML = _renderMaintenanceCardInner(state);
+        bindMaintenanceToggle();
+    };
+
     const loadPaymentsMaintenance = () => {
         if (_maintInFlight) return _maintInFlight;
         state.paymentsMaintenanceError = false;
@@ -353,11 +372,48 @@ export function renderAdminFinancesView(root, state) {
             .finally(() => {
                 _maintInFlight = null;
                 if (state.adminTab === "finances" && state.mode === "admin") {
-                    renderAdminFinancesView(root, state);
+                    syncMaintenanceCard();
                 }
             });
         return _maintInFlight;
     };
+
+    function bindMaintenanceToggle() {
+        const toggleMaintBtn = root.querySelector("#togglePaymentsMaintBtn");
+        if (!toggleMaintBtn) return;
+        toggleMaintBtn.addEventListener("click", () => {
+            if (state.paymentsMaintenanceError) {
+                state.paymentsMaintenance = undefined;
+                state.paymentsMaintenanceError = false;
+                syncMaintenanceCard();
+                loadPaymentsMaintenance();
+                return;
+            }
+            const nextVal = !state.paymentsMaintenance;
+            showConfirmModal({
+                title: nextVal ? "Приостановить приём платежей?" : "Возобновить приём платежей?",
+                message: nextVal
+                    ? "Создание новых заказов и пополнение баланса будет временно заблокировано для всех пользователей. Действующие подписки продолжают работать."
+                    : "Пользователи снова смогут оформлять подписки и пополнять баланс.",
+                confirmText: nextVal ? "Приостановить" : "Возобновить",
+                cancelText: "Отмена",
+                isDestructive: nextVal,
+                onConfirm: async () => {
+                    toggleMaintBtn.disabled = true;
+                    try {
+                        const res = await api.setPaymentsMaintenance(nextVal);
+                        state.paymentsMaintenance = Boolean(res.enabled);
+                        state.paymentsMaintenanceError = false;
+                        showToast(res.enabled ? "Техработы платежей включены" : "Приём платежей возобновлён");
+                        syncMaintenanceCard();
+                    } catch (err) {
+                        showToast(err.message || "Ошибка переключения техработ", "error");
+                        toggleMaintBtn.disabled = false;
+                    }
+                },
+            });
+        });
+    }
 
     root.querySelectorAll("[data-fintab]").forEach((btn) => {
         btn.addEventListener("click", async () => {
@@ -392,55 +448,31 @@ export function renderAdminFinancesView(root, state) {
         });
     }
 
-    const toggleMaintBtn = root.querySelector("#togglePaymentsMaintBtn");
-    if (toggleMaintBtn) {
-        toggleMaintBtn.addEventListener("click", () => {
-            if (state.paymentsMaintenanceError) {
-                state.paymentsMaintenance = undefined;
-                state.paymentsMaintenanceError = false;
-                renderAdminFinancesView(root, state);
-                return;
-            }
-            const nextVal = !state.paymentsMaintenance;
-            showConfirmModal({
-                title: nextVal ? "Приостановить приём платежей?" : "Возобновить приём платежей?",
-                message: nextVal
-                    ? "Создание новых заказов и пополнение баланса будет временно заблокировано для всех пользователей. Действующие подписки продолжат работать."
-                    : "Пользователи снова смогут оформлять подписки и пополнять баланс.",
-                confirmText: nextVal ? "Приостановить" : "Возобновить",
-                cancelText: "Отмена",
-                isDestructive: nextVal,
-                onConfirm: async () => {
-                    toggleMaintBtn.disabled = true;
-                    try {
-                        const res = await api.setPaymentsMaintenance(nextVal);
-                        state.paymentsMaintenance = Boolean(res.enabled);
-                        state.paymentsMaintenanceError = false;
-                        showToast(res.enabled ? "Техработы платежей включены" : "Приём платежей возобновлён");
-                        renderAdminFinancesView(root, state);
-                    } catch (err) {
-                        showToast(err.message || "Ошибка переключения техработ", "error");
-                        toggleMaintBtn.disabled = false;
-                    }
-                },
-            });
-        });
-    }
+    bindMaintenanceToggle();
 
     if (typeof state.paymentsMaintenance === "undefined" && !state.paymentsMaintenanceError) {
         loadPaymentsMaintenance();
     }
 
+    const listContainer = root.querySelector("#finListContainer");
+
     if (subTab === "audit") {
+        const auditQueryInput = root.querySelector("#auditQueryInput");
         const syncAuditFilters = () => {
             state.auditAction = root.querySelector("#auditActionSelect").value;
             state.auditTargetType = root.querySelector("#auditTargetTypeSelect").value;
-            state.auditQuery = _cleanQuery(root.querySelector("#auditQueryInput").value);
+            state.auditQuery = _cleanQuery(auditQueryInput.value);
         };
         root.querySelector("#auditFilterForm").addEventListener("submit", async (e) => {
             e.preventDefault();
             syncAuditFilters();
             await loadAudit(0);
+        });
+        auditQueryInput.addEventListener("search", async () => {
+            if (auditQueryInput.value === "") {
+                syncAuditFilters();
+                await loadAudit(0);
+            }
         });
         root.querySelector("#auditActionSelect").addEventListener("change", async () => {
             syncAuditFilters();
@@ -450,19 +482,36 @@ export function renderAdminFinancesView(root, state) {
             syncAuditFilters();
             await loadAudit(0);
         });
-        _renderAuditRows(root.querySelector("#finListContainer"), auditData.items || [], state);
-        _renderPager(root, auditData, loadAudit, "событий");
+        if (state.auditLogsData == null) {
+            listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:12px;">Загрузка…</div>`;
+            loadAudit(0);
+        } else {
+            _renderAuditRows(listContainer, auditData.items || [], state);
+            _renderPager(root, auditData, loadAudit, "событий");
+        }
     } else if (subTab === "webhooks") {
-        _renderWebhookRows(root.querySelector("#finListContainer"), webhooksData);
+        if (state.webhooksData == null) {
+            listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:12px;">Загрузка…</div>`;
+            loadWebhooks();
+        } else {
+            _renderWebhookRows(listContainer, webhooksData);
+        }
     } else {
+        const finQueryInput = root.querySelector("#finQueryInput");
         const syncFinFilters = () => {
-            state.finQuery = _cleanQuery(root.querySelector("#finQueryInput").value);
+            state.finQuery = _cleanQuery(finQueryInput.value);
             state.finStatus = root.querySelector("#finStatusSelect").value;
         };
         root.querySelector("#finFilterForm").addEventListener("submit", async (e) => {
             e.preventDefault();
             syncFinFilters();
             await loadFinances(0);
+        });
+        finQueryInput.addEventListener("search", async () => {
+            if (finQueryInput.value === "") {
+                syncFinFilters();
+                await loadFinances(0);
+            }
         });
         root.querySelector("#finStatusSelect").addEventListener("change", async () => {
             syncFinFilters();
@@ -473,8 +522,13 @@ export function renderAdminFinancesView(root, state) {
             state.finAttentionOnly = !state.finAttentionOnly;
             await loadFinances(0);
         });
-        _renderFinanceRows(root.querySelector("#finListContainer"), finData.items || [], state);
-        _renderPager(root, finData, loadFinances, "заказов");
+        if (state.financesData == null) {
+            listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:12px;">Загрузка…</div>`;
+            loadFinances(0);
+        } else {
+            _renderFinanceRows(listContainer, finData.items || [], state);
+            _renderPager(root, finData, loadFinances, "заказов");
+        }
     }
 }
 
@@ -647,16 +701,24 @@ function _renderWebhookRows(container, items) {
     items.forEach((wh) => {
         const row = document.createElement("div");
         row.className = "item-row";
-        const timeStr = wh.created_at ? `${formatRelativeTime(wh.created_at)} (${formatDate(wh.created_at)})` : "—";
+        const eventKey = wh.event_key || wh.event_id || "";
+        const receivedTs = wh.received_at || wh.created_at;
+        const receivedStr = receivedTs ? `${formatRelativeTime(receivedTs)} (${formatDate(receivedTs)})` : "—";
+        const processedStr = wh.processed_at ? formatDate(wh.processed_at) : null;
         row.innerHTML = `
             <div class="row">
                 <span class="mono" style="font-weight:600; font-size:12px;">${escapeHtml(wh.event_type || "—")}</span>
                 ${_webhookStatusChip(wh.status)}
             </div>
-            <div class="row muted" style="font-size:11px;">
-                <span>Попыток: <b class="tabular">${wh.attempts ?? 0}</b></span>
-                <span>${escapeHtml(timeStr)}</span>
+            <div class="row muted" style="font-size:11px; flex-wrap:wrap; gap:6px;">
+                <span>Получен: ${escapeHtml(receivedStr)}</span>
+                ${processedStr ? `<span>Обработан: ${escapeHtml(processedStr)}</span>` : ""}
             </div>
+            ${
+                eventKey
+                    ? `<div class="muted" style="font-size:11px; word-break:break-all;">Ключ: <span class="mono">${escapeHtml(eventKey)}</span></div>`
+                    : ""
+            }
             <div class="row muted" style="font-size:11px; flex-wrap:wrap; gap:6px;">
                 <span>Заказ: <span class="mono">${escapeHtml(wh.public_order_id || "—")}</span></span>
                 ${
@@ -666,14 +728,21 @@ function _renderWebhookRows(container, items) {
                 }
             </div>
             ${
-                wh.last_error
-                    ? `<div class="mono" style="font-size:11px; color:var(--err, #ef4444); white-space:pre-wrap; word-break:break-word;">${escapeHtml(wh.last_error)}</div>`
+                wh.payment_external_id
+                    ? `<div class="row muted" style="font-size:11px; flex-wrap:wrap; gap:6px;">
+                        <span>Платёж: <span class="mono">${escapeHtml(wh.payment_external_id)}</span></span>
+                        <button type="button" class="btn btn-sm" data-copy-wh-payment="${escapeHtml(wh.payment_external_id)}" style="padding:1px 6px; font-size:11px;">Копировать платёж</button>
+                    </div>`
                     : ""
             }
         `;
-        const copyBtn = row.querySelector("[data-copy-wh-order]");
-        if (copyBtn) {
-            copyBtn.addEventListener("click", () => copyText(wh.public_order_id, "ID заказа скопирован"));
+        const copyOrderBtn = row.querySelector("[data-copy-wh-order]");
+        if (copyOrderBtn) {
+            copyOrderBtn.addEventListener("click", () => copyText(wh.public_order_id, "ID заказа скопирован"));
+        }
+        const copyPaymentBtn = row.querySelector("[data-copy-wh-payment]");
+        if (copyPaymentBtn) {
+            copyPaymentBtn.addEventListener("click", () => copyText(wh.payment_external_id, "ID платежа скопирован"));
         }
         container.appendChild(row);
     });

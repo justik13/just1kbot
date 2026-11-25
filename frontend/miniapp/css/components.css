@@ -1282,17 +1282,6 @@ body[data-tier="white_internet"] .guides-trigger-badge {
     gap: 8px;
 }
 
-@media (max-width: 420px) {
-    .seg-group {
-        flex-wrap: wrap;
-    }
-
-    .seg-btn {
-        flex: 1 1 auto;
-        min-width: max-content;
-    }
-}
-
 .seg-btn {
     flex: 1;
     min-width: 0;
@@ -1307,6 +1296,17 @@ body[data-tier="white_internet"] .guides-trigger-badge {
     cursor: pointer;
     text-align: center;
     transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+@media (max-width: 420px) {
+    .seg-group {
+        flex-wrap: wrap;
+    }
+
+    .seg-btn {
+        flex: 1 1 auto;
+        min-width: max-content;
+    }
 }
 
 .btn-group {
@@ -2279,6 +2279,11 @@ details[open] > summary .disclosure-pill svg {
     border: 1px solid var(--border-subtle);
     font-size: 12px;
     color: var(--text-primary);
+}
+
+.pulse-card[role="button"],
+.alert-banner[role="button"] {
+    cursor: pointer;
 }
 
 .alert-banner.warn {

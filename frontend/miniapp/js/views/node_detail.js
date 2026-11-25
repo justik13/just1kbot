@@ -308,7 +308,7 @@ function _openEditModal(node, onDone) {
 
 export function renderNodeDetailView(root, node, onBack, onReload) {
     const health = healthChipInfo(node);
-    const isDecommissioning = String(node.lifecycle_status || "ACTIVE").toUpperCase() === "DECOMMISSIONING";
+    const isDecommissioning = String(node.lifecycle_status || "").toUpperCase() === "DECOMMISSIONING";
     const canResyncClients = node.role === "ru_hub" || node.role === "exit_node";
 
     root.innerHTML = `
@@ -440,13 +440,9 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
             isDestructive: willDisable,
             onConfirm: async () => {
                 await withButtonLoading(b, "Применение...", async () => {
-                    try {
-                        await api.toggleNode(node.id);
-                        showToast(`Статус ноды #${node.id} изменён`);
-                        await onReload();
-                    } catch (err) {
-                        showToast(err.message || "Ошибка переключения", "error");
-                    }
+                    await api.toggleNode(node.id);
+                    showToast(`Статус ноды #${node.id} изменён`);
+                    await onReload();
                 });
             },
         });
@@ -493,17 +489,13 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
             isDestructive: !isDecommissioning,
             onConfirm: async () => {
                 await withButtonLoading(b, "Применение...", async () => {
-                    try {
-                        await api.setNodeLifecycle(node.id, targetStatus);
-                        showToast(
-                            isDecommissioning
-                                ? `Нода #${node.id} возвращена в ACTIVE`
-                                : `Нода #${node.id} переведена в Drain (DECOMMISSIONING)`
-                        );
-                        await onReload();
-                    } catch (err) {
-                        showToast(err.message || "Ошибка смены lifecycle", "error");
-                    }
+                    await api.setNodeLifecycle(node.id, targetStatus);
+                    showToast(
+                        isDecommissioning
+                            ? `Нода #${node.id} возвращена в ACTIVE`
+                            : `Нода #${node.id} переведена в Drain (DECOMMISSIONING)`
+                    );
+                    await onReload();
                 });
             },
         });
@@ -531,8 +523,8 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
                 try {
                     await api.deleteNode(node.id);
                     showToast(`Сервер #${node.id} удалён`);
-                    await onReload();
-                    onBack();
+                    const ok = await onReload({ skipRender: true, removeNodeId: node.id });
+                    if (ok !== false) onBack();
                 } catch (err) {
                     if (err && err.status === 409) {
                         showConfirmModal({
@@ -542,19 +534,15 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
                             cancelText: "Отмена",
                             isDestructive: true,
                             onConfirm: async () => {
-                                try {
-                                    await api.deleteNode(node.id, true);
-                                    showToast(`Сервер #${node.id} принудительно удалён`);
-                                    await onReload();
-                                    onBack();
-                                } catch (err2) {
-                                    showToast(err2.message || "Ошибка удаления", "error");
-                                }
+                                await api.deleteNode(node.id, true);
+                                showToast(`Сервер #${node.id} принудительно удалён`);
+                                const ok = await onReload({ skipRender: true, removeNodeId: node.id });
+                                if (ok !== false) onBack();
                             },
                         });
                         return;
                     }
-                    showToast(err.message || "Ошибка удаления", "error");
+                    throw err;
                 }
             },
         });

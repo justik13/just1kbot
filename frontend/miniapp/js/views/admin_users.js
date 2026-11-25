@@ -117,7 +117,9 @@ export function renderAdminUsersView(root, state, onOpenUser) {
     });
 
     searchInput.addEventListener("search", () => {
-        reload(getLiveQuery(), state.usersFilter || "all", 0);
+        if (searchInput.value === "") {
+            reload("", state.usersFilter || "all", 0);
+        }
     });
 
     const searchFormEl = root.querySelector("#userSearchForm");

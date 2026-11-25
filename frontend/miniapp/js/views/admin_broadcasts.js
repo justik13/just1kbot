@@ -204,7 +204,12 @@ export function renderAdminBroadcastsView(root, state) {
                 }
             }
         } catch (err) {
+            if (err && err.code === "2fa_required") {
+                clearBroadcastPollTimer();
+                return;
+            }
             if (reqId !== _bcReqId) return;
+            clearBroadcastPollTimer();
             if (!silent) showToast(err.message || "Не удалось обновить список рассылок", "error");
         }
     };
@@ -324,10 +329,12 @@ export function renderAdminBroadcastsView(root, state) {
             }
             try {
                 const preview = await withButtonLoading(submitBtn, "Подсчёт…", () => api.previewBroadcast(audience));
-                const totalRub = amount * Number(preview.reachable_count || 0);
+                const totalCount = Number(preview.total_count ?? preview.reachable_count ?? 0);
+                const reachableCount = Number(preview.reachable_count ?? 0);
+                const totalRub = amount * totalCount;
                 _confirmModal(
                     "Массовое начисление бонуса",
-                    `Начислить +${amount} ₽ сегменту «${preview.label || audienceLabel}»?\nПолучателей: ${preview.reachable_count} · Итого: ${totalRub} ₽.\nДействие необратимо.`,
+                    `Начислить +${amount} ₽ сегменту «${preview.label || audienceLabel}»?\nЗатронуто пользователей: ${totalCount} (из них получат push в боте: ${reachableCount}) · Итого: ${totalRub} ₽.\nДействие необратимо.`,
                     async () => {
                         try {
                             const res = await api.massBonus({
@@ -359,9 +366,11 @@ export function renderAdminBroadcastsView(root, state) {
             const scopeLabel = scope === "white_internet" ? "Белый интернет" : "Стандарт";
             try {
                 const preview = await withButtonLoading(submitBtn, "Подсчёт…", () => api.previewBroadcast(audience));
+                const totalCount = Number(preview.total_count ?? preview.reachable_count ?? 0);
+                const reachableCount = Number(preview.reachable_count ?? 0);
                 _confirmModal(
                     "Массовое продление подписки",
-                    `Продлить «${scopeLabel}» на +${days} дн. для сегмента «${preview.label || audienceLabel}»?\nПолучателей: ${preview.reachable_count}.`,
+                    `Продлить «${scopeLabel}» на +${days} дн. для сегмента «${preview.label || audienceLabel}»?\nЗатронуто пользователей: ${totalCount} (из них получат push в боте: ${reachableCount}).`,
                     async () => {
                         try {
                             const res = await api.massExtend({
@@ -459,11 +468,20 @@ function _renderHistoryList(root, container, state, reloadBroadcasts) {
             repeatBtn.addEventListener("click", () => {
                 const textInput = root.querySelector("#bcTextInput");
                 if (textInput) {
-                    textInput.value = b.text_preview || "";
+                    const previewText = String(b.text_preview || "");
+                    textInput.value = previewText;
                     _updateCharCounter(root);
                     textInput.focus();
                     textInput.scrollIntoView({ behavior: "smooth", block: "center" });
-                    showToast("Текст скопирован в редактор");
+                    const looksTruncated =
+                        previewText.endsWith("...") ||
+                        previewText.endsWith("…") ||
+                        previewText.length >= 180;
+                    if (looksTruncated) {
+                        showToast("Скопировано превью (до 180 симв.) — проверьте полный текст", "warn");
+                    } else {
+                        showToast("Текст скопирован в редактор");
+                    }
                 }
             });
         }

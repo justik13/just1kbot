@@ -29,35 +29,80 @@ const ORDER_KIND_MAP = {
 const METADATA_FLAG_MAP = {
     requires_manual_review: { text: "Ручная проверка", cls: "chip-err" },
     settlement_held: { text: "Холд", cls: "chip-warn" },
-    payment_amount_mismatch: { text: "Расхождение суммы", cls: "chip-err" },
+    payment_amount_mismatch: { text: "Расхождение суммы оплаты", cls: "chip-err" },
+    refund_amount_mismatch: { text: "Расхождение суммы возврата", cls: "chip-err" },
+    payment_id_mismatch: { text: "Несовпадение ID платежа", cls: "chip-err" },
+    refund_payment_id_mismatch: { text: "Несовпадение ID возврата", cls: "chip-err" },
+    late_payment_after_refund_on_canceled: { text: "Оплата после отмены/возврата", cls: "chip-err" },
+    underpaid: { text: "Недоплата", cls: "chip-err" },
+    mixed_fallback_credited: { text: "Возврат на баланс (fallback)", cls: "chip-warn" },
     fulfillment_error: { text: "Ошибка выдачи", cls: "chip-err" },
+    negative_balance_rub: { text: "Отрицательный баланс", cls: "chip-err" },
+    partial_refund_amount_rub: { text: "Частичный возврат", cls: "chip-warn" },
 };
 
 const LEDGER_ENTRY_TYPE_MAP = {
     payment_credit: "Зачисление",
-    bonus_credit: "Бонус",
-    admin_credit: "Коррекция (+)",
-    admin_debit: "Коррекция (−)",
     purchase_debit: "Оплата подписки",
     refund_debit: "Возврат",
-    referral_bonus: "Реферальный бонус",
+    admin_adjustment: "Коррекция админом",
 };
 
 const AUDIT_ACTION_MAP = {
-    admin_balance_topup: "Изменение баланса",
-    admin_sub_extend: "Продление подписки",
-    admin_sub_change: "Изменение подписки",
-    reduce: "Сокращение подписки",
-    white_internet_extend: "Продление БИ",
-    white_internet_traffic_added: "Добавлен трафик БИ",
-    white_internet_quota_set: "Установлена квота БИ",
-    white_internet_traffic_reset: "Сброс трафика БИ",
-    user_devices_reset: "Сброс всех HWID",
-    user_device_deleted: "Удаление устройства",
-    user_token_rotated: "Перевыпуск токена",
-    user_resync: "Пересинхронизация узлов",
-    user_restrictions: "Изменение ограничений",
-    user_message: "Сообщение пользователю",
+    ACCOUNT_PURCHASE_SETTLED: "Оплата подписки",
+    ACCOUNT_TARIFF_CHANGE_SETTLED: "Смена тарифа",
+    ADD_SERVER: "Добавление ноды",
+    ADMIN_2FA_LOCKED: "Блокировка 2FA",
+    ADMIN_2FA_LOGOUT_ALL: "Сброс 2FA-сессий",
+    ADMIN_2FA_VERIFY_FAILED: "Неудачная 2FA",
+    ADMIN_BALANCE_DEDUCT: "Списание баланса",
+    ADMIN_BALANCE_TOPUP: "Пополнение баланса",
+    ADMIN_DIRECT_MESSAGE_SENT: "Сообщение пользователю",
+    ADMIN_SUB_CHANGE: "Изменение подписки",
+    ADMIN_SUB_EXTEND: "Продление подписки",
+    ADMIN_SUB_GRANT: "Выдача подписки",
+    ADMIN_SUB_REDUCE: "Сокращение подписки",
+    BALANCE_REFUND_REQUESTED: "Запрос возврата",
+    BROADCAST: "Запуск рассылки",
+    BROADCAST_COMPLETED: "Рассылка завершена",
+    CHANGE_TARIFF: "Смена тарифа",
+    CLEANUP_DEVICE_DELETE: "Очистка устройства",
+    DEDUCT_USER_BALANCE: "Списание баланса",
+    DELETE_SERVER: "Удаление ноды",
+    EDIT_SERVER: "Редактирование ноды",
+    EXTEND: "Продление",
+    GRANT: "Выдача доступа",
+    INCY_SETTINGS_UPDATED: "Настройки INCY",
+    MANUAL_GRANT: "Ручная выдача",
+    MASS_BONUS_GRANTED: "Массовый бонус",
+    MASS_SUB_EXTEND: "Массовое продление",
+    PAID_AFTER_CANCEL: "Оплата после отмены",
+    PAYMENT_CANCELLED: "Платёж отменён",
+    PAYMENT_CANCEL_AFTER_COMPLETED: "Отмена после оплаты",
+    PAYMENT_CHARGEBACK: "Чарджбэк",
+    PAYMENT_DISPUTE_MANUAL_REVIEW: "Спор: ручная проверка",
+    PAYMENT_DISPUTE_OPENED: "Спор открыт",
+    PAYMENT_DISPUTE_RESOLVED: "Спор закрыт",
+    PAYMENT_QUEUE_MANUAL_RETRY: "Повтор очереди платежа",
+    PAYMENT_SUCCESS: "Успешная оплата",
+    REDUCE: "Сокращение срока",
+    REFERRAL_ATTACHED: "Привязка реферала",
+    REFERRAL_BONUS_GRANTED: "Реферальный бонус",
+    SERVER_FORCE_PURGE: "Принудительное удаление ноды",
+    TOGGLE_MAINTENANCE: "Техработы платежей",
+    TOGGLE_SERVER: "Переключение ноды",
+    USER_REGISTER: "Регистрация",
+    USER_RESTORED: "Восстановление пользователя",
+    VLESS_HWID_RESET: "Сброс устройств (Стандарт)",
+    VLESS_TOKEN_RESET: "Ротация токена",
+    WELCOME_BONUS_GRANTED: "Приветственный бонус",
+    WHITE_INTERNET_DEVLIMIT_SET: "Лимит устройств БИ",
+    WHITE_INTERNET_EXTEND: "Продление БИ",
+    WHITE_INTERNET_HWID_RESET: "Сброс устройств БИ",
+    WHITE_INTERNET_QUOTA_SET: "Квота трафика БИ",
+    WHITE_INTERNET_TOKEN_RESET: "Ротация токена БИ",
+    WHITE_INTERNET_TRAFFIC_ADDED: "Добавлен трафик БИ",
+    WHITE_INTERNET_TRAFFIC_RESET: "Сброс трафика БИ",
 };
 
 function _formatDisplayName(u) {
@@ -263,7 +308,8 @@ function _renderHistoryTabContent(tab, details) {
     }
     return audits
         .map((a) => {
-            const actionLabel = AUDIT_ACTION_MAP[a.action] || a.action || "Действие";
+            const actionKey = String(a.action || "").toUpperCase();
+            const actionLabel = AUDIT_ACTION_MAP[actionKey] || a.action || "Действие";
             const detailsStr =
                 typeof a.details === "string"
                     ? a.details
@@ -361,6 +407,7 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         : "Не подключён";
 
     const wiStatusMap = {
+        pending: "Настраивается",
         active: "Активен",
         expired: "Истёк",
         exhausted: "Трафик исчерпан",
@@ -620,6 +667,11 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
 
         <section class="card">
             <div class="card-title">Ограничения</div>
+            ${
+                details.financial_block_reason
+                    ? `<div style="font-size:12px; padding:6px 10px; border-radius:8px; background:var(--accent-red-soft); border:1px solid rgba(248,113,113,0.28); color:var(--accent-red);">Причина блокировки: ${escapeHtml(details.financial_block_reason)}</div>`
+                    : ""
+            }
             <form id="userRestrictionsForm" class="field" style="gap:8px;">
                 <label class="toggle-row">
                     <span class="toggle-label">Финансовая блокировка</span>
@@ -716,7 +768,7 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
     });
 
     root.querySelector("#detOpenAuditBtn").addEventListener("click", () => {
-        state?.onOpenAudit?.(String(details.telegram_id));
+        state?.onOpenAudit?.(String(details.id), "user");
     });
 
     const forgiveDebtBtn = root.querySelector("#detForgiveDebtBtn");
@@ -785,15 +837,25 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
     });
     stdForm.addEventListener("submit", async (e) => {
         e.preventDefault();
-        const days = Number(stdForm.querySelector("input[name='days']").value);
+        const rawDays = stdForm.querySelector("input[name='days']").value.trim();
         const deviceLimit = Number(stdForm.querySelector("input[name='device_limit']").value);
+        const limitChanged = deviceLimit !== Number(stdLimit);
+        if (rawDays === "" && !limitChanged) {
+            showToast("Укажите количество дней или измените лимит устройств", "error");
+            return;
+        }
+        const days = rawDays === "" ? 0 : Number(rawDays);
         if (!Number.isInteger(days) || days < -3650 || days > 3650) {
             showToast("Укажите корректное количество дней", "error");
             return;
         }
+        if (!Number.isInteger(deviceLimit) || deviceLimit < 2 || deviceLimit > 10) {
+            showToast("Лимит устройств должен быть от 2 до 10", "error");
+            return;
+        }
         const notifyUser = Boolean(stdForm.querySelector("input[name='notify_user']")?.checked);
         const payload = { action: "grant_standard", days, notify_user: notifyUser };
-        if (days >= 0 || deviceLimit !== Number(stdLimit)) {
+        if (days >= 0 || limitChanged) {
             payload.device_limit = deviceLimit;
         }
         const execute = async () => {
@@ -841,15 +903,25 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
     });
     wiForm.addEventListener("submit", async (e) => {
         e.preventDefault();
-        const days = Number(wiForm.querySelector("input[name='days']").value);
+        const rawDays = wiForm.querySelector("input[name='days']").value.trim();
         const deviceLimit = Number(wiForm.querySelector("input[name='device_limit']").value);
+        const limitChanged = deviceLimit !== Number(wiLimit);
+        if (rawDays === "" && !limitChanged) {
+            showToast("Укажите количество дней или измените количество слотов", "error");
+            return;
+        }
+        const days = rawDays === "" ? 0 : Number(rawDays);
         if (!Number.isInteger(days) || days < -3650 || days > 3650) {
             showToast("Укажите корректное количество дней", "error");
             return;
         }
+        if (!Number.isInteger(deviceLimit) || deviceLimit < 1 || deviceLimit > 3) {
+            showToast("Количество слотов должно быть от 1 до 3", "error");
+            return;
+        }
         const notifyUser = Boolean(wiForm.querySelector("input[name='notify_user']")?.checked);
         const payload = { action: "grant_wi", days, notify_user: notifyUser };
-        if (days >= 0 || deviceLimit !== Number(wiLimit)) {
+        if (days >= 0 || limitChanged) {
             payload.device_limit = deviceLimit;
         }
         const execute = async () => {
@@ -974,24 +1046,31 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
     });
 
     const restrForm = root.querySelector("#userRestrictionsForm");
+    const origFinancialHold = Boolean(details.financial_hold);
+    const origTopupBlocked = Boolean(details.topup_blocked);
     restrForm.addEventListener("submit", (e) => {
         e.preventDefault();
         const financialHold = Boolean(restrForm.querySelector("input[name='financial_hold']")?.checked);
         const topupBlocked = Boolean(restrForm.querySelector("input[name='topup_blocked']")?.checked);
         const note = restrForm.querySelector("input[name='note']")?.value.trim() || null;
+        const holdChanged = financialHold !== origFinancialHold;
+        const topupChanged = topupBlocked !== origTopupBlocked;
+        if (!holdChanged && !topupChanged) {
+            showToast("Ограничения не изменились", "warn");
+            return;
+        }
+        const payload = { action: "restrictions", note };
+        if (holdChanged) payload.financial_hold = financialHold;
+        if (topupChanged) payload.topup_blocked = topupBlocked;
+        const enablingRestriction = (holdChanged && financialHold) || (topupChanged && topupBlocked);
         showConfirmModal({
             title: "Сохранить ограничения?",
-            message: `Применить настройки ограничений для ${uname}?${financialHold ? " Финансовая блокировка ограничит доступ." : ""}`,
+            message: `Применить настройки ограничений для ${uname}?${holdChanged && financialHold ? " Финансовая блокировка ограничит доступ." : ""}`,
             confirmText: "Сохранить",
             cancelText: "Отмена",
-            isDestructive: financialHold,
+            isDestructive: enablingRestriction,
             onConfirm: async () => {
-                const res = await api.adjustUser(details.id, {
-                    action: "restrictions",
-                    financial_hold: financialHold,
-                    topup_blocked: topupBlocked,
-                    note,
-                });
+                const res = await api.adjustUser(details.id, payload);
                 showToast(res.message || "Ограничения сохранены");
                 await refreshAll();
             },

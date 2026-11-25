@@ -379,7 +379,10 @@ async def create_server(
     effective_is_active = (
         is_active
         if is_active is not None
-        else (str(lifecycle_status) == ServerLifecycleStatus.ACTIVE)
+        else (
+            str(lifecycle_status)
+            in (ServerLifecycleStatus.ACTIVE, ServerLifecycleStatus.DECOMMISSIONING)
+        )
     )
     server = Server(
         name=name,
@@ -413,8 +416,11 @@ async def update_server(
             if key in ("extra_data", "capabilities"):
                 flag_modified(server, key)
 
-    if "lifecycle_status" in kwargs:
-        server.is_active = (str(server.lifecycle_status) == ServerLifecycleStatus.ACTIVE)
+    if "lifecycle_status" in kwargs and "is_active" not in kwargs:
+        server.is_active = str(server.lifecycle_status) in (
+            ServerLifecycleStatus.ACTIVE,
+            ServerLifecycleStatus.DECOMMISSIONING,
+        )
 
     await session.flush()
     await session.refresh(server)

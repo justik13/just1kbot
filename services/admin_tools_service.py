@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
-from sqlalchemy import String, cast, desc, func, or_, select, update
+from sqlalchemy import String, and_, cast, desc, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.keyboards.notifications import (
@@ -447,15 +447,22 @@ async def start_mass_extend(
     }
 
 
+_MAX_INT32 = 2_147_483_647
+_MAX_INT64 = 9_223_372_036_854_775_807
+
 _ANOMALY_METADATA_KEYS: tuple[str, ...] = (
     "requires_manual_review",
     "settlement_held",
-    "paid_after_cancel",
-    "amount_mismatch",
-    "currency_mismatch",
-    "refund_debt",
-    "dispute_open",
-    "chargeback",
+    "payment_amount_mismatch",
+    "refund_amount_mismatch",
+    "payment_id_mismatch",
+    "refund_payment_id_mismatch",
+    "late_payment_after_refund_on_canceled",
+    "underpaid",
+    "mixed_fallback_credited",
+    "fulfillment_error",
+    "negative_balance_rub",
+    "partial_refund_amount_rub",
 )
 
 
@@ -488,8 +495,8 @@ async def get_overview_finances_summary(session: AsyncSession) -> dict[str, Any]
             await session.scalar(
                 select(func.count(Order.id)).where(
                     or_(
-                        Order.metadata_["requires_manual_review"].as_boolean().is_(True),
-                        Order.metadata_["settlement_held"].as_boolean().is_(True),
+                        Order.metadata_["requires_manual_review"].astext == "true",
+                        Order.metadata_["settlement_held"].astext == "true",
                     )
                 )
             )
@@ -547,8 +554,8 @@ async def list_finances(
         count_stmt = count_stmt.where(Order.status == clean_status)
     if attention_only:
         attn_cond = or_(
-            Order.metadata_["requires_manual_review"].as_boolean().is_(True),
-            Order.metadata_["settlement_held"].as_boolean().is_(True),
+            Order.metadata_["requires_manual_review"].astext == "true",
+            Order.metadata_["settlement_held"].astext == "true",
         )
         stmt = stmt.where(attn_cond)
         count_stmt = count_stmt.where(attn_cond)
@@ -567,8 +574,9 @@ async def list_finances(
             pass
         if clean_q.isdigit():
             num = int(clean_q)
-            conds.append(User.telegram_id == num)
-            if 0 < num <= 2_147_483_647:
+            if 0 < num <= _MAX_INT64:
+                conds.append(User.telegram_id == num)
+            if 0 < num <= _MAX_INT32:
                 conds.append(Order.user_id == num)
         stmt = stmt.where(or_(*conds))
         count_stmt = count_stmt.where(or_(*conds))
@@ -644,8 +652,18 @@ async def list_audit_logs(
         conds = [AuditLog.details.ilike(f"%{clean_q}%"), AuditLog.action.ilike(f"%{clean_q}%")]
         if clean_q.isdigit():
             num = int(clean_q)
-            conds.extend([AuditLog.admin_id == num, AuditLog.target_id == num])
-            if 0 < num <= 2_147_483_647:
+            if 0 <= num <= _MAX_INT64:
+                conds.extend([AuditLog.admin_id == num, AuditLog.target_id == num])
+            if 0 < num <= _MAX_INT64:
+                conds.append(
+                    and_(
+                        func.lower(AuditLog.target_type) == "user",
+                        AuditLog.target_id.in_(
+                            select(User.id).where(User.telegram_id == num)
+                        ),
+                    )
+                )
+            if 0 < num <= _MAX_INT32:
                 conds.append(AuditLog.id == num)
         stmt = stmt.where(or_(*conds))
         count_stmt = count_stmt.where(or_(*conds))

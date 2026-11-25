@@ -6,6 +6,7 @@ import {
     formatDate,
     openExternalLink,
     openModal,
+    setPageBackButton,
     showConfirmModal,
     showToast,
 } from "../ui.js?v=2.8.0";
@@ -1118,26 +1119,12 @@ function _syncTopbarProfile(d, root) {
     };
 }
 
-let _cabinetTgBackListener = null;
-
 export function clearCabinetBackButton() {
-    _setCabinetBackButton(null);
+    setPageBackButton(null);
 }
 
 function _setCabinetBackButton(onBack) {
-    const tg = window.Telegram && window.Telegram.WebApp;
-    if (!tg || !tg.BackButton) return;
-    if (_cabinetTgBackListener) {
-        tg.BackButton.offClick(_cabinetTgBackListener);
-        _cabinetTgBackListener = null;
-    }
-    if (onBack) {
-        _cabinetTgBackListener = onBack;
-        tg.BackButton.onClick(_cabinetTgBackListener);
-        tg.BackButton.show();
-    } else {
-        tg.BackButton.hide();
-    }
+    setPageBackButton(onBack);
 }
 
 function _render(root) {

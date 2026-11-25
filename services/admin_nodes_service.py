@@ -587,6 +587,13 @@ async def update_node_settings(
         server_ro = await get_server_by_id(s, server_id, for_update=False)
         if server_ro is None:
             raise AdminNodeServiceError("Node not found", status_code=404)
+        if clean_url is not None:
+            existing = await get_server_by_api_url(s, clean_url)
+            if existing is not None and existing.id != server_id:
+                raise AdminNodeServiceError(
+                    "Node with this api_url already exists",
+                    status_code=409,
+                )
         return server_ro.api_url, server_ro.api_key
 
     cur_url, cur_key = await _run_in_session(session, _read_current)
@@ -742,13 +749,21 @@ async def toggle_node(
         if role == "ru_hub":
             from services.vless_subscription_service import VlessSubscriptionService
             sid = updated.id
-            queue_post_commit_task(session, lambda sid=sid: VlessSubscriptionService.sync_all_active_to_server_background(sid))
+
+            async def _spawn_ru_sync(sid: int = sid) -> None:
+                VlessSubscriptionService.sync_all_active_to_server_background(sid)
+
+            queue_post_commit_task(session, _spawn_ru_sync)
         elif role == "exit_node":
             from services.vless_subscription_service import VlessSubscriptionService
             ru_hubs = await VlessSubscriptionService.get_configured_vless_servers(session)
             for hub in ru_hubs:
                 hid = hub.id
-                queue_post_commit_task(session, lambda hid=hid: VlessSubscriptionService.sync_all_active_to_server_background(hid))
+
+                async def _spawn_hub_sync(hid: int = hid) -> None:
+                    VlessSubscriptionService.sync_all_active_to_server_background(hid)
+
+                queue_post_commit_task(session, _spawn_hub_sync)
     await AuditService.log_action(
         session,
         admin_id=admin_id,
@@ -820,7 +835,22 @@ async def set_node_lifecycle(
         if server is None:
             raise AdminNodeServiceError("Node not found", status_code=404)
 
-        updated = await update_server(session, server, lifecycle_status=normalized)
+        if normalized == ServerLifecycleStatus.ACTIVE.value and (
+            server.health_state == ServerHealthState.MANUAL_DISABLED or not server.is_active
+        ):
+            raise AdminNodeServiceError(
+                "Сначала включите сервер через переключатель активности.",
+                status_code=400,
+            )
+
+        update_kwargs: dict[str, Any] = {"lifecycle_status": normalized}
+        if normalized == ServerLifecycleStatus.DECOMMISSIONING.value:
+            # Preserve active state for WI client draining; never silently re-enable MANUAL_DISABLED nodes.
+            update_kwargs["is_active"] = bool(
+                server.is_active and server.health_state != ServerHealthState.MANUAL_DISABLED
+            )
+
+        updated = await update_server(session, server, **update_kwargs)
         _queue_topology_sync(session)
         await AuditService.log_action(
             session,
@@ -834,23 +864,91 @@ async def set_node_lifecycle(
 
 
 async def trigger_topology_sync(admin_telegram_id: int) -> dict[str, Any]:
-    """Trigger immediate v2 topology sync across all eligible nodes and log to AuditLog."""
-    from services.topology_sync_service import sync_v2_topology_to_nodes
+    """Trigger immediate v2 topology sync across all eligible nodes outside DB tx and log to AuditLog."""
+    from database.repositories.servers_repo import (
+        get_server_xray_api_url,
+        is_v2_node_server,
+    )
+    from services.topology_sync_service import (
+        _extract_ipv4,
+        _extract_ipv4_async,
+        build_v2_topology_links,
+    )
+    from services.xray_node_client import _sanitize_url
 
     async with session_scope() as session:
-        raw_results = await sync_v2_topology_to_nodes(session)
-        results = {str(k): bool(v) for k, v in raw_results.items()}
-        synced = sum(1 for v in raw_results.values() if v)
-        failed = sum(1 for v in raw_results.values() if not v)
+        servers = list(await get_all_servers(session))
+
+    for srv in servers:
+        if srv.is_active and srv.health_state == ServerHealthState.ONLINE and not _extract_ipv4(srv):
+            ip_res = await _extract_ipv4_async(srv)
+            if ip_res:
+                extra = dict(srv.extra_data or {})
+                extra["ip"] = ip_res
+                srv.extra_data = extra
+
+    payloads = build_v2_topology_links(servers)
+    targets: list[tuple[int, str, str, dict[str, Any]]] = []
+    for srv in servers:
+        if not srv.is_active or srv.health_state != ServerHealthState.ONLINE:
+            continue
+        if srv.lifecycle_status not in (None, ServerLifecycleStatus.ACTIVE):
+            continue
+        if not is_v2_node_server(srv):
+            continue
+        payload = payloads.get(srv.id)
+        if not payload:
+            continue
+        api_url = get_server_xray_api_url(srv)
+        if api_url and srv.api_key:
+            targets.append((srv.id, api_url, srv.api_key, payload))
+
+    async def _push_one(
+        srv_id: int, api_url: str, api_key: str, payload: dict[str, Any]
+    ) -> tuple[int, bool]:
+        try:
+            async with XrayNodeClient(timeout=10.0) as client:
+                ok, _data, err = await client.update_node_links(api_url, api_key, payload)
+                if not ok:
+                    logger.warning(
+                        "Topology links sync failed for node %s (%s): %s",
+                        srv_id,
+                        _sanitize_url(api_url),
+                        err,
+                    )
+                return srv_id, ok
+        except Exception as exc:
+            logger.warning(
+                "Topology links sync error for node %s (%s): %s",
+                srv_id,
+                _sanitize_url(api_url),
+                exc,
+            )
+            return srv_id, False
+
+    raw_results: dict[int, bool] = (
+        dict(
+            await asyncio.gather(
+                *(_push_one(sid, url, key, pl) for sid, url, key, pl in targets)
+            )
+        )
+        if targets
+        else {}
+    )
+    results = {str(k): bool(v) for k, v in raw_results.items()}
+    synced = sum(1 for v in raw_results.values() if v)
+    failed = sum(1 for v in raw_results.values() if not v)
+
+    async with session_scope() as session:
         await AuditService.log_action(
             session,
             admin_id=admin_telegram_id,
             action=AdminAuditAction.EDIT_SERVER,
             target_type="server",
-            target_id=0,
+            target_id=None,
             details={"action": "topology_sync", "synced": synced, "failed": failed},
         )
-        return {"results": results, "synced": synced, "failed": failed}
+    return {"results": results, "synced": synced, "failed": failed}
 
 
 async def trigger_node_clients_resync(
@@ -858,6 +956,9 @@ async def trigger_node_clients_resync(
     admin_telegram_id: int,
 ) -> dict[str, Any]:
     """Queue VLESS client resync for an active ru_hub or exit_node and log to AuditLog."""
+    from services.vless_subscription_service import VlessSubscriptionService
+
+    target_server_ids: list[int] = []
     async with session_scope() as session:
         server = await get_server_by_id(session, server_id, for_update=False)
         if server is None:
@@ -874,18 +975,26 @@ async def trigger_node_clients_resync(
                 status_code=400,
             )
 
-        from services.vless_subscription_service import VlessSubscriptionService
+        if role == "ru_hub":
+            target_server_ids = [server_id]
+        else:
+            ru_hubs = await VlessSubscriptionService.get_configured_vless_servers(session)
+            target_server_ids = [hub.id for hub in ru_hubs]
 
-        queue_post_commit_task(
-            session,
-            lambda sid=server_id: VlessSubscriptionService.sync_all_active_to_server_background(sid),
-        )
         await AuditService.log_action(
             session,
             admin_id=admin_telegram_id,
             action=AdminAuditAction.EDIT_SERVER,
             target_type="server",
             target_id=server_id,
-            details={"action": "clients_resync", "role": role},
+            details={
+                "action": "clients_resync",
+                "role": role,
+                "target_server_ids": target_server_ids,
+            },
         )
-        return {"ok": True, "server_id": server_id}
+
+    for target_sid in target_server_ids:
+        VlessSubscriptionService.sync_all_active_to_server_background(target_sid)
+
+    return {"ok": True, "server_id": server_id, "target_server_ids": target_server_ids}

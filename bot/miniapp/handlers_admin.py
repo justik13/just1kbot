@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import os
 from datetime import timedelta
@@ -73,6 +74,7 @@ from services.miniapp_auth_service import (
     build_totp_uri,
     generate_totp_secret,
     get_admin_2fa_config,
+    get_admin_session_epoch,
     issue_totp_setup_token,
     revoke_all_admin_sessions,
     verify_admin_2fa,
@@ -89,6 +91,8 @@ from utils.telegram import safe_send_message
 SchemaT = TypeVar("SchemaT", bound=BaseModel)
 logger = logging.getLogger(__name__)
 _background_tasks: set[asyncio.Task[object]] = set()
+_MAX_INT32 = 2_147_483_647
+_MAX_INT64 = 9_223_372_036_854_775_807
 
 
 def _parse_server_id(request: web.Request) -> tuple[int | None, web.Response | None]:
@@ -157,7 +161,15 @@ async def _queue_wi_inline_sync(
     async def _sync_wi_after_admin_op() -> None:
         async with session_scope() as bg_sess:
             bg_sub = await white_internet_repo.get_subscription_by_id(bg_sess, sub_id_snap)
-            if bg_sub is not None:
+            if (
+                bg_sub is not None
+                and bg_sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING)
+                and bg_sub.provisioning_status
+                in (
+                    WhiteInternetProvisioningStatus.PENDING_CREATE,
+                    WhiteInternetProvisioningStatus.PENDING_UPDATE,
+                )
+            ):
                 await WhiteInternetService._try_inline_sync_multi(
                     bg_sess,
                     bg_sub,
@@ -166,6 +178,39 @@ async def _queue_wi_inline_sync(
                 )
 
     queue_post_commit_task(session, _sync_wi_after_admin_op)
+
+
+async def _queue_wi_deprovision_all(
+    session: AsyncSession,
+    user_id: int,
+    wi_sub: WhiteInternetSubscription,
+    *,
+    context: str,
+) -> None:
+    """Queue post-commit deprovisioning of subscription and all bound device UUIDs on WI hubs."""
+    wi_hubs = await WhiteInternetService.get_hub_nodes(session)
+    if not wi_hubs:
+        return
+    dev_rows = (
+        await session.scalars(
+            select(UserDevice.device_uuid).where(
+                UserDevice.user_id == user_id,
+                UserDevice.device_uuid.is_not(None),
+            )
+        )
+    ).all()
+    uuids_to_revoke = list(dict.fromkeys([wi_sub.uuid, *[str(u) for u in dev_rows if u]]))
+    from services.white_internet_service import _dispatch_deprovision
+
+    for hub in wi_hubs:
+        for rev_u in uuids_to_revoke:
+            _dispatch_deprovision(
+                hub,
+                rev_u,
+                wi_sub.desired_version,
+                session=session,
+                context=context,
+            )
 
 
 def _queue_user_notification(
@@ -225,8 +270,13 @@ async def api_me_handler(request: web.Request) -> web.Response:
     display_name = " ".join(part for part in (ctx.first_name, ctx.last_name) if part).strip()
     if ctx.is_admin:
         session_token = request.headers.get("X-Admin-Session")
-        session_valid = verify_admin_session_token(session_token, ctx.telegram_id)
         async with session_scope() as session:
+            expected_epoch = await get_admin_session_epoch(session)
+            session_valid = verify_admin_session_token(
+                session_token,
+                ctx.telegram_id,
+                expected_epoch=expected_epoch,
+            )
             cfg = await get_admin_2fa_config(session, ctx.telegram_id)
         security_payload = {
             "two_factor_required": True,
@@ -298,7 +348,11 @@ async def api_admin_2fa_verify_handler(request: web.Request) -> web.Response:
             await AuditService.log_action(
                 session,
                 admin_id=ctx.telegram_id,
-                action="ADMIN_2FA_LOCKED" if result.get("locked") else "ADMIN_2FA_VERIFY_FAILED",
+                action=(
+                    AdminAuditAction.ADMIN_2FA_LOCKED
+                    if result.get("locked")
+                    else AdminAuditAction.ADMIN_2FA_VERIFY_FAILED
+                ),
                 target_type="admin",
                 target_id=ctx.telegram_id,
                 details={
@@ -359,11 +413,11 @@ async def api_admin_2fa_logout_handler(request: web.Request) -> web.Response:
         return err_resp  # type: ignore[return-value]
 
     async with session_scope() as session:
-        await revoke_all_admin_sessions(session)
+        await revoke_all_admin_sessions(session, admin_telegram_id=ctx.telegram_id)
         await AuditService.log_action(
             session,
             admin_id=ctx.telegram_id,
-            action="ADMIN_2FA_LOGOUT_ALL",
+            action=AdminAuditAction.ADMIN_2FA_LOGOUT_ALL,
             target_type="admin",
             target_id=ctx.telegram_id,
         )
@@ -733,10 +787,10 @@ async def api_admin_users_handler(request: web.Request) -> web.Response:
             stmt = stmt.where(User.is_bot_blocked.is_(True))
 
         if q:
-            if q.isdigit():
+            if q.isdigit() and int(q) <= _MAX_INT64:
                 q_num = int(q)
                 id_conds = [User.telegram_id == q_num]
-                if 0 < q_num <= 2_147_483_647:
+                if 0 < q_num <= _MAX_INT32:
                     id_conds.append(User.id == q_num)
                 stmt = stmt.where(or_(*id_conds))
             else:
@@ -939,7 +993,7 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                     f"Текущий баланс: {int(bal_after.available)} ₽."
                 )
                 if payload.send_note_to_user and note:
-                    msg_text += f"\nКомментарий: {note}"
+                    msg_text += f"\nКомментарий: {html.escape(note)}"
                 _queue_user_notification(
                     session,
                     bot,
@@ -1072,6 +1126,10 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                     vless_sub.expires_at = now - timedelta(hours=constants.VPN_ACCESS_GRACE_HOURS + 1)
                 else:
                     vless_sub.expires_at = new_end
+                limit_changed = (
+                    payload.device_limit is not None
+                    and payload.device_limit != before_limit
+                )
                 if payload.device_limit is not None:
                     vless_sub.device_limit = payload.device_limit
                 await session.flush()
@@ -1098,6 +1156,12 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                     await session.flush()
                     VlessSubscriptionService.ensure_synced_background(
                         user.id, is_active=False, session=session
+                    )
+                elif limit_changed:
+                    vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1
+                    await session.flush()
+                    VlessSubscriptionService.ensure_synced_background(
+                        user.id, session=session
                     )
                 if payload.notify_user is True:
                     _queue_user_notification(
@@ -1316,38 +1380,78 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
             await session.flush()
             await SubscriptionService.sync_access_state(session, locked_user)
 
-            now = now_utc()
-            wi_reactivated = False
-            wi_sub = await get_subscription_by_user_id(session, user.id)
-            if wi_sub is not None and not locked_user.financial_hold:
-                should_reactivate_wi = bool(payload.reactivate_wi) or (
-                    payload.financial_hold is False
-                    and wi_sub.status == WhiteInternetStatus.DISABLED
-                    and bool(wi_sub.expires_at and wi_sub.expires_at > now)
+            if not locked_user.financial_hold:
+                held_stmt = select(Order).where(
+                    Order.user_id == locked_user.id,
+                    Order.status == "paid",
+                    Order.metadata_["settlement_held"].astext == "true",
                 )
-                if should_reactivate_wi and wi_sub.status == WhiteInternetStatus.DISABLED and wi_sub.expires_at and wi_sub.expires_at > now:
-                    locked_wi = await white_internet_repo.get_subscription_with_lock(session, wi_sub.id)
-                    if locked_wi is not None:
-                        locked_wi.status = WhiteInternetStatus.PENDING
-                        locked_wi.status_reason = None
-                        locked_wi.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
-                        locked_wi.desired_version = (locked_wi.desired_version or 1) + 1
-                        await session.flush()
-                        await _queue_wi_inline_sync(session, locked_wi, "restrictions_reactivate_wi")
-                        wi_reactivated = True
-
-            if not locked_user.financial_hold and not locked_user.topup_blocked:
-                held_orders = (
-                    await session.scalars(
-                        select(Order).where(
-                            Order.user_id == locked_user.id,
-                            Order.status == "paid",
-                            Order.metadata_["settlement_held"].as_boolean().is_(True),
-                        )
-                    )
-                ).all()
+                if locked_user.topup_blocked:
+                    held_stmt = held_stmt.where(Order.service_type != "topup")
+                held_orders = (await session.scalars(held_stmt)).all()
                 for held_order in held_orders:
                     await OrderService.mark_order_paid(session, held_order.id)
+
+            now = now_utc()
+            wi_reactivated = False
+            hold_cleared = (
+                before_state["financial_hold"] is True
+                and locked_user.financial_hold is False
+            )
+            should_reactivate_wi = hold_cleared or bool(payload.reactivate_wi)
+            if should_reactivate_wi and not locked_user.financial_hold:
+                wi_sub = await get_subscription_by_user_id(session, user.id)
+                if (
+                    wi_sub is not None
+                    and wi_sub.status == WhiteInternetStatus.DISABLED
+                    and wi_sub.expires_at
+                    and wi_sub.expires_at > now
+                    and wi_sub.status_reason in (None, "", "financial_hold")
+                ):
+                    other_live_wi_id = await session.scalar(
+                        select(WhiteInternetSubscription.id)
+                        .where(
+                            WhiteInternetSubscription.user_id == user.id,
+                            WhiteInternetSubscription.id != wi_sub.id,
+                            WhiteInternetSubscription.status.in_([
+                                WhiteInternetStatus.PENDING,
+                                WhiteInternetStatus.ACTIVE,
+                                WhiteInternetStatus.EXHAUSTED,
+                            ]),
+                        )
+                        .limit(1)
+                    )
+                    if other_live_wi_id is None:
+                        locked_wi = await white_internet_repo.get_subscription_with_lock(
+                            session, wi_sub.id
+                        )
+                        if (
+                            locked_wi is not None
+                            and locked_wi.status == WhiteInternetStatus.DISABLED
+                            and locked_wi.expires_at
+                            and locked_wi.expires_at > now
+                            and locked_wi.status_reason in (None, "", "financial_hold")
+                        ):
+                            total_quota = (locked_wi.base_traffic_bytes or 0) + (
+                                locked_wi.extra_traffic_bytes or 0
+                            )
+                            used_quota = max(
+                                0,
+                                (locked_wi.traffic_used_bytes or 0)
+                                - (locked_wi.traffic_overage_bytes or 0),
+                            )
+                            if total_quota > 0 and used_quota < total_quota:
+                                locked_wi.status = WhiteInternetStatus.PENDING
+                                locked_wi.status_reason = None
+                                locked_wi.provisioning_status = (
+                                    WhiteInternetProvisioningStatus.PENDING_UPDATE
+                                )
+                                locked_wi.desired_version = (locked_wi.desired_version or 1) + 1
+                                await session.flush()
+                                await _queue_wi_inline_sync(
+                                    session, locked_wi, "restrictions_reactivate_wi"
+                                )
+                                wi_reactivated = True
             await AuditService.log_action(
                 session,
                 admin_id=ctx.telegram_id,
@@ -1460,15 +1564,15 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                     status=400,
                 )
         elif payload.days > 0:
-            ok, msg, updated = await WhiteInternetService.extend_subscription(
-                session, user.id, payload.days
-            )
-            if not ok:
-                return web.json_response({"ok": False, "error": msg}, status=400)
-            if updated is not None:
-                wi_sub = updated
+            try:
+                wi_sub = await white_internet_repo.extend_subscription_atomic(
+                    session, wi_sub.id, payload.days
+                )
+            except (white_internet_repo.WhiteInternetError, ValueError) as exc:
+                return _safe_admin_error_response(exc)
 
         devlimit_changed = False
+        transitioned_to_exhausted = False
         if payload.device_limit is not None and payload.device_limit != wi_sub.device_limit:
             devlimit_changed = True
             wi_sub.device_limit = payload.device_limit
@@ -1486,6 +1590,7 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                 wi_sub.status = WhiteInternetStatus.EXHAUSTED
                 wi_sub.status_reason = "quota_exhausted"
                 wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_DELETE
+                transitioned_to_exhausted = True
             elif wi_sub.status == WhiteInternetStatus.EXHAUSTED and total_quota > used_quota:
                 wi_sub.status = WhiteInternetStatus.ACTIVE
                 wi_sub.status_reason = None
@@ -1507,7 +1612,11 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
             )
 
         if payload.days == 0:
-            if devlimit_changed:
+            if transitioned_to_exhausted:
+                await _queue_wi_deprovision_all(
+                    session, user.id, wi_sub, context="admin_devlimit_exhausted"
+                )
+            elif devlimit_changed:
                 await _queue_wi_inline_sync(session, wi_sub, "grant_wi_devlimit")
             if payload.notify_user is True:
                 _queue_user_notification(
@@ -1532,30 +1641,19 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                 wi_sub.status = WhiteInternetStatus.EXPIRED
                 wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_DELETE
                 wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
-                wi_hubs = await WhiteInternetService.get_hub_nodes(session)
-                dev_rows = (
-                    await session.scalars(
-                        select(UserDevice.device_uuid).where(
-                            UserDevice.user_id == user.id,
-                            UserDevice.device_uuid.is_not(None),
-                        )
-                    )
-                ).all()
-                uuids_to_revoke = list(dict.fromkeys([wi_sub.uuid, *[str(u) for u in dev_rows if u]]))
-                from services.white_internet_service import _dispatch_deprovision
-
-                for hub in wi_hubs:
-                    for rev_u in uuids_to_revoke:
-                        _dispatch_deprovision(
-                            hub,
-                            rev_u,
-                            wi_sub.desired_version,
-                            session=session,
-                            context="admin_reduce_expired",
-                        )
+                await session.flush()
+                await _queue_wi_deprovision_all(
+                    session, user.id, wi_sub, context="admin_reduce_expired"
+                )
             else:
                 wi_sub.expires_at = new_end
-            await session.flush()
+                await session.flush()
+                if transitioned_to_exhausted:
+                    await _queue_wi_deprovision_all(
+                        session, user.id, wi_sub, context="admin_devlimit_exhausted"
+                    )
+                elif devlimit_changed:
+                    await _queue_wi_inline_sync(session, wi_sub, "grant_wi_reduce_devlimit")
             await AuditService.log_action(
                 session,
                 admin_id=ctx.telegram_id,
@@ -1585,6 +1683,12 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                 "message": f"Подписка «Белый интернет» сокращена на {abs(payload.days)} дн.",
             })
 
+        if transitioned_to_exhausted:
+            await _queue_wi_deprovision_all(
+                session, user.id, wi_sub, context="admin_extend_devlimit_exhausted"
+            )
+        else:
+            await _queue_wi_inline_sync(session, wi_sub, "grant_wi_extend")
         await AuditService.log_action(
             session,
             admin_id=ctx.telegram_id,
@@ -1681,7 +1785,10 @@ async def api_admin_user_details_handler(request: web.Request) -> web.Response:
         recent_audit_rows = (
             await session.scalars(
                 select(AuditLog)
-                .where(or_(AuditLog.target_id == user.id, AuditLog.target_id == user.telegram_id))
+                .where(
+                    func.lower(AuditLog.target_type) == "user",
+                    or_(AuditLog.target_id == user.id, AuditLog.target_id == user.telegram_id),
+                )
                 .order_by(AuditLog.id.desc())
                 .limit(20)
             )
@@ -1848,17 +1955,25 @@ async def api_admin_user_devices_reset_handler(request: web.Request) -> web.Resp
 
         vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
         wi_sub = await get_subscription_by_user_id(session, user.id)
+        old_vless_uuid: str | None = None
         if vless_sub is not None:
-            await vless_subscription_repo.reset_hwids(session, vless_sub.id)
+            old_vless_uuid, _new_vless_uuid = await vless_subscription_repo.reset_hwids(
+                session, vless_sub.id
+            )
+            vless_sub = (
+                await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+                or vless_sub
+            )
 
         existing_devs = (await session.scalars(select(UserDevice).where(UserDevice.user_id == user.id))).all()
         dev_uuids = [d.device_uuid for d in existing_devs if getattr(d, "device_uuid", None)]
         if vless_sub is not None and dev_uuids:
-            await vless_subscription_repo.add_pending_revocation_uuids(session, vless_sub.id, dev_uuids)
-        if wi_sub is not None and dev_uuids:
-            await white_internet_repo.add_pending_revocation_uuids(session, wi_sub.id, dev_uuids)
-        sub_ver = getattr(vless_sub, "version", None) if vless_sub else None
-        sub_id = vless_sub.id if vless_sub else None
+            vless_sub = (
+                await vless_subscription_repo.add_pending_revocation_uuids(
+                    session, vless_sub.id, dev_uuids
+                )
+                or vless_sub
+            )
 
         dev_del_res = await session.execute(
             delete(UserDevice).where(UserDevice.user_id == user.id)
@@ -1866,12 +1981,44 @@ async def api_admin_user_devices_reset_handler(request: web.Request) -> web.Resp
         events_del_res = await session.execute(
             delete(DeviceRegistrationEvent).where(DeviceRegistrationEvent.user_id == user.id)
         )
-        for u_uuid in dev_uuids:
-            VlessSubscriptionService.deprovision_background(
-                u_uuid, version=sub_ver, sub_id=sub_id, session=session, services=("vless", "white_internet")
-            )
+
         if vless_sub is not None:
+            sub_ver = getattr(vless_sub, "version", None)
+            sub_id = vless_sub.id
+            vless_rev_uuids = list(
+                dict.fromkeys([u for u in [old_vless_uuid, *dev_uuids] if u])
+            )
+            for u_uuid in vless_rev_uuids:
+                VlessSubscriptionService.deprovision_background(
+                    u_uuid,
+                    version=sub_ver,
+                    sub_id=sub_id,
+                    session=session,
+                    services=("vless",),
+                )
             VlessSubscriptionService.ensure_synced_background(user.id, session=session)
+
+        if wi_sub is not None and dev_uuids:
+            wi_sub = (
+                await white_internet_repo.get_subscription_with_lock(session, wi_sub.id)
+                or wi_sub
+            )
+            await white_internet_repo.add_pending_revocation_uuids(
+                session, wi_sub.id, dev_uuids
+            )
+            wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
+            if wi_sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING):
+                wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+            await session.flush()
+            wi_ver = wi_sub.desired_version
+            for u_uuid in dev_uuids:
+                VlessSubscriptionService.deprovision_background(
+                    u_uuid,
+                    version=wi_ver,
+                    sub_id=None,
+                    session=session,
+                    services=("white_internet",),
+                )
         await AuditService.log_action(
             session,
             admin_id=ctx.telegram_id,
@@ -1977,7 +2124,10 @@ async def api_admin_user_resync_handler(request: web.Request) -> web.Response:
         return id_err  # type: ignore[return-value]
 
     async with session_scope() as session:
-        user = await session.get(User, target_user_id)
+        await acquire_user_account_lock(session, target_user_id)
+        user = await session.scalar(
+            select(User).where(User.id == target_user_id).with_for_update()
+        )
         if user is None or getattr(user, "is_deleted", False):
             return web.json_response({"ok": False, "error": "Пользователь не найден"}, status=404)
 
@@ -1989,9 +2139,20 @@ async def api_admin_user_resync_handler(request: web.Request) -> web.Response:
         if vless_sub is not None:
             VlessSubscriptionService.ensure_synced_background(user.id, session=session)
             synced_standard = True
-        if wi_sub is not None:
-            await _queue_wi_inline_sync(session, wi_sub, "manual_resync")
-            synced_wi = True
+        if wi_sub is not None and wi_sub.status in (
+            WhiteInternetStatus.ACTIVE,
+            WhiteInternetStatus.PENDING,
+        ):
+            locked_wi = await white_internet_repo.get_subscription_with_lock(session, wi_sub.id)
+            if locked_wi is not None and locked_wi.status in (
+                WhiteInternetStatus.ACTIVE,
+                WhiteInternetStatus.PENDING,
+            ):
+                locked_wi.desired_version = (locked_wi.desired_version or 1) + 1
+                locked_wi.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+                await session.flush()
+                await _queue_wi_inline_sync(session, locked_wi, "manual_resync")
+                synced_wi = True
 
         await AuditService.log_action(
             session,
@@ -2038,31 +2199,71 @@ async def api_admin_user_token_rotate_handler(request: web.Request) -> web.Respo
         vless_sub = await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
         wi_sub = await get_subscription_by_user_id(session, user.id)
         new_token: str | None = None
+        old_vless_uuid: str | None = None
+        old_wi_uuid: str | None = wi_sub.uuid if wi_sub is not None else None
         if vless_sub is not None:
-            new_token, _old_u, _new_u = await vless_subscription_repo.rotate_token(
+            new_token, old_vless_uuid, _new_u = await vless_subscription_repo.rotate_token(
                 session, vless_sub.id, reset_hwids=True
+            )
+            vless_sub = (
+                await vless_subscription_repo.get_subscription_by_user_id(session, user.id)
+                or vless_sub
             )
         if wi_sub is not None:
             wi_token = await white_internet_repo.reset_subscription_token_atomic(
                 session, wi_sub.id, new_token=new_token, reset_hwids=True
             )
             new_token = new_token or wi_token
-            wi_sub = await white_internet_repo.get_subscription_by_id(session, wi_sub.id) or wi_sub
+            wi_sub = (
+                await white_internet_repo.get_subscription_with_lock(session, wi_sub.id)
+                or wi_sub
+            )
 
         existing_devs = (await session.scalars(select(UserDevice).where(UserDevice.user_id == user.id))).all()
         dev_uuids = [d.device_uuid for d in existing_devs if getattr(d, "device_uuid", None)]
-        if vless_sub is not None and dev_uuids:
-            await vless_subscription_repo.add_pending_revocation_uuids(session, vless_sub.id, dev_uuids)
-        if wi_sub is not None and dev_uuids:
-            await white_internet_repo.add_pending_revocation_uuids(session, wi_sub.id, dev_uuids)
-        for dev_uuid in dev_uuids:
-            VlessSubscriptionService.deprovision_background(
-                dev_uuid,
-                version=getattr(vless_sub, "version", None) if vless_sub else None,
-                sub_id=vless_sub.id if vless_sub else None,
-                session=session,
-                services=("vless", "white_internet"),
+
+        if vless_sub is not None:
+            if dev_uuids:
+                vless_sub = (
+                    await vless_subscription_repo.add_pending_revocation_uuids(
+                        session, vless_sub.id, dev_uuids
+                    )
+                    or vless_sub
+                )
+            vless_rev_uuids = list(
+                dict.fromkeys([u for u in [old_vless_uuid, *dev_uuids] if u])
             )
+            sub_ver = getattr(vless_sub, "version", None)
+            for u_uuid in vless_rev_uuids:
+                VlessSubscriptionService.deprovision_background(
+                    u_uuid,
+                    version=sub_ver,
+                    sub_id=vless_sub.id,
+                    session=session,
+                    services=("vless",),
+                )
+
+        if wi_sub is not None:
+            wi_rev_uuids = list(
+                dict.fromkeys([u for u in [old_wi_uuid, *dev_uuids] if u])
+            )
+            if wi_rev_uuids:
+                await white_internet_repo.add_pending_revocation_uuids(
+                    session, wi_sub.id, wi_rev_uuids
+                )
+                wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
+                if wi_sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING):
+                    wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+                await session.flush()
+                wi_ver = wi_sub.desired_version
+                for u_uuid in wi_rev_uuids:
+                    VlessSubscriptionService.deprovision_background(
+                        u_uuid,
+                        version=wi_ver,
+                        sub_id=None,
+                        session=session,
+                        services=("white_internet",),
+                    )
 
         await session.execute(
             delete(UserDevice).where(UserDevice.user_id == user.id)
@@ -2214,7 +2415,8 @@ async def api_admin_broadcast_start_handler(request: web.Request) -> web.Respons
             media_url=payload.media_url,
         )
     except ValueError as exc:
-        return _safe_admin_error_response(exc)
+        status_code = 409 if "Уже выполняется другая рассылка" in str(exc) else 400
+        return _safe_admin_error_response(exc, status=status_code)
 
     return web.json_response({"ok": True, "broadcast": item, "message": "Рассылка запущена"})
 
@@ -2404,6 +2606,11 @@ async def api_admin_overview_handler(request: web.Request) -> web.Response:
         for n in nodes:
             is_active = bool(n.get("is_active", False))
             h_state = str(n.get("health_state") or "")
+            disabled_reason = n.get("disabled_reason")
+            is_manual_disabled = (
+                h_state == ServerHealthState.MANUAL_DISABLED
+                or str(disabled_reason or "").strip().lower() == "manual"
+            )
             if not is_active or h_state == ServerHealthState.MANUAL_DISABLED:
                 disabled += 1
             elif h_state == ServerHealthState.ONLINE:
@@ -2416,8 +2623,7 @@ async def api_admin_overview_handler(request: web.Request) -> web.Response:
             err_count = int(n.get("module_errors_count") or 0)
             ingress_prob = bool(n.get("ingress_problem", False))
             cdn_prob = bool(n.get("cdn_problem", False))
-            disabled_reason = n.get("disabled_reason")
-            if (
+            if not is_manual_disabled and (
                 not is_active
                 or h_state != ServerHealthState.ONLINE
                 or bool(disabled_reason)
@@ -2578,16 +2784,19 @@ async def api_admin_webhooks_handler(request: web.Request) -> web.Response:
     items = [
         {
             "id": row.id,
-            "event_id": row.event_key,
+            "event_key": row.event_key,
             "provider": row.provider,
             "event_type": row.event_type,
+            "provider_object_id": row.provider_object_id,
             "public_order_id": row.public_order_id,
             "payment_external_id": row.payment_external_id,
             "status": row.status,
-            "attempts": int(row.payload.get("attempts", 0)) if isinstance(row.payload, dict) else 0,
-            "last_error": row.payload.get("last_error") if isinstance(row.payload, dict) else None,
-            "created_at": row.received_at.isoformat() if row.received_at else None,
-            "updated_at": row.received_at.isoformat() if row.received_at else None,
+            "received_at": row.received_at.isoformat() if row.received_at else None,
+            "processed_at": (
+                row.processed_at.isoformat()
+                if getattr(row, "processed_at", None) is not None
+                else None
+            ),
         }
         for row in rows
     ]

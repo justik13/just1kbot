@@ -1,6 +1,6 @@
 import { api, setOn2FARequired, setOnInitDataExpired } from "./api.js?v=2.8.0";
-import { closeAllModals, escapeHtml, showToast } from "./ui.js?v=2.8.0";
-import { clearCabinetBackButton, loadAndRenderUserCabinet } from "./views/user_cabinet.js?v=2.8.0";
+import { closeAllModals, escapeHtml, setPageBackButton, showToast } from "./ui.js?v=2.8.0";
+import { loadAndRenderUserCabinet } from "./views/user_cabinet.js?v=2.8.0";
 
 const _ADMIN_TABS = [
     { id: "overview", label: "Обзор" },
@@ -14,12 +14,17 @@ const _VALID_ADMIN_TABS = new Set(_ADMIN_TABS.map((t) => t.id));
 
 let _broadcastsMod = null;
 let _tabSwitchSeq = 0;
-let _tgBackListener = null;
 
 function _clearBroadcastPollTimerIfLoaded() {
     if (_broadcastsMod && typeof _broadcastsMod.clearBroadcastPollTimer === "function") {
         _broadcastsMod.clearBroadcastPollTimer();
     }
+}
+
+function _parsePositiveInt(raw) {
+    if (raw === null || raw === undefined || String(raw).trim() === "") return null;
+    const n = Number(raw);
+    return Number.isInteger(n) && n > 0 ? n : null;
 }
 
 function _parseDeepLink() {
@@ -31,8 +36,8 @@ function _parseDeepLink() {
         const nodeIdRaw = params.get("node_id");
         const userIdRaw = params.get("user_id");
         const q = (params.get("q") || "").trim();
-        const nodeId = nodeIdRaw && Number.isFinite(Number(nodeIdRaw)) ? Number(nodeIdRaw) : null;
-        const userId = userIdRaw && Number.isFinite(Number(userIdRaw)) ? Number(userIdRaw) : null;
+        const nodeId = _parsePositiveInt(nodeIdRaw);
+        const userId = _parsePositiveInt(userIdRaw);
         let tab = _VALID_ADMIN_TABS.has(rawTab) ? rawTab : "";
         if (!tab) {
             if (nodeId != null) tab = "nodes";
@@ -69,6 +74,7 @@ const appState = {
     adminTab: "overview",
     overviewData: null,
     nodes: [],
+    nodesLoaded: false,
     selectedNodeId: null,
     nodesScrollY: 0,
     usersData: null,
@@ -88,26 +94,26 @@ const appState = {
     auditAction: "",
     auditTargetType: "",
     auditQuery: "",
+    webhooksData: null,
     pendingDeepLink: _parseDeepLink(),
     onOpenUser: (userId) => {
-        if (userId == null) return;
+        const id = _parsePositiveInt(userId);
+        if (id == null) return;
         closeAllModals();
         appState.mode = "admin";
         appState.adminTab = "users";
         appState.selectedNodeId = null;
-        appState.selectedUserId = Number(userId);
+        appState.selectedUserId = id;
         _renderAdminView();
     },
     onOpenNode: (nodeId) => {
+        const id = nodeId == null ? null : _parsePositiveInt(nodeId);
+        if (nodeId != null && id == null) return;
         closeAllModals();
         appState.mode = "admin";
         appState.adminTab = "nodes";
         appState.selectedUserId = null;
-        appState.selectedNodeId = nodeId != null ? Number(nodeId) : null;
-        if (appState.selectedNodeId != null && !appState.nodes.length) {
-            _reloadNodesAndRender();
-            return;
-        }
+        appState.selectedNodeId = id;
         _renderAdminView();
     },
     onOpenFinances: (query = "", attentionOnly = false) => {
@@ -155,6 +161,7 @@ const appState = {
         _renderAdminView();
     },
     onRequire2FA: () => {
+        _clearBroadcastPollTimerIfLoaded();
         closeAllModals();
         appState.twoFactorPassed = false;
         const root = document.getElementById("appRoot");
@@ -179,24 +186,7 @@ function _initTelegramChrome() {
 }
 
 function _updateTelegramBackButton(onBack) {
-    clearCabinetBackButton();
-    const tg = window.Telegram && window.Telegram.WebApp;
-    if (!tg || !tg.BackButton) return;
-    try {
-        if (_tgBackListener) {
-            tg.BackButton.offClick(_tgBackListener);
-            _tgBackListener = null;
-        }
-        if (onBack) {
-            _tgBackListener = onBack;
-            tg.BackButton.onClick(_tgBackListener);
-            tg.BackButton.show();
-        } else {
-            tg.BackButton.hide();
-        }
-    } catch {
-        // Non-critical
-    }
+    setPageBackButton(onBack);
 }
 
 function _renderErrorCard(root, title, desc, showRetry = false) {
@@ -254,13 +244,17 @@ async function _renderAdminView() {
         _clearBroadcastPollTimerIfLoaded();
     }
 
+    let nodesFetchedThisRender = false;
+
     if (appState.adminTab === "nodes" && appState.selectedNodeId != null) {
-        if (!appState.nodes.length) {
+        if (!appState.nodesLoaded) {
             root.innerHTML = `<section class="card card-center"><div class="muted">Загрузка ноды...</div></section>`;
+            nodesFetchedThisRender = true;
             try {
                 const res = await api.listNodes();
                 if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
                 appState.nodes = res.nodes || [];
+                appState.nodesLoaded = true;
             } catch (err) {
                 if (seq !== _tabSwitchSeq) return;
                 if (err && err.code === "2fa_required") return;
@@ -306,7 +300,7 @@ async function _renderAdminView() {
                 appState.usersData = await api.listUsers(
                     appState.usersQuery || "",
                     appState.usersOffset || 0,
-                    10,
+                    25,
                     appState.usersFilter || "all"
                 );
             } catch (err) {
@@ -314,7 +308,7 @@ async function _renderAdminView() {
             }
         };
         _updateTelegramBackButton(onBack);
-        renderUserDetailView(root, userSummary, onBack, onReloadUser);
+        renderUserDetailView(root, userSummary, onBack, onReloadUser, appState);
         window.scrollTo(0, 0);
         return;
     }
@@ -361,10 +355,11 @@ async function _renderAdminView() {
             if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
             await renderAdminOverviewView(body, appState);
         } else if (appState.adminTab === "nodes") {
-            if (!appState.nodes.length) {
+            if (!appState.nodesLoaded && !nodesFetchedThisRender) {
                 const res = await api.listNodes();
                 if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
                 appState.nodes = res.nodes || [];
+                appState.nodesLoaded = true;
             }
             const { renderNodesView } = await import("./views/nodes.js?v=2.8.0");
             if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
@@ -374,15 +369,28 @@ async function _renderAdminView() {
                 _renderAdminView();
             });
         } else if (appState.adminTab === "subscription") {
-            const { renderSubscriptionSettingsView } = await import("./views/nodes.js?v=2.8.0");
+            const [nodesMod] = await Promise.all([
+                import("./views/nodes.js?v=2.8.0"),
+                appState.nodesLoaded
+                    ? Promise.resolve(null)
+                    : api.listNodes()
+                        .then((res) => {
+                            appState.nodes = res.nodes || [];
+                            appState.nodesLoaded = true;
+                        })
+                        .catch((err) => {
+                            if (err && err.code === "2fa_required") throw err;
+                            showToast(err.message || "Не удалось загрузить ноды", "error");
+                        }),
+            ]);
             if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
-            await renderSubscriptionSettingsView(body, appState, _reloadNodesAndRender);
+            await nodesMod.renderSubscriptionSettingsView(body, appState, _reloadNodesAndRender);
         } else if (appState.adminTab === "users") {
             const [usersMod] = await Promise.all([
                 import("./views/admin_users.js?v=2.8.0"),
                 appState.usersData
                     ? Promise.resolve(null)
-                    : api.listUsers(appState.usersQuery || "", appState.usersOffset || 0, 10, appState.usersFilter || "all")
+                    : api.listUsers(appState.usersQuery || "", appState.usersOffset || 0, 25, appState.usersFilter || "all")
                         .then((res) => {
                             appState.usersData = res;
                         })
@@ -418,18 +426,60 @@ async function _renderAdminView() {
             if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
             bcMod.renderAdminBroadcastsView(body, appState);
         } else {
-            const [finMod] = await Promise.all([
-                import("./views/admin_finances.js?v=2.8.0"),
-                appState.financesData || appState.finSubTab !== "orders"
-                    ? Promise.resolve(null)
-                    : api.listFinances("orders", appState.finStatus || "", appState.finQuery || "", 0, 25, Boolean(appState.finAttentionOnly))
+            const subTab = appState.finSubTab || "orders";
+            let dataPromise = Promise.resolve(null);
+            if (subTab === "audit") {
+                if (appState.auditLogsData == null) {
+                    dataPromise = api
+                        .listAuditLogs(
+                            appState.auditAction || "",
+                            appState.auditQuery || "",
+                            0,
+                            40,
+                            appState.auditTargetType || ""
+                        )
                         .then((res) => {
-                            appState.financesData = res;
+                            appState.auditLogsData = res;
                         })
                         .catch((err) => {
                             if (err && err.code === "2fa_required") throw err;
-                            showToast(err.message || "Не удалось загрузить финансы", "error");
-                        }),
+                            showToast(err.message || "Не удалось загрузить аудит-лог", "error");
+                        });
+                }
+            } else if (subTab === "webhooks") {
+                if (appState.webhooksData == null) {
+                    dataPromise = api
+                        .getAdminWebhooks()
+                        .then((res) => {
+                            appState.webhooksData = res.webhooks || [];
+                        })
+                        .catch((err) => {
+                            if (err && err.code === "2fa_required") throw err;
+                            showToast(err.message || "Не удалось загрузить вебхуки", "error");
+                        });
+                }
+            } else if (appState.financesData == null) {
+                const kind = ["orders", "subscriptions", "topups"].includes(subTab) ? subTab : "orders";
+                dataPromise = api
+                    .listFinances(
+                        kind,
+                        appState.finStatus || "",
+                        appState.finQuery || "",
+                        0,
+                        25,
+                        Boolean(appState.finAttentionOnly)
+                    )
+                    .then((res) => {
+                        appState.financesData = res;
+                    })
+                    .catch((err) => {
+                        if (err && err.code === "2fa_required") throw err;
+                        showToast(err.message || "Не удалось загрузить финансы", "error");
+                    });
+            }
+            const [finMod] = await Promise.all([
+                import("./views/admin_finances.js?v=2.8.0"),
+                dataPromise,
             ]);
             if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
             finMod.renderAdminFinancesView(body, appState);
@@ -441,18 +491,26 @@ async function _renderAdminView() {
     }
 }
 
-async function _reloadNodesAndRender() {
+async function _reloadNodesAndRender({ skipRender = false, removeNodeId = null } = {}) {
+    if (removeNodeId != null) {
+        appState.nodes = appState.nodes.filter((n) => n.id !== removeNodeId);
+    }
     try {
         const res = await api.listNodes();
         appState.nodes = res.nodes || [];
+        appState.nodesLoaded = true;
     } catch (err) {
-        if (err && err.code === "2fa_required") return;
+        if (err && err.code === "2fa_required") return false;
         showToast(err.message || "Не удалось загрузить ноды", "error");
     }
-    _renderAdminView();
+    if (!skipRender) {
+        _renderAdminView();
+    }
+    return true;
 }
 
 async function _openAdmin2FAGate(root) {
+    _clearBroadcastPollTimerIfLoaded();
     const seq = ++_tabSwitchSeq;
     _syncModeSwitch();
     _updateTelegramBackButton(() => {
@@ -488,6 +546,7 @@ async function _openAdmin2FAGate(root) {
 }
 
 setOn2FARequired(() => {
+    _clearBroadcastPollTimerIfLoaded();
     closeAllModals();
     appState.twoFactorPassed = false;
     const root = document.getElementById("appRoot");
@@ -497,6 +556,7 @@ setOn2FARequired(() => {
 });
 
 setOnInitDataExpired(() => {
+    _clearBroadcastPollTimerIfLoaded();
     closeAllModals();
     showToast("Сессия Telegram устарела. Закройте и откройте Mini App заново.", "error");
     const root = document.getElementById("appRoot");
@@ -568,6 +628,9 @@ async function bootstrap() {
         appState.mode = "cabinet";
         await _renderAdminView();
     } catch (err) {
+        if (err && err.code === "init_data_expired") {
+            return;
+        }
         const isUnauthorized = Boolean(err && err.status === 401);
         _renderErrorCard(
             root,

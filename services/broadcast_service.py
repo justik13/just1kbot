@@ -13,7 +13,7 @@ from aiogram.exceptions import (
     TelegramForbiddenError,
     TelegramRetryAfter,
 )
-from sqlalchemy import desc, func, select, update
+from sqlalchemy import desc, func, select, text as sa_text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.keyboards.notifications import (
@@ -406,6 +406,12 @@ async def create_and_start_broadcast(
         raise ValueError("Bot instance is unavailable for broadcast")
 
     async with session_scope() as session:
+        bind = session.get_bind() if hasattr(session, "get_bind") else getattr(session, "bind", None)
+        if bind is None:
+            bind = getattr(session, "bind", None)
+        if bind and getattr(bind, "dialect", None) and bind.dialect.name == "postgresql":
+            await session.execute(sa_text("SELECT pg_advisory_xact_lock(7100001)"))
+
         existing_id = await session.scalar(
             select(BroadcastProgress.id)
             .where(BroadcastProgress.status == "in_progress")

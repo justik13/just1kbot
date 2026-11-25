@@ -19,6 +19,7 @@ from cachetools import TTLCache
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.settings import get_settings
+from database.connection import queue_post_commit_task
 from database.repositories.system_settings_repo import get_system_setting, set_system_setting
 from utils.admin import is_admin
 
@@ -178,7 +179,6 @@ async def revoke_all_admin_sessions(
     admin_telegram_id: int | None = None,
 ) -> str:
     """Increment miniapp_admin_session_epoch so all existing admin session tokens become invalid."""
-    global _cached_admin_session_epoch
     current = await get_admin_session_epoch(session)
     try:
         new_epoch = str(int(current) + 1)
@@ -190,7 +190,16 @@ async def revoke_all_admin_sessions(
         new_epoch,
         updated_by=admin_telegram_id,
     )
-    _cached_admin_session_epoch = new_epoch
+
+    async def _update_epoch_after_commit() -> None:
+        global _cached_admin_session_epoch
+        try:
+            if int(new_epoch) > int(_cached_admin_session_epoch):
+                _cached_admin_session_epoch = new_epoch
+        except ValueError:
+            _cached_admin_session_epoch = new_epoch
+
+    queue_post_commit_task(session, _update_epoch_after_commit)
     return new_epoch
 
 

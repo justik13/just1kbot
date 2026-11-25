@@ -94,6 +94,21 @@ class IncyGlobalSettingsPayload(BaseModel):
     cdn_turboflare_label: str | None = Field(default=None, max_length=32)
     mtproto_proxy_url: str | None = Field(default=None, max_length=500)
 
+    @field_validator("mtproto_proxy_url")
+    @classmethod
+    def check_mtproto_proxy_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        clean = value.strip()
+        if not clean:
+            return ""
+        lowered = clean.lower()
+        if not (lowered.startswith("https://t.me/proxy?") or lowered.startswith("tg://proxy?")):
+            raise ValueError(
+                "Ссылка прокси должна начинаться с https://t.me/proxy? или tg://proxy?"
+            )
+        return clean
+
 
 class UpdateNodePayload(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
