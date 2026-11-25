@@ -62,6 +62,13 @@ function _hideToast() {
     }
     _toastRemainingMs = 0;
     if (toast) {
+        if (typeof toast.hidePopover === "function" && toast.hasAttribute("popover")) {
+            try {
+                if (toast.matches(":popover-open")) toast.hidePopover();
+            } catch {
+                // ignore popover fallback
+            }
+        }
         toast.hidden = true;
     }
 }
@@ -109,6 +116,14 @@ export function showToast(message, type = "success") {
     toast.append(msgSpan, closeBtn);
     toast.className = `toast toast-${normalized}`;
     toast.hidden = false;
+    if (typeof toast.showPopover === "function" && toast.hasAttribute("popover")) {
+        try {
+            if (toast.matches(":popover-open")) toast.hidePopover();
+            toast.showPopover();
+        } catch {
+            // Fallback to fixed positioning
+        }
+    }
     toast.onclick = _hideToast;
     toast.onmouseenter = _pauseToastTimer;
     toast.onmouseleave = () => {
@@ -130,12 +145,13 @@ export function showToast(message, type = "success") {
             const curToast = document.getElementById("toastRoot");
             if (!curToast || curToast.hidden) return;
             if (curToast.contains(document.activeElement)) {
+                e.preventDefault();
                 e.stopPropagation();
                 _hideToast();
             } else if (!_hasOpenModal()) {
                 _hideToast();
             }
-        });
+        }, true);
     }
 
     _announceToast(msgText, normalized === "error");
@@ -294,15 +310,14 @@ let _pageBackHandler = null;
 let _globalBackListenerBound = false;
 
 function _hasOpenModal() {
-    const backdrop = document.getElementById("modalRoot");
-    return Boolean(backdrop && !backdrop.hidden && typeof backdrop._activeClose === "function");
+    return _modalStack.length > 0;
 }
 
 function _handleGlobalBackButton() {
     if (_hasOpenModal()) {
-        const backdrop = document.getElementById("modalRoot");
-        if (backdrop && typeof backdrop._activeClose === "function") {
-            backdrop._activeClose();
+        const top = _modalStack[_modalStack.length - 1];
+        if (top && typeof top.closeFn === "function") {
+            top.closeFn();
         }
         return;
     }
@@ -343,13 +358,6 @@ function _getModalFocusable(card) {
     );
 }
 
-function _setBackgroundInert(isInert) {
-    const shell = document.querySelector(".app-shell");
-    if (shell && "inert" in shell) {
-        shell.inert = Boolean(isInert);
-    }
-}
-
 function _focusFirstInModal(card) {
     const focusables = _getModalFocusable(card);
     const preferred =
@@ -384,22 +392,38 @@ function _restoreModalFocus(prevTrigger, restoreFocusSelector) {
     _focusElementSafe(fallback);
 }
 
-export function closeAllModals() {
-    const backdrop = document.getElementById("modalRoot");
-    if (!backdrop) return;
-    if (backdrop._activeKeyDown) {
-        document.removeEventListener("keydown", backdrop._activeKeyDown);
+function _closeDialogElement(dialog) {
+    if (!dialog) return;
+    if (typeof dialog.close === "function" && dialog.open) {
+        dialog.close();
+    } else {
+        dialog.removeAttribute("open");
     }
-    if (typeof backdrop._activeCleanup === "function") {
+    if (dialog.parentNode) {
+        dialog.parentNode.removeChild(dialog);
+    }
+}
+
+function _promoteVisibleToast() {
+    const toast = document.getElementById("toastRoot");
+    if (!toast || toast.hidden) return;
+    if (typeof toast.showPopover === "function" && toast.hasAttribute("popover")) {
         try {
-            backdrop._activeCleanup();
+            if (toast.matches(":popover-open")) toast.hidePopover();
+            toast.showPopover();
         } catch {
-            // ignore cleanup errors on forced teardown
+            // ignore
         }
     }
-    for (const item of _modalStack) {
-        if (item.onKeyDown) {
-            document.removeEventListener("keydown", item.onKeyDown);
+}
+
+export function closeAllModals() {
+    const modalRoot = document.getElementById("modalRoot");
+    const items = _modalStack.slice().reverse();
+    _modalStack = [];
+    for (const item of items) {
+        if (typeof item.markClosed === "function") {
+            item.markClosed();
         }
         if (typeof item.onCleanup === "function") {
             try {
@@ -408,17 +432,13 @@ export function closeAllModals() {
                 // ignore cleanup errors on forced teardown
             }
         }
+        _closeDialogElement(item.dialog);
     }
-    _modalStack = [];
-    backdrop._activeKeyDown = null;
-    backdrop._activeClose = null;
-    backdrop._activeCleanup = null;
-    backdrop._activeRestoreFocusSelector = null;
-    backdrop.onclick = null;
     document.body.style.overflow = "";
-    _setBackgroundInert(false);
-    backdrop.hidden = true;
-    backdrop.innerHTML = "";
+    if (modalRoot) {
+        modalRoot.hidden = true;
+        modalRoot.innerHTML = "";
+    }
     _syncTelegramBackButton();
 }
 
@@ -427,37 +447,16 @@ export function openModal(
     bodyNode,
     { showCloseBtn = true, canClose = null, onClose = null, restoreFocusSelector = null } = {}
 ) {
-    const backdrop = document.getElementById("modalRoot");
-    if (!backdrop) return () => {};
+    const modalRoot = document.getElementById("modalRoot");
+    if (!modalRoot) return () => {};
 
-    const prevCard = backdrop.querySelector(".modal-card");
-    const prevKeyDown = backdrop._activeKeyDown || null;
-    const prevClose = backdrop._activeClose || null;
-    const prevCleanup = backdrop._activeCleanup || null;
-    const prevRestoreFocusSelector = backdrop._activeRestoreFocusSelector || null;
     const prevTrigger = document.activeElement;
-    if (prevCard && !backdrop.hidden) {
-        if (prevKeyDown) {
-            document.removeEventListener("keydown", prevKeyDown);
-        }
-        _modalStack.push({
-            card: prevCard,
-            onKeyDown: prevKeyDown,
-            closeFn: prevClose,
-            onCleanup: prevCleanup,
-            restoreFocusSelector: prevRestoreFocusSelector,
-            trigger: prevTrigger,
-        });
-    } else {
-        _modalStack = [];
-    }
+    const dialog = document.createElement("dialog");
+    dialog.className = "modal-dialog";
 
-    backdrop.innerHTML = "";
     const card = document.createElement("div");
     card.className = "modal-card";
     card.tabIndex = -1;
-    card.setAttribute("role", "dialog");
-    card.setAttribute("aria-modal", "true");
 
     _modalTitleSeq += 1;
     const titleId = `modalDialogTitle_${_modalTitleSeq}`;
@@ -467,35 +466,9 @@ export function openModal(
     h.className = "card-title";
     h.id = titleId;
     h.textContent = title;
-    card.setAttribute("aria-labelledby", titleId);
+    dialog.setAttribute("aria-labelledby", titleId);
 
     let closed = false;
-    const onKeyDown = (e) => {
-        if (e.key === "Escape") {
-            close();
-            return;
-        }
-        if (e.key !== "Tab") return;
-        const focusables = _getModalFocusable(card);
-        if (focusables.length === 0) {
-            e.preventDefault();
-            card.focus({ preventScroll: true });
-            return;
-        }
-        const first = focusables[0];
-        const last = focusables[focusables.length - 1];
-        const active = document.activeElement;
-        if (e.shiftKey) {
-            if (active === first || !card.contains(active)) {
-                e.preventDefault();
-                last.focus({ preventScroll: true });
-            }
-        } else if (active === last || !card.contains(active)) {
-            e.preventDefault();
-            first.focus({ preventScroll: true });
-        }
-    };
-
     const runCleanup = () => {
         if (typeof onClose === "function") {
             try {
@@ -510,56 +483,46 @@ export function openModal(
         if (closed) return;
         if (!force && canClose && !canClose()) return;
         closed = true;
-        document.removeEventListener("keydown", onKeyDown);
-        runCleanup();
 
-        if (!backdrop.contains(card)) {
-            const idx = _modalStack.findIndex((item) => item.card === card);
-            if (idx !== -1) {
-                _modalStack.splice(idx, 1);
-            }
-            _syncTelegramBackButton();
-            return;
+        const idx = _modalStack.findIndex((item) => item.dialog === dialog);
+        const wasTop = idx !== -1 && idx === _modalStack.length - 1;
+        if (idx !== -1) {
+            _modalStack.splice(idx, 1);
         }
+
+        runCleanup();
+        _closeDialogElement(dialog);
 
         if (_modalStack.length > 0) {
-            const parent = _modalStack.pop();
-            backdrop.innerHTML = "";
-            backdrop.appendChild(parent.card);
-            backdrop._activeKeyDown = parent.onKeyDown;
-            backdrop._activeClose = parent.closeFn;
-            backdrop._activeCleanup = parent.onCleanup;
-            backdrop._activeRestoreFocusSelector = parent.restoreFocusSelector;
-            if (parent.onKeyDown) {
-                document.addEventListener("keydown", parent.onKeyDown);
-            }
-            backdrop.onclick = (e) => {
-                if (e.target === backdrop && parent.closeFn) {
-                    parent.closeFn();
-                }
-            };
+            modalRoot.hidden = false;
             _syncTelegramBackButton();
-            if (parent.trigger && parent.card.contains(parent.trigger) && typeof parent.trigger.focus === "function") {
-                parent.trigger.focus({ preventScroll: true });
-            } else {
-                _focusFirstInModal(parent.card);
+            if (wasTop) {
+                if (prevTrigger && document.contains(prevTrigger) && typeof prevTrigger.focus === "function") {
+                    prevTrigger.focus({ preventScroll: true });
+                } else {
+                    const top = _modalStack[_modalStack.length - 1];
+                    if (top && top.card) _focusFirstInModal(top.card);
+                }
             }
             return;
         }
 
-        _modalStack = [];
-        backdrop._activeKeyDown = null;
-        backdrop._activeClose = null;
-        backdrop._activeCleanup = null;
-        backdrop._activeRestoreFocusSelector = null;
-        backdrop.onclick = null;
         document.body.style.overflow = "";
-        _setBackgroundInert(false);
-        backdrop.hidden = true;
-        backdrop.innerHTML = "";
+        modalRoot.hidden = true;
         _syncTelegramBackButton();
         _restoreModalFocus(prevTrigger, restoreFocusSelector);
     };
+
+    dialog.addEventListener("cancel", (e) => {
+        e.preventDefault();
+        close();
+    });
+
+    dialog.addEventListener("click", (e) => {
+        if (e.target === dialog) {
+            close();
+        }
+    });
 
     header.appendChild(h);
 
@@ -572,20 +535,32 @@ export function openModal(
         header.appendChild(closeBtn);
     }
 
-    backdrop.onclick = (e) => {
-        if (e.target === backdrop) close();
-    };
-
     card.append(header, bodyNode);
-    backdrop.appendChild(card);
-    backdrop.hidden = false;
-    backdrop._activeKeyDown = onKeyDown;
-    backdrop._activeClose = close;
-    backdrop._activeCleanup = runCleanup;
-    backdrop._activeRestoreFocusSelector = restoreFocusSelector;
+    dialog.appendChild(card);
+
+    _modalStack.push({
+        dialog,
+        card,
+        closeFn: close,
+        onCleanup: runCleanup,
+        restoreFocusSelector,
+        trigger: prevTrigger,
+        markClosed: () => {
+            closed = true;
+        },
+    });
+
+    modalRoot.hidden = false;
+    modalRoot.appendChild(dialog);
     document.body.style.overflow = "hidden";
-    _setBackgroundInert(true);
-    document.addEventListener("keydown", onKeyDown);
+
+    if (typeof dialog.showModal === "function") {
+        dialog.showModal();
+    } else {
+        dialog.setAttribute("open", "");
+    }
+
+    _promoteVisibleToast();
     _syncTelegramBackButton();
     _focusFirstInModal(card);
     return close;
