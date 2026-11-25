@@ -38,7 +38,7 @@ function _webhookStatusChip(status) {
     if (status === "processing") return `<span class="chip chip-warn">Обработка</span>`;
     if (status === "retry") return `<span class="chip chip-warn">Повтор</span>`;
     if (status === "succeeded") return `<span class="chip chip-ok">Обработан</span>`;
-    if (status === "dead") return `<span class="chip chip-err">Ошибка (dead)</span>`;
+    if (status === "dead") return `<span class="chip chip-err">Сбой доставки</span>`;
     return `<span class="chip chip-muted">${escapeHtml(status || "—")}</span>`;
 }
 
@@ -86,11 +86,11 @@ function _renderMaintenanceCardInner(state) {
     return `
         <div class="row" style="align-items:center; justify-content:space-between; gap:12px;">
             <div>
-                <div style="font-weight:600; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <h2 class="card-title" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                     <span>Техработы платежей</span>
                     <span id="paymentsMaintBadge" class="chip ${badgeCls}">${escapeHtml(badgeText)}</span>
-                </div>
-                <div class="muted" style="font-size:12px; margin-top:4px;">
+                </h2>
+                <div class="meta-text" style="margin-top:4px;">
                     Блокирует создание новых заказов и пополнение баланса. Действующие подписки продолжают работать.
                 </div>
             </div>
@@ -102,7 +102,7 @@ function _renderMaintenanceCardInner(state) {
 }
 
 function _renderMaintenanceCard(state) {
-    return `<section id="paymentsMaintCard" class="card" style="margin-bottom:12px;">${_renderMaintenanceCardInner(state)}</section>`;
+    return `<section id="paymentsMaintCard" class="card">${_renderMaintenanceCardInner(state)}</section>`;
 }
 
 export function renderAdminFinancesView(root, state) {
@@ -145,6 +145,7 @@ export function renderAdminFinancesView(root, state) {
                     ? `
                 <form id="auditFilterForm" class="field" style="gap:8px;">
                     <div class="grid-2">
+                        <label for="auditActionSelect" class="visually-hidden">Действие</label>
                         <select id="auditActionSelect" class="select">
                             <option value="">Все действия</option>
                             ${(auditData.actions || [])
@@ -156,6 +157,7 @@ export function renderAdminFinancesView(root, state) {
                                 )
                                 .join("")}
                         </select>
+                        <label for="auditTargetTypeSelect" class="visually-hidden">Тип цели</label>
                         <select id="auditTargetTypeSelect" class="select">
                             <option value="" ${!state.auditTargetType ? "selected" : ""}>Все цели</option>
                             <option value="user" ${state.auditTargetType === "user" ? "selected" : ""}>Пользователь</option>
@@ -168,31 +170,34 @@ export function renderAdminFinancesView(root, state) {
                             <option value="mass_extend" ${state.auditTargetType === "mass_extend" ? "selected" : ""}>Массовое продление</option>
                         </select>
                     </div>
-                    <div class="row" style="flex-wrap:nowrap;">
+                    <div class="row-nowrap">
+                        <label for="auditQueryInput" class="visually-hidden">Поиск в аудите</label>
                         <input id="auditQueryInput" class="input" type="search" value="${escapeHtml(
                             state.auditQuery || ""
-                        )}" placeholder="ID, детали...">
+                        )}" placeholder="ID или детали">
                         <button type="submit" class="btn btn-primary btn-sm">Найти</button>
                     </div>
                 </form>
                 <div id="finPagerTop"></div>
-                <div id="finListContainer" style="display:flex; flex-direction:column; gap:8px;"></div>
+                <div id="finListContainer" class="stack-sm"></div>
                 <div id="finPagerBottom"></div>
             `
                     : subTab === "webhooks"
                     ? `
-                <div class="muted" style="font-size:12px;">
+                <div class="meta-text">
                     Последние 30 входящих вебхуков ЮKassa со статусами <span class="mono">pending / retry / dead</span>.
                 </div>
-                <div id="finListContainer" style="display:flex; flex-direction:column; gap:8px;"></div>
+                <div id="finListContainer" class="stack-sm"></div>
             `
                     : `
                 <form id="finFilterForm" class="field" style="gap:8px;">
                     <div class="row">
+                        <label for="finQueryInput" class="visually-hidden">Поиск заказа или пользователя</label>
                         <input id="finQueryInput" class="input" type="search" value="${escapeHtml(
                             state.finQuery || ""
                         )}" placeholder="Telegram ID, username, ID заказа">
-                        <select id="finStatusSelect" class="select" style="max-width:130px;">
+                        <label for="finStatusSelect" class="visually-hidden">Статус заказа</label>
+                        <select id="finStatusSelect" class="select" style="max-width:140px;">
                             <option value="">Все статусы</option>
                             <option value="paid" ${state.finStatus === "paid" ? "selected" : ""}>Оплачен</option>
                             <option value="pending" ${state.finStatus === "pending" ? "selected" : ""}>Ожидает</option>
@@ -202,7 +207,7 @@ export function renderAdminFinancesView(root, state) {
                         </select>
                         <button type="submit" class="btn btn-primary btn-sm">Найти</button>
                     </div>
-                    <div class="row" style="gap:8px; justify-content:flex-start;">
+                    <div class="row row-start">
                         <button type="button" id="finAttentionToggleBtn" class="btn btn-sm ${
                             state.finAttentionOnly ? "btn-primary" : ""
                         }" aria-pressed="${state.finAttentionOnly ? "true" : "false"}">
@@ -211,7 +216,7 @@ export function renderAdminFinancesView(root, state) {
                     </div>
                 </form>
                 <div id="finPagerTop"></div>
-                <div id="finListContainer" style="display:flex; flex-direction:column; gap:8px;"></div>
+                <div id="finListContainer" class="stack-sm"></div>
                 <div id="finPagerBottom"></div>
             `
             }
@@ -441,10 +446,10 @@ export function renderAdminFinancesView(root, state) {
         });
         if (state.auditLogsData == null) {
             if (!state.auditLoadAttempted) {
-                listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:12px;">Загрузка…</div>`;
+                listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:16px;">Загрузка</div>`;
                 loadAudit(0);
             } else {
-                listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:12px;">Не удалось загрузить аудит-лог. Нажмите «Обновить».</div>`;
+                listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:16px;">Не удалось загрузить аудит-лог. Нажмите «Обновить».</div>`;
             }
         } else {
             _renderAuditRows(listContainer, auditData.items || [], state);
@@ -453,10 +458,10 @@ export function renderAdminFinancesView(root, state) {
     } else if (subTab === "webhooks") {
         if (state.webhooksData == null) {
             if (!state.webhooksLoadAttempted) {
-                listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:12px;">Загрузка…</div>`;
+                listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:16px;">Загрузка</div>`;
                 loadWebhooks();
             } else {
-                listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:12px;">Не удалось загрузить вебхуки. Нажмите «Обновить».</div>`;
+                listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:16px;">Не удалось загрузить вебхуки. Нажмите «Обновить».</div>`;
             }
         } else {
             _renderWebhookRows(listContainer, webhooksData);
@@ -489,10 +494,10 @@ export function renderAdminFinancesView(root, state) {
         });
         if (state.financesData == null) {
             if (!state.financesLoadAttempted) {
-                listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:12px;">Загрузка…</div>`;
+                listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:16px;">Загрузка</div>`;
                 loadFinances(0);
             } else {
-                listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:12px;">Не удалось загрузить финансы. Нажмите «Обновить».</div>`;
+                listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:16px;">Не удалось загрузить финансы. Нажмите «Обновить».</div>`;
             }
         } else {
             _renderFinanceRows(listContainer, finData.items || [], state);
@@ -532,21 +537,21 @@ function _renderFinanceRows(container, items, state) {
 
         row.innerHTML = `
             <div class="row">
-                <div style="display:flex; align-items:center; flex-wrap:wrap; gap:6px;">
+                <div style="display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
                     <span class="mono" style="font-weight:600;">#${escapeHtml(shortId)}</span>
-                    <button type="button" class="btn btn-sm" data-open-user="${item.user_id}" style="padding:2px 6px; font-size:12px;">
+                    <button type="button" class="btn btn-sm btn-ghost-inline" data-open-user="${item.user_id}">
                         ${escapeHtml(uname)} · <span class="mono">${escapeHtml(item.telegram_id)}</span>
                     </button>
                 </div>
                 <span class="tabular" style="font-weight:600;">${item.amount_rub} ₽</span>
             </div>
-            <div class="row muted" style="font-size:11px;">
+            <div class="row meta-text">
                 <span>${escapeHtml(metaParts.filter(Boolean).join(" · "))}</span>
                 <span>${formatDate(item.created_at)}</span>
             </div>
             ${
                 timeDetails.length
-                    ? `<div class="muted" style="font-size:11px;">${escapeHtml(timeDetails.join(" · "))}</div>`
+                    ? `<div class="meta-text">${escapeHtml(timeDetails.join(" · "))}</div>`
                     : ""
             }
             ${
@@ -554,21 +559,21 @@ function _renderFinanceRows(container, items, state) {
                     ? `<div style="display:flex; flex-wrap:wrap; gap:4px;">${flagsHtml}</div>`
                     : ""
             }
-            <div class="row" style="gap:6px; flex-wrap:wrap;">
-                <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap; min-width:0;">
-                    <button type="button" class="btn btn-sm" data-copy-id="${escapeHtml(item.id)}" style="padding:2px 6px; font-size:11px;">
+            <div class="row" style="gap:8px; flex-wrap:wrap;">
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; min-width:0;">
+                    <button type="button" class="mono-copy" data-copy-id="${escapeHtml(item.id)}">
                         Копировать ID
                     </button>
                     ${
                         item.external_id
-                            ? `<button type="button" class="btn btn-sm" data-copy-ext="${escapeHtml(item.external_id)}" style="padding:2px 6px; font-size:11px;">
+                            ? `<button type="button" class="mono-copy" data-copy-ext="${escapeHtml(item.external_id)}">
                                 Копировать ext_id
                             </button>`
                             : ""
                     }
                     ${
                         item.reference
-                            ? `<span class="mono muted" style="font-size:11px; word-break:break-all;">${escapeHtml(item.reference)}</span>`
+                            ? `<span class="mono meta-text" style="word-break:break-all;">${escapeHtml(item.reference)}</span>`
                             : ""
                     }
                 </div>
@@ -607,17 +612,17 @@ function _formatAuditDetails(details) {
     if (isLong) {
         return `
             <details style="margin-top:4px;">
-                <summary class="muted" style="cursor:pointer; font-size:11px;">Детали (${formatted.length} симв.)</summary>
-                <pre class="mono muted" style="font-size:11px; white-space:pre-wrap; word-break:break-word; margin:4px 0 0;">${escapeHtml(formatted)}</pre>
+                <summary class="meta-text" style="cursor:pointer;">Детали (${formatted.length} симв.)</summary>
+                <pre class="mono meta-text" style="white-space:pre-wrap; word-break:break-word; margin:4px 0 0;">${escapeHtml(formatted)}</pre>
             </details>
         `;
     }
-    return `<div class="mono muted" style="font-size:11px; white-space:pre-wrap; word-break:break-word;">${escapeHtml(formatted)}</div>`;
+    return `<div class="mono meta-text" style="white-space:pre-wrap; word-break:break-word;">${escapeHtml(formatted)}</div>`;
 }
 
 function _renderAuditRows(container, items, state) {
     if (!items.length) {
-        container.innerHTML = `<div class="muted" style="text-align:center; padding:12px;">События не найдены</div>`;
+        container.innerHTML = `<div class="muted" style="text-align:center; padding:16px;">События не найдены</div>`;
         return;
     }
     items.forEach((item) => {
@@ -631,15 +636,15 @@ function _renderAuditRows(container, items, state) {
         const isClickableTarget = hasTargetId && (targetType === "user" || targetType === "server");
 
         const targetHtml = isClickableTarget
-            ? `<button type="button" class="btn btn-sm" data-open-target style="padding:1px 6px; font-size:11px;">${escapeHtml(targetText)}</button>`
+            ? `<button type="button" class="btn btn-sm btn-ghost-inline" data-open-target>${escapeHtml(targetText)}</button>`
             : `<span class="mono">${escapeHtml(targetText)}</span>`;
 
         row.innerHTML = `
             <div class="row">
                 <span class="chip chip-muted" title="${escapeHtml(item.action)}">${escapeHtml(formatAuditAction(item.action))}</span>
-                <span class="muted" style="font-size:11px;">${formatDate(item.created_at)}</span>
+                <span class="meta-text">${formatDate(item.created_at)}</span>
             </div>
-            <div class="row muted" style="font-size:11px; align-items:center;">
+            <div class="row meta-text" style="align-items:center;">
                 <span>Админ: <span class="mono">${escapeHtml(item.admin_id)}</span></span>
                 <span>Цель: ${targetHtml}</span>
             </div>
@@ -664,7 +669,7 @@ function _renderAuditRows(container, items, state) {
 
 function _renderWebhookRows(container, items) {
     if (!items.length) {
-        container.innerHTML = `<div class="muted" style="text-align:center; padding:12px;">Проблемных или ожидающих вебхуков нет</div>`;
+        container.innerHTML = `<div class="muted" style="text-align:center; padding:16px;">Проблемных или ожидающих вебхуков нет</div>`;
         return;
     }
     items.forEach((wh) => {
@@ -678,27 +683,27 @@ function _renderWebhookRows(container, items) {
                 <span class="mono" style="font-weight:600; font-size:12px;">${escapeHtml(wh.event_type || "—")}</span>
                 ${_webhookStatusChip(wh.status)}
             </div>
-            <div class="row muted" style="font-size:11px; flex-wrap:wrap; gap:6px;">
+            <div class="row meta-text">
                 <span>Получен: ${escapeHtml(receivedStr)}</span>
             </div>
             ${
                 eventKey
-                    ? `<div class="muted" style="font-size:11px; word-break:break-all;">Ключ: <span class="mono">${escapeHtml(eventKey)}</span></div>`
+                    ? `<div class="meta-text" style="word-break:break-all;">Ключ: <span class="mono">${escapeHtml(eventKey)}</span></div>`
                     : ""
             }
-            <div class="row muted" style="font-size:11px; flex-wrap:wrap; gap:6px;">
+            <div class="row meta-text">
                 <span>Заказ: <span class="mono">${escapeHtml(wh.public_order_id || "—")}</span></span>
                 ${
                     wh.public_order_id
-                        ? `<button type="button" class="btn btn-sm" data-copy-wh-order="${escapeHtml(wh.public_order_id)}" style="padding:1px 6px; font-size:11px;">Копировать заказ</button>`
+                        ? `<button type="button" class="mono-copy" data-copy-wh-order="${escapeHtml(wh.public_order_id)}">Копировать заказ</button>`
                         : ""
                 }
             </div>
             ${
                 wh.payment_external_id
-                    ? `<div class="row muted" style="font-size:11px; flex-wrap:wrap; gap:6px;">
+                    ? `<div class="row meta-text">
                         <span>Платёж: <span class="mono">${escapeHtml(wh.payment_external_id)}</span></span>
-                        <button type="button" class="btn btn-sm" data-copy-wh-payment="${escapeHtml(wh.payment_external_id)}" style="padding:1px 6px; font-size:11px;">Копировать платёж</button>
+                        <button type="button" class="mono-copy" data-copy-wh-payment="${escapeHtml(wh.payment_external_id)}">Копировать платёж</button>
                     </div>`
                     : ""
             }

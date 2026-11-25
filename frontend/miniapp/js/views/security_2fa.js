@@ -134,7 +134,7 @@ function _bindTotpForm({ form, input, btn, submitLabel, onSubmit }) {
         }
         submitting = true;
         btn.disabled = true;
-        btn.textContent = "Проверка...";
+        btn.textContent = "Проверка";
         try {
             await onSubmit(code);
             clearRetryTimer();
@@ -172,7 +172,7 @@ export function renderSecurity2FA(root, securityMeta, onVerified) {
     root.innerHTML = `
         <section class="card">
             <div class="row">
-                <div class="card-title">Подтверждение входа</div>
+                <h1 class="card-title">Подтверждение входа</h1>
                 <span class="chip chip-muted">TOTP 2FA</span>
             </div>
             <p class="muted">
@@ -221,7 +221,7 @@ function _renderSetupScreen(root, onVerified) {
         root.innerHTML = `
             <section class="card">
                 <div class="row">
-                    <div class="card-title">Настройка TOTP 2FA администратора</div>
+                    <h1 class="card-title">Настройка TOTP 2FA администратора</h1>
                     <span class="chip chip-warn">Первая настройка</span>
                 </div>
                 <p class="muted">
@@ -293,7 +293,7 @@ function _totpSetupHtml(setupState) {
     }
     return `
         <div class="field">
-            <label>Секретный ключ (Base32)</label>
+            <span class="meta-text">Секретный ключ (Base32)</span>
             <div class="sub-url-box">${escapeHtml(setupState.secret)}</div>
             <div class="btn-group">
                 <button id="copyTotpSecretBtn" type="button" class="btn btn-sm">Копировать ключ</button>

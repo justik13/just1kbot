@@ -217,7 +217,7 @@ function _renderErrorCard(root, title, desc, showRetry = false) {
     `;
     if (showRetry) {
         root.querySelector("#bootstrapRetryBtn")?.addEventListener("click", () => {
-            root.innerHTML = `<section class="card card-center"><div class="muted">Проверка доступа...</div></section>`;
+            root.innerHTML = `<section class="card card-center"><div class="muted">Проверка доступа</div></section>`;
             bootstrap();
         });
     }
@@ -269,7 +269,7 @@ async function _renderAdminView() {
 
     if (appState.adminTab === "nodes" && appState.selectedNodeId != null) {
         if (!appState.nodesLoaded) {
-            root.innerHTML = `<section class="card card-center"><div class="muted">Загрузка ноды...</div></section>`;
+            root.innerHTML = `<section class="card card-center"><div class="muted">Загрузка ноды</div></section>`;
             nodesFetchedThisRender = true;
             try {
                 const res = await api.listNodes();
@@ -284,7 +284,7 @@ async function _renderAdminView() {
         }
         const node = appState.nodes.find((n) => n.id === appState.selectedNodeId);
         if (node) {
-            root.innerHTML = `<section class="card card-center"><div class="muted">Загрузка...</div></section>`;
+            root.innerHTML = `<section class="card card-center"><div class="muted">Загрузка</div></section>`;
             const { renderNodeDetailView } = await import("./views/node_detail.js?v=2.8.0");
             if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
             const onBack = () => {
@@ -307,7 +307,7 @@ async function _renderAdminView() {
             id: appState.selectedUserId,
             telegram_id: null,
         };
-        root.innerHTML = `<section class="card card-center"><div class="muted">Загрузка профиля...</div></section>`;
+        root.innerHTML = `<section class="card card-center"><div class="muted">Загрузка профиля</div></section>`;
         const { renderUserDetailView } = await import("./views/user_detail.js?v=2.8.0");
         if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
         const onBack = () => {
@@ -335,6 +335,7 @@ async function _renderAdminView() {
     }
 
     _updateTelegramBackButton(null);
+    const activeTabMeta = _ADMIN_TABS.find((t) => t.id === appState.adminTab) || _ADMIN_TABS[0];
     const tabsHtml = _ADMIN_TABS
         .map(
             (t) =>
@@ -343,9 +344,12 @@ async function _renderAdminView() {
         .join("");
 
     root.innerHTML = `
-        <nav class="tabs-bar">${tabsHtml}</nav>
+        <nav class="tabs-bar" aria-label="Разделы админки">${tabsHtml}</nav>
+        <div class="admin-page-head">
+            <h1 class="admin-page-title">${escapeHtml(activeTabMeta.label)}</h1>
+        </div>
         <div id="adminTabBody" class="app-main">
-            <section class="card card-center"><div class="muted">Загрузка...</div></section>
+            <section class="card card-center"><div class="muted">Загрузка</div></section>
         </div>
     `;
 
@@ -545,7 +549,7 @@ async function _openAdmin2FAGate(root) {
         appState.mode = "cabinet";
         _renderAdminView();
     });
-    root.innerHTML = `<section class="card card-center"><div class="muted">Проверка доступа...</div></section>`;
+    root.innerHTML = `<section class="card card-center"><div class="muted">Проверка доступа</div></section>`;
     const { renderSecurity2FA } = await import("./views/security_2fa.js?v=2.8.0");
     if (seq !== _tabSwitchSeq || appState.mode !== "admin" || appState.twoFactorPassed) return;
     renderSecurity2FA(root, appState.security, async (res) => {

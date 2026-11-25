@@ -60,12 +60,12 @@ function _renderDevicesHtml(devices) {
             const metaParts = [d.platform, d.app_version ? `v${d.app_version}` : ""].filter(Boolean);
             const metaText = metaParts.join(" · ");
             return `
-                <div class="item-row" style="padding:8px 12px;">
+                <div class="item-row" style="padding:12px;">
                     <div class="row">
                         <span style="font-weight:600; font-size:13px;">${escapeHtml(d.device_model || d.platform || "Устройство")}</span>
-                        <span class="muted" style="font-size:12px;">${d.last_seen_at ? formatRelativeTime(d.last_seen_at) : "—"}</span>
+                        <span class="meta-text">${d.last_seen_at ? formatRelativeTime(d.last_seen_at) : "—"}</span>
                     </div>
-                    ${metaText ? `<div class="muted" style="font-size:11px;">${escapeHtml(metaText)}</div>` : ""}
+                    ${metaText ? `<div class="meta-text">${escapeHtml(metaText)}</div>` : ""}
                     <div class="row" style="gap:8px; margin-top:4px;">
                         <button type="button" class="mono-copy" data-copy-hwid="${escapeHtml(d.hwid)}" title="Копировать HWID">${escapeHtml(d.hwid)}</button>
                         <button type="button" class="btn btn-sm btn-danger" data-del-hwid="${escapeHtml(d.hwid)}" style="flex-shrink:0;">Удалить</button>
@@ -108,7 +108,7 @@ function _renderWiDiagnosticsHtml(wi) {
         <div class="filter-pills" style="margin-top:4px;">${syncNodesHtml}</div>
         ${
             wi.last_sync_error
-                ? `<div style="margin-top:6px; padding:8px 10px; border-radius:8px; background:var(--accent-red-soft); border:1px solid rgba(248,113,113,0.32); color:var(--accent-red); font-size:12px; white-space:pre-wrap;">${escapeHtml(wi.last_sync_error)}</div>`
+                ? `<div class="text-err" style="margin-top:8px; padding:8px 12px; border-radius:8px; background:var(--accent-red-soft); border:1px solid rgba(248,113,113,0.32); font-size:12px; white-space:pre-wrap;">${escapeHtml(wi.last_sync_error)}</div>`
                 : ""
         }
     `;
@@ -118,7 +118,7 @@ function _renderHistoryTabContent(tab, details) {
     if (tab === "orders") {
         const orders = details.recent_orders || [];
         if (!orders.length) {
-            return `<div class="muted" style="text-align:center; padding:12px;">Заказов нет</div>`;
+            return `<div class="muted" style="text-align:center; padding:16px;">Заказов нет</div>`;
         }
         return orders
             .map((o) => {
@@ -144,7 +144,7 @@ function _renderHistoryTabContent(tab, details) {
                             <span>${formatDate(o.created_at)}</span>
                             <span class="chip ${stInfo.cls}">${escapeHtml(stInfo.text)}</span>
                         </div>
-                        <div class="filter-pills" style="margin-top:2px;">
+                        <div class="filter-pills" style="margin-top:4px;">
                             <button type="button" class="mono-copy" data-copy-val="${escapeHtml(o.id)}" data-copy-msg="ID заказа скопирован">ID: ${escapeHtml(String(o.id).slice(0, 8))}…</button>
                             ${
                                 o.external_id
@@ -162,25 +162,24 @@ function _renderHistoryTabContent(tab, details) {
     if (tab === "ledger") {
         const entries = details.recent_ledger || [];
         if (!entries.length) {
-            return `<div class="muted" style="text-align:center; padding:12px;">Операций по балансу нет</div>`;
+            return `<div class="muted" style="text-align:center; padding:16px;">Операций по балансу нет</div>`;
         }
         return entries
             .map((entry) => {
                 const amt = Number(entry.amount || 0);
                 const signStr = amt > 0 ? `+${amt} ₽` : `${amt} ₽`;
-                const amtColor =
-                    amt > 0 ? "var(--accent-emerald, #34d399)" : amt < 0 ? "var(--accent-red, #f87171)" : "inherit";
+                const amtCls = amt > 0 ? "amount-pos" : amt < 0 ? "amount-err" : "tabular";
                 const bucketLabel = entry.bucket === "bonus" ? "бонус" : "реал";
                 const typeLabel = formatLedgerEntryType(entry.entry_type);
                 return `
                     <div class="item-row">
                         <div class="row">
                             <span style="font-weight:600; font-size:13px;">${escapeHtml(typeLabel)} <span class="chip chip-muted">${bucketLabel}</span></span>
-                            <span class="tabular" style="font-weight:600; color:${amtColor};">${escapeHtml(signStr)}</span>
+                            <span class="${amtCls}" style="font-weight:600;">${escapeHtml(signStr)}</span>
                         </div>
                         ${
                             entry.description
-                                ? `<div class="muted" style="font-size:12px;">${escapeHtml(entry.description)}</div>`
+                                ? `<div class="meta-text">${escapeHtml(entry.description)}</div>`
                                 : ""
                         }
                         <div class="history-row-meta">
@@ -195,7 +194,7 @@ function _renderHistoryTabContent(tab, details) {
     if (tab === "devices") {
         const events = details.recent_device_events || [];
         if (!events.length) {
-            return `<div class="muted" style="text-align:center; padding:12px;">Событий устройств нет</div>`;
+            return `<div class="muted" style="text-align:center; padding:16px;">Событий устройств нет</div>`;
         }
         return events
             .map((ev) => {
@@ -204,11 +203,11 @@ function _renderHistoryTabContent(tab, details) {
                     <div class="item-row">
                         <div class="row">
                             <span style="font-weight:600; font-size:13px;">${escapeHtml(title)}</span>
-                            <span class="muted" style="font-size:11px;">${formatDate(ev.created_at)}</span>
+                            <span class="meta-text">${formatDate(ev.created_at)}</span>
                         </div>
                         ${
                             ev.hwid
-                                ? `<div style="margin-top:2px;"><button type="button" class="mono-copy" data-copy-val="${escapeHtml(ev.hwid)}" data-copy-msg="HWID скопирован">${escapeHtml(_formatShortHwid(ev.hwid))}</button></div>`
+                                ? `<div style="margin-top:4px;"><button type="button" class="mono-copy" data-copy-val="${escapeHtml(ev.hwid)}" data-copy-msg="HWID скопирован">${escapeHtml(_formatShortHwid(ev.hwid))}</button></div>`
                                 : ""
                         }
                     </div>
@@ -219,7 +218,7 @@ function _renderHistoryTabContent(tab, details) {
 
     const audits = details.recent_audit || [];
     if (!audits.length) {
-        return `<div class="muted" style="text-align:center; padding:12px;">Записей аудита нет</div>`;
+        return `<div class="muted" style="text-align:center; padding:16px;">Записей аудита нет</div>`;
     }
     return audits
         .map((a) => {
@@ -234,11 +233,11 @@ function _renderHistoryTabContent(tab, details) {
                 <div class="item-row">
                     <div class="row">
                         <span class="chip chip-muted">${escapeHtml(actionLabel)}</span>
-                        <span class="muted" style="font-size:11px;">${formatDate(a.created_at)}</span>
+                        <span class="meta-text">${formatDate(a.created_at)}</span>
                     </div>
                     ${
                         detailsStr
-                            ? `<div class="mono muted" style="font-size:11px; white-space:pre-wrap; word-break:break-word;">${escapeHtml(detailsStr)}</div>`
+                            ? `<div class="mono meta-text" style="white-space:pre-wrap; word-break:break-word;">${escapeHtml(detailsStr)}</div>`
                             : ""
                     }
                 </div>
@@ -260,7 +259,7 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
                 <span class="detail-sticky-meta">${escapeHtml(fallbackName)}</span>
             </div>
             <section class="card card-center">
-                <div class="muted">Загрузка профиля...</div>
+                <div class="muted">Загрузка профиля</div>
             </section>
         `;
         root.querySelector("#userDetailBackBtn").addEventListener("click", onBack);
@@ -282,7 +281,7 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
                 <span class="detail-sticky-meta">${escapeHtml(fallbackName)}</span>
             </div>
             <section class="card card-center">
-                <div class="card-title">Не удалось загрузить профиль</div>
+                <h1 class="card-title">Не удалось загрузить профиль</h1>
                 <div class="muted">${escapeHtml(err.message || "Ошибка запроса")}</div>
                 <button id="userRetryBtn" type="button" class="btn btn-sm">Повторить</button>
             </section>
@@ -350,11 +349,11 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         <section class="card">
             <div class="row" style="align-items:flex-start;">
                 <div>
-                    <div style="font-size:16px; font-weight:600;">${escapeHtml(uname)}</div>
-                    <button id="copyTgIdBtn" type="button" class="btn-ghost" style="border:none; padding:0; margin-top:4px; font-size:12px; color:var(--text-secondary); cursor:pointer; font-family:var(--font-mono);">
+                    <h1 class="detail-hero-title">${escapeHtml(uname)}</h1>
+                    <button id="copyTgIdBtn" type="button" class="mono-copy" style="margin-top:8px;">
                         ID ${details.telegram_id} · Копировать
                     </button>
-                    <div class="filter-pills" style="margin-top:6px;">
+                    <div class="filter-pills" style="margin-top:8px;">
                         ${details.is_bot_blocked ? `<span class="chip chip-err">Бот заблокирован</span>` : ""}
                         ${Number(details.churn_events_24h || 0) > 0 ? `<span class="chip chip-warn">Смены устр. 24ч: ${details.churn_events_24h}</span>` : ""}
                         ${details.financial_hold ? `<span class="chip chip-err">Финансовая блокировка</span>` : ""}
@@ -385,10 +384,10 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         <section class="danger-card">
             <div class="row">
                 <div>
-                    <div class="danger-card-title">Долг: ${debt} ₽</div>
+                    <h2 class="danger-card-title">Долг: ${debt} ₽</h2>
                     ${
                         details.financial_block_reason
-                            ? `<div class="muted" style="font-size:12px; margin-top:4px;">${escapeHtml(details.financial_block_reason)}</div>`
+                            ? `<div class="meta-text" style="margin-top:4px;">${escapeHtml(details.financial_block_reason)}</div>`
                             : ""
                     }
                 </div>
@@ -400,7 +399,7 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
 
         <section class="card">
             <div class="row">
-                <div class="card-title">Бонусный баланс</div>
+                <h2 class="card-title">Бонусный баланс</h2>
                 <span class="muted">Коррекция</span>
             </div>
             <form id="userBonusForm" class="field" style="gap:8px;">
@@ -410,36 +409,38 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
                     <button type="button" class="pill-btn" data-add="1000">+1000 ₽</button>
                     <button type="button" class="pill-btn" data-add="-100">-100 ₽</button>
                 </div>
-                <div class="row" style="flex-wrap:nowrap;">
-                    <input name="amount_rub" class="input tabular" type="number" min="-100000" max="100000" step="1" value="" placeholder="Сумма ₽ (напр. 100 или -100)" aria-label="Сумма коррекции в рублях">
+                <div class="row-nowrap">
+                    <label for="userBonusAmount" class="visually-hidden">Сумма коррекции в рублях</label>
+                    <input id="userBonusAmount" name="amount_rub" class="input tabular" type="number" min="-100000" max="100000" step="1" value="" placeholder="Сумма ₽ (напр. 100 или -100)">
                     <button type="submit" class="btn btn-primary btn-sm" style="flex-shrink:0;">Применить</button>
                 </div>
-                <input name="note" class="input" type="text" maxlength="120" placeholder="Комментарий (необязательно)">
-                <label class="toggle-row">
+                <label for="userBonusNote" class="visually-hidden">Комментарий к коррекции</label>
+                <input id="userBonusNote" name="note" class="input" type="text" maxlength="120" placeholder="Комментарий (необязательно)">
+                <label for="userBonusNotify" class="toggle-row">
                     <span class="toggle-label">Уведомить в Telegram</span>
                     <span class="switch">
-                        <input name="notify_user" type="checkbox" checked>
+                        <input id="userBonusNotify" name="notify_user" type="checkbox" checked>
                         <span class="switch-track"></span>
                     </span>
                 </label>
-                <label class="toggle-row">
+                <label for="userBonusSendNote" class="toggle-row">
                     <span class="toggle-label">Отправить комментарий пользователю</span>
                     <span class="switch">
-                        <input name="send_note_to_user" type="checkbox">
+                        <input id="userBonusSendNote" name="send_note_to_user" type="checkbox">
                         <span class="switch-track"></span>
                     </span>
                 </label>
-                <div class="muted" style="font-size:11px;">Если переключатель выключен, комментарий сохранится только в аудит-логе.</div>
+                <div class="meta-text">Если переключатель выключен, комментарий сохранится только в аудит-логе.</div>
             </form>
         </section>
 
         <section class="card">
-            <div class="card-title">Подписки</div>
+            <h2 class="card-title">Подписки</h2>
 
             <div class="user-sub-box">
                 <div class="row">
                     <div>
-                        <div style="font-weight:600; font-size:13px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                        <div style="font-weight:600; font-size:13px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                             <span>Стандарт</span>
                             ${stdExpired ? `<span class="chip chip-err">Истекла</span>` : stdInfo && !stdInfo.is_active ? `<span class="chip chip-warn">Отключена</span>` : ""}
                         </div>
@@ -450,12 +451,12 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
                 <form id="stdEditForm" class="field" style="gap:8px; padding-top:8px; border-top:1px solid var(--border-subtle);" hidden>
                     <div class="grid-2">
                         <div class="field">
-                            <label>Срок (дней, 0 = лимит)</label>
-                            <input name="days" class="input tabular" type="number" min="-3650" max="3650" step="1" value="30">
+                            <label for="stdDaysInput">Срок (дней, 0 = лимит)</label>
+                            <input id="stdDaysInput" name="days" class="input tabular" type="number" min="-3650" max="3650" step="1" value="30">
                         </div>
                         <div class="field">
-                            <label>Устройств (2..10)</label>
-                            <input name="device_limit" class="input tabular" type="number" min="2" max="10" step="1" value="${Math.min(10, Math.max(2, stdLimit))}">
+                            <label for="stdLimitInput">Устройств (2..10)</label>
+                            <input id="stdLimitInput" name="device_limit" class="input tabular" type="number" min="2" max="10" step="1" value="${Math.min(10, Math.max(2, stdLimit))}">
                         </div>
                     </div>
                     <div class="filter-pills">
@@ -465,10 +466,10 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
                         <button type="button" class="pill-btn" data-std-days="90">+90 дн.</button>
                         <button type="button" class="pill-btn" data-std-days="-7">-7 дн.</button>
                     </div>
-                    <label class="toggle-row">
+                    <label for="stdNotifyInput" class="toggle-row">
                         <span class="toggle-label">Уведомить пользователя</span>
                         <span class="switch">
-                            <input name="notify_user" type="checkbox">
+                            <input id="stdNotifyInput" name="notify_user" type="checkbox">
                             <span class="switch-track"></span>
                         </span>
                     </label>
@@ -492,12 +493,12 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
                 <form id="wiEditForm" class="field" style="gap:8px; padding-top:8px; border-top:1px solid var(--border-subtle);" hidden>
                     <div class="grid-2">
                         <div class="field">
-                            <label>Срок (дней, 0 = слоты)</label>
-                            <input name="days" class="input tabular" type="number" min="-3650" max="3650" step="1" value="30">
+                            <label for="wiDaysInput">Срок (дней, 0 = слоты)</label>
+                            <input id="wiDaysInput" name="days" class="input tabular" type="number" min="-3650" max="3650" step="1" value="30">
                         </div>
                         <div class="field">
-                            <label>Слотов (1..3)</label>
-                            <input name="device_limit" class="input tabular" type="number" min="1" max="3" step="1" value="${Math.min(3, Math.max(1, wiLimit))}">
+                            <label for="wiLimitInput">Слотов (1..3)</label>
+                            <input id="wiLimitInput" name="device_limit" class="input tabular" type="number" min="1" max="3" step="1" value="${Math.min(3, Math.max(1, wiLimit))}">
                         </div>
                     </div>
                     <div class="filter-pills">
@@ -506,10 +507,10 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
                         <button type="button" class="pill-btn" data-wi-days="30">+30 дн.</button>
                         <button type="button" class="pill-btn" data-wi-days="-7">-7 дн.</button>
                     </div>
-                    <label class="toggle-row">
+                    <label for="wiNotifyInput" class="toggle-row">
                         <span class="toggle-label">Уведомить пользователя</span>
                         <span class="switch">
-                            <input name="notify_user" type="checkbox">
+                            <input id="wiNotifyInput" name="notify_user" type="checkbox">
                             <span class="switch-track"></span>
                         </span>
                     </label>
@@ -518,21 +519,21 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
 
                 <form id="wiTrafficForm" class="field" style="gap:8px; padding-top:8px; border-top:1px solid var(--border-subtle);" hidden>
                     <div class="field">
-                        <label>Операция с трафиком</label>
-                        <select name="traffic_action" class="select">
+                        <label for="wiTrafficActionSelect">Операция с трафиком</label>
+                        <select id="wiTrafficActionSelect" name="traffic_action" class="select">
                             <option value="add_gb">Добавить дополнительный трафик (+ГБ)</option>
                             <option value="reset_used">Сбросить использованный трафик</option>
                             <option value="set_base_gb">Установить базовую квоту (ГБ)</option>
                         </select>
                     </div>
                     <div class="field" id="wiGbField">
-                        <label>Объём (ГБ)</label>
-                        <input name="gb" class="input tabular" type="number" min="1" max="5000" step="1" value="50">
+                        <label for="wiGbInput">Объём (ГБ)</label>
+                        <input id="wiGbInput" name="gb" class="input tabular" type="number" min="1" max="5000" step="1" value="50">
                     </div>
-                    <label class="toggle-row">
+                    <label for="wiTrafficNotifyInput" class="toggle-row">
                         <span class="toggle-label">Уведомить пользователя</span>
                         <span class="switch">
-                            <input name="notify_user" type="checkbox">
+                            <input id="wiTrafficNotifyInput" name="notify_user" type="checkbox">
                             <span class="switch-track"></span>
                         </span>
                     </label>
@@ -542,29 +543,30 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         </section>
 
         <section class="card">
-            <div class="card-title">Написать в бот</div>
+            <h2 class="card-title">Написать в бот</h2>
             <form id="userDmForm" class="field" style="gap:8px;">
-                <textarea name="text" class="textarea" rows="3" maxlength="4096" required style="min-height:84px; font-family:inherit; font-size:13px;" placeholder="Сообщение пользователю (поддерживается HTML)"></textarea>
+                <label for="userDmTextInput" class="visually-hidden">Сообщение пользователю</label>
+                <textarea id="userDmTextInput" name="text" class="textarea" rows="3" maxlength="4096" required style="min-height:84px; font-family:inherit; font-size:13px;" placeholder="Сообщение пользователю (поддерживается HTML)"></textarea>
                 <button type="submit" class="btn btn-primary btn-sm">Отправить в бот</button>
             </form>
         </section>
 
         ${details.subscription_url || details.subscription_backup_url ? `
         <section class="card">
-            <div class="card-title">Ссылки подключения</div>
+            <h2 class="card-title">Ссылки подключения</h2>
             ${details.subscription_url ? `
             <div class="field">
-                <label>Основная (CDN)</label>
-                <div class="row" style="gap:8px; flex-wrap:nowrap;">
-                    <input class="input mono" readonly value="${escapeHtml(details.subscription_url)}">
+                <label for="detMainSubInput">Основная (CDN)</label>
+                <div class="row-nowrap">
+                    <input id="detMainSubInput" class="input mono" readonly value="${escapeHtml(details.subscription_url)}">
                     <button id="detCopySubBtn" type="button" class="btn btn-sm" style="flex-shrink:0;">Копировать</button>
                 </div>
             </div>` : ""}
             ${details.subscription_backup_url ? `
             <div class="field">
-                <label>Резервная (Прямая)</label>
-                <div class="row" style="gap:8px; flex-wrap:nowrap;">
-                    <input class="input mono" readonly value="${escapeHtml(details.subscription_backup_url)}">
+                <label for="detBackupSubInput">Резервная (Прямая)</label>
+                <div class="row-nowrap">
+                    <input id="detBackupSubInput" class="input mono" readonly value="${escapeHtml(details.subscription_backup_url)}">
                     <button id="detCopyBackupSubBtn" type="button" class="btn btn-sm" style="flex-shrink:0;">Копировать</button>
                 </div>
             </div>` : ""}
@@ -572,7 +574,7 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
 
         <section class="card">
             <div class="row">
-                <div class="card-title">Устройства (${devices.length})</div>
+                <h2 class="card-title">Устройства (${devices.length})</h2>
             </div>
             <div id="detDevicesList" class="field" style="gap:8px;">
                 ${_renderDevicesHtml(devices)}
@@ -580,35 +582,36 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         </section>
 
         <section class="card">
-            <div class="card-title">Ограничения</div>
+            <h2 class="card-title">Ограничения</h2>
             ${
                 details.financial_block_reason
-                    ? `<div style="font-size:12px; padding:6px 10px; border-radius:8px; background:var(--accent-red-soft); border:1px solid rgba(248,113,113,0.28); color:var(--accent-red);">Причина блокировки: ${escapeHtml(details.financial_block_reason)}</div>`
+                    ? `<div class="text-err" style="font-size:12px; padding:8px 12px; border-radius:8px; background:var(--accent-red-soft); border:1px solid rgba(248,113,113,0.28);">Причина блокировки: ${escapeHtml(details.financial_block_reason)}</div>`
                     : ""
             }
             <form id="userRestrictionsForm" class="field" style="gap:8px;">
-                <label class="toggle-row">
+                <label for="restrHoldInput" class="toggle-row">
                     <span class="toggle-label">Финансовая блокировка</span>
                     <span class="switch">
-                        <input name="financial_hold" type="checkbox" ${details.financial_hold ? "checked" : ""}>
+                        <input id="restrHoldInput" name="financial_hold" type="checkbox" ${details.financial_hold ? "checked" : ""}>
                         <span class="switch-track"></span>
                     </span>
                 </label>
-                <label class="toggle-row">
+                <label for="restrTopupInput" class="toggle-row">
                     <span class="toggle-label">Блокировка пополнений</span>
                     <span class="switch">
-                        <input name="topup_blocked" type="checkbox" ${details.topup_blocked ? "checked" : ""}>
+                        <input id="restrTopupInput" name="topup_blocked" type="checkbox" ${details.topup_blocked ? "checked" : ""}>
                         <span class="switch-track"></span>
                     </span>
                 </label>
-                <input name="note" class="input" type="text" maxlength="120" placeholder="Причина / комментарий (необязательно)">
+                <label for="restrNoteInput" class="visually-hidden">Причина или комментарий к ограничениям</label>
+                <input id="restrNoteInput" name="note" class="input" type="text" maxlength="120" placeholder="Причина / комментарий (необязательно)">
                 <button type="submit" class="btn btn-sm">Сохранить ограничения</button>
             </form>
         </section>
 
         <section class="card">
             <div class="row">
-                <div class="card-title">История</div>
+                <h2 class="card-title">История</h2>
             </div>
             <div class="seg-group" id="userHistoryTabs">
                 <button type="button" class="seg-btn active" data-htab="orders">Заказы</button>
@@ -622,8 +625,8 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         </section>
 
         <section class="danger-card">
-            <div class="danger-card-title">Опасная зона</div>
-            <label class="toggle-row">
+            <h2 class="danger-card-title">Опасная зона</h2>
+            <label for="dangerNotifyUser" class="toggle-row">
                 <span class="toggle-label">Уведомить пользователя</span>
                 <span class="switch">
                     <input id="dangerNotifyUser" type="checkbox">

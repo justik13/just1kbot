@@ -38,20 +38,21 @@ function _renderModuleErrors(node) {
     const lines = entries
         .map(([k, v]) => `<div>• <b>${escapeHtml(k)}</b>: ${escapeHtml(v)}</div>`)
         .join("");
-    return `<section class="card" style="border-color: rgba(248, 113, 113, 0.4);"><div class="card-title" style="color:var(--accent-red);">Ошибки модулей (${entries.length})</div><div class="meta-list" style="color:var(--accent-red);">${lines}</div></section>`;
+    return `<section class="danger-card"><h2 class="danger-card-title">Ошибки модулей (${entries.length})</h2><div class="meta-list text-err">${lines}</div></section>`;
 }
 
 function _metricBarHtml(label, pctRaw, extraText = "") {
     if (pctRaw == null || !Number.isFinite(Number(pctRaw))) return "";
     const pct = Math.max(0, Math.min(100, Number(pctRaw)));
+    const scale = (pct / 100).toFixed(4);
     const cls = pct >= 95 ? "err" : pct >= 80 ? "warn" : "";
     return `
         <div style="display:flex; flex-direction:column; gap:4px;">
             <div class="row" style="font-size:12px;">
                 <span class="detail-label">${escapeHtml(label)}</span>
-                <span><b>${pct.toFixed(1).replace(/\.0$/, "")}%</b>${extraText ? ` <span class="muted">(${escapeHtml(extraText)})</span>` : ""}</span>
+                <span class="tabular"><b>${pct.toFixed(1).replace(/\.0$/, "")}%</b>${extraText ? ` <span class="muted">(${escapeHtml(extraText)})</span>` : ""}</span>
             </div>
-            <div class="metric-bar"><div class="metric-fill ${cls}" style="width:${pct}%"></div></div>
+            <div class="metric-bar"><div class="metric-fill ${cls}" style="transform:scaleX(${scale})"></div></div>
         </div>
     `;
 }
@@ -108,11 +109,11 @@ function _renderTelemetryCard(node) {
 
     return `
         <section class="card">
-            <div class="row" style="margin-bottom:8px;">
-                <div class="card-title" style="margin:0;">Телеметрия и диагностика</div>
+            <div class="row">
+                <h2 class="card-title">Телеметрия и диагностика</h2>
                 <button type="button" id="copyDiagBtn" class="btn btn-sm">Скопировать диагностику</button>
             </div>
-            ${bars ? `<div style="display:flex; flex-direction:column; gap:10px; margin-bottom:12px;">${bars}</div>` : ""}
+            ${bars ? `<div class="stack-sm">${bars}</div>` : ""}
             <div class="detail-grid">
                 ${tl && !tl.limit_bytes ? `
                 <div class="detail-item">
@@ -217,7 +218,7 @@ function _renderTopologyCard(node) {
 
     return `
         <section class="card">
-            <div class="card-title">Multi-CDN и каскад</div>
+            <h2 class="card-title">Multi-CDN и каскад</h2>
             <div class="detail-grid">
                 ${cdnDomains.map(([k, v]) => `
                     <div class="detail-item">
@@ -278,17 +279,17 @@ function _openEditModal(node, onDone) {
     box.style.gap = "12px";
     box.innerHTML = `
         <div class="field">
-            <label>Название</label>
-            <input name="name" class="input" required maxlength="255" value="${escapeHtml(node.name)}">
+            <label for="editNodeNameInput">Название</label>
+            <input id="editNodeNameInput" name="name" class="input" required maxlength="255" value="${escapeHtml(node.name)}">
         </div>
         ${renderCountryFlagField({ value: node.country_flag || "" })}
         <div class="field">
-            <label>URL API ноды</label>
-            <input name="api_url" class="input" type="url" required maxlength="500" value="${escapeHtml(node.api_url || "")}">
+            <label for="editNodeApiUrlInput">URL API ноды</label>
+            <input id="editNodeApiUrlInput" name="api_url" class="input" type="url" required maxlength="500" value="${escapeHtml(node.api_url || "")}">
         </div>
         <div class="field">
-            <label>Новый API Токен (оставьте пустым, чтобы не менять)</label>
-            <input name="api_key" class="input" type="password" maxlength="512" placeholder="••••••••">
+            <label for="editNodeApiKeyInput">Новый API Токен (оставьте пустым, чтобы не менять)</label>
+            <input id="editNodeApiKeyInput" name="api_key" class="input" type="password" maxlength="512" placeholder="••••••••">
         </div>
         <button type="submit" class="btn btn-primary">Сохранить</button>
     `;
@@ -342,7 +343,7 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
                 <div style="display:flex; align-items:center; gap:12px;">
                     ${renderFlagHtml(node.country_flag || node.location_code || "", 26)}
                     <div>
-                        <div style="font-size:16px; font-weight:600;">${escapeHtml(node.name)}</div>
+                        <h1 class="detail-hero-title">${escapeHtml(node.name)}</h1>
                         <div class="muted">Сервер #${node.id}</div>
                     </div>
                 </div>
@@ -370,7 +371,7 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
         ${_renderTelemetryCard(node)}
 
         <section class="card">
-            <div class="card-title">Сетевые параметры</div>
+            <h2 class="card-title">Сетевые параметры</h2>
             <div class="detail-grid">
                 <div class="detail-item">
                     <span class="detail-label">API URL</span>
@@ -406,7 +407,7 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
         ${_renderTopologyCard(node)}
 
         <section class="card">
-            <div class="card-title">Модули</div>
+            <h2 class="card-title">Модули</h2>
             <div class="filter-pills" style="margin-bottom:8px;">${_renderModules(node)}</div>
             ${node.inbounds && node.inbounds.length ? `
                 <div class="detail-item" style="margin-top:8px;">
@@ -417,15 +418,15 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
         </section>
 
         <section class="card">
-            <div class="card-title">Настройки</div>
+            <h2 class="card-title">Настройки</h2>
             <div class="actions-row">
                 <button type="button" id="detailEditBtn" class="btn btn-sm">Изменить</button>
             </div>
         </section>
 
         <section class="danger-card">
-            <div class="danger-card-title">Опасная зона</div>
-            <div class="muted" style="font-size:12px;">Удаление сервера уберёт его из базы и запустит пересчёт топологии.</div>
+            <h2 class="danger-card-title">Опасная зона</h2>
+            <div class="meta-text">Удаление сервера уберёт его из базы и запустит пересчёт топологии.</div>
             <div class="actions-row">
                 <button type="button" id="detailDeleteBtn" class="btn btn-sm btn-danger">Удалить сервер</button>
             </div>

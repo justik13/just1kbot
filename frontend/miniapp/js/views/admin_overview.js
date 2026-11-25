@@ -70,38 +70,38 @@ function _renderOverviewContent(root, state, data) {
     const banners = [];
     if (data.payments_maintenance_enabled) {
         banners.push(`
-            <div class="alert-banner warn" data-nav="finances" role="button" tabindex="0">
+            <button type="button" class="alert-banner warn" data-nav="finances">
                 <span>Техническое обслуживание платежей включено</span>
                 <span class="chip chip-warn">Финансы →</span>
-            </div>
+            </button>
         `);
     }
     for (const p of problems) {
         banners.push(`
-            <div class="alert-banner err" data-open-node="${escapeHtml(p.id)}" role="button" tabindex="0">
+            <button type="button" class="alert-banner err" data-open-node="${escapeHtml(p.id)}">
                 <div>
                     <strong>${escapeHtml(p.name || `Нода #${p.id}`)}</strong>
                     <span class="muted">(${escapeHtml(roleLabel(p.role))})</span>
                     <div class="pulse-sub">${escapeHtml(_problemLabel(p))}</div>
                 </div>
                 <span class="chip chip-err">Открыть →</span>
-            </div>
+            </button>
         `);
     }
     if (Number(finances.attention_orders_count || 0) > 0) {
         banners.push(`
-            <div class="alert-banner warn" data-nav="attention-orders" role="button" tabindex="0">
+            <button type="button" class="alert-banner warn" data-nav="attention-orders">
                 <span>Заказы требуют внимания: <strong>${Number(finances.attention_orders_count)}</strong></span>
                 <span class="chip chip-warn">Проверить →</span>
-            </div>
+            </button>
         `);
     }
     if (Number(webhooks.dead || 0) > 0) {
         banners.push(`
-            <div class="alert-banner err" data-nav="webhooks" role="button" tabindex="0">
-                <span>Ошибки доставки вебхуков (dead): <strong>${Number(webhooks.dead)}</strong></span>
+            <button type="button" class="alert-banner err" data-nav="webhooks">
+                <span>Ошибки доставки вебхуков: <strong>${Number(webhooks.dead)}</strong></span>
                 <span class="chip chip-err">Вебхуки →</span>
-            </div>
+            </button>
         `);
     }
 
@@ -138,18 +138,18 @@ function _renderOverviewContent(root, state, data) {
         : 0;
     const fourthTileHtml = activeBroadcast
         ? `
-            <div class="pulse-card" data-nav="broadcasts" role="button" tabindex="0">
+            <button type="button" class="pulse-card" data-nav="broadcasts">
                 <span class="pulse-label">Активная рассылка</span>
                 <span class="pulse-val">${activeProcessed} / ${Number(activeBroadcast.total_count || 0)}</span>
                 <span class="pulse-sub">Статус: ${escapeHtml(activeBroadcast.status || "в процессе")}</span>
-            </div>
+            </button>
         `
         : `
-            <div class="pulse-card" data-nav="webhooks" role="button" tabindex="0">
+            <button type="button" class="pulse-card" data-nav="webhooks">
                 <span class="pulse-label">Вебхуки</span>
                 <span class="pulse-val">${Number(webhooks.pending || 0)} в очереди</span>
-                <span class="pulse-sub">Ошибок (dead): ${Number(webhooks.dead || 0)}</span>
-            </div>
+                <span class="pulse-sub">Сбои доставки: ${Number(webhooks.dead || 0)}</span>
+            </button>
         `;
 
     const workersHtml = workers.length
@@ -159,7 +159,7 @@ function _renderOverviewContent(root, state, data) {
                 const stateVal = w.state || "—";
                 const errorType = w.last_error_type || "";
                 const criticalBadge = w.critical
-                    ? ` <span class="chip chip-muted" style="font-size:10px; padding:2px 6px;">critical</span>`
+                    ? ` <span class="chip chip-muted">critical</span>`
                     : "";
                 return `
                     <div class="history-row">
@@ -171,51 +171,52 @@ function _renderOverviewContent(root, state, data) {
                             <span>Состояние: ${escapeHtml(stateVal)}</span>
                             <span>Сбоев подряд: ${fails}</span>
                         </div>
-                        ${errorType ? `<div class="pulse-sub" style="color:#fecaca;">Последняя ошибка: ${escapeHtml(errorType)}</div>` : ""}
+                        ${errorType ? `<div class="pulse-sub text-err">Последняя ошибка: ${escapeHtml(errorType)}</div>` : ""}
                     </div>
                 `;
             })
             .join("")
-        : `<div class="muted" style="font-size:12px;">Нет данных о фоновых воркерах.</div>`;
+        : `<div class="meta-text">Нет данных о фоновых воркерах.</div>`;
 
     root.innerHTML = `
-        <div class="stack" style="display:flex; flex-direction:column; gap:12px;">
-            ${banners.length ? `<div style="display:flex; flex-direction:column; gap:8px;">${banners.join("")}</div>` : ""}
+        <div class="stack-md">
+            ${banners.length ? `<div class="stack-sm">${banners.join("")}</div>` : ""}
 
             <div class="overview-grid">
-                <div class="pulse-card" data-nav="nodes" role="button" tabindex="0">
+                <button type="button" class="pulse-card" data-nav="nodes">
                     <span class="pulse-label">Ноды</span>
                     <span class="pulse-val">${Number(nodes.online || 0)} / ${Number(nodes.total || 0)}</span>
-                    <span class="pulse-sub">Проблемы: ${degradedOrOffline} · Откл: ${Number(nodes.disabled || 0)}</span>
-                </div>
+                    <span class="pulse-sub">Проблемы: ${degradedOrOffline} · Откл.: ${Number(nodes.disabled || 0)}</span>
+                </button>
                 <div class="pulse-card">
                     <span class="pulse-label">Пользователи</span>
                     <span class="pulse-val">${Number(users.total || 0)}</span>
-                    <span class="pulse-sub">Std: ${Number(users.active_standard || 0)} · БИ: ${Number(users.active_wi || 0)}</span>
-                    <div class="row" style="gap:10px; justify-content:flex-start; flex-wrap:wrap; margin-top:2px;">
-                        <button type="button" class="btn btn-sm btn-ghost" data-nav="users" style="padding:2px 0;">
+                    <span class="pulse-sub">Стандарт: ${Number(users.active_standard || 0)} · БИ: ${Number(users.active_wi || 0)}</span>
+                    <div class="row row-start">
+                        <button type="button" class="btn btn-sm btn-ghost btn-ghost-inline" data-nav="users">
                             Все →
                         </button>
-                        <button type="button" class="btn btn-sm btn-ghost" data-nav="expiring-users" style="padding:2px 0;">
+                        <button type="button" class="btn btn-sm btn-ghost btn-ghost-inline" data-nav="expiring-users">
                             Истекают (3д): ${Number(users.expiring_3d || 0)} →
                         </button>
                     </div>
                 </div>
-                <div class="pulse-card" data-nav="finances" role="button" tabindex="0">
+                <button type="button" class="pulse-card" data-nav="finances">
                     <span class="pulse-label">Выручка</span>
                     <span class="pulse-val">${Number(finances.revenue_24h || 0)} ₽</span>
                     <span class="pulse-sub">24ч · 7д: ${Number(finances.revenue_7d || 0)} ₽${finances.attention_orders_count ? ` · Внимание: ${finances.attention_orders_count}` : ""}</span>
-                </div>
+                </button>
                 ${fourthTileHtml}
             </div>
 
             <section class="card">
-                <form id="overviewQuickSearchForm" class="row" style="gap:8px; flex-wrap:nowrap;">
+                <form id="overviewQuickSearchForm" class="row-nowrap">
+                    <label for="overviewQuickSearchInput" class="visually-hidden">Быстрый поиск пользователя</label>
                     <input
                         id="overviewQuickSearchInput"
                         class="input"
                         type="search"
-                        placeholder="Быстрый поиск пользователя (@username, ID)..."
+                        placeholder="Поиск пользователя (@username, ID)"
                         autocomplete="off"
                     />
                     <button type="submit" class="btn btn-primary btn-sm">Найти</button>
@@ -227,12 +228,12 @@ function _renderOverviewContent(root, state, data) {
                     <span>Фоновые воркеры (${workers.length})${workersWithErrors ? ` · Ошибки: ${workersWithErrors}` : ""}</span>
                     ${supervisorBadgeHtml}
                 </summary>
-                <div class="history-list" style="margin-top:10px;">
+                <div class="history-list" style="margin-top:12px;">
                     ${workersHtml}
                 </div>
             </details>
 
-            <div class="row" style="justify-content:space-between; gap:8px; flex-wrap:wrap;">
+            <div class="row">
                 <button id="overviewRefreshBtn" type="button" class="btn btn-sm">Обновить</button>
                 <button id="overviewLogoutAllBtn" type="button" class="btn btn-sm btn-danger">Выйти со всех устройств</button>
             </div>
@@ -240,22 +241,14 @@ function _renderOverviewContent(root, state, data) {
     `;
 
     root.querySelectorAll("[data-open-node]").forEach((el) => {
-        const openNode = () => {
+        el.addEventListener("click", () => {
             const nodeId = Number(el.dataset.openNode);
             if (Number.isFinite(nodeId)) state.onOpenNode?.(nodeId);
-        };
-        el.addEventListener("click", openNode);
-        el.addEventListener("keydown", (e) => {
-            if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                openNode();
-            }
         });
     });
 
     root.querySelectorAll("[data-nav]").forEach((el) => {
-        const handleNav = (e) => {
-            if (e.target !== el && e.target.closest("[data-nav]") !== el) return;
+        el.addEventListener("click", (e) => {
             const target = el.dataset.nav;
             if (target === "finances") {
                 state.onOpenFinances?.("", false, "orders");
@@ -273,16 +266,7 @@ function _renderOverviewContent(root, state, data) {
             } else if (target === "broadcasts") {
                 state.onOpenBroadcasts?.();
             }
-        };
-        el.addEventListener("click", handleNav);
-        if (el.tagName !== "BUTTON") {
-            el.addEventListener("keydown", (e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    handleNav(e);
-                }
-            });
-        }
+        });
     });
 
     const searchForm = root.querySelector("#overviewQuickSearchForm");
@@ -298,7 +282,7 @@ function _renderOverviewContent(root, state, data) {
     const refreshBtn = root.querySelector("#overviewRefreshBtn");
     if (refreshBtn) {
         refreshBtn.addEventListener("click", () => {
-            withButtonLoading(refreshBtn, "Обновление...", () => renderAdminOverviewView(root, state));
+            withButtonLoading(refreshBtn, "Обновление", () => renderAdminOverviewView(root, state));
         });
     }
 
@@ -326,7 +310,7 @@ export async function renderAdminOverviewView(root, state) {
     if (!state.overviewData) {
         root.innerHTML = `
             <section class="card card-center">
-                <div class="muted">Загрузка обзора...</div>
+                <div class="muted">Загрузка обзора</div>
             </section>
         `;
     }

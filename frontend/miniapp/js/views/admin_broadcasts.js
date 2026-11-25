@@ -102,9 +102,9 @@ function _renderMassOpFormHtml(state) {
             </div>
         `
         }
-        <label class="muted" style="display:flex; align-items:center; gap:8px; font-size:12px;">
+        <label for="massNotifyCheckbox" class="checkbox-row">
             <input id="massNotifyCheckbox" type="checkbox" checked>
-            Отправить уведомление пользователям в бот
+            <span>Отправить уведомление пользователям в бот</span>
         </label>
         <button id="massSubmitBtn" type="submit" class="btn btn-primary">Применить массово</button>
     `;
@@ -118,7 +118,7 @@ function _updateCharCounter(root) {
     const len = textInput.value.length;
     const hasMedia = Boolean(mediaInput && mediaInput.value.trim());
     if (hasMedia && len > 1024) {
-        counterEl.innerHTML = `<span style="color:var(--accent-amber, #fbbf24); font-weight:600;">${len} / 4096 · С фото > 1024 симв. — сообщение будет разбито на 2 части</span>`;
+        counterEl.innerHTML = `<span style="color:var(--accent-amber); font-weight:600;">${len} / 4096 · С фото > 1024 симв. — сообщение будет разбито на 2 части</span>`;
     } else {
         counterEl.textContent = `${len} / 4096`;
     }
@@ -133,28 +133,28 @@ export function renderAdminBroadcastsView(root, state) {
     root.innerHTML = `
         <section class="card">
             <div class="row">
-                <div class="card-title">Рассылка в Telegram</div>
+                <h2 class="card-title">Рассылка в Telegram</h2>
                 <span class="chip chip-muted">HTML · фото URL</span>
             </div>
-            <form id="broadcastForm" class="field" style="gap:10px;">
+            <form id="broadcastForm" class="field" style="gap:12px;">
                 <div class="field">
                     <label for="bcAudienceSelect">Аудитория</label>
-                    <div class="row" style="flex-wrap:nowrap;">
+                    <div class="row-nowrap">
                         <select id="bcAudienceSelect" class="select">${audienceHtml}</select>
                         <button id="bcPreviewBtn" type="button" class="btn btn-sm">Охват</button>
                     </div>
-                    <div id="bcPreviewHint" class="muted" style="font-size:11px;"></div>
+                    <div id="bcPreviewHint" class="meta-text"></div>
                 </div>
                 <div class="field">
                     <label for="bcTextInput">Текст сообщения (HTML: &lt;b&gt;, &lt;i&gt;, &lt;code&gt;, &lt;a&gt;)</label>
                     <textarea id="bcTextInput" class="textarea" rows="5" maxlength="4096" required
-                        placeholder="Текст рассылки..."></textarea>
-                    <div id="bcCharCounter" class="muted" style="font-size:11px;">0 / 4096</div>
+                        placeholder="Текст рассылки"></textarea>
+                    <div id="bcCharCounter" class="meta-text">0 / 4096</div>
                 </div>
                 <div class="field">
                     <label for="bcMediaInput">Фото (необязательно: https://... или file_id)</label>
                     <input id="bcMediaInput" class="input" type="text" maxlength="500"
-                        placeholder="https://example.com/banner.jpg">
+                        placeholder="https://... или Telegram file_id">
                 </div>
                 <button id="bcLaunchBtn" type="submit" class="btn btn-primary">Запустить рассылку</button>
             </form>
@@ -162,24 +162,24 @@ export function renderAdminBroadcastsView(root, state) {
 
         <section class="card">
             <div class="row">
-                <div class="card-title">Массовые операции</div>
+                <h2 class="card-title">Массовые операции</h2>
                 <div class="seg-group" style="max-width:240px;">
                     <button type="button" class="seg-btn ${massTab === "bonus" ? "active" : ""}" data-masstab="bonus">Бонус ₽</button>
                     <button type="button" class="seg-btn ${massTab === "extend" ? "active" : ""}" data-masstab="extend">Продление</button>
                 </div>
             </div>
-            <form id="massOpForm" class="field" style="gap:10px;">
+            <form id="massOpForm" class="field" style="gap:12px;">
                 ${_renderMassOpFormHtml(state)}
             </form>
         </section>
 
         <section class="card">
             <div class="row">
-                <div class="card-title">История рассылок</div>
+                <h2 class="card-title">История рассылок</h2>
                 <button id="reloadBcBtn" type="button" class="btn btn-sm">Обновить</button>
             </div>
             <div id="bcPagerTop"></div>
-            <div id="bcListContainer" style="display:flex; flex-direction:column; gap:8px;"></div>
+            <div id="bcListContainer" class="stack-sm"></div>
             <div id="bcPagerBottom"></div>
         </section>
     `;
@@ -230,7 +230,7 @@ export function renderAdminBroadcastsView(root, state) {
     root.querySelector("#bcPreviewBtn").addEventListener("click", async () => {
         const audience = root.querySelector("#bcAudienceSelect").value;
         const hintEl = root.querySelector("#bcPreviewHint");
-        hintEl.textContent = "Подсчёт...";
+        hintEl.textContent = "Подсчёт";
         try {
             const res = await api.previewBroadcast(audience);
             hintEl.textContent = `Аудитория «${res.label}»: получат ${res.reachable_count} (всего в сегменте ${res.total_count})`;
@@ -425,7 +425,7 @@ function _renderHistoryList(root, container, state, reloadBroadcasts) {
     const broadcasts = state.broadcastsData || [];
     container.innerHTML = "";
     if (!broadcasts.length) {
-        container.innerHTML = `<div class="muted" style="text-align:center; padding:12px;">Рассылок пока нет</div>`;
+        container.innerHTML = `<div class="muted" style="text-align:center; padding:16px;">Рассылок пока нет</div>`;
         return;
     }
 
@@ -434,19 +434,19 @@ function _renderHistoryList(root, container, state, reloadBroadcasts) {
         row.className = "item-row";
         row.innerHTML = `
             <div class="row">
-                <div style="display:flex; align-items:center; flex-wrap:wrap; gap:6px;">
+                <div style="display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
                     <span style="font-weight:600;">#${b.id} · ${escapeHtml(b.label)}</span>
-                    ${b.has_media ? `<span class="chip chip-muted">📷 Фото</span>` : ""}
-                    <span class="muted" style="font-size:11px;">${formatDate(b.created_at)}</span>
+                    ${b.has_media ? `<span class="chip chip-muted">Фото</span>` : ""}
+                    <span class="meta-text">${formatDate(b.created_at)}</span>
                 </div>
                 ${_statusChip(b.status)}
             </div>
-            <div class="muted" style="font-size:12px; word-break:break-word;">${escapeHtml(b.text_preview)}</div>
-            <div class="row" style="gap:6px; flex-wrap:wrap;">
-                <span class="tabular muted" style="font-size:12px;">
+            <div class="meta-text" style="word-break:break-word;">${escapeHtml(b.text_preview)}</div>
+            <div class="row" style="gap:8px; flex-wrap:wrap;">
+                <span class="tabular meta-text">
                     Успешно: <b>${b.success_count}</b> / ${b.total_count} (${b.progress_pct}%) · Ошибок: ${b.fail_count}
                 </span>
-                <div style="display:flex; gap:6px; align-items:center;">
+                <div style="display:flex; gap:8px; align-items:center;">
                     <button type="button" class="btn btn-sm" data-repeat-bc="${b.id}">Повторить</button>
                     ${
                         b.status === "in_progress"

@@ -57,7 +57,7 @@ export function renderAdminUsersView(root, state, onOpenUser) {
 
         <section class="card">
             <div class="row">
-                <div class="card-title">Пользователи и балансы</div>
+                <h2 class="card-title">Пользователи и балансы</h2>
                 <button id="reloadUsersBtn" type="button" class="btn btn-sm">Обновить</button>
             </div>
             <div class="filter-pills">
@@ -69,14 +69,15 @@ export function renderAdminUsersView(root, state, onOpenUser) {
                 <button type="button" class="pill-btn ${activeFilter === "new_7d" ? "active" : ""}" data-ufilter="new_7d">Новые 7д (${fc.new_7d ?? 0})</button>
                 <button type="button" class="pill-btn ${activeFilter === "expired" ? "active" : ""}" data-ufilter="expired">Истекли (${fc.expired ?? 0})</button>
                 <button type="button" class="pill-btn ${activeFilter === "never" ? "active" : ""}" data-ufilter="never">Без подписки (${fc.never ?? 0})</button>
-                <button type="button" class="pill-btn ${activeFilter === "banned" ? "active" : ""}" data-ufilter="banned">Бот забл. (${fc.banned ?? 0})</button>
+                <button type="button" class="pill-btn ${activeFilter === "banned" ? "active" : ""}" data-ufilter="banned">Бот заблокирован (${fc.banned ?? 0})</button>
             </div>
-            <form id="userSearchForm" class="row" style="flex-wrap:nowrap;">
+            <form id="userSearchForm" class="row-nowrap">
+                <label for="userSearchInput" class="visually-hidden">Поиск пользователей</label>
                 <input id="userSearchInput" class="input" type="search" value="${escapeHtml(query)}" placeholder="ID, @username, имя, HWID, UUID">
                 <button type="submit" class="btn btn-primary btn-sm">Найти</button>
             </form>
             <div id="usersPagerTop"></div>
-            <div id="usersListContainer" class="nodes-list" style="display:flex; flex-direction:column; gap:8px;"></div>
+            <div id="usersListContainer" class="stack-sm"></div>
             <div id="usersPagerBottom"></div>
         </section>
     `;
@@ -108,7 +109,7 @@ export function renderAdminUsersView(root, state, onOpenUser) {
 
     const reloadBtn = root.querySelector("#reloadUsersBtn");
     reloadBtn.addEventListener("click", () => {
-        withButtonLoading(reloadBtn, "Обновление...", () =>
+        withButtonLoading(reloadBtn, "Обновление", () =>
             reload(getLiveQuery(), state.usersFilter || "all", state.usersOffset || 0)
         );
     });
@@ -150,15 +151,14 @@ export function renderAdminUsersView(root, state, onOpenUser) {
 
     const listEl = root.querySelector("#usersListContainer");
     if (!users.length) {
-        listEl.innerHTML = `<div class="muted" style="text-align:center; padding:14px;">Пользователи не найдены</div>`;
+        listEl.innerHTML = `<div class="muted" style="text-align:center; padding:16px;">Пользователи не найдены</div>`;
         return;
     }
 
     users.forEach((u) => {
-        const card = document.createElement("div");
-        card.className = "card node-card-compact";
-        card.setAttribute("role", "button");
-        card.setAttribute("tabindex", "0");
+        const card = document.createElement("button");
+        card.type = "button";
+        card.className = "card node-card-compact card-btn";
 
         const stdShort = _formatShortDate(u.standard_end);
         const wiShort = _formatShortDate(u.wi_end);
@@ -178,14 +178,14 @@ export function renderAdminUsersView(root, state, onOpenUser) {
             <div class="row">
                 <div>
                     <span style="font-weight:600;">${_formatUserTitle(u)}</span>
-                    <span class="mono muted" style="margin-left:6px;">${u.telegram_id}</span>
+                    <span class="mono muted" style="margin-left:8px;">${u.telegram_id}</span>
                 </div>
                 <div style="display:flex; align-items:center; gap:8px;">
                     <span class="tabular" style="font-weight:600;">${u.total_balance} ₽</span>
-                    <span class="node-chevron">›</span>
+                    <span class="node-chevron" aria-hidden="true">›</span>
                 </div>
             </div>
-            <div class="row muted" style="font-size:12px;">
+            <div class="row meta-text">
                 <span>Осн.: ${u.real_balance} ₽ · Бонусы: ${u.bonus_balance} ₽</span>
                 <span>Рег.: ${formatDate(u.created_at)}</span>
             </div>
@@ -196,15 +196,8 @@ export function renderAdminUsersView(root, state, onOpenUser) {
             </div>
         `;
 
-        const open = () => {
+        card.addEventListener("click", () => {
             if (onOpenUser) onOpenUser(u);
-        };
-        card.addEventListener("click", open);
-        card.addEventListener("keydown", (e) => {
-            if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                open();
-            }
         });
         listEl.appendChild(card);
     });

@@ -167,6 +167,7 @@ export function formatBytesGb(bytes) {
 
 let _modalStack = [];
 let _modalTitleSeq = 0;
+let _fieldIdSeq = 0;
 let _pageBackHandler = null;
 let _globalBackListenerBound = false;
 
@@ -220,10 +221,20 @@ function _getModalFocusable(card) {
     );
 }
 
+function _setBackgroundInert(isInert) {
+    const shell = document.querySelector(".app-shell");
+    if (shell && "inert" in shell) {
+        shell.inert = Boolean(isInert);
+    }
+}
+
 function _focusFirstInModal(card) {
-    const focusable = _getModalFocusable(card)[0];
-    if (focusable && typeof focusable.focus === "function") {
-        focusable.focus({ preventScroll: true });
+    const focusables = _getModalFocusable(card);
+    const preferred =
+        focusables.find((el) => el.hasAttribute("autofocus") || el.autofocus) ||
+        focusables[0];
+    if (preferred && typeof preferred.focus === "function") {
+        preferred.focus({ preventScroll: true });
     } else if (typeof card.focus === "function") {
         card.focus({ preventScroll: true });
     }
@@ -245,6 +256,7 @@ export function closeAllModals() {
     backdrop._activeClose = null;
     backdrop.onclick = null;
     document.body.style.overflow = "";
+    _setBackgroundInert(false);
     backdrop.hidden = true;
     backdrop.innerHTML = "";
     _syncTelegramBackButton();
@@ -283,7 +295,7 @@ export function openModal(title, bodyNode, { showCloseBtn = true, canClose = nul
     const titleId = `modalDialogTitle_${_modalTitleSeq}`;
     const header = document.createElement("div");
     header.className = "row";
-    const h = document.createElement("div");
+    const h = document.createElement("h1");
     h.className = "card-title";
     h.id = titleId;
     h.textContent = title;
@@ -359,6 +371,7 @@ export function openModal(title, bodyNode, { showCloseBtn = true, canClose = nul
         backdrop._activeClose = null;
         backdrop.onclick = null;
         document.body.style.overflow = "";
+        _setBackgroundInert(false);
         backdrop.hidden = true;
         backdrop.innerHTML = "";
         _syncTelegramBackButton();
@@ -388,6 +401,7 @@ export function openModal(title, bodyNode, { showCloseBtn = true, canClose = nul
     backdrop._activeKeyDown = onKeyDown;
     backdrop._activeClose = close;
     document.body.style.overflow = "hidden";
+    _setBackgroundInert(true);
     document.addEventListener("keydown", onKeyDown);
     _syncTelegramBackButton();
     _focusFirstInModal(card);
@@ -425,7 +439,10 @@ export function showConfirmModal({
     cancelBtn.type = "button";
     cancelBtn.className = "btn";
     cancelBtn.textContent = cancelText;
-    if (isDestructive) cancelBtn.autofocus = true;
+    if (isDestructive) {
+        cancelBtn.autofocus = true;
+        cancelBtn.setAttribute("autofocus", "");
+    }
 
     const okBtn = document.createElement("button");
     okBtn.type = "button";
@@ -548,9 +565,11 @@ export function renderCountryFlagField({
     const raw = String(value || "").trim();
     const code = _extractCountryCode(raw);
     const isKnown = Boolean(code && _COUNTRY_CODE_SET.has(code));
-    const isCustom = Boolean(raw && raw !== "🌐" && !isKnown);
+    const isCustom = Boolean(raw && raw !== "\u{1F310}" && !isKnown);
     const selectVal = isKnown ? code : isCustom ? "__custom__" : "";
     const effectiveVal = isKnown ? countryCodeToEmoji(code) : isCustom ? raw : "";
+    _fieldIdSeq += 1;
+    const selectId = id ? `${id}_select` : `flagSelect_${_fieldIdSeq}`;
 
     const optionsHtml = COUNTRY_OPTIONS.map(
         (c) =>
@@ -559,17 +578,17 @@ export function renderCountryFlagField({
 
     return `
         <div class="field" data-flag-field>
-            <label>${escapeHtml(label)}</label>
+            <label for="${escapeHtml(selectId)}">${escapeHtml(label)}</label>
             <div class="flag-picker">
                 <span class="flag-picker-preview" data-flag-preview>${renderFlagHtml(effectiveVal, 22)}</span>
-                <select class="select flag-picker-select" data-flag-select>
+                <select id="${escapeHtml(selectId)}" class="select flag-picker-select" data-flag-select>
                     <option value="" ${selectVal === "" ? "selected" : ""}>${escapeHtml(emptyLabel)}</option>
                     ${optionsHtml}
-                    <option value="__custom__" ${selectVal === "__custom__" ? "selected" : ""}>Другая (код или флаг)…</option>
+                    <option value="__custom__" ${selectVal === "__custom__" ? "selected" : ""}>Другая (код или флаг)</option>
                 </select>
                 <input type="hidden" name="${escapeHtml(name)}" ${id ? `id="${escapeHtml(id)}"` : ""} value="${escapeHtml(effectiveVal)}" data-flag-value>
             </div>
-            <input type="text" class="input" data-flag-custom maxlength="10" value="${escapeHtml(isCustom ? raw : "")}" placeholder="Код (напр. AU) или эмодзи" ${isCustom ? "" : "hidden"}>
+            <input type="text" class="input" data-flag-custom maxlength="10" value="${escapeHtml(isCustom ? raw : "")}" placeholder="Код (напр. AU) или эмодзи" aria-label="Свой код или символ страны" ${isCustom ? "" : "hidden"}>
         </div>
     `;
 }
@@ -684,7 +703,7 @@ export function renderFlagHtml(flagOrCode, width = 20) {
     if (code && svgs[code]) {
         return svgs[code]();
     }
-    if (flagOrCode && flagOrCode !== "🌐") {
+    if (flagOrCode && flagOrCode !== "\u{1F310}") {
         return `<span style="font-size:${Math.max(14, width - 2)}px; line-height:1;">${escapeHtml(flagOrCode)}</span>`;
     }
     return `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`;

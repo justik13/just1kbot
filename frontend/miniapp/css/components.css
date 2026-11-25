@@ -11,6 +11,34 @@
     padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
 }
 
+@media (min-width: 768px) {
+    .app-shell.mode-admin {
+        max-width: 920px;
+    }
+}
+
+.admin-page-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0 4px;
+}
+
+.admin-page-title {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+    line-height: 1.25;
+}
+
+.detail-hero-title {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 1.25;
+}
+
 @media (max-width: 440px) {
     .mode-admin #userChip {
         display: none;
@@ -43,6 +71,10 @@
 }
 
 .mode-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 32px;
     border: none;
     background: transparent;
     color: var(--text-secondary);
@@ -50,6 +82,7 @@
     padding: 4px 12px;
     font-size: 12px;
     font-weight: 500;
+    font-family: inherit;
     cursor: pointer;
     white-space: nowrap;
     transition: background 0.15s ease, color 0.15s ease;
@@ -126,6 +159,18 @@
     outline-offset: 2px;
 }
 
+.visually-hidden:where(:not(:focus-within, :active)) {
+    position: absolute !important;
+    clip-path: inset(50%) !important;
+    overflow: hidden !important;
+    width: 1px !important;
+    height: 1px !important;
+    margin: -1px !important;
+    padding: 0 !important;
+    border: 0 !important;
+    white-space: nowrap !important;
+}
+
 .avatar-circle {
     position: relative;
     width: 24px;
@@ -198,6 +243,7 @@
 }
 
 .card-title {
+    margin: 0;
     font-size: 16px;
     font-weight: 600;
     line-height: 1.3;
@@ -509,14 +555,14 @@
 }
 
 .btn-danger-filled:hover:not(:disabled) {
-    background: #fca5a5;
-    border-color: #fca5a5;
+    background: var(--accent-red-hover);
+    border-color: var(--accent-red-hover);
 }
 
 .btn-danger-filled:active:not(:disabled) {
-    background: #ef4444;
-    border-color: #ef4444;
-    opacity: 1;
+    background: var(--accent-red);
+    border-color: var(--accent-red);
+    opacity: 0.9;
 }
 
 .btn-sm {
@@ -529,6 +575,11 @@
 @media (pointer: coarse) {
     .btn-sm {
         min-height: 44px;
+    }
+
+    .pill-btn,
+    .mono-copy {
+        min-height: 36px;
     }
 }
 
@@ -573,12 +624,17 @@
 }
 
 .pill-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 32px;
     border: 1px solid var(--border-subtle);
     background: var(--bg-surface);
     color: var(--text-secondary);
     border-radius: 8px;
     padding: 4px 12px;
     font-size: 12px;
+    font-family: inherit;
     cursor: pointer;
 }
 
@@ -960,6 +1016,7 @@ body[data-tier="white_internet"] .guides-trigger-badge {
     align-items: center;
     justify-content: center;
     padding: 16px;
+    overscroll-behavior: contain;
     z-index: 40;
 }
 
@@ -979,6 +1036,7 @@ body[data-tier="white_internet"] .guides-trigger-badge {
     gap: 12px;
     max-height: 86vh;
     overflow-y: auto;
+    overscroll-behavior: contain;
 }
 
 .toast {
@@ -1008,23 +1066,23 @@ body[data-tier="white_internet"] .guides-trigger-badge {
 
 .toast.toast-warn {
     background: #271e08;
-    color: #fde68a;
+    color: var(--accent-amber-ink);
     border-color: rgba(251, 191, 36, 0.48);
 }
 
 .toast.toast-error {
     background: #2a0f12;
-    color: #fecaca;
+    color: var(--accent-red-ink);
     border-color: rgba(248, 113, 113, 0.48);
 }
 
 .tabs-bar {
     display: flex;
-    gap: 6px;
+    gap: 4px;
     background: var(--bg-surface);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-card);
-    padding: 5px;
+    padding: 4px;
     overflow-x: auto;
     scrollbar-width: none;
     -ms-overflow-style: none;
@@ -1038,7 +1096,7 @@ body[data-tier="white_internet"] .guides-trigger-badge {
 .tab-btn {
     flex: 1;
     min-width: fit-content;
-    min-height: 38px;
+    min-height: 40px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1049,6 +1107,7 @@ body[data-tier="white_internet"] .guides-trigger-badge {
     padding: 8px 12px;
     font-size: 12px;
     font-weight: 500;
+    font-family: inherit;
     cursor: pointer;
     white-space: nowrap;
 }
@@ -1191,6 +1250,12 @@ body[data-tier="white_internet"] .guides-trigger-badge {
 
 .amount-neg {
     color: var(--text-primary);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.amount-err {
+    color: var(--accent-red);
     font-weight: 600;
     font-variant-numeric: tabular-nums;
 }
@@ -2228,6 +2293,55 @@ details[open] > summary .disclosure-pill svg {
 }
 
 /* Admin QoL Reusable Components */
+.stack-sm {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.stack-md {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.row-nowrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.row-nowrap > .input,
+.row-nowrap > .select {
+    flex: 1;
+    min-width: 0;
+}
+
+.row-start {
+    justify-content: flex-start;
+}
+
+.meta-text {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.text-err {
+    color: var(--accent-red-ink);
+}
+
+.btn-ghost-inline {
+    min-height: 36px;
+    padding: 4px 8px;
+}
+
+.card-btn {
+    width: 100%;
+    text-align: left;
+    font-family: inherit;
+    color: var(--text-primary);
+}
+
 .overview-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
@@ -2241,6 +2355,7 @@ details[open] > summary .disclosure-pill svg {
 }
 
 .pulse-card {
+    width: 100%;
     background: var(--bg-surface);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-control);
@@ -2248,6 +2363,19 @@ details[open] > summary .disclosure-pill svg {
     display: flex;
     flex-direction: column;
     gap: 4px;
+    text-align: left;
+    font-family: inherit;
+    color: var(--text-primary);
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+button.pulse-card {
+    cursor: pointer;
+}
+
+button.pulse-card:hover {
+    border-color: var(--border-strong);
+    background: var(--bg-elevated);
 }
 
 .pulse-label {
@@ -2263,22 +2391,26 @@ details[open] > summary .disclosure-pill svg {
 }
 
 .pulse-sub {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-secondary);
     font-variant-numeric: tabular-nums;
 }
 
 .alert-banner {
+    width: 100%;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 10px;
-    padding: 10px 12px;
+    gap: 12px;
+    padding: 12px;
     border-radius: var(--radius-control);
     background: var(--bg-elevated);
     border: 1px solid var(--border-subtle);
     font-size: 12px;
+    text-align: left;
+    font-family: inherit;
     color: var(--text-primary);
+    cursor: pointer;
 }
 
 .pulse-card[role="button"],
@@ -2289,26 +2421,26 @@ details[open] > summary .disclosure-pill svg {
 .alert-banner.warn {
     background: var(--accent-amber-soft);
     border-color: rgba(251, 191, 36, 0.35);
-    color: #fde68a;
+    color: var(--accent-amber-ink);
 }
 
 .alert-banner.err {
     background: var(--accent-red-soft);
     border-color: rgba(248, 113, 113, 0.35);
-    color: #fecaca;
+    color: var(--accent-red-ink);
 }
 
 .history-list {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
 }
 
 .history-row {
     background: var(--bg-elevated);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
-    padding: 10px 12px;
+    padding: 12px;
     display: flex;
     flex-direction: column;
     gap: 4px;
@@ -2327,7 +2459,7 @@ details[open] > summary .disclosure-pill svg {
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-muted);
     font-variant-numeric: tabular-nums;
 }
@@ -2343,6 +2475,7 @@ details[open] > summary .disclosure-pill svg {
 }
 
 .danger-card-title {
+    margin: 0;
     font-size: 14px;
     font-weight: 600;
     color: var(--accent-red);
@@ -2351,13 +2484,14 @@ details[open] > summary .disclosure-pill svg {
 .mono-copy {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 3px 8px;
+    gap: 8px;
+    min-height: 32px;
+    padding: 4px 8px;
     border-radius: 6px;
     background: var(--bg-input);
     border: 1px solid var(--border-subtle);
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-secondary);
     cursor: pointer;
     max-width: 100%;
@@ -2374,7 +2508,7 @@ details[open] > summary .disclosure-pill svg {
 
 .metric-bar {
     width: 100%;
-    height: 6px;
+    height: 8px;
     background: var(--bg-input);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-pill);
@@ -2383,9 +2517,11 @@ details[open] > summary .disclosure-pill svg {
 
 .metric-fill {
     height: 100%;
+    width: 100%;
     background: var(--accent-emerald);
     border-radius: var(--radius-pill);
-    transition: width 0.25s ease;
+    transform-origin: left center;
+    transition: transform 0.2s var(--ease-out);
 }
 
 .metric-fill.warn {

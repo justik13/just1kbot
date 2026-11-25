@@ -25,8 +25,11 @@
     --accent-sky-soft: rgba(56, 189, 248, 0.12);
     --accent-amber: #fbbf24;
     --accent-amber-soft: rgba(251, 191, 36, 0.12);
+    --accent-amber-ink: #fde68a;
     --accent-warn: #fbbf24;
     --accent-red: #f87171;
+    --accent-red-hover: #fca5a5;
+    --accent-red-ink: #fecaca;
     --accent-red-soft: rgba(248, 113, 113, 0.12);
 
     --radius-card: 20px;
