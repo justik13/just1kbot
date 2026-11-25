@@ -42,6 +42,7 @@ function _parseDeepLink() {
         if (!tab) {
             if (nodeId != null) tab = "nodes";
             else if (userId != null) tab = "users";
+            else if (q) tab = "users";
             else tab = "overview";
         }
         return { mode: "admin", tab, nodeId, userId, q };
@@ -59,6 +60,7 @@ function _applyDeepLink(target) {
         if (appState.adminTab === "finances") {
             appState.finQuery = target.q;
             appState.financesData = null;
+            appState.financesLoadAttempted = false;
         } else {
             appState.usersQuery = target.q;
             appState.usersData = null;
@@ -87,14 +89,17 @@ const appState = {
     massTab: "bonus",
     finSubTab: "orders",
     financesData: null,
+    financesLoadAttempted: false,
     finQuery: "",
     finStatus: "",
     finAttentionOnly: false,
     auditLogsData: null,
+    auditLoadAttempted: false,
     auditAction: "",
     auditTargetType: "",
     auditQuery: "",
     webhooksData: null,
+    webhooksLoadAttempted: false,
     pendingDeepLink: _parseDeepLink(),
     onOpenUser: (userId) => {
         const id = _parsePositiveInt(userId);
@@ -116,14 +121,19 @@ const appState = {
         appState.selectedNodeId = id;
         _renderAdminView();
     },
-    onOpenFinances: (query = "", attentionOnly = false) => {
+    onOpenFinances: (query = "", attentionOnly = false, subTab = "orders") => {
         closeAllModals();
         appState.mode = "admin";
         appState.adminTab = "finances";
-        appState.finSubTab = "orders";
+        appState.finSubTab = subTab || "orders";
         appState.finQuery = String(query || "");
         appState.finAttentionOnly = Boolean(attentionOnly);
         appState.financesData = null;
+        appState.financesLoadAttempted = false;
+        if (appState.finSubTab === "webhooks") {
+            appState.webhooksData = null;
+            appState.webhooksLoadAttempted = false;
+        }
         appState.selectedNodeId = null;
         appState.selectedUserId = null;
         _renderAdminView();
@@ -136,6 +146,7 @@ const appState = {
         appState.auditQuery = String(query || "");
         appState.auditTargetType = String(targetType || "");
         appState.auditLogsData = null;
+        appState.auditLoadAttempted = false;
         appState.selectedNodeId = null;
         appState.selectedUserId = null;
         _renderAdminView();
@@ -284,7 +295,7 @@ async function _renderAdminView() {
         const usersList = (appState.usersData && appState.usersData.users) || [];
         const userSummary = usersList.find((u) => u.id === appState.selectedUserId) || {
             id: appState.selectedUserId,
-            telegram_id: appState.selectedUserId,
+            telegram_id: null,
         };
         root.innerHTML = `<section class="card card-center"><div class="muted">Загрузка профиля...</div></section>`;
         const { renderUserDetailView } = await import("./views/user_detail.js?v=2.8.0");
@@ -429,7 +440,7 @@ async function _renderAdminView() {
             const subTab = appState.finSubTab || "orders";
             let dataPromise = Promise.resolve(null);
             if (subTab === "audit") {
-                if (appState.auditLogsData == null) {
+                if (appState.auditLogsData == null && !appState.auditLoadAttempted) {
                     dataPromise = api
                         .listAuditLogs(
                             appState.auditAction || "",
@@ -440,25 +451,29 @@ async function _renderAdminView() {
                         )
                         .then((res) => {
                             appState.auditLogsData = res;
+                            appState.auditLoadAttempted = true;
                         })
                         .catch((err) => {
                             if (err && err.code === "2fa_required") throw err;
+                            appState.auditLoadAttempted = true;
                             showToast(err.message || "Не удалось загрузить аудит-лог", "error");
                         });
                 }
             } else if (subTab === "webhooks") {
-                if (appState.webhooksData == null) {
+                if (appState.webhooksData == null && !appState.webhooksLoadAttempted) {
                     dataPromise = api
                         .getAdminWebhooks()
                         .then((res) => {
                             appState.webhooksData = res.webhooks || [];
+                            appState.webhooksLoadAttempted = true;
                         })
                         .catch((err) => {
                             if (err && err.code === "2fa_required") throw err;
+                            appState.webhooksLoadAttempted = true;
                             showToast(err.message || "Не удалось загрузить вебхуки", "error");
                         });
                 }
-            } else if (appState.financesData == null) {
+            } else if (appState.financesData == null && !appState.financesLoadAttempted) {
                 const kind = ["orders", "subscriptions", "topups"].includes(subTab) ? subTab : "orders";
                 dataPromise = api
                     .listFinances(
@@ -471,9 +486,11 @@ async function _renderAdminView() {
                     )
                     .then((res) => {
                         appState.financesData = res;
+                        appState.financesLoadAttempted = true;
                     })
                     .catch((err) => {
                         if (err && err.code === "2fa_required") throw err;
+                        appState.financesLoadAttempted = true;
                         showToast(err.message || "Не удалось загрузить финансы", "error");
                     });
             }
@@ -614,13 +631,13 @@ async function bootstrap() {
         appState.twoFactorPassed = Boolean(me.security && me.security.two_factor_verified);
 
         if (appState.pendingDeepLink && appState.pendingDeepLink.mode === "admin") {
-            _applyDeepLink(appState.pendingDeepLink);
-            appState.pendingDeepLink = null;
             appState.mode = "admin";
             if (!appState.twoFactorPassed) {
                 await _openAdmin2FAGate(root);
                 return;
             }
+            _applyDeepLink(appState.pendingDeepLink);
+            appState.pendingDeepLink = null;
             await _renderAdminView();
             return;
         }

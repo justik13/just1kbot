@@ -254,9 +254,8 @@ def build_v2_topology_links(servers: list[Server]) -> dict[int, dict[str, Any]]:
     return payloads
 
 
-async def sync_v2_topology_to_nodes(session: AsyncSession) -> dict[int, bool]:
-    """Compute and push v2 links.json to all active v2 nodes via PUT /v1/node/links."""
-    servers = await get_all_servers(session)
+async def push_v2_topology_links(servers: list[Server]) -> dict[int, bool]:
+    """Compute and push v2 links.json to all eligible v2 nodes without holding a DB session."""
     for srv in servers:
         if srv.is_active and srv.health_state == ServerHealthState.ONLINE and not _extract_ipv4(srv):
             ip_res = await _extract_ipv4_async(srv)
@@ -302,3 +301,18 @@ async def sync_v2_topology_to_nodes(session: AsyncSession) -> dict[int, bool]:
 
     results = await asyncio.gather(*(_push_one(sid, url, key, pl) for sid, url, key, pl in targets))
     return dict(results)
+
+
+async def sync_v2_topology_to_nodes(session: AsyncSession) -> dict[int, bool]:
+    """Compute and push v2 links.json to all active v2 nodes via PUT /v1/node/links."""
+    servers = list(await get_all_servers(session))
+    return await push_v2_topology_links(servers)
+
+
+async def sync_v2_topology_to_nodes_nonblocking() -> dict[int, bool]:
+    """Read servers in a short session and push v2 links.json outside any DB transaction."""
+    from database.connection import session_scope
+
+    async with session_scope() as session:
+        servers = list(await get_all_servers(session))
+    return await push_v2_topology_links(servers)

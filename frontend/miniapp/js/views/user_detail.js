@@ -1,5 +1,11 @@
 import { api } from "../api.js?v=2.8.0";
 import {
+    ORDER_KIND_MAP,
+    ORDER_STATUS_MAP,
+    formatAuditAction,
+    formatMetadataFlag,
+} from "../admin_labels.js?v=2.8.0";
+import {
     copyText,
     escapeHtml,
     formatBytesGb,
@@ -12,97 +18,11 @@ import {
 
 let _detailReqId = 0;
 
-const ORDER_STATUS_MAP = {
-    paid: { text: "Оплачен", cls: "chip-ok" },
-    pending: { text: "Ожидает", cls: "chip-warn" },
-    refunded: { text: "Возврат", cls: "chip-warn" },
-    partially_refunded: { text: "Част. возврат", cls: "chip-warn" },
-    canceled: { text: "Отменён", cls: "chip-muted" },
-};
-
-const ORDER_KIND_MAP = {
-    standard: "Стандарт",
-    white_internet: "Белый интернет",
-    topup: "Пополнение",
-};
-
-const METADATA_FLAG_MAP = {
-    requires_manual_review: { text: "Ручная проверка", cls: "chip-err" },
-    settlement_held: { text: "Холд", cls: "chip-warn" },
-    payment_amount_mismatch: { text: "Расхождение суммы оплаты", cls: "chip-err" },
-    refund_amount_mismatch: { text: "Расхождение суммы возврата", cls: "chip-err" },
-    payment_id_mismatch: { text: "Несовпадение ID платежа", cls: "chip-err" },
-    refund_payment_id_mismatch: { text: "Несовпадение ID возврата", cls: "chip-err" },
-    late_payment_after_refund_on_canceled: { text: "Оплата после отмены/возврата", cls: "chip-err" },
-    underpaid: { text: "Недоплата", cls: "chip-err" },
-    mixed_fallback_credited: { text: "Возврат на баланс (fallback)", cls: "chip-warn" },
-    fulfillment_error: { text: "Ошибка выдачи", cls: "chip-err" },
-    negative_balance_rub: { text: "Отрицательный баланс", cls: "chip-err" },
-    partial_refund_amount_rub: { text: "Частичный возврат", cls: "chip-warn" },
-};
-
 const LEDGER_ENTRY_TYPE_MAP = {
     payment_credit: "Зачисление",
     purchase_debit: "Оплата подписки",
     refund_debit: "Возврат",
     admin_adjustment: "Коррекция админом",
-};
-
-const AUDIT_ACTION_MAP = {
-    ACCOUNT_PURCHASE_SETTLED: "Оплата подписки",
-    ACCOUNT_TARIFF_CHANGE_SETTLED: "Смена тарифа",
-    ADD_SERVER: "Добавление ноды",
-    ADMIN_2FA_LOCKED: "Блокировка 2FA",
-    ADMIN_2FA_LOGOUT_ALL: "Сброс 2FA-сессий",
-    ADMIN_2FA_VERIFY_FAILED: "Неудачная 2FA",
-    ADMIN_BALANCE_DEDUCT: "Списание баланса",
-    ADMIN_BALANCE_TOPUP: "Пополнение баланса",
-    ADMIN_DIRECT_MESSAGE_SENT: "Сообщение пользователю",
-    ADMIN_SUB_CHANGE: "Изменение подписки",
-    ADMIN_SUB_EXTEND: "Продление подписки",
-    ADMIN_SUB_GRANT: "Выдача подписки",
-    ADMIN_SUB_REDUCE: "Сокращение подписки",
-    BALANCE_REFUND_REQUESTED: "Запрос возврата",
-    BROADCAST: "Запуск рассылки",
-    BROADCAST_COMPLETED: "Рассылка завершена",
-    CHANGE_TARIFF: "Смена тарифа",
-    CLEANUP_DEVICE_DELETE: "Очистка устройства",
-    DEDUCT_USER_BALANCE: "Списание баланса",
-    DELETE_SERVER: "Удаление ноды",
-    EDIT_SERVER: "Редактирование ноды",
-    EXTEND: "Продление",
-    GRANT: "Выдача доступа",
-    INCY_SETTINGS_UPDATED: "Настройки INCY",
-    MANUAL_GRANT: "Ручная выдача",
-    MASS_BONUS_GRANTED: "Массовый бонус",
-    MASS_SUB_EXTEND: "Массовое продление",
-    PAID_AFTER_CANCEL: "Оплата после отмены",
-    PAYMENT_CANCELLED: "Платёж отменён",
-    PAYMENT_CANCEL_AFTER_COMPLETED: "Отмена после оплаты",
-    PAYMENT_CHARGEBACK: "Чарджбэк",
-    PAYMENT_DISPUTE_MANUAL_REVIEW: "Спор: ручная проверка",
-    PAYMENT_DISPUTE_OPENED: "Спор открыт",
-    PAYMENT_DISPUTE_RESOLVED: "Спор закрыт",
-    PAYMENT_QUEUE_MANUAL_RETRY: "Повтор очереди платежа",
-    PAYMENT_SUCCESS: "Успешная оплата",
-    REDUCE: "Сокращение срока",
-    REFERRAL_ATTACHED: "Привязка реферала",
-    REFERRAL_BONUS_GRANTED: "Реферальный бонус",
-    SERVER_FORCE_PURGE: "Принудительное удаление ноды",
-    TOGGLE_MAINTENANCE: "Техработы платежей",
-    TOGGLE_SERVER: "Переключение ноды",
-    USER_REGISTER: "Регистрация",
-    USER_RESTORED: "Восстановление пользователя",
-    VLESS_HWID_RESET: "Сброс устройств (Стандарт)",
-    VLESS_TOKEN_RESET: "Ротация токена",
-    WELCOME_BONUS_GRANTED: "Приветственный бонус",
-    WHITE_INTERNET_DEVLIMIT_SET: "Лимит устройств БИ",
-    WHITE_INTERNET_EXTEND: "Продление БИ",
-    WHITE_INTERNET_HWID_RESET: "Сброс устройств БИ",
-    WHITE_INTERNET_QUOTA_SET: "Квота трафика БИ",
-    WHITE_INTERNET_TOKEN_RESET: "Ротация токена БИ",
-    WHITE_INTERNET_TRAFFIC_ADDED: "Добавлен трафик БИ",
-    WHITE_INTERNET_TRAFFIC_RESET: "Сброс трафика БИ",
 };
 
 function _formatDisplayName(u) {
@@ -111,7 +31,8 @@ function _formatDisplayName(u) {
     }
     if (u.username) return `@${u.username}`;
     if (u.first_name) return u.first_name;
-    return `ID ${u.telegram_id}`;
+    if (u.telegram_id) return `ID ${u.telegram_id}`;
+    return `Пользователь #${u.id}`;
 }
 
 function _formatShortHwid(hwid) {
@@ -215,7 +136,7 @@ function _renderHistoryTabContent(tab, details) {
                 const flags = Array.isArray(o.metadata_flags) ? o.metadata_flags : [];
                 const flagsHtml = flags
                     .map((flag) => {
-                        const info = METADATA_FLAG_MAP[flag] || { text: flag, cls: "chip-warn" };
+                        const info = formatMetadataFlag(flag);
                         return `<span class="chip ${info.cls}">${escapeHtml(info.text)}</span>`;
                     })
                     .join("");
@@ -254,7 +175,7 @@ function _renderHistoryTabContent(tab, details) {
                 const amt = Number(entry.amount || 0);
                 const signStr = amt > 0 ? `+${amt} ₽` : `${amt} ₽`;
                 const amtColor =
-                    amt > 0 ? "var(--accent-green, #4ade80)" : amt < 0 ? "var(--accent-red, #f87171)" : "inherit";
+                    amt > 0 ? "var(--accent-emerald, #34d399)" : amt < 0 ? "var(--accent-red, #f87171)" : "inherit";
                 const bucketLabel = entry.bucket === "bonus" ? "бонус" : "реал";
                 const typeLabel = LEDGER_ENTRY_TYPE_MAP[entry.entry_type] || entry.entry_type || "Операция";
                 return `
@@ -308,8 +229,7 @@ function _renderHistoryTabContent(tab, details) {
     }
     return audits
         .map((a) => {
-            const actionKey = String(a.action || "").toUpperCase();
-            const actionLabel = AUDIT_ACTION_MAP[actionKey] || a.action || "Действие";
+            const actionLabel = formatAuditAction(a.action);
             const detailsStr =
                 typeof a.details === "string"
                     ? a.details

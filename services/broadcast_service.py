@@ -37,6 +37,11 @@ from utils.telegram import safe_send_message
 
 logger = logging.getLogger(__name__)
 
+
+class BroadcastConflictError(ValueError):
+    """Raised when attempting to start a broadcast while another is in progress."""
+
+
 BROADCAST_BATCH_SIZE = 25
 MAX_BROADCAST_TEXT_LEN = 4096
 MAX_BROADCAST_CAPTION_LEN = 1024
@@ -169,6 +174,8 @@ def serialize_broadcast(bp: BroadcastProgress) -> dict[str, Any]:
         "label": bp.label,
         "content_type": bp.content_type,
         "has_media": bool(bp.media_id),
+        "media_url": bp.media_id,
+        "text": bp.broadcast_text or "",
         "text_preview": (bp.broadcast_text or "")[:180],
         "status": bp.status,
         "total_count": total,
@@ -418,7 +425,7 @@ async def create_and_start_broadcast(
             .limit(1)
         )
         if existing_id is not None:
-            raise ValueError("Уже выполняется другая рассылка. Дождитесь завершения или остановите её.")
+            raise BroadcastConflictError("Уже выполняется другая рассылка. Дождитесь завершения или остановите её.")
 
         total_count = await count_broadcast_audience(
             session,

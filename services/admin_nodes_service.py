@@ -324,15 +324,7 @@ async def _ensure_unique_exit_location_code(
     return f"exit{server_id}"
 
 
-async def _run_in_session(session: AsyncSession | None, fn):
-    if session is not None:
-        return await fn(session)
-    async with session_scope() as scoped:
-        return await fn(scoped)
-
-
 async def discover_and_add_node(
-    session: AsyncSession | None = None,
     *,
     admin_id: int,
     api_url: str,
@@ -354,7 +346,8 @@ async def discover_and_add_node(
                 status_code=409,
             )
 
-    await _run_in_session(session, _check_duplicate)
+    async with session_scope() as session:
+        await _check_duplicate(session)
 
     status_data, health_data, probe_ok, probe_error = await _probe_v2_node(
         clean_url,
@@ -454,35 +447,31 @@ async def discover_and_add_node(
             "probe_ok": True,
         }
 
-    return await _run_in_session(session, _persist_new_node)
+    async with session_scope() as session:
+        return await _persist_new_node(session)
 
 
 def _queue_topology_sync(session: AsyncSession) -> None:
     """Queue v2 topology sync to run after the current transaction commits and releases row locks."""
     async def _sync_topology() -> None:
-        from database.connection import session_scope
-        from services.topology_sync_service import sync_v2_topology_to_nodes
+        from services.topology_sync_service import sync_v2_topology_to_nodes_nonblocking
 
-        async with session_scope() as topo_session:
-            await sync_v2_topology_to_nodes(topo_session)
+        await sync_v2_topology_to_nodes_nonblocking()
 
     queue_post_commit_task(session, _sync_topology)
 
 
 async def refresh_node(
-    session: AsyncSession | None = None,
     *,
     admin_id: int,
     server_id: int,
 ) -> dict[str, Any]:
     """Re-query /v1/node/status and /v1/health outside DB transaction and synchronize DB metadata."""
-    async def _read_creds(s: AsyncSession) -> tuple[str, str]:
-        server_ro = await get_server_by_id(s, server_id, for_update=False)
+    async with session_scope() as session:
+        server_ro = await get_server_by_id(session, server_id, for_update=False)
         if server_ro is None:
             raise AdminNodeServiceError("Node not found", status_code=404)
-        return server_ro.api_url, server_ro.api_key
-
-    api_url, api_key = await _run_in_session(session, _read_creds)
+        api_url, api_key = server_ro.api_url, server_ro.api_key
     status_data, health_data, probe_ok, probe_error = await _probe_v2_node(
         api_url,
         api_key,
@@ -549,11 +538,11 @@ async def refresh_node(
         logger.info("Admin %s refreshed v2 node %s (role=%s)", admin_id, server.id, role)
         return serialize_server_node(updated)
 
-    return await _run_in_session(session, _apply_refresh)
+    async with session_scope() as session:
+        return await _apply_refresh(session)
 
 
 async def update_node_settings(
-    session: AsyncSession | None = None,
     *,
     admin_id: int,
     server_id: int,
@@ -583,20 +572,18 @@ async def update_node_settings(
         if not clean_key:
             raise AdminNodeServiceError("api_key cannot be empty", status_code=400)
 
-    async def _read_current(s: AsyncSession) -> tuple[str, str]:
-        server_ro = await get_server_by_id(s, server_id, for_update=False)
+    async with session_scope() as session:
+        server_ro = await get_server_by_id(session, server_id, for_update=False)
         if server_ro is None:
             raise AdminNodeServiceError("Node not found", status_code=404)
         if clean_url is not None:
-            existing = await get_server_by_api_url(s, clean_url)
+            existing = await get_server_by_api_url(session, clean_url)
             if existing is not None and existing.id != server_id:
                 raise AdminNodeServiceError(
                     "Node with this api_url already exists",
                     status_code=409,
                 )
-        return server_ro.api_url, server_ro.api_key
-
-    cur_url, cur_key = await _run_in_session(session, _read_current)
+        cur_url, cur_key = server_ro.api_url, server_ro.api_key
     url_changed = clean_url is not None and clean_url != cur_url
     key_changed = clean_key is not None and clean_key != cur_key
 
@@ -706,7 +693,8 @@ async def update_node_settings(
         )
         return serialize_server_node(updated)
 
-    return await _run_in_session(session, _apply_update)
+    async with session_scope() as session:
+        return await _apply_update(session)
 
 
 async def toggle_node(
@@ -722,6 +710,11 @@ async def toggle_node(
         raise AdminNodeServiceError("Node not found", status_code=404)
 
     target_active = (not bool(server.is_active)) if is_active is None else bool(is_active)
+    if target_active and server.lifecycle_status == ServerLifecycleStatus.DECOMMISSIONING:
+        raise AdminNodeServiceError(
+            "Сервер в статусе вывода (Drain). Сначала верните его в ACTIVE.",
+            status_code=400,
+        )
     if target_active:
         updates = {
             "is_active": True,
@@ -845,6 +838,12 @@ async def set_node_lifecycle(
 
         update_kwargs: dict[str, Any] = {"lifecycle_status": normalized}
         if normalized == ServerLifecycleStatus.DECOMMISSIONING.value:
+            role = get_server_role(server)
+            if role != "ru_hub":
+                raise AdminNodeServiceError(
+                    "Плавный вывод (Drain) поддерживается только для ru_hub.",
+                    status_code=400,
+                )
             # Preserve active state for WI client draining; never silently re-enable MANUAL_DISABLED nodes.
             update_kwargs["is_active"] = bool(
                 server.is_active and server.health_state != ServerHealthState.MANUAL_DISABLED
@@ -865,76 +864,9 @@ async def set_node_lifecycle(
 
 async def trigger_topology_sync(admin_telegram_id: int) -> dict[str, Any]:
     """Trigger immediate v2 topology sync across all eligible nodes outside DB tx and log to AuditLog."""
-    from database.repositories.servers_repo import (
-        get_server_xray_api_url,
-        is_v2_node_server,
-    )
-    from services.topology_sync_service import (
-        _extract_ipv4,
-        _extract_ipv4_async,
-        build_v2_topology_links,
-    )
-    from services.xray_node_client import _sanitize_url
+    from services.topology_sync_service import sync_v2_topology_to_nodes_nonblocking
 
-    async with session_scope() as session:
-        servers = list(await get_all_servers(session))
-
-    for srv in servers:
-        if srv.is_active and srv.health_state == ServerHealthState.ONLINE and not _extract_ipv4(srv):
-            ip_res = await _extract_ipv4_async(srv)
-            if ip_res:
-                extra = dict(srv.extra_data or {})
-                extra["ip"] = ip_res
-                srv.extra_data = extra
-
-    payloads = build_v2_topology_links(servers)
-    targets: list[tuple[int, str, str, dict[str, Any]]] = []
-    for srv in servers:
-        if not srv.is_active or srv.health_state != ServerHealthState.ONLINE:
-            continue
-        if srv.lifecycle_status not in (None, ServerLifecycleStatus.ACTIVE):
-            continue
-        if not is_v2_node_server(srv):
-            continue
-        payload = payloads.get(srv.id)
-        if not payload:
-            continue
-        api_url = get_server_xray_api_url(srv)
-        if api_url and srv.api_key:
-            targets.append((srv.id, api_url, srv.api_key, payload))
-
-    async def _push_one(
-        srv_id: int, api_url: str, api_key: str, payload: dict[str, Any]
-    ) -> tuple[int, bool]:
-        try:
-            async with XrayNodeClient(timeout=10.0) as client:
-                ok, _data, err = await client.update_node_links(api_url, api_key, payload)
-                if not ok:
-                    logger.warning(
-                        "Topology links sync failed for node %s (%s): %s",
-                        srv_id,
-                        _sanitize_url(api_url),
-                        err,
-                    )
-                return srv_id, ok
-        except Exception as exc:
-            logger.warning(
-                "Topology links sync error for node %s (%s): %s",
-                srv_id,
-                _sanitize_url(api_url),
-                exc,
-            )
-            return srv_id, False
-
-    raw_results: dict[int, bool] = (
-        dict(
-            await asyncio.gather(
-                *(_push_one(sid, url, key, pl) for sid, url, key, pl in targets)
-            )
-        )
-        if targets
-        else {}
-    )
+    raw_results = await sync_v2_topology_to_nodes_nonblocking()
     results = {str(k): bool(v) for k, v in raw_results.items()}
     synced = sum(1 for v in raw_results.values() if v)
     failed = sum(1 for v in raw_results.values() if not v)
@@ -963,6 +895,11 @@ async def trigger_node_clients_resync(
         server = await get_server_by_id(session, server_id, for_update=False)
         if server is None:
             raise AdminNodeServiceError("Node not found", status_code=404)
+        if server.lifecycle_status == ServerLifecycleStatus.DECOMMISSIONING:
+            raise AdminNodeServiceError(
+                "Сервер в статусе вывода (Drain). Сначала верните его в ACTIVE.",
+                status_code=400,
+            )
         if not server.is_active:
             raise AdminNodeServiceError(
                 "Сервер выключен. Включите его перед синхронизацией клиентов.",

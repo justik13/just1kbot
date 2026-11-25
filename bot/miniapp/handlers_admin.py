@@ -60,6 +60,7 @@ from database.models import (
 from database.repositories import user_devices_repo, users_repo, vless_subscription_repo, white_internet_repo
 from database.repositories.account_ledger_repo import (
     create_admin_adjustment,
+    forgive_real_debt,
     get_account_balance,
     get_account_balances_batch,
     get_account_history,
@@ -95,14 +96,21 @@ _MAX_INT32 = 2_147_483_647
 _MAX_INT64 = 9_223_372_036_854_775_807
 
 
-def _parse_server_id(request: web.Request) -> tuple[int | None, web.Response | None]:
-    raw_id = request.match_info.get("server_id", "")
+def _parse_positive_int(
+    request: web.Request,
+    name: str,
+    *,
+    label: str | None = None,
+    max_value: int = _MAX_INT32,
+) -> tuple[int | None, web.Response | None]:
+    raw_id = request.match_info.get(name, "")
+    err_label = label or name
     if not raw_id.isdigit():
-        return None, web.json_response({"ok": False, "error": "Invalid node id"}, status=400)
-    server_id = int(raw_id)
-    if server_id < 1 or server_id > 2_147_483_647:
-        return None, web.json_response({"ok": False, "error": "Invalid node id"}, status=400)
-    return server_id, None
+        return None, web.json_response({"ok": False, "error": f"Invalid {err_label}"}, status=400)
+    val = int(raw_id)
+    if val < 1 or val > max_value:
+        return None, web.json_response({"ok": False, "error": f"Invalid {err_label}"}, status=400)
+    return val, None
 
 
 async def _parse_json_model(
@@ -461,7 +469,7 @@ async def api_admin_nodes_refresh_handler(request: web.Request) -> web.Response:
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
-    server_id, id_err = _parse_server_id(request)
+    server_id, id_err = _parse_positive_int(request, "server_id", label="node id")
     if id_err is not None or server_id is None:
         return id_err  # type: ignore[return-value]
 
@@ -480,7 +488,7 @@ async def api_admin_nodes_patch_handler(request: web.Request) -> web.Response:
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
-    server_id, id_err = _parse_server_id(request)
+    server_id, id_err = _parse_positive_int(request, "server_id", label="node id")
     if id_err is not None or server_id is None:
         return id_err  # type: ignore[return-value]
 
@@ -515,7 +523,7 @@ async def api_admin_nodes_toggle_handler(request: web.Request) -> web.Response:
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
-    server_id, id_err = _parse_server_id(request)
+    server_id, id_err = _parse_positive_int(request, "server_id", label="node id")
     if id_err is not None or server_id is None:
         return id_err  # type: ignore[return-value]
 
@@ -545,7 +553,7 @@ async def api_admin_nodes_delete_handler(request: web.Request) -> web.Response:
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
-    server_id, id_err = _parse_server_id(request)
+    server_id, id_err = _parse_positive_int(request, "server_id", label="node id")
     if id_err is not None or server_id is None:
         return id_err  # type: ignore[return-value]
 
@@ -903,16 +911,6 @@ async def api_admin_users_handler(request: web.Request) -> web.Response:
         })
 
 
-def _parse_user_id(request: web.Request) -> tuple[int | None, web.Response | None]:
-    raw_id = request.match_info.get("user_id", "")
-    if not raw_id.isdigit():
-        return None, web.json_response({"ok": False, "error": "Invalid user id"}, status=400)
-    user_id = int(raw_id)
-    if user_id < 1 or user_id > 2_147_483_647:
-        return None, web.json_response({"ok": False, "error": "Invalid user id"}, status=400)
-    return user_id, None
-
-
 async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
     """Admin action: adjust user balance or grant/extend Standard or White Internet access."""
     ctx, err_resp = require_admin_user(request)
@@ -921,7 +919,7 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
     if ctx is None:
         return web.json_response({"ok": False, "error": "Unauthorized"}, status=401)
 
-    target_user_id, id_err = _parse_user_id(request)
+    target_user_id, id_err = _parse_positive_int(request, "user_id", label="user id")
     if id_err is not None or target_user_id is None:
         return id_err  # type: ignore[return-value]
 
@@ -1021,23 +1019,13 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
             forgive_amount = bal_before.debt.quantize(Decimal("1.00"))
             if payload.amount_rub is not None:
                 forgive_amount = min(forgive_amount, Decimal(payload.amount_rub).quantize(Decimal("1.00")))
-            session.add(
-                AccountLedgerEntry(
-                    user_id=user.id,
-                    entry_type="payment_credit",
-                    bucket="real",
-                    amount=forgive_amount,
-                    currency="RUB",
-                    order_id=None,
-                    idempotency_key=f"miniapp:admin:forgive_debt:{ctx.telegram_id}:{user.id}:{uuid4().hex}",
-                    metadata_={
-                        "source": "miniapp_admin_forgive_debt",
-                        "admin_telegram_id": ctx.telegram_id,
-                        "description": note or "Списание задолженности (админ)",
-                    },
-                )
+            await forgive_real_debt(
+                session,
+                user_id=user.id,
+                amount_rub=int(forgive_amount),
+                admin_telegram_id=ctx.telegram_id,
+                note=note or None,
             )
-            await session.flush()
             bal_after = await get_account_balance(session, user_id=user.id)
             await AuditService.log_action(
                 session,
@@ -1724,7 +1712,7 @@ async def api_admin_user_details_handler(request: web.Request) -> web.Response:
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
-    target_user_id, id_err = _parse_user_id(request)
+    target_user_id, id_err = _parse_positive_int(request, "user_id", label="user id")
     if id_err is not None or target_user_id is None:
         return id_err  # type: ignore[return-value]
 
@@ -1933,7 +1921,7 @@ async def api_admin_user_devices_reset_handler(request: web.Request) -> web.Resp
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
-    target_user_id, id_err = _parse_user_id(request)
+    target_user_id, id_err = _parse_positive_int(request, "user_id", label="user id")
     if id_err is not None or target_user_id is None:
         return id_err  # type: ignore[return-value]
 
@@ -2048,7 +2036,7 @@ async def api_admin_user_device_delete_handler(request: web.Request) -> web.Resp
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
-    target_user_id, id_err = _parse_user_id(request)
+    target_user_id, id_err = _parse_positive_int(request, "user_id", label="user id")
     if id_err is not None or target_user_id is None:
         return id_err  # type: ignore[return-value]
 
@@ -2089,8 +2077,9 @@ async def api_admin_user_device_delete_handler(request: web.Request) -> web.Resp
             if wi_sub is not None:
                 wi_sub = await white_internet_repo.get_subscription_with_lock(session, wi_sub.id) or wi_sub
                 await white_internet_repo.add_pending_revocation_uuids(session, wi_sub.id, [deleted_uuid])
-                wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
-                wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+                if wi_sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING):
+                    wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
+                    wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
                 await session.flush()
                 VlessSubscriptionService.deprovision_background(
                     deleted_uuid,
@@ -2099,7 +2088,8 @@ async def api_admin_user_device_delete_handler(request: web.Request) -> web.Resp
                     session=session,
                     services=("white_internet",),
                 )
-                await _queue_wi_inline_sync(session, wi_sub, "device_delete")
+                if wi_sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.PENDING):
+                    await _queue_wi_inline_sync(session, wi_sub, "device_delete")
 
         await AuditService.log_action(
             session,
@@ -2119,7 +2109,7 @@ async def api_admin_user_resync_handler(request: web.Request) -> web.Response:
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
-    target_user_id, id_err = _parse_user_id(request)
+    target_user_id, id_err = _parse_positive_int(request, "user_id", label="user id")
     if id_err is not None or target_user_id is None:
         return id_err  # type: ignore[return-value]
 
@@ -2176,7 +2166,7 @@ async def api_admin_user_token_rotate_handler(request: web.Request) -> web.Respo
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
-    target_user_id, id_err = _parse_user_id(request)
+    target_user_id, id_err = _parse_positive_int(request, "user_id", label="user id")
     if id_err is not None or target_user_id is None:
         return id_err  # type: ignore[return-value]
 
@@ -2296,22 +2286,12 @@ async def api_admin_user_token_rotate_handler(request: web.Request) -> web.Respo
     })
 
 
-def _parse_positive_int(request: web.Request, name: str) -> tuple[int | None, web.Response | None]:
-    raw = request.match_info.get(name, "")
-    if not raw.isdigit():
-        return None, web.json_response({"ok": False, "error": f"Invalid {name}"}, status=400)
-    val = int(raw)
-    if val <= 0 or val > 2_147_483_647:
-        return None, web.json_response({"ok": False, "error": f"Invalid {name}"}, status=400)
-    return val, None
-
-
 async def api_admin_user_message_handler(request: web.Request) -> web.Response:
     ctx, err_resp = require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
-    user_id, id_err = _parse_user_id(request)
+    user_id, id_err = _parse_positive_int(request, "user_id", label="user id")
     if id_err is not None or user_id is None:
         return id_err  # type: ignore[return-value]
 
@@ -2414,9 +2394,10 @@ async def api_admin_broadcast_start_handler(request: web.Request) -> web.Respons
             text=payload.text,
             media_url=payload.media_url,
         )
+    except broadcast_service.BroadcastConflictError as exc:
+        return _safe_admin_error_response(exc, status=409)
     except ValueError as exc:
-        status_code = 409 if "Уже выполняется другая рассылка" in str(exc) else 400
-        return _safe_admin_error_response(exc, status=status_code)
+        return _safe_admin_error_response(exc, status=400)
 
     return web.json_response({"ok": True, "broadcast": item, "message": "Рассылка запущена"})
 
@@ -2723,7 +2704,7 @@ async def api_admin_nodes_resync_clients_handler(request: web.Request) -> web.Re
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
-    server_id, id_err = _parse_server_id(request)
+    server_id, id_err = _parse_positive_int(request, "server_id", label="node id")
     if id_err is not None or server_id is None:
         return id_err  # type: ignore[return-value]
 
@@ -2740,7 +2721,7 @@ async def api_admin_nodes_lifecycle_handler(request: web.Request) -> web.Respons
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
-    server_id, id_err = _parse_server_id(request)
+    server_id, id_err = _parse_positive_int(request, "server_id", label="node id")
     if id_err is not None or server_id is None:
         return id_err  # type: ignore[return-value]
 
@@ -2792,11 +2773,6 @@ async def api_admin_webhooks_handler(request: web.Request) -> web.Response:
             "payment_external_id": row.payment_external_id,
             "status": row.status,
             "received_at": row.received_at.isoformat() if row.received_at else None,
-            "processed_at": (
-                row.processed_at.isoformat()
-                if getattr(row, "processed_at", None) is not None
-                else None
-            ),
         }
         for row in rows
     ]

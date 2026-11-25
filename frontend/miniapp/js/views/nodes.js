@@ -260,7 +260,7 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                 <details class="guide-details">
                     <summary class="guide-summary">
                         <span>Поведение и сортировка</span>
-                        <span class="muted" style="font-size:11px;">${escapeHtml(current.sort_order || "none")} · ${escapeHtml(current.no_limit_mode || "all")}</span>
+                        <span id="subSortSummaryBadge" class="muted" style="font-size:11px;">${escapeHtml(current.sort_order || "none")} · ${escapeHtml(current.no_limit_mode || "all")}</span>
                     </summary>
                     <div class="guide-body">
                         <div class="muted" style="font-size:11px;">Порядок серверов, лимит памяти iOS для XHTTP и скрытие элементов интерфейса в клиенте.</div>
@@ -298,7 +298,7 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                 <details class="guide-details">
                     <summary class="guide-summary">
                         <span>Фрагментация TLS</span>
-                        <span class="chip ${current.fragmentation_enabled !== false ? "chip-ok" : "chip-muted"}">${current.fragmentation_enabled !== false ? "Вкл" : "Выкл"}</span>
+                        <span id="subFragSummaryBadge" class="chip ${current.fragmentation_enabled !== false ? "chip-ok" : "chip-muted"}">${current.fragmentation_enabled !== false ? "Вкл" : "Выкл"}</span>
                     </summary>
                     <div class="guide-body">
                         <div class="muted" style="font-size:11px;">Дробит TLS ClientHello (напр. tlshello, 10-30 байт каждые 10-30 мс) от DPI. Выключайте, если тормозит хендшейк.</div>
@@ -326,7 +326,7 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                 <details class="guide-details">
                     <summary class="guide-summary">
                         <span>DoH Pre-resolve (INCY / Happ)</span>
-                        <span class="chip ${current.dns_resolve_enabled ? "chip-ok" : "chip-muted"}">${current.dns_resolve_enabled ? "Вкл" : "Выкл"}</span>
+                        <span id="subDnsSummaryBadge" class="chip ${current.dns_resolve_enabled ? "chip-ok" : "chip-muted"}">${current.dns_resolve_enabled ? "Вкл" : "Выкл"}</span>
                     </summary>
                     <div class="guide-body">
                         <div class="muted" style="font-size:11px;">Резолвит домен сервера через DoH до старта туннеля (защита от DNS-подмены; пример: dns.google + 8.8.8.8).</div>
@@ -350,7 +350,7 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                 <details class="guide-details">
                     <summary class="guide-summary">
                         <span>Раздельное туннелирование (Android)</span>
-                        <span class="chip ${current.per_app_proxy_enabled ? "chip-ok" : "chip-muted"}">${current.per_app_proxy_enabled ? "Вкл" : "Выкл"}</span>
+                        <span id="subPerAppSummaryBadge" class="chip ${current.per_app_proxy_enabled ? "chip-ok" : "chip-muted"}">${current.per_app_proxy_enabled ? "Вкл" : "Выкл"}</span>
                     </summary>
                     <div class="guide-body">
                         <div class="muted" style="font-size:11px;">Исключает выбранные приложения (bypass, напр. банки) или пускает только их (proxy). Список через запятую или с новой строки.</div>
@@ -403,6 +403,11 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
         const btn = form.querySelector("button[type='submit']");
         await withButtonLoading(btn, "Сохранение...", async () => {
             try {
+                const sortOrder = String(fd.get("sort_order") || "none");
+                const noLimitMode = String(fd.get("no_limit_mode") || "all");
+                const fragEnabled = Boolean(fd.get("fragmentation_enabled"));
+                const dnsEnabled = Boolean(fd.get("dns_resolve_enabled"));
+                const perAppEnabled = Boolean(fd.get("per_app_proxy_enabled"));
                 const intervalRaw = parseInt(String(fd.get("profile_update_interval") || "6"), 10);
                 await api.updateIncySettings({
                     profile_title: String(fd.get("profile_title") || "").trim(),
@@ -413,21 +418,32 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                     support_url: String(fd.get("support_url") || "").trim(),
                     web_page_url: String(fd.get("web_page_url") || "").trim(),
                     mtproto_proxy_url: String(fd.get("mtproto_proxy_url") || "").trim(),
-                    sort_order: String(fd.get("sort_order") || "none"),
-                    no_limit_mode: String(fd.get("no_limit_mode") || "all"),
+                    sort_order: sortOrder,
+                    no_limit_mode: noLimitMode,
                     hide_url: Boolean(fd.get("hide_url")),
                     hide_check: Boolean(fd.get("hide_check")),
-                    fragmentation_enabled: Boolean(fd.get("fragmentation_enabled")),
+                    fragmentation_enabled: fragEnabled,
                     fragmentation_packets: String(fd.get("fragmentation_packets") || "").trim(),
                     fragmentation_length: String(fd.get("fragmentation_length") || "").trim(),
                     fragmentation_interval: String(fd.get("fragmentation_interval") || "").trim(),
-                    dns_resolve_enabled: Boolean(fd.get("dns_resolve_enabled")),
+                    dns_resolve_enabled: dnsEnabled,
                     dns_resolve_domain: String(fd.get("dns_resolve_domain") || "").trim(),
                     dns_resolve_ip: String(fd.get("dns_resolve_ip") || "").trim(),
-                    per_app_proxy_enabled: Boolean(fd.get("per_app_proxy_enabled")),
+                    per_app_proxy_enabled: perAppEnabled,
                     per_app_proxy_mode: String(fd.get("per_app_proxy_mode") || "bypass"),
                     per_app_proxy_list: String(fd.get("per_app_proxy_list") || "").trim(),
                 });
+                const sortBadge = form.querySelector("#subSortSummaryBadge");
+                if (sortBadge) sortBadge.textContent = `${sortOrder} · ${noLimitMode}`;
+                const updateChip = (selector, on) => {
+                    const el = form.querySelector(selector);
+                    if (!el) return;
+                    el.className = `chip ${on ? "chip-ok" : "chip-muted"}`;
+                    el.textContent = on ? "Вкл" : "Выкл";
+                };
+                updateChip("#subFragSummaryBadge", fragEnabled);
+                updateChip("#subDnsSummaryBadge", dnsEnabled);
+                updateChip("#subPerAppSummaryBadge", perAppEnabled);
                 showToast("Настройки подписки сохранены");
             } catch (err) {
                 showToast(err.message || "Ошибка сохранения", "error");
@@ -494,7 +510,7 @@ function _openAddNodeModal(onReload, onSelectNode) {
                 });
                 showToast("Нода добавлена и выключена. Откройте её для включения.");
                 close();
-                await onReload();
+                await onReload({ skipRender: true });
                 if (res && res.node && res.node.id && typeof onSelectNode === "function") {
                     onSelectNode(res.node.id);
                 }

@@ -1119,10 +1119,6 @@ function _syncTopbarProfile(d, root) {
     };
 }
 
-export function clearCabinetBackButton() {
-    setPageBackButton(null);
-}
-
 function _setCabinetBackButton(onBack) {
     setPageBackButton(onBack);
 }

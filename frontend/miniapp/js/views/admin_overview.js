@@ -98,9 +98,9 @@ function _renderOverviewContent(root, state, data) {
     }
     if (Number(webhooks.dead || 0) > 0) {
         banners.push(`
-            <div class="alert-banner err" data-nav="finances" role="button" tabindex="0">
+            <div class="alert-banner err" data-nav="webhooks" role="button" tabindex="0">
                 <span>Ошибки доставки вебхуков (dead): <strong>${Number(webhooks.dead)}</strong></span>
-                <span class="chip chip-err">Финансы →</span>
+                <span class="chip chip-err">Вебхуки →</span>
             </div>
         `);
     }
@@ -145,7 +145,7 @@ function _renderOverviewContent(root, state, data) {
             </div>
         `
         : `
-            <div class="pulse-card" data-nav="finances" role="button" tabindex="0">
+            <div class="pulse-card" data-nav="webhooks" role="button" tabindex="0">
                 <span class="pulse-label">Вебхуки</span>
                 <span class="pulse-val">${Number(webhooks.pending || 0)} в очереди</span>
                 <span class="pulse-sub">Ошибок (dead): ${Number(webhooks.dead || 0)}</span>
@@ -188,13 +188,18 @@ function _renderOverviewContent(root, state, data) {
                     <span class="pulse-val">${Number(nodes.online || 0)} / ${Number(nodes.total || 0)}</span>
                     <span class="pulse-sub">Проблемы: ${degradedOrOffline} · Откл: ${Number(nodes.disabled || 0)}</span>
                 </div>
-                <div class="pulse-card" data-nav="users" role="button" tabindex="0">
+                <div class="pulse-card">
                     <span class="pulse-label">Пользователи</span>
                     <span class="pulse-val">${Number(users.total || 0)}</span>
                     <span class="pulse-sub">Std: ${Number(users.active_standard || 0)} · БИ: ${Number(users.active_wi || 0)}</span>
-                    <button type="button" class="btn btn-sm btn-ghost" data-nav="expiring-users" style="align-self:flex-start; padding:2px 0; margin-top:2px;">
-                        Истекают (3д): ${Number(users.expiring_3d || 0)} →
-                    </button>
+                    <div class="row" style="gap:10px; justify-content:flex-start; flex-wrap:wrap; margin-top:2px;">
+                        <button type="button" class="btn btn-sm btn-ghost" data-nav="users" style="padding:2px 0;">
+                            Все →
+                        </button>
+                        <button type="button" class="btn btn-sm btn-ghost" data-nav="expiring-users" style="padding:2px 0;">
+                            Истекают (3д): ${Number(users.expiring_3d || 0)} →
+                        </button>
+                    </div>
                 </div>
                 <div class="pulse-card" data-nav="finances" role="button" tabindex="0">
                     <span class="pulse-label">Выручка</span>
@@ -253,9 +258,11 @@ function _renderOverviewContent(root, state, data) {
             if (e.target !== el && e.target.closest("[data-nav]") !== el) return;
             const target = el.dataset.nav;
             if (target === "finances") {
-                state.onOpenFinances?.("", false);
+                state.onOpenFinances?.("", false, "orders");
             } else if (target === "attention-orders") {
-                state.onOpenFinances?.("", true);
+                state.onOpenFinances?.("", true, "orders");
+            } else if (target === "webhooks") {
+                state.onOpenFinances?.("", false, "webhooks");
             } else if (target === "nodes") {
                 state.onOpenNode?.(null);
             } else if (target === "users") {

@@ -118,7 +118,7 @@ function _updateCharCounter(root) {
     const len = textInput.value.length;
     const hasMedia = Boolean(mediaInput && mediaInput.value.trim());
     if (hasMedia && len > 1024) {
-        counterEl.innerHTML = `<span style="color:var(--warn, #f59e0b); font-weight:600;">${len} / 4096 · С фото > 1024 симв. — сообщение будет разбито на 2 части</span>`;
+        counterEl.innerHTML = `<span style="color:var(--accent-amber, #fbbf24); font-weight:600;">${len} / 4096 · С фото > 1024 симв. — сообщение будет разбито на 2 части</span>`;
     } else {
         counterEl.textContent = `${len} / 4096`;
     }
@@ -336,19 +336,15 @@ export function renderAdminBroadcastsView(root, state) {
                     "Массовое начисление бонуса",
                     `Начислить +${amount} ₽ сегменту «${preview.label || audienceLabel}»?\nЗатронуто пользователей: ${totalCount} (из них получат push в боте: ${reachableCount}) · Итого: ${totalRub} ₽.\nДействие необратимо.`,
                     async () => {
-                        try {
-                            const res = await api.massBonus({
-                                target_audience: audience,
-                                amount_rub: amount,
-                                reason,
-                                notify_users: notifyUsers,
-                            });
-                            state.usersData = null;
-                            state.financesData = null;
-                            showToast(res.message || "Массовое начисление запущено");
-                        } catch (err) {
-                            showToast(err.message || "Ошибка начисления", "error");
-                        }
+                        const res = await api.massBonus({
+                            target_audience: audience,
+                            amount_rub: amount,
+                            reason,
+                            notify_users: notifyUsers,
+                        });
+                        state.usersData = null;
+                        state.financesData = null;
+                        showToast(res.message || "Массовое начисление запущено");
                     },
                     "Начислить",
                     true
@@ -372,20 +368,16 @@ export function renderAdminBroadcastsView(root, state) {
                     "Массовое продление подписки",
                     `Продлить «${scopeLabel}» на +${days} дн. для сегмента «${preview.label || audienceLabel}»?\nЗатронуто пользователей: ${totalCount} (из них получат push в боте: ${reachableCount}).`,
                     async () => {
-                        try {
-                            const res = await api.massExtend({
-                                service_scope: scope,
-                                target_audience: audience,
-                                days,
-                                reason,
-                                notify_users: notifyUsers,
-                            });
-                            state.usersData = null;
-                            state.financesData = null;
-                            showToast(res.message || "Массовое продление запущено");
-                        } catch (err) {
-                            showToast(err.message || "Ошибка продления", "error");
-                        }
+                        const res = await api.massExtend({
+                            service_scope: scope,
+                            target_audience: audience,
+                            days,
+                            reason,
+                            notify_users: notifyUsers,
+                        });
+                        state.usersData = null;
+                        state.financesData = null;
+                        showToast(res.message || "Массовое продление запущено");
                     },
                     "Продлить",
                     true
@@ -467,16 +459,22 @@ function _renderHistoryList(root, container, state, reloadBroadcasts) {
         if (repeatBtn) {
             repeatBtn.addEventListener("click", () => {
                 const textInput = root.querySelector("#bcTextInput");
+                const mediaInput = root.querySelector("#bcMediaInput");
                 if (textInput) {
-                    const previewText = String(b.text_preview || "");
-                    textInput.value = previewText;
+                    const hasFullText = typeof b.text === "string" && b.text.length > 0;
+                    const textToCopy = hasFullText ? b.text : String(b.text_preview || "");
+                    textInput.value = textToCopy;
+                    if (mediaInput) {
+                        mediaInput.value = b.media_url ? String(b.media_url) : "";
+                    }
                     _updateCharCounter(root);
                     textInput.focus();
                     textInput.scrollIntoView({ behavior: "smooth", block: "center" });
                     const looksTruncated =
-                        previewText.endsWith("...") ||
-                        previewText.endsWith("…") ||
-                        previewText.length >= 180;
+                        !hasFullText &&
+                        (textToCopy.endsWith("...") ||
+                            textToCopy.endsWith("…") ||
+                            textToCopy.length >= 180);
                     if (looksTruncated) {
                         showToast("Скопировано превью (до 180 симв.) — проверьте полный текст", "warn");
                     } else {
@@ -494,13 +492,9 @@ function _renderHistoryList(root, container, state, reloadBroadcasts) {
                     `Остановить рассылку #${b.id} («${b.label}»)? Уже отправленные сообщения не будут удалены.`,
                     async () => {
                         await withButtonLoading(cancelBtn, "Остановка…", async () => {
-                            try {
-                                const res = await api.cancelBroadcast(b.id);
-                                showToast(res.message || "Рассылка остановлена");
-                                await reloadBroadcasts(false);
-                            } catch (err) {
-                                showToast(err.message || "Ошибка остановки", "error");
-                            }
+                            const res = await api.cancelBroadcast(b.id);
+                            showToast(res.message || "Рассылка остановлена");
+                            await reloadBroadcasts(false);
                         });
                     },
                     "Остановить",

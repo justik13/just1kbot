@@ -239,14 +239,12 @@ export const api = {
                 status
             )}&q=${encodeURIComponent(q)}&offset=${offset}&limit=${limit}${attentionOnly ? "&attention_only=1" : ""}`
         ),
-    getAdminFinances: (...args) => api.listFinances(...args),
     listAuditLogs: (action = "", q = "", offset = 0, limit = 40, targetType = "") =>
         requestJson(
             `/api/app/admin/audit-logs?action=${encodeURIComponent(action)}&q=${encodeURIComponent(
                 q
             )}&offset=${offset}&limit=${limit}${targetType ? `&target_type=${encodeURIComponent(targetType)}` : ""}`
         ),
-    getAdminAudit: (...args) => api.listAuditLogs(...args),
     getPaymentsMaintenance: () => requestJson("/api/app/admin/settings/payments-maintenance"),
     setPaymentsMaintenance: (enabled) =>
         requestJson("/api/app/admin/settings/payments-maintenance", {

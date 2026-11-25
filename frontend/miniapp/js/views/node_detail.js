@@ -235,13 +235,17 @@ function _buildDiagnosticsText(node) {
     const health = healthChipInfo(node);
     const sys = node.system_load && typeof node.system_load === "object" ? node.system_load : null;
     const tl = node.traffic_limit && typeof node.traffic_limit === "object" ? node.traffic_limit : null;
+    const cdnDomainsList = node.cdn_domains && typeof node.cdn_domains === "object" ? Object.entries(node.cdn_domains) : [];
+    const cdnLine = cdnDomainsList.length
+        ? `CDN Domains: ${cdnDomainsList.map(([k, v]) => `${k}=${v}`).join(", ")}`
+        : (node.cdn_domain ? `CDN Domain: ${node.cdn_domain}` : null);
     const lines = [
         `Node #${node.id}: ${node.name} (${roleLabel(node.role)})`,
         `Health: ${health.text} (${node.health_state || "—"}) | Active: ${Boolean(node.is_active)} | Lifecycle: ${node.lifecycle_status || "ACTIVE"}`,
         node.disabled_reason ? `Disabled reason: ${node.disabled_reason}` : null,
         `API URL: ${node.api_url || "—"}`,
         node.domain ? `Domain: ${node.domain}` : null,
-        node.cdn_domain ? `CDN Domain: ${node.cdn_domain}` : null,
+        cdnLine,
         `Fails: total=${node.consecutive_fails || 0}, ingress=${node.consecutive_ingress_fails || 0} (problem=${Boolean(node.ingress_problem)}), cdn=${node.consecutive_cdn_fails || 0} (problem=${Boolean(node.cdn_problem)})`,
         sys ? `Load: CPU=${sys.cpu_percent ?? "—"}%, RAM=${sys.ram_percent ?? "—"}%, Disk=${sys.disk_percent ?? node.disk_usage?.used_percent ?? "—"}%` : null,
         tl ? `Traffic: ${tl.pct ?? 0}% (exceeded=${Boolean(tl.exceeded)}, reset_day=${tl.reset_day ?? "—"})` : null,

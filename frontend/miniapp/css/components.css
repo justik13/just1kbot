@@ -2298,12 +2298,6 @@ details[open] > summary .disclosure-pill svg {
     color: #fecaca;
 }
 
-.alert-banner.info {
-    background: var(--accent-sky-soft);
-    border-color: rgba(56, 189, 248, 0.35);
-    color: #bae6fd;
-}
-
 .history-list {
     display: flex;
     flex-direction: column;

@@ -112,6 +112,7 @@ def run_audit() -> list[str]:
             violations.append(f"[{desc_name}] Checkout description contains forbidden 'обход'")
 
     # 3. Audit HTML templates & MiniApp
+    admin_allowlist_files = {"node_detail.js", "nodes.js", "user_detail.js", "security_2fa.js"}
     template_dirs = [REPO_ROOT / "bot" / "templates", REPO_ROOT / "frontend" / "miniapp"]
     for t_dir in template_dirs:
         if not t_dir.exists():
@@ -128,12 +129,17 @@ def run_audit() -> list[str]:
                     .replace("vpn://", "")
                     .replace("vless_name", "")
                     .replace('caps.includes("vless")', "")
-                    .replace("VLESS_HWID_RESET", "")
-                    .replace("VLESS_TOKEN_RESET", "")
-                    .replace("vless_synced_epoch", "")
-                    .replace("xray_instance_epoch", "")
-                    .replace("monthly_vless_bytes", "")
                 )
+                if fpath.suffix == ".js" and (
+                    fpath.name.startswith("admin_") or fpath.name in admin_allowlist_files
+                ):
+                    clean_content = (
+                        clean_content.replace("VLESS_HWID_RESET", "")
+                        .replace("VLESS_TOKEN_RESET", "")
+                        .replace("vless_synced_epoch", "")
+                        .replace("xray_instance_epoch", "")
+                        .replace("monthly_vless_bytes", "")
+                    )
                 rel_path = fpath.relative_to(REPO_ROOT).as_posix()
                 if re.search(r"(?<![A-Za-zА-Яа-я])VPN(?![A-Za-zА-Яа-я])", clean_content, re.IGNORECASE):
                     violations.append(f"[{rel_path}] Contains forbidden 'VPN'")

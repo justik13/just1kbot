@@ -32,6 +32,7 @@ from database.repositories.vless_subscription_repo import (
 from database.repositories.white_internet_repo import get_subscription_by_user_id
 from services.referral_bonus import get_referral_tier
 from services.subscription import SubscriptionService
+from utils.admin import is_admin
 from utils.telegram import EFFECT_LIKE, resolve_bot_username, safe, safe_send_message
 from utils.datetime_helpers import now_utc
 
@@ -254,8 +255,7 @@ async def cmd_start(message: Message) -> None:
 
     settings = get_settings()
     app_url = f"https://{settings.DOMAIN}/app"
-    is_admin = tg_user.id in (getattr(settings, "ADMIN_IDS", None) or [])
-    admin_url = f"https://{settings.DOMAIN}/app?mode=admin" if is_admin else None
+    admin_url = f"https://{settings.DOMAIN}/app?mode=admin" if is_admin(tg_user.id) else None
     bot_username = (await resolve_bot_username(message.bot) or DEFAULT_FALLBACK_BOT_USERNAME).lstrip("@")
     ref_link = f"https://t.me/{bot_username}?start=ref_{db_user.telegram_id}"
     share_text = f"Держи приглашение: скидка {profile_ctx['welcome_discount_pct']}% на первый заказ"
@@ -307,8 +307,7 @@ async def cmd_fallback(message: Message) -> None:
 
     settings = get_settings()
     app_url = f"https://{settings.DOMAIN}/app"
-    is_admin = message.from_user.id in (getattr(settings, "ADMIN_IDS", None) or [])
-    admin_url = f"https://{settings.DOMAIN}/app?mode=admin" if is_admin else None
+    admin_url = f"https://{settings.DOMAIN}/app?mode=admin" if is_admin(message.from_user.id) else None
     kb = build_start_inline_keyboard(app_url, admin_url=admin_url)
     await safe_send_message(
         message.bot,
@@ -330,11 +329,11 @@ async def cb_legacy_fallback(callback: CallbackQuery) -> None:
         return
     settings = get_settings()
     app_url = f"https://{settings.DOMAIN}/app"
-    is_admin = bool(
-        callback.from_user
-        and callback.from_user.id in (getattr(settings, "ADMIN_IDS", None) or [])
+    admin_url = (
+        f"https://{settings.DOMAIN}/app?mode=admin"
+        if (callback.from_user and is_admin(callback.from_user.id))
+        else None
     )
-    admin_url = f"https://{settings.DOMAIN}/app?mode=admin" if is_admin else None
     kb = build_start_inline_keyboard(app_url, admin_url=admin_url)
     try:
         await callback.answer("Меню обновлено. Откройте кабинет.", show_alert=False)

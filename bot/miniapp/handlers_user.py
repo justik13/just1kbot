@@ -280,6 +280,8 @@ def _serialize_ledger_entry(entry) -> dict[str, Any]:
         description = raw_desc
     elif source == "referral_bonus":
         description = "Реферальный бонус"
+    elif entry.entry_type == "payment_credit" and source == "admin_debt_forgiveness":
+        description = "Погашение долга"
     elif entry.entry_type == "admin_adjustment":
         description = "Бонусное начисление" if Decimal(entry.amount) > 0 else "Коррекция баланса"
     else:

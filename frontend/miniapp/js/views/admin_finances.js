@@ -1,4 +1,5 @@
 import { api } from "../api.js?v=2.8.0";
+import { formatAuditAction, formatMetadataFlag } from "../admin_labels.js?v=2.8.0";
 import {
     copyText,
     escapeHtml,
@@ -12,83 +13,6 @@ import {
 
 let _finViewReqId = 0;
 let _maintInFlight = null;
-
-const _METADATA_FLAG_MAP = {
-    requires_manual_review: { label: "Ручная проверка", cls: "chip-err" },
-    settlement_held: { label: "Холд", cls: "chip-warn" },
-    payment_amount_mismatch: { label: "Расхождение суммы оплаты", cls: "chip-err" },
-    refund_amount_mismatch: { label: "Расхождение суммы возврата", cls: "chip-err" },
-    payment_id_mismatch: { label: "Несовпадение ID платежа", cls: "chip-err" },
-    refund_payment_id_mismatch: { label: "Несовпадение ID возврата", cls: "chip-err" },
-    late_payment_after_refund_on_canceled: { label: "Оплата после отмены/возврата", cls: "chip-err" },
-    underpaid: { label: "Недоплата", cls: "chip-err" },
-    mixed_fallback_credited: { label: "Возврат на баланс (fallback)", cls: "chip-warn" },
-    fulfillment_error: { label: "Ошибка выдачи", cls: "chip-err" },
-    negative_balance_rub: { label: "Отрицательный баланс", cls: "chip-err" },
-    partial_refund_amount_rub: { label: "Частичный возврат", cls: "chip-warn" },
-};
-
-const _AUDIT_ACTION_LABELS = {
-    ACCOUNT_PURCHASE_SETTLED: "Оплата подписки",
-    ACCOUNT_TARIFF_CHANGE_SETTLED: "Смена тарифа",
-    ADD_SERVER: "Добавление ноды",
-    ADMIN_2FA_LOCKED: "Блокировка 2FA",
-    ADMIN_2FA_LOGOUT_ALL: "Сброс 2FA-сессий",
-    ADMIN_2FA_VERIFY_FAILED: "Неудачная 2FA",
-    ADMIN_BALANCE_DEDUCT: "Списание баланса",
-    ADMIN_BALANCE_TOPUP: "Пополнение баланса",
-    ADMIN_DIRECT_MESSAGE_SENT: "Сообщение пользователю",
-    ADMIN_SUB_CHANGE: "Изменение подписки",
-    ADMIN_SUB_EXTEND: "Продление подписки",
-    ADMIN_SUB_GRANT: "Выдача подписки",
-    ADMIN_SUB_REDUCE: "Сокращение подписки",
-    BALANCE_REFUND_REQUESTED: "Запрос возврата",
-    BROADCAST: "Запуск рассылки",
-    BROADCAST_COMPLETED: "Рассылка завершена",
-    CHANGE_TARIFF: "Смена тарифа",
-    CLEANUP_DEVICE_DELETE: "Очистка устройства",
-    DEDUCT_USER_BALANCE: "Списание баланса",
-    DELETE_SERVER: "Удаление ноды",
-    EDIT_SERVER: "Редактирование ноды",
-    EXTEND: "Продление",
-    GRANT: "Выдача доступа",
-    INCY_SETTINGS_UPDATED: "Настройки INCY",
-    MANUAL_GRANT: "Ручная выдача",
-    MASS_BONUS_GRANTED: "Массовый бонус",
-    MASS_SUB_EXTEND: "Массовое продление",
-    PAID_AFTER_CANCEL: "Оплата после отмены",
-    PAYMENT_CANCELLED: "Платёж отменён",
-    PAYMENT_CANCEL_AFTER_COMPLETED: "Отмена после оплаты",
-    PAYMENT_CHARGEBACK: "Чарджбэк",
-    PAYMENT_DISPUTE_MANUAL_REVIEW: "Спор: ручная проверка",
-    PAYMENT_DISPUTE_OPENED: "Спор открыт",
-    PAYMENT_DISPUTE_RESOLVED: "Спор закрыт",
-    PAYMENT_QUEUE_MANUAL_RETRY: "Повтор очереди платежа",
-    PAYMENT_SUCCESS: "Успешная оплата",
-    REDUCE: "Сокращение срока",
-    REFERRAL_ATTACHED: "Привязка реферала",
-    REFERRAL_BONUS_GRANTED: "Реферальный бонус",
-    SERVER_FORCE_PURGE: "Принудительное удаление ноды",
-    TOGGLE_MAINTENANCE: "Техработы платежей",
-    TOGGLE_SERVER: "Переключение ноды",
-    USER_REGISTER: "Регистрация",
-    USER_RESTORED: "Восстановление пользователя",
-    VLESS_HWID_RESET: "Сброс устройств (Стандарт)",
-    VLESS_TOKEN_RESET: "Ротация токена",
-    WELCOME_BONUS_GRANTED: "Приветственный бонус",
-    WHITE_INTERNET_DEVLIMIT_SET: "Лимит устройств БИ",
-    WHITE_INTERNET_EXTEND: "Продление БИ",
-    WHITE_INTERNET_HWID_RESET: "Сброс устройств БИ",
-    WHITE_INTERNET_QUOTA_SET: "Квота трафика БИ",
-    WHITE_INTERNET_TOKEN_RESET: "Ротация токена БИ",
-    WHITE_INTERNET_TRAFFIC_ADDED: "Добавлен трафик БИ",
-    WHITE_INTERNET_TRAFFIC_RESET: "Сброс трафика БИ",
-};
-
-function _auditActionLabel(action) {
-    const key = String(action || "").toUpperCase();
-    return _AUDIT_ACTION_LABELS[key] || action || "—";
-}
 
 function _financeStatusChip(status) {
     if (status === "paid") {
@@ -228,7 +152,7 @@ export function renderAdminFinancesView(root, state) {
                                     (act) =>
                                         `<option value="${escapeHtml(act)}" ${
                                             state.auditAction === act ? "selected" : ""
-                                        }>${escapeHtml(_auditActionLabel(act))}</option>`
+                                        }>${escapeHtml(formatAuditAction(act))}</option>`
                                 )
                                 .join("")}
                         </select>
@@ -264,7 +188,7 @@ export function renderAdminFinancesView(root, state) {
             `
                     : `
                 <form id="finFilterForm" class="field" style="gap:8px;">
-                    <div class="row" style="flex-wrap:nowrap;">
+                    <div class="row">
                         <input id="finQueryInput" class="input" type="search" value="${escapeHtml(
                             state.finQuery || ""
                         )}" placeholder="Telegram ID, username, ID заказа">
@@ -310,9 +234,11 @@ export function renderAdminFinancesView(root, state) {
             );
             if (reqId !== _finViewReqId) return;
             state.financesData = data;
+            state.financesLoadAttempted = true;
             renderAdminFinancesView(root, state);
         } catch (err) {
             if (reqId !== _finViewReqId) return;
+            state.financesLoadAttempted = true;
             showToast(err.message || "Ошибка загрузки финансов", "error");
         }
     };
@@ -329,9 +255,11 @@ export function renderAdminFinancesView(root, state) {
             );
             if (reqId !== _finViewReqId) return;
             state.auditLogsData = data;
+            state.auditLoadAttempted = true;
             renderAdminFinancesView(root, state);
         } catch (err) {
             if (reqId !== _finViewReqId) return;
+            state.auditLoadAttempted = true;
             showToast(err.message || "Ошибка загрузки аудит-лога", "error");
         }
     };
@@ -342,18 +270,22 @@ export function renderAdminFinancesView(root, state) {
             const res = await api.getAdminWebhooks();
             if (reqId !== _finViewReqId) return;
             state.webhooksData = res.webhooks || [];
+            state.webhooksLoadAttempted = true;
             renderAdminFinancesView(root, state);
         } catch (err) {
             if (reqId !== _finViewReqId) return;
+            state.webhooksLoadAttempted = true;
             showToast(err.message || "Ошибка загрузки вебхуков", "error");
         }
     };
 
     const syncMaintenanceCard = () => {
-        const maintCard = root.querySelector("#paymentsMaintCard");
+        const maintCard = root.isConnected
+            ? root.querySelector("#paymentsMaintCard")
+            : document.getElementById("paymentsMaintCard");
         if (!maintCard) return;
         maintCard.innerHTML = _renderMaintenanceCardInner(state);
-        bindMaintenanceToggle();
+        bindMaintenanceToggle(maintCard);
     };
 
     const loadPaymentsMaintenance = () => {
@@ -366,6 +298,7 @@ export function renderAdminFinancesView(root, state) {
                 state.paymentsMaintenanceError = false;
             })
             .catch((err) => {
+                if (err && err.code === "2fa_required") return;
                 state.paymentsMaintenanceError = true;
                 showToast(err.message || "Ошибка загрузки статуса техработ", "error");
             })
@@ -378,8 +311,8 @@ export function renderAdminFinancesView(root, state) {
         return _maintInFlight;
     };
 
-    function bindMaintenanceToggle() {
-        const toggleMaintBtn = root.querySelector("#togglePaymentsMaintBtn");
+    function bindMaintenanceToggle(scopeEl = root) {
+        const toggleMaintBtn = scopeEl.querySelector("#togglePaymentsMaintBtn");
         if (!toggleMaintBtn) return;
         toggleMaintBtn.addEventListener("click", () => {
             if (state.paymentsMaintenanceError) {
@@ -399,17 +332,11 @@ export function renderAdminFinancesView(root, state) {
                 cancelText: "Отмена",
                 isDestructive: nextVal,
                 onConfirm: async () => {
-                    toggleMaintBtn.disabled = true;
-                    try {
-                        const res = await api.setPaymentsMaintenance(nextVal);
-                        state.paymentsMaintenance = Boolean(res.enabled);
-                        state.paymentsMaintenanceError = false;
-                        showToast(res.enabled ? "Техработы платежей включены" : "Приём платежей возобновлён");
-                        syncMaintenanceCard();
-                    } catch (err) {
-                        showToast(err.message || "Ошибка переключения техработ", "error");
-                        toggleMaintBtn.disabled = false;
-                    }
+                    const res = await api.setPaymentsMaintenance(nextVal);
+                    state.paymentsMaintenance = Boolean(res.enabled);
+                    state.paymentsMaintenanceError = false;
+                    showToast(res.enabled ? "Техработы платежей включены" : "Приём платежей возобновлён");
+                    syncMaintenanceCard();
                 },
             });
         });
@@ -483,16 +410,24 @@ export function renderAdminFinancesView(root, state) {
             await loadAudit(0);
         });
         if (state.auditLogsData == null) {
-            listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:12px;">Загрузка…</div>`;
-            loadAudit(0);
+            if (!state.auditLoadAttempted) {
+                listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:12px;">Загрузка…</div>`;
+                loadAudit(0);
+            } else {
+                listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:12px;">Не удалось загрузить аудит-лог. Нажмите «Обновить».</div>`;
+            }
         } else {
             _renderAuditRows(listContainer, auditData.items || [], state);
             _renderPager(root, auditData, loadAudit, "событий");
         }
     } else if (subTab === "webhooks") {
         if (state.webhooksData == null) {
-            listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:12px;">Загрузка…</div>`;
-            loadWebhooks();
+            if (!state.webhooksLoadAttempted) {
+                listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:12px;">Загрузка…</div>`;
+                loadWebhooks();
+            } else {
+                listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:12px;">Не удалось загрузить вебхуки. Нажмите «Обновить».</div>`;
+            }
         } else {
             _renderWebhookRows(listContainer, webhooksData);
         }
@@ -523,8 +458,12 @@ export function renderAdminFinancesView(root, state) {
             await loadFinances(0);
         });
         if (state.financesData == null) {
-            listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:12px;">Загрузка…</div>`;
-            loadFinances(0);
+            if (!state.financesLoadAttempted) {
+                listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:12px;">Загрузка…</div>`;
+                loadFinances(0);
+            } else {
+                listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:12px;">Не удалось загрузить финансы. Нажмите «Обновить».</div>`;
+            }
         } else {
             _renderFinanceRows(listContainer, finData.items || [], state);
             _renderPager(root, finData, loadFinances, "заказов");
@@ -536,8 +475,8 @@ function _renderFlagChips(flags) {
     if (!Array.isArray(flags) || !flags.length) return "";
     return flags
         .map((flag) => {
-            const info = _METADATA_FLAG_MAP[flag] || { label: flag, cls: "chip-warn" };
-            return `<span class="chip ${info.cls}">${escapeHtml(info.label)}</span>`;
+            const info = formatMetadataFlag(flag);
+            return `<span class="chip ${info.cls}">${escapeHtml(info.text)}</span>`;
         })
         .join("");
 }
@@ -667,7 +606,7 @@ function _renderAuditRows(container, items, state) {
 
         row.innerHTML = `
             <div class="row">
-                <span class="chip chip-muted" title="${escapeHtml(item.action)}">${escapeHtml(_auditActionLabel(item.action))}</span>
+                <span class="chip chip-muted" title="${escapeHtml(item.action)}">${escapeHtml(formatAuditAction(item.action))}</span>
                 <span class="muted" style="font-size:11px;">${formatDate(item.created_at)}</span>
             </div>
             <div class="row muted" style="font-size:11px; align-items:center;">
@@ -704,7 +643,6 @@ function _renderWebhookRows(container, items) {
         const eventKey = wh.event_key || wh.event_id || "";
         const receivedTs = wh.received_at || wh.created_at;
         const receivedStr = receivedTs ? `${formatRelativeTime(receivedTs)} (${formatDate(receivedTs)})` : "—";
-        const processedStr = wh.processed_at ? formatDate(wh.processed_at) : null;
         row.innerHTML = `
             <div class="row">
                 <span class="mono" style="font-weight:600; font-size:12px;">${escapeHtml(wh.event_type || "—")}</span>
@@ -712,7 +650,6 @@ function _renderWebhookRows(container, items) {
             </div>
             <div class="row muted" style="font-size:11px; flex-wrap:wrap; gap:6px;">
                 <span>Получен: ${escapeHtml(receivedStr)}</span>
-                ${processedStr ? `<span>Обработан: ${escapeHtml(processedStr)}</span>` : ""}
             </div>
             ${
                 eventKey
