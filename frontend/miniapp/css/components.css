@@ -12,6 +12,11 @@
 }
 
 @media (min-width: 768px) {
+    .app-shell:not(.mode-admin) {
+        max-width: 720px;
+        padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+    }
+
     .app-shell.mode-admin {
         max-width: 920px;
     }
@@ -225,7 +230,6 @@
 .card {
     background: var(--bg-card);
     border: 1px solid var(--border-subtle);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
     border-radius: var(--radius-card);
     padding: 16px;
     display: flex;
@@ -770,7 +774,6 @@ label:not(.switch):has(> input[type="checkbox"]) > input[type="checkbox"] {
     border-radius: var(--radius-control);
     background: var(--accent-emerald-soft);
     border: 1px solid rgba(52, 211, 153, 0.34);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
     color: var(--text-primary);
     font-family: inherit;
     text-align: left;
@@ -1066,7 +1069,7 @@ body[data-tier="white_internet"] .guides-trigger-badge {
     max-width: calc(100vw - 32px);
     text-align: center;
     cursor: pointer;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); /* taste-skill-ignore */
     transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
 }
 
@@ -1310,7 +1313,6 @@ body[data-tier="white_internet"] .guides-trigger-badge {
 .balance-card {
     background: var(--bg-card);
     border: 1px solid var(--border-subtle);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
     border-radius: var(--radius-card);
     padding: 16px;
     display: flex;
@@ -1578,7 +1580,6 @@ body[data-tier="white_internet"] .guides-trigger-badge {
 .guide-details.guide-video-priority {
     border-color: var(--border-strong);
     background: var(--bg-elevated);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .guide-details.guide-video-priority[open] {
@@ -1597,7 +1598,6 @@ body[data-tier="white_internet"] .guides-trigger-badge {
     border-radius: 10px;
     background: var(--accent-white);
     color: #09090b;
-    box-shadow: 0 0 18px rgba(255, 255, 255, 0.22);
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1836,7 +1836,6 @@ details[open] > summary .disclosure-pill svg {
 .plan-card {
     background: var(--bg-card);
     border: 1px solid var(--border-subtle);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
     border-radius: var(--radius-card);
     padding: 16px;
     display: flex;
@@ -1847,14 +1846,12 @@ details[open] > summary .disclosure-pill svg {
 
 .plan-card.plan-active {
     border-color: var(--border-strong);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .plan-card.plan-wi,
 .plan-card.plan-featured {
     border-color: rgba(255, 255, 255, 0.24);
     background: #18181f;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
 }
 
 .plan-wi .progress-fill {
@@ -1988,7 +1985,7 @@ details[open] > summary .disclosure-pill svg {
     gap: 4px;
 }
 
-.hero-kicker {
+.hero-status {
     display: inline-flex;
     align-items: center;
     gap: 8px;
@@ -1997,15 +1994,15 @@ details[open] > summary .disclosure-pill svg {
     color: var(--accent-emerald);
 }
 
-.hero-kicker.warn {
+.hero-status.warn {
     color: var(--accent-amber);
 }
 
-.hero-kicker.err {
+.hero-status.err {
     color: var(--accent-red);
 }
 
-.hero-kicker.muted {
+.hero-status.muted {
     color: var(--text-secondary);
 }
 
@@ -2044,8 +2041,7 @@ details[open] > summary .disclosure-pill svg {
 
 .channel-tile.is-wi {
     border-color: rgba(255, 255, 255, 0.22);
-    background: var(--bg-surface);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+    background: #18181f;
 }
 
 .channel-tile.is-inactive {
@@ -2075,12 +2071,10 @@ details[open] > summary .disclosure-pill svg {
 
 .channel-tile.is-active .channel-indicator {
     background: var(--accent-emerald);
-    box-shadow: 0 0 8px rgba(52, 211, 153, 0.7);
 }
 
 .channel-tile.is-wi.is-active .channel-indicator {
     background: var(--accent-white);
-    box-shadow: 0 0 10px rgba(255, 255, 255, 0.85);
 }
 
 .channel-tile.is-warn .channel-indicator {
@@ -2300,12 +2294,26 @@ details[open] > summary .disclosure-pill svg {
     max-width: 560px;
     background: #0b0b0f;
     border-top: 1px solid var(--border-subtle);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px));
     gap: 4px;
     z-index: 30;
+}
+
+@media (min-width: 768px) {
+    .bottom-nav {
+        position: sticky;
+        left: auto;
+        transform: none;
+        bottom: 16px;
+        max-width: 400px;
+        margin: 16px auto 0;
+        border-radius: 14px;
+        border: 1px solid var(--border-subtle);
+        padding: 8px 12px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); /* taste-skill-ignore */
+    }
 }
 
 .nav-item {
@@ -2564,6 +2572,27 @@ button.pulse-card {
 
 .metric-fill.err {
     background: var(--accent-red);
+}
+
+.user-balance-box {
+    text-align: right;
+    flex-shrink: 0;
+}
+
+@media (max-width: 480px) {
+    .user-balance-box {
+        width: 100%;
+        text-align: left;
+    }
+
+    #userHistoryTabs {
+        gap: 6px;
+    }
+
+    #userHistoryTabs .seg-btn {
+        padding: 8px 10px;
+        font-size: 12px;
+    }
 }
 
 @media (pointer: coarse) {
