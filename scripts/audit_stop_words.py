@@ -6,6 +6,7 @@ account from suspension due to forbidden vocabulary (VPN, bypass, whitelists, et
 
 from __future__ import annotations
 
+import ast
 import os
 from pathlib import Path
 import re
@@ -51,11 +52,179 @@ FORBIDDEN_USER_WORDING: tuple[str, ...] = (
     "белый список",
     "белые списки",
     "белых списков",
+    "белым спискам",
+    "белых списках",
+    "белыми списками",
     "amnezia",
     "amneziawg",
     "amneziavpn",
     "defaultvpn",
 )
+
+_CYRILLIC_RE = re.compile(r"[а-яА-ЯёЁ]")
+_WHITELIST_INFLECTION_RE = re.compile(r"бел\w*\s+спис\w*", re.IGNORECASE)
+_PURE_IDENTIFIER_RE = re.compile(r"^[a-zA-Z0-9_./:-]+$")
+_PROTOCOLS = ("vless", "xray", "wireguard", "amnezia", "amneziawg")
+
+_USER_STRING_CALL_NAMES = frozenset({
+    "ValueError",
+    "safe_send_message",
+    "_queue_user_notification",
+    "answer",
+    "edit_text",
+    "reply",
+    "json_response",
+    "Response",
+})
+
+
+def _check_text_compliance(
+    label: str,
+    text_val: str,
+    *,
+    strict_checkout: bool = False,
+    allow_identifier_only: bool = False,
+) -> list[str]:
+    violations: list[str] = []
+    if not text_val:
+        return violations
+    clean = (
+        text_val.replace(".vpn", "")
+        .replace("vpn://", "")
+        .replace("vless_name", "")
+        .replace('caps.includes("vless")', "")
+    )
+    low = clean.lower()
+    if re.search(r"(?<![A-Za-zА-Яа-я])VPN(?![A-Za-zА-Яа-я])", clean, re.IGNORECASE):
+        violations.append(f"[{label}] Contains forbidden 'VPN'")
+    if "впн" in low:
+        violations.append(f"[{label}] Contains forbidden 'ВПН'")
+    if re.search(r"(?<![A-Za-z0-9])LTE(?![A-Za-z0-9])", clean, re.IGNORECASE):
+        violations.append(f"[{label}] Contains forbidden 'LTE'")
+    for phrase in FORBIDDEN_USER_WORDING:
+        if phrase == "LTE":
+            continue
+        if phrase.lower() in low:
+            violations.append(f"[{label}] Contains forbidden phrase: {phrase!r}")
+    if _WHITELIST_INFLECTION_RE.search(clean):
+        violations.append(f"[{label}] Contains forbidden whitelist inflection")
+
+    clean_no_placeholders = re.sub(r"\{[a-zA-Z0-9_]*\}", "", clean).lower()
+    is_pure_ident = allow_identifier_only and bool(_PURE_IDENTIFIER_RE.match(text_val.strip()))
+    if not is_pure_ident:
+        for proto in _PROTOCOLS:
+            if proto in clean_no_placeholders:
+                violations.append(f"[{label}] Exposes forbidden protocol name: {proto!r}")
+        if re.search(r"\bawg\b", clean_no_placeholders):
+            violations.append(f"[{label}] Exposes forbidden protocol name: 'awg'")
+
+    if strict_checkout:
+        if "прокси" in low:
+            violations.append(f"[{label}] Checkout description contains forbidden 'прокси'")
+        if "обход" in low:
+            violations.append(f"[{label}] Checkout description contains forbidden 'обход'")
+
+    return violations
+
+
+def _collect_docstring_and_logger_ids(tree: ast.AST) -> tuple[set[int], set[int]]:
+    skip_ids: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if (
+                node.body
+                and isinstance(node.body[0], ast.Expr)
+                and isinstance(node.body[0].value, ast.Constant)
+                and isinstance(node.body[0].value.value, str)
+            ):
+                skip_ids.add(id(node.body[0].value))
+        elif isinstance(node, ast.Call):
+            fn = node.func
+            is_logger = (
+                isinstance(fn, ast.Attribute)
+                and isinstance(fn.value, ast.Name)
+                and fn.value.id in {"logger", "logging"}
+            )
+            if is_logger:
+                for sub in ast.walk(node):
+                    if isinstance(sub, (ast.Constant, ast.JoinedStr)):
+                        skip_ids.add(id(sub))
+    return skip_ids, set()
+
+
+def _joined_str_text(node: ast.JoinedStr) -> str:
+    parts: list[str] = []
+    for val in node.values:
+        if isinstance(val, ast.Constant) and isinstance(val.value, str):
+            parts.append(val.value)
+        else:
+            parts.append("{}")
+    return "".join(parts)
+
+
+def _extract_python_user_strings(fpath: Path) -> list[tuple[int, str, bool]]:
+    """Extract (lineno, text, is_checkout_desc) for user-facing strings in a Python file."""
+    try:
+        source = fpath.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(fpath))
+    except Exception:
+        return []
+
+    skip_ids, _ = _collect_docstring_and_logger_ids(tree)
+    desc_node_ids: set[int] = set()
+    user_call_node_ids: set[int] = set()
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for tgt in node.targets:
+                if isinstance(tgt, ast.Name) and tgt.id == "description":
+                    for sub in ast.walk(node.value):
+                        if isinstance(sub, (ast.Constant, ast.JoinedStr)):
+                            desc_node_ids.add(id(sub))
+        elif isinstance(node, ast.Call):
+            for kw in node.keywords:
+                if kw.arg == "description":
+                    for sub in ast.walk(kw.value):
+                        if isinstance(sub, (ast.Constant, ast.JoinedStr)):
+                            desc_node_ids.add(id(sub))
+            fn_name = ""
+            if isinstance(node.func, ast.Name):
+                fn_name = node.func.id
+            elif isinstance(node.func, ast.Attribute):
+                fn_name = node.func.attr
+            if fn_name in _USER_STRING_CALL_NAMES:
+                for arg in node.args:
+                    for sub in ast.walk(arg):
+                        if isinstance(sub, (ast.Constant, ast.JoinedStr)):
+                            user_call_node_ids.add(id(sub))
+                for kw in node.keywords:
+                    if kw.arg in {"text", "message", "msg", "description", "error"}:
+                        for sub in ast.walk(kw.value):
+                            if isinstance(sub, (ast.Constant, ast.JoinedStr)):
+                                user_call_node_ids.add(id(sub))
+
+    results: list[tuple[int, str, bool]] = []
+
+    def _visit(node: ast.AST) -> None:
+        if id(node) in skip_ids:
+            return
+        if isinstance(node, ast.JoinedStr):
+            text_val = _joined_str_text(node)
+            is_desc = id(node) in desc_node_ids
+            if _CYRILLIC_RE.search(text_val) or is_desc or id(node) in user_call_node_ids:
+                results.append((node.lineno, text_val, is_desc))
+            return  # do not re-visit children of JoinedStr
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            text_val = node.value
+            is_desc = id(node) in desc_node_ids
+            if _CYRILLIC_RE.search(text_val) or is_desc or id(node) in user_call_node_ids:
+                results.append((node.lineno, text_val, is_desc))
+            return
+        for child in ast.iter_child_nodes(node):
+            _visit(child)
+
+    _visit(tree)
+    return results
 
 
 def _collect_user_texts() -> list[tuple[str, str]]:
@@ -78,22 +247,7 @@ def run_audit() -> list[str]:
     # 1. Audit user-facing text catalogue
     user_texts = _collect_user_texts()
     for key, text_val in user_texts:
-        low = text_val.lower()
-        if re.search(r"\bvpn\b", text_val, re.IGNORECASE):
-            violations.append(f"[{key}] Contains forbidden English word 'VPN'")
-        if "впн" in low:
-            violations.append(f"[{key}] Contains forbidden Russian word 'ВПН'")
-        for phrase in FORBIDDEN_USER_WORDING:
-            if phrase.lower() in low:
-                violations.append(f"[{key}] Contains forbidden wording: {phrase!r}")
-
-        # Check raw protocols
-        clean_no_placeholders = re.sub(r"\{[a-zA-Z0-9_]+\}", "", text_val).lower()
-        for proto in ("vless", "xray", "wireguard", "amnezia", "amneziawg"):
-            if proto in clean_no_placeholders:
-                violations.append(f"[{key}] Exposes forbidden protocol name: {proto!r}")
-        if re.search(r"\bawg\b", clean_no_placeholders):
-            violations.append(f"[{key}] Exposes forbidden protocol name: 'awg'")
+        violations.extend(_check_text_compliance(key, text_val))
 
     # 2. Audit checkout descriptions (YooKassa strict compliance)
     from bot import texts
@@ -102,14 +256,7 @@ def run_audit() -> list[str]:
         ("CHECKOUT_DESCRIPTION_DEFAULT", texts.CHECKOUT_DESCRIPTION_DEFAULT),
     ]
     for desc_name, desc_val in descriptions:
-        if re.search(r"(?<![A-Za-zА-Яа-я])VPN(?![A-Za-zА-Яа-я])", desc_val, re.IGNORECASE):
-            violations.append(f"[{desc_name}] Checkout description contains forbidden 'VPN'")
-        if "ВПН" in desc_val.upper():
-            violations.append(f"[{desc_name}] Checkout description contains forbidden 'ВПН'")
-        if "прокси" in desc_val.lower():
-            violations.append(f"[{desc_name}] Checkout description contains forbidden 'прокси'")
-        if "обход" in desc_val.lower():
-            violations.append(f"[{desc_name}] Checkout description contains forbidden 'обход'")
+        violations.extend(_check_text_compliance(desc_name, desc_val, strict_checkout=True))
 
     # 3. Audit HTML templates & MiniApp
     admin_allowlist_files = {"node_detail.js", "nodes.js", "user_detail.js", "security_2fa.js"}
@@ -123,13 +270,7 @@ def run_audit() -> list[str]:
                     content = fpath.read_text(encoding="utf-8")
                 except Exception:
                     continue
-                # Clean allowed URL-like scheme strings and internal admin API field identifiers
-                clean_content = (
-                    content.replace(".vpn", "")
-                    .replace("vpn://", "")
-                    .replace("vless_name", "")
-                    .replace('caps.includes("vless")', "")
-                )
+                clean_content = content
                 if fpath.suffix == ".js" and (
                     fpath.name.startswith("admin_") or fpath.name in admin_allowlist_files
                 ):
@@ -141,20 +282,7 @@ def run_audit() -> list[str]:
                         .replace("monthly_vless_bytes", "")
                     )
                 rel_path = fpath.relative_to(REPO_ROOT).as_posix()
-                if re.search(r"(?<![A-Za-zА-Яа-я])VPN(?![A-Za-zА-Яа-я])", clean_content, re.IGNORECASE):
-                    violations.append(f"[{rel_path}] Contains forbidden 'VPN'")
-                if "ВПН" in clean_content.upper():
-                    violations.append(f"[{rel_path}] Contains forbidden 'ВПН'")
-                if re.search(r"(?<![A-Za-z0-9])LTE(?![A-Za-z0-9])", clean_content, re.IGNORECASE):
-                    violations.append(f"[{rel_path}] Contains forbidden 'LTE'")
-                for phrase in FORBIDDEN_USER_WORDING:
-                    if phrase == "LTE":
-                        continue
-                    if phrase.lower() in clean_content.lower():
-                        violations.append(f"[{rel_path}] Contains forbidden phrase: {phrase!r}")
-                for proto in ("vless", "xray", "wireguard", "amnezia", "amneziawg"):
-                    if proto in clean_content.lower():
-                        violations.append(f"[{rel_path}] Exposes forbidden protocol name: {proto!r}")
+                violations.extend(_check_text_compliance(rel_path, clean_content))
 
     # 3b. Audit Caddyfile user-facing error pages / responses
     caddyfile_path = REPO_ROOT / "Caddyfile"
@@ -165,20 +293,7 @@ def run_audit() -> list[str]:
             content = ""
         if content:
             rel_path = caddyfile_path.relative_to(REPO_ROOT).as_posix()
-            if re.search(r"(?<![A-Za-zА-Яа-я])VPN(?![A-Za-zА-Яа-я])", content, re.IGNORECASE):
-                violations.append(f"[{rel_path}] Contains forbidden 'VPN'")
-            if "ВПН" in content.upper():
-                violations.append(f"[{rel_path}] Contains forbidden 'ВПН'")
-            if re.search(r"(?<![A-Za-z0-9])LTE(?![A-Za-z0-9])", content, re.IGNORECASE):
-                violations.append(f"[{rel_path}] Contains forbidden 'LTE'")
-            for phrase in FORBIDDEN_USER_WORDING:
-                if phrase == "LTE":
-                    continue
-                if phrase.lower() in content.lower():
-                    violations.append(f"[{rel_path}] Contains forbidden phrase: {phrase!r}")
-            for proto in ("vless", "xray", "wireguard", "amnezia", "amneziawg"):
-                if proto in content.lower():
-                    violations.append(f"[{rel_path}] Exposes forbidden protocol name: {proto!r}")
+            violations.extend(_check_text_compliance(rel_path, content))
 
     # 4. Audit Telegram keyboards (bot/keyboards/)
     keyboards_dir = REPO_ROOT / "bot" / "keyboards"
@@ -189,20 +304,37 @@ def run_audit() -> list[str]:
             except Exception:
                 continue
             rel_path = fpath.relative_to(REPO_ROOT).as_posix()
-            if re.search(r"(?<![A-Za-zА-Яа-я])VPN(?![A-Za-zА-Яа-я])", content, re.IGNORECASE):
-                violations.append(f"[{rel_path}] Contains forbidden 'VPN'")
-            if "ВПН" in content.upper():
-                violations.append(f"[{rel_path}] Contains forbidden 'ВПН'")
-            if re.search(r"(?<![A-Za-z0-9])LTE(?![A-Za-z0-9])", content, re.IGNORECASE):
-                violations.append(f"[{rel_path}] Contains forbidden 'LTE'")
-            for phrase in FORBIDDEN_USER_WORDING:
-                if phrase == "LTE":
-                    continue
-                if phrase.lower() in content.lower():
-                    violations.append(f"[{rel_path}] Contains forbidden phrase: {phrase!r}")
-            for proto in ("vless", "xray", "wireguard", "amnezia", "amneziawg"):
-                if proto in content.lower():
-                    violations.append(f"[{rel_path}] Exposes forbidden protocol name: {proto!r}")
+            violations.extend(_check_text_compliance(rel_path, content))
+
+    # 5. Audit hardcoded user-facing strings, DMs, errors, and YooKassa descriptions in handlers & services
+    python_targets: list[Path] = []
+    handlers_dir = REPO_ROOT / "bot" / "handlers"
+    if handlers_dir.exists():
+        python_targets.extend(sorted(handlers_dir.glob("*.py")))
+    for rel in (
+        "bot/miniapp/handlers_user.py",
+        "bot/miniapp/handlers_admin.py",
+        "services/order_service.py",
+        "services/admin_tools_service.py",
+        "services/workers/traffic.py",
+        "services/workers/notifications.py",
+        "services/workers/credit_notifications.py",
+    ):
+        p = REPO_ROOT / rel
+        if p.exists():
+            python_targets.append(p)
+
+    for fpath in python_targets:
+        rel_path = fpath.relative_to(REPO_ROOT).as_posix()
+        for lineno, text_val, is_desc in _extract_python_user_strings(fpath):
+            violations.extend(
+                _check_text_compliance(
+                    f"{rel_path}:{lineno}",
+                    text_val,
+                    strict_checkout=is_desc and fpath.name == "order_service.py",
+                    allow_identifier_only=True,
+                )
+            )
 
     return violations
 

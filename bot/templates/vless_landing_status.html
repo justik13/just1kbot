@@ -428,11 +428,11 @@
             </button>
             <div id="supportFormContainer" class="support-form-container" role="region" aria-label="Форма связи с поддержкой" aria-hidden="true">
                 <div class="support-form-inner">
-                    <p class="support-intro">Оставьте контакты для связи — мы напишем вам в удобное приложение и поможем с настройкой.</p>
+                    <p class="support-intro">Оставьте контакты для связи: мы напишем вам в удобное приложение и поможем с настройкой.</p>
                     <form id="emergencySupportForm" onsubmit="submitSupportReport(event)">
                         <div class="support-field">
                             <label for="supportContact" class="support-label">Куда вам написать?</label>
-                            <input type="text" id="supportContact" class="support-input" placeholder="Telegram @username, WhatsApp, телефон или другой контакт" maxlength="120" required>
+                            <input type="text" id="supportContact" class="support-input" placeholder="Telegram @username, телефон или другой контакт" maxlength="120" required>
                         </div>
                         <div class="support-field">
                             <label for="supportMessage" class="support-label">Что произошло?</label>
@@ -441,7 +441,7 @@
                         <button type="submit" id="supportSubmitBtn" class="support-submit-btn">
                             <span id="supportSubmitBtnText">Отправить контакты</span>
                         </button>
-                        <div id="supportStatusMsg" class="support-status-msg" aria-live="polite"></div>
+                        <div id="supportStatusMsg" class="support-status-msg" role="status" aria-live="polite"></div>
                     </form>
                 </div>
             </div>

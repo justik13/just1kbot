@@ -25,6 +25,20 @@ const _state = {
     guideDesktopMethod: null,
 };
 
+let _dashReqId = 0;
+
+function _scrollTopSmooth() {
+    const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    window.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
+}
+
+function _safeFormatDate(iso) {
+    if (!iso) return "";
+    const formatted = formatDate(iso);
+    if (!formatted || formatted === "—" || /invalid/i.test(String(formatted))) return "";
+    return String(formatted);
+}
+
 const _ICONS = {
     copy: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`,
     bolt: `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`,
@@ -114,18 +128,18 @@ function _newIdempotencyKey() {
 
 function _handlePaymentResponse(res, successMsg, onReload) {
     if (!res) {
-        showToast("Не удалось оформить платёж. Попробуйте ещё раз.");
+        showToast("Не удалось оформить платёж. Попробуйте ещё раз.", "error");
         return;
     }
     if (res.fulfillment_error || res.fulfillment_failed) {
-        showToast(res.fulfillment_error || "Не удалось активировать подписку. Средства сохранены на балансе.");
+        showToast(res.fulfillment_error || "Не удалось активировать подписку. Средства сохранены на балансе.", "error");
         onReload();
         return;
     }
     if (!res.confirmation_url) {
         const st = String(res.status || "").toLowerCase();
         if (st === "canceled" || st === "pending") {
-            showToast("Платёж не был завершён. Попробуйте оформить заново.");
+            showToast("Платёж не был завершён. Попробуйте оформить заново.", "error");
             return;
         }
         showToast(successMsg);
@@ -144,13 +158,12 @@ function _handlePaymentResponse(res, successMsg, onReload) {
     wrap.style.gap = "12px";
     wrap.innerHTML = `
         <div class="hint" id="modalPayHint">
-            Страница оплаты открыта. После завершения платежа статус обновится автоматически — или нажмите «Проверить оплату».
+            Страница оплаты открыта. После завершения платежа статус обновится автоматически, или нажмите «Проверить оплату».
         </div>
         <button id="modalPayCheckBtn" type="button" class="btn btn-primary btn-lg">Проверить оплату</button>
         <button id="modalPayReopenBtn" type="button" class="btn btn-secondary">Открыть оплату снова</button>
     `;
 
-    const close = openModal("Ожидание оплаты", wrap);
     const hintEl = wrap.querySelector("#modalPayHint");
     const checkBtn = wrap.querySelector("#modalPayCheckBtn");
     const reopenBtn = wrap.querySelector("#modalPayReopenBtn");
@@ -158,14 +171,20 @@ function _handlePaymentResponse(res, successMsg, onReload) {
     let stopped = false;
     let inFlight = false;
     let pollCount = 0;
+    let timerId = null;
 
     const cleanup = () => {
         if (stopped) return;
         stopped = true;
-        clearInterval(timerId);
+        if (timerId !== null) {
+            clearInterval(timerId);
+            timerId = null;
+        }
         document.removeEventListener("visibilitychange", onVisible);
         window.removeEventListener("focus", onFocus);
     };
+
+    const close = openModal("Ожидание оплаты", wrap, { onClose: cleanup });
 
     const checkNow = async (manual = false) => {
         if (stopped) return;
@@ -212,6 +231,10 @@ function _handlePaymentResponse(res, successMsg, onReload) {
                 hintEl.textContent = "Платёж ещё обрабатывается банком. Попробуйте через пару секунд.";
             }
         } catch (err) {
+            if (!wrap.isConnected || stopped) {
+                cleanup();
+                return;
+            }
             hintEl.textContent = err.message || "Не удалось проверить оплату";
         } finally {
             inFlight = false;
@@ -223,13 +246,23 @@ function _handlePaymentResponse(res, successMsg, onReload) {
     };
 
     const onVisible = () => {
+        if (!wrap.isConnected || stopped) {
+            cleanup();
+            return;
+        }
         if (document.visibilityState === "visible") {
             checkNow(false);
         }
     };
-    const onFocus = () => checkNow(false);
+    const onFocus = () => {
+        if (!wrap.isConnected || stopped) {
+            cleanup();
+            return;
+        }
+        checkNow(false);
+    };
 
-    const timerId = setInterval(() => {
+    timerId = setInterval(() => {
         pollCount += 1;
         if (pollCount > 60 || !wrap.isConnected) {
             cleanup();
@@ -251,8 +284,8 @@ function _openTopupModal(minTopup, onReload) {
     form.style.gap = "12px";
     form.innerHTML = `
         <div class="field">
-            <label>Сумма пополнения (от ${minTopup} ₽)</label>
-            <input name="amount" class="input tabular" type="number" min="${minTopup}" max="50000" step="1" value="250" required>
+            <label for="topupAmountInput">Сумма пополнения (от ${minTopup} до 50000 ₽)</label>
+            <input id="topupAmountInput" name="amount" class="input tabular" type="number" min="${minTopup}" max="50000" step="1" value="250" required>
         </div>
         <div class="filter-pills">
             <button type="button" class="pill-btn" data-amt="100">100 ₽</button>
@@ -263,17 +296,23 @@ function _openTopupModal(minTopup, onReload) {
         <button type="submit" class="btn btn-primary btn-lg">Перейти к оплате</button>
     `;
     const close = openModal("Пополнение баланса", form);
+    const amountInput = form.querySelector("#topupAmountInput");
     form.querySelectorAll("[data-amt]").forEach((b) => {
         b.addEventListener("click", () => {
-            form.querySelector("input[name='amount']").value = b.dataset.amt;
+            if (amountInput) amountInput.value = b.dataset.amt;
         });
     });
     let idemKey = _newIdempotencyKey();
     form.addEventListener("submit", async (e) => {
         e.preventDefault();
-        const amount = Number(form.querySelector("input[name='amount']").value);
-        if (!Number.isInteger(amount) || amount < minTopup) {
-            showToast(`Минимальная сумма — ${minTopup} ₽`);
+        const raw = String((amountInput && amountInput.value) || "").trim();
+        const amount = Number(raw);
+        if (!/^\d+$/.test(raw) || !Number.isInteger(amount) || amount < minTopup) {
+            showToast(`Минимальная сумма: ${minTopup} ₽`, "error");
+            return;
+        }
+        if (amount > 50000) {
+            showToast("Максимальная сумма пополнения: 50000 ₽", "error");
             return;
         }
         const btn = form.querySelector("button[type='submit']");
@@ -285,7 +324,7 @@ function _openTopupModal(minTopup, onReload) {
         } catch (err) {
             idemKey = _newIdempotencyKey();
             btn.disabled = false;
-            showToast(err.message || "Не удалось создать платёж");
+            showToast(err.message || "Не удалось создать платёж", "error");
         }
     });
 }
@@ -300,25 +339,13 @@ function _openStandardPlanModal(d, mode, onReload) {
     let duration = 30;
     let useBalance = true;
     let quote = null;
+    let idemKey = _newIdempotencyKey();
 
     const wrap = document.createElement("div");
     wrap.className = "field";
     wrap.style.gap = "12px";
 
     const close = openModal(mode === "renew" ? "Продление · Стандарт" : "Подключение · Стандарт", wrap);
-
-    const fetchQuote = async () => {
-        const reqDev = devices;
-        const reqDur = duration;
-        try {
-            const q = await api.quoteStandard(reqDev, reqDur);
-            if (reqDev !== devices || reqDur !== duration) return;
-            quote = q;
-            updateSummary();
-        } catch {
-            // Instant local fallback stays shown
-        }
-    };
 
     const getCheckoutText = (price, cardDue, balUsed) => {
         const verb = mode === "renew" ? "Продлить" : "Подключить";
@@ -359,122 +386,160 @@ function _openStandardPlanModal(d, mode, onReload) {
         submitBtn.disabled = Boolean(blockedReason);
     };
 
-    const renderModal = () => {
-        wrap.innerHTML = `
-            ${mode === "buy" ? `
-                <div class="field">
-                    <label>Готовые конфигурации</label>
-                    <div class="filter-pills">
-                        <button type="button" class="pill-btn ${devices === 2 ? "active" : ""}" data-preset="2">Базовый · 2</button>
-                        <button type="button" class="pill-btn ${devices === 5 ? "active" : ""}" data-preset="5">Семейный · 5</button>
-                        <button type="button" class="pill-btn ${devices === 10 ? "active" : ""}" data-preset="10">Pro · 10</button>
-                    </div>
-                </div>
-                <div class="field">
-                    <label>Точное число устройств (от 2 до 10)</label>
-                    <div class="stepper">
-                        <button type="button" class="stepper-btn" id="stepMinus" ${devices <= 2 ? "disabled" : ""}>−</button>
-                        <span class="stepper-val">${devices} устр.</span>
-                        <button type="button" class="stepper-btn" id="stepPlus" ${devices >= 10 ? "disabled" : ""}>+</button>
-                    </div>
-                </div>
-            ` : `
-                <div class="notice-box">
-                    <span>Текущий лимит: <strong style="color:var(--text-primary);">${devices} устр.</strong></span>
-                    <span>+ дни к сроку</span>
-                </div>
-            `}
-            <div class="field">
-                <label>Выберите срок</label>
-                <div class="price-tile-grid">
-                    ${durations.map((days) => {
-                        const p = _calcStdPrice(pricing, devices, days);
-                        return `
-                            <button type="button" class="price-tile ${duration === days ? "active" : ""}" data-dur="${days}">
-                                <span class="price-tile-top">${days} дн.</span>
-                                <span class="price-tile-price">${p} ₽</span>
-                            </button>
-                        `;
-                    }).join("")}
-                </div>
-            </div>
-            <label class="toggle-row">
-                <span class="toggle-label">Списать с баланса (доступно ${bal.total} ₽)</span>
-                <span class="switch">
-                    <input id="modalStdBalChk" type="checkbox" ${useBalance ? "checked" : ""}>
-                    <span class="switch-track"></span>
-                </span>
-            </label>
-            <div id="modalStdSummary" class="quote-box"></div>
-            <button id="modalStdPayBtn" type="button" class="btn btn-primary btn-lg"></button>
-        `;
-
+    const updateControls = () => {
         wrap.querySelectorAll("[data-preset]").forEach((b) => {
-            b.addEventListener("click", () => {
-                devices = Number(b.dataset.preset);
-                quote = null;
-                renderModal();
-                fetchQuote();
-            });
+            const isActive = devices === Number(b.dataset.preset);
+            b.classList.toggle("active", isActive);
+            b.setAttribute("aria-pressed", isActive ? "true" : "false");
         });
-
+        const stepVal = wrap.querySelector("#stepDevVal");
+        if (stepVal) stepVal.textContent = `${devices} устр.`;
         const minus = wrap.querySelector("#stepMinus");
         const plus = wrap.querySelector("#stepPlus");
-        if (minus) {
-            minus.addEventListener("click", () => {
-                if (devices > 2) {
-                    devices -= 1;
-                    quote = null;
-                    renderModal();
-                    fetchQuote();
-                }
-            });
-        }
-        if (plus) {
-            plus.addEventListener("click", () => {
-                if (devices < 10) {
-                    devices += 1;
-                    quote = null;
-                    renderModal();
-                    fetchQuote();
-                }
-            });
-        }
+        if (minus) minus.disabled = devices <= 2;
+        if (plus) plus.disabled = devices >= 10;
 
         wrap.querySelectorAll("[data-dur]").forEach((b) => {
-            b.addEventListener("click", () => {
-                duration = Number(b.dataset.dur);
-                quote = null;
-                renderModal();
-                fetchQuote();
-            });
+            const dDays = Number(b.dataset.dur);
+            const isActive = duration === dDays;
+            b.classList.toggle("active", isActive);
+            b.setAttribute("aria-pressed", isActive ? "true" : "false");
+            const priceEl = b.querySelector(".price-tile-price");
+            if (priceEl) priceEl.textContent = `${_calcStdPrice(pricing, devices, dDays)} ₽`;
         });
-
-        const balChk = wrap.querySelector("#modalStdBalChk");
-        balChk.addEventListener("change", () => {
-            useBalance = balChk.checked;
-            updateSummary();
-        });
-
-        const payBtn = wrap.querySelector("#modalStdPayBtn");
-        let idemKey = _newIdempotencyKey();
-        payBtn.addEventListener("click", async () => {
-            payBtn.disabled = true;
-            try {
-                const res = await api.checkoutStandard(devices, duration, useBalance, idemKey);
-                close();
-                _handlePaymentResponse(res, "Подписка «Стандарт» оформлена", onReload);
-            } catch (err) {
-                idemKey = _newIdempotencyKey();
-                payBtn.disabled = false;
-                showToast(err.message || "Ошибка оплаты");
-            }
-        });
-
         updateSummary();
     };
 
-    renderModal();
+    const fetchQuote = async () => {
+        if (!wrap.isConnected) return;
+        const reqDev = devices;
+        const reqDur = duration;
+        try {
+            const q = await api.quoteStandard(reqDev, reqDur);
+            if (!wrap.isConnected || reqDev !== devices || reqDur !== duration) return;
+            quote = q;
+            updateSummary();
+        } catch {
+            // Instant local fallback stays shown
+        }
+    };
+
+    wrap.innerHTML = `
+        ${mode === "buy" ? `
+            <div class="field">
+                <span id="stdPresetsLabel" style="font-size:12px; color:var(--text-secondary);">Готовые конфигурации</span>
+                <div class="filter-pills" role="group" aria-labelledby="stdPresetsLabel">
+                    <button type="button" class="pill-btn ${devices === 2 ? "active" : ""}" aria-pressed="${devices === 2 ? "true" : "false"}" data-preset="2">Базовый · 2</button>
+                    <button type="button" class="pill-btn ${devices === 5 ? "active" : ""}" aria-pressed="${devices === 5 ? "true" : "false"}" data-preset="5">Семейный · 5</button>
+                    <button type="button" class="pill-btn ${devices === 10 ? "active" : ""}" aria-pressed="${devices === 10 ? "true" : "false"}" data-preset="10">Pro · 10</button>
+                </div>
+            </div>
+            <div class="field">
+                <span id="stdStepperLabel" style="font-size:12px; color:var(--text-secondary);">Точное число устройств (от 2 до 10)</span>
+                <div class="stepper" role="group" aria-labelledby="stdStepperLabel">
+                    <button type="button" class="stepper-btn" id="stepMinus" aria-label="Уменьшить количество устройств" ${devices <= 2 ? "disabled" : ""}>−</button>
+                    <span class="stepper-val" id="stepDevVal">${devices} устр.</span>
+                    <button type="button" class="stepper-btn" id="stepPlus" aria-label="Увеличить количество устройств" ${devices >= 10 ? "disabled" : ""}>+</button>
+                </div>
+            </div>
+        ` : `
+            <div class="notice-box">
+                <span>Текущий лимит: <strong style="color:var(--text-primary);">${devices} устр.</strong></span>
+                <span>+ дни к сроку</span>
+            </div>
+        `}
+        <div class="field">
+            <span id="stdDurationLabel" style="font-size:12px; color:var(--text-secondary);">Выберите срок</span>
+            <div class="price-tile-grid" role="group" aria-labelledby="stdDurationLabel">
+                ${durations.map((days) => {
+                    const p = _calcStdPrice(pricing, devices, days);
+                    return `
+                        <button type="button" class="price-tile ${duration === days ? "active" : ""}" aria-pressed="${duration === days ? "true" : "false"}" data-dur="${days}">
+                            <span class="price-tile-top">${days} дн.</span>
+                            <span class="price-tile-price">${p} ₽</span>
+                        </button>
+                    `;
+                }).join("")}
+            </div>
+        </div>
+        <label class="toggle-row" for="modalStdBalChk">
+            <span class="toggle-label">Списать с баланса (доступно ${bal.total} ₽)</span>
+            <span class="switch">
+                <input id="modalStdBalChk" type="checkbox" ${useBalance ? "checked" : ""}>
+                <span class="switch-track"></span>
+            </span>
+        </label>
+        <div id="modalStdSummary" class="quote-box"></div>
+        <button id="modalStdPayBtn" type="button" class="btn btn-primary btn-lg"></button>
+    `;
+
+    wrap.querySelectorAll("[data-preset]").forEach((b) => {
+        b.addEventListener("click", () => {
+            devices = Number(b.dataset.preset);
+            quote = null;
+            idemKey = _newIdempotencyKey();
+            updateControls();
+            fetchQuote();
+        });
+    });
+
+    const minus = wrap.querySelector("#stepMinus");
+    const plus = wrap.querySelector("#stepPlus");
+    if (minus) {
+        minus.addEventListener("click", () => {
+            if (devices > 2) {
+                devices -= 1;
+                quote = null;
+                idemKey = _newIdempotencyKey();
+                updateControls();
+                fetchQuote();
+            }
+        });
+    }
+    if (plus) {
+        plus.addEventListener("click", () => {
+            if (devices < 10) {
+                devices += 1;
+                quote = null;
+                idemKey = _newIdempotencyKey();
+                updateControls();
+                fetchQuote();
+            }
+        });
+    }
+
+    wrap.querySelectorAll("[data-dur]").forEach((b) => {
+        b.addEventListener("click", () => {
+            duration = Number(b.dataset.dur);
+            quote = null;
+            idemKey = _newIdempotencyKey();
+            updateControls();
+            fetchQuote();
+        });
+    });
+
+    const balChk = wrap.querySelector("#modalStdBalChk");
+    balChk.addEventListener("change", () => {
+        useBalance = balChk.checked;
+        idemKey = _newIdempotencyKey();
+        updateSummary();
+    });
+
+    const payBtn = wrap.querySelector("#modalStdPayBtn");
+    payBtn.addEventListener("click", async () => {
+        payBtn.disabled = true;
+        try {
+            const res = await api.checkoutStandard(devices, duration, useBalance, idemKey);
+            close();
+            _handlePaymentResponse(res, "Подписка «Стандарт» оформлена", onReload);
+        } catch (err) {
+            idemKey = _newIdempotencyKey();
+            payBtn.disabled = false;
+            showToast(err.message || "Ошибка оплаты", "error");
+        }
+    });
+
+    updateSummary();
     fetchQuote();
 }
 
@@ -485,31 +550,49 @@ function _openStandardDevicesModal(d, onReload) {
     let targetLimit = currentLimit < 10 ? currentLimit + 1 : currentLimit - 1;
     let useBalance = true;
     let quote = null;
+    let quoteError = null;
+    let idemKey = _newIdempotencyKey();
 
     const wrap = document.createElement("div");
     wrap.className = "field";
     wrap.style.gap = "12px";
 
     const close = openModal("Устройства · Стандарт", wrap);
+    const expStr = _safeFormatDate(std.expires_at);
 
-    const fetchQuote = async () => {
-        if (targetLimit === currentLimit) {
-            quote = null;
-            renderContent();
-            return;
-        }
-        const reqTarget = targetLimit;
-        try {
-            const q = await api.quoteStandard(reqTarget, 30);
-            if (reqTarget !== targetLimit) return;
-            quote = q;
-            renderContent();
-        } catch (err) {
-            showToast(err.message || "Не удалось рассчитать изменение");
-        }
-    };
+    wrap.innerHTML = `
+        <div class="notice-box">
+            <span>Сейчас активно: <strong style="color:var(--text-primary);">${currentLimit} устр.</strong></span>
+            <span>${expStr ? `до ${expStr}` : ""}</span>
+        </div>
+        <div class="field">
+            <span id="devStepperLabel" style="font-size:12px; color:var(--text-secondary);">Новый лимит устройств (от 2 до 10)</span>
+            <div class="stepper" role="group" aria-labelledby="devStepperLabel">
+                <button type="button" class="stepper-btn" id="devMinus" aria-label="Уменьшить лимит устройств">−</button>
+                <span class="stepper-val" id="devTargetVal">${targetLimit} устр.</span>
+                <button type="button" class="stepper-btn" id="devPlus" aria-label="Увеличить лимит устройств">+</button>
+            </div>
+        </div>
+        <label class="toggle-row" id="devBalWrap" for="devBalChk" hidden>
+            <span class="toggle-label">Списать с баланса (доступно ${bal.total} ₽)</span>
+            <span class="switch">
+                <input id="devBalChk" type="checkbox" ${useBalance ? "checked" : ""}>
+                <span class="switch-track"></span>
+            </span>
+        </label>
+        <div id="devInfoBox"></div>
+        <button id="devApplyBtn" type="button" class="btn btn-primary btn-lg" disabled>Выберите другой лимит</button>
+    `;
 
-    const renderContent = () => {
+    const devMinus = wrap.querySelector("#devMinus");
+    const devPlus = wrap.querySelector("#devPlus");
+    const devTargetVal = wrap.querySelector("#devTargetVal");
+    const devBalWrap = wrap.querySelector("#devBalWrap");
+    const devBalChk = wrap.querySelector("#devBalChk");
+    const devInfoBox = wrap.querySelector("#devInfoBox");
+    const devApplyBtn = wrap.querySelector("#devApplyBtn");
+
+    const updateView = () => {
         const isSame = targetLimit === currentLimit;
         const isUpgrade = targetLimit > currentLimit;
         const isDowngrade = targetLimit < currentLimit;
@@ -517,8 +600,20 @@ function _openStandardDevicesModal(d, onReload) {
         const split = _calcBalanceSplit(price, bal, useBalance, (d.pricing && d.pricing.min_topup_rub) || 20);
         const blockedReason = quote && quote.blocked_reason ? quote.blocked_reason : null;
 
+        devTargetVal.textContent = `${targetLimit} устр.`;
+        devMinus.disabled = targetLimit <= 2;
+        devPlus.disabled = targetLimit >= 10;
+        devBalWrap.hidden = !isUpgrade;
+
         let infoHtml = `<div class="muted">Выберите новое число устройств, отличное от текущего (${currentLimit} устр.).</div>`;
-        if (!isSame && !quote) {
+        if (!isSame && quoteError) {
+            infoHtml = `
+                <div class="notice-box notice-warn" style="flex-direction:column; align-items:flex-start; gap:8px;">
+                    <span>${escapeHtml(quoteError)}</span>
+                    <button id="devRetryQuoteBtn" type="button" class="btn btn-sm">Повторить</button>
+                </div>
+            `;
+        } else if (!isSame && !quote) {
             infoHtml = `<div class="muted">Расчёт условий...</div>`;
         } else if (isUpgrade && quote) {
             infoHtml = `
@@ -545,68 +640,25 @@ function _openStandardDevicesModal(d, onReload) {
                         <div class="quote-line"><span>Следующее снижение</span><strong>через 7 дней</strong></div>
                    </div>
                    ${Number(quote.bonus_credit_rub || 0) > 0
-                       ? `<div class="muted" style="font-size:11px;">Бонусами можно оплатить до 100% следующих заказов.</div>`
+                       ? `<div class="muted" style="font-size:11px; margin-top:6px;">Бонусами можно оплатить до 100% следующих заказов.</div>`
                        : ""}`;
         }
+
+        devInfoBox.innerHTML = infoHtml;
 
         const btnLabel = isSame
             ? "Выберите другой лимит"
             : (isUpgrade
                 ? (split.cardDue === 0 ? `Увеличить за ${price} ₽ с баланса` : `Доплатить ${split.cardDue} ₽`)
                 : `Снизить до ${targetLimit} устр.`);
+        devApplyBtn.textContent = btnLabel;
+        devApplyBtn.disabled = Boolean(isSame || !quote || blockedReason || quoteError);
 
-        wrap.innerHTML = `
-            <div class="notice-box">
-                <span>Сейчас активно: <strong style="color:var(--text-primary);">${currentLimit} устр.</strong></span>
-                <span>до ${formatDate(std.expires_at)}</span>
-            </div>
-            <div class="field">
-                <label>Новый лимит устройств (от 2 до 10)</label>
-                <div class="stepper">
-                    <button type="button" class="stepper-btn" id="devMinus" ${targetLimit <= 2 ? "disabled" : ""}>−</button>
-                    <span class="stepper-val">${targetLimit} устр.</span>
-                    <button type="button" class="stepper-btn" id="devPlus" ${targetLimit >= 10 ? "disabled" : ""}>+</button>
-                </div>
-            </div>
-            ${isUpgrade ? `
-                <label class="toggle-row">
-                    <span class="toggle-label">Списать с баланса (доступно ${bal.total} ₽)</span>
-                    <span class="switch">
-                        <input id="devBalChk" type="checkbox" ${useBalance ? "checked" : ""}>
-                        <span class="switch-track"></span>
-                    </span>
-                </label>
-            ` : ""}
-            ${infoHtml}
-            <button id="devApplyBtn" type="button" class="btn btn-primary btn-lg" ${isSame || !quote || blockedReason ? "disabled" : ""}>
-                ${btnLabel}
-            </button>
-        `;
-
-        wrap.querySelector("#devMinus").addEventListener("click", () => {
-            if (targetLimit > 2) {
-                targetLimit -= 1;
-                quote = null;
-                renderContent();
-                fetchQuote();
-            }
-        });
-        wrap.querySelector("#devPlus").addEventListener("click", () => {
-            if (targetLimit < 10) {
-                targetLimit += 1;
-                quote = null;
-                renderContent();
-                fetchQuote();
-            }
-        });
-        const balChk = wrap.querySelector("#devBalChk");
-        if (balChk) {
-            balChk.addEventListener("change", () => {
-                useBalance = balChk.checked;
-                renderContent();
-            });
+        const retryBtn = devInfoBox.querySelector("#devRetryQuoteBtn");
+        if (retryBtn) {
+            retryBtn.addEventListener("click", () => fetchQuote());
         }
-        const goDevBtn = wrap.querySelector("#devGoDevicesBtn");
+        const goDevBtn = devInfoBox.querySelector("#devGoDevicesBtn");
         if (goDevBtn) {
             goDevBtn.addEventListener("click", () => {
                 close();
@@ -614,47 +666,96 @@ function _openStandardDevicesModal(d, onReload) {
                 if (connectTab) connectTab.click();
             });
         }
-
-        let idemKey = _newIdempotencyKey();
-        wrap.querySelector("#devApplyBtn").addEventListener("click", async () => {
-            const btn = wrap.querySelector("#devApplyBtn");
-            if (isUpgrade) {
-                btn.disabled = true;
-                try {
-                    const res = await api.checkoutStandard(targetLimit, 30, useBalance, idemKey);
-                    close();
-                    _handlePaymentResponse(res, `Лимит увеличен до ${targetLimit} устр.`, onReload);
-                } catch (err) {
-                    idemKey = _newIdempotencyKey();
-                    btn.disabled = false;
-                    showToast(err.message || "Не удалось изменить лимит");
-                }
-                return;
-            }
-            const bonusAmt = Number((quote && quote.bonus_credit_rub) || 0);
-            const bonusMsg = bonusAmt > 0 ? ` На бонусный баланс вернётся ${bonusAmt} ₽.` : "";
-            showConfirmModal({
-                title: "Снизить лимит устройств?",
-                message: `Лимит уменьшится с ${currentLimit} до ${targetLimit} устр.${bonusMsg} Следующее снижение будет доступно через 7 дней.`,
-                confirmText: `Снизить до ${targetLimit} устр.`,
-                cancelText: "Отмена",
-                onConfirm: async () => {
-                    btn.disabled = true;
-                    try {
-                        await api.downgradeStandard(targetLimit);
-                        close();
-                        showToast(`Лимит снижен до ${targetLimit} устр.`);
-                        onReload();
-                    } catch (err) {
-                        btn.disabled = false;
-                        showToast(err.message || "Не удалось изменить лимит");
-                    }
-                },
-            });
-        });
     };
 
-    renderContent();
+    const fetchQuote = async () => {
+        if (!wrap.isConnected) return;
+        if (targetLimit === currentLimit) {
+            quote = null;
+            quoteError = null;
+            updateView();
+            return;
+        }
+        quote = null;
+        quoteError = null;
+        updateView();
+        const reqTarget = targetLimit;
+        try {
+            const q = await api.quoteStandard(reqTarget, 30);
+            if (!wrap.isConnected || reqTarget !== targetLimit) return;
+            quote = q;
+            quoteError = null;
+            updateView();
+        } catch (err) {
+            if (!wrap.isConnected || reqTarget !== targetLimit) return;
+            quote = null;
+            quoteError = (err && err.message) || "Не удалось рассчитать изменение";
+            showToast(quoteError, "error");
+            updateView();
+        }
+    };
+
+    devMinus.addEventListener("click", () => {
+        if (targetLimit > 2) {
+            targetLimit -= 1;
+            idemKey = _newIdempotencyKey();
+            fetchQuote();
+        }
+    });
+    devPlus.addEventListener("click", () => {
+        if (targetLimit < 10) {
+            targetLimit += 1;
+            idemKey = _newIdempotencyKey();
+            fetchQuote();
+        }
+    });
+    devBalChk.addEventListener("change", () => {
+        useBalance = devBalChk.checked;
+        idemKey = _newIdempotencyKey();
+        updateView();
+    });
+
+    devApplyBtn.addEventListener("click", async () => {
+        const isUpgrade = targetLimit > currentLimit;
+        if (isUpgrade) {
+            devApplyBtn.disabled = true;
+            try {
+                const res = await api.checkoutStandard(targetLimit, 30, useBalance, idemKey);
+                close();
+                _handlePaymentResponse(res, `Лимит увеличен до ${targetLimit} устр.`, onReload);
+            } catch (err) {
+                idemKey = _newIdempotencyKey();
+                devApplyBtn.disabled = false;
+                showToast(err.message || "Не удалось изменить лимит", "error");
+            }
+            return;
+        }
+        const bonusAmt = Number((quote && quote.bonus_credit_rub) || 0);
+        const bonusMsg = bonusAmt > 0 ? ` На бонусный баланс вернётся ${bonusAmt} ₽.` : "";
+        showConfirmModal({
+            title: "Снизить лимит устройств?",
+            message: `Лимит уменьшится с ${currentLimit} до ${targetLimit} устр.${bonusMsg} Следующее снижение будет доступно через 7 дней.`,
+            confirmText: `Снизить до ${targetLimit} устр.`,
+            cancelText: "Отмена",
+            onConfirm: async () => {
+                devApplyBtn.disabled = true;
+                try {
+                    await api.downgradeStandard(targetLimit);
+                    showToast(`Лимит снижен до ${targetLimit} устр.`);
+                    queueMicrotask(() => {
+                        close();
+                        onReload();
+                    });
+                } catch (err) {
+                    devApplyBtn.disabled = false;
+                    showToast(err.message || "Не удалось изменить лимит", "error");
+                    throw err;
+                }
+            },
+        });
+    });
+
+    updateView();
     fetchQuote();
 }
 
@@ -676,6 +777,7 @@ function _openWiPurchaseModal(d, mode, onReload) {
         : 1;
     let devices = defaultDevices;
     let useBalance = true;
+    let idemKey = _newIdempotencyKey();
 
     const welcomeDiscountEligible = Boolean(!isRenew && ref.welcome_discount_eligible);
     const welcomeDiscountPct = Number(ref.welcome_discount_pct || 25);
@@ -685,7 +787,70 @@ function _openWiPurchaseModal(d, mode, onReload) {
     wrap.style.gap = "12px";
     const close = openModal(isRenew ? "Продление · Белый интернет" : "Подключение · Белый интернет", wrap);
 
-    const renderModal = () => {
+    const wiExpStr = _safeFormatDate(wi.expires_at);
+    const wiPendStr = _safeFormatDate(wi.pending_from || wi.expires_at);
+
+    wrap.innerHTML = `
+        ${isRenew ? `
+            <div class="notice-box">
+                <span>Сейчас активно: <strong style="color:var(--text-primary);">${curLimit} устр.</strong></span>
+                <span>${wiExpStr ? `до ${wiExpStr}` : ""}</span>
+            </div>
+            ${wi.pending_device_limit ? `
+                <div class="notice-box notice-info" style="font-size:11px; padding:6px 10px;">
+                    <span>${isActivePeriod
+                        ? `Запланировано снижение до ${wi.pending_device_limit} устр.${wiPendStr ? ` с ${wiPendStr}` : ""}. Переход произойдёт в эту дату (автопродление или продление после окончания срока). Продление сейчас на ${curLimit} устр. отменит запланированное снижение.`
+                        : `Запланировано снижение до ${wi.pending_device_limit} устр. Вы можете продлить на ${wi.pending_device_limit} устр. или выбрать другое число слотов ниже.`
+                    }</span>
+                </div>
+            ` : ""}
+        ` : `
+            <div class="muted" style="font-size:12px;">
+                Независимая подписка на 30 дней для мобильной сети при жёстких ограничениях. Работает как отдельно, так и в дополнение к «Стандарту».
+            </div>
+            ${d.devices && d.devices.length > devices ? (() => {
+                const sortedDevs = [...d.devices].sort((a, b) => (a.id || 0) - (b.id || 0));
+                const firstDevName = sortedDevs[0]?.device_name || sortedDevs[0]?.platform || "Устройство";
+                return `
+                <div class="notice-box notice-info" style="font-size:11px; padding:6px 10px; margin-top:4px;">
+                    <span>Слот будет привязан к основному устройству (${escapeHtml(firstDevName)}). Выбрать другое можно в любой момент на вкладке подключения.</span>
+                </div>
+                `;
+            })() : ""}
+        `}
+        <div class="field">
+            <span id="wiPurchaseDevicesLabel" style="font-size:12px; color:var(--text-secondary);">${isRenew ? "Количество слотов на новый период (+30 дн.)" : "Количество устройств (по 50 ГБ на слот)"}</span>
+            <div class="price-tile-grid" role="group" aria-labelledby="wiPurchaseDevicesLabel">
+                ${[1, 2, 3].map((n) => {
+                    const p = base + (n - 1) * extra;
+                    const isDisabled = isActivePeriod && n < curLimit;
+                    return `
+                        <button type="button" class="price-tile ${devices === n ? "active" : ""}" aria-pressed="${devices === n ? "true" : "false"}" data-wi-cnt="${n}" ${isDisabled ? "disabled" : ""}>
+                            <span class="price-tile-top">${n} устр. · ${n * 50} ГБ</span>
+                            <span class="price-tile-price">${p} ₽</span>
+                        </button>
+                    `;
+                }).join("")}
+            </div>
+            ${isActivePeriod && curLimit > 1 ? `
+                <div class="muted" style="font-size:11px;">Снизить число слотов со следующего периода можно в «Слоты и трафик».</div>
+            ` : ""}
+        </div>
+        <label class="toggle-row" for="modalWiBalChk">
+            <span class="toggle-label">Списать с баланса (доступно ${bal.total} ₽)</span>
+            <span class="switch switch-wi">
+                <input id="modalWiBalChk" type="checkbox" ${useBalance ? "checked" : ""}>
+                <span class="switch-track"></span>
+            </span>
+        </label>
+        <div id="modalWiQuote" class="quote-box"></div>
+        <button id="modalWiPayBtn" type="button" class="btn btn-primary btn-lg"></button>
+    `;
+
+    const quoteEl = wrap.querySelector("#modalWiQuote");
+    const payBtn = wrap.querySelector("#modalWiPayBtn");
+
+    const updateView = () => {
         const originalPrice = base + Math.max(0, devices - 1) * extra;
         const discount = welcomeDiscountEligible
             ? Math.floor((originalPrice * welcomeDiscountPct) / 100)
@@ -697,107 +862,58 @@ function _openWiPurchaseModal(d, mode, onReload) {
             ? `Оплатить с баланса (${total} ₽)`
             : (split.balUsed > 0 ? `${verb} · доплата ${split.cardDue} ₽` : `${verb} за ${total} ₽`);
 
-        wrap.innerHTML = `
-            ${isRenew ? `
-                <div class="notice-box">
-                    <span>Сейчас активно: <strong style="color:var(--text-primary);">${curLimit} устр.</strong></span>
-                    <span>до ${formatDate(wi.expires_at)}</span>
-                </div>
-                ${wi.pending_device_limit ? `
-                    <div class="notice-box notice-info" style="font-size:11px; padding:6px 10px;">
-                        <span>${isActivePeriod
-                            ? `Запланировано снижение до ${wi.pending_device_limit} устр. с ${formatDate(wi.pending_from || wi.expires_at)}. Переход произойдёт в эту дату (автопродление или продление после окончания срока). Продление сейчас на ${curLimit} устр. отменит запланированное снижение.`
-                            : `Запланировано снижение до ${wi.pending_device_limit} устр. Вы можете продлить на ${wi.pending_device_limit} устр. или выбрать другое число слотов ниже.`
-                        }</span>
-                    </div>
-                ` : ""}
-            ` : `
-                <div class="muted" style="font-size:12px;">
-                    Независимая подписка на 30 дней для мобильной сети при жёстких ограничениях. Работает как отдельно, так и в дополнение к «Стандарту».
-                </div>
-                ${d.devices && d.devices.length > devices ? (() => {
-                    const sortedDevs = [...d.devices].sort((a, b) => (a.id || 0) - (b.id || 0));
-                    const firstDevName = sortedDevs[0]?.device_name || sortedDevs[0]?.platform || "Устройство";
-                    return `
-                    <div class="notice-box notice-info" style="font-size:11px; padding:6px 10px; margin-top:4px;">
-                        <span>Слот будет привязан к основному устройству (${escapeHtml(firstDevName)}). Выбрать другое можно в любой момент на вкладке подключения.</span>
-                    </div>
-                    `;
-                })() : ""}
-            `}
-            <div class="field">
-                <label>${isRenew ? "Количество слотов на новый период (+30 дн.)" : "Количество устройств (по 50 ГБ на слот)"}</label>
-                <div class="price-tile-grid">
-                    ${[1, 2, 3].map((n) => {
-                        const p = base + (n - 1) * extra;
-                        const isDisabled = isActivePeriod && n < curLimit;
-                        return `
-                            <button type="button" class="price-tile ${devices === n ? "active" : ""}" data-wi-cnt="${n}" ${isDisabled ? "disabled" : ""}>
-                                <span class="price-tile-top">${n} устр. · ${n * 50} ГБ</span>
-                                <span class="price-tile-price">${p} ₽</span>
-                            </button>
-                        `;
-                    }).join("")}
-                </div>
-                ${isActivePeriod && curLimit > 1 ? `
-                    <div class="muted" style="font-size:11px;">Снизить число слотов со следующего периода можно в «Слоты и трафик».</div>
-                ` : ""}
-            </div>
-            <label class="toggle-row">
-                <span class="toggle-label">Списать с баланса (доступно ${bal.total} ₽)</span>
-                <span class="switch switch-wi">
-                    <input id="modalWiBalChk" type="checkbox" ${useBalance ? "checked" : ""}>
-                    <span class="switch-track"></span>
-                </span>
-            </label>
-            <div class="quote-box">
-                <div class="quote-line"><span>${isRenew ? "Продление" : "Подписка"} (${devices} устр. · +30 дн.)</span><strong>${originalPrice} ₽</strong></div>
-                ${discount > 0 ? `<div class="quote-line"><span>Приветственная скидка</span><strong style="color:var(--accent-emerald);">-${discount} ₽</strong></div>` : ""}
-                ${split.balUsed > 0 ? `<div class="quote-line"><span>С баланса</span><strong>-${split.balUsed} ₽</strong></div>` : ""}
-                <div class="quote-line"><span>К оплате картой / СБП</span><strong ${split.cardDue === 0 ? 'style="color:var(--accent-emerald);"' : ""}>${split.cardDue} ₽</strong></div>
-            </div>
-            <button id="modalWiPayBtn" type="button" class="btn btn-primary btn-lg">${ctaText}</button>
-        `;
-
         wrap.querySelectorAll("[data-wi-cnt]").forEach((b) => {
-            b.addEventListener("click", () => {
-                devices = Number(b.dataset.wiCnt);
-                renderModal();
-            });
+            const isSel = Number(b.dataset.wiCnt) === devices;
+            b.classList.toggle("active", isSel);
+            b.setAttribute("aria-pressed", isSel ? "true" : "false");
         });
-
-        const balChk = wrap.querySelector("#modalWiBalChk");
-        balChk.addEventListener("change", () => {
-            useBalance = balChk.checked;
-            renderModal();
-        });
-
-        const payBtn = wrap.querySelector("#modalWiPayBtn");
-        let idemKey = _newIdempotencyKey();
-        payBtn.addEventListener("click", async () => {
-            payBtn.disabled = true;
-            try {
-                const res = await api.checkoutWi({
-                    action: isRenew ? "renew" : "buy",
-                    device_limit: devices,
-                    use_balance: useBalance,
-                    idempotency_key: idemKey,
-                });
-                close();
-                _handlePaymentResponse(
-                    res,
-                    isRenew ? "Подписка продлена на 30 дней" : "Подписка «Белый интернет» подключена",
-                    onReload
-                );
-            } catch (err) {
-                idemKey = _newIdempotencyKey();
-                payBtn.disabled = false;
-                showToast(err.message || (isRenew ? "Ошибка продления" : "Ошибка подключения"));
-            }
-        });
+        quoteEl.innerHTML = `
+            <div class="quote-line"><span>${isRenew ? "Продление" : "Подписка"} (${devices} устр. · +30 дн.)</span><strong>${originalPrice} ₽</strong></div>
+            ${discount > 0 ? `<div class="quote-line"><span>Приветственная скидка</span><strong style="color:var(--accent-emerald);">-${discount} ₽</strong></div>` : ""}
+            ${split.balUsed > 0 ? `<div class="quote-line"><span>С баланса</span><strong>-${split.balUsed} ₽</strong></div>` : ""}
+            <div class="quote-line"><span>К оплате картой / СБП</span><strong ${split.cardDue === 0 ? 'style="color:var(--accent-emerald);"' : ""}>${split.cardDue} ₽</strong></div>
+        `;
+        payBtn.textContent = ctaText;
     };
 
-    renderModal();
+    wrap.querySelectorAll("[data-wi-cnt]").forEach((b) => {
+        b.addEventListener("click", () => {
+            devices = Number(b.dataset.wiCnt);
+            idemKey = _newIdempotencyKey();
+            updateView();
+        });
+    });
+
+    const balChk = wrap.querySelector("#modalWiBalChk");
+    balChk.addEventListener("change", () => {
+        useBalance = balChk.checked;
+        idemKey = _newIdempotencyKey();
+        updateView();
+    });
+
+    payBtn.addEventListener("click", async () => {
+        payBtn.disabled = true;
+        try {
+            const res = await api.checkoutWi({
+                action: isRenew ? "renew" : "buy",
+                device_limit: devices,
+                use_balance: useBalance,
+                idempotency_key: idemKey,
+            });
+            close();
+            _handlePaymentResponse(
+                res,
+                isRenew ? "Подписка продлена на 30 дней" : "Подписка «Белый интернет» подключена",
+                onReload
+            );
+        } catch (err) {
+            idemKey = _newIdempotencyKey();
+            payBtn.disabled = false;
+            showToast(err.message || (isRenew ? "Ошибка продления" : "Ошибка подключения"), "error");
+        }
+    });
+
+    updateView();
 }
 
 function _openWiManageModal(d, onReload) {
@@ -819,20 +935,111 @@ function _openWiManageModal(d, onReload) {
         ? { kind: "pack", gb: Number(wiPacks[0].gb), price: Number(wiPacks[0].price_rub) }
         : (canAddSlot ? { kind: "slot" } : null);
     let useBalance = true;
+    let idemKey = _newIdempotencyKey();
 
     const wrap = document.createElement("div");
     wrap.className = "field";
     wrap.style.gap = "12px";
 
     const close = openModal("Слоты и трафик · Белый интернет", wrap);
+    const wiPendStr = _safeFormatDate(wi.pending_from);
+    const wiExpStr = _safeFormatDate(wi.expires_at);
 
-    const renderModal = () => {
+    wrap.innerHTML = `
+        <div class="quote-box">
+            <div class="quote-line"><span>Трафик</span><strong>${wiUsedGb} / ${wiTotalGb} ГБ</strong></div>
+            <div class="quote-line"><span>Слотов устройств</span><strong>${wiCurLimit}</strong></div>
+            <div class="quote-line"><span>Баланс аккаунта</span><strong>${bal.total} ₽</strong></div>
+        </div>
+        ${canAddSlot ? `
+            <div class="field">
+                <span id="wiManageSlotLabel" style="font-size:12px; color:var(--text-secondary);">Дополнительный слот (до ${wiMaxDevices} слотов в тарифе)</span>
+                <button id="modalWiSelectSlotBtn" type="button" class="price-tile ${selectedItem && selectedItem.kind === "slot" ? "active" : ""}" aria-pressed="${selectedItem && selectedItem.kind === "slot" ? "true" : "false"}" aria-labelledby="wiManageSlotLabel" style="width:100%; flex-direction:row; justify-content:space-between; padding:12px 16px;">
+                    <span class="price-tile-top">+1 слот устройства (+${addSlotGb} ГБ)</span>
+                    <span class="price-tile-price">${addSlotPrice} ₽</span>
+                </button>
+            </div>
+        ` : (wiCurLimit >= wiMaxDevices ? `
+            <div class="notice-box notice-info" style="font-size:12px; margin-top:4px;">
+                <span>Достигнут максимум тарифа (${wiMaxDevices} слота). Больше слотов добавить нельзя.</span>
+            </div>
+        ` : "")}
+        ${wiPacks.length ? `
+            <div class="field">
+                <span id="wiManagePacksLabel" style="font-size:12px; color:var(--text-secondary);">Дополнительный трафик</span>
+                <div class="price-tile-grid" role="group" aria-labelledby="wiManagePacksLabel">
+                    ${wiPacks.map((p) => {
+                        const isSel = selectedItem && selectedItem.kind === "pack" && Number(selectedItem.gb) === Number(p.gb);
+                        return `
+                            <button type="button" class="price-tile ${isSel ? "active" : ""}" aria-pressed="${isSel ? "true" : "false"}" data-modal-wi-pack="${p.gb}" data-modal-wi-price="${p.price_rub}">
+                                <span class="price-tile-top">+${p.gb} ГБ</span>
+                                <span class="price-tile-price">${p.price_rub} ₽</span>
+                            </button>
+                        `;
+                    }).join("")}
+                </div>
+            </div>
+        ` : ""}
+        ${selectedItem ? `
+            <label class="toggle-row" for="modalWiManageBalChk">
+                <span class="toggle-label">Списать с баланса (доступно ${bal.total} ₽)</span>
+                <span class="switch switch-wi">
+                    <input id="modalWiManageBalChk" type="checkbox" ${useBalance ? "checked" : ""}>
+                    <span class="switch-track"></span>
+                </span>
+            </label>
+            <div id="modalWiManageQuote" class="quote-box"></div>
+            <button id="modalWiManagePayBtn" type="button" class="btn btn-primary btn-lg"></button>
+        ` : ""}
+        ${wi.pending_device_limit ? `
+            <div class="notice-box notice-warn">
+                <span>Снижение до ${wi.pending_device_limit} устр.${wiPendStr ? ` с ${wiPendStr}` : ""}</span>
+                <button id="modalWiCancelDgBtn" type="button" class="btn btn-sm btn-danger">Отменить</button>
+            </div>
+        ` : (wiCurLimit > 1 ? `
+            <details class="guide-details">
+                <summary class="guide-summary">
+                    <span>Снизить число слотов со следующего периода</span>
+                    <span class="disclosure-pill"><span>Изменить</span>${_ICONS.chevronDown}</span>
+                </summary>
+                <div class="guide-body">
+                    <div class="actions-row">
+                        ${Array.from({ length: wiCurLimit - 1 }, (_, i) => i + 1).map((target) => `
+                            <button type="button" class="btn btn-sm" data-modal-wi-dg="${target}">
+                                Снизить до ${target} устр.
+                            </button>
+                        `).join("")}
+                    </div>
+                </div>
+            </details>
+        ` : "")}
+    `;
+
+    const selectSlotBtn = wrap.querySelector("#modalWiSelectSlotBtn");
+    const quoteEl = wrap.querySelector("#modalWiManageQuote");
+    const payBtn = wrap.querySelector("#modalWiManagePayBtn");
+
+    const updateView = () => {
+        if (selectSlotBtn) {
+            const isSlot = Boolean(selectedItem && selectedItem.kind === "slot");
+            selectSlotBtn.classList.toggle("active", isSlot);
+            selectSlotBtn.setAttribute("aria-pressed", isSlot ? "true" : "false");
+        }
+        wrap.querySelectorAll("[data-modal-wi-pack]").forEach((b) => {
+            const isSel = Boolean(
+                selectedItem && selectedItem.kind === "pack" && Number(selectedItem.gb) === Number(b.dataset.modalWiPack)
+            );
+            b.classList.toggle("active", isSel);
+            b.setAttribute("aria-pressed", isSel ? "true" : "false");
+        });
+        if (!selectedItem || !quoteEl || !payBtn) return;
+
         let itemLabel = "";
         let itemPrice = 0;
-        if (selectedItem && selectedItem.kind === "slot") {
+        if (selectedItem.kind === "slot") {
             itemLabel = `Доп. слот (+1 устр. · +${addSlotGb} ГБ)`;
             itemPrice = addSlotPrice;
-        } else if (selectedItem && selectedItem.kind === "pack") {
+        } else {
             itemLabel = `Пакет трафика (+${selectedItem.gb} ГБ)`;
             itemPrice = selectedItem.price;
         }
@@ -841,183 +1048,119 @@ function _openWiManageModal(d, onReload) {
             ? `Оплатить с баланса (${itemPrice} ₽)`
             : (split.balUsed > 0 ? `Оплатить · доплата ${split.cardDue} ₽` : `Оплатить ${itemPrice} ₽`);
 
-        wrap.innerHTML = `
-            <div class="quote-box">
-                <div class="quote-line"><span>Трафик</span><strong>${wiUsedGb} / ${wiTotalGb} ГБ</strong></div>
-                <div class="quote-line"><span>Слотов устройств</span><strong>${wiCurLimit}</strong></div>
-                <div class="quote-line"><span>Баланс аккаунта</span><strong>${bal.total} ₽</strong></div>
-            </div>
-            ${canAddSlot ? `
-                <div class="field">
-                    <label>Дополнительный слот (до ${wiMaxDevices} слотов в тарифе)</label>
-                    <button id="modalWiSelectSlotBtn" type="button" class="price-tile ${selectedItem && selectedItem.kind === "slot" ? "active" : ""}" style="width:100%; flex-direction:row; justify-content:space-between; padding:12px 16px;">
-                        <span class="price-tile-top">+1 слот устройства (+${addSlotGb} ГБ)</span>
-                        <span class="price-tile-price">${addSlotPrice} ₽</span>
-                    </button>
-                </div>
-            ` : (wiCurLimit >= wiMaxDevices ? `
-                <div class="notice-box notice-info" style="font-size:12px; margin-top:4px;">
-                    <span>Достигнут максимум тарифа (${wiMaxDevices} слота). Больше слотов добавить нельзя.</span>
-                </div>
-            ` : "")}
-            ${wiPacks.length ? `
-                <div class="field">
-                    <label>Дополнительный трафик</label>
-                    <div class="price-tile-grid">
-                        ${wiPacks.map((p) => {
-                            const isSel = selectedItem && selectedItem.kind === "pack" && Number(selectedItem.gb) === Number(p.gb);
-                            return `
-                                <button type="button" class="price-tile ${isSel ? "active" : ""}" data-modal-wi-pack="${p.gb}" data-modal-wi-price="${p.price_rub}">
-                                    <span class="price-tile-top">+${p.gb} ГБ</span>
-                                    <span class="price-tile-price">${p.price_rub} ₽</span>
-                                </button>
-                            `;
-                        }).join("")}
-                    </div>
-                </div>
-            ` : ""}
-            ${selectedItem ? `
-                <label class="toggle-row">
-                    <span class="toggle-label">Списать с баланса (доступно ${bal.total} ₽)</span>
-                    <span class="switch switch-wi">
-                        <input id="modalWiManageBalChk" type="checkbox" ${useBalance ? "checked" : ""}>
-                        <span class="switch-track"></span>
-                    </span>
-                </label>
-                <div class="quote-box">
-                    <div class="quote-line"><span>${escapeHtml(itemLabel)}</span><strong>${itemPrice} ₽</strong></div>
-                    ${split.balUsed > 0 ? `<div class="quote-line"><span>С баланса</span><strong>-${split.balUsed} ₽</strong></div>` : ""}
-                    <div class="quote-line"><span>К оплате картой / СБП</span><strong ${split.cardDue === 0 ? 'style="color:var(--accent-emerald);"' : ""}>${split.cardDue} ₽</strong></div>
-                </div>
-                <button id="modalWiManagePayBtn" type="button" class="btn btn-primary btn-lg">${ctaText}</button>
-            ` : ""}
-            ${wi.pending_device_limit ? `
-                <div class="notice-box notice-warn">
-                    <span>Снижение до ${wi.pending_device_limit} устр. с ${formatDate(wi.pending_from)}</span>
-                    <button id="modalWiCancelDgBtn" type="button" class="btn btn-sm btn-danger">Отменить</button>
-                </div>
-            ` : (wiCurLimit > 1 ? `
-                <details class="guide-details">
-                    <summary class="guide-summary">
-                        <span>Снизить число слотов со следующего периода</span>
-                        <span class="disclosure-pill"><span>Изменить</span>${_ICONS.chevronDown}</span>
-                    </summary>
-                    <div class="guide-body">
-                        <div class="actions-row">
-                            ${Array.from({ length: wiCurLimit - 1 }, (_, i) => i + 1).map((target) => `
-                                <button type="button" class="btn btn-sm" data-modal-wi-dg="${target}">
-                                    Снизить до ${target} устр.
-                                </button>
-                            `).join("")}
-                        </div>
-                    </div>
-                </details>
-            ` : "")}
+        quoteEl.innerHTML = `
+            <div class="quote-line"><span>${escapeHtml(itemLabel)}</span><strong>${itemPrice} ₽</strong></div>
+            ${split.balUsed > 0 ? `<div class="quote-line"><span>С баланса</span><strong>-${split.balUsed} ₽</strong></div>` : ""}
+            <div class="quote-line"><span>К оплате картой / СБП</span><strong ${split.cardDue === 0 ? 'style="color:var(--accent-emerald);"' : ""}>${split.cardDue} ₽</strong></div>
         `;
-
-        const selectSlotBtn = wrap.querySelector("#modalWiSelectSlotBtn");
-        if (selectSlotBtn) {
-            selectSlotBtn.addEventListener("click", () => {
-                selectedItem = { kind: "slot" };
-                renderModal();
-            });
-        }
-
-        wrap.querySelectorAll("[data-modal-wi-pack]").forEach((b) => {
-            b.addEventListener("click", () => {
-                selectedItem = {
-                    kind: "pack",
-                    gb: Number(b.dataset.modalWiPack),
-                    price: Number(b.dataset.modalWiPrice),
-                };
-                renderModal();
-            });
-        });
-
-        const balChk = wrap.querySelector("#modalWiManageBalChk");
-        if (balChk) {
-            balChk.addEventListener("change", () => {
-                useBalance = balChk.checked;
-                renderModal();
-            });
-        }
-
-        const payBtn = wrap.querySelector("#modalWiManagePayBtn");
-        let idemKey = _newIdempotencyKey();
-        if (payBtn && selectedItem) {
-            payBtn.addEventListener("click", async () => {
-                payBtn.disabled = true;
-                try {
-                    if (selectedItem.kind === "slot") {
-                        const res = await api.checkoutWi({
-                            action: "add_slot",
-                            use_balance: useBalance,
-                            idempotency_key: idemKey,
-                        });
-                        close();
-                        _handlePaymentResponse(res, "Слот добавлен", onReload);
-                    } else {
-                        const res = await api.checkoutWi({
-                            action: "topup",
-                            gb: Number(selectedItem.gb),
-                            use_balance: useBalance,
-                            idempotency_key: idemKey,
-                        });
-                        close();
-                        _handlePaymentResponse(res, "Пакет трафика добавлен", onReload);
-                    }
-                } catch (err) {
-                    idemKey = _newIdempotencyKey();
-                    payBtn.disabled = false;
-                    showToast(err.message || "Ошибка оформления");
-                }
-            });
-        }
-
-        wrap.querySelectorAll("[data-modal-wi-dg]").forEach((b) => {
-            b.addEventListener("click", () => {
-                const target = Number(b.dataset.modalWiDg);
-                showConfirmModal({
-                    title: "Снизить число слотов?",
-                    message: `Со следующего периода (${formatDate(wi.expires_at)}) лимит уменьшится до ${target} устр. (${target * 50} ГБ). До конца текущего срока сохранится ${wiCurLimit} устр.`,
-                    confirmText: `Снизить до ${target} устр.`,
-                    cancelText: "Отмена",
-                    onConfirm: async () => {
-                        b.disabled = true;
-                        try {
-                            await api.scheduleWiDowngrade(target);
-                            close();
-                            showToast("Снижение запланировано на следующий период");
-                            onReload();
-                        } catch (err) {
-                            showToast(err.message || "Ошибка");
-                        } finally {
-                            b.disabled = false;
-                        }
-                    },
-                });
-            });
-        });
-
-        const cancelDgBtn = wrap.querySelector("#modalWiCancelDgBtn");
-        if (cancelDgBtn) {
-            cancelDgBtn.addEventListener("click", async () => {
-                cancelDgBtn.disabled = true;
-                try {
-                    await api.cancelWiDowngrade();
-                    close();
-                    showToast("Отложенное снижение отменено");
-                    onReload();
-                } catch (err) {
-                    showToast(err.message || "Ошибка отмены");
-                } finally {
-                    cancelDgBtn.disabled = false;
-                }
-            });
-        }
+        payBtn.textContent = ctaText;
     };
 
-    renderModal();
+    if (selectSlotBtn) {
+        selectSlotBtn.addEventListener("click", () => {
+            selectedItem = { kind: "slot" };
+            idemKey = _newIdempotencyKey();
+            updateView();
+        });
+    }
+
+    wrap.querySelectorAll("[data-modal-wi-pack]").forEach((b) => {
+        b.addEventListener("click", () => {
+            selectedItem = {
+                kind: "pack",
+                gb: Number(b.dataset.modalWiPack),
+                price: Number(b.dataset.modalWiPrice),
+            };
+            idemKey = _newIdempotencyKey();
+            updateView();
+        });
+    });
+
+    const balChk = wrap.querySelector("#modalWiManageBalChk");
+    if (balChk) {
+        balChk.addEventListener("change", () => {
+            useBalance = balChk.checked;
+            idemKey = _newIdempotencyKey();
+            updateView();
+        });
+    }
+
+    if (payBtn && selectedItem) {
+        payBtn.addEventListener("click", async () => {
+            payBtn.disabled = true;
+            try {
+                if (selectedItem.kind === "slot") {
+                    const res = await api.checkoutWi({
+                        action: "add_slot",
+                        use_balance: useBalance,
+                        idempotency_key: idemKey,
+                    });
+                    close();
+                    _handlePaymentResponse(res, "Слот добавлен", onReload);
+                } else {
+                    const res = await api.checkoutWi({
+                        action: "topup",
+                        gb: Number(selectedItem.gb),
+                        use_balance: useBalance,
+                        idempotency_key: idemKey,
+                    });
+                    close();
+                    _handlePaymentResponse(res, "Пакет трафика добавлен", onReload);
+                }
+            } catch (err) {
+                idemKey = _newIdempotencyKey();
+                payBtn.disabled = false;
+                showToast(err.message || "Ошибка оформления", "error");
+            }
+        });
+    }
+
+    wrap.querySelectorAll("[data-modal-wi-dg]").forEach((b) => {
+        b.addEventListener("click", () => {
+            const target = Number(b.dataset.modalWiDg);
+            showConfirmModal({
+                title: "Снизить число слотов?",
+                message: `Со следующего периода${wiExpStr ? ` (${wiExpStr})` : ""} лимит уменьшится до ${target} устр. (${target * 50} ГБ). До конца текущего срока сохранится ${wiCurLimit} устр.`,
+                confirmText: `Снизить до ${target} устр.`,
+                cancelText: "Отмена",
+                onConfirm: async () => {
+                    b.disabled = true;
+                    try {
+                        await api.scheduleWiDowngrade(target);
+                        showToast("Снижение запланировано на следующий период");
+                        queueMicrotask(() => {
+                            close();
+                            onReload();
+                        });
+                    } catch (err) {
+                        showToast(err.message || "Ошибка", "error");
+                        throw err;
+                    } finally {
+                        b.disabled = false;
+                    }
+                },
+            });
+        });
+    });
+
+    const cancelDgBtn = wrap.querySelector("#modalWiCancelDgBtn");
+    if (cancelDgBtn) {
+        cancelDgBtn.addEventListener("click", async () => {
+            cancelDgBtn.disabled = true;
+            try {
+                await api.cancelWiDowngrade();
+                close();
+                showToast("Отложенное снижение отменено");
+                onReload();
+            } catch (err) {
+                showToast(err.message || "Ошибка отмены", "error");
+            } finally {
+                cancelDgBtn.disabled = false;
+            }
+        });
+    }
+
+    updateView();
 }
 
 function _wiHasActivePeriod(wi) {
@@ -1033,9 +1176,10 @@ function _wiHasActivePeriod(wi) {
 
 export async function loadAndRenderUserCabinet(root, options = {}) {
     const isActive = () => (typeof options.isActive === "function" ? options.isActive() : true);
+    const reqId = ++_dashReqId;
     try {
         const data = await api.getUserDashboard();
-        if (!isActive()) return;
+        if (reqId !== _dashReqId || !isActive() || !root.isConnected) return;
         _state.data = data;
         const stdActive = Boolean(data.standard && data.standard.active);
         const wiActive = _wiHasActivePeriod(data.wi);
@@ -1050,7 +1194,7 @@ export async function loadAndRenderUserCabinet(root, options = {}) {
         }
         _render(root);
     } catch (err) {
-        if (!isActive()) return;
+        if (reqId !== _dashReqId || !isActive() || !root.isConnected) return;
         root.innerHTML = `
             <section class="card card-center">
                 <div class="card-title">Не удалось загрузить кабинет</div>
@@ -1065,11 +1209,13 @@ export async function loadAndRenderUserCabinet(root, options = {}) {
 
 function _getProfileMeta(d) {
     const tgUser = (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initDataUnsafe && window.Telegram.WebApp.initDataUnsafe.user) || {};
-    const displayName = (d.user && d.user.name) || [tgUser.first_name, tgUser.last_name].filter(Boolean).join(" ") || (tgUser.username ? `@${tgUser.username}` : "Профиль");
-    const initial = String(displayName.replace(/^@/, "").trim().charAt(0) || "J").toUpperCase();
+    const rawName = (d.user && d.user.name) || [tgUser.first_name, tgUser.last_name].filter(Boolean).join(" ") || (tgUser.username ? `@${tgUser.username}` : "");
+    const displayName = rawName || "Профиль";
+    const initial = String(displayName.replace(/^@/, "").trim().charAt(0) || "П").toUpperCase();
     const photoUrl = tgUser.photo_url || "";
     return {
         displayName,
+        hasName: Boolean(rawName),
         username: tgUser.username ? `@${tgUser.username}` : "",
         userId: (d.user && d.user.telegram_id) || tgUser.id || "",
         initial,
@@ -1112,13 +1258,16 @@ function _syncTopbarProfile(d, root) {
     }
     if (balEl) balEl.textContent = `${bal.total ?? 0} ₽`;
     pill.classList.toggle("active", _state.tab === "profile");
+    pill.setAttribute("aria-label", `Профиль: ${meta.displayName}`);
+    if (_state.tab === "profile") pill.setAttribute("aria-current", "page");
+    else pill.removeAttribute("aria-current");
 
     pill.onclick = () => {
         if (_state.tab === "profile") return;
         _state.profileReturnTab = ["connect", "tariffs", "more"].includes(_state.tab) ? _state.tab : "connect";
         _state.tab = "profile";
-        _render(root);
-        window.scrollTo({ top: 0, behavior: "smooth" });
+        _render(root, { preserveScroll: false });
+        _scrollTopSmooth();
     };
 }
 
@@ -1126,11 +1275,11 @@ function _setCabinetBackButton(onBack) {
     setPageBackButton(onBack);
 }
 
-function _render(root) {
+function _render(root, { preserveScroll = true } = {}) {
     const d = _state.data;
     if (!d) return;
     const prevGuideOpen = Boolean(root.querySelector("#connectGuide")?.open);
-    const prevScrollY = window.scrollY;
+    const prevScrollY = preserveScroll ? window.scrollY : 0;
     const stdActive = Boolean(d.standard && d.standard.active);
     const wiActive = _wiHasActivePeriod(d.wi);
     const hasAny = stdActive || wiActive;
@@ -1158,9 +1307,9 @@ function _render(root) {
 
     root.innerHTML = `
         <div id="userTabBody" class="app-main"></div>
-        <nav class="bottom-nav" role="tablist" aria-label="Разделы кабинета">
+        <nav class="bottom-nav" aria-label="Разделы кабинета">
             ${navTabs.map((t) => `
-                <button type="button" class="nav-item ${_state.tab === t.id ? "active" : ""}" role="tab" aria-selected="${_state.tab === t.id ? "true" : "false"}" data-utab="${t.id}">
+                <button type="button" class="nav-item ${_state.tab === t.id ? "active" : ""}" ${_state.tab === t.id ? 'aria-current="page"' : ""} data-utab="${t.id}">
                     ${t.icon}
                     <span>${escapeHtml(t.label)}</span>
                 </button>
@@ -1172,8 +1321,8 @@ function _render(root) {
         b.addEventListener("click", () => {
             if (_state.tab === b.dataset.utab) return;
             _state.tab = b.dataset.utab;
-            _render(root);
-            window.scrollTo({ top: 0, behavior: "smooth" });
+            _render(root, { preserveScroll: false });
+            _scrollTopSmooth();
         });
     });
 
@@ -1200,7 +1349,7 @@ function _render(root) {
             });
             _setCabinetBackButton(null);
             _state.tab = _state.guidesReturnTab || "connect";
-            _render(root);
+            _render(root, { preserveScroll: false });
             requestAnimationFrame(() => window.scrollTo(0, _state.guidesReturnScrollY || 0));
         };
         _setCabinetBackButton(goBack);
@@ -1209,7 +1358,7 @@ function _render(root) {
         const goBackProfile = () => {
             _setCabinetBackButton(null);
             _state.tab = _state.profileReturnTab || "connect";
-            _render(root);
+            _render(root, { preserveScroll: false });
         };
         _setCabinetBackButton(goBackProfile);
         _renderProfileTab(body, d, reload, goBackProfile);
@@ -1219,7 +1368,7 @@ function _render(root) {
         const nextGuide = root.querySelector("#connectGuide");
         if (nextGuide) nextGuide.open = true;
     }
-    if (prevScrollY > 0 && _state.tab !== "profile" && _state.tab !== "guides") {
+    if (preserveScroll && prevScrollY > 0 && _state.tab !== "profile" && _state.tab !== "guides") {
         window.scrollTo(0, prevScrollY);
     }
 }
@@ -1241,9 +1390,9 @@ function _buildGuideHtml(subUrl, backupSubUrl, isActive) {
                 <span class="disclosure-pill"><span>Открыть</span>${_ICONS.chevronDown}</span>
             </summary>
             <div class="guide-body">
-                <div class="filter-pills">
+                <div class="filter-pills" role="group" aria-label="Выбор платформы">
                     ${Object.entries(platformLabels).map(([key, label]) => `
-                        <button type="button" class="pill-btn pill-btn-with-icon ${_state.platform === key ? "active" : ""}" data-platform="${key}">${platformIcons[key] || ""}<span>${label}</span></button>
+                        <button type="button" class="pill-btn pill-btn-with-icon ${_state.platform === key ? "active" : ""}" aria-pressed="${_state.platform === key ? "true" : "false"}" data-platform="${key}">${platformIcons[key] || ""}<span>${label}</span></button>
                     `).join("")}
                 </div>
                 <div class="field" style="gap:6px;">
@@ -1260,7 +1409,7 @@ function _buildGuideHtml(subUrl, backupSubUrl, isActive) {
                 ${isActive && subUrl ? `
                     <div class="field">
                         <div style="display:flex; justify-content:space-between; align-items:center;">
-                            <label style="margin:0;">Основная ссылка подключения</label>
+                            <span style="font-size:12px; color:var(--text-secondary);">Основная ссылка подключения</span>
                             <button id="copyInlineSubBtn" type="button" class="btn btn-sm" style="padding:4px 10px; font-size:12px;">Скопировать</button>
                         </div>
                         <div class="sub-url-box">${escapeHtml(subUrl)}</div>
@@ -1269,7 +1418,7 @@ function _buildGuideHtml(subUrl, backupSubUrl, isActive) {
                 ${isActive && backupSubUrl ? `
                     <div class="field" style="margin-top:8px;">
                         <div style="display:flex; justify-content:space-between; align-items:center;">
-                            <label style="margin:0;">Резервная ссылка (прямая)</label>
+                            <span style="font-size:12px; color:var(--text-secondary);">Резервная ссылка (прямая)</span>
                             <button id="copyBackupSubBtn" type="button" class="btn btn-sm" style="padding:4px 10px; font-size:12px;">Скопировать</button>
                         </div>
                         <div class="sub-url-box" style="font-size:11px; opacity:0.85;">${escapeHtml(backupSubUrl)}</div>
@@ -1291,6 +1440,7 @@ function _bindGuideEvents(container, root) {
                 const nextGuide = root.querySelector("#connectGuide");
                 if (nextGuide) nextGuide.open = true;
             }
+            root.querySelector(`[data-platform="${_state.platform}"]`)?.focus({ preventScroll: true });
         });
     });
     container.querySelectorAll("[data-download]").forEach((btn) => {
@@ -1335,7 +1485,7 @@ function _renderConnectTab(body, d, reload, root) {
                 <div class="hero-title-group">
                     <span class="hero-kicker muted">Не подключено</span>
                     <h1 class="hero-headline-lg">Нет активных подписок</h1>
-                    <p class="hero-sub">Оформите «Стандарт» или «Белый интернет» — ссылка подключения активируется сразу после оплаты.</p>
+                    <p class="hero-sub">Оформите «Стандарт» или «Белый интернет»: ссылка подключения активируется сразу после оплаты.</p>
                 </div>
                 <button id="goTariffsBtn" type="button" class="btn btn-primary btn-lg">Перейти к тарифам</button>
                 ${_buildGuideHtml(subUrl, backupSubUrl, false)}
@@ -1354,13 +1504,14 @@ function _renderConnectTab(body, d, reload, root) {
         `;
         body.querySelector("#goTariffsBtn").addEventListener("click", () => {
             _state.tab = "tariffs";
-            _render(root);
+            _render(root, { preserveScroll: false });
+            _scrollTopSmooth();
         });
         body.querySelector("#openGuidesFromInactiveBtn")?.addEventListener("click", () => {
             _state.guidesReturnTab = "connect";
             _state.guidesReturnScrollY = window.scrollY;
             _state.tab = "guides";
-            _render(root);
+            _render(root, { preserveScroll: false });
             window.scrollTo(0, 0);
         });
         _bindGuideEvents(body, root);
@@ -1369,7 +1520,7 @@ function _renderConnectTab(body, d, reload, root) {
     }
 
     const stdExpMs = std.expires_at ? new Date(std.expires_at).getTime() : 0;
-    const isStdGrace = Boolean(std.active && stdExpMs && stdExpMs < Date.now());
+    const isStdGrace = Boolean(std.active && Number.isFinite(stdExpMs) && stdExpMs > 0 && stdExpMs < Date.now());
     const graceEndMs = stdExpMs + (4 * 3600 * 1000);
     const graceHoursLeft = Math.max(1, Math.ceil((graceEndMs - Date.now()) / (3600 * 1000)));
 
@@ -1381,9 +1532,11 @@ function _renderConnectTab(body, d, reload, root) {
     const wiExhausted = Boolean(wiHasPeriod && (String(wi.status || "").toUpperCase() === "EXHAUSTED" || (wiLimitBytes > 0 && wiUsedBytes >= wiLimitBytes)));
 
     const _shortDate = (iso) => {
-        const dStr = formatDate(iso);
-        return dStr ? String(dStr).split(",")[0].trim() : "";
+        const dStr = _safeFormatDate(iso);
+        return dStr ? dStr.split(",")[0].trim() : "";
     };
+    const stdShortDate = _shortDate(std.expires_at);
+    const wiShortDate = _shortDate(wi.expires_at);
 
     const stdTileHtml = std.active
         ? `
@@ -1394,9 +1547,12 @@ function _renderConnectTab(body, d, reload, root) {
                 </div>
                 <div class="channel-metric">∞ <span class="channel-metric-unit">ГБ</span></div>
                 <div class="channel-foot">
+                    <div class="progress-track" aria-hidden="true">
+                        <div class="progress-fill" style="background:${isStdGrace ? "var(--accent-amber)" : "var(--accent-emerald)"}; transform:scaleX(1);"></div>
+                    </div>
                     <div class="channel-meta">
                         <span style="white-space:nowrap;">${Number(std.device_limit || 2)} устр.</span>
-                        <span style="white-space:nowrap;">${isStdGrace ? `~${graceHoursLeft} ч.` : `до ${_shortDate(std.expires_at)}`}</span>
+                        <span style="white-space:nowrap;">${isStdGrace ? `~${graceHoursLeft} ч.` : (stdShortDate ? `до ${stdShortDate}` : "")}</span>
                     </div>
                     <span class="channel-action">Тарифы ›</span>
                 </div>
@@ -1411,7 +1567,7 @@ function _renderConnectTab(body, d, reload, root) {
                 <div class="channel-metric">—</div>
                 <div class="channel-foot">
                     <div class="channel-meta">
-                        <span>Не подключен</span>
+                        <span>Не подключён</span>
                         <span>Подключить</span>
                     </div>
                 </div>
@@ -1428,11 +1584,11 @@ function _renderConnectTab(body, d, reload, root) {
                 <div class="channel-metric">${wiExhausted ? "0" : wiRemainingGb} <span class="channel-metric-unit">ГБ осталось</span></div>
                 <div class="channel-foot">
                     <div class="progress-track">
-                        <div class="progress-fill" style="transform:scaleX(${wiExhausted ? 0 : (Number(wiRemainingPct || 0) / 100).toFixed(3)});"></div>
+                        <div class="progress-fill" style="background:var(--accent-white); transform:scaleX(${wiExhausted ? 0 : (Number(wiRemainingPct || 0) / 100).toFixed(3)});"></div>
                     </div>
                     <div class="channel-meta">
                         <span style="white-space:nowrap;">${Number(wi.device_limit || 1)} устр.</span>
-                        <span style="white-space:nowrap;">до ${_shortDate(wi.expires_at)}</span>
+                        <span style="white-space:nowrap;">${wiShortDate ? `до ${wiShortDate}` : ""}</span>
                     </div>
                     <span class="channel-action">Тарифы ›</span>
                 </div>
@@ -1447,7 +1603,7 @@ function _renderConnectTab(body, d, reload, root) {
                 <div class="channel-metric">—</div>
                 <div class="channel-foot">
                     <div class="channel-meta">
-                        <span>Не подключен</span>
+                        <span>Не подключён</span>
                         <span>Подключить</span>
                     </div>
                 </div>
@@ -1495,10 +1651,7 @@ function _renderConnectTab(body, d, reload, root) {
                             <span style="display:block; font-size:12px; color:var(--text-secondary);">iOS, Android, ПК / Mac и частые вопросы</span>
                         </span>
                     </span>
-                    <span style="display:inline-flex; align-items:center; gap:8px; flex-shrink:0;">
-                        <span class="guides-trigger-badge">Видео</span>
-                        <span class="node-chevron" style="display:inline-flex;">${_ICONS.chevronRight}</span>
-                    </span>
+                    <span class="node-chevron" style="display:inline-flex; flex-shrink:0;">${_ICONS.chevronRight}</span>
                 </button>
             </div>
 
@@ -1507,7 +1660,7 @@ function _renderConnectTab(body, d, reload, root) {
                     <span class="connect-step-badge" aria-hidden="true">2</span>
                     <h2 class="connect-step-title">Подключите профиль</h2>
                 </div>
-                <p class="connect-step-sub">После установки нажмите кнопку ниже — профиль добавится автоматически</p>
+                <p class="connect-step-sub">После установки нажмите кнопку ниже, и профиль добавится автоматически</p>
 
                 <div class="connect-dock">
                     ${desktopFirst ? `
@@ -1545,8 +1698,8 @@ function _renderConnectTab(body, d, reload, root) {
     body.querySelectorAll("[data-jump-tariffs]").forEach((btn) => {
         btn.addEventListener("click", () => {
             _state.tab = "tariffs";
-            _render(root);
-            window.scrollTo({ top: 0, behavior: "smooth" });
+            _render(root, { preserveScroll: false });
+            _scrollTopSmooth();
         });
     });
     body.querySelectorAll("[data-open-client]").forEach((btn) => {
@@ -1580,7 +1733,8 @@ function _renderConnectTab(body, d, reload, root) {
     if (graceBtn) {
         graceBtn.addEventListener("click", () => {
             _state.tab = "tariffs";
-            _render(root);
+            _render(root, { preserveScroll: false });
+            _scrollTopSmooth();
         });
     }
     _bindGuideEvents(body, root);
@@ -1589,7 +1743,7 @@ function _renderConnectTab(body, d, reload, root) {
         _state.guidesReturnTab = "connect";
         _state.guidesReturnScrollY = window.scrollY;
         _state.tab = "guides";
-        _render(root);
+        _render(root, { preserveScroll: false });
         window.scrollTo(0, 0);
     });
     body.querySelector("#connectSupportBtn")?.addEventListener("click", () => {
@@ -1608,9 +1762,11 @@ function _renderTariffsTab(body, d, reload) {
     const stdMin7 = _calcStdPrice(pricing, 2, 7);
     const stdMin30 = _calcStdPrice(pricing, 2, 30);
     const stdExpMs = std.expires_at ? new Date(std.expires_at).getTime() : 0;
-    const isStdGrace = Boolean(std.active && stdExpMs > 0 && stdExpMs < Date.now());
+    const isStdGrace = Boolean(std.active && Number.isFinite(stdExpMs) && stdExpMs > 0 && stdExpMs < Date.now());
     const graceEndMs = stdExpMs + (4 * 3600 * 1000);
     const graceHoursLeft = Math.max(1, Math.ceil((graceEndMs - Date.now()) / (3600 * 1000)));
+    const stdExpStr = _safeFormatDate(std.expires_at);
+    const wiExpStr = _safeFormatDate(wi.expires_at);
 
     const wiBase = Number(pricing.wi_base_price_rub || 250);
     const wiUsedGb = formatBytesGb(wi.traffic_used_bytes);
@@ -1622,6 +1778,11 @@ function _renderTariffsTab(body, d, reload) {
     const wiMaxDevices = pricing.wi_max_devices || 3;
 
     body.innerHTML = `
+        <section class="hero-title-group">
+            <span class="hero-kicker muted">Управление подписками</span>
+            <h1 class="hero-headline-lg">Тарифы</h1>
+        </section>
+
         ${d.financial_hold ? `
             <div class="notice-box notice-warn" style="margin-bottom:8px;">
                 <span style="display:flex; align-items:center; gap:8px;">${_ICONS.alert}<span>Оплата и изменение подписок временно недоступны: профиль находится на проверке. Свяжитесь с поддержкой.</span></span>
@@ -1642,17 +1803,17 @@ function _renderTariffsTab(body, d, reload) {
         </section>
 
         <div class="muted" style="font-size:12px; padding:0 2px;">
-            Две независимые подписки на одну ссылку — выберите нужную или подключите обе.
+            Две независимые подписки на одну ссылку: выберите нужную или подключите обе.
         </div>
 
         <section class="plan-card ${std.active && !isStdGrace ? "plan-active" : ""}" ${isStdGrace ? 'style="border-color: rgba(245, 158, 11, 0.4);"' : ""}>
             <div class="row">
                 <div>
-                    <div class="card-title">Стандарт</div>
+                    <h2 class="card-title">Стандарт</h2>
                     <div class="muted" style="font-size:12px;">Для дома, Wi-Fi и повседневного использования</div>
                 </div>
                 <span class="chip ${isStdGrace ? "chip-warn" : (std.active ? "chip-ok" : "chip-muted")}">
-                    ${isStdGrace ? `Продлить · ~${graceHoursLeft} ч.` : (std.active ? `до ${formatDate(std.expires_at)}` : "Не подключена")}
+                    ${isStdGrace ? `Продлить · ~${graceHoursLeft} ч.` : (std.active ? (stdExpStr ? `до ${stdExpStr}` : "Активен") : "Не подключён")}
                 </span>
             </div>
             <div class="plan-features">
@@ -1660,7 +1821,7 @@ function _renderTariffsTab(body, d, reload) {
                 <span>• Работает через приложение по единой ссылке подключения</span>
             </div>
             ${std.active ? `
-                <label class="toggle-row">
+                <label class="toggle-row" for="stdAutoRenewChk">
                     <span class="toggle-label">Автопродление с баланса (${stdLimit} устр.)</span>
                     <span class="switch">
                         <input id="stdAutoRenewChk" type="checkbox" ${std.auto_renew_enabled ? "checked" : ""}>
@@ -1682,7 +1843,7 @@ function _renderTariffsTab(body, d, reload) {
         <section class="plan-card plan-wi ${wi.active ? "plan-active" : ""}">
             <div class="row">
                 <div>
-                    <div class="card-title">Белый интернет</div>
+                    <h2 class="card-title">Белый интернет</h2>
                     <div class="muted" style="font-size:12px;">Для мобильной сети при жёстких ограничениях доступа</div>
                 </div>
                 <span class="chip ${
@@ -1700,10 +1861,10 @@ function _renderTariffsTab(body, d, reload) {
                             : wi.status === "PENDING"
                                 ? "Настраивается"
                                 : wi.active
-                                    ? `до ${formatDate(wi.expires_at)}`
+                                    ? (wiExpStr ? `до ${wiExpStr}` : "Активен")
                                     : wi.status === "EXPIRED"
-                                        ? "Истекла"
-                                        : "Не подключена"
+                                        ? "Истёк"
+                                        : "Не подключён"
                     }
                 </span>
             </div>
@@ -1719,7 +1880,7 @@ function _renderTariffsTab(body, d, reload) {
                     </div>
                     <div class="progress-track"><div class="progress-fill" style="transform:scaleX(${(wiPct / 100).toFixed(3)});"></div></div>
                 </div>
-                <label class="toggle-row">
+                <label class="toggle-row" for="wiAutoRenewChk">
                     <span class="toggle-label">Автопродление с баланса</span>
                     <span class="switch switch-wi">
                         <input id="wiAutoRenewChk" type="checkbox" ${wi.auto_renew_enabled ? "checked" : ""}>
@@ -1741,11 +1902,11 @@ function _renderTariffsTab(body, d, reload) {
 
     const checkCanPay = () => {
         if (d.financial_hold) {
-            showToast("Профиль на проверке — свяжитесь с поддержкой");
+            showToast("Профиль на проверке, свяжитесь с поддержкой", "error");
             return false;
         }
         if (d.payments_maintenance) {
-            showToast("Приём платежей временно приостановлен (техработы)");
+            showToast("Приём платежей временно приостановлен (техработы)", "error");
             return false;
         }
         return true;
@@ -1773,12 +1934,19 @@ function _renderTariffsTab(body, d, reload) {
     const stdAuto = body.querySelector("#stdAutoRenewChk");
     if (stdAuto) {
         stdAuto.addEventListener("change", async () => {
+            const nextVal = stdAuto.checked;
             try {
-                await api.setAutoRenew("standard", stdAuto.checked);
-                showToast(stdAuto.checked ? "Автопродление включено" : "Автопродление выключено");
+                await api.setAutoRenew("standard", nextVal);
+                if (_state.data && _state.data.standard) {
+                    _state.data.standard.auto_renew_enabled = nextVal;
+                }
+                showToast(nextVal ? "Автопродление включено" : "Автопродление выключено");
             } catch (err) {
-                stdAuto.checked = !stdAuto.checked;
-                showToast(err.message || "Ошибка настройки автопродления");
+                stdAuto.checked = !nextVal;
+                if (_state.data && _state.data.standard) {
+                    _state.data.standard.auto_renew_enabled = !nextVal;
+                }
+                showToast(err.message || "Ошибка настройки автопродления", "error");
             }
         });
     }
@@ -1791,12 +1959,19 @@ function _renderTariffsTab(body, d, reload) {
     const wiAuto = body.querySelector("#wiAutoRenewChk");
     if (wiAuto) {
         wiAuto.addEventListener("change", async () => {
+            const nextVal = wiAuto.checked;
             try {
-                await api.setAutoRenew("wi", wiAuto.checked);
-                showToast(wiAuto.checked ? "Автопродление включено" : "Автопродление выключено");
+                await api.setAutoRenew("wi", nextVal);
+                if (_state.data && _state.data.wi) {
+                    _state.data.wi.auto_renew_enabled = nextVal;
+                }
+                showToast(nextVal ? "Автопродление включено" : "Автопродление выключено");
             } catch (err) {
-                wiAuto.checked = !wiAuto.checked;
-                showToast(err.message || "Ошибка настройки автопродления");
+                wiAuto.checked = !nextVal;
+                if (_state.data && _state.data.wi) {
+                    _state.data.wi.auto_renew_enabled = !nextVal;
+                }
+                showToast(err.message || "Ошибка настройки автопродления", "error");
             }
         });
     }
@@ -1847,11 +2022,11 @@ function _buildDevicesSectionHtml(d) {
                 <div style="color:var(--text-secondary);">${_ICONS.phone}</div>
                 <div style="font-weight:600; font-size:14px;">Устройств пока нет</div>
                 <p class="muted" style="font-size:12px;">
-                    Нажмите «Подключить в INCY» или «Подключить в Happ» выше — устройство привяжется автоматически.
+                    Нажмите «Подключить в INCY» или «Подключить в Happ» выше, чтобы привязать устройство.
                 </p>
             </div>
         `
-        : `<div class="list-group">${devices.map((dev) => {
+        : `<div class="list-group">${devices.map((dev, idx) => {
             const label = dev.device_name || dev.platform || "Устройство";
             const rawHwid = String(dev.hwid || "");
             const shortHwid = rawHwid.length > 14 ? `${rawHwid.slice(0, 6)}…${rawHwid.slice(-4)}` : rawHwid;
@@ -1863,18 +2038,19 @@ function _buildDevicesSectionHtml(d) {
             const isBi = Boolean(wiActive && dev.is_bi_assigned);
 
             const leftMeta = meta || shortHwid;
-            const dateLabel = formatDate(dev.last_seen_at);
+            const dateLabel = _safeFormatDate(dev.last_seen_at);
             const metaLine = [leftMeta, dateLabel].filter(Boolean).join(" · ");
 
             let stdRowHtml = "";
             if (needStdToggles) {
+                const stdInputId = `devStdSwitch_${idx}`;
                 stdRowHtml = `
-                    <label class="device-bi-bar">
+                    <label class="device-bi-bar" for="${stdInputId}">
                         <span style="color:${isStd ? "var(--text-primary)" : "var(--text-secondary)"};">
                             Слот «Стандарт»
                         </span>
                         <span class="switch">
-                            <input type="checkbox" data-std-toggle="${escapeHtml(dev.hwid)}" data-name="${escapeHtml(label)}" ${isStd ? "checked" : ""}>
+                            <input id="${stdInputId}" type="checkbox" data-std-toggle="${escapeHtml(dev.hwid)}" data-name="${escapeHtml(label)}" aria-label="Слот «Стандарт» для ${escapeHtml(label)}" ${isStd ? "checked" : ""}>
                             <span class="switch-track"></span>
                         </span>
                     </label>
@@ -1883,13 +2059,14 @@ function _buildDevicesSectionHtml(d) {
 
             let biRowHtml = "";
             if (needBiToggles) {
+                const biInputId = `devBiSwitch_${idx}`;
                 biRowHtml = `
-                    <label class="device-bi-bar">
+                    <label class="device-bi-bar" for="${biInputId}">
                         <span style="color:${isBi ? "var(--text-primary)" : "var(--text-secondary)"};">
                             Слот «Белый интернет»
                         </span>
                         <span class="switch switch-wi">
-                            <input type="checkbox" data-bi-toggle="${escapeHtml(dev.hwid)}" data-name="${escapeHtml(label)}" ${isBi ? "checked" : ""}>
+                            <input id="${biInputId}" type="checkbox" data-bi-toggle="${escapeHtml(dev.hwid)}" data-name="${escapeHtml(label)}" aria-label="Слот «Белый интернет» для ${escapeHtml(label)}" ${isBi ? "checked" : ""}>
                             <span class="switch-track"></span>
                         </span>
                     </label>
@@ -1945,7 +2122,7 @@ function _buildDevicesSectionHtml(d) {
             ` : ""}
             ${isLimitReached ? `
                 <div class="notice-box notice-warn" style="margin:0;">
-                    <span>Все слоты (${devices.length} из ${totalLimit}) заняты — удалите устройство, чтобы подключить новое.</span>
+                    <span>Все слоты (${devices.length} из ${totalLimit}) заняты: удалите устройство, чтобы подключить новое.</span>
                 </div>
             ` : ""}
             ${rowsHtml}
@@ -1990,10 +2167,10 @@ function _openSlotReplaceModal(slotTitle, targetDev, activeDevices, applyFn, onR
             try {
                 await applyFn(targetDev.hwid, 10, fromHwid);
                 close();
-                showToast("Слот перенесён — обновите список в приложении");
+                showToast("Слот перенесён. Обновите список в приложении");
                 onReplaced();
             } catch (err) {
-                showToast(err.message || "Не удалось перенести слот");
+                showToast(err.message || "Не удалось перенести слот", "error");
                 wrap.querySelectorAll("[data-replace-from]").forEach((b) => { b.disabled = false; });
             }
         });
@@ -2018,6 +2195,7 @@ function _bindDevicesEvents(container, d, reload) {
                         reload();
                     } catch (err) {
                         showToast(err.message || "Не удалось удалить устройство", "error");
+                        throw err;
                     } finally {
                         btn.disabled = false;
                     }
@@ -2053,6 +2231,7 @@ function _bindDevicesEvents(container, d, reload) {
                         reload();
                     } catch (err) {
                         showToast(err.message || "Не удалось сбросить устройства", "error");
+                        throw err;
                     } finally {
                         resetBtn.disabled = false;
                     }
@@ -2097,10 +2276,11 @@ function _bindDevicesEvents(container, d, reload) {
                                 chk.disabled = true;
                                 try {
                                     await applyFn(hwid, 10, fromDev.hwid);
-                                    showToast("Слот перенесён — обновите список в приложении");
+                                    showToast("Слот перенесён. Обновите список в приложении");
                                     reload();
                                 } catch (err) {
-                                    showToast(err.message || "Не удалось перенести слот");
+                                    showToast(err.message || "Не удалось перенести слот", "error");
+                                    throw err;
                                 } finally {
                                     chk.disabled = false;
                                 }
@@ -2117,13 +2297,13 @@ function _bindDevicesEvents(container, d, reload) {
                     await applyFn(hwid, wantEnable ? 10 : -1);
                     showToast(
                         wantEnable
-                            ? `${slotTitle} включён — обновите список в приложении`
+                            ? `${slotTitle} включён. Обновите список в приложении`
                             : `${slotTitle} отключён на устройстве`
                     );
                     reload();
                 } catch (err) {
                     chk.checked = !wantEnable;
-                    showToast(err.message || "Не удалось изменить статус слота");
+                    showToast(err.message || "Не удалось изменить статус слота", "error");
                 } finally {
                     chk.disabled = false;
                 }
@@ -2155,7 +2335,7 @@ function _renderMoreTab(body, d, root) {
     const ref = d.referrals || {};
     const bal = d.balance || { real: 0, bonus: 0, total: 0 };
     const minActive = ref.active_min_topup_rub || 67;
-    const shareText = `Держи приглашение — скидка ${ref.welcome_discount_pct ?? 25}% на первый заказ`;
+    const shareText = `Держи приглашение: скидка ${ref.welcome_discount_pct ?? 25}% на первый заказ`;
     const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(ref.link || "")}&text=${encodeURIComponent(shareText)}`;
     const sup = d.support || {};
     const invitedUsers = ref.invited_users || [];
@@ -2208,7 +2388,7 @@ function _renderMoreTab(body, d, root) {
 
         <section class="card">
             <div class="row">
-                <div class="card-title">Приглашения и бонусы</div>
+                <h2 class="card-title">Приглашения и бонусы</h2>
                 <span class="chip chip-ok">${escapeHtml(ref.tier_name || "Стандарт")}</span>
             </div>
             ${ref.invited_by ? `
@@ -2224,7 +2404,7 @@ function _renderMoreTab(body, d, root) {
                     <span>До уровня <b>${escapeHtml(ref.next_tier_name)}</b> (${ref.next_rate_pct}%): ещё ${_formatFriendsCount(ref.needed_for_next)}</span>
                 </div>
             ` : ""}
-            <div id="refLinkBox" class="sub-url-box">${escapeHtml(ref.link || "")}</div>
+            <button id="refLinkBox" type="button" class="sub-url-box clickable" style="width:100%; text-align:left;" aria-label="Скопировать реферальную ссылку">${escapeHtml(ref.link || "")}</button>
             <div class="connect-pair">
                 <button id="shareRefBtn" type="button" class="btn btn-primary">${_ICONS.share} Пригласить</button>
                 <button id="copyRefBtn" type="button" class="btn">${_ICONS.copy} Копировать</button>
@@ -2242,7 +2422,7 @@ function _renderMoreTab(body, d, root) {
                                     <span style="font-size:13px; font-weight:500;">${escapeHtml(u.label)}</span>
                                     <span class="chip ${u.is_active ? "chip-ok" : "chip-muted"}">${u.is_active ? "Активен" : "Ожидает"}</span>
                                 </div>
-                                <div class="muted" style="font-size:12px;">${formatDate(u.created_at)}</div>
+                                <div class="muted" style="font-size:12px;">${_safeFormatDate(u.created_at) || "—"}</div>
                             </div>
                         `).join("")}
                     </div>
@@ -2306,7 +2486,7 @@ function _renderMoreTab(body, d, root) {
         _state.guidesReturnTab = "more";
         _state.guidesReturnScrollY = window.scrollY;
         _state.tab = "guides";
-        _render(root);
+        _render(root, { preserveScroll: false });
         window.scrollTo(0, 0);
     });
     body.querySelector("#shareRefBtn").addEventListener("click", () => openExternalLink(shareUrl));
@@ -2327,6 +2507,7 @@ function _renderProfileTab(body, d, reload, onBack) {
     const minTopup = (d.pricing && d.pricing.min_topup_rub) || 20;
     const items = d.history || [];
     const meta = _getProfileMeta(d);
+    const subBadge = [meta.username, meta.userId ? `ID ${meta.userId}` : ""].filter(Boolean).join(" · ");
 
     body.innerHTML = `
         <div class="detail-header-nav">
@@ -2339,7 +2520,7 @@ function _renderProfileTab(body, d, reload, onBack) {
                 <span id="profileLargeAvatar" class="avatar-circle avatar-lg">${_renderAvatarInner(meta)}</span>
                 <div>
                     <h1 class="hero-headline-lg" style="font-size:20px;">${escapeHtml(meta.displayName)}</h1>
-                    <span class="mono-badge">${escapeHtml([meta.username, meta.userId ? `ID ${meta.userId}` : ""].filter(Boolean).join(" · ") || "Профиль")}</span>
+                    ${subBadge ? `<span class="mono-badge">${escapeHtml(subBadge)}</span>` : ""}
                 </div>
             </div>
         </section>
@@ -2379,11 +2560,11 @@ function _renderProfileTab(body, d, reload, onBack) {
 
     body.querySelector("#profileTopupBtn").addEventListener("click", () => {
         if (d.financial_hold) {
-            showToast("Профиль на проверке — свяжитесь с поддержкой");
+            showToast("Профиль на проверке, свяжитесь с поддержкой", "error");
             return;
         }
         if (d.payments_maintenance) {
-            showToast("Приём платежей временно приостановлен (техработы)");
+            showToast("Приём платежей временно приостановлен (техработы)", "error");
             return;
         }
         _openTopupModal(minTopup, reload);
@@ -2405,14 +2586,15 @@ function _renderProfileTab(body, d, reload, onBack) {
         visibleItems.forEach((op) => {
             const row = document.createElement("div");
             row.className = "device-item";
-            const sign = op.amount_rub > 0 ? "+" : "";
-            const cls = op.amount_rub > 0 ? "amount-pos" : "amount-neg";
+            const amt = Number(op.amount_rub ?? op.amount ?? 0);
+            const sign = amt > 0 ? "+" : "";
+            const cls = amt > 0 ? "amount-pos" : "amount-neg";
             row.innerHTML = `
                 <div class="row">
                     <span style="font-weight:500;">${escapeHtml(op.description)}</span>
-                    <span class="${cls}">${sign}${op.amount_rub} ₽</span>
+                    <span class="${cls}">${sign}${amt} ₽</span>
                 </div>
-                <div class="device-meta">${formatDate(op.created_at)}</div>
+                <div class="device-meta">${_safeFormatDate(op.created_at) || "—"}</div>
             `;
             group.appendChild(row);
         });

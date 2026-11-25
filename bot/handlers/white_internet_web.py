@@ -46,7 +46,10 @@ def get_white_internet_pending_html() -> str:
             "{status_description}",
             "Идёт подготовка защищённого шлюза. Обычно это занимает несколько секунд. Страница проверяет статус каждые 5 секунд.",
         )
-        .replace("{extra_hint}", "")
+        .replace(
+            "{extra_hint}",
+            '<p class="hint-note">Если Telegram не открывается, напишите нам через форму поддержки ниже</p>',
+        )
         .replace("{extra_script}", _PENDING_REFRESH_SCRIPT)
     )
 

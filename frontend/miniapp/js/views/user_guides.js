@@ -1,12 +1,13 @@
 import { copyText, escapeHtml, openModal } from "../ui.js?v=2.8.0";
 
 function _openExternal(url) {
-    if (!url) return;
+    const target = String(url || "").trim();
+    if (!target || !/^(https?:|tg:)/i.test(target)) return;
     const tg = window.Telegram && window.Telegram.WebApp;
-    if (tg && typeof tg.openLink === "function") {
-        tg.openLink(url);
+    if (tg && typeof tg.openLink === "function" && /^https?:/i.test(target)) {
+        tg.openLink(target);
     } else {
-        window.open(url, "_blank", "noopener,noreferrer");
+        window.open(target, "_blank", "noopener,noreferrer");
     }
 }
 
@@ -38,7 +39,9 @@ function _renderIosContent(method) {
                 <div class="guide-body">
                     <video class="guide-video" controls playsinline preload="none" poster="/app/assets/guides/ios_02_kazakhstan.jpg">
                         <source src="/app/assets/guides/happ_guide.mp4" type="video/mp4">
+                        <track kind="captions" srclang="ru" label="Русские субтитры" src="data:text/vtt;charset=utf-8,WEBVTT%0A%0A00%3A00.000%20--%3E%2000%3A38.000%0A%D0%9F%D0%BE%D1%88%D0%B0%D0%B3%D0%BE%D0%B2%D0%B0%D1%8F%20%D1%82%D0%B5%D0%BA%D1%81%D1%82%D0%BE%D0%B2%D0%B0%D1%8F%20%D0%B8%D0%BD%D1%81%D1%82%D1%80%D1%83%D0%BA%D1%86%D0%B8%D1%8F%20%D0%BF%D1%80%D0%B8%D0%B2%D0%B5%D0%B4%D0%B5%D0%BD%D0%B0%20%D0%BF%D0%BE%D0%B4%20%D0%B2%D0%B8%D0%B4%D0%B5%D0%BE.">
                     </video>
+                    <p class="muted" style="font-size:12px; margin-top:6px;">Текстовое описание всех шагов из видео приведено ниже.</p>
                 </div>
             </details>
             <div class="notice-box">
@@ -91,47 +94,25 @@ function _renderIosContent(method) {
             </div>
         `;
     }
-    if (method === "newid") {
-        return `
-            <div class="notice-box">
-                <span>Запасной вариант, если на основном Apple ID есть активные подписки Apple или семейный доступ.</span>
-            </div>
-            <div class="guide-step-card">
-                <div class="guide-step-head"><span class="guide-step-num">1</span><span>Создайте Apple ID с регионом Казахстан</span></div>
-                <p class="muted">Откройте account.apple.com и зарегистрируйте новый аккаунт, выбрав страну Казахстан и резервную почту.</p>
-                <button type="button" class="btn btn-sm" data-ext="https://account.apple.com/account">Открыть account.apple.com</button>
-            </div>
-            <div class="guide-step-card">
-                <div class="guide-step-head"><span class="guide-step-num">2</span><span>Войдите только в App Store</span></div>
-                <p class="muted">В настройках телефона iCloud оставьте прежним. Откройте <b>App Store</b> → иконка профиля → <b>Выйти</b> в самом низу и войдите новым аккаунтом.</p>
-            </div>
-            <div class="guide-step-card">
-                <div class="guide-step-head"><span class="guide-step-num">3</span><span>Скачайте приложение и верните основной аккаунт</span></div>
-                <div class="connect-pair">
-                    <button type="button" class="btn btn-sm" data-ext="https://apps.apple.com/app/incy/id6756943388">App Store: INCY</button>
-                    <button type="button" class="btn btn-sm" data-ext="https://apps.apple.com/app/happ-proxy-utility/id6504287215">App Store: Happ</button>
-                </div>
-            </div>
-        `;
-    }
     return `
-        <div class="notice-box notice-warn">
-            <span>В публичных тестах TestFlight Apple ограничивает число мест (приглашения часто заполнены или закрыты). Основной и надёжный способ — смена региона на <b>Казахстан</b>.</span>
+        <div class="notice-box">
+            <span>Запасной вариант, если на основном Apple ID есть активные подписки Apple или семейный доступ.</span>
         </div>
         <div class="guide-step-card">
-            <div class="guide-step-head"><span class="guide-step-num">1</span><span>Установите Apple TestFlight</span></div>
-            <p class="muted">Скачайте официальное приложение TestFlight из российского App Store.</p>
-            <button type="button" class="btn btn-sm" data-ext="https://apps.apple.com/app/testflight/id899247664">Установить TestFlight</button>
+            <div class="guide-step-head"><span class="guide-step-num">1</span><span>Создайте Apple ID с регионом Казахстан или США</span></div>
+            <p class="muted">Откройте account.apple.com и зарегистрируйте новый аккаунт, выбрав страну <b>Казахстан</b> или <b>США</b> и резервную почту. В поле номера телефона укажите свой российский номер (+7): SMS с кодом подтверждения приходит без задержек.</p>
+            <button type="button" class="btn btn-sm" data-ext="https://account.apple.com/account">Открыть account.apple.com</button>
         </div>
         <div class="guide-step-card">
-            <div class="guide-step-head"><span class="guide-step-num">2</span><span>Откройте приглашение, если есть свободные места</span></div>
-            <p class="muted">В открывшемся TestFlight нажмите <b>Принять</b> (Accept), затем <b>Установить</b> (Install).</p>
-            <button type="button" class="btn btn-sm" data-ext="https://testflight.apple.com/join/XMls6Ckd">Happ (TestFlight)</button>
-            <button type="button" class="guide-shot-btn" data-shot="/app/assets/guides/ios_testflight.jpg" data-shot-title="Установка в TestFlight">
-                <img src="/app/assets/guides/ios_testflight.jpg" alt="Установка в TestFlight" loading="lazy">
-                <span class="guide-shot-hint">Увеличить</span>
-            </button>
-            <p class="muted" style="font-size:12px;">Если TestFlight пишет «Этот бета-тест заполнен», используйте вкладку «Казахстан» выше.</p>
+            <div class="guide-step-head"><span class="guide-step-num">2</span><span>Войдите только в App Store</span></div>
+            <p class="muted">В настройках телефона iCloud оставьте прежним. Откройте <b>App Store</b> → иконка профиля → <b>Выйти</b> в самом низу и войдите новым аккаунтом.</p>
+        </div>
+        <div class="guide-step-card">
+            <div class="guide-step-head"><span class="guide-step-num">3</span><span>Скачайте приложение и верните основной аккаунт</span></div>
+            <div class="connect-pair">
+                <button type="button" class="btn btn-sm" data-ext="https://apps.apple.com/app/incy/id6756943388">App Store: INCY</button>
+                <button type="button" class="btn btn-sm" data-ext="https://apps.apple.com/app/happ-proxy-utility/id6504287215">App Store: Happ</button>
+            </div>
         </div>
     `;
 }
@@ -158,6 +139,10 @@ function _renderAndroidContent(method) {
                 <div class="guide-step-head"><span class="guide-step-num">2</span><span>Подключите профиль</span></div>
                 <p class="muted">Вернитесь на вкладку «Доступ» и нажмите кнопку «Подключить в INCY» или «Подключить в Happ», либо вставьте скопированную ссылку в приложении через «+».</p>
             </div>
+            <div class="guide-step-card">
+                <div class="guide-step-head"><span class="guide-step-num">3</span><span>Первое подключение и подтверждение</span></div>
+                <p class="muted">Откройте приложение, нажмите кнопку включения и подтвердите системный <b>«Запрос на подключение»</b> Android (нажмите <b>«ОК»</b>).</p>
+            </div>
         `;
     }
     return `
@@ -170,7 +155,11 @@ function _renderAndroidContent(method) {
         </div>
         <div class="guide-step-card">
             <div class="guide-step-head"><span class="guide-step-num">2</span><span>Добавьте профиль</span></div>
-            <p class="muted">Вернитесь на вкладку «Доступ» и нажмите «Подключить в INCY». В открывшемся приложении включите главный переключатель.</p>
+            <p class="muted">Вернитесь на вкладку «Доступ» и нажмите «Подключить в INCY» или вставьте ссылку через «+» в приложении.</p>
+        </div>
+        <div class="guide-step-card">
+            <div class="guide-step-head"><span class="guide-step-num">3</span><span>Первое подключение и подтверждение</span></div>
+            <p class="muted">В открывшемся приложении включите главный переключатель и подтвердите системный запрос Android (нажмите <b>«ОК»</b>).</p>
         </div>
     `;
 }
@@ -183,7 +172,7 @@ function _renderDesktopContent(method) {
                 <p class="muted">Подходит для процессоров Apple Silicon (M1–M4) и Intel. Перетащите иконку в папку «Программы» (Applications).</p>
                 <div class="connect-pair">
                     <button type="button" class="btn btn-primary btn-sm" data-ext="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/Happ.macOS.universal.dmg">Скачать Happ (.dmg)</button>
-                    <button type="button" class="btn btn-sm" data-ext="https://github.com/INCY-DEV/incy-platforms/releases">Релизы INCY</button>
+                    <button type="button" class="btn btn-sm" data-ext="https://apps.apple.com/app/incy/id6756943388">INCY (App Store)</button>
                 </div>
             </div>
             <div class="guide-step-card">
@@ -193,16 +182,24 @@ function _renderDesktopContent(method) {
         `;
     }
     if (method === "linux") {
-        const cmd = "curl -fsSL https://github.com/Happ-proxy/happ-desktop/releases/latest/download/Happ.linux.x64.AppImage -o Happ.AppImage && chmod +x Happ.AppImage";
+        const cmd = "curl -fsSL https://github.com/Happ-proxy/happ-desktop/releases/latest/download/Happ.linux.x64.AppImage -o Happ.AppImage && chmod +x Happ.AppImage && ./Happ.AppImage";
         return `
             <div class="guide-step-card">
-                <div class="guide-step-head"><span class="guide-step-num">1</span><span>Скачайте Happ для Linux</span></div>
+                <div class="guide-step-head"><span class="guide-step-num">1</span><span>Скачайте и запустите Happ для Linux</span></div>
                 <p class="muted">Доступны пакеты AppImage, .deb и .rpm на GitHub.</p>
                 <div class="sub-url-box" style="font-size:12px;">${escapeHtml(cmd)}</div>
                 <div class="connect-pair">
                     <button type="button" class="btn btn-sm" data-copy="${escapeHtml(cmd)}">Копировать команду</button>
-                    <button type="button" class="btn btn-sm" data-ext="https://github.com/Happ-proxy/happ-desktop/releases/latest">Релизы GitHub</button>
+                    <button type="button" class="btn btn-sm" data-ext="https://github.com/Happ-proxy/happ-desktop/releases/latest">Релизы Happ</button>
                 </div>
+            </div>
+            <div class="guide-step-card">
+                <div class="guide-step-head"><span class="guide-step-num">2</span><span>Добавьте подписку</span></div>
+                <p class="muted">Скопируйте ссылку на вкладке «Доступ». В программе нажмите кнопку <b>«+» (Добавить)</b> и выберите <b>«Вставить из буфера»</b>.</p>
+            </div>
+            <div class="guide-step-card">
+                <div class="guide-step-head"><span class="guide-step-num">3</span><span>Подключение</span></div>
+                <p class="muted">Выберите локацию из списка и активируйте соединение переключателем.</p>
             </div>
         `;
     }
@@ -217,7 +214,7 @@ function _renderDesktopContent(method) {
         </div>
         <div class="guide-step-card">
             <div class="guide-step-head"><span class="guide-step-num">2</span><span>Добавьте ссылку и выберите режим</span></div>
-            <p class="muted">Скопируйте ссылку на вкладке «Доступ», в программе нажмите «+» → «Вставить из буфера». Внизу выберите режим <b>TUN (Рекомендуется)</b> или Системный прокси.</p>
+            <p class="muted">Скопируйте ссылку на вкладке «Доступ», в программе нажмите «+» → «Вставить из буфера». Внизу выберите режим <b>TUN (Рекомендуется)</b> или Системный режим.</p>
         </div>
     `;
 }
@@ -231,10 +228,6 @@ function _renderFaqContent(deviceLimit) {
         {
             q: "Как вернуть регион App Store обратно на Россию?",
             a: "Сразу после загрузки INCY или Happ откройте App Store → иконка профиля → Имя/Apple ID → «Страна или регион» → «Россия» и способ оплаты «Нет». Приложение останется на устройстве.",
-        },
-        {
-            q: "Что делать, если в TestFlight пишет «Этот бета-тест заполнен»?",
-            a: "Выберите способ «Казахстан» во вкладке iOS: смените регион App Store без банковской карты (займёт 2 минуты) и установите приложение напрямую из магазина.",
         },
         {
             q: "Что делать, если пропал доступ или страницы не грузятся?",
@@ -284,7 +277,7 @@ export function renderUserGuidesView(root, state, data, onBack) {
         else if (state.platform === "windows" || state.platform === "macos") state.guideTab = "desktop";
         else state.guideTab = "ios";
     }
-    if (!state.guideIosMethod) state.guideIosMethod = "region";
+    if (!state.guideIosMethod || state.guideIosMethod === "tf") state.guideIosMethod = "region";
     if (!state.guideAndroidMethod) state.guideAndroidMethod = "play";
     if (!state.guideDesktopMethod) {
         state.guideDesktopMethod = state.platform === "macos" ? "mac" : "win";
@@ -297,27 +290,26 @@ export function renderUserGuidesView(root, state, data, onBack) {
 
     if (state.guideTab === "ios") {
         subTabsHtml = `
-            <div class="filter-pills">
-                <button type="button" class="pill-btn ${state.guideIosMethod === "region" ? "active" : ""}" data-ios-m="region">Казахстан</button>
-                <button type="button" class="pill-btn ${state.guideIosMethod === "newid" ? "active" : ""}" data-ios-m="newid">Второй ID</button>
-                <button type="button" class="pill-btn ${state.guideIosMethod === "tf" ? "active" : ""}" data-ios-m="tf">TestFlight</button>
+            <div class="filter-pills" role="group" aria-label="Способ установки iOS">
+                <button type="button" class="pill-btn ${state.guideIosMethod === "region" ? "active" : ""}" aria-pressed="${state.guideIosMethod === "region" ? "true" : "false"}" data-ios-m="region">Казахстан</button>
+                <button type="button" class="pill-btn ${state.guideIosMethod === "newid" ? "active" : ""}" aria-pressed="${state.guideIosMethod === "newid" ? "true" : "false"}" data-ios-m="newid">Второй ID</button>
             </div>
         `;
         contentHtml = _renderIosContent(state.guideIosMethod);
     } else if (state.guideTab === "android") {
         subTabsHtml = `
-            <div class="filter-pills">
-                <button type="button" class="pill-btn ${state.guideAndroidMethod === "play" ? "active" : ""}" data-and-m="play">Google Play</button>
-                <button type="button" class="pill-btn ${state.guideAndroidMethod === "apk" ? "active" : ""}" data-and-m="apk">Прямой APK</button>
+            <div class="filter-pills" role="group" aria-label="Способ установки Android">
+                <button type="button" class="pill-btn ${state.guideAndroidMethod === "play" ? "active" : ""}" aria-pressed="${state.guideAndroidMethod === "play" ? "true" : "false"}" data-and-m="play">Google Play</button>
+                <button type="button" class="pill-btn ${state.guideAndroidMethod === "apk" ? "active" : ""}" aria-pressed="${state.guideAndroidMethod === "apk" ? "true" : "false"}" data-and-m="apk">Прямой APK</button>
             </div>
         `;
         contentHtml = _renderAndroidContent(state.guideAndroidMethod);
     } else if (state.guideTab === "desktop") {
         subTabsHtml = `
-            <div class="filter-pills">
-                <button type="button" class="pill-btn ${state.guideDesktopMethod === "win" ? "active" : ""}" data-desk-m="win">Windows</button>
-                <button type="button" class="pill-btn ${state.guideDesktopMethod === "mac" ? "active" : ""}" data-desk-m="mac">macOS</button>
-                <button type="button" class="pill-btn ${state.guideDesktopMethod === "linux" ? "active" : ""}" data-desk-m="linux">Linux</button>
+            <div class="filter-pills" role="group" aria-label="Операционная система">
+                <button type="button" class="pill-btn ${state.guideDesktopMethod === "win" ? "active" : ""}" aria-pressed="${state.guideDesktopMethod === "win" ? "true" : "false"}" data-desk-m="win">Windows</button>
+                <button type="button" class="pill-btn ${state.guideDesktopMethod === "mac" ? "active" : ""}" aria-pressed="${state.guideDesktopMethod === "mac" ? "true" : "false"}" data-desk-m="mac">macOS</button>
+                <button type="button" class="pill-btn ${state.guideDesktopMethod === "linux" ? "active" : ""}" aria-pressed="${state.guideDesktopMethod === "linux" ? "true" : "false"}" data-desk-m="linux">Linux</button>
             </div>
         `;
         contentHtml = _renderDesktopContent(state.guideDesktopMethod);
@@ -337,19 +329,19 @@ export function renderUserGuidesView(root, state, data, onBack) {
         </section>
 
         <div class="seg-group" role="tablist" aria-label="Платформы">
-            <button type="button" class="seg-btn seg-btn-with-icon ${state.guideTab === "ios" ? "active" : ""}" role="tab" aria-selected="${state.guideTab === "ios" ? "true" : "false"}" data-gtab="ios">
+            <button id="guideTab_ios" type="button" class="seg-btn seg-btn-with-icon ${state.guideTab === "ios" ? "active" : ""}" role="tab" aria-selected="${state.guideTab === "ios" ? "true" : "false"}" aria-controls="guideTabPanel" tabindex="${state.guideTab === "ios" ? "0" : "-1"}" data-gtab="ios">
                 <svg class="seg-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="2.5"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
                 <span>iOS</span>
             </button>
-            <button type="button" class="seg-btn seg-btn-with-icon ${state.guideTab === "android" ? "active" : ""}" role="tab" aria-selected="${state.guideTab === "android" ? "true" : "false"}" data-gtab="android">
+            <button id="guideTab_android" type="button" class="seg-btn seg-btn-with-icon ${state.guideTab === "android" ? "active" : ""}" role="tab" aria-selected="${state.guideTab === "android" ? "true" : "false"}" aria-controls="guideTabPanel" tabindex="${state.guideTab === "android" ? "0" : "-1"}" data-gtab="android">
                 <svg class="seg-btn-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 18c0 .55.45 1 1 1h1v3.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5V19h2v3.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5V19h1c.55 0 1-.45 1-1V8H6v10zM3.5 8C2.67 8 2 8.67 2 9.5v7c0 .83.67 1.5 1.5 1.5S5 17.33 5 16.5v-7C5 8.67 4.33 8 3.5 8zm17 0c-.83 0-1.5.67-1.5 1.5v7c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5v-7c0-.83-.67-1.5-1.5-1.5zm-4.97-4.84l1.3-1.3c.2-.2.2-.51 0-.71-.2-.2-.51-.2-.71 0l-1.48 1.48C13.85 2.23 12.95 2 12 2c-.96 0-1.86.23-2.66.63L7.85 1.15c-.2-.2-.51-.2-.71 0-.2.2-.2.51 0 .71l1.31 1.31C6.97 4.26 6 5.92 6 7.8h12c0-1.88-.97-3.54-2.47-4.64zM9 6c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm6 0c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1z"/></svg>
                 <span>Android</span>
             </button>
-            <button type="button" class="seg-btn seg-btn-with-icon ${state.guideTab === "desktop" ? "active" : ""}" role="tab" aria-selected="${state.guideTab === "desktop" ? "true" : "false"}" data-gtab="desktop">
+            <button id="guideTab_desktop" type="button" class="seg-btn seg-btn-with-icon ${state.guideTab === "desktop" ? "active" : ""}" role="tab" aria-selected="${state.guideTab === "desktop" ? "true" : "false"}" aria-controls="guideTabPanel" tabindex="${state.guideTab === "desktop" ? "0" : "-1"}" data-gtab="desktop">
                 <svg class="seg-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><line x1="2" y1="20" x2="22" y2="20"/></svg>
                 <span>ПК / Mac</span>
             </button>
-            <button type="button" class="seg-btn seg-btn-with-icon ${state.guideTab === "faq" ? "active" : ""}" role="tab" aria-selected="${state.guideTab === "faq" ? "true" : "false"}" data-gtab="faq">
+            <button id="guideTab_faq" type="button" class="seg-btn seg-btn-with-icon ${state.guideTab === "faq" ? "active" : ""}" role="tab" aria-selected="${state.guideTab === "faq" ? "true" : "false"}" aria-controls="guideTabPanel" tabindex="${state.guideTab === "faq" ? "0" : "-1"}" data-gtab="faq">
                 <svg class="seg-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                 <span>Вопросы</span>
             </button>
@@ -357,7 +349,7 @@ export function renderUserGuidesView(root, state, data, onBack) {
 
         ${subTabsHtml}
 
-        <div class="field" style="gap:12px;">
+        <div id="guideTabPanel" class="field" style="gap:12px;" role="tabpanel" aria-labelledby="guideTab_${state.guideTab}">
             ${contentHtml}
         </div>
     `;
@@ -373,6 +365,29 @@ export function renderUserGuidesView(root, state, data, onBack) {
         });
     });
 
+    const tablist = root.querySelector('[role="tablist"]');
+    if (tablist) {
+        tablist.addEventListener("keydown", (e) => {
+            const tabs = Array.from(tablist.querySelectorAll('[role="tab"]'));
+            if (!tabs.length) return;
+            const idx = tabs.indexOf(document.activeElement);
+            if (idx === -1) return;
+            let next = -1;
+            if (e.key === "ArrowRight") next = (idx + 1) % tabs.length;
+            else if (e.key === "ArrowLeft") next = (idx - 1 + tabs.length) % tabs.length;
+            else if (e.key === "Home") next = 0;
+            else if (e.key === "End") next = tabs.length - 1;
+            if (next !== -1) {
+                e.preventDefault();
+                const nextTab = tabs[next].dataset.gtab;
+                _pauseGuideVideos(root);
+                state.guideTab = nextTab;
+                renderUserGuidesView(root, state, data, onBack);
+                root.querySelector(`#guideTab_${nextTab}`)?.focus();
+            }
+        });
+    }
+
     root.querySelectorAll("[data-gtab]").forEach((btn) => {
         btn.addEventListener("click", () => {
             _pauseGuideVideos(root);
@@ -386,6 +401,7 @@ export function renderUserGuidesView(root, state, data, onBack) {
             _pauseGuideVideos(root);
             state.guideIosMethod = btn.dataset.iosM;
             renderUserGuidesView(root, state, data, onBack);
+            root.querySelector(`[data-ios-m="${state.guideIosMethod}"]`)?.focus();
         });
     });
     root.querySelectorAll("[data-and-m]").forEach((btn) => {
@@ -393,6 +409,7 @@ export function renderUserGuidesView(root, state, data, onBack) {
             _pauseGuideVideos(root);
             state.guideAndroidMethod = btn.dataset.andM;
             renderUserGuidesView(root, state, data, onBack);
+            root.querySelector(`[data-and-m="${state.guideAndroidMethod}"]`)?.focus();
         });
     });
     root.querySelectorAll("[data-desk-m]").forEach((btn) => {
@@ -400,6 +417,7 @@ export function renderUserGuidesView(root, state, data, onBack) {
             _pauseGuideVideos(root);
             state.guideDesktopMethod = btn.dataset.deskM;
             renderUserGuidesView(root, state, data, onBack);
+            root.querySelector(`[data-desk-m="${state.guideDesktopMethod}"]`)?.focus();
         });
     });
 

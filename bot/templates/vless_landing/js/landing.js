@@ -38,6 +38,14 @@
 
         let activePlatform = "ios";
 
+        const _TRIGGER_COPY = {
+            ios: "Смена региона App Store за 2 минуты и видеоинструкция",
+            android: "Установка из Google Play или прямой APK без сервисов",
+            windows: "Установка клиента для Windows и выбор режима работы",
+            macos: "Установка образа .dmg или App Store на macOS",
+            github: "Сборка и запуск AppImage / deb / rpm для Linux"
+        };
+
         function switchPlatformTab(platform) {
             activePlatform = platform;
             const platforms = ["ios", "android", "windows", "macos", "github"];
@@ -50,8 +58,13 @@
                     const isSelected = (p === platform);
                     btn.classList.toggle("active", isSelected);
                     btn.setAttribute("aria-selected", isSelected ? "true" : "false");
+                    btn.setAttribute("tabindex", isSelected ? "0" : "-1");
                 }
             });
+            const triggerSub = document.getElementById("guidesTriggerSub");
+            if (triggerSub && _TRIGGER_COPY[platform]) {
+                triggerSub.textContent = _TRIGGER_COPY[platform];
+            }
             if (platform === "windows" || platform === "macos") {
                 updateActiveClient("happ");
             } else if (platform === "ios" || platform === "android") {
@@ -273,6 +286,11 @@
             if (contactInput) contactInput.focus();
         }
     
+        function _scrollTopSmooth() {
+            const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+            window.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
+        }
+
         function openGuidesTab(platform) {
             const main = document.getElementById("mainView");
             const guides = document.getElementById("guidesView");
@@ -280,7 +298,7 @@
             if (guides) guides.classList.remove("view-hidden");
             if (platform) switchGuideTab(platform);
             window.location.hash = "guides";
-            window.scrollTo({ top: 0, behavior: "smooth" });
+            _scrollTopSmooth();
         }
 
         function openGuidesCurrentTab() {
@@ -320,7 +338,7 @@
             if (window.location.hash === "#guides") {
                 history.replaceState(null, document.title, window.location.pathname + window.location.search);
             }
-            window.scrollTo({ top: 0, behavior: "smooth" });
+            _scrollTopSmooth();
         }
 
         function switchGuideTab(tab) {
@@ -333,6 +351,7 @@
                 if (btn) {
                     btn.classList.toggle("active", isActive);
                     btn.setAttribute("aria-selected", isActive ? "true" : "false");
+                    btn.setAttribute("tabindex", isActive ? "0" : "-1");
                 }
                 if (sec) sec.style.display = isActive ? "block" : "none";
             });
@@ -341,7 +360,6 @@
         function switchIosMethod(method) {
             pauseGuideVideos();
             const methods = {
-                "tf": { btn: "tabBtnIosTf", sec: "iosSubGuideTf" },
                 "region": { btn: "tabBtnIosRegion", sec: "iosSubGuideRegion" },
                 "newid": { btn: "tabBtnIosNewId", sec: "iosSubGuideNewId" }
             };
@@ -352,6 +370,7 @@
                 if (b) {
                     b.classList.toggle("active", isActive);
                     b.setAttribute("aria-selected", isActive ? "true" : "false");
+                    b.setAttribute("tabindex", isActive ? "0" : "-1");
                 }
                 if (s) s.style.display = isActive ? "block" : "none";
             });
@@ -377,10 +396,12 @@
             if (btnPlay) {
                 btnPlay.classList.toggle("active", isPlay);
                 btnPlay.setAttribute("aria-selected", isPlay ? "true" : "false");
+                btnPlay.setAttribute("tabindex", isPlay ? "0" : "-1");
             }
             if (btnApk) {
                 btnApk.classList.toggle("active", !isPlay);
                 btnApk.setAttribute("aria-selected", !isPlay ? "true" : "false");
+                btnApk.setAttribute("tabindex", !isPlay ? "0" : "-1");
             }
             if (secPlay) secPlay.style.display = isPlay ? "block" : "none";
             if (secApk) secApk.style.display = !isPlay ? "block" : "none";
@@ -399,19 +420,41 @@
             if (btnWin) {
                 btnWin.classList.toggle("active", isWin);
                 btnWin.setAttribute("aria-selected", isWin ? "true" : "false");
+                btnWin.setAttribute("tabindex", isWin ? "0" : "-1");
             }
             if (btnMac) {
                 btnMac.classList.toggle("active", isMac);
                 btnMac.setAttribute("aria-selected", isMac ? "true" : "false");
+                btnMac.setAttribute("tabindex", isMac ? "0" : "-1");
             }
             if (btnLinux) {
                 btnLinux.classList.toggle("active", isLinux);
                 btnLinux.setAttribute("aria-selected", isLinux ? "true" : "false");
+                btnLinux.setAttribute("tabindex", isLinux ? "0" : "-1");
             }
             if (secWin) secWin.style.display = isWin ? "block" : "none";
             if (secMac) secMac.style.display = isMac ? "block" : "none";
             if (secLinux) secLinux.style.display = isLinux ? "block" : "none";
         }
+
+        document.querySelectorAll('[role="tablist"]').forEach(function(tablist) {
+            tablist.addEventListener("keydown", function(e) {
+                const tabs = Array.from(tablist.querySelectorAll('[role="tab"]'));
+                if (!tabs.length) return;
+                const idx = tabs.indexOf(document.activeElement);
+                if (idx === -1) return;
+                let next = -1;
+                if (e.key === "ArrowRight") next = (idx + 1) % tabs.length;
+                else if (e.key === "ArrowLeft") next = (idx - 1 + tabs.length) % tabs.length;
+                else if (e.key === "Home") next = 0;
+                else if (e.key === "End") next = tabs.length - 1;
+                if (next !== -1) {
+                    e.preventDefault();
+                    tabs[next].focus();
+                    tabs[next].click();
+                }
+            });
+        });
 
         function copyGuideField(text, btn) {
             if (!btn || btn.classList.contains("copied") || btn.classList.contains("copy-failed")) return;

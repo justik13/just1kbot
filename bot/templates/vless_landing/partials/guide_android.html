@@ -2,7 +2,7 @@
             <div id="guideSectionAndroid" class="guide-section" role="tabpanel" aria-labelledby="guideNavBtnAndroid" style="display: none;">
                 <div class="guide-section-label">Выберите способ установки</div>
                 <div class="guide-method-tabs guide-method-tabs-2" role="tablist" aria-label="Способ установки Android">
-                    <button type="button" class="guide-method-btn active" id="tabBtnAndroidPlay" onclick="switchAndroidMethod('play')" role="tab" aria-selected="true">
+                    <button type="button" class="guide-method-btn active" id="tabBtnAndroidPlay" onclick="switchAndroidMethod('play')" role="tab" aria-selected="true" tabindex="0">
                         <span class="guide-method-badge">Рекомендуется</span>
                         <span class="guide-method-title">
                             <svg class="guide-tab-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3.61 1.814L13.793 12 3.61 22.186a1.05 1.05 0 0 1-.61-.959V2.773c0-.419.246-.785.61-.959zm10.89 10.893l2.302 2.302-10.937 6.333 8.635-8.635zm3.199-3.198l2.807 1.626a1 1 0 0 1 0 1.73l-2.808 1.626L15.206 12l2.493-2.491zM5.864 2.658L16.8 8.99l-2.302 2.302-8.634-8.634z"/></svg>
@@ -10,7 +10,7 @@
                         </span>
                         <span class="guide-method-sub">Официальный магазин</span>
                     </button>
-                    <button type="button" class="guide-method-btn" id="tabBtnAndroidApk" onclick="switchAndroidMethod('apk')" role="tab" aria-selected="false">
+                    <button type="button" class="guide-method-btn" id="tabBtnAndroidApk" onclick="switchAndroidMethod('apk')" role="tab" aria-selected="false" tabindex="-1">
                         <span class="guide-method-badge">Без сервисов</span>
                         <span class="guide-method-title">
                             <svg class="guide-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -98,7 +98,7 @@
                                 3. После загрузки откройте файл и выберите <strong>«Установить»</strong>.
                             </div>
                             <div class="guide-screenshot-wrapper horizontal">
-                                <img src="{{IMG_ANDROID_APK}}" alt="Предупреждение при установке APK" class="guide-real-screenshot loaded" loading="lazy" decoding="async" onload="markImgLoaded(this)">
+                                <img src="{{IMG_ANDROID_APK}}" alt="Предупреждение при установке APK" class="guide-real-screenshot loaded" decoding="async" onload="markImgLoaded(this)">
                             </div>
                             <div class="guide-tip-link-wrap">
                                 <a href="https://github.com/Happ-proxy/happ-android/releases" target="_blank" rel="noopener noreferrer" class="guide-sub-link">

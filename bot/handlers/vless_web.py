@@ -72,7 +72,6 @@ def get_vless_landing_active_html() -> str:
         "{{IMG_IOS_2}}": "ios_02_kazakhstan.jpg",
         "{{IMG_IOS_3}}": "ios_03_payment.jpg",
         "{{IMG_IOS_4}}": "ios_04_appstore.jpg",
-        "{{IMG_TESTFLIGHT}}": "ios_testflight.jpg",
         "{{IMG_ANDROID_APK}}": "android_apk_warning.jpg",
     }
     missing_assets = [fn for fn in asset_placeholders.values() if not (assets_dir / fn).is_file()]
