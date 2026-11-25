@@ -10,6 +10,12 @@ import {
 const USERS_PAGE_SIZE = 25;
 let _usersReqId = 0;
 
+const _SHORT_DATE_FMT = new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: "Europe/Moscow",
+});
+
 function _formatShortDate(iso) {
     if (!iso) return "";
     let raw = String(iso).trim();
@@ -18,9 +24,7 @@ function _formatShortDate(iso) {
     }
     const d = new Date(raw);
     if (!Number.isFinite(d.getTime())) return "";
-    const dd = String(d.getDate()).padStart(2, "0");
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    return `${dd}.${mm}`;
+    return _SHORT_DATE_FMT.format(d);
 }
 
 function _formatUserTitle(u) {

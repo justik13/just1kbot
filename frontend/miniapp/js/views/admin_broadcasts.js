@@ -26,7 +26,7 @@ function _buildAudienceOptions({ includeTest = true, includeEmptyPlaceholder = f
         base.push({ value: "test", label: "Тест (только мне)" });
     }
     const items = includeEmptyPlaceholder
-        ? [{ value: "", label: "— Выберите аудиторию —" }, ...base]
+        ? [{ value: "", label: "Выберите аудиторию" }, ...base]
         : base;
     return items
         .map(
@@ -123,7 +123,7 @@ function _updateCharCounter(root) {
     const len = textInput.value.length;
     const hasMedia = Boolean(mediaInput && mediaInput.value.trim());
     if (hasMedia && len > 1024) {
-        counterEl.innerHTML = `<span style="color:var(--accent-amber); font-weight:600;">${len} / 4096 · С фото > 1024 симв. — сообщение будет разбито на 2 части</span>`;
+        counterEl.innerHTML = `<span style="color:var(--accent-amber); font-weight:600;">${len} / 4096 · С фото > 1024 симв.: сообщение будет разбито на 2 части</span>`;
     } else {
         counterEl.textContent = `${len} / 4096`;
     }
@@ -546,7 +546,7 @@ function _renderHistoryList(root, container, state, reloadBroadcasts) {
                             textToCopy.endsWith("…") ||
                             textToCopy.length >= 180);
                     if (looksTruncated) {
-                        showToast("Скопировано превью (до 180 симв.) — проверьте полный текст", "warn");
+                        showToast("Скопировано превью (до 180 симв.), проверьте полный текст", "warn");
                     } else {
                         showToast("Текст скопирован в редактор");
                     }

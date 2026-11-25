@@ -63,7 +63,7 @@ export function openLocationSubModal(node, onDone) {
                 <input id="locStdBadge" name="server_description" class="input" maxlength="30" value="${escapeHtml(node.server_description || "")}" placeholder="Опционально">
             </div>
         </div>
-        <div class="meta-text" style="font-weight:600;">Белый Интернет — Yandex</div>
+        <div class="meta-text" style="font-weight:600;">Белый Интернет · Yandex</div>
         <div class="grid-2">
             <div class="field">
                 <label for="locYanName">Название</label>
@@ -74,7 +74,7 @@ export function openLocationSubModal(node, onDone) {
                 <input id="locYanBadge" name="wi_yandex_badge" class="input" maxlength="30" value="${escapeHtml(node.wi_yandex_badge || "")}" placeholder="Опционально">
             </div>
         </div>
-        <div class="meta-text" style="font-weight:600;">Белый Интернет — Turboflare</div>
+        <div class="meta-text" style="font-weight:600;">Белый Интернет · Turboflare</div>
         <div class="grid-2">
             <div class="field">
                 <label for="locTfName">Название</label>

@@ -116,7 +116,7 @@ function _renderWiDiagnosticsHtml(wi) {
         : `<span class="muted">Нет данных по нодам</span>`;
 
     return `
-        <div class="detail-grid" style="padding-top:8px; border-top:1px solid var(--border-subtle);">
+        <div class="detail-grid" style="margin-top:4px;">
             <div class="detail-item"><span class="detail-label">Провижининг</span><span>${escapeHtml(provStatus)}</span></div>
             <div class="detail-item"><span class="detail-label">Автопродление</span><span>${wi.auto_renew_enabled ? "Включено" : "Выключено"}</span></div>
             <div class="detail-item"><span class="detail-label">Версия конфига</span><span class="mono tabular">${wi.actual_version ?? 0} / ${wi.desired_version ?? 1}</span></div>
@@ -139,24 +139,23 @@ function _renderWiDiagnosticsHtml(wi) {
 function _renderHistoryTabContent(tab, details) {
     if (tab === "orders") {
         const orders = details.recent_orders || [];
-        if (!orders.length) {
-            return `<div class="muted" style="text-align:center; padding:16px;">Заказов нет</div>`;
-        }
-        return orders
-            .map((o) => {
-                const stInfo = ORDER_STATUS_MAP[o.status] || {
-                    text: o.status || "—",
-                    cls: "chip-muted",
-                };
-                const kindLabel = ORDER_KIND_MAP[o.kind] || o.kind || "";
-                const flags = Array.isArray(o.metadata_flags) ? o.metadata_flags : [];
-                const flagsHtml = flags
-                    .map((flag) => {
-                        const info = formatMetadataFlag(flag);
-                        return `<span class="chip ${info.cls}">${escapeHtml(info.text)}</span>`;
-                    })
-                    .join("");
-                return `
+        const ordersHtml = !orders.length
+            ? `<div class="muted" style="text-align:center; padding:16px;">Заказов нет</div>`
+            : orders
+                  .map((o) => {
+                      const stInfo = ORDER_STATUS_MAP[o.status] || {
+                          text: o.status || "—",
+                          cls: "chip-muted",
+                      };
+                      const kindLabel = ORDER_KIND_MAP[o.kind] || o.kind || "";
+                      const flags = Array.isArray(o.metadata_flags) ? o.metadata_flags : [];
+                      const flagsHtml = flags
+                          .map((flag) => {
+                              const info = formatMetadataFlag(flag);
+                              return `<span class="chip ${info.cls}">${escapeHtml(info.text)}</span>`;
+                          })
+                          .join("");
+                      return `
                     <div class="item-row">
                         <div class="row">
                             <span style="font-weight:600; font-size:13px;">${escapeHtml(kindLabel)}${o.description ? ` · ${escapeHtml(o.description)}` : ""}</span>
@@ -177,8 +176,12 @@ function _renderHistoryTabContent(tab, details) {
                         </div>
                     </div>
                 `;
-            })
-            .join("");
+                  })
+                  .join("");
+        return `
+            ${ordersHtml}
+            <button id="detOpenFinancesBtn" type="button" class="btn btn-sm" style="align-self:flex-start; margin-top:4px;">Все заказы в Финансах →</button>
+        `;
     }
 
     if (tab === "ledger") {
@@ -239,19 +242,18 @@ function _renderHistoryTabContent(tab, details) {
     }
 
     const audits = details.recent_audit || [];
-    if (!audits.length) {
-        return `<div class="muted" style="text-align:center; padding:16px;">Записей аудита нет</div>`;
-    }
-    return audits
-        .map((a) => {
-            const actionLabel = formatAuditAction(a.action);
-            const detailsStr =
-                typeof a.details === "string"
-                    ? a.details
-                    : a.details
-                      ? JSON.stringify(a.details)
-                      : "";
-            return `
+    const auditsHtml = !audits.length
+        ? `<div class="muted" style="text-align:center; padding:16px;">Записей аудита нет</div>`
+        : audits
+              .map((a) => {
+                  const actionLabel = formatAuditAction(a.action);
+                  const detailsStr =
+                      typeof a.details === "string"
+                          ? a.details
+                          : a.details
+                            ? JSON.stringify(a.details)
+                            : "";
+                  return `
                 <div class="item-row">
                     <div class="row">
                         <span class="chip chip-muted">${escapeHtml(actionLabel)}</span>
@@ -264,8 +266,12 @@ function _renderHistoryTabContent(tab, details) {
                     }
                 </div>
             `;
-        })
-        .join("");
+              })
+              .join("");
+    return `
+        ${auditsHtml}
+        <button id="detOpenAuditBtn" type="button" class="btn btn-sm" style="align-self:flex-start; margin-top:4px;">Весь аудит пользователя →</button>
+    `;
 }
 
 export async function renderUserDetailView(root, userSummary, onBack, onReloadUser, state = null, options = {}) {
@@ -379,7 +385,7 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
 
         <section class="card">
             <div class="row" style="align-items:flex-start;">
-                <div>
+                <div style="min-width:0; flex:1;">
                     <h1 class="detail-hero-title">${escapeHtml(uname)}</h1>
                     <button id="copyTgIdBtn" type="button" class="mono-copy" style="margin-top:8px;">
                         ID ${details.telegram_id} · Копировать
@@ -391,21 +397,15 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
                         ${details.topup_blocked ? `<span class="chip chip-warn">Блок пополнений</span>` : ""}
                     </div>
                 </div>
-                <div style="text-align:right;">
+                <div class="user-balance-box">
                     <div class="tabular" style="font-size:18px; font-weight:600;">${totalBal} ₽</div>
                     <div class="muted" style="font-size:12px;">Осн. ${realBal} ₽ · Бонусы ${bonusBal} ₽</div>
                 </div>
             </div>
-            <div class="detail-grid" style="padding-top:8px; border-top:1px solid var(--border-subtle);">
+            <div class="detail-grid" style="margin-top:4px;">
                 <div class="detail-item"><span class="detail-label">Регистрация</span><span>${formatDate(details.created_at || userSummary.created_at)}</span></div>
                 <div class="detail-item"><span class="detail-label">Последняя оплата</span><span>${details.last_payment_at ? formatDate(details.last_payment_at) : "—"}</span></div>
                 <div class="detail-item"><span class="detail-label">Пригласил</span><span>${escapeHtml(inviterStr)}</span></div>
-                <div class="detail-item"><span class="detail-label">Трафик Стандарт</span><span class="tabular">${formatBytesGb(details.monthly_vless_bytes)} ГБ / всего ${formatBytesGb(details.total_traffic_bytes)} ГБ</span></div>
-            </div>
-            <div class="actions-row" style="padding-top:8px; border-top:1px solid var(--border-subtle);">
-                <button id="detResyncUserBtn" type="button" class="btn btn-sm">Пересинхронизировать узлы</button>
-                <button id="detOpenFinancesBtn" type="button" class="btn btn-sm">Заказы в Финансах</button>
-                <button id="detOpenAuditBtn" type="button" class="btn btn-sm">Аудит</button>
             </div>
         </section>
 
@@ -430,56 +430,23 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
 
         <section class="card">
             <div class="row">
-                <h2 class="card-title">Бонусный баланс</h2>
-                <span class="muted">Коррекция</span>
+                <h2 class="card-title">Подписки</h2>
+                <button id="detResyncUserBtn" type="button" class="btn btn-sm">Пересинхронизировать узлы</button>
             </div>
-            <form id="userBonusForm" class="field" style="gap:8px;">
-                <div class="filter-pills">
-                    <button type="button" class="pill-btn" data-add="100">+100 ₽</button>
-                    <button type="button" class="pill-btn" data-add="500">+500 ₽</button>
-                    <button type="button" class="pill-btn" data-add="1000">+1000 ₽</button>
-                    <button type="button" class="pill-btn" data-add="-100">-100 ₽</button>
-                </div>
-                <div class="row-nowrap">
-                    <label for="userBonusAmount" class="visually-hidden">Сумма коррекции в рублях</label>
-                    <input id="userBonusAmount" name="amount_rub" class="input tabular" type="number" min="-100000" max="100000" step="1" required value="" placeholder="Сумма ₽ (напр. 100 или -100)">
-                    <button type="submit" class="btn btn-primary btn-sm" style="flex-shrink:0;">Применить</button>
-                </div>
-                <label for="userBonusNote" class="visually-hidden">Комментарий к коррекции</label>
-                <input id="userBonusNote" name="note" class="input" type="text" maxlength="120" placeholder="Комментарий (необязательно)">
-                <label for="userBonusNotify" class="toggle-row">
-                    <span class="toggle-label">Уведомить в Telegram</span>
-                    <span class="switch">
-                        <input id="userBonusNotify" name="notify_user" type="checkbox" checked>
-                        <span class="switch-track"></span>
-                    </span>
-                </label>
-                <label for="userBonusSendNote" class="toggle-row">
-                    <span class="toggle-label">Отправить комментарий пользователю</span>
-                    <span class="switch">
-                        <input id="userBonusSendNote" name="send_note_to_user" type="checkbox">
-                        <span class="switch-track"></span>
-                    </span>
-                </label>
-                <div class="meta-text">Если переключатель выключен, комментарий сохранится только в аудит-логе.</div>
-            </form>
-        </section>
-
-        <section class="card">
-            <h2 class="card-title">Подписки</h2>
 
             <div class="user-sub-box">
                 <div class="row">
-                    <div>
+                    <div style="min-width:0; flex:1;">
                         <div style="font-weight:600; font-size:13px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                             <span>Стандарт</span>
                             ${stdExpired ? `<span class="chip chip-err">Истекла</span>` : stdInfo && !stdInfo.is_active ? `<span class="chip chip-warn">Отключена</span>` : ""}
                         </div>
                         <div class="muted" style="font-size:12px;">${escapeHtml(stdSummary)}</div>
+                        <div class="meta-text tabular" style="margin-top:2px;">Трафик: ${formatBytesGb(details.monthly_vless_bytes)} ГБ за мес · ${formatBytesGb(details.total_traffic_bytes)} ГБ всего</div>
                     </div>
                     <button id="toggleStdEditBtn" type="button" class="btn btn-sm">Изменить</button>
                 </div>
-                <form id="stdEditForm" class="field" style="gap:8px; padding-top:8px; border-top:1px solid var(--border-subtle);" hidden>
+                <form id="stdEditForm" class="field" style="gap:8px; margin-top:4px;" hidden>
                     <div class="grid-2">
                         <div class="field">
                             <label for="stdDaysInput">Срок (дней, 0 = лимит)</label>
@@ -510,7 +477,7 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
 
             <div class="user-sub-box">
                 <div class="row">
-                    <div>
+                    <div style="min-width:0; flex:1;">
                         <div style="font-weight:600; font-size:13px;">Белый интернет</div>
                         <div class="muted" style="font-size:12px;">${escapeHtml(wiSummary)}</div>
                     </div>
@@ -521,7 +488,7 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
                 </div>
                 ${_renderWiDiagnosticsHtml(wi)}
 
-                <form id="wiEditForm" class="field" style="gap:8px; padding-top:8px; border-top:1px solid var(--border-subtle);" hidden>
+                <form id="wiEditForm" class="field" style="gap:8px; margin-top:4px;" hidden>
                     <div class="grid-2">
                         <div class="field">
                             <label for="wiDaysInput">Срок (дней, 0 = слоты)</label>
@@ -548,7 +515,7 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
                     <button type="submit" class="btn btn-primary btn-sm">Сохранить Белый интернет</button>
                 </form>
 
-                <form id="wiTrafficForm" class="field" style="gap:8px; padding-top:8px; border-top:1px solid var(--border-subtle);" hidden>
+                <form id="wiTrafficForm" class="field" style="gap:8px; margin-top:4px;" hidden>
                     <div class="field">
                         <label for="wiTrafficActionSelect">Операция с трафиком</label>
                         <select id="wiTrafficActionSelect" name="traffic_action" class="select">
@@ -571,6 +538,43 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
                     <button type="submit" class="btn btn-primary btn-sm">Применить трафик</button>
                 </form>
             </div>
+        </section>
+
+        <section class="card">
+            <div class="row">
+                <h2 class="card-title">Бонусный баланс</h2>
+                <span class="muted">Коррекция</span>
+            </div>
+            <form id="userBonusForm" class="field" style="gap:8px;">
+                <div class="filter-pills">
+                    <button type="button" class="pill-btn" data-add="100">+100 ₽</button>
+                    <button type="button" class="pill-btn" data-add="500">+500 ₽</button>
+                    <button type="button" class="pill-btn" data-add="1000">+1000 ₽</button>
+                    <button type="button" class="pill-btn" data-add="-100">-100 ₽</button>
+                </div>
+                <div class="row-nowrap">
+                    <label for="userBonusAmount" class="visually-hidden">Сумма коррекции в рублях</label>
+                    <input id="userBonusAmount" name="amount_rub" class="input tabular" type="number" min="-100000" max="100000" step="1" required value="" placeholder="Сумма ₽ (напр. 100 или -100)">
+                    <button type="submit" class="btn btn-primary btn-sm" style="flex-shrink:0;">Применить</button>
+                </div>
+                <label for="userBonusNote" class="visually-hidden">Комментарий к коррекции</label>
+                <input id="userBonusNote" name="note" class="input" type="text" maxlength="120" placeholder="Комментарий (необязательно)">
+                <label for="userBonusNotify" class="toggle-row">
+                    <span class="toggle-label">Уведомить в Telegram</span>
+                    <span class="switch">
+                        <input id="userBonusNotify" name="notify_user" type="checkbox" checked>
+                        <span class="switch-track"></span>
+                    </span>
+                </label>
+                <label id="userBonusSendNoteRow" for="userBonusSendNote" class="toggle-row">
+                    <span class="toggle-label">Отправить комментарий пользователю</span>
+                    <span class="switch">
+                        <input id="userBonusSendNote" name="send_note_to_user" type="checkbox">
+                        <span class="switch-track"></span>
+                    </span>
+                </label>
+                <div class="meta-text">Если переключатель выключен, комментарий сохранится только в аудит-логе.</div>
+            </form>
         </section>
 
         <section class="card">
@@ -682,6 +686,22 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
     const origFinancialHold = Boolean(details.financial_hold);
     const origTopupBlocked = Boolean(details.topup_blocked);
 
+    const bonusNotifyInput = bonusForm.querySelector("input[name='notify_user']");
+    const bonusSendNoteInput = bonusForm.querySelector("input[name='send_note_to_user']");
+    const bonusSendNoteRow = bonusForm.querySelector("#userBonusSendNoteRow");
+    const syncBonusSendNoteState = () => {
+        if (!bonusNotifyInput || !bonusSendNoteInput) return;
+        const notifyOn = Boolean(bonusNotifyInput.checked);
+        bonusSendNoteInput.disabled = !notifyOn;
+        if (!notifyOn) {
+            bonusSendNoteInput.checked = false;
+        }
+        if (bonusSendNoteRow) {
+            bonusSendNoteRow.style.opacity = notifyOn ? "" : "0.5";
+            bonusSendNoteRow.style.pointerEvents = notifyOn ? "" : "none";
+        }
+    };
+
     if (drafts) {
         if (drafts.dmText != null) {
             const dmInput = dmForm.querySelector("textarea[name='text']");
@@ -690,12 +710,10 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         if (drafts.bonus) {
             const amtEl = bonusForm.querySelector("input[name='amount_rub']");
             const noteEl = bonusForm.querySelector("input[name='note']");
-            const notifyEl = bonusForm.querySelector("input[name='notify_user']");
-            const sendNoteEl = bonusForm.querySelector("input[name='send_note_to_user']");
             if (amtEl && drafts.bonus.amount != null) amtEl.value = drafts.bonus.amount;
             if (noteEl && drafts.bonus.note != null) noteEl.value = drafts.bonus.note;
-            if (notifyEl && drafts.bonus.notify != null) notifyEl.checked = drafts.bonus.notify;
-            if (sendNoteEl && drafts.bonus.sendNote != null) sendNoteEl.checked = drafts.bonus.sendNote;
+            if (bonusNotifyInput && drafts.bonus.notify != null) bonusNotifyInput.checked = drafts.bonus.notify;
+            if (bonusSendNoteInput && drafts.bonus.sendNote != null) bonusSendNoteInput.checked = drafts.bonus.sendNote;
         }
         if (drafts.std) {
             stdForm.hidden = !drafts.std.open;
@@ -739,6 +757,8 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
             if (dangerEl) dangerEl.checked = drafts.dangerNotify;
         }
     }
+    syncBonusSendNoteState();
+    bonusNotifyInput?.addEventListener("change", syncBonusSendNoteState);
 
     if (preserveScroll && savedScrollY !== null) {
         requestAnimationFrame(() => window.scrollTo(0, savedScrollY));
@@ -855,14 +875,6 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
                 showToast(err.message || "Ошибка пересинхронизации", "error");
             }
         });
-    });
-
-    root.querySelector("#detOpenFinancesBtn").addEventListener("click", () => {
-        state?.onOpenFinances?.(String(details.telegram_id));
-    });
-
-    root.querySelector("#detOpenAuditBtn").addEventListener("click", () => {
-        state?.onOpenAudit?.(String(details.id), "user");
     });
 
     const forgiveDebtBtn = root.querySelector("#detForgiveDebtBtn");
@@ -1233,14 +1245,22 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
 
     const historyTabsEl = root.querySelector("#userHistoryTabs");
     const historyListEl = root.querySelector("#userHistoryList");
-    const wireHistoryCopyButtons = () => {
-        historyListEl.querySelectorAll("[data-copy-val]").forEach((btn) => {
-            btn.addEventListener("click", () => {
-                copyText(btn.dataset.copyVal, btn.dataset.copyMsg || "Скопировано");
-            });
-        });
-    };
-    wireHistoryCopyButtons();
+    historyListEl.addEventListener("click", (e) => {
+        const copyBtnEl = e.target.closest("[data-copy-val]");
+        if (copyBtnEl && historyListEl.contains(copyBtnEl)) {
+            copyText(copyBtnEl.dataset.copyVal, copyBtnEl.dataset.copyMsg || "Скопировано");
+            return;
+        }
+        const finBtn = e.target.closest("#detOpenFinancesBtn");
+        if (finBtn && historyListEl.contains(finBtn)) {
+            state?.onOpenFinances?.(String(details.telegram_id));
+            return;
+        }
+        const auditBtn = e.target.closest("#detOpenAuditBtn");
+        if (auditBtn && historyListEl.contains(auditBtn)) {
+            state?.onOpenAudit?.(String(details.id), "user");
+        }
+    });
 
     const historyTabButtons = Array.from(historyTabsEl.querySelectorAll("[data-htab]"));
     const activateHistoryTab = (nextTab, focusTab = false) => {
@@ -1256,7 +1276,6 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         });
         historyListEl.setAttribute("aria-labelledby", `htab-${activeHistoryTab}`);
         historyListEl.innerHTML = _renderHistoryTabContent(activeHistoryTab, details);
-        wireHistoryCopyButtons();
     };
 
     historyTabButtons.forEach((btn, idx) => {
