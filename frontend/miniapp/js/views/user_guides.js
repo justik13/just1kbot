@@ -1,15 +1,4 @@
-import { copyText, escapeHtml, openModal } from "../ui.js?v=2.8.0";
-
-function _openExternal(url) {
-    const target = String(url || "").trim();
-    if (!target || !/^(https?:|tg:)/i.test(target)) return;
-    const tg = window.Telegram && window.Telegram.WebApp;
-    if (tg && typeof tg.openLink === "function" && /^https?:/i.test(target)) {
-        tg.openLink(target);
-    } else {
-        window.open(target, "_blank", "noopener,noreferrer");
-    }
-}
+import { copyText, escapeHtml, openExternalLink, openModal } from "../ui.js?v=2.8.0";
 
 function _openImageModal(src, title) {
     const wrap = document.createElement("div");
@@ -422,7 +411,7 @@ export function renderUserGuidesView(root, state, data, onBack) {
     });
 
     root.querySelectorAll("[data-ext]").forEach((btn) => {
-        btn.addEventListener("click", () => _openExternal(btn.dataset.ext));
+        btn.addEventListener("click", () => openExternalLink(btn.dataset.ext));
     });
 
     root.querySelectorAll("[data-copy]").forEach((btn) => {

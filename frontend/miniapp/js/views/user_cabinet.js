@@ -16,6 +16,7 @@ const _state = {
     tab: null,
     platform: _detectPlatform(),
     data: null,
+    serverClockOffsetMs: 0,
     avatarFailed: false,
     guidesReturnTab: "connect",
     guidesReturnScrollY: 0,
@@ -26,6 +27,26 @@ const _state = {
 };
 
 let _dashReqId = 0;
+
+function _syncServerClock(d) {
+    const serverMs = d && d.server_now ? Date.parse(d.server_now) : NaN;
+    _state.serverClockOffsetMs = Number.isFinite(serverMs) ? (serverMs - Date.now()) : 0;
+}
+
+function _serverNowMs() {
+    return Date.now() + (_state.serverClockOffsetMs || 0);
+}
+
+function _getStdGraceInfo(d, std) {
+    const stdExpMs = std && std.expires_at ? new Date(std.expires_at).getTime() : 0;
+    const nowMs = _serverNowMs();
+    const rawGrace = d && (d.grace_hours ?? (d.pricing && d.pricing.grace_hours));
+    const graceHours = Number.isFinite(Number(rawGrace)) && Number(rawGrace) > 0 ? Number(rawGrace) : 4;
+    const isStdGrace = Boolean(std && std.active && Number.isFinite(stdExpMs) && stdExpMs > 0 && stdExpMs < nowMs);
+    const graceEndMs = stdExpMs + (graceHours * 3600 * 1000);
+    const graceHoursLeft = Math.max(1, Math.ceil((graceEndMs - nowMs) / (3600 * 1000)));
+    return { stdExpMs, isStdGrace, graceHoursLeft };
+}
 
 function _scrollTopSmooth() {
     const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -93,11 +114,24 @@ function _detectPlatform() {
     return "ios";
 }
 
-function _calcStdPrice(pricing, devices, days) {
-    const plans = (pricing && pricing.standard_plans) || {};
-    const entry = plans[String(days)];
-    if (entry && entry.base_rub != null && entry.step_rub != null) {
-        return Number(entry.base_rub) + Math.max(0, devices - 2) * Number(entry.step_rub);
+function _calcStdPrice(source, devices, days) {
+    const key = String(days);
+    const devKey = String(devices);
+    const topPlans = source && source.standard_tariff_prices;
+    const nestedPlans = source && (source.standard_plans || (source.pricing && source.pricing.standard_plans));
+    const entry = (topPlans && topPlans[key]) || (nestedPlans && nestedPlans[key]);
+    if (entry != null) {
+        if (Array.isArray(entry) && entry.length >= 2) {
+            return Number(entry[0]) + Math.max(0, devices - 2) * Number(entry[1]);
+        }
+        if (typeof entry === "object") {
+            if (entry[devKey] != null) return Number(entry[devKey]);
+            const base = entry.base_rub ?? entry.base;
+            const step = entry.step_rub ?? entry.step;
+            if (base != null && step != null) {
+                return Number(base) + Math.max(0, devices - 2) * Number(step);
+            }
+        }
     }
     const fallback = { 7: [39, 12], 30: [99, 30], 90: [255, 78] }[days] || [99, 30];
     return fallback[0] + Math.max(0, devices - 2) * fallback[1];
@@ -333,7 +367,10 @@ function _openStandardPlanModal(d, mode, onReload) {
     const std = d.standard || {};
     const bal = d.balance || { real: 0, bonus: 0, total: 0 };
     const pricing = d.pricing || {};
-    const durations = pricing.standard_durations || [7, 30, 90];
+    const tariffDurations = d.standard_tariff_prices
+        ? Object.keys(d.standard_tariff_prices).map(Number).filter(Number.isFinite).sort((a, b) => a - b)
+        : [];
+    const durations = pricing.standard_durations || (tariffDurations.length ? tariffDurations : [7, 30, 90]);
 
     let devices = mode === "renew" ? Math.max(2, Number(std.device_limit || 2)) : 2;
     let duration = 30;
@@ -359,7 +396,7 @@ function _openStandardPlanModal(d, mode, onReload) {
         const submitBtn = wrap.querySelector("#modalStdPayBtn");
         if (!summaryEl || !submitBtn) return;
 
-        const basePrice = _calcStdPrice(pricing, devices, duration);
+        const basePrice = _calcStdPrice(d, devices, duration);
         const price = quote ? Number(quote.due_rub ?? basePrice) : basePrice;
         const originalPrice = quote ? Number(quote.original_price_rub ?? price) : basePrice;
         const discount = quote ? Number(quote.discount_rub || 0) : 0;
@@ -405,7 +442,7 @@ function _openStandardPlanModal(d, mode, onReload) {
             b.classList.toggle("active", isActive);
             b.setAttribute("aria-pressed", isActive ? "true" : "false");
             const priceEl = b.querySelector(".price-tile-price");
-            if (priceEl) priceEl.textContent = `${_calcStdPrice(pricing, devices, dDays)} ₽`;
+            if (priceEl) priceEl.textContent = `${_calcStdPrice(d, devices, dDays)} ₽`;
         });
         updateSummary();
     };
@@ -452,7 +489,7 @@ function _openStandardPlanModal(d, mode, onReload) {
             <span id="stdDurationLabel" style="font-size:12px; color:var(--text-secondary);">Выберите срок</span>
             <div class="price-tile-grid" role="group" aria-labelledby="stdDurationLabel">
                 ${durations.map((days) => {
-                    const p = _calcStdPrice(pricing, devices, days);
+                    const p = _calcStdPrice(d, devices, days);
                     return `
                         <button type="button" class="price-tile ${duration === days ? "active" : ""}" aria-pressed="${duration === days ? "true" : "false"}" data-dur="${days}">
                             <span class="price-tile-top">${days} дн.</span>
@@ -770,7 +807,7 @@ function _openWiPurchaseModal(d, mode, onReload) {
     const extra = Number(pricing.wi_extra_device_price_rub || 200);
     const curLimit = Math.max(1, Number(wi.device_limit || 1));
     const isActivePeriod = Boolean(
-        isRenew && wi.expires_at && new Date(wi.expires_at).getTime() > Date.now()
+        isRenew && wi.expires_at && new Date(wi.expires_at).getTime() > _serverNowMs()
     );
     const defaultDevices = isRenew
         ? (isActivePeriod ? curLimit : Math.max(1, Number(wi.pending_device_limit || curLimit)))
@@ -1170,7 +1207,7 @@ function _wiHasActivePeriod(wi) {
     return Boolean(
         ["ACTIVE", "PENDING", "EXHAUSTED"].includes(status)
         && wi.expires_at
-        && new Date(wi.expires_at).getTime() > Date.now()
+        && new Date(wi.expires_at).getTime() > _serverNowMs()
     );
 }
 
@@ -1181,6 +1218,7 @@ export async function loadAndRenderUserCabinet(root, options = {}) {
         const data = await api.getUserDashboard();
         if (reqId !== _dashReqId || !isActive() || !root.isConnected) return;
         _state.data = data;
+        _syncServerClock(data);
         const stdActive = Boolean(data.standard && data.standard.active);
         const wiActive = _wiHasActivePeriod(data.wi);
         if (!_state.tab) {
@@ -1519,10 +1557,7 @@ function _renderConnectTab(body, d, reload, root) {
         return;
     }
 
-    const stdExpMs = std.expires_at ? new Date(std.expires_at).getTime() : 0;
-    const isStdGrace = Boolean(std.active && Number.isFinite(stdExpMs) && stdExpMs > 0 && stdExpMs < Date.now());
-    const graceEndMs = stdExpMs + (4 * 3600 * 1000);
-    const graceHoursLeft = Math.max(1, Math.ceil((graceEndMs - Date.now()) / (3600 * 1000)));
+    const { isStdGrace, graceHoursLeft } = _getStdGraceInfo(d, std);
 
     const wiLimitBytes = Number(wi.traffic_limit_bytes || 0);
     const wiUsedBytes = Number(wi.traffic_used_bytes || 0);
@@ -1759,12 +1794,9 @@ function _renderTariffsTab(body, d, reload) {
     const minTopup = pricing.min_topup_rub || 20;
 
     const stdLimit = Number(std.device_limit || 2);
-    const stdMin7 = _calcStdPrice(pricing, 2, 7);
-    const stdMin30 = _calcStdPrice(pricing, 2, 30);
-    const stdExpMs = std.expires_at ? new Date(std.expires_at).getTime() : 0;
-    const isStdGrace = Boolean(std.active && Number.isFinite(stdExpMs) && stdExpMs > 0 && stdExpMs < Date.now());
-    const graceEndMs = stdExpMs + (4 * 3600 * 1000);
-    const graceHoursLeft = Math.max(1, Math.ceil((graceEndMs - Date.now()) / (3600 * 1000)));
+    const stdMin7 = _calcStdPrice(d, 2, 7);
+    const stdMin30 = _calcStdPrice(d, 2, 30);
+    const { isStdGrace, graceHoursLeft } = _getStdGraceInfo(d, std);
     const stdExpStr = _safeFormatDate(std.expires_at);
     const wiExpStr = _safeFormatDate(wi.expires_at);
 
@@ -2368,7 +2400,7 @@ function _renderMoreTab(body, d, root) {
                 ` : ""}
                 ${sup.tg_proxy_url ? `
                     <button id="tgProxyBtn" type="button" class="settings-row">
-                        <span class="settings-left">${_ICONS.send}<span>Прокси для Telegram</span></span>
+                        <span class="settings-left">${_ICONS.send}<span>Доступ к Telegram</span></span>
                         <span style="display:inline-flex; color:var(--text-muted);">${_ICONS.chevronRight}</span>
                     </button>
                 ` : ""}

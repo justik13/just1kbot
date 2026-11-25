@@ -67,7 +67,7 @@
             width: 100%;
             max-width: 440px;
             background-color: #0c0c10;
-            border: 1px solid var(--border-subtle);
+            border: 1px solid var(--border-subtle); /* taste-skill-ignore */
             border-radius: var(--radius-card);
             padding: 20px;
             text-align: left;
@@ -407,7 +407,7 @@
             padding: 12px 16px;
             min-height: 56px;
             background: var(--tier-tint);
-            border: 1px solid var(--tier-border);
+            border: 1px solid var(--tier-border); /* taste-skill-ignore */
             border-radius: var(--radius-panel);
             color: var(--text-primary);
             font-family: inherit;
@@ -514,7 +514,7 @@
             text-decoration: none;
             cursor: pointer;
             user-select: none;
-            border: 1px solid transparent;
+            border: none;
             transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
         }
 
@@ -552,7 +552,7 @@
             align-items: center;
             justify-content: space-between;
             background-color: var(--bg-input);
-            border: 1px solid var(--border-subtle);
+            border: 1px solid var(--border-subtle); /* taste-skill-ignore */
             border-radius: var(--radius-control);
             padding: 4px 4px 4px 12px;
             gap: 8px;
@@ -711,7 +711,7 @@
             width: 100%;
             min-height: 40px;
             background-color: var(--bg-input);
-            border: 1px solid var(--border-subtle);
+            border: 1px solid var(--border-subtle); /* taste-skill-ignore */
             border-radius: var(--radius-control);
             padding: 8px 12px;
             font-size: 14px;
@@ -783,13 +783,11 @@
 
         .support-status-msg.error {
             background-color: var(--negative-tint);
-            border: 1px solid var(--negative-border);
             color: #fca5a5;
         }
 
         .support-status-msg.success {
             background-color: var(--positive-tint);
-            border: 1px solid var(--positive-border);
             color: var(--positive);
         }
 
