@@ -174,6 +174,8 @@ def merge_v2_extra_data(
         "inbounds",
         "traffic_limit",
         "disk_usage",
+        "last_apply",
+        "ssl_cert",
     ):
         val = _pick(key)
         if val is not None:

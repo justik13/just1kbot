@@ -11,11 +11,12 @@ from typing import Any
 from urllib.parse import urlparse
 
 import aiohttp
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.constants import VLESS_PROTOCOL, WHITE_INTERNET_CAPABILITY, XRAY_PROTOCOL
 from config.enums import AdminAuditAction, ServerHealthState, ServerLifecycleStatus
-from database.models import Server
+from database.models import Server, VlessSubscription, WhiteInternetSubscription
 from database.repositories.servers_repo import (
     V2_NODE_ROLES,
     create_server,
@@ -270,6 +271,8 @@ def serialize_server_node(server: Server) -> dict[str, Any]:
             if (usage := get_server_hosting_usage(extra)) and (usage.host_bytes > 0 or (usage.limit_gb and usage.limit_gb > 0))
             else None
         ),
+        "last_apply": extra.get("last_apply") if isinstance(extra.get("last_apply"), dict) else None,
+        "ssl_cert": extra.get("ssl_cert") if isinstance(extra.get("ssl_cert"), dict) else None,
         "last_successful_check": (
             server.last_successful_check.isoformat() if server.last_successful_check else None
         ),
@@ -795,6 +798,17 @@ async def delete_node(
 
     deleted_name = server.name
     await delete_server(session, server)
+    sid_key = str(server_id)
+    await session.execute(
+        update(WhiteInternetSubscription)
+        .where(WhiteInternetSubscription.node_sync_state.has_key(sid_key))
+        .values(node_sync_state=WhiteInternetSubscription.node_sync_state.op("-")(sid_key))
+    )
+    await session.execute(
+        update(VlessSubscription)
+        .where(VlessSubscription.node_traffic_snapshots.has_key(sid_key))
+        .values(node_traffic_snapshots=VlessSubscription.node_traffic_snapshots.op("-")(sid_key))
+    )
     from services.workers.node_monitor import clear_server_monitor_state
     clear_server_monitor_state(server_id)
     _queue_topology_sync(session)

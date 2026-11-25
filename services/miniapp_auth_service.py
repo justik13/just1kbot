@@ -229,16 +229,10 @@ def verify_admin_session_token(
         return False
     parts = token.strip().split(".")
     current_epoch = (expected_epoch or _cached_admin_session_epoch or "1").strip() or "1"
-    if len(parts) == 3:
-        if current_epoch != "1":
-            return False
-        exp_raw, nonce, sig = parts
-        token_epoch: str | None = None
-    elif len(parts) == 4:
-        exp_raw, nonce, token_epoch, sig = parts
-        if token_epoch != current_epoch:
-            return False
-    else:
+    if len(parts) != 4:
+        return False
+    exp_raw, nonce, token_epoch, sig = parts
+    if token_epoch != current_epoch:
         return False
 
     if not exp_raw.isdigit() or not nonce or not sig:
@@ -246,10 +240,7 @@ def verify_admin_session_token(
     exp_ts = int(exp_raw)
     if exp_ts < int(time.time()):
         return False
-    if token_epoch is None:
-        payload = f"{telegram_id}:{exp_ts}:{nonce}".encode("utf-8")
-    else:
-        payload = f"{telegram_id}:{exp_ts}:{nonce}:{token_epoch}".encode("utf-8")
+    payload = f"{telegram_id}:{exp_ts}:{nonce}:{token_epoch}".encode("utf-8")
     expected_sig = hmac.new(
         _derive_signing_key(b"MiniAppAdminSession"),
         payload,

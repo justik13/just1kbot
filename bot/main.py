@@ -476,9 +476,11 @@ async def main():
 
         try:
             from bot.handlers.start import cancel_start_background_tasks
+            from bot.miniapp.handlers_admin import cancel_admin_background_tasks
             from services.vless_subscription_service import cancel_vless_background_tasks
             from services.workers.traffic import cancel_traffic_background_tasks
 
+            await cancel_admin_background_tasks()
             await cancel_vless_background_tasks()
             await cancel_traffic_background_tasks()
             await cancel_start_background_tasks()

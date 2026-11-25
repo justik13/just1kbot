@@ -1286,3 +1286,361 @@ def test_db_models_targeted_indexes_present():
         "ix_audit_logs_action_id_desc",
         "ix_audit_logs_details_trgm",
     }.issubset({i.name for i in AuditLog.__table__.indexes})
+
+
+@pytest.mark.asyncio
+async def test_b1_cancel_admin_background_tasks():
+    import asyncio
+
+    started = asyncio.Event()
+    cancelled = False
+
+    async def _worker():
+        nonlocal cancelled
+        started.set()
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            cancelled = True
+            raise
+
+    task = asyncio.create_task(_worker())
+    await started.wait()
+    handlers_admin._background_tasks.clear()
+    handlers_admin._background_tasks.add(task)
+    task.add_done_callback(handlers_admin._background_tasks.discard)
+    await handlers_admin.cancel_admin_background_tasks()
+
+    assert cancelled is True
+    assert task.cancelled()
+    assert len(handlers_admin._background_tasks) == 0
+
+
+def test_b2_verify_admin_session_token_requires_four_parts():
+    import hashlib
+    import hmac
+    import secrets
+    import time
+    from services import miniapp_auth_service
+
+    with (
+        patch.object(miniapp_auth_service, "is_admin", return_value=True),
+        patch.object(
+            miniapp_auth_service,
+            "_derive_signing_key",
+            return_value=b"test-admin-session-signing-key-32b",
+        ),
+    ):
+        tok_4, _ = miniapp_auth_service.issue_admin_session_token(1001, epoch="7")
+        assert len(tok_4.split(".")) == 4
+        assert miniapp_auth_service.verify_admin_session_token(tok_4, 1001, expected_epoch="7") is True
+        assert miniapp_auth_service.verify_admin_session_token(tok_4, 1001, expected_epoch="8") is False
+
+        # Legacy 3-part token signed with the same key must be rejected.
+        exp_ts = str(int(time.time()) + 300)
+        nonce = secrets.token_hex(8)
+        payload = f"1001:{exp_ts}:{nonce}"
+        sig = hmac.new(
+            miniapp_auth_service._derive_signing_key(b"MiniAppAdminSession"),
+            payload.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        legacy_tok = f"{exp_ts}.{nonce}.{sig}"
+        assert miniapp_auth_service.verify_admin_session_token(legacy_tok, 1001, expected_epoch="7") is False
+
+
+@pytest.mark.asyncio
+async def test_b4_delete_node_cleans_jsonb_subscription_snapshots():
+    hub = SimpleNamespace(
+        id=13,
+        name="Hub 13",
+        role="ru_hub",
+        capabilities=["ru_hub"],
+        is_active=True,
+        health_state=ServerHealthState.ONLINE,
+        lifecycle_status=ServerLifecycleStatus.ACTIVE,
+        extra_data={},
+    )
+    session = AsyncMock()
+    session.execute = AsyncMock()
+
+    with (
+        patch.object(admin_nodes_service, "get_server_by_id", AsyncMock(return_value=hub)),
+        patch.object(admin_nodes_service, "get_all_servers", AsyncMock(return_value=[hub])),
+        patch.object(admin_nodes_service, "delete_server", AsyncMock()),
+        patch.object(admin_nodes_service, "_queue_topology_sync", MagicMock()),
+        patch.object(admin_nodes_service.AuditService, "log_action", AsyncMock()),
+    ):
+        res = await admin_nodes_service.delete_node(session, admin_id=1001, server_id=13, force=True)
+
+    assert res == {"deleted_id": 13, "name": "Hub 13"}
+    assert session.execute.await_count == 2
+    executed_tables = [call.args[0].table.name for call in session.execute.call_args_list]
+    assert executed_tables == ["white_internet_subscriptions", "vless_subscriptions"]
+
+
+@pytest.mark.asyncio
+async def test_b5_admin_webhook_retry_and_dismiss_endpoints():
+    admin_ctx = SimpleNamespace(telegram_id=1001)
+    dead_row = SimpleNamespace(
+        id=5,
+        event_key="yk:evt:5",
+        provider="yookassa",
+        status=WebhookInboxStatus.DEAD.value,
+    )
+    pending_row = SimpleNamespace(
+        id=6,
+        event_key="yk:evt:6",
+        provider="yookassa",
+        status=WebhookInboxStatus.PENDING.value,
+    )
+    retry_row = SimpleNamespace(
+        id=7,
+        event_key="yk:evt:7",
+        provider="yookassa",
+        status=WebhookInboxStatus.RETRY.value,
+    )
+
+    session = AsyncMock()
+    session.scalar = AsyncMock(side_effect=[dead_row, retry_row, pending_row, None])
+    audit_mock = AsyncMock()
+
+    with (
+        patch.object(handlers_admin, "require_admin_user", return_value=(admin_ctx, None)),
+        patch.object(handlers_admin, "session_scope", _make_session_scope(session)),
+        patch.object(handlers_admin.AuditService, "log_action", audit_mock),
+    ):
+        resp_retry = await handlers_admin.api_admin_webhook_retry_handler(
+            SimpleNamespace(match_info={"webhook_id": "5"})
+        )
+        resp_dismiss = await handlers_admin.api_admin_webhook_dismiss_handler(
+            SimpleNamespace(match_info={"webhook_id": "7"})
+        )
+        resp_bad = await handlers_admin.api_admin_webhook_retry_handler(
+            SimpleNamespace(match_info={"webhook_id": "6"})
+        )
+        resp_missing = await handlers_admin.api_admin_webhook_dismiss_handler(
+            SimpleNamespace(match_info={"webhook_id": "999"})
+        )
+
+    assert resp_retry.status == 200
+    assert json.loads(resp_retry.text)["status"] == WebhookInboxStatus.PENDING.value
+    assert dead_row.status == WebhookInboxStatus.PENDING.value
+
+    assert resp_dismiss.status == 200
+    assert json.loads(resp_dismiss.text)["status"] == WebhookInboxStatus.SUCCEEDED.value
+    assert retry_row.status == WebhookInboxStatus.SUCCEEDED.value
+
+    assert resp_bad.status == 400
+    assert resp_missing.status == 404
+    assert audit_mock.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_b6_worker_age_fields_and_server_now_payloads():
+    from datetime import datetime, timezone
+    import time
+    from bot.miniapp import admin_users_handlers, handlers_user
+    import services.workers as workers_mod
+
+    now_m = time.monotonic()
+    workers_mod._worker_health["test_b6_worker"] = workers_mod.WorkerHealth(
+        state="degraded",
+        last_started_at=now_m - 12.5,
+        last_finished_at=now_m - 4.0,
+        consecutive_failures=1,
+        last_error_type="RuntimeError",
+        critical=False,
+    )
+    snap = workers_mod.get_worker_health_snapshot()
+    w_info = snap["workers"].pop("test_b6_worker")
+    workers_mod._worker_health.pop("test_b6_worker", None)
+    assert isinstance(w_info["last_started_age_sec"], float)
+    assert w_info["last_started_age_sec"] >= 12.0
+    assert isinstance(w_info["last_error_age_sec"], float)
+    assert w_info["last_error_age_sec"] >= 3.5
+
+    # User dashboard payload includes server_now, grace_hours, standard_tariff_prices
+    now = datetime(2026, 11, 25, 12, 0, 0, tzinfo=timezone.utc)
+    fake_user = SimpleNamespace(
+        id=42,
+        telegram_id=420001,
+        username="u42",
+        first_name="User42",
+        financial_hold=False,
+        financial_block_reason=None,
+        is_deleted=False,
+        created_at=now,
+        last_payment_at=None,
+        referred_by=None,
+        is_bot_blocked=False,
+    )
+    fake_bal = SimpleNamespace(
+        real_available=Decimal("100"),
+        bonus_available=Decimal("50"),
+        available=Decimal("150"),
+        debt=Decimal("0"),
+        real_position=Decimal("100"),
+    )
+    fake_vless = SimpleNamespace(
+        token="std-tok-1",
+        is_active=True,
+        expires_at=now + timedelta(days=5),
+        device_limit=3,
+        auto_renew_enabled=False,
+        downgrade_cooldown_until=None,
+        last_synced_at=None,
+    )
+    user_session = AsyncMock()
+    user_req = SimpleNamespace(app={"bot_username": "just1k_test_bot"})
+
+    with (
+        patch.object(handlers_user, "require_authenticated_user", return_value=(SimpleNamespace(telegram_id=420001), None)),
+        patch.object(handlers_user, "now_utc", return_value=now),
+        patch.object(handlers_user, "session_scope", _make_session_scope(user_session)),
+        patch.object(handlers_user, "_ensure_user", AsyncMock(return_value=fake_user)),
+        patch.object(handlers_user, "get_account_balance", AsyncMock(return_value=fake_bal)),
+        patch.object(handlers_user, "get_or_create_subscription", AsyncMock(return_value=fake_vless)),
+        patch.object(handlers_user, "get_subscription_by_user_id", AsyncMock(return_value=None)),
+        patch.object(handlers_user.SubscriptionService, "check_vpn_access", return_value=True),
+        patch.object(handlers_user, "is_eligible_for_referral_first_discount", AsyncMock(return_value=False)),
+        patch.object(handlers_user.user_devices_repo, "list_user_devices", AsyncMock(return_value=[])),
+        patch.object(handlers_user, "_get_referral_summary", AsyncMock(return_value={"invited": 0})),
+        patch.object(handlers_user, "get_account_history", AsyncMock(return_value=[])),
+        patch.object(handlers_user, "get_settings", return_value=SimpleNamespace(SUPPORT_USERNAME="@just1k_help", MINIAPP_URL="https://app.example.com", SUBSCRIPTION_DOMAIN="sub.example.com", SUBSCRIPTION_BACKUP_DOMAIN="backup.example.com", DOMAIN="example.com")),
+        patch.object(handlers_user, "get_system_setting", AsyncMock(side_effect=["false", ""])),
+    ):
+        dash_resp = await handlers_user.api_user_dashboard_handler(user_req)
+
+    assert dash_resp.status == 200
+    dash_data = json.loads(dash_resp.text)
+    assert dash_data["server_now"] == now.isoformat()
+    assert dash_data["grace_hours"] == 4
+    assert "30" in dash_data["standard_tariff_prices"]
+    assert "base_rub" in dash_data["standard_tariff_prices"]["30"]
+    assert "step_rub" in dash_data["standard_tariff_prices"]["30"]
+
+    # Admin user details payload includes server_now
+    admin_session = AsyncMock()
+    admin_session.get = AsyncMock(return_value=fake_user)
+    admin_session.scalar = AsyncMock(return_value=0)
+    empty_scalars = MagicMock()
+    empty_scalars.all.return_value = []
+    admin_session.scalars = AsyncMock(return_value=empty_scalars)
+
+    with (
+        patch.object(handlers_admin, "require_admin_user", return_value=(SimpleNamespace(telegram_id=1001), None)),
+        patch.object(handlers_admin, "session_scope", _make_session_scope(admin_session)),
+        patch.object(admin_users_handlers, "now_utc", return_value=now),
+        patch.object(admin_users_handlers, "get_account_balance", AsyncMock(return_value=fake_bal)),
+        patch.object(handlers_admin.vless_subscription_repo, "get_subscription_by_user_id", AsyncMock(return_value=fake_vless)),
+        patch.object(handlers_admin, "get_subscription_by_user_id", AsyncMock(return_value=None)),
+        patch.object(handlers_admin.SubscriptionService, "get_device_slot_usage", AsyncMock(return_value={"devices": []})),
+        patch.object(admin_users_handlers, "get_account_history", AsyncMock(return_value=[])),
+        patch.object(handlers_user, "get_settings", return_value=SimpleNamespace(SUBSCRIPTION_DOMAIN="sub.example.com", SUBSCRIPTION_BACKUP_DOMAIN="backup.example.com", DOMAIN="example.com")),
+    ):
+        details_resp = await handlers_admin.api_admin_user_details_handler(
+            SimpleNamespace(match_info={"user_id": "42"})
+        )
+
+    assert details_resp.status == 200
+    details_data = json.loads(details_resp.text)
+    assert details_data["server_now"] == now.isoformat()
+
+
+def test_b7_last_apply_and_ssl_cert_persistence_and_serialization():
+    from database.repositories import servers_repo
+
+    merged = servers_repo.merge_v2_extra_data(
+        {"existing_key": 1},
+        status_data={
+            "last_apply": {"ok": True, "rc": 0, "role": "exit", "ts": 1700000000},
+            "ssl_cert": {"expires_at": "2027-01-01T00:00:00Z", "days_left": 120},
+        },
+        health_data={},
+    )
+    assert merged["last_apply"]["ok"] is True
+    assert merged["ssl_cert"]["days_left"] == 120
+
+    node = SimpleNamespace(
+        id=9,
+        name="Node 9",
+        role="exit_node",
+        capabilities=["exit_node"],
+        country_flag="🇪🇪",
+        protocol="xray",
+        api_url="https://node9.example",
+        api_key="k",
+        is_active=True,
+        disabled_reason=None,
+        disabled_at=None,
+        health_state=ServerHealthState.ONLINE,
+        lifecycle_status=ServerLifecycleStatus.ACTIVE,
+        consecutive_fails=0,
+        problem_started_at=None,
+        xray_instance_epoch="ep9",
+        last_successful_check=None,
+        created_at=None,
+        extra_data=merged,
+    )
+    serialized = admin_nodes_service.serialize_server_node(node)
+    assert serialized["last_apply"] == {"ok": True, "rc": 0, "role": "exit", "ts": 1700000000}
+    assert serialized["ssl_cert"] == {"expires_at": "2027-01-01T00:00:00Z", "days_left": 120}
+
+
+@pytest.mark.asyncio
+async def test_b8_wi_traffic_alerts_attach_tariffs_keyboard():
+    from services.workers import traffic as traffic_worker
+
+    fake_user = SimpleNamespace(id=77, telegram_id=77001, is_bot_blocked=False)
+    session = AsyncMock()
+    session.scalar = AsyncMock(return_value=fake_user)
+    session.execute = AsyncMock()
+    send_mock = AsyncMock()
+    bot = MagicMock()
+
+    with (
+        patch.object(traffic_worker, "session_scope", _make_session_scope(session)),
+        patch.object(traffic_worker.global_send_limiter, "acquire", AsyncMock()),
+        patch.object(traffic_worker, "safe_send_message", send_mock),
+        patch.object(traffic_worker, "get_action_notification_keyboard", return_value="KB_TARIFFS") as kb_mock,
+    ):
+        await traffic_worker._send_wi_exhausted_alerts(bot, [77])
+        await traffic_worker._send_wi_90p_alerts(bot, [(10, 77, 3)])
+
+    assert kb_mock.call_count == 2
+    assert all(c.args == ("Открыть тарифы",) and c.kwargs == {"tab": "tariffs"} for c in kb_mock.call_args_list)
+    assert send_mock.await_count == 2
+    assert all(c.kwargs.get("reply_markup") == "KB_TARIFFS" for c in send_mock.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_b10_miniapp_asset_version_rewrite_and_webhook_routes():
+    from aiohttp import web
+    from bot.miniapp import routes
+
+    assert isinstance(routes._MINIAPP_ASSET_VERSION, str)
+    assert len(routes._MINIAPP_ASSET_VERSION) == 10
+    assert routes._MINIAPP_ASSET_VERSION != "2.8.0"
+
+    req = SimpleNamespace(remote="127.0.0.1", headers={}, match_info={"asset_path": "js/app.js"})
+    with (
+        patch.object(routes, "check_miniapp_rate_limit", return_value=None),
+        patch.object(routes, "check_miniapp_asset_rate_limit", return_value=None),
+    ):
+        idx_resp = await routes.miniapp_index_handler(req)
+        js_resp = await routes.miniapp_asset_handler(req)
+
+    assert idx_resp.status == 200
+    assert f"?v={routes._MINIAPP_ASSET_VERSION}" in idx_resp.text
+    assert "?v=2.8.0" not in idx_resp.text
+
+    assert js_resp.status == 200
+    assert f"?v={routes._MINIAPP_ASSET_VERSION}" in js_resp.text
+    assert "?v=2.8.0" not in js_resp.text
+
+    app = web.Application()
+    routes.setup_miniapp_routes(app)
+    registered_paths = {r.resource.canonical for r in app.router.routes()}
+    assert "/api/app/admin/webhooks/{webhook_id}/retry" in registered_paths
+    assert "/api/app/admin/webhooks/{webhook_id}/dismiss" in registered_paths

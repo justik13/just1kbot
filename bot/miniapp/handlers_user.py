@@ -33,6 +33,7 @@ from config.constants import (
     REFERRAL_ACTIVE_MIN_TOPUP_RUB,
     REFERRAL_WELCOME_DISCOUNT_PERCENT,
     STANDARD_PLANS,
+    VPN_ACCESS_GRACE_HOURS,
     WHITE_INTERNET_BASE_PRICE_RUB,
     WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB,
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
@@ -381,6 +382,12 @@ async def api_user_dashboard_handler(request: web.Request) -> web.Response:
 
         return web.json_response({
             "ok": True,
+            "server_now": now.isoformat(),
+            "grace_hours": VPN_ACCESS_GRACE_HOURS,
+            "standard_tariff_prices": {
+                str(days): {"base_rub": int(base), "step_rub": int(step)}
+                for days, (base, step) in sorted(STANDARD_PLANS.items())
+            },
             "financial_hold": bool(getattr(user, "financial_hold", False)),
             "payments_maintenance": payments_maintenance,
             "support": {

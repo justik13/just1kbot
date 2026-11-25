@@ -5,6 +5,7 @@ from typing import Any
 from aiogram import Bot
 from bot import texts
 from bot.keyboards.notifications import (
+    get_action_notification_keyboard,
     get_admin_user_keyboard,
 )
 from bot.texts.runtime.alerts import ALERT_TRAFFIC_OVERUSAGE
@@ -208,6 +209,7 @@ async def _send_wi_exhausted_alerts(bot: Bot | None, exhausted_users: list[int])
             continue
 
         alert_text = texts.WL_TRAFFIC_EXHAUSTED_ALERT
+        reply_markup = get_action_notification_keyboard("Открыть тарифы", tab="tariffs")
         for attempt in range(3):
             try:
                 await global_send_limiter.acquire()
@@ -215,6 +217,7 @@ async def _send_wi_exhausted_alerts(bot: Bot | None, exhausted_users: list[int])
                     bot,
                     chat_id=telegram_id,
                     text=alert_text,
+                    reply_markup=reply_markup,
                     parse_mode="HTML",
                     raise_forbidden=True,
                 )
@@ -261,6 +264,7 @@ async def _send_wi_90p_alerts(bot: Bot | None, warn_users: list[tuple[int, int, 
                 bot,
                 chat_id=telegram_id,
                 text=alert_text,
+                reply_markup=get_action_notification_keyboard("Открыть тарифы", tab="tariffs"),
                 parse_mode="HTML",
                 raise_forbidden=True,
             )

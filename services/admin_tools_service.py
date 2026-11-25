@@ -84,7 +84,7 @@ async def send_direct_message(
             bot,
             tg_id,
             clean_text,
-            reply_markup=get_action_notification_keyboard("⚡ Открыть приложение", tab="connect"),
+            reply_markup=get_action_notification_keyboard("Открыть приложение", tab="connect"),
             parse_mode="HTML",
             raise_forbidden=True,
         )
@@ -123,7 +123,7 @@ async def _run_mass_bonus_worker(
     failed = 0
     reason_safe = html.escape(reason) if reason else "Начисление от администратора"
     notify_text = (
-        f"🎁 <b>Вам начислен бонус +{amount_rub} ₽</b>\n\n"
+        f"<b>Вам начислен бонус +{amount_rub} ₽</b>\n\n"
         f"Комментарий: {reason_safe}"
     )
 
@@ -269,13 +269,11 @@ async def _run_mass_extend_worker(
     notified = 0
     failed = 0
     scope_label = (
-        "Все подписки"
-        if service_scope == "all"
-        else ("Белый Интернет" if service_scope == "white_internet" else "Стандартный доступ")
+        "Белый Интернет" if service_scope == "white_internet" else "Стандартный доступ"
     )
     reason_safe = html.escape(reason) if reason else "Продление от администратора"
     notify_text = (
-        f"🎁 <b>Ваша подписка ({scope_label}) продлена на +{days} дн.</b>\n\n"
+        f"<b>Ваша подписка ({scope_label}) продлена на +{days} дн.</b>\n\n"
         f"Комментарий: {reason_safe}"
     )
 
@@ -283,7 +281,7 @@ async def _run_mass_extend_worker(
         did_extend = False
         try:
             async with session_scope() as session:
-                if service_scope in ("standard", "all"):
+                if service_scope == "standard":
                     user_row = await session.get(User, uid)
                     if user_row is not None and not user_row.is_deleted:
                         vless_sub = await get_or_create_subscription(session, uid)
@@ -299,7 +297,7 @@ async def _run_mass_extend_worker(
                         if updated is not None:
                             did_extend = True
 
-                if service_scope in ("white_internet", "all"):
+                if service_scope == "white_internet":
                     wi_sub = await session.scalar(
                         select(WhiteInternetSubscription).where(
                             WhiteInternetSubscription.user_id == uid
@@ -330,7 +328,7 @@ async def _run_mass_extend_worker(
                     bot,
                     tg_id,
                     notify_text,
-                    reply_markup=get_action_notification_keyboard("⚡ Открыть кабинет", tab="connect"),
+                    reply_markup=get_action_notification_keyboard("Открыть кабинет", tab="connect"),
                     parse_mode="HTML",
                     raise_forbidden=True,
                 )

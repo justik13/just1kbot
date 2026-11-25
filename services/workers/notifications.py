@@ -214,7 +214,7 @@ async def _send_autorenew_notice(
             bot,
             telegram_id,
             text,
-            reply_markup=reply_markup or get_action_notification_keyboard("⚡ Открыть кабинет", tab="connect"),
+            reply_markup=reply_markup or get_action_notification_keyboard("Открыть кабинет", tab="connect"),
             parse_mode="HTML",
             raise_forbidden=True,
         )

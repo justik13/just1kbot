@@ -118,10 +118,25 @@ _WORKERS_BY_NAME = {definition.name: definition for definition in WORKERS}
 
 def get_worker_health_snapshot() -> dict[str, object]:
     """Return a read-only, secret-free copy suitable for health checks/tests."""
+    now_m = time.monotonic()
+    workers_payload: dict[str, dict[str, object]] = {}
+    for name, health in _worker_health.items():
+        data = asdict(health)
+        data["last_started_age_sec"] = (
+            round(max(0.0, now_m - health.last_started_at), 1)
+            if health.last_started_at is not None
+            else None
+        )
+        data["last_error_age_sec"] = (
+            round(max(0.0, now_m - health.last_finished_at), 1)
+            if health.last_error_type and health.last_finished_at is not None
+            else None
+        )
+        workers_payload[name] = data
     return {
         "supervisor_healthy": _supervisor_healthy,
         "fatal_shutdown": _fatal_shutdown,
-        "workers": {name: asdict(health) for name, health in _worker_health.items()},
+        "workers": workers_payload,
     }
 
 

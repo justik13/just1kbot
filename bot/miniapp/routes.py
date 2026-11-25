@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from pathlib import Path
 
@@ -42,6 +43,8 @@ from bot.miniapp.handlers_admin import (
     api_admin_user_resync_handler,
     api_admin_user_token_rotate_handler,
     api_admin_users_handler,
+    api_admin_webhook_dismiss_handler,
+    api_admin_webhook_retry_handler,
     api_admin_webhooks_handler,
     api_me_handler,
 )
@@ -92,6 +95,27 @@ _ASSET_CACHE_HEADERS = {
 }
 
 
+def _compute_miniapp_asset_version() -> str:
+    """Compute startup content hash across Mini App frontend assets for cache-busting."""
+    if not FRONTEND_DIR.is_dir():
+        return "2.8.0"
+    digest = hashlib.sha256()
+    for path in sorted(FRONTEND_DIR.rglob("*")):
+        if path.is_file() and path.suffix.lower() in {".html", ".css", ".js"}:
+            digest.update(path.relative_to(FRONTEND_DIR).as_posix().encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
+    return digest.hexdigest()[:10]
+
+
+_MINIAPP_ASSET_VERSION = _compute_miniapp_asset_version()
+
+
+def _rewrite_asset_version(text: str) -> str:
+    return text.replace("?v=2.8.0", f"?v={_MINIAPP_ASSET_VERSION}")
+
+
 async def miniapp_index_handler(request: web.Request) -> web.Response:
     """Serve Mini App HTML entrypoint."""
     rate_err = check_miniapp_rate_limit(request)
@@ -102,7 +126,7 @@ async def miniapp_index_handler(request: web.Request) -> web.Response:
     if not index_path.is_file():
         return web.Response(status=404, text="Mini App frontend not found")
 
-    content = index_path.read_text(encoding="utf-8")
+    content = _rewrite_asset_version(index_path.read_text(encoding="utf-8"))
     return web.Response(
         text=content,
         content_type="text/html",
@@ -142,6 +166,14 @@ async def miniapp_asset_handler(request: web.Request) -> web.Response:
         if rel_path.startswith("guides/")
         else _ASSET_CACHE_HEADERS
     )
+    if not rel_path.startswith("guides/") and target.suffix.lower() in {".js", ".css"}:
+        rewritten = _rewrite_asset_version(target.read_text(encoding="utf-8"))
+        return web.Response(
+            text=rewritten,
+            content_type=content_type,
+            charset="utf-8",
+            headers=headers,
+        )
     return web.FileResponse(target, headers=headers)
 
 
@@ -161,6 +193,8 @@ def setup_miniapp_routes(app: web.Application) -> None:
     # Admin overview & webhooks
     app.router.add_get("/api/app/admin/overview", api_admin_overview_handler)
     app.router.add_get("/api/app/admin/webhooks", api_admin_webhooks_handler)
+    app.router.add_post("/api/app/admin/webhooks/{webhook_id}/retry", api_admin_webhook_retry_handler)
+    app.router.add_post("/api/app/admin/webhooks/{webhook_id}/dismiss", api_admin_webhook_dismiss_handler)
 
     # Admin nodes & users
     app.router.add_get("/api/app/admin/nodes", api_admin_nodes_list_handler)

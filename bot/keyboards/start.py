@@ -31,7 +31,7 @@ def build_start_inline_keyboard(
         rows.append(
             [
                 InlineKeyboardButton(
-                    text="🛠 Админ-панель",
+                    text="Админ-панель",
                     web_app=WebAppInfo(url=str(admin_url).strip()),
                 )
             ]
@@ -49,7 +49,7 @@ def build_start_inline_keyboard(
         rows.append(
             [
                 InlineKeyboardButton(
-                    text="Прокси для Telegram",
+                    text="Доступ к Telegram",
                     url=str(mtproto_url).strip(),
                 )
             ]
