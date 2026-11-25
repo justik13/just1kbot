@@ -16,6 +16,19 @@ let currentFilter = "all";
 let lastReloadedAt = null;
 let _subSettingsReqId = 0;
 
+function _isLastApplyFailed(node) {
+    const la = node && node.last_apply && typeof node.last_apply === "object" ? node.last_apply : null;
+    if (!la) return false;
+    const st = String(la.status || "").toLowerCase();
+    return (
+        la.ok === false ||
+        st === "failed" ||
+        st === "error" ||
+        st === "rollback" ||
+        Boolean(la.rollback_error || la.error || la.rolled_back)
+    );
+}
+
 function _isProblemNode(node) {
     if (!node) return false;
     if (node.is_active && node.health_state !== "ONLINE") return true;
@@ -27,6 +40,12 @@ function _isProblemNode(node) {
         typeof node.traffic_limit === "object" &&
         Number(node.traffic_limit.pct || 0) >= 80
     ) {
+        return true;
+    }
+    if (node.ssl_cert && node.ssl_cert.days_left != null && Number(node.ssl_cert.days_left) < 14) {
+        return true;
+    }
+    if (_isLastApplyFailed(node)) {
         return true;
     }
     return false;
@@ -269,11 +288,6 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                         <input id="subWebPageUrl" name="web_page_url" class="input" maxlength="500" value="${escapeHtml(current.web_page_url || "")}" placeholder="По умолчанию ссылка на бота">
                     </div>
                 </div>
-                <div class="field">
-                    <label for="subMtprotoProxyUrl">Ссылка на прокси для Telegram (MTProto Proxy URL)</label>
-                    <input id="subMtprotoProxyUrl" name="mtproto_proxy_url" class="input" maxlength="500" value="${escapeHtml(current.mtproto_proxy_url || "")}" placeholder="https://t.me/proxy?server=...&port=...&secret=...">
-                    <div class="meta-text">Кнопка быстрого подключения прокси в боте и личном кабинете. Оставьте пустым, чтобы скрыть.</div>
-                </div>
 
                 <details class="guide-details">
                     <summary class="guide-summary">
@@ -453,7 +467,6 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                     announce_url: String(fd.get("announce_url") || "").trim(),
                     support_url: String(fd.get("support_url") || "").trim(),
                     web_page_url: String(fd.get("web_page_url") || "").trim(),
-                    mtproto_proxy_url: String(fd.get("mtproto_proxy_url") || "").trim(),
                     sort_order: sortOrder,
                     no_limit_mode: noLimitMode,
                     hide_url: Boolean(fd.get("hide_url")),
@@ -579,6 +592,14 @@ function _nodeDiagnosticBadges(node) {
     if (tl && Number(tl.pct || 0) >= 80) {
         const cls = tl.exceeded || Number(tl.pct) >= 95 ? "chip-err" : "chip-warn";
         badges.push(`<span class="chip ${cls}">Трафик ${tl.pct}%</span>`);
+    }
+    const ssl = node.ssl_cert && typeof node.ssl_cert === "object" ? node.ssl_cert : null;
+    if (ssl && ssl.days_left != null && Number.isFinite(Number(ssl.days_left)) && Number(ssl.days_left) < 14) {
+        const daysLeft = Math.max(0, Math.floor(Number(ssl.days_left)));
+        badges.push(`<span class="chip ${daysLeft < 7 ? "chip-err" : "chip-warn"}">SSL: ${daysLeft} дн.</span>`);
+    }
+    if (_isLastApplyFailed(node)) {
+        badges.push(`<span class="chip chip-err">Ошибка apply</span>`);
     }
     return badges.join("");
 }

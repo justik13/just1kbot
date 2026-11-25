@@ -127,6 +127,14 @@ export const api = {
     // Admin overview, nodes & users
     getAdminOverview: () => requestJson("/api/app/admin/overview"),
     getAdminWebhooks: () => requestJson("/api/app/admin/webhooks"),
+    retryWebhook: (webhookId) =>
+        requestJson(`/api/app/admin/webhooks/${encodeURIComponent(webhookId)}/retry`, {
+            method: "POST",
+        }),
+    dismissWebhook: (webhookId) =>
+        requestJson(`/api/app/admin/webhooks/${encodeURIComponent(webhookId)}/dismiss`, {
+            method: "POST",
+        }),
     getIncySettings: () => requestJson("/api/app/admin/incy-settings"),
     updateIncySettings: (payload) =>
         requestJson("/api/app/admin/incy-settings", {

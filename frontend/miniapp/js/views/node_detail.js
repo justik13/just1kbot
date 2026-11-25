@@ -63,6 +63,8 @@ function _renderTelemetryCard(node) {
     const sys = node.system_load && typeof node.system_load === "object" ? node.system_load : null;
     const disk = node.disk_usage && typeof node.disk_usage === "object" ? node.disk_usage : null;
     const tl = node.traffic_limit && typeof node.traffic_limit === "object" ? node.traffic_limit : null;
+    const ssl = node.ssl_cert && typeof node.ssl_cert === "object" ? node.ssl_cert : null;
+    const lastApply = node.last_apply && typeof node.last_apply === "object" ? node.last_apply : null;
 
     const cpuPct = sys && sys.cpu_percent != null ? sys.cpu_percent : null;
     const ramPct = sys && sys.ram_percent != null ? sys.ram_percent : null;
@@ -92,7 +94,32 @@ function _renderTelemetryCard(node) {
         Number(node.consecutive_fails || 0) > 0 ||
         Number(node.consecutive_ingress_fails || 0) > 0 ||
         Number(node.consecutive_cdn_fails || 0) > 0 ||
-        Boolean(node.problem_started_at);
+        Boolean(node.problem_started_at) ||
+        Boolean(ssl && (ssl.days_left != null || ssl.expires_at)) ||
+        Boolean(lastApply);
+
+    const sslDaysLeft = ssl && ssl.days_left != null && Number.isFinite(Number(ssl.days_left)) ? Math.floor(Number(ssl.days_left)) : null;
+    const sslCls = sslDaysLeft != null ? (sslDaysLeft < 7 ? "chip-err" : sslDaysLeft < 14 ? "chip-warn" : "chip-ok") : "chip-muted";
+
+    const applyStatusRaw = lastApply ? String(lastApply.status || "").toLowerCase() : "";
+    const applyFailed = Boolean(
+        lastApply &&
+        (lastApply.ok === false ||
+            applyStatusRaw === "failed" ||
+            applyStatusRaw === "error" ||
+            applyStatusRaw === "rollback" ||
+            lastApply.rollback_error ||
+            lastApply.error ||
+            lastApply.rolled_back)
+    );
+    const applyBadgeCls = applyFailed ? "chip-err" : "chip-ok";
+    const applyLabel = lastApply?.rolled_back
+        ? "Откат"
+        : applyFailed
+          ? "Ошибка"
+          : "Успешно";
+    const applyAt = lastApply ? (lastApply.applied_at || lastApply.timestamp || lastApply.ts || lastApply.at || null) : null;
+    const applyErrText = lastApply ? (lastApply.rollback_error || lastApply.error || "") : "";
 
     const hasEpochs = node.vless_synced_epoch != null || node.xray_instance_epoch != null;
     const epochMismatch =
@@ -164,12 +191,29 @@ function _renderTelemetryCard(node) {
                         ${epochMismatch ? ` <span class="chip chip-warn">Рассинхрон</span>` : ""}
                     </span>
                 </div>` : ""}
+                ${ssl && (sslDaysLeft != null || ssl.expires_at) ? `
+                <div class="detail-item">
+                    <span class="detail-label">SSL-сертификат</span>
+                    <span>
+                        ${sslDaysLeft != null ? `<span class="chip ${sslCls}">${sslDaysLeft < 0 ? "истёк" : `осталось ${sslDaysLeft} дн.`}</span>` : ""}
+                        ${ssl.expires_at ? ` <span class="muted">(до ${escapeHtml(formatDate(ssl.expires_at))})</span>` : ""}
+                    </span>
+                </div>` : ""}
+                ${lastApply ? `
+                <div class="detail-item">
+                    <span class="detail-label">Последний apply</span>
+                    <span>
+                        <span class="chip ${applyBadgeCls}">${escapeHtml(applyLabel)}</span>
+                        ${applyAt ? ` <span class="muted">${escapeHtml(formatRelativeTime(applyAt))} (${escapeHtml(formatDate(applyAt))})</span>` : ""}
+                    </span>
+                </div>` : ""}
                 <div class="detail-item">
                     <span class="detail-label">Последняя проверка</span>
                     <span>${escapeHtml(formatRelativeTime(node.last_successful_check))}${node.last_successful_check ? ` <span class="muted">(${escapeHtml(formatDate(node.last_successful_check))})</span>` : ""}</span>
                 </div>
                 ${!bars && !hasOutageInfo && !hasEpochs ? `<div class="muted" style="font-size:12px;">Метрики нагрузки пока не поступали.</div>` : ""}
             </div>
+            ${applyErrText ? `<div class="text-err" style="margin-top:8px; padding:8px 12px; border-radius:8px; background:var(--accent-red-soft); border:1px solid rgba(248,113,113,0.32); font-size:12px; white-space:pre-wrap;">Ошибка применения: ${escapeHtml(applyErrText)}</div>` : ""}
         </section>
     `;
 }

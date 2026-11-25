@@ -128,7 +128,16 @@ export function renderAdminFinancesView(root, state) {
     const webhooksData = state.webhooksData || [];
     const summary = finData.summary || {};
 
+    const hasReturn = Array.isArray(state.returnStack) && state.returnStack.length > 0;
+
     root.innerHTML = `
+        ${
+            hasReturn
+                ? `<div class="return-banner">
+                    <button type="button" id="finReturnBtn" class="btn btn-sm">← Вернуться к пользователю</button>
+                </div>`
+                : ""
+        }
         <section id="finStatsStrip" class="stats-strip">${_renderFinStatsInner(summary)}</section>
 
         ${_renderMaintenanceCard(state)}
@@ -292,7 +301,7 @@ export function renderAdminFinancesView(root, state) {
 
     const syncDynamicWebhooks = () => {
         listContainer.innerHTML = "";
-        _renderWebhookRows(listContainer, state.webhooksData || []);
+        _renderWebhookRows(listContainer, state.webhooksData || [], loadWebhooks);
     };
 
     const loadFinances = async (offset = 0) => {
@@ -425,6 +434,10 @@ export function renderAdminFinancesView(root, state) {
         });
     }
 
+    root.querySelector("#finReturnBtn")?.addEventListener("click", () => {
+        state.onReturnBack?.();
+    });
+
     root.querySelectorAll("[data-fintab]").forEach((btn) => {
         btn.addEventListener("click", () => {
             const nextSubTab = btn.dataset.fintab;
@@ -531,7 +544,7 @@ export function renderAdminFinancesView(root, state) {
                 renderRetryList("Не удалось загрузить вебхуки", () => loadWebhooks());
             }
         } else {
-            _renderWebhookRows(listContainer, webhooksData);
+            _renderWebhookRows(listContainer, webhooksData, loadWebhooks);
         }
     } else {
         const finQueryInput = root.querySelector("#finQueryInput");
@@ -735,7 +748,7 @@ function _renderAuditRows(container, items, state) {
     });
 }
 
-function _renderWebhookRows(container, items) {
+function _renderWebhookRows(container, items, reloadWebhooks = null) {
     if (!items.length) {
         container.innerHTML = `<div class="muted" style="text-align:center; padding:16px;">Проблемных или ожидающих вебхуков нет</div>`;
         return;
@@ -746,6 +759,8 @@ function _renderWebhookRows(container, items) {
         const eventKey = wh.event_key || wh.event_id || "";
         const receivedTs = wh.received_at || wh.created_at;
         const receivedStr = receivedTs ? `${formatRelativeTime(receivedTs)} (${formatDate(receivedTs)})` : "—";
+        const statusLower = String(wh.status || "").toLowerCase();
+        const canAct = wh.id != null && (statusLower === "dead" || statusLower === "retry");
         row.innerHTML = `
             <div class="row">
                 <span class="mono" style="font-weight:600; font-size:12px;">${escapeHtml(wh.event_type || "—")}</span>
@@ -775,6 +790,14 @@ function _renderWebhookRows(container, items) {
                     </div>`
                     : ""
             }
+            ${
+                canAct
+                    ? `<div class="actions-row" style="margin-top:4px;">
+                        <button type="button" class="btn btn-sm" data-retry-wh="${escapeHtml(wh.id)}">Повторить</button>
+                        <button type="button" class="btn btn-sm btn-danger" data-dismiss-wh="${escapeHtml(wh.id)}">Скрыть</button>
+                    </div>`
+                    : ""
+            }
         `;
         const copyOrderBtn = row.querySelector("[data-copy-wh-order]");
         if (copyOrderBtn) {
@@ -783,6 +806,39 @@ function _renderWebhookRows(container, items) {
         const copyPaymentBtn = row.querySelector("[data-copy-wh-payment]");
         if (copyPaymentBtn) {
             copyPaymentBtn.addEventListener("click", () => copyText(wh.payment_external_id, "ID платежа скопирован"));
+        }
+        const retryBtn = row.querySelector("[data-retry-wh]");
+        if (retryBtn) {
+            retryBtn.addEventListener("click", () => {
+                showConfirmModal({
+                    title: "Повторить обработку вебхука?",
+                    message: `Вебхук #${wh.id} (${wh.event_type || "событие"}) будет поставлен обратно в очередь обработки.`,
+                    confirmText: "Повторить",
+                    cancelText: "Отмена",
+                    onConfirm: async () => {
+                        const res = await api.retryWebhook(wh.id);
+                        showToast(res.message || "Вебхук поставлен в очередь");
+                        if (typeof reloadWebhooks === "function") await reloadWebhooks();
+                    },
+                });
+            });
+        }
+        const dismissBtn = row.querySelector("[data-dismiss-wh]");
+        if (dismissBtn) {
+            dismissBtn.addEventListener("click", () => {
+                showConfirmModal({
+                    title: "Скрыть проблемный вебхук?",
+                    message: `Вебхук #${wh.id} будет отмечен как обработанный и убран из списка проблемных. Действие запишется в аудит-лог.`,
+                    confirmText: "Скрыть",
+                    cancelText: "Отмена",
+                    isDestructive: true,
+                    onConfirm: async () => {
+                        const res = await api.dismissWebhook(wh.id);
+                        showToast(res.message || "Вебхук скрыт");
+                        if (typeof reloadWebhooks === "function") await reloadWebhooks();
+                    },
+                });
+            });
         }
         container.appendChild(row);
     });

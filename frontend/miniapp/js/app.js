@@ -100,11 +100,13 @@ const appState = {
     auditQuery: "",
     webhooksData: null,
     webhooksLoadAttempted: false,
+    returnStack: [],
     pendingDeepLink: _parseDeepLink(),
     onOpenUser: (userId) => {
         const id = _parsePositiveInt(userId);
         if (id == null) return;
         closeAllModals();
+        appState.returnStack = [];
         appState.mode = "admin";
         appState.adminTab = "users";
         appState.selectedNodeId = null;
@@ -115,6 +117,7 @@ const appState = {
         const id = nodeId == null ? null : _parsePositiveInt(nodeId);
         if (nodeId != null && id == null) return;
         closeAllModals();
+        appState.returnStack = [];
         appState.mode = "admin";
         appState.adminTab = "nodes";
         appState.selectedUserId = null;
@@ -123,6 +126,15 @@ const appState = {
     },
     onOpenFinances: (query = "", attentionOnly = false, subTab = "orders") => {
         closeAllModals();
+        if (appState.mode === "admin" && appState.adminTab === "users" && appState.selectedUserId != null) {
+            appState.returnStack.push({
+                type: "user",
+                userId: appState.selectedUserId,
+                scrollY: window.scrollY,
+            });
+        } else {
+            appState.returnStack = [];
+        }
         appState.mode = "admin";
         appState.adminTab = "finances";
         appState.finSubTab = subTab || "orders";
@@ -145,6 +157,15 @@ const appState = {
     },
     onOpenAudit: (query = "", targetType = "") => {
         closeAllModals();
+        if (appState.mode === "admin" && appState.adminTab === "users" && appState.selectedUserId != null) {
+            appState.returnStack.push({
+                type: "user",
+                userId: appState.selectedUserId,
+                scrollY: window.scrollY,
+            });
+        } else {
+            appState.returnStack = [];
+        }
         appState.mode = "admin";
         appState.adminTab = "finances";
         appState.finSubTab = "audit";
@@ -157,8 +178,25 @@ const appState = {
         appState.selectedUserId = null;
         _renderAdminView();
     },
+    onReturnBack: () => {
+        const entry = Array.isArray(appState.returnStack) ? appState.returnStack.pop() : null;
+        if (!entry) return;
+        closeAllModals();
+        if (entry.type === "user" && entry.userId != null) {
+            appState.mode = "admin";
+            appState.adminTab = "users";
+            appState.selectedNodeId = null;
+            appState.selectedUserId = entry.userId;
+            _renderAdminView().then(() => {
+                if (Number.isFinite(entry.scrollY)) {
+                    requestAnimationFrame(() => window.scrollTo(0, entry.scrollY));
+                }
+            });
+        }
+    },
     onOpenUsersFilter: (filter = "all", query = "") => {
         closeAllModals();
+        appState.returnStack = [];
         appState.mode = "admin";
         appState.adminTab = "users";
         appState.usersFilter = String(filter || "all");
@@ -171,6 +209,7 @@ const appState = {
     },
     onOpenBroadcasts: () => {
         closeAllModals();
+        appState.returnStack = [];
         appState.mode = "admin";
         appState.adminTab = "broadcasts";
         appState.selectedNodeId = null;
@@ -273,6 +312,7 @@ async function _renderAdminView() {
 
     if (appState.mode === "cabinet") {
         _clearBroadcastPollTimerIfLoaded();
+        appState.returnStack = [];
         appState.selectedNodeId = null;
         appState.selectedUserId = null;
         _updateTelegramBackButton(null);
@@ -384,7 +424,11 @@ async function _renderAdminView() {
         return;
     }
 
-    _updateTelegramBackButton(null);
+    _updateTelegramBackButton(
+        appState.adminTab === "finances" && Array.isArray(appState.returnStack) && appState.returnStack.length > 0
+            ? () => appState.onReturnBack()
+            : null
+    );
     const activeTabMeta = _ADMIN_TABS.find((t) => t.id === appState.adminTab) || _ADMIN_TABS[0];
     const tabsHtml = _ADMIN_TABS
         .map((t) => {
@@ -414,6 +458,7 @@ async function _renderAdminView() {
             if (appState.adminTab === "broadcasts" && nextTab !== "broadcasts") {
                 _clearBroadcastPollTimerIfLoaded();
             }
+            appState.returnStack = [];
             appState.adminTab = nextTab;
             appState.selectedNodeId = null;
             appState.selectedUserId = null;
@@ -718,7 +763,6 @@ async function bootstrap() {
 
     const root = document.getElementById("appRoot");
     const userChip = document.getElementById("userChip");
-    const roleChip = document.getElementById("roleChip");
     const modeSwitch = document.getElementById("modeSwitch");
 
     if (modeSwitch && !modeSwitch.dataset.bound) {
@@ -747,14 +791,12 @@ async function bootstrap() {
         userChip.textContent = me.user.name || "";
 
         if (!me.user.is_admin) {
-            roleChip.hidden = true;
             if (modeSwitch) modeSwitch.hidden = true;
             _syncModeSwitch();
             await loadAndRenderUserCabinet(root);
             return;
         }
 
-        roleChip.hidden = true;
         appState.twoFactorPassed = Boolean(me.security && me.security.two_factor_verified);
 
         if (appState.pendingDeepLink && appState.pendingDeepLink.mode === "admin") {

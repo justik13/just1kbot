@@ -32,6 +32,18 @@ function _translateWorkerState(state) {
     return map[s] || state || "—";
 }
 
+function _formatAgeSec(sec) {
+    if (sec == null || !Number.isFinite(Number(sec))) return "";
+    const s = Math.max(0, Math.round(Number(sec)));
+    if (s < 60) return `${s} сек назад`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m} мин назад`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h} ч назад`;
+    const d = Math.floor(h / 24);
+    return `${d} дн назад`;
+}
+
 function _translateBroadcastStatus(status) {
     const s = String(status || "").trim().toLowerCase();
     const map = {
@@ -194,6 +206,8 @@ function _renderOverviewContent(root, state, data) {
                 const stateVal = w.state || "—";
                 const stateLabel = _translateWorkerState(stateVal);
                 const errorType = w.last_error_type || "";
+                const startedAge = _formatAgeSec(w.last_started_age_sec);
+                const errorAge = _formatAgeSec(w.last_error_age_sec);
                 const criticalBadge = w.critical
                     ? ` <span class="chip chip-muted">критич.</span>`
                     : "";
@@ -207,12 +221,15 @@ function _renderOverviewContent(root, state, data) {
                             <span>Состояние: ${escapeHtml(stateLabel)}</span>
                             <span>Сбоев подряд: ${fails}</span>
                         </div>
-                        ${errorType ? `<div class="pulse-sub text-err">Последняя ошибка: ${escapeHtml(errorType)}</div>` : ""}
+                        ${startedAge ? `<div class="meta-text">Запуск: ${escapeHtml(startedAge)}</div>` : ""}
+                        ${errorType ? `<div class="pulse-sub text-err">Последняя ошибка: ${escapeHtml(errorType)}${errorAge ? ` (${escapeHtml(errorAge)})` : ""}</div>` : ""}
                     </div>
                 `;
             })
             .join("")
         : `<div class="meta-text">Нет данных о фоновых воркерах.</div>`;
+
+    const mtprotoUrl = state.mtprotoProxyUrl ?? "";
 
     root.innerHTML = `
         <div class="stack-md">
@@ -269,6 +286,29 @@ function _renderOverviewContent(root, state, data) {
                 </div>
             </details>
 
+            <section class="card">
+                <div class="row">
+                    <h2 class="card-title">Системные настройки</h2>
+                    <span class="chip chip-muted">Telegram</span>
+                </div>
+                <form id="overviewSystemSettingsForm" class="field" style="gap:8px;">
+                    <label for="overviewMtprotoProxyInput">Ссылка на доступ к Telegram (MTProto Proxy URL)</label>
+                    <div class="row-nowrap">
+                        <input
+                            id="overviewMtprotoProxyInput"
+                            name="mtproto_proxy_url"
+                            class="input"
+                            type="text"
+                            maxlength="500"
+                            value="${escapeHtml(mtprotoUrl)}"
+                            placeholder="https://t.me/proxy?server=...&port=...&secret=..."
+                        />
+                        <button id="overviewSaveMtprotoBtn" type="submit" class="btn btn-primary btn-sm" style="flex-shrink:0;">Сохранить</button>
+                    </div>
+                    <div class="meta-text">Кнопка быстрого подключения в боте и личном кабинете. Оставьте пустым, чтобы скрыть.</div>
+                </form>
+            </section>
+
             <div class="row">
                 <button id="overviewRefreshBtn" type="button" class="btn btn-sm">Обновить</button>
                 <button id="overviewLogoutAllBtn" type="button" class="btn btn-sm btn-danger">Выйти со всех устройств</button>
@@ -315,6 +355,34 @@ function _renderOverviewContent(root, state, data) {
         });
     }
 
+    const sysForm = root.querySelector("#overviewSystemSettingsForm");
+    const mtprotoInput = root.querySelector("#overviewMtprotoProxyInput");
+    const saveMtprotoBtn = root.querySelector("#overviewSaveMtprotoBtn");
+    if (sysForm && mtprotoInput) {
+        mtprotoInput.addEventListener("input", () => mtprotoInput.removeAttribute("aria-invalid"));
+        sysForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const val = mtprotoInput.value.trim();
+            if (val && !/^(https:\/\/t\.me\/proxy\?|tg:\/\/proxy\?)/i.test(val)) {
+                mtprotoInput.setAttribute("aria-invalid", "true");
+                mtprotoInput.focus();
+                showToast("Ссылка должна начинаться с https://t.me/proxy? или tg://proxy?", "error");
+                return;
+            }
+            await withButtonLoading(saveMtprotoBtn, "Сохранение...", async () => {
+                try {
+                    const res = await api.updateIncySettings({ mtproto_proxy_url: val });
+                    const savedVal = res?.settings?.mtproto_proxy_url ?? val;
+                    state.mtprotoProxyUrl = savedVal;
+                    if (root.isConnected) mtprotoInput.value = savedVal;
+                    showToast("Системные настройки сохранены");
+                } catch (err) {
+                    showToast(err.message || "Не удалось сохранить настройки", "error");
+                }
+            });
+        });
+    }
+
     const refreshBtn = root.querySelector("#overviewRefreshBtn");
     if (refreshBtn) {
         refreshBtn.addEventListener("click", () => {
@@ -351,9 +419,19 @@ export async function renderAdminOverviewView(root, state) {
         `;
     }
     try {
-        const data = await api.getAdminOverview();
+        const [overviewRes, settingsRes] = await Promise.allSettled([
+            api.getAdminOverview(),
+            api.getIncySettings(),
+        ]);
         if (reqId !== _overviewReqId || !root.isConnected || state.adminTab !== "overview" || state.mode !== "admin") return;
+        if (overviewRes.status === "rejected") {
+            throw overviewRes.reason;
+        }
+        const data = overviewRes.value;
         state.overviewData = data;
+        if (settingsRes.status === "fulfilled" && settingsRes.value?.settings) {
+            state.mtprotoProxyUrl = settingsRes.value.settings.mtproto_proxy_url || "";
+        }
         _renderOverviewContent(root, state, data);
     } catch (err) {
         if (reqId !== _overviewReqId || !root.isConnected || state.adminTab !== "overview" || state.mode !== "admin") return;
