@@ -3,6 +3,7 @@ import { escapeHtml, formatDate, renderPagination, showConfirmModal, showToast, 
 
 let _pollTimer = null;
 let _bcReqId = 0;
+let _previewReqId = 0;
 
 export function clearBroadcastPollTimer() {
     if (_pollTimer !== null) {
@@ -139,7 +140,8 @@ function _updateCharCounter(root) {
 
 export function renderAdminBroadcastsView(root, state) {
     clearBroadcastPollTimer();
-    const viewReqId = ++_bcReqId;
+    ++_bcReqId;
+    ++_previewReqId;
     const broadcasts = state.broadcastsData || [];
     const massTab = state.massTab || "bonus";
     const audienceHtml = _buildAudienceOptions({ includeTest: true, defaultValue: "test" });
@@ -258,6 +260,7 @@ export function renderAdminBroadcastsView(root, state) {
     _updateCharCounter(root);
 
     root.querySelector("#bcAudienceSelect").addEventListener("change", () => {
+        ++_previewReqId;
         const hintEl = root.querySelector("#bcPreviewHint");
         if (hintEl) hintEl.textContent = "";
     });
@@ -265,15 +268,16 @@ export function renderAdminBroadcastsView(root, state) {
     root.querySelector("#reloadBcBtn").addEventListener("click", () => reloadBroadcasts(false, state.broadcastsOffset || 0));
 
     root.querySelector("#bcPreviewBtn").addEventListener("click", async () => {
+        const reqId = ++_previewReqId;
         const audience = root.querySelector("#bcAudienceSelect").value;
         const hintEl = root.querySelector("#bcPreviewHint");
         hintEl.textContent = "Подсчёт...";
         try {
             const res = await api.previewBroadcast(audience);
-            if (!isStillActive(viewReqId) && !root.isConnected) return;
+            if (reqId !== _previewReqId || !root.isConnected || state.adminTab !== "broadcasts" || state.mode !== "admin") return;
             hintEl.textContent = `Аудитория «${res.label}»: получат ${res.reachable_count} (всего в сегменте ${res.total_count})`;
         } catch (err) {
-            if (!root.isConnected) return;
+            if (reqId !== _previewReqId || !root.isConnected || state.adminTab !== "broadcasts" || state.mode !== "admin") return;
             hintEl.textContent = "";
             showToast(err.message || "Ошибка предпросмотра", "error");
         }

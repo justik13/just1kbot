@@ -558,14 +558,19 @@ async def list_finances(
         stmt = stmt.where(attn_cond)
         count_stmt = count_stmt.where(attn_cond)
     if clean_q:
+        escaped_q = clean_q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         clean_user_q = clean_q.lstrip("@")
         conds = [
-            cast(Order.id, String).ilike(f"%{clean_q}%"),
-            Order.external_id.ilike(f"%{clean_q}%"),
-            Order.description.ilike(f"%{clean_q}%"),
-            User.username.ilike(f"%{clean_user_q}%"),
-            User.first_name.ilike(f"%{clean_user_q}%"),
+            cast(Order.id, String).ilike(f"%{escaped_q}%", escape="\\"),
+            Order.external_id.ilike(f"%{escaped_q}%", escape="\\"),
+            Order.description.ilike(f"%{escaped_q}%", escape="\\"),
         ]
+        if clean_user_q:
+            escaped_user_q = clean_user_q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            conds.extend([
+                User.username.ilike(f"%{escaped_user_q}%", escape="\\"),
+                User.first_name.ilike(f"%{escaped_user_q}%", escape="\\"),
+            ])
         try:
             conds.append(Order.id == UUID(clean_q))
         except ValueError:
@@ -647,7 +652,11 @@ async def list_audit_logs(
         stmt = stmt.where(func.lower(AuditLog.target_type) == clean_target_type.lower())
         count_stmt = count_stmt.where(func.lower(AuditLog.target_type) == clean_target_type.lower())
     if clean_q:
-        conds = [AuditLog.details.ilike(f"%{clean_q}%"), AuditLog.action.ilike(f"%{clean_q}%")]
+        escaped_q = clean_q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        conds = [
+            AuditLog.details.ilike(f"%{escaped_q}%", escape="\\"),
+            AuditLog.action.ilike(f"%{escaped_q}%", escape="\\"),
+        ]
         if clean_q.isdigit():
             num = int(clean_q)
             if 0 <= num <= _MAX_INT64:

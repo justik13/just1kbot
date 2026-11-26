@@ -304,19 +304,20 @@ async def reprocess_webhook_inbox_row(
     request_id = f"retry-{getattr(row, 'id', '0')}"
 
     try:
-        (
-            order,
-            inbox_status,
-            notify_order_info,
-            admin_alert_info,
-            refund_alert_info,
-        ) = await _process_yookassa_payload_in_session(
-            session,
-            payload,
-            event=event,
-            request_id=request_id,
-            is_existing_event=True,
-        )
+        async with session.begin_nested():
+            (
+                order,
+                inbox_status,
+                notify_order_info,
+                admin_alert_info,
+                refund_alert_info,
+            ) = await _process_yookassa_payload_in_session(
+                session,
+                payload,
+                event=event,
+                request_id=request_id,
+                is_existing_event=True,
+            )
     except Exception as exc:
         logger.exception(
             "[%s] Failed to reprocess WebhookInbox row %s",

@@ -119,27 +119,29 @@ async def api_admin_users_handler(request: web.Request) -> web.Response:
                     id_conds.append(User.id == q_num)
                 stmt = stmt.where(or_(*id_conds))
             else:
-                pattern = f"%{q.lstrip('@')}%"
+                effective_q = q.lstrip("@") or q
+                escaped_q = effective_q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                pattern = f"%{escaped_q}%"
                 stmt = stmt.where(
                     or_(
-                        User.username.ilike(pattern),
-                        User.first_name.ilike(pattern),
+                        User.username.ilike(pattern, escape="\\"),
+                        User.first_name.ilike(pattern, escape="\\"),
                         User.id.in_(
-                            select(UserDevice.user_id).where(UserDevice.hwid.ilike(pattern))
+                            select(UserDevice.user_id).where(UserDevice.hwid.ilike(pattern, escape="\\"))
                         ),
                         User.id.in_(
                             select(VlessSubscription.user_id).where(
                                 or_(
-                                    VlessSubscription.uuid.ilike(pattern),
-                                    VlessSubscription.token.ilike(pattern),
+                                    VlessSubscription.uuid.ilike(pattern, escape="\\"),
+                                    VlessSubscription.token.ilike(pattern, escape="\\"),
                                 )
                             )
                         ),
                         User.id.in_(
                             select(WhiteInternetSubscription.user_id).where(
                                 or_(
-                                    WhiteInternetSubscription.uuid.ilike(pattern),
-                                    WhiteInternetSubscription.token.ilike(pattern),
+                                    WhiteInternetSubscription.uuid.ilike(pattern, escape="\\"),
+                                    WhiteInternetSubscription.token.ilike(pattern, escape="\\"),
                                 )
                             )
                         ),

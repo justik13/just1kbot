@@ -943,6 +943,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                                     eu_srv = eu_hubs_by_domain.get(probe_sni)
                             if (
                                 not eu_srv
+                                or eu_srv.id not in all_enabled_eu_ids
                                 or not eu_srv.is_active
                                 or eu_srv.health_state != ServerHealthState.ONLINE
                                 or get_server_monitor_state(eu_srv.id, eu_srv).health_state != ServerHealthState.ONLINE

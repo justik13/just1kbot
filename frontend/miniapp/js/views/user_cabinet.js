@@ -787,8 +787,7 @@ function _openStandardDevicesModal(d, onReload) {
                     });
                 } catch (err) {
                     devApplyBtn.disabled = false;
-                    showToast(err.message || "Не удалось изменить лимит", "error");
-                    throw err;
+                    throw new Error((err && err.message) || "Не удалось изменить лимит");
                 }
             },
         });
@@ -848,11 +847,11 @@ function _openWiPurchaseModal(d, mode, onReload) {
             <div class="muted" style="font-size:12px;">
                 Независимая подписка на 30 дней для мобильной сети при жёстких ограничениях. Работает как отдельно, так и в дополнение к «Стандарту».
             </div>
-            ${d.devices && d.devices.length > devices ? (() => {
+            ${d.devices && d.devices.length > 1 ? (() => {
                 const sortedDevs = [...d.devices].sort((a, b) => (a.id || 0) - (b.id || 0));
                 const firstDevName = sortedDevs[0]?.device_name || sortedDevs[0]?.platform || "Устройство";
                 return `
-                <div class="notice-box notice-info" style="font-size:11px; padding:6px 10px; margin-top:4px;">
+                <div id="modalWiPrimaryDevNotice" class="notice-box notice-info" style="font-size:11px; padding:6px 10px; margin-top:4px;" ${d.devices.length > devices ? "" : "hidden"}>
                     <span>Слот будет привязан к основному устройству (${escapeHtml(firstDevName)}). Выбрать другое можно в любой момент на вкладке подключения.</span>
                 </div>
                 `;
@@ -889,8 +888,12 @@ function _openWiPurchaseModal(d, mode, onReload) {
 
     const quoteEl = wrap.querySelector("#modalWiQuote");
     const payBtn = wrap.querySelector("#modalWiPayBtn");
+    const primaryDevNotice = wrap.querySelector("#modalWiPrimaryDevNotice");
 
     const updateView = () => {
+        if (primaryDevNotice) {
+            primaryDevNotice.hidden = !(d.devices && d.devices.length > devices);
+        }
         const originalPrice = base + Math.max(0, devices - 1) * extra;
         const discount = welcomeDiscountEligible
             ? Math.floor((originalPrice * welcomeDiscountPct) / 100)
@@ -1173,8 +1176,7 @@ function _openWiManageModal(d, onReload) {
                             onReload();
                         });
                     } catch (err) {
-                        showToast(err.message || "Ошибка", "error");
-                        throw err;
+                        throw new Error((err && err.message) || "Ошибка");
                     } finally {
                         b.disabled = false;
                     }
@@ -1215,6 +1217,7 @@ function _wiHasActivePeriod(wi) {
 }
 
 export async function loadAndRenderUserCabinet(root, options = {}) {
+    _state.loadOptions = options;
     const isActive = () => (typeof options.isActive === "function" ? options.isActive() : true);
     const reqId = ++_dashReqId;
     try {
@@ -1233,7 +1236,7 @@ export async function loadAndRenderUserCabinet(root, options = {}) {
                 _state.tab = (stdActive || wiActive) ? "connect" : "tariffs";
             }
         }
-        _render(root);
+        _render(root, { loadOptions: options });
     } catch (err) {
         if (reqId !== _dashReqId || !isActive() || !root.isConnected) return;
         root.innerHTML = `
@@ -1316,7 +1319,7 @@ function _setCabinetBackButton(onBack) {
     setPageBackButton(onBack);
 }
 
-function _render(root, { preserveScroll = true } = {}) {
+function _render(root, { preserveScroll = true, loadOptions = _state.loadOptions } = {}) {
     const d = _state.data;
     if (!d) return;
     const prevGuideOpen = Boolean(root.querySelector("#connectGuide")?.open);
@@ -1368,7 +1371,7 @@ function _render(root, { preserveScroll = true } = {}) {
     });
 
     const body = root.querySelector("#userTabBody");
-    const reload = () => loadAndRenderUserCabinet(root);
+    const reload = () => loadAndRenderUserCabinet(root, loadOptions || {});
 
     if (_state.tab === "connect") {
         _setCabinetBackButton(null);
@@ -2233,8 +2236,7 @@ function _bindDevicesEvents(container, d, reload) {
                         showToast("Устройство удалено");
                         reload();
                     } catch (err) {
-                        showToast(err.message || "Не удалось удалить устройство", "error");
-                        throw err;
+                        throw new Error((err && err.message) || "Не удалось удалить устройство");
                     } finally {
                         btn.disabled = false;
                     }
@@ -2269,8 +2271,7 @@ function _bindDevicesEvents(container, d, reload) {
                         showToast("Все устройства отвязаны");
                         reload();
                     } catch (err) {
-                        showToast(err.message || "Не удалось сбросить устройства", "error");
-                        throw err;
+                        throw new Error((err && err.message) || "Не удалось сбросить устройства");
                     } finally {
                         resetBtn.disabled = false;
                     }
@@ -2318,8 +2319,7 @@ function _bindDevicesEvents(container, d, reload) {
                                     showToast("Слот перенесён. Обновите список в приложении");
                                     reload();
                                 } catch (err) {
-                                    showToast(err.message || "Не удалось перенести слот", "error");
-                                    throw err;
+                                    throw new Error((err && err.message) || "Не удалось перенести слот");
                                 } finally {
                                     chk.disabled = false;
                                 }

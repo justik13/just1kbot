@@ -233,7 +233,10 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                             {"ok": False, "error": limit_reason or "Активных устройств больше нового лимита"},
                             status=400,
                         )
-                vless_sub.expires_at = new_end
+                if new_end <= now:
+                    vless_sub.expires_at = now - timedelta(hours=constants.VPN_ACCESS_GRACE_HOURS + 1)
+                else:
+                    vless_sub.expires_at = new_end
                 limit_changed = (
                     payload.device_limit is not None
                     and payload.device_limit != before_limit

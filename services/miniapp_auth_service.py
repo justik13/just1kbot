@@ -410,7 +410,7 @@ def _decrypt_totp_secret(stored: str) -> str | None:
             raise RuntimeError("DB_ENCRYPTION_KEY is required to decrypt TOTP secret")
         raw_token = clean[len(_TOTP_ENC_PREFIX):]
         return _get_fernet_engine(keys_str).decrypt(raw_token.encode("utf-8")).decode("utf-8")
-    except (InvalidToken, RuntimeError) as exc:
+    except (InvalidToken, RuntimeError, ValueError) as exc:
         logger.error("Failed to decrypt admin TOTP secret: %s", exc)
         return None
 
@@ -469,6 +469,16 @@ async def verify_admin_2fa(
     clean_code = (code or "").strip().replace(" ", "")
     cfg = await get_admin_2fa_config(session, telegram_id)
 
+    retry_after = _check_2fa_lockout(telegram_id)
+    if retry_after > 0:
+        return {
+            "verified": False,
+            "locked": True,
+            "newly_locked": False,
+            "retry_after": retry_after,
+            "error": f"Слишком много неверных попыток. Повторите через {retry_after} сек.",
+        }
+
     if setup_token:
         if cfg["configured"]:
             return {"verified": False, "error": "2FA уже настроена"}
@@ -494,10 +504,10 @@ async def verify_admin_2fa(
             }
         try:
             encrypted_secret = _encrypt_totp_secret(pending_secret)
-        except RuntimeError:
+        except (RuntimeError, ValueError):
             return {
                 "verified": False,
-                "error": "Ключ шифрования БД (DB_ENCRYPTION_KEY) не настроен на сервере.",
+                "error": "Ключ шифрования БД (DB_ENCRYPTION_KEY) не настроен или некорректен на сервере.",
             }
         _used_totp_steps[(telegram_id, matched_step)] = True
         await set_system_setting(
