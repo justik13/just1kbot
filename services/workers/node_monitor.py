@@ -47,6 +47,7 @@ from config.constants import (
     WHITE_INTERNET_CAPABILITY,
     WHITE_INTERNET_SUB_PATH_PREFIX,
 )
+from config.enums import ServerLifecycleStatus
 from config.settings import get_settings
 from database.connection import session_scope
 from database.models import Server
@@ -345,7 +346,7 @@ async def check_node_resources_and_alerts(bot: Bot):
             _dom = _extract_domain(_srv)
             if _dom:
                 eu_hubs_by_domain[_dom] = _srv
-            if _srv.is_active:
+            if _srv.is_active and getattr(_srv, "lifecycle_status", None) in (None, ServerLifecycleStatus.ACTIVE):
                 all_enabled_eu_ids.add(_srv.id)
                 if _srv.health_state == ServerHealthState.ONLINE:
                     all_online_eu_ids.add(_srv.id)
