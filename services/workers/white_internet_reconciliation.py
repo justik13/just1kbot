@@ -441,9 +441,13 @@ class WhiteInternetReconciliationWorker:
         self,
         active_servers: list[tuple[int, str, str, str, list]],
         sf,
+        expected_hub_count: int | None = None,
     ) -> int:
         if not active_servers:
             return 0
+        required_hub_count = (
+            expected_hub_count if expected_hub_count is not None else len(active_servers)
+        )
         revoked_count = 0
         async with sf() as sess:
             stmt = (
@@ -531,7 +535,7 @@ class WhiteInternetReconciliationWorker:
                             sub.desired_version = bump_version_to
                             await sess.commit()
                     cur_ver = max(cur_ver, bump_version_to)
-                if len(results) == len(active_servers) and all(results):
+                if required_hub_count > 0 and len(results) == required_hub_count and all(results):
                     async with sf() as sess:
                         await white_internet_repo.pop_pending_revoked_uuid(sess, sub_id, old_uuid)
                         await sess.commit()
@@ -573,7 +577,6 @@ class WhiteInternetReconciliationWorker:
                         ServerLifecycleStatus.ACTIVE,
                         ServerLifecycleStatus.DECOMMISSIONING,
                     ]),
-                    Server.health_state.in_([ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION]),
                 )
                 .order_by(Server.id.asc())
             )
@@ -581,8 +584,13 @@ class WhiteInternetReconciliationWorker:
 
             active_server_targets: list[tuple[int, str, str, str, list]] = []
             decommissioning_server_ids: set[int] = set()
+            total_active_wi_hubs = 0
             for s in servers:
                 if WHITE_INTERNET_CAPABILITY not in (s.capabilities or []):
+                    continue
+                total_active_wi_hubs += 1
+                health_state = getattr(s, "health_state", None) or ServerHealthState.ONLINE
+                if health_state not in (ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION):
                     continue
                 epoch = s.xray_instance_epoch
                 if not epoch:
@@ -730,7 +738,11 @@ class WhiteInternetReconciliationWorker:
                     elif r is True:
                         synced_count += 1
 
-        synced_count += await self._reconcile_pending_revocations(active_server_targets, sf)
+        synced_count += await self._reconcile_pending_revocations(
+            active_server_targets,
+            sf,
+            expected_hub_count=total_active_wi_hubs,
+        )
         return synced_count
 
 

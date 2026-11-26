@@ -27,6 +27,37 @@ logger = logging.getLogger(__name__)
 
 _CODE_CLEAN_RE = re.compile(r"[^a-z0-9_-]+")
 _ROUTE_UUID_NAMESPACE = uuid.UUID("7f3b9a10-5c2d-4e8a-9f1b-2d4c6e8a0b1c")
+_topology_sync_lock: asyncio.Lock | None = None
+_topology_sync_lock_loop: asyncio.AbstractEventLoop | None = None
+_topology_sync_running: bool = False
+_resync_requested: bool = False
+_sync_req_seq: int = 0
+_sync_completed_seq: int = 0
+_last_topology_sync_results: dict[int, bool] = {}
+
+
+def _get_topology_sync_lock() -> asyncio.Lock:
+    global _topology_sync_lock, _topology_sync_lock_loop
+    global _topology_sync_running, _resync_requested, _sync_req_seq, _sync_completed_seq, _last_topology_sync_results
+    try:
+        current_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        current_loop = None
+    if _topology_sync_lock is None or _topology_sync_lock_loop is not current_loop:
+        _topology_sync_lock = asyncio.Lock()
+        _topology_sync_lock_loop = current_loop
+        _topology_sync_running = False
+        _resync_requested = False
+        _sync_req_seq = 0
+        _sync_completed_seq = 0
+        _last_topology_sync_results = {}
+    return _topology_sync_lock
+
+
+def _format_bridge_code(loc_code: str, eu_id: int) -> str:
+    suffix = f"-eu{eu_id}"
+    max_loc_len = max(0, 32 - len(suffix))
+    return f"{loc_code[:max_loc_len]}{suffix}"[:32]
 
 
 def _clean_code(raw: Any, fallback: str) -> str:
@@ -107,12 +138,19 @@ def _deterministic_route_uuid(eu_hub_id: int, exit_node_id: int, eu_bridge_uuid:
 
 
 def _is_node_eligible(srv: Server) -> bool:
-    return (
-        bool(srv.is_active)
-        and srv.health_state in (ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION)
-        and getattr(srv, "lifecycle_status", None) in (None, ServerLifecycleStatus.ACTIVE)
-        and is_v2_node_server(srv)
+    if not bool(srv.is_active):
+        return False
+    if srv.health_state not in (ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION):
+        return False
+    if not is_v2_node_server(srv):
+        return False
+    role = get_server_role(srv)
+    allowed_lifecycle = (
+        (None, ServerLifecycleStatus.ACTIVE, ServerLifecycleStatus.DECOMMISSIONING)
+        if role == "ru_hub"
+        else (None, ServerLifecycleStatus.ACTIVE)
     )
+    return getattr(srv, "lifecycle_status", None) in allowed_lifecycle
 
 
 def build_v2_topology_links(servers: list[Server]) -> dict[int, dict[str, Any]]:
@@ -235,7 +273,7 @@ def build_v2_topology_links(servers: list[Server]) -> dict[int, dict[str, Any]]:
             for ex, _ex_ip, _ex_dom, _ex_uid, loc_code in valid_exit:
                 ex_extra = ex.extra_data if isinstance(ex.extra_data, dict) else {}
                 r_uid = _deterministic_route_uuid(eu.id, ex.id, eu_uid)
-                bridge_id = f"{loc_code}-eu{eu.id}" if multi_eu else loc_code
+                bridge_id = _format_bridge_code(loc_code, eu.id) if multi_eu else loc_code[:32]
                 if ex_extra.get("in_standard") is not False:
                     std_bridges.append({
                         "code": bridge_id,
@@ -261,18 +299,19 @@ def build_v2_topology_links(servers: list[Server]) -> dict[int, dict[str, Any]]:
                         bi_locations.append({"code": loc_code, "bridge_code": loc_code})
 
         if excluded_eu and valid_exit:
-            first_ex, _fip, _fdom, _fuid, first_loc = valid_exit[0]
+            probe_exits = valid_exit[:2]
             for eu, eu_ip, eu_dom, eu_uid in excluded_eu:
-                r_uid = _deterministic_route_uuid(eu.id, first_ex.id, eu_uid)
-                probe_bridges.append({
-                    "code": f"{first_loc}-eu{eu.id}",
-                    "location_code": first_loc,
-                    "ip": eu_ip,
-                    "port": 443,
-                    "sni": eu_dom,
-                    "uuid": r_uid,
-                    "is_default": False,
-                })
+                for p_ex, _pip, _pdom, _puid, p_loc in probe_exits:
+                    r_uid = _deterministic_route_uuid(eu.id, p_ex.id, eu_uid)
+                    probe_bridges.append({
+                        "code": _format_bridge_code(p_loc, eu.id),
+                        "location_code": p_loc,
+                        "ip": eu_ip,
+                        "port": 443,
+                        "sni": eu_dom,
+                        "uuid": r_uid,
+                        "is_default": False,
+                    })
 
         rh_payload: dict[str, Any] = {
             "standard": {
@@ -293,7 +332,7 @@ def build_v2_topology_links(servers: list[Server]) -> dict[int, dict[str, Any]]:
 async def push_v2_topology_links(servers: list[Server]) -> dict[int, bool]:
     """Compute and push v2 links.json to all eligible v2 nodes without holding a DB session."""
     for srv in servers:
-        if srv.is_active and srv.health_state == ServerHealthState.ONLINE and not _extract_ipv4(srv):
+        if _is_node_eligible(srv) and not _extract_ipv4(srv):
             ip_res = await _extract_ipv4_async(srv)
             if ip_res:
                 extra = dict(srv.extra_data or {})
@@ -305,9 +344,15 @@ async def push_v2_topology_links(servers: list[Server]) -> dict[int, bool]:
     for srv in servers:
         if not srv.is_active or srv.health_state != ServerHealthState.ONLINE:
             continue
-        if srv.lifecycle_status not in (None, ServerLifecycleStatus.ACTIVE):
-            continue
         if not is_v2_node_server(srv):
+            continue
+        role = get_server_role(srv)
+        allowed_lifecycle = (
+            (None, ServerLifecycleStatus.ACTIVE, ServerLifecycleStatus.DECOMMISSIONING)
+            if role == "ru_hub"
+            else (None, ServerLifecycleStatus.ACTIVE)
+        )
+        if getattr(srv, "lifecycle_status", None) not in allowed_lifecycle:
             continue
         payload = payloads.get(srv.id)
         if not payload:
@@ -347,8 +392,29 @@ async def sync_v2_topology_to_nodes(session: AsyncSession) -> dict[int, bool]:
 
 async def sync_v2_topology_to_nodes_nonblocking() -> dict[int, bool]:
     """Read servers in a short session and push v2 links.json outside any DB transaction."""
+    global _topology_sync_running, _resync_requested, _sync_req_seq, _sync_completed_seq, _last_topology_sync_results
     from database.connection import session_scope
 
-    async with session_scope() as session:
-        servers = list(await get_all_servers(session))
-    return await push_v2_topology_links(servers)
+    lock = _get_topology_sync_lock()
+    _sync_req_seq += 1
+    my_seq = _sync_req_seq
+    if _topology_sync_running or lock.locked():
+        _resync_requested = True
+
+    async with lock:
+        if _sync_completed_seq >= my_seq and not _resync_requested:
+            return dict(_last_topology_sync_results)
+        _topology_sync_running = True
+        try:
+            while True:
+                _resync_requested = False
+                target_seq = _sync_req_seq
+                async with session_scope() as session:
+                    servers = list(await get_all_servers(session))
+                results = await push_v2_topology_links(servers)
+                _last_topology_sync_results = dict(results)
+                _sync_completed_seq = target_seq
+                if not _resync_requested:
+                    return results
+        finally:
+            _topology_sync_running = False

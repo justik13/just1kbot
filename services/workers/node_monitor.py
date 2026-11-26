@@ -124,6 +124,9 @@ def _build_v2_extra_patch(
     for k, v in merged.items():
         if k not in base or base[k] != v:
             patch[k] = v
+    for k in ("last_apply", "ssl_cert"):
+        if k in base and k not in merged:
+            patch[k] = None
     return patch
 
 
@@ -334,12 +337,14 @@ async def check_node_resources_and_alerts(bot: Bot):
 
     from services.topology_sync_service import _extract_domain, _extract_ipv4
 
+    eu_hubs_by_id: dict[int, Server] = {}
     eu_hubs_by_ip: dict[str, Server] = {}
     eu_hubs_by_domain: dict[str, Server] = {}
     all_enabled_eu_ids: set[int] = set()
     all_online_eu_ids: set[int] = set()
     for _srv in servers:
         if get_server_role(_srv) == "eu_hub":
+            eu_hubs_by_id[_srv.id] = _srv
             _ip = _extract_ipv4(_srv)
             if _ip:
                 eu_hubs_by_ip[_ip] = _srv
@@ -611,7 +616,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                 )
 
         alerts_to_send: list[dict] = []
-        ingress_alerts_to_send: list[tuple[str, str, object, bool]] = []
+        ingress_alerts_to_send: list[tuple[str, str, bool, float | None]] = []
 
         # Decoupled ingress alert evaluation and delivery (independent of core server CAS / health state)
         if origin_probe_result is not None:
@@ -630,243 +635,262 @@ async def check_node_resources_and_alerts(bot: Bot):
 
                 if got_lock:
                     fresh_server = await get_server_by_id(session, server.id, for_update=True)
-                    db_extra = dict((fresh_server.extra_data if fresh_server else server.extra_data) or {})
-                    db_ingress_problem = bool(db_extra.get("ingress_problem"))
-                    db_cdn_problem = bool(db_extra.get("cdn_problem"))
+                    if fresh_server is None:
+                        logger.debug(
+                            "Server %d was deleted during ingress probe; skipping ingress state/alerts.",
+                            server.id,
+                        )
+                    else:
+                        db_extra = dict(fresh_server.extra_data or {})
+                        db_ingress_problem = bool(db_extra.get("ingress_problem"))
+                        db_cdn_problem = bool(db_extra.get("cdn_problem"))
 
-                    # Durable-by-Default: sync in-memory state with DB
-                    if db_ingress_problem:
-                        st.ingress_problem = True
-                    if "consecutive_ingress_fails" in db_extra:
-                        st.consecutive_ingress_fails = int(db_extra.get("consecutive_ingress_fails") or 0)
-                    if "consecutive_ingress_successes" in db_extra:
-                        st.consecutive_ingress_successes = int(db_extra.get("consecutive_ingress_successes") or 0)
-                    saved_ing_start = db_extra.get("ingress_problem_started_at")
-                    if saved_ing_start is not None and isinstance(saved_ing_start, (int, float)):
-                        if st.ingress_problem_started_at is None:
-                            diff = max(0.0, time.time() - float(saved_ing_start))
-                            st.ingress_problem_started_at = now_m - diff
-                    elif not db_ingress_problem and not st.ingress_problem:
-                        st.ingress_problem_started_at = None
+                        # Durable-by-Default: sync in-memory state with DB
+                        if db_ingress_problem:
+                            st.ingress_problem = True
+                        if "consecutive_ingress_fails" in db_extra:
+                            st.consecutive_ingress_fails = int(db_extra.get("consecutive_ingress_fails") or 0)
+                        if "consecutive_ingress_successes" in db_extra:
+                            st.consecutive_ingress_successes = int(db_extra.get("consecutive_ingress_successes") or 0)
+                        saved_ing_start = db_extra.get("ingress_problem_started_at")
+                        if saved_ing_start is not None and isinstance(saved_ing_start, (int, float)):
+                            if st.ingress_problem_started_at is None:
+                                diff = max(0.0, time.time() - float(saved_ing_start))
+                                st.ingress_problem_started_at = now_m - diff
+                        elif not db_ingress_problem and not st.ingress_problem:
+                            st.ingress_problem_started_at = None
 
-                    if db_cdn_problem:
-                        st.cdn_problem = True
-                    if "consecutive_cdn_fails" in db_extra:
-                        st.consecutive_cdn_fails = int(db_extra.get("consecutive_cdn_fails") or 0)
-                    if "consecutive_cdn_successes" in db_extra:
-                        st.consecutive_cdn_successes = int(db_extra.get("consecutive_cdn_successes") or 0)
-                    saved_cdn_start = db_extra.get("cdn_problem_started_at")
-                    if saved_cdn_start is not None and isinstance(saved_cdn_start, (int, float)):
-                        if st.cdn_problem_started_at is None:
-                            diff = max(0.0, time.time() - float(saved_cdn_start))
-                            st.cdn_problem_started_at = now_m - diff
-                    elif not db_cdn_problem and not st.cdn_problem:
-                        st.cdn_problem_started_at = None
+                        if db_cdn_problem:
+                            st.cdn_problem = True
+                        if "consecutive_cdn_fails" in db_extra:
+                            st.consecutive_cdn_fails = int(db_extra.get("consecutive_cdn_fails") or 0)
+                        if "consecutive_cdn_successes" in db_extra:
+                            st.consecutive_cdn_successes = int(db_extra.get("consecutive_cdn_successes") or 0)
+                        saved_cdn_start = db_extra.get("cdn_problem_started_at")
+                        if saved_cdn_start is not None and isinstance(saved_cdn_start, (int, float)):
+                            if st.cdn_problem_started_at is None:
+                                diff = max(0.0, time.time() - float(saved_cdn_start))
+                                st.cdn_problem_started_at = now_m - diff
+                        elif not db_cdn_problem and not st.cdn_problem:
+                            st.cdn_problem_started_at = None
 
-                    has_ingress_problem = db_ingress_problem or st.ingress_problem
-                    has_cdn_problem = db_cdn_problem or st.cdn_problem
-                    extra_changed = False
+                        has_ingress_problem = db_ingress_problem or st.ingress_problem
+                        has_cdn_problem = db_cdn_problem or st.cdn_problem
+                        extra_changed = False
 
-                    if origin_probe_result is not None:
-                        origin_ok, origin_detail = origin_probe_result
-                        active_origin_domain = origin_domain or cdn_domain or server.name
+                        if origin_probe_result is not None:
+                            origin_ok, origin_detail = origin_probe_result
+                            active_origin_domain = origin_domain or cdn_domain or server.name
 
-                        # 1. Evaluate Origin Ingress
-                        if not origin_ok:
-                            st.consecutive_ingress_fails += 1
-                            st.consecutive_ingress_successes = 0
-                            if (
-                                db_extra.get("consecutive_ingress_fails") != st.consecutive_ingress_fails
-                                or db_extra.get("consecutive_ingress_successes") != 0
-                            ):
-                                db_extra["consecutive_ingress_fails"] = st.consecutive_ingress_fails
-                                db_extra["consecutive_ingress_successes"] = 0
-                                extra_changed = True
+                            # 1. Evaluate Origin Ingress
+                            if not origin_ok:
+                                st.consecutive_ingress_fails += 1
+                                st.consecutive_ingress_successes = 0
+                                if (
+                                    db_extra.get("consecutive_ingress_fails") != st.consecutive_ingress_fails
+                                    or db_extra.get("consecutive_ingress_successes") != 0
+                                ):
+                                    db_extra["consecutive_ingress_fails"] = st.consecutive_ingress_fails
+                                    db_extra["consecutive_ingress_successes"] = 0
+                                    extra_changed = True
 
-                            if not has_ingress_problem and st.consecutive_ingress_fails >= REQUIRED_INGRESS_FAILS:
-                                st.ingress_problem = True
-                                st.ingress_problem_started_at = now_m
-                                st.last_ingress_reminder_at = now_m
-                                db_extra["ingress_problem"] = True
-                                db_extra["ingress_problem_started_at"] = time.time()
-                                extra_changed = True
-                                ingress_alerts_to_send.append((
-                                    "ingress",
-                                    ALERT_INGRESS_PROBLEM.format(
-                                        server_name=safe(server.name),
-                                        server_id=server.id,
-                                        domain=safe(active_origin_domain),
-                                        status_or_err=safe(origin_detail),
-                                        endpoint=safe(f"{sub_prefix}/ping"),
-                                    ),
-                                    True,
-                                ))
-                            elif has_ingress_problem:
-                                if st.last_ingress_reminder_at is None:
-                                    st.last_ingress_reminder_at = now_m
-                                elif (now_m - st.last_ingress_reminder_at) >= OUTAGE_REMINDER_INTERVAL_SECONDS:
-                                    outage_dur = (now_m - st.ingress_problem_started_at) if st.ingress_problem_started_at else OUTAGE_REMINDER_INTERVAL_SECONDS
+                                if not has_ingress_problem and st.consecutive_ingress_fails >= REQUIRED_INGRESS_FAILS:
+                                    st.ingress_problem = True
+                                    st.ingress_problem_started_at = now_m
+                                    db_extra["ingress_problem"] = True
+                                    db_extra["ingress_problem_started_at"] = time.time()
+                                    extra_changed = True
                                     ingress_alerts_to_send.append((
                                         "ingress",
-                                        ALERT_INGRESS_PROBLEM_REMINDER.format(
+                                        ALERT_INGRESS_PROBLEM.format(
                                             server_name=safe(server.name),
                                             server_id=server.id,
                                             domain=safe(active_origin_domain),
+                                            status_or_err=safe(origin_detail),
                                             endpoint=safe(f"{sub_prefix}/ping"),
-                                            hours_text=_format_outage_duration(outage_dur),
                                         ),
                                         True,
+                                        now_m,
                                     ))
-                                    st.last_ingress_reminder_at = now_m
-                        else:
-                            st.consecutive_ingress_successes += 1
-                            st.consecutive_ingress_fails = 0
-                            if (
-                                db_extra.get("consecutive_ingress_successes") != st.consecutive_ingress_successes
-                                or db_extra.get("consecutive_ingress_fails") != 0
-                            ):
-                                db_extra["consecutive_ingress_successes"] = st.consecutive_ingress_successes
-                                db_extra["consecutive_ingress_fails"] = 0
-                                extra_changed = True
-
-                            if st.consecutive_ingress_successes >= REQUIRED_INGRESS_SUCCESSES:
-                                st.ingress_problem = False
-                                st.ingress_problem_started_at = None
-                                st.last_ingress_reminder_at = None
-                                if "ingress_problem" in db_extra or "ingress_problem_started_at" in db_extra:
-                                    db_extra.pop("ingress_problem", None)
-                                    db_extra.pop("ingress_problem_started_at", None)
-                                    extra_changed = True
-                                if has_ingress_problem:
-                                    ingress_alerts_to_send.append((
-                                        "ingress",
-                                        ALERT_INGRESS_RESTORED.format(
-                                            server_name=safe(server.name),
-                                            server_id=server.id,
-                                            domain=safe(active_origin_domain),
-                                            endpoint=safe(f"{sub_prefix}/ping"),
-                                        ),
-                                        False,
-                                    ))
-
-                        # 2. Evaluate CDN Delivery (only in dual probe mode when origin is healthy)
-                        if cdn_probe_result is not None and cdn_domain:
-                            cdn_ok, cdn_detail = cdn_probe_result
-                            if origin_ok:
-                                if cdn_ok:
-                                    st.consecutive_cdn_successes += 1
-                                    st.consecutive_cdn_fails = 0
-                                    if (
-                                        db_extra.get("consecutive_cdn_successes") != st.consecutive_cdn_successes
-                                        or db_extra.get("consecutive_cdn_fails") != 0
-                                    ):
-                                        db_extra["consecutive_cdn_successes"] = st.consecutive_cdn_successes
-                                        db_extra["consecutive_cdn_fails"] = 0
-                                        extra_changed = True
-
-                                    if st.consecutive_cdn_successes >= REQUIRED_INGRESS_SUCCESSES:
-                                        st.cdn_problem = False
-                                        st.cdn_problem_started_at = None
-                                        st.last_cdn_reminder_at = None
-                                        if "cdn_problem" in db_extra or "cdn_problem_started_at" in db_extra:
-                                            db_extra.pop("cdn_problem", None)
-                                            db_extra.pop("cdn_problem_started_at", None)
-                                            extra_changed = True
-                                        if has_cdn_problem:
-                                            ingress_alerts_to_send.append((
-                                                "cdn",
-                                                ALERT_CDN_INGRESS_RESTORED.format(
-                                                    server_name=safe(server.name),
-                                                    server_id=server.id,
-                                                    domain=safe(cdn_domain),
-                                                    endpoint=safe(f"{sub_prefix}/ping"),
-                                                ),
-                                                False,
-                                            ))
-                                else:
-                                    st.consecutive_cdn_fails += 1
-                                    st.consecutive_cdn_successes = 0
-                                    if (
-                                        db_extra.get("consecutive_cdn_fails") != st.consecutive_cdn_fails
-                                        or db_extra.get("consecutive_cdn_successes") != 0
-                                    ):
-                                        db_extra["consecutive_cdn_fails"] = st.consecutive_cdn_fails
-                                        db_extra["consecutive_cdn_successes"] = 0
-                                        extra_changed = True
-
-                                    if st.consecutive_cdn_fails < REQUIRED_CDN_FAILS:
-                                        logger.info(
-                                            "Xray origin node %s Origin (%s) is healthy (200), but CDN (%s) returned %s (%d/%d fails). Suppressing transient alert.",
-                                            server.id, active_origin_domain, cdn_domain, cdn_detail, st.consecutive_cdn_fails, REQUIRED_CDN_FAILS,
-                                        )
-                                    elif not has_cdn_problem:
-                                        st.cdn_problem = True
-                                        st.cdn_problem_started_at = now_m
-                                        st.last_cdn_reminder_at = now_m
-                                        db_extra["cdn_problem"] = True
-                                        db_extra["cdn_problem_started_at"] = time.time()
-                                        extra_changed = True
-                                        logger.warning(
-                                            "Xray origin node %s CDN (%s) persistent failure (%d fails): %s (Origin %s is 200 OK). Sending CDN alert.",
-                                            server.id, cdn_domain, st.consecutive_cdn_fails, cdn_detail, active_origin_domain,
-                                        )
+                                elif has_ingress_problem:
+                                    if st.last_ingress_reminder_at is None:
+                                        st.last_ingress_reminder_at = now_m
+                                    elif (now_m - st.last_ingress_reminder_at) >= OUTAGE_REMINDER_INTERVAL_SECONDS:
+                                        outage_dur = (now_m - st.ingress_problem_started_at) if st.ingress_problem_started_at else OUTAGE_REMINDER_INTERVAL_SECONDS
                                         ingress_alerts_to_send.append((
-                                            "cdn",
-                                            ALERT_CDN_INGRESS_PROBLEM.format(
+                                            "ingress",
+                                            ALERT_INGRESS_PROBLEM_REMINDER.format(
                                                 server_name=safe(server.name),
                                                 server_id=server.id,
-                                                domain=safe(cdn_domain),
-                                                origin_domain=safe(active_origin_domain),
-                                                status_or_err=safe(cdn_detail),
+                                                domain=safe(active_origin_domain),
                                                 endpoint=safe(f"{sub_prefix}/ping"),
+                                                hours_text=_format_outage_duration(outage_dur),
                                             ),
                                             True,
+                                            now_m,
                                         ))
-                                    elif has_cdn_problem:
-                                        if st.last_cdn_reminder_at is None:
-                                            st.last_cdn_reminder_at = now_m
-                                        elif (now_m - st.last_cdn_reminder_at) >= OUTAGE_REMINDER_INTERVAL_SECONDS:
-                                            outage_dur = (now_m - st.cdn_problem_started_at) if st.cdn_problem_started_at else OUTAGE_REMINDER_INTERVAL_SECONDS
+                            else:
+                                st.consecutive_ingress_successes += 1
+                                st.consecutive_ingress_fails = 0
+                                if (
+                                    db_extra.get("consecutive_ingress_successes") != st.consecutive_ingress_successes
+                                    or db_extra.get("consecutive_ingress_fails") != 0
+                                ):
+                                    db_extra["consecutive_ingress_successes"] = st.consecutive_ingress_successes
+                                    db_extra["consecutive_ingress_fails"] = 0
+                                    extra_changed = True
+
+                                if st.consecutive_ingress_successes >= REQUIRED_INGRESS_SUCCESSES:
+                                    st.ingress_problem = False
+                                    st.ingress_problem_started_at = None
+                                    st.last_ingress_reminder_at = None
+                                    if "ingress_problem" in db_extra or "ingress_problem_started_at" in db_extra:
+                                        db_extra.pop("ingress_problem", None)
+                                        db_extra.pop("ingress_problem_started_at", None)
+                                        extra_changed = True
+                                    if has_ingress_problem:
+                                        ingress_alerts_to_send.append((
+                                            "ingress",
+                                            ALERT_INGRESS_RESTORED.format(
+                                                server_name=safe(server.name),
+                                                server_id=server.id,
+                                                domain=safe(active_origin_domain),
+                                                endpoint=safe(f"{sub_prefix}/ping"),
+                                            ),
+                                            False,
+                                            None,
+                                        ))
+
+                            # 2. Evaluate CDN Delivery (only in dual probe mode when origin is healthy)
+                            if cdn_probe_result is not None and cdn_domain:
+                                cdn_ok, cdn_detail = cdn_probe_result
+                                if origin_ok:
+                                    if cdn_ok:
+                                        st.consecutive_cdn_successes += 1
+                                        st.consecutive_cdn_fails = 0
+                                        if (
+                                            db_extra.get("consecutive_cdn_successes") != st.consecutive_cdn_successes
+                                            or db_extra.get("consecutive_cdn_fails") != 0
+                                        ):
+                                            db_extra["consecutive_cdn_successes"] = st.consecutive_cdn_successes
+                                            db_extra["consecutive_cdn_fails"] = 0
+                                            extra_changed = True
+
+                                        if st.consecutive_cdn_successes >= REQUIRED_INGRESS_SUCCESSES:
+                                            st.cdn_problem = False
+                                            st.cdn_problem_started_at = None
+                                            st.last_cdn_reminder_at = None
+                                            if "cdn_problem" in db_extra or "cdn_problem_started_at" in db_extra:
+                                                db_extra.pop("cdn_problem", None)
+                                                db_extra.pop("cdn_problem_started_at", None)
+                                                extra_changed = True
+                                            if has_cdn_problem:
+                                                ingress_alerts_to_send.append((
+                                                    "cdn",
+                                                    ALERT_CDN_INGRESS_RESTORED.format(
+                                                        server_name=safe(server.name),
+                                                        server_id=server.id,
+                                                        domain=safe(cdn_domain),
+                                                        endpoint=safe(f"{sub_prefix}/ping"),
+                                                    ),
+                                                    False,
+                                                    None,
+                                                ))
+                                    else:
+                                        st.consecutive_cdn_fails += 1
+                                        st.consecutive_cdn_successes = 0
+                                        if (
+                                            db_extra.get("consecutive_cdn_fails") != st.consecutive_cdn_fails
+                                            or db_extra.get("consecutive_cdn_successes") != 0
+                                        ):
+                                            db_extra["consecutive_cdn_fails"] = st.consecutive_cdn_fails
+                                            db_extra["consecutive_cdn_successes"] = 0
+                                            extra_changed = True
+
+                                        if st.consecutive_cdn_fails < REQUIRED_CDN_FAILS:
+                                            logger.info(
+                                                "Xray origin node %s Origin (%s) is healthy (200), but CDN (%s) returned %s (%d/%d fails). Suppressing transient alert.",
+                                                server.id, active_origin_domain, cdn_domain, cdn_detail, st.consecutive_cdn_fails, REQUIRED_CDN_FAILS,
+                                            )
+                                        elif not has_cdn_problem:
+                                            st.cdn_problem = True
+                                            st.cdn_problem_started_at = now_m
+                                            db_extra["cdn_problem"] = True
+                                            db_extra["cdn_problem_started_at"] = time.time()
+                                            extra_changed = True
+                                            logger.warning(
+                                                "Xray origin node %s CDN (%s) persistent failure (%d fails): %s (Origin %s is 200 OK). Sending CDN alert.",
+                                                server.id, cdn_domain, st.consecutive_cdn_fails, cdn_detail, active_origin_domain,
+                                            )
                                             ingress_alerts_to_send.append((
                                                 "cdn",
-                                                ALERT_CDN_INGRESS_PROBLEM_REMINDER.format(
+                                                ALERT_CDN_INGRESS_PROBLEM.format(
                                                     server_name=safe(server.name),
                                                     server_id=server.id,
                                                     domain=safe(cdn_domain),
+                                                    origin_domain=safe(active_origin_domain),
+                                                    status_or_err=safe(cdn_detail),
                                                     endpoint=safe(f"{sub_prefix}/ping"),
-                                                    hours_text=_format_outage_duration(outage_dur),
                                                 ),
                                                 True,
+                                                now_m,
                                             ))
-                                            st.last_cdn_reminder_at = now_m
+                                        elif has_cdn_problem:
+                                            if st.last_cdn_reminder_at is None:
+                                                st.last_cdn_reminder_at = now_m
+                                            elif (now_m - st.last_cdn_reminder_at) >= OUTAGE_REMINDER_INTERVAL_SECONDS:
+                                                outage_dur = (now_m - st.cdn_problem_started_at) if st.cdn_problem_started_at else OUTAGE_REMINDER_INTERVAL_SECONDS
+                                                ingress_alerts_to_send.append((
+                                                    "cdn",
+                                                    ALERT_CDN_INGRESS_PROBLEM_REMINDER.format(
+                                                        server_name=safe(server.name),
+                                                        server_id=server.id,
+                                                        domain=safe(cdn_domain),
+                                                        endpoint=safe(f"{sub_prefix}/ping"),
+                                                        hours_text=_format_outage_duration(outage_dur),
+                                                    ),
+                                                    True,
+                                                    now_m,
+                                                ))
 
-                    if extra_changed and fresh_server:
-                        merged_extra = dict(fresh_server.extra_data or {})
-                        merged_extra.update(db_extra)
-                        for _health_key in (
-                            "ingress_problem",
-                            "ingress_problem_started_at",
-                            "cdn_problem",
-                            "cdn_problem_started_at",
-                        ):
-                            if _health_key not in db_extra:
-                                merged_extra.pop(_health_key, None)
-                        await update_server(session, fresh_server, extra_data=merged_extra)
+                        if extra_changed and fresh_server:
+                            merged_extra = dict(fresh_server.extra_data or {})
+                            merged_extra.update(db_extra)
+                            for _health_key in (
+                                "ingress_problem",
+                                "ingress_problem_started_at",
+                                "cdn_problem",
+                                "cdn_problem_started_at",
+                            ):
+                                if _health_key not in db_extra:
+                                    merged_extra.pop(_health_key, None)
+                            await update_server(session, fresh_server, extra_data=merged_extra)
 
             # Decoupled alert dispatch outside DB transaction and advisory lock (notifications only)
-            for alert_kind, alert_text, _is_problem in ingress_alerts_to_send:
+            for alert_kind, alert_text, is_problem, reminder_ts in ingress_alerts_to_send:
                 try:
-                    await _send_admin_alert_msg(
+                    sent_ok = await _send_admin_alert_msg(
                         bot,
                         alert_text,
                         reply_markup=get_admin_node_keyboard(server.id),
                     )
+                    if sent_ok and is_problem and reminder_ts is not None:
+                        if alert_kind == "ingress":
+                            st.last_ingress_reminder_at = reminder_ts
+                        elif alert_kind == "cdn":
+                            st.last_cdn_reminder_at = reminder_ts
+                    elif not sent_ok:
+                        logger.warning(
+                            "Failed to deliver %s alert for server %d (send returned False)",
+                            alert_kind,
+                            server.id,
+                        )
                 except Exception as e:
                     logger.error("Failed to deliver %s alert for server %d: %s", alert_kind, server.id, e)
 
         if is_healthy and get_server_role(server) == "ru_hub" and isinstance(xray_data, dict) and isinstance(xray_data.get("bridge_health"), dict):
             bridge_health_map = xray_data["bridge_health"]
-            bridge_alerts_to_send: list[str] = []
+            bridge_alerts_to_send: list[tuple[str, str, str, float | None]] = []
             bridge_lock_key = 9_000_000_000 + int(server.id)
             async with session_scope() as session:
                 bind = getattr(session, "bind", None)
@@ -879,157 +903,276 @@ async def check_node_resources_and_alerts(bot: Bot):
 
                 if got_bridge_lock:
                     fresh_ru = await get_server_by_id(session, server.id, for_update=True)
-                    ru_extra = dict((fresh_ru.extra_data if fresh_ru else server.extra_data) or {})
-                    bh_state: dict[str, dict[str, Any]] = dict(ru_extra.get("bridge_health_state") or {})
-                    prev_blocked = {int(x) for x in (ru_extra.get("blocked_eu_ids") or []) if str(x).isdigit()}
-                    new_blocked = {eid for eid in prev_blocked if eid in all_enabled_eu_ids}
-                    bh_changed = new_blocked != prev_blocked
-                    now_wall = time.time()
-
-                    # Prune state entries only for deleted/admin-disabled eu_hubs (not transient WAITING_CONFIRMATION)
-                    for stale_k in list(bh_state.keys()):
-                        if not stale_k.isdigit() or int(stale_k) not in all_enabled_eu_ids:
-                            bh_state.pop(stale_k, None)
-                            bh_changed = True
-
-                    for eu_ip, probe_info in bridge_health_map.items():
-                        if not isinstance(probe_info, dict):
-                            continue
-                        eu_srv = eu_hubs_by_ip.get(str(eu_ip).strip())
-                        if eu_srv is None:
-                            probe_sni = str(probe_info.get("sni") or "").strip().lower().rstrip(".")
-                            if probe_sni:
-                                eu_srv = eu_hubs_by_domain.get(probe_sni)
-                        if not eu_srv or not eu_srv.is_active or eu_srv.health_state != ServerHealthState.ONLINE:
-                            continue
-
-                        eu_key = str(eu_srv.id)
-                        entry = dict(bh_state.get(eu_key) or {})
-                        was_blocked = bool(entry.get("blocked", False))
-                        probe_ok = bool(probe_info.get("ok", False))
-                        err_detail = str(probe_info.get("error") or "probe failed")
-                        raw_checked_at = probe_info.get("checked_at")
-                        probe_checked_at = float(raw_checked_at) if isinstance(raw_checked_at, (int, float)) else None
-                        is_duplicate_sample = (
-                            probe_checked_at is not None
-                            and entry.get("last_checked_at") == probe_checked_at
+                    if fresh_ru is None:
+                        logger.debug(
+                            "ru_hub %d was deleted during health check; skipping bridge TSPU state/alerts.",
+                            server.id,
                         )
+                    else:
+                        ru_extra = dict(fresh_ru.extra_data or {})
+                        bh_state: dict[str, dict[str, Any]] = dict(ru_extra.get("bridge_health_state") or {})
+                        prev_blocked = {int(x) for x in (ru_extra.get("blocked_eu_ids") or []) if str(x).isdigit()}
+                        new_blocked = {eid for eid in prev_blocked if eid in all_enabled_eu_ids}
+                        bh_changed = new_blocked != prev_blocked
+                        now_wall = time.time()
 
-                        if is_duplicate_sample:
-                            if was_blocked:
-                                new_blocked.add(eu_srv.id)
-                                last_rem = entry.get("last_reminder_at")
-                                if isinstance(last_rem, (int, float)) and (now_wall - float(last_rem)) >= OUTAGE_REMINDER_INTERVAL_SECONDS:
-                                    started = float(entry.get("started_at") or last_rem)
-                                    bridge_alerts_to_send.append(
-                                        ALERT_BRIDGE_TSPU_PROBLEM_REMINDER.format(
+                        # Prune state entries only for deleted/admin-disabled eu_hubs (not transient WAITING_CONFIRMATION)
+                        for stale_k in list(bh_state.keys()):
+                            if not stale_k.isdigit() or int(stale_k) not in all_enabled_eu_ids:
+                                bh_state.pop(stale_k, None)
+                                bh_changed = True
+
+                        def _count_remaining_online_eus() -> int:
+                            live_online = {
+                                eid
+                                for eid, esrv in eu_hubs_by_id.items()
+                                if eid in all_enabled_eu_ids
+                                and esrv.is_active
+                                and esrv.health_state == ServerHealthState.ONLINE
+                                and get_server_monitor_state(eid, esrv).health_state == ServerHealthState.ONLINE
+                            }
+                            return len(live_online - new_blocked)
+
+                        for eu_ip, probe_info in bridge_health_map.items():
+                            if not isinstance(probe_info, dict):
+                                continue
+                            eu_srv = eu_hubs_by_ip.get(str(eu_ip).strip())
+                            if eu_srv is None:
+                                probe_sni = str(probe_info.get("sni") or "").strip().lower().rstrip(".")
+                                if probe_sni:
+                                    eu_srv = eu_hubs_by_domain.get(probe_sni)
+                            if (
+                                not eu_srv
+                                or not eu_srv.is_active
+                                or eu_srv.health_state != ServerHealthState.ONLINE
+                                or get_server_monitor_state(eu_srv.id, eu_srv).health_state != ServerHealthState.ONLINE
+                            ):
+                                continue
+
+                            eu_key = str(eu_srv.id)
+                            entry = dict(bh_state.get(eu_key) or {})
+                            was_blocked = bool(entry.get("blocked", False))
+                            probe_ok = bool(probe_info.get("ok", False))
+                            err_detail = str(probe_info.get("error") or "probe failed")
+                            raw_checked_at = probe_info.get("checked_at")
+                            probe_checked_at = float(raw_checked_at) if isinstance(raw_checked_at, (int, float)) else None
+                            is_duplicate_sample = (
+                                probe_checked_at is not None
+                                and entry.get("last_checked_at") == probe_checked_at
+                            )
+
+                            if is_duplicate_sample:
+                                if was_blocked:
+                                    new_blocked.add(eu_srv.id)
+                                    if entry.get("problem_alert_sent") is False:
+                                        remaining_eu = _count_remaining_online_eus()
+                                        action_text = (
+                                            f"Трафик автоматически переключён на резервный шлюз (доступно: {remaining_eu})."
+                                            if remaining_eu >= 1
+                                            else "Резервных шлюзов нет — маршрут оставлен в качестве fallback."
+                                        )
+                                        bridge_alerts_to_send.append((
+                                            "problem",
+                                            eu_key,
+                                            ALERT_BRIDGE_TSPU_PROBLEM.format(
+                                                ru_name=safe(server.name),
+                                                ru_id=server.id,
+                                                eu_name=safe(eu_srv.name),
+                                                eu_id=eu_srv.id,
+                                                eu_ip=safe(eu_ip),
+                                                error_detail=safe(err_detail),
+                                                action_text=action_text,
+                                            ),
+                                            now_wall,
+                                        ))
+                                    else:
+                                        last_rem = entry.get("last_reminder_at")
+                                        if isinstance(last_rem, (int, float)) and (now_wall - float(last_rem)) >= OUTAGE_REMINDER_INTERVAL_SECONDS:
+                                            started = float(entry.get("started_at") or last_rem)
+                                            bridge_alerts_to_send.append((
+                                                "reminder",
+                                                eu_key,
+                                                ALERT_BRIDGE_TSPU_PROBLEM_REMINDER.format(
+                                                    ru_name=safe(server.name),
+                                                    ru_id=server.id,
+                                                    eu_name=safe(eu_srv.name),
+                                                    eu_id=eu_srv.id,
+                                                    eu_ip=safe(eu_ip),
+                                                    error_detail=safe(err_detail),
+                                                    hours_text=_format_outage_duration(max(60.0, now_wall - started)),
+                                                ),
+                                                now_wall,
+                                            ))
+                                continue
+
+                            if probe_checked_at is not None:
+                                entry["last_checked_at"] = probe_checked_at
+
+                            if not probe_ok:
+                                fails = int(entry.get("fails", 0) or 0) + 1
+                                entry["fails"] = fails
+                                entry["successes"] = 0
+                                entry["last_error"] = err_detail
+                                bh_changed = True
+
+                                if not was_blocked and fails >= REQUIRED_BRIDGE_FAILS:
+                                    entry["blocked"] = True
+                                    entry["started_at"] = now_wall
+                                    entry["problem_alert_sent"] = False
+                                    entry["last_reminder_at"] = None
+                                    new_blocked.add(eu_srv.id)
+                                    remaining_eu = _count_remaining_online_eus()
+                                    action_text = (
+                                        f"Трафик автоматически переключён на резервный шлюз (доступно: {remaining_eu})."
+                                        if remaining_eu >= 1
+                                        else "Резервных шлюзов нет — маршрут оставлен в качестве fallback."
+                                    )
+                                    bridge_alerts_to_send.append((
+                                        "problem",
+                                        eu_key,
+                                        ALERT_BRIDGE_TSPU_PROBLEM.format(
                                             ru_name=safe(server.name),
                                             ru_id=server.id,
                                             eu_name=safe(eu_srv.name),
                                             eu_id=eu_srv.id,
                                             eu_ip=safe(eu_ip),
                                             error_detail=safe(err_detail),
-                                            hours_text=_format_outage_duration(max(60.0, now_wall - started)),
+                                            action_text=action_text,
+                                        ),
+                                        now_wall,
+                                    ))
+                                elif was_blocked:
+                                    new_blocked.add(eu_srv.id)
+                                    if entry.get("problem_alert_sent") is False:
+                                        remaining_eu = _count_remaining_online_eus()
+                                        action_text = (
+                                            f"Трафик автоматически переключён на резервный шлюз (доступно: {remaining_eu})."
+                                            if remaining_eu >= 1
+                                            else "Резервных шлюзов нет — маршрут оставлен в качестве fallback."
                                         )
-                                    )
-                                    entry["last_reminder_at"] = now_wall
-                                    bh_state[eu_key] = entry
-                                    bh_changed = True
-                            continue
-
-                        if probe_checked_at is not None:
-                            entry["last_checked_at"] = probe_checked_at
-
-                        if not probe_ok:
-                            fails = int(entry.get("fails", 0) or 0) + 1
-                            entry["fails"] = fails
-                            entry["successes"] = 0
-                            entry["last_error"] = err_detail
-                            bh_changed = True
-
-                            if not was_blocked and fails >= REQUIRED_BRIDGE_FAILS:
-                                entry["blocked"] = True
-                                entry["started_at"] = now_wall
-                                entry["last_reminder_at"] = now_wall
-                                new_blocked.add(eu_srv.id)
-                                remaining_eu = len(all_online_eu_ids - new_blocked)
-                                action_text = (
-                                    f"Трафик автоматически переключён на резервный шлюз (доступно: {remaining_eu})."
-                                    if remaining_eu >= 1
-                                    else "Резервных шлюзов нет — маршрут оставлен в качестве fallback."
-                                )
-                                bridge_alerts_to_send.append(
-                                    ALERT_BRIDGE_TSPU_PROBLEM.format(
-                                        ru_name=safe(server.name),
-                                        ru_id=server.id,
-                                        eu_name=safe(eu_srv.name),
-                                        eu_id=eu_srv.id,
-                                        eu_ip=safe(eu_ip),
-                                        error_detail=safe(err_detail),
-                                        action_text=action_text,
-                                    )
-                                )
-                            elif was_blocked:
-                                new_blocked.add(eu_srv.id)
-                                last_rem = entry.get("last_reminder_at")
-                                if not isinstance(last_rem, (int, float)):
-                                    entry["last_reminder_at"] = now_wall
-                                elif (now_wall - float(last_rem)) >= OUTAGE_REMINDER_INTERVAL_SECONDS:
-                                    started = float(entry.get("started_at") or last_rem)
-                                    bridge_alerts_to_send.append(
-                                        ALERT_BRIDGE_TSPU_PROBLEM_REMINDER.format(
+                                        bridge_alerts_to_send.append((
+                                            "problem",
+                                            eu_key,
+                                            ALERT_BRIDGE_TSPU_PROBLEM.format(
+                                                ru_name=safe(server.name),
+                                                ru_id=server.id,
+                                                eu_name=safe(eu_srv.name),
+                                                eu_id=eu_srv.id,
+                                                eu_ip=safe(eu_ip),
+                                                error_detail=safe(err_detail),
+                                                action_text=action_text,
+                                            ),
+                                            now_wall,
+                                        ))
+                                    else:
+                                        last_rem = entry.get("last_reminder_at")
+                                        if not isinstance(last_rem, (int, float)):
+                                            entry["last_reminder_at"] = now_wall
+                                            bh_changed = True
+                                        elif (now_wall - float(last_rem)) >= OUTAGE_REMINDER_INTERVAL_SECONDS:
+                                            started = float(entry.get("started_at") or last_rem)
+                                            bridge_alerts_to_send.append((
+                                                "reminder",
+                                                eu_key,
+                                                ALERT_BRIDGE_TSPU_PROBLEM_REMINDER.format(
+                                                    ru_name=safe(server.name),
+                                                    ru_id=server.id,
+                                                    eu_name=safe(eu_srv.name),
+                                                    eu_id=eu_srv.id,
+                                                    eu_ip=safe(eu_ip),
+                                                    error_detail=safe(err_detail),
+                                                    hours_text=_format_outage_duration(max(60.0, now_wall - started)),
+                                                ),
+                                                now_wall,
+                                            ))
+                            else:
+                                succs = int(entry.get("successes", 0) or 0) + 1
+                                entry["successes"] = succs
+                                entry["fails"] = 0
+                                entry["last_error"] = None
+                                if was_blocked and succs >= REQUIRED_BRIDGE_SUCCESSES:
+                                    entry["blocked"] = False
+                                    entry["started_at"] = None
+                                    entry["last_reminder_at"] = None
+                                    entry.pop("problem_alert_sent", None)
+                                    new_blocked.discard(eu_srv.id)
+                                    bridge_alerts_to_send.append((
+                                        "restored",
+                                        eu_key,
+                                        ALERT_BRIDGE_TSPU_RESTORED.format(
                                             ru_name=safe(server.name),
                                             ru_id=server.id,
                                             eu_name=safe(eu_srv.name),
                                             eu_id=eu_srv.id,
                                             eu_ip=safe(eu_ip),
-                                            error_detail=safe(err_detail),
-                                            hours_text=_format_outage_duration(max(60.0, now_wall - started)),
-                                        )
-                                    )
-                                    entry["last_reminder_at"] = now_wall
-                        else:
-                            succs = int(entry.get("successes", 0) or 0) + 1
-                            entry["successes"] = succs
-                            entry["fails"] = 0
-                            entry["last_error"] = None
-                            if was_blocked and succs >= REQUIRED_BRIDGE_SUCCESSES:
-                                entry["blocked"] = False
-                                entry["started_at"] = None
-                                entry["last_reminder_at"] = None
-                                new_blocked.discard(eu_srv.id)
-                                bridge_alerts_to_send.append(
-                                    ALERT_BRIDGE_TSPU_RESTORED.format(
-                                        ru_name=safe(server.name),
-                                        ru_id=server.id,
-                                        eu_name=safe(eu_srv.name),
-                                        eu_id=eu_srv.id,
-                                        eu_ip=safe(eu_ip),
-                                    )
-                                )
-                            elif was_blocked:
-                                new_blocked.add(eu_srv.id)
-                            bh_changed = True
+                                        ),
+                                        None,
+                                    ))
+                                elif was_blocked:
+                                    new_blocked.add(eu_srv.id)
+                                bh_changed = True
 
-                        bh_state[eu_key] = entry
+                            bh_state[eu_key] = entry
 
-                    if bh_changed and fresh_ru:
-                        sorted_blocked = sorted(new_blocked)
-                        if sorted_blocked != sorted(prev_blocked):
-                            topology_dirty = True
-                        ru_extra["bridge_health_state"] = bh_state
-                        if sorted_blocked:
-                            ru_extra["blocked_eu_ids"] = sorted_blocked
-                        else:
-                            ru_extra.pop("blocked_eu_ids", None)
-                        await update_server(session, fresh_ru, extra_data=ru_extra)
-                        server.extra_data = ru_extra
+                        if bh_changed and fresh_ru:
+                            sorted_blocked = sorted(new_blocked)
+                            if sorted_blocked != sorted(prev_blocked):
+                                topology_dirty = True
+                            ru_extra["bridge_health_state"] = bh_state
+                            if sorted_blocked:
+                                ru_extra["blocked_eu_ids"] = sorted_blocked
+                            else:
+                                ru_extra.pop("blocked_eu_ids", None)
+                            await update_server(session, fresh_ru, extra_data=ru_extra)
+                            server.extra_data = ru_extra
 
-            for b_alert in bridge_alerts_to_send:
+            sent_bridge_timestamps: list[tuple[str, str, float]] = []
+            for alert_kind, eu_key, b_alert, reminder_ts in bridge_alerts_to_send:
                 try:
-                    await _send_admin_alert_msg(bot, b_alert)
+                    sent_ok = await _send_admin_alert_msg(
+                        bot,
+                        b_alert,
+                        reply_markup=get_admin_node_keyboard(server.id),
+                    )
+                    if sent_ok:
+                        if alert_kind in ("problem", "reminder") and reminder_ts is not None:
+                            sent_bridge_timestamps.append((alert_kind, eu_key, reminder_ts))
+                    else:
+                        logger.warning(
+                            "Bridge TSPU %s alert not delivered for ru_hub %d (eu=%s); will retry.",
+                            alert_kind,
+                            server.id,
+                            eu_key,
+                        )
                 except Exception as exc:
                     logger.error("Failed to deliver bridge TSPU alert for ru_hub %d: %s", server.id, exc)
+
+            if sent_bridge_timestamps:
+                try:
+                    async with session_scope() as session:
+                        fresh_ru_ack = await get_server_by_id(session, server.id, for_update=True)
+                        if fresh_ru_ack is not None:
+                            ack_extra = dict(fresh_ru_ack.extra_data or {})
+                            ack_bh = dict(ack_extra.get("bridge_health_state") or {})
+                            ack_changed = False
+                            for alert_kind, eu_key, reminder_ts in sent_bridge_timestamps:
+                                if eu_key in ack_bh and isinstance(ack_bh[eu_key], dict):
+                                    ack_entry = dict(ack_bh[eu_key])
+                                    ack_entry["last_reminder_at"] = reminder_ts
+                                    if alert_kind == "problem":
+                                        ack_entry["problem_alert_sent"] = True
+                                    ack_bh[eu_key] = ack_entry
+                                    ack_changed = True
+                            if ack_changed:
+                                ack_extra["bridge_health_state"] = ack_bh
+                                await update_server(session, fresh_ru_ack, extra_data=ack_extra)
+                                server.extra_data = ack_extra
+                except Exception as ack_exc:
+                    logger.warning(
+                        "Failed to persist bridge alert timestamps for ru_hub %d: %s",
+                        server.id,
+                        ack_exc,
+                    )
 
         if is_healthy:
             if st.health_state == ServerHealthState.WAITING_CONFIRMATION:
@@ -1258,8 +1401,8 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 hours_text=_format_outage_duration(outage_dur),
                             ),
                             "is_reminder": True,
+                            "reminder_ts": now_m,
                         })
-                        st.last_core_reminder_at = now_m
 
         # 5. ЕДИНСТВЕННОЕ АТОМАРНОЕ ОБНОВЛЕНИЕ БД НА КАЖДУЮ ПРОВЕРКУ (СНАЧАЛА CAS UPDATE)
         update_kwargs = {
@@ -1323,7 +1466,11 @@ async def check_node_resources_and_alerts(bot: Bot):
                         extra = dict(updated_srv.extra_data or {})
                         extra_changed = bool(extra_patch)
                         if extra_patch:
-                            extra.update(extra_patch)
+                            for pk, pv in extra_patch.items():
+                                if pv is None and pk in ("last_apply", "ssl_cert"):
+                                    extra.pop(pk, None)
+                                else:
+                                    extra[pk] = pv
                         cdn_domains = xray_data.get("cdn_domains")
                         if isinstance(cdn_domains, dict) and not cdn_domains.get("cdn_turboflare") and "turboflare_domain" in extra:
                             extra.pop("turboflare_domain", None)
@@ -1350,8 +1497,22 @@ async def check_node_resources_and_alerts(bot: Bot):
                 new_health_state=st.health_state,
                 **update_kwargs,
             )
+            if applied and db_server is not None:
+                server.health_state = db_server.health_state
+                server.is_active = db_server.is_active
+                if get_server_role(server) == "eu_hub":
+                    if (
+                        server.is_active
+                        and getattr(server, "lifecycle_status", None) in (None, ServerLifecycleStatus.ACTIVE)
+                        and server.health_state == ServerHealthState.ONLINE
+                    ):
+                        all_online_eu_ids.add(server.id)
+                    else:
+                        all_online_eu_ids.discard(server.id)
             if applied and expected_health_state != st.health_state:
-                topology_dirty = True
+                topology_states = (ServerHealthState.PROBLEM, ServerHealthState.MANUAL_DISABLED)
+                if expected_health_state in topology_states or st.health_state in topology_states:
+                    topology_dirty = True
             if db_server and not applied:
                 st.sync_from_db_server(db_server)
 
@@ -1359,6 +1520,7 @@ async def check_node_resources_and_alerts(bot: Bot):
         if applied and alerts_to_send:
             for alert_to_send in alerts_to_send:
                 target_state = alert_to_send.get("target_alert_state")
+                reminder_ts = alert_to_send.get("reminder_ts")
                 sent_ok = False
                 try:
                     sent_ok = await _send_admin_alert_msg(
@@ -1371,17 +1533,24 @@ async def check_node_resources_and_alerts(bot: Bot):
                     sent_ok = False
 
                 if sent_ok:
+                    if reminder_ts is not None:
+                        st.last_core_reminder_at = reminder_ts
                     if target_state:
                         st.last_alert_sent_state = target_state
 
-                    async with session_scope() as session:
-                        fresh_server = await get_server_by_id(session, server.id)
-                        if fresh_server and fresh_server.health_state != ServerHealthState.MANUAL_DISABLED:
-                            await update_server(
-                                session,
-                                fresh_server,
-                                last_alert_sent_state=st.last_alert_sent_state,
-                            )
+                        async with session_scope() as session:
+                            fresh_server = await get_server_by_id(session, server.id)
+                            if fresh_server and fresh_server.health_state != ServerHealthState.MANUAL_DISABLED:
+                                await update_server(
+                                    session,
+                                    fresh_server,
+                                    last_alert_sent_state=st.last_alert_sent_state,
+                                )
+                else:
+                    logger.warning(
+                        "Failed to deliver core node monitor alert for server %d; state flag not advanced.",
+                        server.id,
+                    )
 
     # Bounded parallel fan-out: one hung node must not freeze monitoring of
     # the remaining nodes in this cycle.

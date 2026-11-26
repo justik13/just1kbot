@@ -180,6 +180,8 @@ def merge_v2_extra_data(
         val = _pick(key)
         if val is not None:
             merged[key] = val
+        elif key in ("last_apply", "ssl_cert") and (key in status_d or key in health_d):
+            merged.pop(key, None)
 
     raw_loc_code = _pick("location_code")
     if isinstance(raw_loc_code, str) and raw_loc_code.strip():
@@ -498,7 +500,11 @@ async def update_server_health_snapshot(
             continue
         if key == "extra_data" and isinstance(value, dict):
             existing_extra = dict(current.extra_data or {})
-            existing_extra.update(value)
+            for ek, ev in value.items():
+                if ev is None and ek in ("last_apply", "ssl_cert"):
+                    existing_extra.pop(ek, None)
+                else:
+                    existing_extra[ek] = ev
             setattr(current, key, existing_extra)
             flag_modified(current, "extra_data")
         elif hasattr(current, key):

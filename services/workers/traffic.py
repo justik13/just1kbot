@@ -49,6 +49,7 @@ WORKER_START_DELAY = 30.0
 _quota_alerted: TTLCache[str, bool] = TTLCache(maxsize=10000, ttl=86400 * 35)
 _consecutive_crashes: int = 0
 _background_tasks: set[asyncio.Task] = set()
+_in_flight_90p_subs: set[int] = set()
 
 
 def _start_background_task(coro) -> asyncio.Task:
@@ -241,49 +242,13 @@ async def _send_wi_90p_alerts(bot: Bot | None, warn_users: list[tuple[int, int, 
         return
 
     for sub_id, uid, expected_version in set(warn_users):
-        async with session_scope() as session:
-            user = await session.scalar(select(User).where(User.id == uid))
-            telegram_id = user.telegram_id if (user and not user.is_bot_blocked) else None
-
-        if not telegram_id:
-            async with session_scope() as session:
-                await session.execute(
-                    update(WhiteInternetSubscription)
-                    .where(
-                        WhiteInternetSubscription.id == sub_id,
-                        WhiteInternetSubscription.desired_version == expected_version,
-                    )
-                    .values(notified_90p=True)
-                )
-            continue
-
         try:
-            alert_text = texts.WL_TRAFFIC_90P_ALERT
-            await global_send_limiter.acquire()
-            await safe_send_message(
-                bot,
-                chat_id=telegram_id,
-                text=alert_text,
-                reply_markup=get_action_notification_keyboard("Открыть тарифы", tab="tariffs"),
-                parse_mode="HTML",
-                raise_forbidden=True,
-            )
             async with session_scope() as session:
-                await session.execute(
-                    update(WhiteInternetSubscription)
-                    .where(
-                        WhiteInternetSubscription.id == sub_id,
-                        WhiteInternetSubscription.desired_version == expected_version,
-                    )
-                    .values(notified_90p=True)
-                )
-        except Exception as exc:
-            if is_terminal_telegram_error(exc):
-                logger.info("User %d blocked bot or terminal error (%s); marking blocked in database", uid, exc)
+                user = await session.scalar(select(User).where(User.id == uid))
+                telegram_id = user.telegram_id if (user and not user.is_bot_blocked) else None
+
+            if not telegram_id:
                 async with session_scope() as session:
-                    await session.execute(
-                        update(User).where(User.id == uid).values(is_bot_blocked=True)
-                    )
                     await session.execute(
                         update(WhiteInternetSubscription)
                         .where(
@@ -292,8 +257,56 @@ async def _send_wi_90p_alerts(bot: Bot | None, warn_users: list[tuple[int, int, 
                         )
                         .values(notified_90p=True)
                     )
-            else:
-                logger.warning("Failed to send 90%% traffic warning alert to user %d: %s", uid, exc)
+                continue
+
+            try:
+                alert_text = texts.WL_TRAFFIC_90P_ALERT
+                await global_send_limiter.acquire()
+                await safe_send_message(
+                    bot,
+                    chat_id=telegram_id,
+                    text=alert_text,
+                    reply_markup=get_action_notification_keyboard("Открыть тарифы", tab="tariffs"),
+                    parse_mode="HTML",
+                    raise_forbidden=True,
+                )
+                async with session_scope() as session:
+                    await session.execute(
+                        update(WhiteInternetSubscription)
+                        .where(
+                            WhiteInternetSubscription.id == sub_id,
+                            WhiteInternetSubscription.desired_version == expected_version,
+                        )
+                        .values(notified_90p=True)
+                    )
+            except Exception as exc:
+                if is_terminal_telegram_error(exc):
+                    logger.info("User %d blocked bot or terminal error (%s); marking blocked in database", uid, exc)
+                    async with session_scope() as session:
+                        await session.execute(
+                            update(User).where(User.id == uid).values(is_bot_blocked=True)
+                        )
+                        await session.execute(
+                            update(WhiteInternetSubscription)
+                            .where(
+                                WhiteInternetSubscription.id == sub_id,
+                                WhiteInternetSubscription.desired_version == expected_version,
+                            )
+                            .values(notified_90p=True)
+                        )
+                else:
+                    logger.warning("Failed to send 90%% traffic warning alert to user %d: %s", uid, exc)
+                    async with session_scope() as session:
+                        await session.execute(
+                            update(WhiteInternetSubscription)
+                            .where(
+                                WhiteInternetSubscription.id == sub_id,
+                                WhiteInternetSubscription.desired_version == expected_version,
+                            )
+                            .values(notified_90p=False)
+                        )
+        finally:
+            _in_flight_90p_subs.discard(sub_id)
 
 
 async def _traffic_sync_once(bot: Bot | None = None):
@@ -414,8 +427,8 @@ async def _traffic_sync_once(bot: Bot | None = None):
 
             server_delta = 0
             affected_vless_user_ids: set[int] = set()
-            exhausted_wi_users: list[tuple[int, bool]] = []
-            warn_90p_wi_users: list[tuple[int, int, bool, int]] = []
+            exhausted_wi_users: list[int] = []
+            warn_90p_wi_users: list[tuple[int, int, int]] = []
 
             if vless_stats:
                 matching_uuids = [u for u in vless_stats.keys() if isinstance(u, str) and u.strip()]
@@ -592,11 +605,16 @@ async def _traffic_sync_once(bot: Bot | None = None):
                                         - (getattr(sub, "traffic_overage_bytes", 0) or 0),
                                     )
                                     if (
-                                        not getattr(sub, "notified_90p", False)
+                                        bot is not None
+                                        and sub.id not in _in_flight_90p_subs
+                                        and not getattr(sub, "notified_90p", False)
                                         and getattr(sub, "status", None) == WhiteInternetStatus.ACTIVE
                                         and total_quota > 0
                                         and used >= (0.90 * total_quota)
                                     ):
+                                        sub.notified_90p = True
+                                        await session.flush()
+                                        _in_flight_90p_subs.add(sub.id)
                                         warn_90p_wi_users.append(
                                             (
                                                 sub.id,

@@ -11,7 +11,8 @@ from typing import Any
 from urllib.parse import urlparse
 
 import aiohttp
-from sqlalchemy import update
+from sqlalchemy import cast, exists, func, literal, or_, update
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.constants import VLESS_PROTOCOL, WHITE_INTERNET_CAPABILITY, XRAY_PROTOCOL
@@ -26,6 +27,7 @@ from database.repositories.servers_repo import (
     get_server_by_api_url,
     get_server_by_id,
     get_server_role,
+    is_white_internet_hub_server,
     merge_v2_extra_data,
     update_server,
 )
@@ -38,9 +40,10 @@ from utils.security import is_safe_url, validate_public_fqdn
 from utils.traffic_helpers import get_server_hosting_usage
 
 logger = logging.getLogger(__name__)
+_BACKGROUND_TASKS: set[asyncio.Task] = set()
 
 
-class AdminNodeServiceError(Exception):
+class AdminNodeServiceError(ValueError):
     """Structured domain error mapped cleanly to HTTP responses."""
 
     def __init__(self, message: str, status_code: int = 400):
@@ -54,15 +57,13 @@ def _normalize_api_url(raw_url: str) -> str:
     parsed = urlparse(clean)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise AdminNodeServiceError("Invalid api_url format", status_code=400)
+    is_ip_literal = False
     try:
         ipaddress.ip_address(parsed.hostname)
-        raise AdminNodeServiceError(
-            "Добавление узла разрешено исключительно по доменному имени (FQDN). Прямые IP-адреса запрещены.",
-            status_code=400,
-        )
+        is_ip_literal = True
     except ValueError:
         pass
-    if not validate_public_fqdn(parsed.hostname):
+    if is_ip_literal or not validate_public_fqdn(parsed.hostname):
         raise AdminNodeServiceError(
             "Добавление узла разрешено исключительно по доменному имени (FQDN). Прямые IP-адреса запрещены.",
             status_code=400,
@@ -771,6 +772,26 @@ async def toggle_node(
     return serialize_server_node(updated)
 
 
+def _jsonb_prefix_exists(col: Any, sid_prefix: str) -> Any:
+    from sqlalchemy import select as sa_select
+
+    k_tv = func.jsonb_object_keys(col).table_valued("key")
+    return exists(sa_select(literal(1)).select_from(k_tv).where(k_tv.c.key.startswith(sid_prefix)))
+
+
+def _strip_server_snapshot_keys_expr(col: Any, sid_key: str, sid_prefix: str) -> Any:
+    from sqlalchemy import select as sa_select
+
+    kv_tv = func.jsonb_each(col).table_valued("key", "value")
+    filtered = (
+        sa_select(func.jsonb_object_agg(kv_tv.c.key, kv_tv.c.value))
+        .select_from(kv_tv)
+        .where(kv_tv.c.key != sid_key, ~kv_tv.c.key.startswith(sid_prefix))
+        .scalar_subquery()
+    )
+    return func.coalesce(filtered, cast({}, JSONB))
+
+
 async def delete_node(
     session: AsyncSession,
     *,
@@ -799,15 +820,40 @@ async def delete_node(
     deleted_name = server.name
     await delete_server(session, server)
     sid_key = str(server_id)
+    sid_prefix = f"{server_id}:"
     await session.execute(
         update(WhiteInternetSubscription)
-        .where(WhiteInternetSubscription.node_sync_state.has_key(sid_key))
-        .values(node_sync_state=WhiteInternetSubscription.node_sync_state.op("-")(sid_key))
+        .where(
+            or_(
+                WhiteInternetSubscription.node_sync_state.has_key(sid_key),
+                WhiteInternetSubscription.node_traffic_snapshots.has_key(sid_key),
+                _jsonb_prefix_exists(WhiteInternetSubscription.node_traffic_snapshots, sid_prefix),
+            )
+        )
+        .values(
+            node_sync_state=WhiteInternetSubscription.node_sync_state.op("-")(sid_key),
+            node_traffic_snapshots=_strip_server_snapshot_keys_expr(
+                WhiteInternetSubscription.node_traffic_snapshots,
+                sid_key,
+                sid_prefix,
+            ),
+        )
     )
     await session.execute(
         update(VlessSubscription)
-        .where(VlessSubscription.node_traffic_snapshots.has_key(sid_key))
-        .values(node_traffic_snapshots=VlessSubscription.node_traffic_snapshots.op("-")(sid_key))
+        .where(
+            or_(
+                VlessSubscription.node_traffic_snapshots.has_key(sid_key),
+                _jsonb_prefix_exists(VlessSubscription.node_traffic_snapshots, sid_prefix),
+            )
+        )
+        .values(
+            node_traffic_snapshots=_strip_server_snapshot_keys_expr(
+                VlessSubscription.node_traffic_snapshots,
+                sid_key,
+                sid_prefix,
+            )
+        )
     )
     from services.workers.node_monitor import clear_server_monitor_state
     clear_server_monitor_state(server_id)
@@ -871,8 +917,23 @@ async def set_node_lifecycle(
                     status_code=400,
                 )
 
+        prev_lifecycle = server.lifecycle_status
         updated = await update_server(session, server, **update_kwargs)
         _queue_topology_sync(session)
+        if (
+            str(prev_lifecycle or "").upper() == ServerLifecycleStatus.DECOMMISSIONING.value
+            and normalized == ServerLifecycleStatus.ACTIVE.value
+            and updated.is_active
+            and get_server_role(updated) == "ru_hub"
+        ):
+            from services.vless_subscription_service import VlessSubscriptionService
+
+            sid = updated.id
+
+            async def _spawn_ru_sync(sid: int = sid) -> None:
+                VlessSubscriptionService.sync_all_active_to_server_background(sid)
+
+            queue_post_commit_task(session, _spawn_ru_sync)
         await AuditService.log_action(
             session,
             admin_id=admin_telegram_id,
@@ -905,14 +966,31 @@ async def trigger_topology_sync(admin_telegram_id: int) -> dict[str, Any]:
     return {"results": results, "synced": synced, "failed": failed}
 
 
+async def _run_wi_reconciliation_once_bg() -> None:
+    from services.workers.white_internet_reconciliation import WhiteInternetReconciliationWorker
+
+    worker = WhiteInternetReconciliationWorker()
+    try:
+        await worker.run_reconciliation_cycle()
+    except Exception as exc:
+        logger.warning("Background WI reconciliation during clients resync failed: %s", exc)
+    finally:
+        if worker.client is not None:
+            try:
+                await worker.client.close()
+            except Exception:
+                pass
+
+
 async def trigger_node_clients_resync(
     server_id: int,
     admin_telegram_id: int,
 ) -> dict[str, Any]:
-    """Queue VLESS client resync for an active ru_hub or exit_node and log to AuditLog."""
+    """Queue client resync for an active ru_hub or exit_node and log to AuditLog."""
     from services.vless_subscription_service import VlessSubscriptionService
 
     target_server_ids: list[int] = []
+    wi_reconciliation_triggered = False
     async with session_scope() as session:
         server = await get_server_by_id(session, server_id, for_update=False)
         if server is None:
@@ -927,6 +1005,11 @@ async def trigger_node_clients_resync(
                 "Сервер выключен. Включите его перед синхронизацией клиентов.",
                 status_code=400,
             )
+        if server.health_state == ServerHealthState.PROBLEM:
+            raise AdminNodeServiceError(
+                "Сервер недоступен (PROBLEM). Дождитесь восстановления связи перед синхронизацией клиентов.",
+                status_code=400,
+            )
         role = get_server_role(server)
         if role not in ("ru_hub", "exit_node"):
             raise AdminNodeServiceError(
@@ -936,6 +1019,7 @@ async def trigger_node_clients_resync(
 
         if role == "ru_hub":
             target_server_ids = [server_id]
+            wi_reconciliation_triggered = is_white_internet_hub_server(server)
         else:
             ru_hubs = await VlessSubscriptionService.get_configured_vless_servers(session)
             target_server_ids = [hub.id for hub in ru_hubs]
@@ -950,10 +1034,21 @@ async def trigger_node_clients_resync(
                 "action": "clients_resync",
                 "role": role,
                 "target_server_ids": target_server_ids,
+                "wi_reconciliation_triggered": wi_reconciliation_triggered,
             },
         )
 
     for target_sid in target_server_ids:
         VlessSubscriptionService.sync_all_active_to_server_background(target_sid)
 
-    return {"ok": True, "server_id": server_id, "target_server_ids": target_server_ids}
+    if wi_reconciliation_triggered:
+        task = asyncio.create_task(_run_wi_reconciliation_once_bg())
+        _BACKGROUND_TASKS.add(task)
+        task.add_done_callback(_BACKGROUND_TASKS.discard)
+
+    return {
+        "ok": True,
+        "server_id": server_id,
+        "target_server_ids": target_server_ids,
+        "wi_reconciliation_triggered": wi_reconciliation_triggered,
+    }
