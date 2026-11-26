@@ -1081,7 +1081,6 @@ dialog.modal-dialog::backdrop {
     max-width: calc(100vw - 32px);
     text-align: center;
     cursor: pointer;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); /* taste-skill-ignore */
     transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
 }
 
@@ -2322,9 +2321,8 @@ details[open] > summary .disclosure-pill svg {
         max-width: 400px;
         margin: 16px auto 0;
         border-radius: 14px;
-        border: 1px solid var(--border-subtle);
+        border: 1px solid var(--border-strong);
         padding: 8px 12px;
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); /* taste-skill-ignore */
     }
 }
 
