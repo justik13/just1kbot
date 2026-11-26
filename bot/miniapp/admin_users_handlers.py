@@ -284,6 +284,9 @@ async def api_admin_user_details_handler(request: web.Request) -> web.Response:
                 .limit(20)
             )
         ).all()
+        recent_orders_breakdown = await _ha.admin_tools_service.build_orders_payment_breakdown(
+            session, recent_orders_rows
+        )
         recent_ledger_rows = await get_account_history(session, user_id=user.id, limit=25)
         recent_device_event_rows = (
             await session.scalars(
@@ -392,6 +395,7 @@ async def api_admin_user_details_handler(request: web.Request) -> web.Response:
                         "status": o.status,
                         "kind": o.service_type,
                         "amount_rub": float(o.amount_rub),
+                        **recent_orders_breakdown[o.id],
                         "description": o.description or "",
                         "external_id": o.external_id,
                         "created_at": o.created_at.isoformat() if o.created_at else None,

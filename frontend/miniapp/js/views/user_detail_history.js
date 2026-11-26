@@ -4,6 +4,8 @@ import {
     formatAuditAction,
     formatLedgerEntryType,
     formatMetadataFlag,
+    formatOrderAmountLabel,
+    formatOrderPaymentBreakdown,
 } from "../admin_labels.js?v=2.8.0";
 import { escapeHtml, formatDate } from "../ui.js?v=2.8.0";
 
@@ -25,6 +27,8 @@ export function renderHistoryTabContent(tab, details) {
                           cls: "chip-muted",
                       };
                       const kindLabel = ORDER_KIND_MAP[o.kind] || o.kind || "";
+                      const paymentBreakdown = formatOrderPaymentBreakdown(o);
+                      const amountLabel = formatOrderAmountLabel(o);
                       const flags = Array.isArray(o.metadata_flags) ? o.metadata_flags : [];
                       const flagsHtml = flags
                           .map((flag) => {
@@ -36,8 +40,13 @@ export function renderHistoryTabContent(tab, details) {
                     <div class="item-row">
                         <div class="row">
                             <span style="font-weight:600; font-size:13px;">${escapeHtml(kindLabel)}${o.description ? ` · ${escapeHtml(o.description)}` : ""}</span>
-                            <span class="tabular" style="font-weight:600;">${o.amount_rub} ₽</span>
+                            <span class="tabular" style="font-weight:600; flex-shrink:0; white-space:nowrap;">${escapeHtml(amountLabel)}</span>
                         </div>
+                        ${
+                            paymentBreakdown
+                                ? `<div class="meta-text">Оплата: ${escapeHtml(paymentBreakdown)}</div>`
+                                : ""
+                        }
                         <div class="history-row-meta">
                             <span>${formatDate(o.created_at)}</span>
                             <span class="chip ${stInfo.cls}">${escapeHtml(stInfo.text)}</span>

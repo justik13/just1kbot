@@ -567,7 +567,7 @@ async function _renderAdminView() {
                     }
                 }
             } else if (appState.financesData == null && !appState.financesLoadAttempted) {
-                const kind = ["orders", "subscriptions", "topups"].includes(subTab) ? subTab : "orders";
+                const kind = ["orders", "gateway", "topups"].includes(subTab) ? subTab : "orders";
                 try {
                     const res = await api.listFinances(
                         kind,

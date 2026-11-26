@@ -1,5 +1,11 @@
 import { api } from "../api.js?v=2.8.0";
-import { formatAuditAction, formatAuditTarget, formatMetadataFlag } from "../admin_labels.js?v=2.8.0";
+import {
+    formatAuditAction,
+    formatAuditTarget,
+    formatMetadataFlag,
+    formatOrderAmountLabel,
+    formatOrderPaymentBreakdown,
+} from "../admin_labels.js?v=2.8.0";
 import {
     copyText,
     escapeHtml,
@@ -47,12 +53,6 @@ function _formatServiceType(serviceType) {
     if (serviceType === "white_internet") return "Белый интернет";
     if (serviceType === "topup") return "Пополнение";
     return serviceType || "";
-}
-
-function _formatPaymentMethod(method) {
-    if (method === "yookassa") return "ЮKassa";
-    if (method === "wallet") return "Баланс";
-    return method || "";
 }
 
 function _cleanQuery(val) {
@@ -139,8 +139,8 @@ export function renderAdminFinancesView(root, state, { forceRefresh = false } = 
                 <button type="button" id="finRefreshBtn" class="btn btn-sm">Обновить</button>
             </div>
             <div class="seg-group" style="overflow-x:auto; flex-wrap:nowrap; scrollbar-width:none; -webkit-overflow-scrolling:touch; gap:6px;">
-                <button type="button" class="seg-btn ${subTab === "orders" ? "active" : ""}" style="flex:1 0 auto; min-width:max-content; white-space:nowrap; padding:8px 10px;" data-fintab="orders" aria-pressed="${subTab === "orders" ? "true" : "false"}">Все</button>
-                <button type="button" class="seg-btn ${subTab === "subscriptions" ? "active" : ""}" style="flex:1 0 auto; min-width:max-content; white-space:nowrap; padding:8px 10px;" data-fintab="subscriptions" aria-pressed="${subTab === "subscriptions" ? "true" : "false"}">Подписки</button>
+                <button type="button" class="seg-btn ${subTab === "orders" ? "active" : ""}" style="flex:1 0 auto; min-width:max-content; white-space:nowrap; padding:8px 10px;" data-fintab="orders" aria-pressed="${subTab === "orders" ? "true" : "false"}">Все заказы</button>
+                <button type="button" class="seg-btn ${subTab === "gateway" ? "active" : ""}" style="flex:1 0 auto; min-width:max-content; white-space:nowrap; padding:8px 10px;" data-fintab="gateway" aria-pressed="${subTab === "gateway" ? "true" : "false"}">Платёжка (ЮKassa)</button>
                 <button type="button" class="seg-btn ${subTab === "topups" ? "active" : ""}" style="flex:1 0 auto; min-width:max-content; white-space:nowrap; padding:8px 10px;" data-fintab="topups" aria-pressed="${subTab === "topups" ? "true" : "false"}">Пополнения</button>
                 <button type="button" class="seg-btn ${subTab === "audit" ? "active" : ""}" style="flex:1 0 auto; min-width:max-content; white-space:nowrap; padding:8px 10px;" data-fintab="audit" aria-pressed="${subTab === "audit" ? "true" : "false"}">Аудит</button>
                 <button type="button" class="seg-btn ${subTab === "webhooks" ? "active" : ""}" style="flex:1 0 auto; min-width:max-content; white-space:nowrap; padding:8px 10px;" data-fintab="webhooks" aria-pressed="${subTab === "webhooks" ? "true" : "false"}">Вебхуки</button>
@@ -299,7 +299,7 @@ export function renderAdminFinancesView(root, state, { forceRefresh = false } = 
     const loadFinances = async (offset = 0, { attentionOnly = state.finAttentionOnly } = {}) => {
         const reqId = ++_finViewReqId;
         try {
-            const kind = ["orders", "subscriptions", "topups"].includes(state.finSubTab)
+            const kind = ["orders", "gateway", "topups"].includes(state.finSubTab)
                 ? state.finSubTab
                 : "orders";
             const data = await api.listFinances(
@@ -601,7 +601,9 @@ function _renderFinanceRows(container, items, state) {
         row.className = "item-row";
         const uname = item.username ? `@${item.username}` : `TG ${item.telegram_id}`;
         const shortId = String(item.id || "").slice(0, 8);
-        const metaParts = [_formatServiceType(item.service_type), _formatPaymentMethod(item.payment_method)];
+        const paymentBreakdown = formatOrderPaymentBreakdown(item);
+        const amountLabel = formatOrderAmountLabel(item);
+        const metaParts = [_formatServiceType(item.service_type), paymentBreakdown];
         if (item.duration_days) metaParts.push(`${item.duration_days} дн.`);
         if (item.device_limit) metaParts.push(`${item.device_limit} устр.`);
         const flagsHtml = _renderFlagChips(item.metadata_flags);
@@ -618,7 +620,7 @@ function _renderFinanceRows(container, items, state) {
                         <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(uname)}</span> · <span class="mono" style="word-break:normal; white-space:nowrap;">${escapeHtml(item.telegram_id)}</span>
                     </button>
                 </div>
-                <span class="tabular" style="font-weight:600; flex-shrink:0; white-space:nowrap;">${item.amount_rub} ₽</span>
+                <span class="tabular" style="font-weight:600; flex-shrink:0; white-space:nowrap;">${escapeHtml(amountLabel)}</span>
             </div>
             <div class="row meta-text">
                 <span>${escapeHtml(metaParts.filter(Boolean).join(" · "))}</span>

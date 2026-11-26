@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from datetime import timedelta
 from decimal import Decimal
 import html
@@ -19,9 +20,10 @@ from bot.keyboards.notifications import (
     get_action_notification_keyboard,
     get_bonus_credited_keyboard,
 )
-from config.enums import AdminAuditAction, OrderServiceType, OrderStatus
+from config.enums import AccountLedgerEntryType, AdminAuditAction, OrderServiceType, OrderStatus
 from database.connection import session_scope
 from database.models import (
+    AccountLedgerEntry,
     AuditLog,
     Order,
     User,
@@ -508,6 +510,72 @@ async def get_overview_finances_summary(session: AsyncSession) -> dict[str, Any]
     }
 
 
+async def build_orders_payment_breakdown(
+    session: AsyncSession,
+    orders: Sequence[Order],
+) -> dict[UUID, dict[str, Any]]:
+    """Compute per-order external/bonus/real-balance payment breakdown in a single batch query."""
+    if not orders:
+        return {}
+
+    order_ids = [order.id for order in orders]
+    ledger_rows = (
+        await session.execute(
+            select(
+                AccountLedgerEntry.order_id,
+                AccountLedgerEntry.bucket,
+                func.coalesce(func.sum(func.abs(AccountLedgerEntry.amount)), 0),
+            )
+            .where(
+                AccountLedgerEntry.order_id.in_(order_ids),
+                AccountLedgerEntry.entry_type == AccountLedgerEntryType.PURCHASE_DEBIT,
+            )
+            .group_by(AccountLedgerEntry.order_id, AccountLedgerEntry.bucket)
+        )
+    ).all()
+
+    ledger_by_order: dict[UUID, dict[str, float]] = {}
+    for oid, bucket, amount_sum in ledger_rows:
+        if oid is None:
+            continue
+        buckets = ledger_by_order.setdefault(oid, {})
+        buckets[str(bucket)] = float(amount_sum or 0)
+
+    result: dict[UUID, dict[str, Any]] = {}
+    for order in orders:
+        payment_method = order.payment_method
+        is_wallet = payment_method == "wallet"
+        external_paid_rub = 0.0 if is_wallet else float(order.amount_rub or 0)
+
+        buckets = ledger_by_order.get(order.id)
+        if buckets is not None:
+            bonus_paid_rub = float(buckets.get("bonus", 0.0))
+            real_balance_paid_rub = float(buckets.get("real", 0.0))
+            wallet_debit_rub = bonus_paid_rub + real_balance_paid_rub
+        else:
+            bonus_paid_rub = 0.0
+            real_balance_paid_rub = 0.0
+            meta = order.metadata_ if isinstance(order.metadata_, dict) else {}
+            raw_wallet_debit = meta.get("wallet_debit_rub")
+            if raw_wallet_debit is not None:
+                try:
+                    wallet_debit_rub = max(0.0, float(raw_wallet_debit))
+                except (TypeError, ValueError):
+                    wallet_debit_rub = 0.0
+            else:
+                wallet_debit_rub = float(order.amount_rub or 0) if is_wallet else 0.0
+
+        result[order.id] = {
+            "payment_method": payment_method,
+            "external_paid_rub": external_paid_rub,
+            "bonus_paid_rub": bonus_paid_rub,
+            "real_balance_paid_rub": real_balance_paid_rub,
+            "wallet_debit_rub": wallet_debit_rub,
+            "total_rub": external_paid_rub + wallet_debit_rub,
+        }
+    return result
+
+
 async def list_finances(
     session: AsyncSession,
     *,
@@ -546,6 +614,9 @@ async def list_finances(
         sub_types = [OrderServiceType.STANDARD, OrderServiceType.WHITE_INTERNET]
         stmt = stmt.where(Order.service_type.in_(sub_types))
         count_stmt = count_stmt.where(Order.service_type.in_(sub_types))
+    elif kind == "gateway":
+        stmt = stmt.where(Order.payment_method != "wallet")
+        count_stmt = count_stmt.where(Order.payment_method != "wallet")
 
     if clean_status:
         stmt = stmt.where(Order.status == clean_status)
@@ -592,6 +663,9 @@ async def list_finances(
             .limit(safe_limit)
         )
     ).all()
+    breakdown_map = await build_orders_payment_breakdown(
+        session, [order for order, _usr in rows]
+    )
     items = [
         {
             "kind": "order",
@@ -604,7 +678,7 @@ async def list_finances(
             "service_type": order.service_type,
             "duration_days": order.duration_days,
             "device_limit": order.device_limit,
-            "payment_method": order.payment_method,
+            **breakdown_map[order.id],
             "external_id": order.external_id,
             "reference": order.external_id or order.description or "",
             "metadata_flags": extract_order_metadata_flags(order.metadata_),

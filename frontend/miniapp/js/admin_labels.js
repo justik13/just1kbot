@@ -191,3 +191,64 @@ export function formatWiNodeSyncStatus(status) {
     const key = String(status).trim().toLowerCase();
     return WI_NODE_SYNC_STATUS_MAP[key] || String(status);
 }
+
+function _fmtRub(val) {
+    const n = Number(val || 0);
+    if (!Number.isFinite(n)) return "0";
+    return Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100);
+}
+
+export function formatOrderPaymentMethod(method) {
+    if (method === "yookassa") return "ЮKassa";
+    if (method === "wallet") return "Баланс";
+    return method || "";
+}
+
+export function formatOrderPaymentBreakdown(item) {
+    if (!item || typeof item !== "object") return "";
+    const method = String(item.payment_method || "");
+    const ext = Math.max(0, Number(item.external_paid_rub || 0));
+    const bonus = Math.max(0, Number(item.bonus_paid_rub || 0));
+    const real = Math.max(0, Number(item.real_balance_paid_rub || 0));
+    const wallet = Math.max(0, Number(item.wallet_debit_rub || 0));
+    const extLabel = formatOrderPaymentMethod(method && method !== "wallet" ? method : "yookassa") || "ЮKassa";
+
+    if (ext > 0 && wallet > 0) {
+        const parts = [`${_fmtRub(ext)} ₽ ${extLabel}`];
+        if (real > 0 && bonus > 0) {
+            parts.push(`${_fmtRub(real)} ₽ осн.`);
+            parts.push(`${_fmtRub(bonus)} ₽ бонусы`);
+        } else if (bonus > 0) {
+            parts.push(`${_fmtRub(bonus)} ₽ бонусы`);
+        } else if (real > 0) {
+            parts.push(`${_fmtRub(real)} ₽ осн.`);
+        } else {
+            parts.push(`${_fmtRub(wallet)} ₽ баланс`);
+        }
+        return parts.join(" + ");
+    }
+
+    if (method === "wallet" || (ext === 0 && wallet > 0)) {
+        if (real > 0 && bonus > 0) {
+            return `${_fmtRub(real)} ₽ осн. + ${_fmtRub(bonus)} ₽ бонусы`;
+        }
+        if (bonus > 0) return "Бонусы";
+        if (real > 0) return "Основной баланс";
+        return "Баланс";
+    }
+
+    if (ext > 0 || method) {
+        return formatOrderPaymentMethod(method) || extLabel;
+    }
+    return "";
+}
+
+export function formatOrderAmountLabel(item) {
+    if (!item || typeof item !== "object") return "0 ₽";
+    const amt = Number(item.amount_rub || 0);
+    const total = Number(item.total_rub ?? amt);
+    if (Number.isFinite(total) && total > amt + 0.001) {
+        return `${_fmtRub(total)} ₽`;
+    }
+    return `${_fmtRub(amt)} ₽`;
+}

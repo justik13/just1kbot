@@ -184,7 +184,7 @@ async def api_admin_finances_handler(request: web.Request) -> web.Response:
         return err_resp  # type: ignore[return-value]
 
     kind = request.query.get("kind", "orders").strip()
-    if kind not in ("orders", "subscriptions", "topups"):
+    if kind not in ("orders", "subscriptions", "topups", "gateway"):
         kind = "orders"
     status = request.query.get("status", "").strip()
     query_str = request.query.get("q", "").strip()
