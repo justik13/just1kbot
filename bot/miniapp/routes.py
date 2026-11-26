@@ -110,10 +110,20 @@ def _compute_miniapp_asset_version() -> str:
 
 _MINIAPP_ASSET_VERSION = _compute_miniapp_asset_version()
 _ASSET_VERSION_RE = re.compile(r"\?v=2\.\d+\.\d+")
+_REWRITTEN_TEXT_ASSET_CACHE: dict[Path, str] = {}
 
 
 def _rewrite_asset_version(text: str) -> str:
     return _ASSET_VERSION_RE.sub(f"?v={_MINIAPP_ASSET_VERSION}", text)
+
+
+def _get_rewritten_text_asset(target: Path) -> str:
+    cached = _REWRITTEN_TEXT_ASSET_CACHE.get(target)
+    if cached is not None:
+        return cached
+    rewritten = _rewrite_asset_version(target.read_text(encoding="utf-8"))
+    _REWRITTEN_TEXT_ASSET_CACHE[target] = rewritten
+    return rewritten
 
 
 async def miniapp_index_handler(request: web.Request) -> web.Response:
@@ -126,7 +136,7 @@ async def miniapp_index_handler(request: web.Request) -> web.Response:
     if not index_path.is_file():
         return web.Response(status=404, text="Mini App frontend not found")
 
-    content = _rewrite_asset_version(index_path.read_text(encoding="utf-8"))
+    content = _get_rewritten_text_asset(index_path)
     return web.Response(
         text=content,
         content_type="text/html",
@@ -167,7 +177,7 @@ async def miniapp_asset_handler(request: web.Request) -> web.Response:
         else _ASSET_CACHE_HEADERS
     )
     if not rel_path.startswith("guides/") and target.suffix.lower() in {".js", ".css", ".html"}:
-        rewritten = _rewrite_asset_version(target.read_text(encoding="utf-8"))
+        rewritten = _get_rewritten_text_asset(target)
         resp_headers = _NO_CACHE_HEADERS if target.suffix.lower() == ".html" else headers
         return web.Response(
             text=rewritten,

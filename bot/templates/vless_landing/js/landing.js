@@ -535,7 +535,7 @@
             img.classList.remove("zoomed");
             if (caption) caption.textContent = imgAlt || "Скриншот настройки";
             if (typeof lightbox.showModal === "function") {
-                lightbox.showModal();
+                if (!lightbox.open) lightbox.showModal();
             } else {
                 lightbox.setAttribute("open", "");
             }
@@ -587,7 +587,11 @@
                 document.body.style.overflow = "";
                 const img = document.getElementById("lightboxImg");
                 if (img) img.classList.remove("zoomed");
+                const prevFocus = lastFocusedElementBeforeLightbox;
                 lastFocusedElementBeforeLightbox = null;
+                if (prevFocus && typeof prevFocus.focus === "function") {
+                    prevFocus.focus();
+                }
             };
             lightboxModal.addEventListener("close", onLightboxDismiss);
             lightboxModal.addEventListener("cancel", onLightboxDismiss);

@@ -366,7 +366,6 @@ async def check_node_resources_and_alerts(bot: Bot):
     eu_hubs_by_ip: dict[str, Server] = {}
     eu_hubs_by_domain: dict[str, Server] = {}
     all_enabled_eu_ids: set[int] = set()
-    all_online_eu_ids: set[int] = set()
     for _srv in servers:
         if get_server_role(_srv) == "eu_hub":
             eu_hubs_by_id[_srv.id] = _srv
@@ -378,8 +377,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                 eu_hubs_by_domain[_dom] = _srv
             if _srv.is_active and getattr(_srv, "lifecycle_status", None) in (None, ServerLifecycleStatus.ACTIVE):
                 all_enabled_eu_ids.add(_srv.id)
-                if _srv.health_state == ServerHealthState.ONLINE:
-                    all_online_eu_ids.add(_srv.id)
     probe_timeout = aiohttp.ClientTimeout(
         total=INGRESS_PROBE_TOTAL_TIMEOUT,
         connect=INGRESS_PROBE_CONNECT_TIMEOUT,
@@ -1526,15 +1523,6 @@ async def check_node_resources_and_alerts(bot: Bot):
             if applied and db_server is not None:
                 server.health_state = db_server.health_state
                 server.is_active = db_server.is_active
-                if get_server_role(server) == "eu_hub":
-                    if (
-                        server.is_active
-                        and getattr(server, "lifecycle_status", None) in (None, ServerLifecycleStatus.ACTIVE)
-                        and server.health_state == ServerHealthState.ONLINE
-                    ):
-                        all_online_eu_ids.add(server.id)
-                    else:
-                        all_online_eu_ids.discard(server.id)
             if applied and expected_health_state != st.health_state:
                 topology_states = (ServerHealthState.PROBLEM, ServerHealthState.MANUAL_DISABLED)
                 if expected_health_state in topology_states or st.health_state in topology_states:

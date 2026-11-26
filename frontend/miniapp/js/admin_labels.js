@@ -93,9 +93,7 @@ export const LEDGER_ENTRY_TYPE_MAP = {
 };
 
 export function formatLedgerEntryType(entryType) {
-    const val = LEDGER_ENTRY_TYPE_MAP[entryType];
-    if (val && typeof val === "object") return val.label || String(entryType || "Операция");
-    return val || entryType || "Операция";
+    return LEDGER_ENTRY_TYPE_MAP[entryType] || entryType || "Операция";
 }
 
 export function formatMetadataFlag(flag) {

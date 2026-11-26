@@ -267,7 +267,7 @@ async def _dispatch_yookassa_notifications(
                 "💸 <b>Возврат ЮKassa</b>\n"
                 f"Заказ: <code>{refund_alert_info['order_id']}</code>\n"
                 f"Пользователь ID: <code>{refund_alert_info['user_id']}</code>\n"
-                f"Услуга: {service_labels.get(refund_alert_info['service_type'], refund_alert_info['service_type'])}\n"
+                f"Услуга: {html.escape(str(service_labels.get(refund_alert_info['service_type'], refund_alert_info['service_type'])))}\n"
                 f"Сумма: {refund_alert_info['amount_rub']} ₽ ({status_label})\n"
                 f"{footer_line}"
             )
