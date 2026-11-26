@@ -51,6 +51,13 @@ class FulfillmentService:
     @staticmethod
     async def fulfill_order(session: AsyncSession, order: Order) -> None:
         """Fulfill paid order linearly based on service_type."""
+        if (order.metadata_ or {}).get("benefits_fulfilled"):
+            logger.warning(
+                "Order %s already fulfilled (benefits_fulfilled=True); skipping duplicate fulfillment",
+                order.id,
+            )
+            return
+
         user = await session.get(User, order.user_id, with_for_update=True)
         if not user:
             logger.error(
@@ -198,6 +205,21 @@ class FulfillmentService:
                 user.id,
                 order.amount_rub,
             )
+        else:
+            logger.warning(
+                "Unknown service_type=%r for order %s; skipping fulfillment",
+                order.service_type,
+                order.id,
+            )
+            return
+
+        final_meta = dict(order.metadata_ or {})
+        final_meta["benefits_fulfilled"] = True
+        order.metadata_ = final_meta
+        if hasattr(order, "_sa_instance_state"):
+            from sqlalchemy.orm.attributes import flag_modified
+
+            flag_modified(order, "metadata_")
 
     @staticmethod
     async def revoke_order(session: AsyncSession, order: Order) -> None:

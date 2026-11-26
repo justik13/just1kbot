@@ -676,8 +676,8 @@ class OrderService:
                 )
             return order
 
-        if order.status == "refunded":
-            logger.warning("Cannot mark refunded order %s as paid", order.id)
+        if order.status in ("refunded", "partially_refunded"):
+            logger.warning("Cannot mark %s order %s as paid", order.status, order.id)
             order._newly_paid = False
             return order
 

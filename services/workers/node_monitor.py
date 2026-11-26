@@ -1525,7 +1525,14 @@ async def check_node_resources_and_alerts(bot: Bot):
                 server.is_active = db_server.is_active
             if applied and expected_health_state != st.health_state:
                 topology_states = (ServerHealthState.PROBLEM, ServerHealthState.MANUAL_DISABLED)
-                if expected_health_state in topology_states or st.health_state in topology_states:
+                if (
+                    expected_health_state in topology_states
+                    or st.health_state in topology_states
+                    or (
+                        expected_health_state == ServerHealthState.WAITING_CONFIRMATION
+                        and st.health_state == ServerHealthState.ONLINE
+                    )
+                ):
                     topology_dirty = True
             if db_server and not applied:
                 st.sync_from_db_server(db_server)

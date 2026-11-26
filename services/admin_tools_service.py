@@ -42,6 +42,7 @@ from utils.telegram import safe_send_message
 logger = logging.getLogger(__name__)
 
 _active_bulk_tasks: set[asyncio.Task] = set()
+_bulk_task_lock = asyncio.Lock()
 
 
 def _track_bulk_task(coro: Any, *, name: str) -> asyncio.Task:
@@ -206,47 +207,49 @@ async def start_mass_bonus(
 ) -> dict[str, Any]:
     if not (1 <= amount_rub <= 50000):
         raise ValueError("Сумма должна быть от 1 до 50000 ₽")
-    if any(not t.done() for t in _active_bulk_tasks):
-        raise ValueError("Массовая операция уже выполняется. Дождитесь завершения.")
 
-    batch_id = uuid4().hex[:12]
-    async with session_scope() as session:
-        targets = await get_audience_targets(
-            session,
-            target_audience,
-            admin_id=admin_id,
-            include_bot_blocked=True,
+    async with _bulk_task_lock:
+        if any(not t.done() for t in _active_bulk_tasks):
+            raise ValueError("Массовая операция уже выполняется. Дождитесь завершения.")
+
+        batch_id = uuid4().hex[:12]
+        async with session_scope() as session:
+            targets = await get_audience_targets(
+                session,
+                target_audience,
+                admin_id=admin_id,
+                include_bot_blocked=True,
+            )
+            if not targets:
+                raise ValueError("Нет пользователей для выбранной аудитории")
+
+            await AuditService.log_action(
+                session,
+                admin_id=admin_id,
+                action=AdminAuditAction.MASS_BONUS_GRANTED,
+                target_type="mass_bonus",
+                details={
+                    "batch_id": batch_id,
+                    "audience": target_audience,
+                    "amount_rub": amount_rub,
+                    "target_count": len(targets),
+                    "notify_users": notify_users,
+                    "reason": reason,
+                },
+            )
+
+        _track_bulk_task(
+            _run_mass_bonus_worker(
+                bot,
+                admin_id=admin_id,
+                batch_id=batch_id,
+                targets=targets,
+                amount_rub=amount_rub,
+                reason=reason,
+                notify_users=notify_users,
+            ),
+            name=f"mass_bonus:{batch_id}",
         )
-        if not targets:
-            raise ValueError("Нет пользователей для выбранной аудитории")
-
-        await AuditService.log_action(
-            session,
-            admin_id=admin_id,
-            action=AdminAuditAction.MASS_BONUS_GRANTED,
-            target_type="mass_bonus",
-            details={
-                "batch_id": batch_id,
-                "audience": target_audience,
-                "amount_rub": amount_rub,
-                "target_count": len(targets),
-                "notify_users": notify_users,
-                "reason": reason,
-            },
-        )
-
-    _track_bulk_task(
-        _run_mass_bonus_worker(
-            bot,
-            admin_id=admin_id,
-            batch_id=batch_id,
-            targets=targets,
-            amount_rub=amount_rub,
-            reason=reason,
-            notify_users=notify_users,
-        ),
-        name=f"mass_bonus:{batch_id}",
-    )
     return {
         "batch_id": batch_id,
         "target_count": len(targets),
@@ -380,64 +383,66 @@ async def start_mass_extend(
         raise ValueError("Укажите сервис: standard или white_internet")
     if not (1 <= days <= 365):
         raise ValueError("Срок продления должен быть от 1 до 365 дней")
-    if any(not t.done() for t in _active_bulk_tasks):
-        raise ValueError("Массовая операция уже выполняется. Дождитесь завершения.")
 
-    batch_id = uuid4().hex[:12]
-    async with session_scope() as session:
-        targets = await get_audience_targets(
-            session,
-            target_audience,
-            admin_id=admin_id,
-            include_bot_blocked=True,
-        )
-        if service_scope == "white_internet" and targets:
-            from config.enums import WhiteInternetStatus
+    async with _bulk_task_lock:
+        if any(not t.done() for t in _active_bulk_tasks):
+            raise ValueError("Массовая операция уже выполняется. Дождитесь завершения.")
 
-            eligible_ids = set(
-                (
-                    await session.scalars(
-                        select(WhiteInternetSubscription.user_id).where(
-                            WhiteInternetSubscription.user_id.in_([t[0] for t in targets]),
-                            WhiteInternetSubscription.status != WhiteInternetStatus.DISABLED,
-                        )
-                    )
-                ).all()
+        batch_id = uuid4().hex[:12]
+        async with session_scope() as session:
+            targets = await get_audience_targets(
+                session,
+                target_audience,
+                admin_id=admin_id,
+                include_bot_blocked=True,
             )
-            targets = [t for t in targets if t[0] in eligible_ids]
+            if service_scope == "white_internet" and targets:
+                from config.enums import WhiteInternetStatus
 
-        if not targets:
-            raise ValueError("Нет подходящих пользователей для продления")
+                eligible_ids = set(
+                    (
+                        await session.scalars(
+                            select(WhiteInternetSubscription.user_id).where(
+                                WhiteInternetSubscription.user_id.in_([t[0] for t in targets]),
+                                WhiteInternetSubscription.status != WhiteInternetStatus.DISABLED,
+                            )
+                        )
+                    ).all()
+                )
+                targets = [t for t in targets if t[0] in eligible_ids]
 
-        await AuditService.log_action(
-            session,
-            admin_id=admin_id,
-            action=AdminAuditAction.MASS_SUB_EXTEND,
-            target_type="mass_extend",
-            details={
-                "batch_id": batch_id,
-                "service_scope": service_scope,
-                "audience": target_audience,
-                "days": days,
-                "target_count": len(targets),
-                "notify_users": notify_users,
-                "reason": reason,
-            },
+            if not targets:
+                raise ValueError("Нет подходящих пользователей для продления")
+
+            await AuditService.log_action(
+                session,
+                admin_id=admin_id,
+                action=AdminAuditAction.MASS_SUB_EXTEND,
+                target_type="mass_extend",
+                details={
+                    "batch_id": batch_id,
+                    "service_scope": service_scope,
+                    "audience": target_audience,
+                    "days": days,
+                    "target_count": len(targets),
+                    "notify_users": notify_users,
+                    "reason": reason,
+                },
+            )
+
+        _track_bulk_task(
+            _run_mass_extend_worker(
+                bot,
+                admin_id=admin_id,
+                batch_id=batch_id,
+                service_scope=service_scope,
+                targets=targets,
+                days=days,
+                reason=reason,
+                notify_users=notify_users,
+            ),
+            name=f"mass_extend:{batch_id}",
         )
-
-    _track_bulk_task(
-        _run_mass_extend_worker(
-            bot,
-            admin_id=admin_id,
-            batch_id=batch_id,
-            service_scope=service_scope,
-            targets=targets,
-            days=days,
-            reason=reason,
-            notify_users=notify_users,
-        ),
-        name=f"mass_extend:{batch_id}",
-    )
     return {
         "batch_id": batch_id,
         "service_scope": service_scope,

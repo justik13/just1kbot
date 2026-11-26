@@ -238,54 +238,23 @@ async def _send_wi_exhausted_alerts(bot: Bot | None, exhausted_users: list[int])
 
 
 async def _send_wi_90p_alerts(bot: Bot | None, warn_users: list[tuple[int, int, int]]):
-    if not bot or not warn_users:
+    if not warn_users:
+        return
+    unique_items = set(warn_users)
+    if not bot:
+        for sub_id, _uid, _expected_version in unique_items:
+            _in_flight_90p_subs.discard(sub_id)
         return
 
-    for sub_id, uid, expected_version in set(warn_users):
-        try:
-            async with session_scope() as session:
-                user = await session.scalar(select(User).where(User.id == uid))
-                telegram_id = user.telegram_id if (user and not user.is_bot_blocked) else None
-
-            if not telegram_id:
-                async with session_scope() as session:
-                    await session.execute(
-                        update(WhiteInternetSubscription)
-                        .where(
-                            WhiteInternetSubscription.id == sub_id,
-                            WhiteInternetSubscription.desired_version == expected_version,
-                        )
-                        .values(notified_90p=True)
-                    )
-                continue
-
+    try:
+        for sub_id, uid, expected_version in unique_items:
             try:
-                alert_text = texts.WL_TRAFFIC_90P_ALERT
-                await global_send_limiter.acquire()
-                await safe_send_message(
-                    bot,
-                    chat_id=telegram_id,
-                    text=alert_text,
-                    reply_markup=get_action_notification_keyboard("Открыть тарифы", tab="tariffs"),
-                    parse_mode="HTML",
-                    raise_forbidden=True,
-                )
                 async with session_scope() as session:
-                    await session.execute(
-                        update(WhiteInternetSubscription)
-                        .where(
-                            WhiteInternetSubscription.id == sub_id,
-                            WhiteInternetSubscription.desired_version == expected_version,
-                        )
-                        .values(notified_90p=True)
-                    )
-            except Exception as exc:
-                if is_terminal_telegram_error(exc):
-                    logger.info("User %d blocked bot or terminal error (%s); marking blocked in database", uid, exc)
+                    user = await session.scalar(select(User).where(User.id == uid))
+                    telegram_id = user.telegram_id if (user and not user.is_bot_blocked) else None
+
+                if not telegram_id:
                     async with session_scope() as session:
-                        await session.execute(
-                            update(User).where(User.id == uid).values(is_bot_blocked=True)
-                        )
                         await session.execute(
                             update(WhiteInternetSubscription)
                             .where(
@@ -294,8 +263,19 @@ async def _send_wi_90p_alerts(bot: Bot | None, warn_users: list[tuple[int, int, 
                             )
                             .values(notified_90p=True)
                         )
-                else:
-                    logger.warning("Failed to send 90%% traffic warning alert to user %d: %s", uid, exc)
+                    continue
+
+                try:
+                    alert_text = texts.WL_TRAFFIC_90P_ALERT
+                    await global_send_limiter.acquire()
+                    await safe_send_message(
+                        bot,
+                        chat_id=telegram_id,
+                        text=alert_text,
+                        reply_markup=get_action_notification_keyboard("Открыть тарифы", tab="tariffs"),
+                        parse_mode="HTML",
+                        raise_forbidden=True,
+                    )
                     async with session_scope() as session:
                         await session.execute(
                             update(WhiteInternetSubscription)
@@ -303,9 +283,45 @@ async def _send_wi_90p_alerts(bot: Bot | None, warn_users: list[tuple[int, int, 
                                 WhiteInternetSubscription.id == sub_id,
                                 WhiteInternetSubscription.desired_version == expected_version,
                             )
-                            .values(notified_90p=False)
+                            .values(notified_90p=True)
                         )
-        finally:
+                except Exception as exc:
+                    if is_terminal_telegram_error(exc):
+                        logger.info("User %d blocked bot or terminal error (%s); marking blocked in database", uid, exc)
+                        async with session_scope() as session:
+                            await session.execute(
+                                update(User).where(User.id == uid).values(is_bot_blocked=True)
+                            )
+                            await session.execute(
+                                update(WhiteInternetSubscription)
+                                .where(
+                                    WhiteInternetSubscription.id == sub_id,
+                                    WhiteInternetSubscription.desired_version == expected_version,
+                                )
+                                .values(notified_90p=True)
+                            )
+                    else:
+                        logger.warning("Failed to send 90%% traffic warning alert to user %d: %s", uid, exc)
+                        async with session_scope() as session:
+                            await session.execute(
+                                update(WhiteInternetSubscription)
+                                .where(
+                                    WhiteInternetSubscription.id == sub_id,
+                                    WhiteInternetSubscription.desired_version == expected_version,
+                                )
+                                .values(notified_90p=False)
+                            )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to process 90%% traffic warning alert for sub %d (user %d): %s",
+                    sub_id,
+                    uid,
+                    exc,
+                )
+            finally:
+                _in_flight_90p_subs.discard(sub_id)
+    finally:
+        for sub_id, _uid, _expected_version in unique_items:
             _in_flight_90p_subs.discard(sub_id)
 
 
@@ -370,6 +386,8 @@ async def _traffic_sync_once(bot: Bot | None = None):
         if err is not None or snapshot is None:
             continue
 
+        warn_90p_wi_users: list[tuple[int, int, int]] = []
+        warn_90p_dispatched = False
         try:
             node_epoch, node_boot_id, node_starttime, users_stats = snapshot[:4]
             if not node_epoch:
@@ -428,7 +446,6 @@ async def _traffic_sync_once(bot: Bot | None = None):
             server_delta = 0
             affected_vless_user_ids: set[int] = set()
             exhausted_wi_users: list[int] = []
-            warn_90p_wi_users: list[tuple[int, int, int]] = []
 
             if vless_stats:
                 matching_uuids = [u for u in vless_stats.keys() if isinstance(u, str) and u.strip()]
@@ -543,6 +560,7 @@ async def _traffic_sync_once(bot: Bot | None = None):
                             continue
 
                         try:
+                            warn_90p_entry: tuple[int, int, int] | None = None
                             async with session_scope() as session:
                                 if wi_sub_uid:
                                     await session.execute(
@@ -614,14 +632,14 @@ async def _traffic_sync_once(bot: Bot | None = None):
                                     ):
                                         sub.notified_90p = True
                                         await session.flush()
-                                        _in_flight_90p_subs.add(sub.id)
-                                        warn_90p_wi_users.append(
-                                            (
-                                                sub.id,
-                                                sub.user_id,
-                                                int(getattr(sub, "desired_version", 1) or 1),
-                                            )
+                                        warn_90p_entry = (
+                                            sub.id,
+                                            sub.user_id,
+                                            int(getattr(sub, "desired_version", 1) or 1),
                                         )
+                            if warn_90p_entry is not None:
+                                _in_flight_90p_subs.add(warn_90p_entry[0])
+                                warn_90p_wi_users.append(warn_90p_entry)
                         except Exception as client_exc:
                             logger.error(
                                 "Error processing WI traffic deduction for client %s on server %d: %s",
@@ -685,6 +703,7 @@ async def _traffic_sync_once(bot: Bot | None = None):
 
             if warn_90p_wi_users and bot:
                 _start_background_task(_send_wi_90p_alerts(bot, warn_90p_wi_users))
+                warn_90p_dispatched = True
 
         except Exception as srv_err:
             logger.error(
@@ -694,6 +713,17 @@ async def _traffic_sync_once(bot: Bot | None = None):
                 srv_err,
                 exc_info=True,
             )
+        finally:
+            if warn_90p_wi_users and not warn_90p_dispatched:
+                if bot:
+                    try:
+                        _start_background_task(_send_wi_90p_alerts(bot, warn_90p_wi_users))
+                        warn_90p_dispatched = True
+                    except Exception:
+                        pass
+                if not warn_90p_dispatched:
+                    for sub_id, _uid, _ver in warn_90p_wi_users:
+                        _in_flight_90p_subs.discard(sub_id)
 
 
 # Backward compatibility alias
