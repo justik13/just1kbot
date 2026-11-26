@@ -474,7 +474,7 @@
             function onFail() {
                 btn.classList.remove("copied");
                 btn.classList.add("copy-failed");
-                btn.innerHTML = '<span class="copy-lbl" style="color:var(--error);">Ошибка</span>';
+                btn.innerHTML = '<span class="copy-lbl" style="color:var(--negative);">Ошибка</span>';
                 setTimeout(function() {
                     btn.classList.remove("copy-failed");
                     btn.innerHTML = btn.getAttribute("data-original-html") || originalHtml;
@@ -547,14 +547,18 @@
         function closeImageLightbox() {
             const lightbox = document.getElementById("imageLightbox");
             if (!lightbox) return;
+            const isOpen = lightbox.open || lightbox.hasAttribute("open");
+            if (!isOpen) return;
+            const prevFocus = lastFocusedElementBeforeLightbox;
+            lastFocusedElementBeforeLightbox = null;
             if (typeof lightbox.close === "function") {
                 lightbox.close();
             } else {
                 lightbox.removeAttribute("open");
             }
             document.body.style.overflow = "";
-            if (lastFocusedElementBeforeLightbox && typeof lastFocusedElementBeforeLightbox.focus === "function") {
-                lastFocusedElementBeforeLightbox.focus();
+            if (prevFocus && typeof prevFocus.focus === "function") {
+                prevFocus.focus();
             }
         }
 
@@ -583,13 +587,30 @@
                 document.body.style.overflow = "";
                 const img = document.getElementById("lightboxImg");
                 if (img) img.classList.remove("zoomed");
+                lastFocusedElementBeforeLightbox = null;
             };
             lightboxModal.addEventListener("close", onLightboxDismiss);
             lightboxModal.addEventListener("cancel", onLightboxDismiss);
         }
 
         document.addEventListener("keydown", function(e) {
-            if (e.key === "Escape") closeImageLightbox();
+            if (e.key === "Escape") {
+                const lightbox = document.getElementById("imageLightbox");
+                if (lightbox && (lightbox.open || lightbox.hasAttribute("open"))) {
+                    closeImageLightbox();
+                }
+                return;
+            }
+            if (e.key === "Enter" || e.key === " ") {
+                const wrapper = e.target.closest && e.target.closest(".guide-screenshot-wrapper");
+                if (wrapper) {
+                    e.preventDefault();
+                    const img = wrapper.querySelector("img");
+                    if (img && img.src) {
+                        openImageLightbox(img.src, img.alt);
+                    }
+                }
+            }
         });
 
         document.addEventListener("click", function(e) {
@@ -600,10 +621,15 @@
         });
 
         window.addEventListener("hashchange", function() {
+            const guides = document.getElementById("guidesView");
             if (window.location.hash === "#guides") {
-                openGuidesCurrentTab();
+                if (guides && guides.classList.contains("view-hidden")) {
+                    openGuidesCurrentTab();
+                }
             } else if (!window.location.hash) {
-                closeGuidesTab();
+                if (guides && !guides.classList.contains("view-hidden")) {
+                    closeGuidesTab();
+                }
             }
         });
 

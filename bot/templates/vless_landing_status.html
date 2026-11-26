@@ -142,8 +142,8 @@
             margin-top: 12px;
             transition: background-color 150ms ease;
         }
-        .support-accordion:hover {
-            border-color: var(--border-strong);
+        .support-accordion:not(.open):hover {
+            background-color: var(--surface-hover);
         }
         .support-accordion-header {
             width: 100%;
@@ -242,9 +242,8 @@
             padding: 12px;
             font-size: 14px;
             color: var(--text-main);
-            outline: none;
             font-family: inherit;
-            transition: border-color 150ms ease, box-shadow 150ms ease;
+            transition: border-color 150ms ease;
             box-sizing: border-box;
         }
         .support-input::placeholder, .support-textarea::placeholder {
@@ -253,7 +252,12 @@
         }
         .support-input:focus, .support-textarea:focus {
             border-color: var(--border-strong);
-            box-shadow: 0 0 0 1px var(--border-strong);
+            outline: 1px solid var(--border-strong);
+            outline-offset: 0;
+        }
+        .support-input:focus-visible, .support-textarea:focus-visible {
+            outline: 2px solid #ffffff;
+            outline-offset: 2px;
         }
         .support-input:disabled, .support-textarea:disabled {
             opacity: 0.55;

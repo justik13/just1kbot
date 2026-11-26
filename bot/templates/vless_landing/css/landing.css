@@ -1727,7 +1727,8 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            gap: 8px;
+            flex-wrap: wrap;
+            gap: 6px 10px;
             padding: 8px 10px;
             background-color: var(--bg-tile);
             border-radius: var(--radius-badge);
@@ -1746,7 +1747,9 @@
         .guide-data-val-group {
             display: inline-flex;
             align-items: center;
+            flex-wrap: wrap;
             gap: 8px;
+            max-width: 100%;
         }
 
         .guide-data-value {

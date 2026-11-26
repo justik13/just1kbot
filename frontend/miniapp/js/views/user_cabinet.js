@@ -816,7 +816,8 @@ function _openWiPurchaseModal(d, mode, onReload) {
     let useBalance = true;
     let idemKey = _newIdempotencyKey();
 
-    const welcomeDiscountEligible = Boolean(!isRenew && ref.welcome_discount_eligible);
+    const wiStatus = String(wi.status || "").toUpperCase();
+    const welcomeDiscountEligible = Boolean(!isRenew && wiStatus !== "EXPIRED" && ref.welcome_discount_eligible);
     const welcomeDiscountPct = Number(ref.welcome_discount_pct || 25);
 
     const wrap = document.createElement("div");
@@ -1559,12 +1560,14 @@ function _renderConnectTab(body, d, reload, root) {
 
     const { isStdGrace, graceHoursLeft } = _getStdGraceInfo(d, std);
 
+    const wiStatus = String(wi.status || "").toUpperCase();
+    const wiPending = Boolean(wiHasPeriod && wiStatus === "PENDING");
     const wiLimitBytes = Number(wi.traffic_limit_bytes || 0);
     const wiUsedBytes = Number(wi.traffic_used_bytes || 0);
     const wiRemainingBytes = Math.max(0, wiLimitBytes - wiUsedBytes);
     const wiRemainingGb = formatBytesGb(wiRemainingBytes);
     const wiRemainingPct = wiLimitBytes > 0 ? Math.min(100, Math.max(0, Math.round((wiRemainingBytes / wiLimitBytes) * 100))) : 0;
-    const wiExhausted = Boolean(wiHasPeriod && (String(wi.status || "").toUpperCase() === "EXHAUSTED" || (wiLimitBytes > 0 && wiUsedBytes >= wiLimitBytes)));
+    const wiExhausted = Boolean(wiHasPeriod && (wiStatus === "EXHAUSTED" || (wiLimitBytes > 0 && wiUsedBytes >= wiLimitBytes)));
 
     const _shortDate = (iso) => {
         const dStr = _safeFormatDate(iso);
@@ -1611,19 +1614,19 @@ function _renderConnectTab(body, d, reload, root) {
 
     const wiTileHtml = wiHasPeriod
         ? `
-            <button type="button" class="channel-tile is-wi ${wiExhausted ? "is-warn" : "is-active"}" data-jump-tariffs="1">
+            <button type="button" class="channel-tile is-wi ${wiExhausted ? "is-warn" : (wiPending ? "" : "is-active")}" data-jump-tariffs="1">
                 <div class="channel-tile-head">
                     <span class="channel-name">Белый интернет</span>
                     <span class="channel-indicator"></span>
                 </div>
-                <div class="channel-metric">${wiExhausted ? "0" : wiRemainingGb} <span class="channel-metric-unit">ГБ осталось</span></div>
+                <div class="channel-metric">${wiPending ? `<span style="font-size:16px;">Активация...</span>` : `${wiExhausted ? "0" : wiRemainingGb} <span class="channel-metric-unit">ГБ осталось</span>`}</div>
                 <div class="channel-foot">
                     <div class="progress-track">
-                        <div class="progress-fill" style="background:var(--accent-white); transform:scaleX(${wiExhausted ? 0 : (Number(wiRemainingPct || 0) / 100).toFixed(3)});"></div>
+                        <div class="progress-fill" style="background:var(--accent-white); transform:scaleX(${wiExhausted || wiPending ? 0 : (Number(wiRemainingPct || 0) / 100).toFixed(3)});"></div>
                     </div>
                     <div class="channel-meta">
                         <span style="white-space:nowrap;">${Number(wi.device_limit || 1)} устр.</span>
-                        <span style="white-space:nowrap;">${wiShortDate ? `до ${wiShortDate}` : ""}</span>
+                        <span style="white-space:nowrap;">${wiPending ? "Настраивается" : (wiShortDate ? `до ${wiShortDate}` : "")}</span>
                     </div>
                     <span class="channel-action">Тарифы ›</span>
                 </div>
@@ -1646,18 +1649,21 @@ function _renderConnectTab(body, d, reload, root) {
         `;
 
     const isWiOnlyExhausted = Boolean(!std.active && wiExhausted);
-    const hasBothActive = Boolean(std.active && wiHasPeriod && !wiExhausted);
+    const isWiOnlyPending = Boolean(!std.active && wiPending);
+    const hasBothActive = Boolean(std.active && wiHasPeriod && !wiExhausted && !wiPending);
 
     body.innerHTML = `
         <section class="hero-section">
             <div class="hero-title-group">
-                <span class="hero-status ${isStdGrace || isWiOnlyExhausted ? "warn" : ""}">${isStdGrace ? `Льготный период · ~${graceHoursLeft} ч.` : (isWiOnlyExhausted ? "Белый интернет" : "Подписка активна")}</span>
-                <h1 class="hero-headline-lg">${isStdGrace ? "Подписка закончилась" : (isWiOnlyExhausted ? "Трафик закончился" : "Подключение готово")}</h1>
+                <span class="hero-status ${isStdGrace || isWiOnlyExhausted ? "warn" : (isWiOnlyPending ? "muted" : "")}">${isStdGrace ? `Льготный период · ~${graceHoursLeft} ч.` : (isWiOnlyExhausted ? "Белый интернет" : (isWiOnlyPending ? "Белый интернет" : "Подписка активна"))}</span>
+                <h1 class="hero-headline-lg">${isStdGrace ? "Подписка закончилась" : (isWiOnlyExhausted ? "Трафик закончился" : (isWiOnlyPending ? "Активация..." : "Подключение готово"))}</h1>
                 <p class="hero-sub">${isStdGrace
                     ? `Основной срок подписки закончился, но доступ сохранён ещё на ~${graceHoursLeft} ч., чтобы вы успели продлить подписку без отключения.`
                     : (isWiOnlyExhausted
                         ? "Пополните пакет трафика или выберите тариф на вкладке «Тарифы»"
-                        : (hasBothActive ? "Стандарт и Белый интернет работают по одной ссылке" : "Выберите приложение ниже или скопируйте ссылку"))}</p>
+                        : (isWiOnlyPending
+                            ? "Подписка активируется автоматически. Доступ появится сразу после завершения настройки."
+                            : (hasBothActive ? "Стандарт и Белый интернет работают по одной ссылке" : "Выберите приложение ниже или скопируйте ссылку")))}</p>
             </div>
 
             ${isStdGrace ? `
@@ -1808,6 +1814,8 @@ function _renderTariffsTab(body, d, reload) {
         : 0;
     const wiCurLimit = Number(wi.device_limit || 1);
     const wiMaxDevices = pricing.wi_max_devices || 3;
+    const wiStatus = String(wi.status || "").toUpperCase();
+    const wiPending = wiStatus === "PENDING";
 
     body.innerHTML = `
         <section class="hero-title-group">
@@ -1828,8 +1836,8 @@ function _renderTariffsTab(body, d, reload) {
         <section class="balance-card">
             <div>
                 <div class="muted" style="font-size:12px;">Баланс аккаунта</div>
-                <div class="balance-value">${bal.total} ₽</div>
-                <div class="balance-sub">Основной: ${bal.real} ₽ · Бонусы: ${bal.bonus} ₽</div>
+                <div class="balance-value" style="white-space:nowrap;">${bal.total}&nbsp;₽</div>
+                <div class="balance-sub">Основной: <span style="white-space:nowrap;">${bal.real}&nbsp;₽</span> · Бонусы: <span style="white-space:nowrap;">${bal.bonus}&nbsp;₽</span></div>
             </div>
             <button id="topupBtn" type="button" class="btn btn-secondary btn-sm">${_ICONS.plus} Пополнить</button>
         </section>
@@ -1868,29 +1876,29 @@ function _renderTariffsTab(body, d, reload) {
             `}
         </section>
 
-        <section class="plan-card plan-wi ${wi.active ? "plan-active" : ""}">
+        <section class="plan-card plan-wi ${wi.active && !wiPending ? "plan-active" : ""}">
             <div class="row">
                 <div>
                     <h2 class="card-title">Белый интернет</h2>
                     <div class="muted" style="font-size:12px;">Для мобильной сети при жёстких ограничениях доступа</div>
                 </div>
                 <span class="chip ${
-                    wi.status === "EXHAUSTED"
+                    wiStatus === "EXHAUSTED"
                         ? "chip-warn"
-                        : wi.status === "PENDING"
-                            ? "chip-wi"
+                        : wiPending
+                            ? "chip-muted"
                             : wi.active
                                 ? "chip-wi"
                                 : "chip-muted"
                 }">
                     ${
-                        wi.status === "EXHAUSTED"
+                        wiStatus === "EXHAUSTED"
                             ? "Трафик исчерпан"
-                            : wi.status === "PENDING"
-                                ? "Настраивается"
+                            : wiPending
+                                ? "Активация..."
                                 : wi.active
                                     ? (wiExpStr ? `до ${wiExpStr}` : "Активен")
-                                    : wi.status === "EXPIRED"
+                                    : wiStatus === "EXPIRED"
                                         ? "Истёк"
                                         : "Не подключён"
                     }
@@ -1916,9 +1924,10 @@ function _renderTariffsTab(body, d, reload) {
                     </span>
                 </label>
                 <div class="connect-pair">
-                    <button id="wiRenewBtn" type="button" class="btn btn-primary">Продлить +30 дн.</button>
-                    <button id="wiManageBtn" type="button" class="btn">Докупить ГБ / Слоты</button>
+                    <button id="wiRenewBtn" type="button" class="btn btn-primary" ${wiPending ? "disabled" : ""}>Продлить +30 дн.</button>
+                    <button id="wiManageBtn" type="button" class="btn" ${wiPending ? "disabled" : ""}>Докупить ГБ / Слоты</button>
                 </div>
+                ${wiPending ? `<div class="muted" style="font-size:12px;">Доступно после завершения активации</div>` : ""}
             ` : `
                 <div class="plan-meta-row">
                     <span class="plan-price-tag">от ${wiBase} ₽ / 30 дн.</span>
@@ -2005,14 +2014,14 @@ function _renderTariffsTab(body, d, reload) {
     }
 
     const wiRenewBtn = body.querySelector("#wiRenewBtn");
-    if (wiRenewBtn) {
+    if (wiRenewBtn && !wiPending) {
         wiRenewBtn.addEventListener("click", () => {
             if (checkCanPay()) _openWiPurchaseModal(d, "renew", reload);
         });
     }
 
     const wiManageBtn = body.querySelector("#wiManageBtn");
-    if (wiManageBtn) {
+    if (wiManageBtn && !wiPending) {
         wiManageBtn.addEventListener("click", () => {
             if (checkCanPay()) _openWiManageModal(d, reload);
         });
@@ -2137,7 +2146,7 @@ function _buildDevicesSectionHtml(d) {
             <div class="section-head">
                 <div class="section-title-wrap">
                     <h2 class="section-title">Устройства</h2>
-                    <span class="mono-badge">${devices.length} / ${totalLimit}</span>
+                    <span class="mono-badge" style="white-space:nowrap;">${devices.length}&nbsp;/&nbsp;${totalLimit}</span>
                 </div>
                 <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
                     <button type="button" class="btn btn-sm" id="refreshDevicesBtn" aria-label="Обновить список устройств">${_ICONS.refresh} Обновить</button>
@@ -2566,8 +2575,8 @@ function _renderProfileTab(body, d, reload, onBack) {
         <section class="balance-card">
             <div>
                 <div class="muted" style="font-size:12px;">Баланс аккаунта</div>
-                <div class="balance-value">${bal.total} ₽</div>
-                <div class="balance-sub">Основной: ${bal.real} ₽ · Бонусы: ${bal.bonus} ₽</div>
+                <div class="balance-value" style="white-space:nowrap;">${bal.total}&nbsp;₽</div>
+                <div class="balance-sub">Основной: <span style="white-space:nowrap;">${bal.real}&nbsp;₽</span> · Бонусы: <span style="white-space:nowrap;">${bal.bonus}&nbsp;₽</span></div>
             </div>
             <button id="profileTopupBtn" type="button" class="btn btn-primary btn-sm">${_ICONS.plus} Пополнить</button>
         </section>

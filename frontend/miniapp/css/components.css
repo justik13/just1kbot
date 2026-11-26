@@ -14,7 +14,7 @@
 @media (min-width: 768px) {
     .app-shell:not(.mode-admin) {
         max-width: 720px;
-        padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+        padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px));
     }
 
     .app-shell.mode-admin {
@@ -141,9 +141,55 @@
     font-size: 13px;
     font-weight: 500;
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    flex-shrink: 0;
     cursor: pointer;
     font-family: inherit;
     transition: border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+
+#profileBalanceText {
+    white-space: nowrap;
+}
+
+@media (max-width: 400px) {
+    .topbar {
+        gap: 6px;
+    }
+
+    .topbar-right {
+        gap: 6px;
+    }
+
+    .brand {
+        gap: 6px;
+    }
+
+    .brand-title {
+        font-size: 14px;
+    }
+
+    .mode-switch {
+        padding: 2px;
+        gap: 2px;
+        border-radius: 10px;
+    }
+
+    .mode-btn {
+        padding: 4px 8px;
+        font-size: 11px;
+    }
+
+    .profile-pill {
+        padding: 4px 8px 4px 4px;
+        gap: 5px;
+        font-size: 12px;
+    }
+
+    .profile-pill-chevron {
+        width: 12px;
+        height: 12px;
+    }
 }
 
 .profile-pill.active {
@@ -1242,21 +1288,6 @@ dialog.modal-dialog::backdrop {
     flex-wrap: wrap;
 }
 
-.device-row {
-    background: var(--bg-elevated);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-control);
-    padding: 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    transition: border-color var(--dur-fast) var(--ease-out);
-}
-
-.device-row.device-bi-active {
-    border-color: rgba(255, 255, 255, 0.28);
-}
-
 .device-header {
     display: flex;
     align-items: center;
@@ -1343,20 +1374,6 @@ dialog.modal-dialog::backdrop {
     font-size: 12px;
     color: var(--text-secondary);
     margin-top: 4px;
-}
-
-.hero-card {
-    background: var(--bg-surface);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-card);
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-}
-
-.hero-card.is-active {
-    border-color: rgba(52, 211, 153, 0.28);
 }
 
 .status-dot {
@@ -2039,6 +2056,8 @@ details[open] > summary .disclosure-pill svg {
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-card);
     padding: 14px;
+    min-width: 0;
+    overflow: hidden;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
@@ -2115,7 +2134,8 @@ details[open] > summary .disclosure-pill svg {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
+    flex-wrap: wrap;
+    gap: 4px 8px;
     font-size: 12px;
     color: var(--text-muted);
     font-variant-numeric: tabular-nums;
@@ -2682,7 +2702,6 @@ button.pulse-card {
     .stepper-btn,
     .nav-item,
     .guide-kv-copy,
-    .return-banner-btn,
     .checkbox-row,
     label:not(.switch):has(input[type="checkbox"]) {
         min-height: 44px;
@@ -2736,7 +2755,7 @@ button.pulse-card {
         background: var(--bg-hover);
     }
 
-    .btn-ghost:hover {
+    .btn.btn-ghost:hover:not(:disabled) {
         background: var(--bg-surface);
         color: var(--text-primary);
     }
