@@ -775,7 +775,7 @@ async def toggle_node(
 def _jsonb_prefix_exists(col: Any, sid_prefix: str) -> Any:
     from sqlalchemy import select as sa_select
 
-    k_tv = func.jsonb_object_keys(col).table_valued("key")
+    k_tv = func.jsonb_each(col).table_valued("key", "value")
     return exists(sa_select(literal(1)).select_from(k_tv).where(k_tv.c.key.startswith(sid_prefix)))
 
 

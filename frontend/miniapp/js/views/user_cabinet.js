@@ -653,7 +653,9 @@ function _openStandardDevicesModal(d, onReload) {
         } else if (!isSame && !quote) {
             infoHtml = `<div class="muted">Расчёт условий...</div>`;
         } else if (isUpgrade && quote) {
-            infoHtml = `
+            infoHtml = blockedReason
+                ? `<div class="notice-box notice-warn">${escapeHtml(blockedReason)}</div>`
+                : `
                 <div class="quote-box">
                     <div class="quote-line"><span>Доплата до конца текущего срока (${quote.days_left || 1} дн.)</span><strong>${price} ₽</strong></div>
                     ${split.balUsed > 0 ? `<div class="quote-line"><span>С баланса</span><strong>-${split.balUsed} ₽</strong></div>` : ""}
