@@ -34,11 +34,17 @@ _resync_requested: bool = False
 _sync_req_seq: int = 0
 _sync_completed_seq: int = 0
 _last_topology_sync_results: dict[int, bool] = {}
+_topology_retry_needed: bool = False
+
+
+def is_topology_retry_pending() -> bool:
+    """Return True if the last nonblocking topology sync had failed nodes or raised."""
+    return _topology_retry_needed
 
 
 def _get_topology_sync_lock() -> asyncio.Lock:
     global _topology_sync_lock, _topology_sync_lock_loop
-    global _topology_sync_running, _resync_requested, _sync_req_seq, _sync_completed_seq, _last_topology_sync_results
+    global _topology_sync_running, _resync_requested, _sync_req_seq, _sync_completed_seq, _last_topology_sync_results, _topology_retry_needed
     try:
         current_loop = asyncio.get_running_loop()
     except RuntimeError:
@@ -51,6 +57,7 @@ def _get_topology_sync_lock() -> asyncio.Lock:
         _sync_req_seq = 0
         _sync_completed_seq = 0
         _last_topology_sync_results = {}
+        _topology_retry_needed = False
     return _topology_sync_lock
 
 
@@ -392,7 +399,7 @@ async def sync_v2_topology_to_nodes(session: AsyncSession) -> dict[int, bool]:
 
 async def sync_v2_topology_to_nodes_nonblocking() -> dict[int, bool]:
     """Read servers in a short session and push v2 links.json outside any DB transaction."""
-    global _topology_sync_running, _resync_requested, _sync_req_seq, _sync_completed_seq, _last_topology_sync_results
+    global _topology_sync_running, _resync_requested, _sync_req_seq, _sync_completed_seq, _last_topology_sync_results, _topology_retry_needed
     from database.connection import session_scope
 
     lock = _get_topology_sync_lock()
@@ -413,8 +420,12 @@ async def sync_v2_topology_to_nodes_nonblocking() -> dict[int, bool]:
                     servers = list(await get_all_servers(session))
                 results = await push_v2_topology_links(servers)
                 _last_topology_sync_results = dict(results)
+                _topology_retry_needed = any(not ok for ok in results.values())
                 _sync_completed_seq = target_seq
                 if not _resync_requested:
                     return results
+        except Exception:
+            _topology_retry_needed = True
+            raise
         finally:
             _topology_sync_running = False

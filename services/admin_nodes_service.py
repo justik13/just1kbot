@@ -458,7 +458,19 @@ def _queue_topology_sync(session: AsyncSession) -> None:
     async def _sync_topology() -> None:
         from services.topology_sync_service import sync_v2_topology_to_nodes_nonblocking
 
-        await sync_v2_topology_to_nodes_nonblocking()
+        try:
+            results = await sync_v2_topology_to_nodes_nonblocking()
+            failed_ids = [sid for sid, ok in results.items() if not ok]
+            if failed_ids:
+                logger.warning(
+                    "Queued v2 topology sync had failed nodes %s; automatic retry armed.",
+                    failed_ids,
+                )
+        except Exception as exc:
+            logger.warning(
+                "Queued v2 topology sync failed (%s); automatic retry armed.",
+                exc,
+            )
 
     queue_post_commit_task(session, _sync_topology)
 

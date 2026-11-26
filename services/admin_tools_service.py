@@ -556,7 +556,9 @@ async def build_orders_payment_breakdown(
             bonus_paid_rub = 0.0
             real_balance_paid_rub = 0.0
             meta = order.metadata_ if isinstance(order.metadata_, dict) else {}
-            raw_wallet_debit = meta.get("wallet_debit_rub")
+            raw_wallet_debit = (
+                None if meta.get("mixed_fallback_credited") else meta.get("wallet_debit_rub")
+            )
             if raw_wallet_debit is not None:
                 try:
                     wallet_debit_rub = max(0.0, float(raw_wallet_debit))
