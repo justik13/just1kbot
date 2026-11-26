@@ -27,7 +27,6 @@ from database.repositories.servers_repo import (
     get_server_by_api_url,
     get_server_by_id,
     get_server_role,
-    is_white_internet_hub_server,
     merge_v2_extra_data,
     update_server,
 )
@@ -40,7 +39,6 @@ from utils.security import is_safe_url, validate_public_fqdn
 from utils.traffic_helpers import get_server_hosting_usage
 
 logger = logging.getLogger(__name__)
-_BACKGROUND_TASKS: set[asyncio.Task] = set()
 
 
 class AdminNodeServiceError(ValueError):
@@ -943,112 +941,3 @@ async def set_node_lifecycle(
             details={"lifecycle_status": normalized},
         )
         return serialize_server_node(updated)
-
-
-async def trigger_topology_sync(admin_telegram_id: int) -> dict[str, Any]:
-    """Trigger immediate v2 topology sync across all eligible nodes outside DB tx and log to AuditLog."""
-    from services.topology_sync_service import sync_v2_topology_to_nodes_nonblocking
-
-    raw_results = await sync_v2_topology_to_nodes_nonblocking()
-    results = {str(k): bool(v) for k, v in raw_results.items()}
-    synced = sum(1 for v in raw_results.values() if v)
-    failed = sum(1 for v in raw_results.values() if not v)
-
-    async with session_scope() as session:
-        await AuditService.log_action(
-            session,
-            admin_id=admin_telegram_id,
-            action=AdminAuditAction.EDIT_SERVER,
-            target_type="server",
-            target_id=None,
-            details={"action": "topology_sync", "synced": synced, "failed": failed},
-        )
-    return {"results": results, "synced": synced, "failed": failed}
-
-
-async def _run_wi_reconciliation_once_bg() -> None:
-    from services.workers.white_internet_reconciliation import WhiteInternetReconciliationWorker
-
-    worker = WhiteInternetReconciliationWorker()
-    try:
-        await worker.run_reconciliation_cycle()
-    except Exception as exc:
-        logger.warning("Background WI reconciliation during clients resync failed: %s", exc)
-    finally:
-        if worker.client is not None:
-            try:
-                await worker.client.close()
-            except Exception:
-                pass
-
-
-async def trigger_node_clients_resync(
-    server_id: int,
-    admin_telegram_id: int,
-) -> dict[str, Any]:
-    """Queue client resync for an active ru_hub or exit_node and log to AuditLog."""
-    from services.vless_subscription_service import VlessSubscriptionService
-
-    target_server_ids: list[int] = []
-    wi_reconciliation_triggered = False
-    async with session_scope() as session:
-        server = await get_server_by_id(session, server_id, for_update=False)
-        if server is None:
-            raise AdminNodeServiceError("Node not found", status_code=404)
-        if server.lifecycle_status == ServerLifecycleStatus.DECOMMISSIONING:
-            raise AdminNodeServiceError(
-                "Сервер в статусе вывода (Drain). Сначала верните его в ACTIVE.",
-                status_code=400,
-            )
-        if not server.is_active:
-            raise AdminNodeServiceError(
-                "Сервер выключен. Включите его перед синхронизацией клиентов.",
-                status_code=400,
-            )
-        if server.health_state == ServerHealthState.PROBLEM:
-            raise AdminNodeServiceError(
-                "Сервер недоступен (PROBLEM). Дождитесь восстановления связи перед синхронизацией клиентов.",
-                status_code=400,
-            )
-        role = get_server_role(server)
-        if role not in ("ru_hub", "exit_node"):
-            raise AdminNodeServiceError(
-                f"Синхронизация VLESS-клиентов поддерживается только для ru_hub и exit_node (роль: {role}).",
-                status_code=400,
-            )
-
-        if role == "ru_hub":
-            target_server_ids = [server_id]
-            wi_reconciliation_triggered = is_white_internet_hub_server(server)
-        else:
-            ru_hubs = await VlessSubscriptionService.get_configured_vless_servers(session)
-            target_server_ids = [hub.id for hub in ru_hubs]
-
-        await AuditService.log_action(
-            session,
-            admin_id=admin_telegram_id,
-            action=AdminAuditAction.EDIT_SERVER,
-            target_type="server",
-            target_id=server_id,
-            details={
-                "action": "clients_resync",
-                "role": role,
-                "target_server_ids": target_server_ids,
-                "wi_reconciliation_triggered": wi_reconciliation_triggered,
-            },
-        )
-
-    for target_sid in target_server_ids:
-        VlessSubscriptionService.sync_all_active_to_server_background(target_sid)
-
-    if wi_reconciliation_triggered:
-        task = asyncio.create_task(_run_wi_reconciliation_once_bg())
-        _BACKGROUND_TASKS.add(task)
-        task.add_done_callback(_BACKGROUND_TASKS.discard)
-
-    return {
-        "ok": True,
-        "server_id": server_id,
-        "target_server_ids": target_server_ids,
-        "wi_reconciliation_triggered": wi_reconciliation_triggered,
-    }

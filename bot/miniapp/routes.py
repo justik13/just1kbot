@@ -30,8 +30,6 @@ from bot.miniapp.handlers_admin import (
     api_admin_nodes_list_handler,
     api_admin_nodes_patch_handler,
     api_admin_nodes_refresh_handler,
-    api_admin_nodes_resync_clients_handler,
-    api_admin_nodes_sync_topology_handler,
     api_admin_nodes_toggle_handler,
     api_admin_overview_handler,
     api_admin_payments_maintenance_get_handler,
@@ -204,9 +202,7 @@ def setup_miniapp_routes(app: web.Application) -> None:
     app.router.add_get("/api/app/admin/incy-settings", api_admin_incy_get_handler)
     app.router.add_put("/api/app/admin/incy-settings", api_admin_incy_put_handler)
     app.router.add_post("/api/app/admin/nodes/add", api_admin_nodes_add_handler)
-    app.router.add_post("/api/app/admin/nodes/sync-topology", api_admin_nodes_sync_topology_handler)
     app.router.add_post("/api/app/admin/nodes/{server_id}/refresh", api_admin_nodes_refresh_handler)
-    app.router.add_post("/api/app/admin/nodes/{server_id}/resync-clients", api_admin_nodes_resync_clients_handler)
     app.router.add_post("/api/app/admin/nodes/{server_id}/lifecycle", api_admin_nodes_lifecycle_handler)
     app.router.add_patch("/api/app/admin/nodes/{server_id}", api_admin_nodes_patch_handler)
     app.router.add_post("/api/app/admin/nodes/{server_id}/toggle", api_admin_nodes_toggle_handler)

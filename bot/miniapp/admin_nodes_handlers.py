@@ -330,36 +330,6 @@ async def api_admin_incy_put_handler(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "settings": settings_payload})
 
 
-async def api_admin_nodes_sync_topology_handler(request: web.Request) -> web.Response:
-    """Trigger immediate topology sync across active nodes."""
-    ctx, err_resp = _ha.require_admin_user(request)
-    if err_resp is not None or ctx is None:
-        return err_resp  # type: ignore[return-value]
-
-    try:
-        res = await _ha.admin_nodes_service.trigger_topology_sync(ctx.telegram_id)
-        return web.json_response({"ok": True, **res})
-    except AdminNodeServiceError as exc:
-        return _ha._service_error_response(exc)
-
-
-async def api_admin_nodes_resync_clients_handler(request: web.Request) -> web.Response:
-    """Trigger immediate client resync on a specific node."""
-    ctx, err_resp = _ha.require_admin_user(request)
-    if err_resp is not None or ctx is None:
-        return err_resp  # type: ignore[return-value]
-
-    server_id, id_err = _ha._parse_positive_int(request, "server_id", label="node id")
-    if id_err is not None or server_id is None:
-        return id_err  # type: ignore[return-value]
-
-    try:
-        res = await _ha.admin_nodes_service.trigger_node_clients_resync(server_id, ctx.telegram_id)
-        return web.json_response({"ok": True, **res})
-    except AdminNodeServiceError as exc:
-        return _ha._service_error_response(exc)
-
-
 async def api_admin_nodes_lifecycle_handler(request: web.Request) -> web.Response:
     """Set node lifecycle_status (active | decommissioning)."""
     ctx, err_resp = _ha.require_admin_user(request)

@@ -2625,26 +2625,6 @@ button.pulse-card {
     }
 }
 
-.return-banner {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 10px 12px;
-    background: var(--bg-elevated);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-control);
-}
-
-.return-banner-meta {
-    font-size: 12px;
-    color: var(--text-secondary);
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
 .node-status-row {
     display: flex;
     align-items: center;

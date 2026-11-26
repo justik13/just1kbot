@@ -159,15 +159,6 @@ export const api = {
             body: JSON.stringify(payload),
             timeoutMs: 25000,
         }),
-    syncTopology: () =>
-        requestJson("/api/app/admin/nodes/sync-topology", {
-            method: "POST",
-            timeoutMs: 25000,
-        }),
-    resyncNodeClients: (serverId) =>
-        requestJson(`/api/app/admin/nodes/${serverId}/resync-clients`, {
-            method: "POST",
-        }),
     setNodeLifecycle: (serverId, lifecycleStatus) =>
         requestJson(`/api/app/admin/nodes/${serverId}/lifecycle`, {
             method: "POST",

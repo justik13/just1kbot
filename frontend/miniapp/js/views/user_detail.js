@@ -129,7 +129,6 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
     const reqId = ++_detailReqId;
     const preserveScroll = Boolean(options && options.preserveScroll);
     const savedScrollY = options && Number.isFinite(options.scrollY) ? options.scrollY : null;
-    const drafts = (options && options.drafts) || null;
     const fallbackName = _formatDisplayName(userSummary);
     const hadExistingProfile = Boolean(root.querySelector("#userDetailBackBtn"));
 
@@ -229,7 +228,7 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         ? `${wiEffectiveStatus ? `${wiEffectiveStatus} · ` : ""}До ${formatDate(wi.expires_at)} · ${wiUsedGb} / ${wiTotalGb} ГБ · ${wiLimit} сл.`
         : (wi && wiEffectiveStatus ? `${wiEffectiveStatus} · ${wiUsedGb} / ${wiTotalGb} ГБ · ${wiLimit} сл.` : "Не подключён");
 
-    let activeHistoryTab = (drafts && drafts.activeHistoryTab) || "orders";
+    let activeHistoryTab = (options && options.activeHistoryTab) || "orders";
     if (!["orders", "ledger", "devices", "audit"].includes(activeHistoryTab)) {
         activeHistoryTab = "orders";
     }
@@ -559,61 +558,6 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         }
     };
 
-    if (drafts) {
-        if (drafts.dmText != null) {
-            const dmInput = dmForm.querySelector("textarea[name='text']");
-            if (dmInput) dmInput.value = drafts.dmText;
-        }
-        if (drafts.bonus) {
-            const amtEl = bonusForm.querySelector("input[name='amount_rub']");
-            const noteEl = bonusForm.querySelector("input[name='note']");
-            if (amtEl && drafts.bonus.amount != null) amtEl.value = drafts.bonus.amount;
-            if (noteEl && drafts.bonus.note != null) noteEl.value = drafts.bonus.note;
-            if (bonusNotifyInput && drafts.bonus.notify != null) bonusNotifyInput.checked = drafts.bonus.notify;
-            if (bonusSendNoteInput && drafts.bonus.sendNote != null) bonusSendNoteInput.checked = drafts.bonus.sendNote;
-        }
-        if (drafts.std) {
-            stdForm.hidden = !drafts.std.open;
-            const daysEl = stdForm.querySelector("input[name='days']");
-            const limitEl = stdForm.querySelector("input[name='device_limit']");
-            const notifyEl = stdForm.querySelector("input[name='notify_user']");
-            if (daysEl && drafts.std.days != null) daysEl.value = drafts.std.days;
-            if (limitEl && drafts.std.deviceLimit != null) limitEl.value = drafts.std.deviceLimit;
-            if (notifyEl && drafts.std.notify != null) notifyEl.checked = drafts.std.notify;
-        }
-        if (drafts.wi) {
-            wiForm.hidden = !drafts.wi.open;
-            const daysEl = wiForm.querySelector("input[name='days']");
-            const limitEl = wiForm.querySelector("input[name='device_limit']");
-            const notifyEl = wiForm.querySelector("input[name='notify_user']");
-            if (daysEl && drafts.wi.days != null) daysEl.value = drafts.wi.days;
-            if (limitEl && drafts.wi.deviceLimit != null) limitEl.value = drafts.wi.deviceLimit;
-            if (notifyEl && drafts.wi.notify != null) notifyEl.checked = drafts.wi.notify;
-        }
-        if (drafts.wiTraffic) {
-            wiTrafficForm.hidden = !drafts.wiTraffic.open;
-            const gbEl = wiTrafficForm.querySelector("input[name='gb']");
-            const notifyEl = wiTrafficForm.querySelector("input[name='notify_user']");
-            if (trafficSelect && drafts.wiTraffic.action) {
-                trafficSelect.value = drafts.wiTraffic.action;
-                wiGbField.hidden = trafficSelect.value === "reset_used";
-            }
-            if (gbEl && drafts.wiTraffic.gb != null) gbEl.value = drafts.wiTraffic.gb;
-            if (notifyEl && drafts.wiTraffic.notify != null) notifyEl.checked = drafts.wiTraffic.notify;
-        }
-        if (drafts.restr) {
-            const holdEl = restrForm.querySelector("input[name='financial_hold']");
-            const topupEl = restrForm.querySelector("input[name='topup_blocked']");
-            const noteEl = restrForm.querySelector("input[name='note']");
-            if (holdEl && drafts.restr.holdDirty) holdEl.checked = drafts.restr.hold;
-            if (topupEl && drafts.restr.topupDirty) topupEl.checked = drafts.restr.topup;
-            if (noteEl && drafts.restr.note != null) noteEl.value = drafts.restr.note;
-        }
-        if (drafts.dangerNotify != null) {
-            const dangerEl = root.querySelector("#dangerNotifyUser");
-            if (dangerEl) dangerEl.checked = drafts.dangerNotify;
-        }
-    }
     syncBonusSendNoteState();
     bonusNotifyInput?.addEventListener("change", syncBonusSendNoteState);
 
@@ -647,62 +591,6 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         copyBackupBtn.addEventListener("click", () => copyText(details.subscription_backup_url, "Резервная ссылка скопирована"));
     }
 
-    const collectDrafts = (clearDraft = null) => {
-        const holdChecked = Boolean(restrForm.querySelector("input[name='financial_hold']")?.checked);
-        const topupChecked = Boolean(restrForm.querySelector("input[name='topup_blocked']")?.checked);
-        return {
-            activeHistoryTab,
-            dmText: dmForm.querySelector("textarea[name='text']")?.value ?? "",
-            bonus:
-                clearDraft === "bonus"
-                    ? null
-                    : {
-                          amount: bonusForm.querySelector("input[name='amount_rub']")?.value ?? "",
-                          note: bonusForm.querySelector("input[name='note']")?.value ?? "",
-                          notify: Boolean(bonusForm.querySelector("input[name='notify_user']")?.checked),
-                          sendNote: Boolean(bonusForm.querySelector("input[name='send_note_to_user']")?.checked),
-                      },
-            std:
-                clearDraft === "std"
-                    ? null
-                    : {
-                          open: !stdForm.hidden,
-                          days: stdForm.querySelector("input[name='days']")?.value ?? "30",
-                          deviceLimit: stdForm.querySelector("input[name='device_limit']")?.value ?? String(stdLimit),
-                          notify: Boolean(stdForm.querySelector("input[name='notify_user']")?.checked),
-                      },
-            wi:
-                clearDraft === "wi"
-                    ? null
-                    : {
-                          open: !wiForm.hidden,
-                          days: wiForm.querySelector("input[name='days']")?.value ?? "30",
-                          deviceLimit: wiForm.querySelector("input[name='device_limit']")?.value ?? String(wiLimit),
-                          notify: Boolean(wiForm.querySelector("input[name='notify_user']")?.checked),
-                      },
-            wiTraffic:
-                clearDraft === "wiTraffic"
-                    ? null
-                    : {
-                          open: !wiTrafficForm.hidden,
-                          action: trafficSelect?.value ?? "add_gb",
-                          gb: wiTrafficForm.querySelector("input[name='gb']")?.value ?? "50",
-                          notify: Boolean(wiTrafficForm.querySelector("input[name='notify_user']")?.checked),
-                      },
-            restr:
-                clearDraft === "restr"
-                    ? null
-                    : {
-                          holdDirty: holdChecked !== origFinancialHold,
-                          hold: holdChecked,
-                          topupDirty: topupChecked !== origTopupBlocked,
-                          topup: topupChecked,
-                          note: restrForm.querySelector("input[name='note']")?.value ?? "",
-                      },
-            dangerNotify: Boolean(root.querySelector("#dangerNotifyUser")?.checked),
-        };
-    };
-
     const schedulePostModalFocus = (selector) => {
         setTimeout(() => {
             if (document.querySelector("dialog.modal-dialog[open], .modal-backdrop:not([hidden])")) return;
@@ -713,14 +601,13 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         }, 0);
     };
 
-    const refreshAll = async ({ clearDraft = null, focusSelector = null } = {}) => {
+    const refreshAll = async ({ focusSelector = null } = {}) => {
         const currentScrollY = window.scrollY;
-        const capturedDrafts = collectDrafts(clearDraft);
         void onReloadUser?.();
         await renderUserDetailView(root, userSummary, onBack, onReloadUser, state, {
             preserveScroll: true,
             scrollY: currentScrollY,
-            drafts: capturedDrafts,
+            activeHistoryTab,
             focusSelector,
         });
     };

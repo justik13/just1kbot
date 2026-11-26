@@ -107,7 +107,7 @@ export function bindUserDetailActions({
                     send_note_to_user: sendNoteToUser,
                 });
                 showToast(res.message || "Баланс обновлён");
-                await refreshAll({ clearDraft: "bonus" });
+                await refreshAll();
                 schedulePostModalFocus("#userBonusAmount");
             },
         });
@@ -170,7 +170,6 @@ export function bindUserDetailActions({
                 const res = await api.adjustUser(details.id, payload);
                 showToast(res.message || "Подписка Стандарт обновлена");
                 await refreshAll({
-                    clearDraft: "std",
                     focusSelector: fromModal ? null : "#toggleStdEditBtn",
                 });
                 if (fromModal) schedulePostModalFocus("#toggleStdEditBtn");
@@ -263,7 +262,6 @@ export function bindUserDetailActions({
                 const res = await api.adjustUser(details.id, payload);
                 showToast(res.message || "Белый интернет обновлён");
                 await refreshAll({
-                    clearDraft: "wi",
                     focusSelector: fromModal ? null : "#toggleWiEditBtn",
                 });
                 if (fromModal) schedulePostModalFocus("#toggleWiEditBtn");
@@ -320,7 +318,6 @@ export function bindUserDetailActions({
                 const res = await api.adjustUser(details.id, payload);
                 showToast(res.message || "Трафик обновлён");
                 await refreshAll({
-                    clearDraft: "wiTraffic",
                     focusSelector: fromModal ? null : "#toggleWiTrafficBtn",
                 });
                 if (fromModal) schedulePostModalFocus("#toggleWiTrafficBtn");
@@ -417,7 +414,7 @@ export function bindUserDetailActions({
             onConfirm: async () => {
                 const res = await api.adjustUser(details.id, payload);
                 showToast(res.message || "Ограничения сохранены");
-                await refreshAll({ clearDraft: "restr" });
+                await refreshAll();
                 schedulePostModalFocus("#restrHoldInput");
             },
         });

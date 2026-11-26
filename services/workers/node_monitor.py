@@ -318,6 +318,35 @@ async def _probe_single_ingress_endpoint(
     return (False, "UNKNOWN")
 
 
+_topology_sync_retry_pending: bool = False
+
+
+async def _run_topology_sync_with_retry_tracking(context: str) -> None:
+    """Run nonblocking v2 topology sync and arm/clear automatic retry on partial failure."""
+    global _topology_sync_retry_pending
+    try:
+        from services.topology_sync_service import sync_v2_topology_to_nodes_nonblocking
+
+        results = await sync_v2_topology_to_nodes_nonblocking()
+        failed_ids = [sid for sid, ok in results.items() if not ok]
+        if failed_ids:
+            _topology_sync_retry_pending = True
+            logger.warning(
+                "v2 topology sync (%s) had failed nodes %s; retry armed for next monitor cycle.",
+                context,
+                failed_ids,
+            )
+        else:
+            _topology_sync_retry_pending = False
+    except Exception as topo_exc:
+        _topology_sync_retry_pending = True
+        logger.warning(
+            "v2 topology sync (%s) failed (%s); retry armed for next monitor cycle.",
+            context,
+            topo_exc,
+        )
+
+
 async def check_node_resources_and_alerts(bot: Bot):
     async with session_scope() as session:
         servers = await get_all_servers(session)
@@ -333,7 +362,7 @@ async def check_node_resources_and_alerts(bot: Bot):
             _monitor_states.pop(sid, None)
 
     now_m = time.monotonic()
-    topology_dirty = False
+    topology_dirty = _topology_sync_retry_pending
 
     from services.topology_sync_service import _extract_domain, _extract_ipv4
 
@@ -1565,24 +1594,15 @@ async def check_node_resources_and_alerts(bot: Bot):
     finally:
         await shared_probe_sess.close()
 
-    if topology_dirty:
-        try:
-            from services.topology_sync_service import sync_v2_topology_to_nodes_nonblocking
-
-            await sync_v2_topology_to_nodes_nonblocking()
-        except Exception as topo_exc:
-            logger.warning("Failed to sync v2 topology after health state transition: %s", topo_exc)
+    if topology_dirty or _topology_sync_retry_pending:
+        await _run_topology_sync_with_retry_tracking("monitor_cycle")
 
 
 async def node_monitor_loop(bot: Bot, shutdown_event: asyncio.Event):
     logger.info("Starting node_monitor_loop background worker...")
-    try:
-        from services.topology_sync_service import sync_v2_topology_to_nodes_nonblocking
-
-        await sync_v2_topology_to_nodes_nonblocking()
+    await _run_topology_sync_with_retry_tracking("startup")
+    if not _topology_sync_retry_pending:
         logger.info("Initial v2 topology sync to all nodes completed on worker startup.")
-    except Exception as init_topo_exc:
-        logger.warning("Initial v2 topology sync on worker startup failed: %s", init_topo_exc)
 
     while not shutdown_event.is_set():
         try:

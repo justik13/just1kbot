@@ -642,7 +642,6 @@ export function renderNodesView(root, state, onReload, onSelectNode) {
                 <h2 class="card-title">Список нод</h2>
                 <div class="actions-row" style="gap:8px;">
                     <button id="addNodeOpenBtn" type="button" class="btn btn-sm btn-primary">+ Добавить</button>
-                    <button id="syncTopologyBtn" type="button" class="btn btn-sm">Синк топологии</button>
                     <button id="reloadNodesBtn" type="button" class="btn btn-sm">${escapeHtml(reloadLabel)}</button>
                 </div>
             </div>
@@ -659,23 +658,6 @@ export function renderNodesView(root, state, onReload, onSelectNode) {
 
     root.querySelector("#addNodeOpenBtn").addEventListener("click", () => {
         _openAddNodeModal(onReload, onSelectNode);
-    });
-
-    root.querySelector("#syncTopologyBtn").addEventListener("click", async (e) => {
-        const btn = e.currentTarget;
-        await withButtonLoading(btn, "Синк...", async () => {
-            try {
-                const res = await api.syncTopology();
-                const synced = Number(res?.synced || 0);
-                const failed = Number(res?.failed || 0);
-                showToast(
-                    `Топология синхронизирована: ${synced} успешно, ${failed} с ошибкой`,
-                    failed > 0 ? "warn" : "success"
-                );
-            } catch (err) {
-                showToast(err.message || "Ошибка синка топологии", "error");
-            }
-        });
     });
 
     root.querySelector("#reloadNodesBtn").addEventListener("click", async (e) => {

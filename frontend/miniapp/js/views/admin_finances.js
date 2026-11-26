@@ -128,16 +128,7 @@ export function renderAdminFinancesView(root, state, { forceRefresh = false } = 
     const webhooksData = state.webhooksData || [];
     const summary = finData.summary || {};
 
-    const hasReturn = Array.isArray(state.returnStack) && state.returnStack.length > 0;
-
     root.innerHTML = `
-        ${
-            hasReturn
-                ? `<div class="return-banner">
-                    <button type="button" id="finReturnBtn" class="btn btn-sm">← Вернуться к пользователю</button>
-                </div>`
-                : ""
-        }
         <section id="finStatsStrip" class="stats-strip">${_renderFinStatsInner(summary)}</section>
 
         ${_renderMaintenanceCard(state)}
@@ -439,10 +430,6 @@ export function renderAdminFinancesView(root, state, { forceRefresh = false } = 
             });
         });
     }
-
-    root.querySelector("#finReturnBtn")?.addEventListener("click", () => {
-        state.onReturnBack?.();
-    });
 
     root.querySelectorAll("[data-fintab]").forEach((btn) => {
         btn.addEventListener("click", () => {

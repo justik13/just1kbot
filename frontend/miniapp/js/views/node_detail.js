@@ -376,7 +376,6 @@ function _openEditModal(node, onDone) {
 export function renderNodeDetailView(root, node, onBack, onReload) {
     const health = healthChipInfo(node);
     const isDecommissioning = String(node.lifecycle_status || "").toUpperCase() === "DECOMMISSIONING";
-    const canResyncClients = node.role === "ru_hub" || node.role === "exit_node";
 
     root.innerHTML = `
         <div class="detail-header-nav">
@@ -404,7 +403,6 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
                     ${node.is_active ? "Выключить" : "Включить"}
                 </button>
                 <button type="button" id="detailRefreshBtn" class="btn btn-sm">Опросить ноду</button>
-                ${canResyncClients ? `<button type="button" id="detailResyncBtn" class="btn btn-sm">Пересинхронизировать клиентов</button>` : ""}
                 ${node.role === "ru_hub" ? `<button type="button" id="detailLifecycleBtn" class="btn btn-sm" title="${isDecommissioning ? "Вернуть ноду в активное обслуживание" : "Перевести ноду в режим вывода из эксплуатации"}">
                     ${isDecommissioning ? "Вернуть в работу" : "Вывести из работы"}
                 </button>` : ""}
@@ -527,21 +525,6 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
             }
         });
     });
-
-    const resyncBtn = root.querySelector("#detailResyncBtn");
-    if (resyncBtn) {
-        resyncBtn.addEventListener("click", async (e) => {
-            const b = e.currentTarget;
-            await withButtonLoading(b, "Синхронизация...", async () => {
-                try {
-                    await api.resyncNodeClients(node.id);
-                    showToast(`Синхронизация клиентов для ноды #${node.id} поставлена в очередь`);
-                } catch (err) {
-                    showToast(err.message || "Ошибка синхронизации клиентов", "error");
-                }
-            });
-        });
-    }
 
     const lifecycleBtn = root.querySelector("#detailLifecycleBtn");
     if (lifecycleBtn) {
