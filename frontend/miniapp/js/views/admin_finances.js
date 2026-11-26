@@ -114,7 +114,7 @@ function _renderFinStatsInner(summary) {
     `;
 }
 
-export function renderAdminFinancesView(root, state) {
+export function renderAdminFinancesView(root, state, { forceRefresh = false } = {}) {
     ++_finViewReqId;
     const subTab = state.finSubTab || "orders";
     const finData = state.financesData || {
@@ -183,6 +183,7 @@ export function renderAdminFinancesView(root, state) {
                             <option value="admin" ${state.auditTargetType === "admin" ? "selected" : ""}>Админ</option>
                             <option value="mass_bonus" ${state.auditTargetType === "mass_bonus" ? "selected" : ""}>Массовый бонус</option>
                             <option value="mass_extend" ${state.auditTargetType === "mass_extend" ? "selected" : ""}>Массовое продление</option>
+                            <option value="webhook_inbox" ${state.auditTargetType === "webhook_inbox" ? "selected" : ""}>Вебхук</option>
                         </select>
                     </div>
                     <div class="row-nowrap">
@@ -304,7 +305,7 @@ export function renderAdminFinancesView(root, state) {
         _renderWebhookRows(listContainer, state.webhooksData || [], loadWebhooks);
     };
 
-    const loadFinances = async (offset = 0) => {
+    const loadFinances = async (offset = 0, { attentionOnly = state.finAttentionOnly } = {}) => {
         const reqId = ++_finViewReqId;
         try {
             const kind = ["orders", "subscriptions", "topups"].includes(state.finSubTab)
@@ -316,18 +317,23 @@ export function renderAdminFinancesView(root, state) {
                 state.finQuery || "",
                 offset,
                 25,
-                Boolean(state.finAttentionOnly)
+                Boolean(attentionOnly)
             );
-            if (!isStillActive(reqId)) return;
+            if (!isStillActive(reqId)) return false;
+            state.finAttentionOnly = Boolean(attentionOnly);
             state.financesData = data;
             state.financesLoadAttempted = true;
             syncDynamicFinances();
+            return true;
         } catch (err) {
-            if (!isStillActive(reqId)) return;
-            if (err && err.code === "2fa_required") return;
+            if (!isStillActive(reqId)) return false;
+            if (err && err.code === "2fa_required") return false;
             state.financesLoadAttempted = true;
             showToast(err.message || "Ошибка загрузки финансов", "error");
-            renderRetryList(err.message || "Не удалось загрузить финансы", () => loadFinances(offset));
+            renderRetryList(err.message || "Не удалось загрузить финансы", () =>
+                loadFinances(offset, { attentionOnly })
+            );
+            return false;
         }
     };
 
@@ -448,19 +454,13 @@ export function renderAdminFinancesView(root, state) {
                 if (!hadData) {
                     state.auditLoadAttempted = false;
                 }
-                renderAdminFinancesView(root, state);
-                if (hadData) {
-                    loadAudit(0);
-                }
+                renderAdminFinancesView(root, state, { forceRefresh: hadData });
             } else if (nextSubTab === "webhooks") {
                 const hadData = state.webhooksData != null;
                 if (!hadData) {
                     state.webhooksLoadAttempted = false;
                 }
-                renderAdminFinancesView(root, state);
-                if (hadData) {
-                    loadWebhooks();
-                }
+                renderAdminFinancesView(root, state, { forceRefresh: hadData });
             } else {
                 state.financesData = null;
                 state.financesLoadAttempted = false;
@@ -534,6 +534,9 @@ export function renderAdminFinancesView(root, state) {
         } else {
             _renderAuditRows(listContainer, auditData.items || [], state);
             _renderPager(root, auditData, loadAudit, "событий");
+            if (forceRefresh) {
+                loadAudit(0);
+            }
         }
     } else if (subTab === "webhooks") {
         if (state.webhooksData == null) {
@@ -545,6 +548,9 @@ export function renderAdminFinancesView(root, state) {
             }
         } else {
             _renderWebhookRows(listContainer, webhooksData, loadWebhooks);
+            if (forceRefresh) {
+                loadWebhooks();
+            }
         }
     } else {
         const finQueryInput = root.querySelector("#finQueryInput");
@@ -572,8 +578,7 @@ export function renderAdminFinancesView(root, state) {
         });
         root.querySelector("#finAttentionToggleBtn").addEventListener("click", async () => {
             syncFinFilters();
-            state.finAttentionOnly = !state.finAttentionOnly;
-            await loadFinances(0);
+            await loadFinances(0, { attentionOnly: !state.finAttentionOnly });
         });
         if (state.financesData == null) {
             if (!state.financesLoadAttempted) {

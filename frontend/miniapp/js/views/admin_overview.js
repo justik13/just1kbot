@@ -230,6 +230,7 @@ function _renderOverviewContent(root, state, data) {
         : `<div class="meta-text">Нет данных о фоновых воркерах.</div>`;
 
     const mtprotoUrl = state.mtprotoProxyUrl ?? "";
+    const settingsLoaded = Boolean(state.incySettingsLoaded);
 
     root.innerHTML = `
         <div class="stack-md">
@@ -293,6 +294,11 @@ function _renderOverviewContent(root, state, data) {
                 </div>
                 <form id="overviewSystemSettingsForm" class="field" style="gap:8px;">
                     <label for="overviewMtprotoProxyInput">Ссылка на доступ к Telegram (MTProto Proxy URL)</label>
+                    ${
+                        !settingsLoaded
+                            ? `<div class="text-err" style="font-size:12px;">Не удалось загрузить текущие настройки. Сохранение отключено, чтобы не перезаписать ссылку.</div>`
+                            : ""
+                    }
                     <div class="row-nowrap">
                         <input
                             id="overviewMtprotoProxyInput"
@@ -302,8 +308,9 @@ function _renderOverviewContent(root, state, data) {
                             maxlength="500"
                             value="${escapeHtml(mtprotoUrl)}"
                             placeholder="https://t.me/proxy?server=...&port=...&secret=..."
+                            ${settingsLoaded ? "" : "disabled"}
                         />
-                        <button id="overviewSaveMtprotoBtn" type="submit" class="btn btn-primary btn-sm" style="flex-shrink:0;">Сохранить</button>
+                        <button id="overviewSaveMtprotoBtn" type="submit" class="btn btn-primary btn-sm" style="flex-shrink:0;" ${settingsLoaded ? "" : "disabled"}>Сохранить</button>
                     </div>
                     <div class="meta-text">Кнопка быстрого подключения в боте и личном кабинете. Оставьте пустым, чтобы скрыть.</div>
                 </form>
@@ -362,6 +369,10 @@ function _renderOverviewContent(root, state, data) {
         mtprotoInput.addEventListener("input", () => mtprotoInput.removeAttribute("aria-invalid"));
         sysForm.addEventListener("submit", async (e) => {
             e.preventDefault();
+            if (!state.incySettingsLoaded) {
+                showToast("Не удалось загрузить текущие настройки. Обновите обзор.", "error");
+                return;
+            }
             const val = mtprotoInput.value.trim();
             if (val && !/^(https:\/\/t\.me\/proxy\?|tg:\/\/proxy\?)/i.test(val)) {
                 mtprotoInput.setAttribute("aria-invalid", "true");
@@ -431,6 +442,9 @@ export async function renderAdminOverviewView(root, state) {
         state.overviewData = data;
         if (settingsRes.status === "fulfilled" && settingsRes.value?.settings) {
             state.mtprotoProxyUrl = settingsRes.value.settings.mtproto_proxy_url || "";
+            state.incySettingsLoaded = true;
+        } else {
+            state.incySettingsLoaded = false;
         }
         _renderOverviewContent(root, state, data);
     } catch (err) {

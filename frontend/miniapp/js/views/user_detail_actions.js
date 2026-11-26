@@ -115,10 +115,12 @@ export function bindUserDetailActions({
 
     const stdDaysInput = stdForm.querySelector("input[name='days']");
     const stdLimitInput = stdForm.querySelector("input[name='device_limit']");
+    const toggleStdEditBtn = root.querySelector("#toggleStdEditBtn");
     stdDaysInput.addEventListener("input", () => stdDaysInput.removeAttribute("aria-invalid"));
     stdLimitInput.addEventListener("input", () => stdLimitInput.removeAttribute("aria-invalid"));
-    root.querySelector("#toggleStdEditBtn").addEventListener("click", () => {
+    toggleStdEditBtn.addEventListener("click", () => {
         stdForm.hidden = !stdForm.hidden;
+        toggleStdEditBtn.setAttribute("aria-expanded", String(!stdForm.hidden));
     });
     stdForm.querySelectorAll("[data-std-days]").forEach((b) => {
         b.addEventListener("click", () => {
@@ -197,15 +199,21 @@ export function bindUserDetailActions({
 
     const wiDaysInput = wiForm.querySelector("input[name='days']");
     const wiLimitInput = wiForm.querySelector("input[name='device_limit']");
+    const toggleWiEditBtn = root.querySelector("#toggleWiEditBtn");
+    const toggleWiTrafficBtn = root.querySelector("#toggleWiTrafficBtn");
     wiDaysInput.addEventListener("input", () => wiDaysInput.removeAttribute("aria-invalid"));
     wiLimitInput.addEventListener("input", () => wiLimitInput.removeAttribute("aria-invalid"));
-    root.querySelector("#toggleWiEditBtn").addEventListener("click", () => {
+    toggleWiEditBtn.addEventListener("click", () => {
         wiForm.hidden = !wiForm.hidden;
         if (!wiForm.hidden) wiTrafficForm.hidden = true;
+        toggleWiEditBtn.setAttribute("aria-expanded", String(!wiForm.hidden));
+        toggleWiTrafficBtn.setAttribute("aria-expanded", String(!wiTrafficForm.hidden));
     });
-    root.querySelector("#toggleWiTrafficBtn").addEventListener("click", () => {
+    toggleWiTrafficBtn.addEventListener("click", () => {
         wiTrafficForm.hidden = !wiTrafficForm.hidden;
         if (!wiTrafficForm.hidden) wiForm.hidden = true;
+        toggleWiTrafficBtn.setAttribute("aria-expanded", String(!wiTrafficForm.hidden));
+        toggleWiEditBtn.setAttribute("aria-expanded", String(!wiForm.hidden));
     });
     wiForm.querySelectorAll("[data-wi-days]").forEach((b) => {
         b.addEventListener("click", () => {

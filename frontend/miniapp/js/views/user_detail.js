@@ -25,12 +25,6 @@ function _formatDisplayName(u) {
     return `Пользователь #${u.id}`;
 }
 
-function _formatShortHwid(hwid) {
-    const raw = String(hwid || "");
-    if (raw.length <= 20) return raw;
-    return `${raw.slice(0, 10)}…${raw.slice(-8)}`;
-}
-
 function _renderDevicesHtml(devices) {
     if (!devices.length) {
         return `<div class="muted">Устройства не привязаны</div>`;
@@ -136,8 +130,9 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
     const savedScrollY = options && Number.isFinite(options.scrollY) ? options.scrollY : null;
     const drafts = (options && options.drafts) || null;
     const fallbackName = _formatDisplayName(userSummary);
+    const hadExistingProfile = Boolean(root.querySelector("#userDetailBackBtn"));
 
-    if (!preserveScroll) {
+    if (!preserveScroll || !hadExistingProfile) {
         root.innerHTML = `
             <div class="detail-header-nav">
                 <button id="userDetailBackBtn" type="button" class="btn btn-sm btn-ghost" style="white-space:nowrap; flex-shrink:0;">← Все пользователи</button>
@@ -153,15 +148,17 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
     const sentinelBtn = root.querySelector("#userDetailBackBtn");
 
     let details;
+    let serverNow = null;
     try {
         const res = await api.getUserDetails(userSummary.id);
         details = res.user;
+        serverNow = res.server_now || details.server_now || null;
     } catch (err) {
         if (reqId !== _detailReqId) return;
         if (state && state.selectedUserId !== userSummary.id) return;
         if (!root.isConnected || (sentinelBtn && !root.contains(sentinelBtn))) return;
         if (err && err.code === "2fa_required") return;
-        if (preserveScroll) {
+        if (preserveScroll && hadExistingProfile) {
             showToast(err.message || "Не удалось обновить профиль", "error");
             return;
         }
@@ -202,7 +199,7 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
     const stdLimit = details.standard_device_limit ?? userSummary.standard_device_limit ?? 2;
     const wiLimit = (wi && wi.device_limit) ?? userSummary.wi_device_limit ?? 1;
 
-    const parsedServerNow = details.server_now ? new Date(details.server_now).getTime() : NaN;
+    const parsedServerNow = serverNow ? new Date(serverNow).getTime() : NaN;
     const nowMs = Number.isFinite(parsedServerNow) ? parsedServerNow : Date.now();
 
     const stdInfo = details.standard || null;
@@ -303,7 +300,7 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
                         <div class="muted" style="font-size:12px;">${escapeHtml(stdSummary)}</div>
                         <div class="meta-text tabular" style="margin-top:2px;">Трафик: ${formatBytesGb(details.monthly_vless_bytes)} ГБ за мес · ${formatBytesGb(details.total_traffic_bytes)} ГБ всего</div>
                     </div>
-                    <button id="toggleStdEditBtn" type="button" class="btn btn-sm">Изменить</button>
+                    <button id="toggleStdEditBtn" type="button" class="btn btn-sm" aria-expanded="false" aria-controls="stdEditForm">Изменить</button>
                 </div>
                 <form id="stdEditForm" class="field" style="gap:8px; margin-top:4px;" hidden>
                     <div class="grid-2">
@@ -341,8 +338,8 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
                         <div class="muted" style="font-size:12px;">${escapeHtml(wiSummary)}</div>
                     </div>
                     <div class="btn-group">
-                        <button id="toggleWiEditBtn" type="button" class="btn btn-sm">Срок</button>
-                        <button id="toggleWiTrafficBtn" type="button" class="btn btn-sm">Трафик</button>
+                        <button id="toggleWiEditBtn" type="button" class="btn btn-sm" aria-expanded="false" aria-controls="wiEditForm">Срок</button>
+                        <button id="toggleWiTrafficBtn" type="button" class="btn btn-sm" aria-expanded="false" aria-controls="wiTrafficForm">Трафик</button>
                     </div>
                 </div>
                 ${_renderWiDiagnosticsHtml(wi)}
@@ -618,6 +615,10 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
     }
     syncBonusSendNoteState();
     bonusNotifyInput?.addEventListener("change", syncBonusSendNoteState);
+
+    root.querySelector("#toggleStdEditBtn")?.setAttribute("aria-expanded", String(!stdForm.hidden));
+    root.querySelector("#toggleWiEditBtn")?.setAttribute("aria-expanded", String(!wiForm.hidden));
+    root.querySelector("#toggleWiTrafficBtn")?.setAttribute("aria-expanded", String(!wiTrafficForm.hidden));
 
     if (preserveScroll && savedScrollY !== null) {
         requestAnimationFrame(() => window.scrollTo(0, savedScrollY));

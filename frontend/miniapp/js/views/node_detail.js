@@ -195,7 +195,7 @@ function _renderTelemetryCard(node) {
                 <div class="detail-item">
                     <span class="detail-label">SSL-сертификат</span>
                     <span>
-                        ${sslDaysLeft != null ? `<span class="chip ${sslCls}">${sslDaysLeft < 0 ? "истёк" : `осталось ${sslDaysLeft} дн.`}</span>` : ""}
+                        ${sslDaysLeft != null ? `<span class="chip ${sslCls}">${sslDaysLeft <= 0 ? "истёк" : `осталось ${sslDaysLeft} дн.`}</span>` : ""}
                         ${ssl.expires_at ? ` <span class="muted">(до ${escapeHtml(formatDate(ssl.expires_at))})</span>` : ""}
                     </span>
                 </div>` : ""}
@@ -603,6 +603,7 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
                             confirmText: "Удалить принудительно",
                             cancelText: "Отмена",
                             isDestructive: true,
+                            restoreFocusSelector: "#detailDeleteBtn",
                             onConfirm: async () => {
                                 await api.deleteNode(node.id, true);
                                 showToast(`Сервер #${node.id} принудительно удалён`);

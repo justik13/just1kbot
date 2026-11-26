@@ -116,6 +116,7 @@ export const AUDIT_TARGET_TYPE_MAP = {
     admin: "Админ",
     mass_bonus: "Массовый бонус",
     mass_extend: "Массовое продление",
+    webhook_inbox: "Вебхук",
 };
 
 export function formatAuditTarget(targetType, targetId = null) {

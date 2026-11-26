@@ -54,6 +54,36 @@ function _announceToast(msg, isAssertive) {
     }
 }
 
+function _getTopOpenDialog() {
+    const topItem = _modalStack[_modalStack.length - 1];
+    if (topItem && topItem.dialog && topItem.dialog.open) {
+        return topItem.dialog;
+    }
+    const openDialogs = document.querySelectorAll("dialog[open]");
+    return openDialogs.length ? openDialogs[openDialogs.length - 1] : null;
+}
+
+function _placeToastInTopLayer(toast) {
+    if (!toast) return;
+    if (typeof toast.showPopover === "function" && toast.hasAttribute("popover")) {
+        if (document.body && toast.parentElement !== document.body) {
+            document.body.appendChild(toast);
+        }
+        try {
+            if (toast.matches(":popover-open")) toast.hidePopover();
+            toast.showPopover();
+            return;
+        } catch {
+            // Fallback to dialog reparenting or fixed positioning
+        }
+    }
+    const topDialog = _getTopOpenDialog();
+    const targetParent = topDialog || document.body;
+    if (targetParent && toast.parentElement !== targetParent) {
+        targetParent.appendChild(toast);
+    }
+}
+
 function _hideToast() {
     const toast = document.getElementById("toastRoot");
     if (_toastTimer) {
@@ -70,6 +100,9 @@ function _hideToast() {
             }
         }
         toast.hidden = true;
+        if (document.body && toast.parentElement !== document.body) {
+            document.body.appendChild(toast);
+        }
     }
 }
 
@@ -116,14 +149,7 @@ export function showToast(message, type = "success") {
     toast.append(msgSpan, closeBtn);
     toast.className = `toast toast-${normalized}`;
     toast.hidden = false;
-    if (typeof toast.showPopover === "function" && toast.hasAttribute("popover")) {
-        try {
-            if (toast.matches(":popover-open")) toast.hidePopover();
-            toast.showPopover();
-        } catch {
-            // Fallback to fixed positioning
-        }
-    }
+    _placeToastInTopLayer(toast);
     toast.onclick = _hideToast;
     toast.onmouseenter = _pauseToastTimer;
     toast.onmouseleave = () => {
@@ -275,6 +301,8 @@ export function openExternalLink(url) {
         if (m && m[1]) {
             target = `https://t.me/${m[1].replace(/^@/, "")}`;
         }
+    } else if (/^tg:\/\/proxy\?/i.test(target)) {
+        target = target.replace(/^tg:\/\/proxy\?/i, "https://t.me/proxy?");
     }
     if (!/^(https?:\/\/|tg:)/i.test(target)) return;
     const tg = window.Telegram && window.Telegram.WebApp;
@@ -391,20 +419,29 @@ function _focusElementSafe(el) {
 }
 
 function _restoreModalFocus(prevTrigger, restoreFocusSelector) {
-    if (prevTrigger && document.contains(prevTrigger) && typeof prevTrigger.focus === "function") {
+    if (
+        prevTrigger &&
+        prevTrigger.isConnected &&
+        !prevTrigger.disabled &&
+        typeof prevTrigger.focus === "function"
+    ) {
         prevTrigger.focus({ preventScroll: true });
         return;
     }
     if (restoreFocusSelector) {
         const target = document.querySelector(restoreFocusSelector);
-        if (target && _focusElementSafe(target)) return;
+        if (target && !target.disabled && _focusElementSafe(target)) return;
     }
-    const fallback = document.querySelector("#appRoot h1, #appRoot button");
+    const fallback = document.querySelector("#appRoot h1, #appRoot button:not([disabled])");
     _focusElementSafe(fallback);
 }
 
 function _closeDialogElement(dialog) {
     if (!dialog) return;
+    const toast = document.getElementById("toastRoot");
+    if (toast && dialog.contains(toast) && document.body) {
+        document.body.appendChild(toast);
+    }
     if (typeof dialog.close === "function" && dialog.open) {
         dialog.close();
     } else {
@@ -418,14 +455,7 @@ function _closeDialogElement(dialog) {
 function _promoteVisibleToast() {
     const toast = document.getElementById("toastRoot");
     if (!toast || toast.hidden) return;
-    if (typeof toast.showPopover === "function" && toast.hasAttribute("popover")) {
-        try {
-            if (toast.matches(":popover-open")) toast.hidePopover();
-            toast.showPopover();
-        } catch {
-            // ignore
-        }
-    }
+    _placeToastInTopLayer(toast);
 }
 
 export function closeAllModals() {
@@ -506,9 +536,15 @@ export function openModal(
 
         if (_modalStack.length > 0) {
             modalRoot.hidden = false;
+            _promoteVisibleToast();
             _syncTelegramBackButton();
             if (wasTop) {
-                if (prevTrigger && document.contains(prevTrigger) && typeof prevTrigger.focus === "function") {
+                if (
+                    prevTrigger &&
+                    prevTrigger.isConnected &&
+                    !prevTrigger.disabled &&
+                    typeof prevTrigger.focus === "function"
+                ) {
                     prevTrigger.focus({ preventScroll: true });
                 } else {
                     const top = _modalStack[_modalStack.length - 1];
@@ -520,6 +556,7 @@ export function openModal(
 
         document.body.style.overflow = "";
         modalRoot.hidden = true;
+        _promoteVisibleToast();
         _syncTelegramBackButton();
         _restoreModalFocus(prevTrigger, restoreFocusSelector);
     };
@@ -529,10 +566,15 @@ export function openModal(
         close();
     });
 
+    let pointerDownOnBackdrop = false;
+    dialog.addEventListener("pointerdown", (e) => {
+        pointerDownOnBackdrop = e.target === dialog;
+    });
     dialog.addEventListener("click", (e) => {
-        if (e.target === dialog) {
+        if (e.target === dialog && pointerDownOnBackdrop) {
             close();
         }
+        pointerDownOnBackdrop = false;
     });
 
     header.appendChild(h);

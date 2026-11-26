@@ -122,6 +122,9 @@ const appState = {
         appState.adminTab = "nodes";
         appState.selectedUserId = null;
         appState.selectedNodeId = id;
+        if (id != null && (!appState.nodesLoaded || !appState.nodes.some((n) => n.id === id))) {
+            appState.nodesLoaded = false;
+        }
         _renderAdminView();
     },
     onOpenFinances: (query = "", attentionOnly = false, subTab = "orders") => {
@@ -187,10 +190,8 @@ const appState = {
             appState.adminTab = "users";
             appState.selectedNodeId = null;
             appState.selectedUserId = entry.userId;
-            _renderAdminView().then(() => {
-                if (Number.isFinite(entry.scrollY)) {
-                    requestAnimationFrame(() => window.scrollTo(0, entry.scrollY));
-                }
+            _renderAdminView({
+                userScrollY: Number.isFinite(entry.scrollY) ? entry.scrollY : null,
             });
         }
     },
@@ -275,6 +276,18 @@ function _renderTabErrorCard(container, title, message, onRetry) {
     });
 }
 
+function _renderDetailError(root, { backLabel, title, message, onBack, onRetry }) {
+    _updateTelegramBackButton(onBack);
+    root.innerHTML = `
+        <div class="detail-header-nav">
+            <button id="detailErrorBackBtn" type="button" class="btn btn-sm btn-ghost" style="white-space:nowrap; flex-shrink:0;">${escapeHtml(backLabel)}</button>
+        </div>
+        <div id="detailErrorBody"></div>
+    `;
+    root.querySelector("#detailErrorBackBtn")?.addEventListener("click", onBack);
+    _renderTabErrorCard(root.querySelector("#detailErrorBody"), title, message, onRetry);
+}
+
 function _syncModeSwitch() {
     const modeSwitch = document.getElementById("modeSwitch");
     const profilePill = document.getElementById("profilePillBtn");
@@ -300,7 +313,7 @@ function _syncModeSwitch() {
     });
 }
 
-async function _renderAdminView() {
+async function _renderAdminView({ userScrollY = null } = {}) {
     const root = document.getElementById("appRoot");
     if (!root) return;
     if (appState.mode === "admin" && !appState.twoFactorPassed) {
@@ -370,7 +383,25 @@ async function _renderAdminView() {
         const node = appState.nodes.find((n) => n.id === appState.selectedNodeId);
         if (node) {
             root.innerHTML = `<section class="card card-center"><div class="muted">Загрузка...</div></section>`;
-            const { renderNodeDetailView } = await import("./views/node_detail.js?v=2.8.0");
+            let renderNodeDetailView;
+            try {
+                ({ renderNodeDetailView } = await import("./views/node_detail.js?v=2.8.0"));
+            } catch (err) {
+                if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
+                showToast((err && err.message) || "Не удалось загрузить страницу ноды", "error");
+                _renderDetailError(root, {
+                    backLabel: "← Все ноды",
+                    title: "Не удалось загрузить страницу ноды",
+                    message: (err && err.message) || "Ошибка загрузки модуля",
+                    onBack: () => {
+                        appState.selectedNodeId = null;
+                        _updateTelegramBackButton(null);
+                        _renderAdminView();
+                    },
+                    onRetry: () => _renderAdminView(),
+                });
+                return;
+            }
             if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
             const onBack = () => {
                 appState.selectedNodeId = null;
@@ -393,7 +424,25 @@ async function _renderAdminView() {
             telegram_id: null,
         };
         root.innerHTML = `<section class="card card-center"><div class="muted">Загрузка профиля...</div></section>`;
-        const { renderUserDetailView } = await import("./views/user_detail.js?v=2.8.0");
+        let renderUserDetailView;
+        try {
+            ({ renderUserDetailView } = await import("./views/user_detail.js?v=2.8.0"));
+        } catch (err) {
+            if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
+            showToast((err && err.message) || "Не удалось загрузить профиль", "error");
+            _renderDetailError(root, {
+                backLabel: "← Все пользователи",
+                title: "Не удалось загрузить профиль",
+                message: (err && err.message) || "Ошибка загрузки модуля",
+                onBack: () => {
+                    appState.selectedUserId = null;
+                    _updateTelegramBackButton(null);
+                    _renderAdminView();
+                },
+                onRetry: () => _renderAdminView({ userScrollY }),
+            });
+            return;
+        }
         if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
         const onBack = () => {
             appState.selectedUserId = null;
@@ -419,8 +468,17 @@ async function _renderAdminView() {
             }
         };
         _updateTelegramBackButton(onBack);
-        renderUserDetailView(root, userSummary, onBack, onReloadUser, appState);
-        window.scrollTo(0, 0);
+        if (userScrollY === null) {
+            window.scrollTo(0, 0);
+        }
+        await renderUserDetailView(
+            root,
+            userSummary,
+            onBack,
+            onReloadUser,
+            appState,
+            userScrollY !== null ? { preserveScroll: true, scrollY: userScrollY } : {}
+        );
         return;
     }
 
@@ -679,20 +737,26 @@ async function _renderAdminView() {
 }
 
 async function _reloadNodesAndRender({ skipRender = false, removeNodeId = null } = {}) {
+    const seq = _tabSwitchSeq;
     if (removeNodeId != null) {
         appState.nodes = appState.nodes.filter((n) => n.id !== removeNodeId);
     }
     try {
         const res = await api.listNodes();
-        if (appState.mode !== "admin") return false;
+        if (seq !== _tabSwitchSeq || appState.mode !== "admin") return false;
         appState.nodes = res.nodes || [];
         appState.nodesLoaded = true;
     } catch (err) {
         if (err && err.code === "2fa_required") return false;
-        if (appState.mode !== "admin") return false;
+        if (seq !== _tabSwitchSeq || appState.mode !== "admin") return false;
         showToast(err.message || "Не удалось загрузить ноды", "error");
     }
-    if (!skipRender && appState.mode === "admin") {
+    if (
+        !skipRender &&
+        seq === _tabSwitchSeq &&
+        appState.mode === "admin" &&
+        (appState.adminTab === "nodes" || appState.adminTab === "subscription")
+    ) {
         _renderAdminView();
     }
     return true;
@@ -704,11 +768,25 @@ async function _openAdmin2FAGate(root) {
     _syncModeSwitch();
     _updateTelegramBackButton(() => {
         closeAllModals();
+        appState.pendingDeepLink = null;
         appState.mode = "cabinet";
         _renderAdminView();
     });
     root.innerHTML = `<section class="card card-center"><div class="muted">Проверка доступа...</div></section>`;
-    const { renderSecurity2FA } = await import("./views/security_2fa.js?v=2.8.0");
+    let renderSecurity2FA;
+    try {
+        ({ renderSecurity2FA } = await import("./views/security_2fa.js?v=2.8.0"));
+    } catch (err) {
+        if (seq !== _tabSwitchSeq || appState.mode !== "admin" || appState.twoFactorPassed) return;
+        showToast((err && err.message) || "Не удалось загрузить форму 2FA", "error");
+        _renderTabErrorCard(
+            root,
+            "Не удалось загрузить форму 2FA",
+            (err && err.message) || "Ошибка загрузки модуля",
+            () => _openAdmin2FAGate(root)
+        );
+        return;
+    }
     if (seq !== _tabSwitchSeq || appState.mode !== "admin" || appState.twoFactorPassed) return;
     renderSecurity2FA(root, appState.security, async (res) => {
         const isConfigured = Boolean(
@@ -772,6 +850,9 @@ async function bootstrap() {
                 const nextMode = btn.dataset.mode;
                 if (nextMode === appState.mode) return;
                 closeAllModals();
+                if (nextMode === "cabinet" && !appState.twoFactorPassed) {
+                    appState.pendingDeepLink = null;
+                }
                 appState.mode = nextMode;
                 if (nextMode === "admin") {
                     if (!appState.twoFactorPassed) {

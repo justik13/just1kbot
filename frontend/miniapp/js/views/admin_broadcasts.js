@@ -38,13 +38,21 @@ function _buildAudienceOptions({ includeTest = true, includeEmptyPlaceholder = f
         .join("");
 }
 
-function _confirmModal(title, summaryText, onConfirm, confirmText = "Подтвердить", isDestructive = false) {
+function _confirmModal(
+    title,
+    summaryText,
+    onConfirm,
+    confirmText = "Подтвердить",
+    isDestructive = false,
+    restoreFocusSelector = null
+) {
     showConfirmModal({
         title,
         message: summaryText,
         confirmText,
         cancelText: "Отмена",
         isDestructive,
+        restoreFocusSelector,
         onConfirm,
     });
 }
@@ -568,7 +576,8 @@ function _renderHistoryList(root, container, state, reloadBroadcasts) {
                         });
                     },
                     "Остановить",
-                    true
+                    true,
+                    `[data-cancel-bc="${b.id}"], [data-repeat-bc="${b.id}"], #reloadBcBtn`
                 );
             });
         }
