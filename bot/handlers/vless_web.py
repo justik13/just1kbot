@@ -725,7 +725,7 @@ async def serve_unified_subscription_feed(
                     landing_headers = {
                         **common_headers,
                         "Content-Type": "text/html; charset=utf-8",
-                        "Content-Security-Policy": "default-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self';",
+                        "Content-Security-Policy": "default-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:;",
                     }
                     return web.Response(status=200, text=html_body, headers=landing_headers)
                 return _build_unified_notice_response(
@@ -771,7 +771,7 @@ async def serve_unified_subscription_feed(
                 landing_headers = {
                     **common_headers,
                     "Content-Type": "text/html; charset=utf-8",
-                    "Content-Security-Policy": "default-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self';",
+                    "Content-Security-Policy": "default-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:;",
                 }
                 return web.Response(status=200, text=html_body, headers=landing_headers)
 
@@ -855,7 +855,7 @@ async def serve_unified_subscription_feed(
                 landing_headers = {
                     **common_headers,
                     "Content-Type": "text/html; charset=utf-8",
-                    "Content-Security-Policy": "default-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self';",
+                    "Content-Security-Policy": "default-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:;",
                 }
                 return web.Response(status=200, text=html_body, headers=landing_headers)
 

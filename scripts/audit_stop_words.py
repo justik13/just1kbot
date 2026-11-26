@@ -89,12 +89,7 @@ def _check_text_compliance(
     violations: list[str] = []
     if not text_val:
         return violations
-    clean = (
-        text_val.replace(".vpn", "")
-        .replace("vpn://", "")
-        .replace("vless_name", "")
-        .replace('caps.includes("vless")', "")
-    )
+    clean = text_val
     low = clean.lower()
     if re.search(r"(?<![A-Za-zА-Яа-я])VPN(?![A-Za-zА-Яа-я])", clean, re.IGNORECASE):
         violations.append(f"[{label}] Contains forbidden 'VPN'")
@@ -119,9 +114,10 @@ def _check_text_compliance(
         if re.search(r"\bawg\b", clean_no_placeholders):
             violations.append(f"[{label}] Exposes forbidden protocol name: 'awg'")
 
+    if "прокси" in low:
+        violations.append(f"[{label}] Contains forbidden 'прокси'")
+
     if strict_checkout:
-        if "прокси" in low:
-            violations.append(f"[{label}] Checkout description contains forbidden 'прокси'")
         if "обход" in low:
             violations.append(f"[{label}] Checkout description contains forbidden 'обход'")
 
@@ -281,6 +277,8 @@ def run_audit() -> list[str]:
                         .replace("vless_synced_epoch", "")
                         .replace("xray_instance_epoch", "")
                         .replace("monthly_vless_bytes", "")
+                        .replace("vless_name", "")
+                        .replace('caps.includes("vless")', "")
                     )
                 rel_path = fpath.relative_to(REPO_ROOT).as_posix()
                 violations.extend(_check_text_compliance(rel_path, clean_content))
@@ -315,6 +313,11 @@ def run_audit() -> list[str]:
     for rel in (
         "bot/miniapp/handlers_user.py",
         "bot/miniapp/handlers_admin.py",
+        "bot/miniapp/admin_nodes_handlers.py",
+        "bot/miniapp/admin_ops_handlers.py",
+        "bot/miniapp/admin_user_adjust_handlers.py",
+        "bot/miniapp/admin_users_handlers.py",
+        "services/broadcast_service.py",
         "services/order_service.py",
         "services/admin_tools_service.py",
         "services/workers/traffic.py",

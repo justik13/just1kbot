@@ -258,6 +258,7 @@ ensure_subscription_domains_caddy() {
         for h in "${extra_hosts[@]}"; do
             cat <<EOF
 ${h} {
+	encode zstd gzip
 	@sub path /sub* ${wi_prefix}*
 	handle @sub {
 		header X-Frame-Options "DENY"

@@ -241,7 +241,11 @@ async def _queue_wi_deprovision_all(
             )
         )
     ).all()
-    uuids_to_revoke = [wi_sub.uuid, *[str(u) for u in dev_rows if u]]
+    uuids_to_revoke = list(dict.fromkeys(str(u) for u in [wi_sub.uuid, *dev_rows] if u))
+    if uuids_to_revoke:
+        await white_internet_repo.add_pending_revocation_uuids(
+            session, wi_sub.id, uuids_to_revoke
+        )
     await _queue_wi_revoke_uuids(session, wi_sub, uuids_to_revoke, context=context)
 
 

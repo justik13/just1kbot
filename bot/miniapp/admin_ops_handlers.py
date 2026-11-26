@@ -117,6 +117,7 @@ async def api_admin_broadcast_cancel_handler(request: web.Request) -> web.Respon
         item = await _ha.broadcast_service.cancel_broadcast(session, broadcast_id, ctx.telegram_id)
     if item is None:
         return web.json_response({"ok": False, "error": "Рассылка не найдена"}, status=404)
+    _ha.broadcast_service.cancel_broadcast_task(broadcast_id)
     return web.json_response({"ok": True, "broadcast": item, "message": "Рассылка остановлена"})
 
 
@@ -476,13 +477,102 @@ async def _transition_webhook_status(
 
 
 async def api_admin_webhook_retry_handler(request: web.Request) -> web.Response:
-    """Requeue a dead/retry WebhookInbox event back to pending for reprocessing."""
-    return await _transition_webhook_status(
-        request,
-        target_status=WebhookInboxStatus.PENDING,
-        audit_action=AdminAuditAction.PAYMENT_QUEUE_MANUAL_RETRY,
-        message="Вебхук переведён в статус pending",
+    """Synchronously reprocess a dead/retry WebhookInbox event."""
+    ctx, err_resp = _ha.require_admin_user(request)
+    if err_resp is not None or ctx is None:
+        return err_resp  # type: ignore[return-value]
+
+    webhook_id, id_err = _ha._parse_positive_int(request, "webhook_id", label="webhook id")
+    if id_err is not None or webhook_id is None:
+        return id_err  # type: ignore[return-value]
+
+    from bot.handlers.webhook import (
+        _dispatch_yookassa_notifications,
+        reprocess_webhook_inbox_row,
     )
+
+    bot = request.app.get("bot") if hasattr(request, "app") else None
+    allowed_from = {WebhookInboxStatus.DEAD.value, WebhookInboxStatus.RETRY.value}
+    notify_ctx: dict[str, Any] | None = None
+    response_status = 200
+    response_payload: dict[str, Any] = {}
+
+    async with _ha.session_scope() as session:
+        row = await session.scalar(
+            select(WebhookInbox).where(WebhookInbox.id == webhook_id).with_for_update()
+        )
+        if row is None:
+            return web.json_response({"ok": False, "error": "Вебхук не найден"}, status=404)
+        prev_status = str(row.status)
+        if prev_status not in allowed_from:
+            return web.json_response(
+                {"ok": False, "error": "Операция доступна только для статусов dead или retry"},
+                status=400,
+            )
+
+        try:
+            succeeded, final_status, error_reason, notify_ctx = await reprocess_webhook_inbox_row(
+                session, bot, row
+            )
+        except ValueError:
+            return web.json_response(
+                {"ok": False, "error": "Некорректный или пустой payload вебхука"},
+                status=400,
+            )
+
+        audit_details: dict[str, Any] = {
+            "event_key": row.event_key,
+            "provider": row.provider,
+            "from_status": prev_status,
+            "to_status": final_status,
+            "outcome": "succeeded" if succeeded else "dead",
+        }
+        if error_reason:
+            audit_details["error"] = error_reason[:300]
+
+        await _ha.AuditService.log_action(
+            session,
+            admin_id=ctx.telegram_id,
+            action=AdminAuditAction.PAYMENT_QUEUE_MANUAL_RETRY,
+            target_type="webhook_inbox",
+            target_id=row.id,
+            details=audit_details,
+        )
+
+        if succeeded:
+            response_status = 200
+            response_payload = {
+                "ok": True,
+                "id": webhook_id,
+                "status": final_status,
+                "message": "Вебхук повторно обработан",
+            }
+        elif error_reason in ("order_not_found", "amount_mismatch"):
+            response_status = 400
+            err_msg = (
+                "Обнаружено расхождение суммы платежа; вебхук оставлен в статусе dead"
+                if error_reason == "amount_mismatch"
+                else "Заказ для вебхука не найден или не готов к обработке"
+            )
+            response_payload = {
+                "ok": False,
+                "id": webhook_id,
+                "status": final_status,
+                "error": err_msg,
+            }
+        else:
+            response_status = 502
+            response_payload = {
+                "ok": False,
+                "id": webhook_id,
+                "status": final_status,
+                "error": "Не удалось повторно обработать вебхук",
+            }
+
+    if notify_ctx is not None and bot is not None:
+        await _dispatch_yookassa_notifications(bot, **notify_ctx)
+
+    return web.json_response(response_payload, status=response_status)
 
 
 async def api_admin_webhook_dismiss_handler(request: web.Request) -> web.Response:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from pathlib import Path
+import re
 
 from aiohttp import web
 
@@ -110,10 +111,11 @@ def _compute_miniapp_asset_version() -> str:
 
 
 _MINIAPP_ASSET_VERSION = _compute_miniapp_asset_version()
+_ASSET_VERSION_RE = re.compile(r"\?v=2\.\d+\.\d+")
 
 
 def _rewrite_asset_version(text: str) -> str:
-    return text.replace("?v=2.8.0", f"?v={_MINIAPP_ASSET_VERSION}")
+    return _ASSET_VERSION_RE.sub(f"?v={_MINIAPP_ASSET_VERSION}", text)
 
 
 async def miniapp_index_handler(request: web.Request) -> web.Response:
@@ -166,13 +168,14 @@ async def miniapp_asset_handler(request: web.Request) -> web.Response:
         if rel_path.startswith("guides/")
         else _ASSET_CACHE_HEADERS
     )
-    if not rel_path.startswith("guides/") and target.suffix.lower() in {".js", ".css"}:
+    if not rel_path.startswith("guides/") and target.suffix.lower() in {".js", ".css", ".html"}:
         rewritten = _rewrite_asset_version(target.read_text(encoding="utf-8"))
+        resp_headers = _NO_CACHE_HEADERS if target.suffix.lower() == ".html" else headers
         return web.Response(
             text=rewritten,
             content_type=content_type,
             charset="utf-8",
-            headers=headers,
+            headers=resp_headers,
         )
     return web.FileResponse(target, headers=headers)
 

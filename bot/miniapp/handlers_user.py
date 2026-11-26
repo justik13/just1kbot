@@ -405,6 +405,12 @@ async def api_user_dashboard_handler(request: web.Request) -> web.Response:
             "subscription_backup_url": _build_backup_sub_url(effective_sub_token),
             "standard": {
                 "active": std_active,
+                "in_grace": bool(
+                    std_active
+                    and vless_sub
+                    and vless_sub.expires_at
+                    and vless_sub.expires_at <= now
+                ),
                 "expires_at": vless_sub.expires_at.isoformat() if vless_sub and vless_sub.expires_at else None,
                 "device_limit": int(std_limit),
                 "auto_renew_enabled": bool(getattr(vless_sub, "auto_renew_enabled", False)) if vless_sub else False,

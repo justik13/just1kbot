@@ -105,7 +105,7 @@ def validate_telegram_init_data(
         hashlib.sha256,
     ).hexdigest()
 
-    if not hmac.compare_digest(received_hash, calculated_hash):
+    if not hmac.compare_digest(str(received_hash).encode("utf-8"), calculated_hash.encode("utf-8")):
         logger.warning("Telegram WebApp initData signature mismatch")
         return None
 
@@ -246,7 +246,7 @@ def verify_admin_session_token(
         payload,
         hashlib.sha256,
     ).hexdigest()
-    return hmac.compare_digest(sig, expected_sig)
+    return hmac.compare_digest(sig.encode("utf-8"), expected_sig.encode("utf-8"))
 
 
 def generate_totp_secret() -> str:
@@ -288,7 +288,7 @@ def _match_totp_step(
     try:
         for delta in range(-window, window + 1):
             candidate_step = step + delta
-            if hmac.compare_digest(_compute_hotp(secret, candidate_step), clean_code):
+            if hmac.compare_digest(_compute_hotp(secret, candidate_step).encode("utf-8"), clean_code.encode("utf-8")):
                 return candidate_step
     except Exception:
         return None

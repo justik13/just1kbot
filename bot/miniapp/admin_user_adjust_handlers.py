@@ -217,6 +217,22 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                 before_end = vless_sub.expires_at.isoformat() if vless_sub.expires_at else None
                 before_limit = int(getattr(vless_sub, "device_limit", 0) or 0)
                 new_end = vless_sub.expires_at - timedelta(days=abs(payload.days))
+                if (
+                    new_end > now
+                    and payload.device_limit is not None
+                    and payload.device_limit < before_limit
+                ):
+                    slot_usage = await _ha.SubscriptionService.get_device_slot_usage(
+                        session, user, vless_sub=vless_sub, now=now
+                    )
+                    fits, limit_reason = _ha.SubscriptionService.check_standard_limit_fits(
+                        slot_usage, payload.device_limit
+                    )
+                    if not fits:
+                        return web.json_response(
+                            {"ok": False, "error": limit_reason or "Активных устройств больше нового лимита"},
+                            status=400,
+                        )
                 vless_sub.expires_at = new_end
                 limit_changed = (
                     payload.device_limit is not None
@@ -271,6 +287,7 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                     "message": f"Подписка «Стандарт» сокращена на {abs(payload.days)} дн.",
                 })
 
+            await _ha.acquire_user_account_lock(session, user.id)
             cur_vless = await _ha.get_or_create_subscription(session, user.id)
             before_end = cur_vless.expires_at.isoformat() if cur_vless.expires_at else None
             before_limit = int(getattr(cur_vless, "device_limit", 0) or 0)

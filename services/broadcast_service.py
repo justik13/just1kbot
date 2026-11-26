@@ -474,12 +474,23 @@ async def create_and_start_broadcast(
     return payload
 
 
+def cancel_broadcast_task(broadcast_id: int) -> None:
+    """Cancel an in-memory broadcast worker task if still running."""
+    task = _active_broadcast_tasks.pop(broadcast_id, None)
+    if task and not task.done():
+        task.cancel()
+
+
 async def cancel_broadcast(
     session: AsyncSession,
     broadcast_id: int,
     admin_id: int,
 ) -> dict[str, Any] | None:
-    bp = await session.get(BroadcastProgress, broadcast_id)
+    bp = await session.scalar(
+        select(BroadcastProgress)
+        .where(BroadcastProgress.id == broadcast_id)
+        .with_for_update()
+    )
     if bp is None:
         return None
     if bp.status == "in_progress":
@@ -498,9 +509,6 @@ async def cancel_broadcast(
                 "fail": bp.fail_count,
             },
         )
-    task = _active_broadcast_tasks.pop(broadcast_id, None)
-    if task and not task.done():
-        task.cancel()
     return serialize_broadcast(bp)
 
 

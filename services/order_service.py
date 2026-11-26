@@ -21,6 +21,7 @@ from config.constants import (
     STANDARD_MAX_EXPIRY_DAYS,
     STANDARD_MIN_DEVICES,
     STANDARD_PLANS,
+    VPN_ACCESS_GRACE_HOURS,
     WHITE_INTERNET_BASE_DURATION_DAYS,
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
     WHITE_INTERNET_MAX_EXPIRY_DAYS,
@@ -880,11 +881,18 @@ class OrderService:
             active_hwid_count = await count_active_user_devices(session, user_id)
             std_assigned_count = active_hwid_count
 
-        is_active = bool(
+        is_strictly_active = bool(
             sub_end is not None
             and sub_end > now
             and current_limit > 0
         )
+        is_in_grace = bool(
+            sub_end is not None
+            and current_limit > 0
+            and sub_end <= now
+            and (now - sub_end) <= timedelta(hours=VPN_ACCESS_GRACE_HOURS)
+        )
+        is_active = is_strictly_active or is_in_grace
         is_grace_autorenew = bool(
             operation == "renew"
             and sub_end is not None
@@ -907,6 +915,7 @@ class OrderService:
                 "discount_rub": int(discount),
                 "bonus_credit_rub": 0,
                 "days_left": 0,
+                "in_grace": False,
                 "can_downgrade": False,
                 "blocked_reason": None,
                 "cooldown_until": cooldown_until.isoformat() if cooldown_until else None,
@@ -931,6 +940,7 @@ class OrderService:
                 "discount_rub": 0,
                 "bonus_credit_rub": 0,
                 "days_left": max(0, math.ceil((sub_end - now).total_seconds() / 86400.0)),
+                "in_grace": is_in_grace,
                 "can_downgrade": False,
                 "blocked_reason": renew_blocked_reason,
                 "cooldown_until": cooldown_until.isoformat() if cooldown_until else None,
@@ -938,6 +948,23 @@ class OrderService:
             }
 
         if target_device_limit > current_limit:
+            if is_in_grace:
+                return {
+                    "operation": "upgrade",
+                    "due_rub": 0,
+                    "original_price_rub": 0,
+                    "discount_rub": 0,
+                    "bonus_credit_rub": 0,
+                    "days_left": 0,
+                    "in_grace": True,
+                    "can_downgrade": False,
+                    "blocked_reason": (
+                        "Срок действия подписки завершается (льготный период). "
+                        "Продлите подписку с нужным числом устройств."
+                    ),
+                    "cooldown_until": cooldown_until.isoformat() if cooldown_until else None,
+                    "active_hwid_count": active_hwid_count,
+                }
             raw_days = max(1, math.ceil((sub_end - now).total_seconds() / 86400.0))
             days_left = min(raw_days, 365) if is_permanent_subscription(sub_end) else raw_days
             diff_30 = calculate_standard_price(target_device_limit, 30) - calculate_standard_price(
@@ -951,6 +978,7 @@ class OrderService:
                 "discount_rub": 0,
                 "bonus_credit_rub": 0,
                 "days_left": days_left,
+                "in_grace": False,
                 "can_downgrade": False,
                 "blocked_reason": None,
                 "cooldown_until": cooldown_until.isoformat() if cooldown_until else None,
@@ -1002,6 +1030,7 @@ class OrderService:
             "discount_rub": 0,
             "bonus_credit_rub": int(bonus_credit),
             "days_left": full_days_left,
+            "in_grace": is_in_grace,
             "can_downgrade": blocked_reason is None,
             "blocked_reason": blocked_reason,
             "blocked_by_devices": blocked_by_devices,
@@ -1194,7 +1223,7 @@ class OrderService:
             )
             if quote["operation"] == "downgrade":
                 raise ValueError("Use downgrade_standard_devices for device downgrade")
-            if quote["operation"] == "renew" and quote.get("blocked_reason"):
+            if quote["operation"] in ("renew", "upgrade") and quote.get("blocked_reason"):
                 raise ValueError(quote["blocked_reason"])
             total_cost = Decimal(quote["due_rub"])
             final_devices = d_limit
