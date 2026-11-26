@@ -1069,54 +1069,81 @@ async def test_node_monitor_nonblocking_topology_and_health_fields():
     assert "hosting_alert_level" not in patch_extra
     assert "role" not in patch_extra
 
-    # Verify check_node_resources_and_alerts uses sync_v2_topology_to_nodes_nonblocking on health change
-    srv = SimpleNamespace(
-        id=1,
-        name="Hub 1",
-        role="ru_hub",
-        protocol="xray",
-        api_url="https://hub1.example",
-        api_key="key",
-        is_active=True,
-        health_state=ServerHealthState.ONLINE,
-        consecutive_fails=0,
-        consecutive_successes=0,
-        last_alert_sent_state=None,
-        problem_started_at=None,
-        next_check_at=None,
-        disabled_reason=None,
-        last_successful_check=None,
-        capabilities=["ru_hub"],
-        extra_data={"role": "ru_hub"},
-        xray_instance_epoch="ep1",
-        xray_instance_boot_id="b1",
-        xray_instance_starttime=100,
-    )
-    node_monitor._server_states.clear()
-    sess = AsyncMock()
-    nonblocking_mock = AsyncMock(return_value={1: True})
-    fake_xray_client = SimpleNamespace(
-        check_health=AsyncMock(return_value=(False, None, None)),
-    )
+    # Verify check_node_resources_and_alerts triggers topology sync on transitions to/from PROBLEM,
+    # and does NOT trigger on ONLINE -> WAITING_CONFIRMATION.
+    def _make_hub(health_state: ServerHealthState, consecutive_fails: int = 0, consecutive_successes: int = 0):
+        return SimpleNamespace(
+            id=1,
+            name="Hub 1",
+            role="ru_hub",
+            protocol="xray",
+            api_url="https://hub1.example",
+            api_key="key",
+            is_active=True,
+            health_state=health_state,
+            consecutive_fails=consecutive_fails,
+            consecutive_successes=consecutive_successes,
+            last_alert_sent_state=None,
+            problem_started_at=None,
+            next_check_at=None,
+            disabled_reason=None,
+            last_successful_check=None,
+            capabilities=["ru_hub"],
+            extra_data={"role": "ru_hub"},
+            xray_instance_epoch="ep1",
+            xray_instance_boot_id="b1",
+            xray_instance_starttime=100,
+        )
 
     @asynccontextmanager
-    async def _xray_ctx(*_a, **_kw):
-        yield fake_xray_client
+    async def _run_monitor_tick(srv_obj, check_health_result):
+        sess = AsyncMock()
+        nonblocking_mock = AsyncMock(return_value={1: True})
+        fake_xray_client = SimpleNamespace(
+            check_health=AsyncMock(return_value=check_health_result),
+        )
 
-    with (
-        patch.object(node_monitor, "session_scope", _make_session_scope(sess)),
-        patch.object(node_monitor, "get_all_servers", AsyncMock(return_value=[srv])),
-        patch("services.xray_node_client.XrayNodeClient", _xray_ctx),
-        patch.object(
-            node_monitor,
-            "update_server_health_snapshot",
-            AsyncMock(return_value=(srv, True)),
-        ),
-        patch("services.topology_sync_service.sync_v2_topology_to_nodes_nonblocking", nonblocking_mock),
-    ):
-        await node_monitor.check_node_resources_and_alerts(bot=None)
+        @asynccontextmanager
+        async def _xray_ctx(*_a, **_kw):
+            yield fake_xray_client
 
-    nonblocking_mock.assert_awaited_once()
+        with (
+            patch.object(node_monitor, "session_scope", _make_session_scope(sess)),
+            patch.object(node_monitor, "get_all_servers", AsyncMock(return_value=[srv_obj])),
+            patch("services.xray_node_client.XrayNodeClient", _xray_ctx),
+            patch.object(
+                node_monitor,
+                "update_server_health_snapshot",
+                AsyncMock(return_value=(srv_obj, True)),
+            ),
+            patch.object(node_monitor, "_send_admin_alert_msg", AsyncMock(return_value=False)),
+            patch("services.topology_sync_service.sync_v2_topology_to_nodes_nonblocking", nonblocking_mock),
+        ):
+            await node_monitor.check_node_resources_and_alerts(bot=None)
+            yield nonblocking_mock
+
+    # 1. ONLINE -> WAITING_CONFIRMATION must NOT trigger topology sync
+    node_monitor._server_states.clear()
+    srv_online = _make_hub(ServerHealthState.ONLINE, consecutive_fails=0)
+    async with _run_monitor_tick(srv_online, (False, None, None)) as nb_mock:
+        nb_mock.assert_not_awaited()
+    assert node_monitor._server_states[1].health_state == ServerHealthState.WAITING_CONFIRMATION
+
+    # 2. WAITING_CONFIRMATION -> PROBLEM MUST trigger topology sync
+    node_monitor._server_states[1].next_check_at = None
+    async with _run_monitor_tick(srv_online, (False, None, None)) as nb_mock:
+        nb_mock.assert_awaited_once()
+    assert node_monitor._server_states[1].health_state == ServerHealthState.PROBLEM
+
+    # 3. PROBLEM -> ONLINE (3rd consecutive success) MUST trigger topology sync
+    node_monitor._server_states.clear()
+    srv_problem = _make_hub(
+        ServerHealthState.PROBLEM,
+        consecutive_successes=node_monitor.REQUIRED_STABLE_SUCCESSES - 1,
+    )
+    async with _run_monitor_tick(srv_problem, (True, None, {})) as nb_mock:
+        nb_mock.assert_awaited_once()
+    assert node_monitor._server_states[1].health_state == ServerHealthState.ONLINE
     node_monitor._server_states.clear()
 
 
@@ -1381,59 +1408,151 @@ async def test_b4_delete_node_cleans_jsonb_subscription_snapshots():
 
 @pytest.mark.asyncio
 async def test_b5_admin_webhook_retry_and_dismiss_endpoints():
+    from services.order_service import OrderService
+
     admin_ctx = SimpleNamespace(telegram_id=1001)
-    dead_row = SimpleNamespace(
+    valid_payload = {
+        "type": "notification",
+        "event": "payment.succeeded",
+        "object": {
+            "id": "pay_5",
+            "status": "succeeded",
+            "metadata": {"order_id": "ORD-5"},
+        },
+    }
+    missing_payload_row = SimpleNamespace(
+        id=4,
+        event_key="yk:evt:4",
+        provider="yookassa",
+        status=WebhookInboxStatus.DEAD.value,
+        payload=None,
+        public_order_id=None,
+    )
+    dead_ok_row = SimpleNamespace(
         id=5,
         event_key="yk:evt:5",
         provider="yookassa",
         status=WebhookInboxStatus.DEAD.value,
+        payload=valid_payload,
+        public_order_id=None,
+    )
+    fail_not_found_row = SimpleNamespace(
+        id=8,
+        event_key="yk:evt:8",
+        provider="yookassa",
+        status=WebhookInboxStatus.RETRY.value,
+        payload={
+            "type": "notification",
+            "event": "payment.succeeded",
+            "object": {"id": "pay_8", "status": "succeeded"},
+        },
+        public_order_id=None,
+    )
+    fail_exc_row = SimpleNamespace(
+        id=9,
+        event_key="yk:evt:9",
+        provider="yookassa",
+        status=WebhookInboxStatus.RETRY.value,
+        payload={
+            "type": "notification",
+            "event": "payment.succeeded",
+            "object": {"id": "pay_9", "status": "succeeded"},
+        },
+        public_order_id=None,
     )
     pending_row = SimpleNamespace(
         id=6,
         event_key="yk:evt:6",
         provider="yookassa",
         status=WebhookInboxStatus.PENDING.value,
+        payload=valid_payload,
     )
-    retry_row = SimpleNamespace(
+    retry_dismiss_row = SimpleNamespace(
         id=7,
         event_key="yk:evt:7",
         provider="yookassa",
         status=WebhookInboxStatus.RETRY.value,
     )
 
+    paid_order = SimpleNamespace(
+        id=55,
+        user_id=1,
+        service_type="standard",
+        status="paid",
+        amount_rub=Decimal("99"),
+        metadata_={},
+        _newly_paid=False,
+    )
+
     session = AsyncMock()
-    session.scalar = AsyncMock(side_effect=[dead_row, retry_row, pending_row, None])
+    session.scalar = AsyncMock(
+        side_effect=[
+            missing_payload_row,
+            dead_ok_row,
+            fail_not_found_row,
+            fail_exc_row,
+            retry_dismiss_row,
+            pending_row,
+            None,
+        ]
+    )
     audit_mock = AsyncMock()
+    process_mock = AsyncMock(
+        side_effect=[paid_order, None, RuntimeError("db error")]
+    )
 
     with (
         patch.object(handlers_admin, "require_admin_user", return_value=(admin_ctx, None)),
         patch.object(handlers_admin, "session_scope", _make_session_scope(session)),
         patch.object(handlers_admin.AuditService, "log_action", audit_mock),
+        patch.object(OrderService, "process_webhook_event", process_mock),
     ):
-        resp_retry = await handlers_admin.api_admin_webhook_retry_handler(
-            SimpleNamespace(match_info={"webhook_id": "5"})
+        resp_missing_payload = await handlers_admin.api_admin_webhook_retry_handler(
+            SimpleNamespace(app={}, match_info={"webhook_id": "4"})
+        )
+        resp_retry_ok = await handlers_admin.api_admin_webhook_retry_handler(
+            SimpleNamespace(app={}, match_info={"webhook_id": "5"})
+        )
+        resp_retry_not_found = await handlers_admin.api_admin_webhook_retry_handler(
+            SimpleNamespace(app={}, match_info={"webhook_id": "8"})
+        )
+        resp_retry_exc = await handlers_admin.api_admin_webhook_retry_handler(
+            SimpleNamespace(app={}, match_info={"webhook_id": "9"})
         )
         resp_dismiss = await handlers_admin.api_admin_webhook_dismiss_handler(
             SimpleNamespace(match_info={"webhook_id": "7"})
         )
         resp_bad = await handlers_admin.api_admin_webhook_retry_handler(
-            SimpleNamespace(match_info={"webhook_id": "6"})
+            SimpleNamespace(app={}, match_info={"webhook_id": "6"})
         )
         resp_missing = await handlers_admin.api_admin_webhook_dismiss_handler(
             SimpleNamespace(match_info={"webhook_id": "999"})
         )
 
-    assert resp_retry.status == 200
-    assert json.loads(resp_retry.text)["status"] == WebhookInboxStatus.PENDING.value
-    assert dead_row.status == WebhookInboxStatus.PENDING.value
+    assert resp_missing_payload.status == 400
+    assert missing_payload_row.status == WebhookInboxStatus.DEAD.value
+
+    assert resp_retry_ok.status == 200
+    assert json.loads(resp_retry_ok.text)["status"] == WebhookInboxStatus.SUCCEEDED.value
+    assert dead_ok_row.status == WebhookInboxStatus.SUCCEEDED.value
+    assert dead_ok_row.public_order_id == "ORD-5"
+
+    # Order missing or exception during reprocessing must finalize as DEAD, never stranded in PENDING
+    assert resp_retry_not_found.status == 400
+    assert json.loads(resp_retry_not_found.text)["status"] == WebhookInboxStatus.DEAD.value
+    assert fail_not_found_row.status == WebhookInboxStatus.DEAD.value
+
+    assert resp_retry_exc.status == 502
+    assert json.loads(resp_retry_exc.text)["status"] == WebhookInboxStatus.DEAD.value
+    assert fail_exc_row.status == WebhookInboxStatus.DEAD.value
 
     assert resp_dismiss.status == 200
     assert json.loads(resp_dismiss.text)["status"] == WebhookInboxStatus.SUCCEEDED.value
-    assert retry_row.status == WebhookInboxStatus.SUCCEEDED.value
+    assert retry_dismiss_row.status == WebhookInboxStatus.SUCCEEDED.value
 
     assert resp_bad.status == 400
     assert resp_missing.status == 404
-    assert audit_mock.await_count == 2
+    assert audit_mock.await_count == 4
 
 
 @pytest.mark.asyncio
@@ -1644,3 +1763,360 @@ async def test_b10_miniapp_asset_version_rewrite_and_webhook_routes():
     registered_paths = {r.resource.canonical for r in app.router.routes()}
     assert "/api/app/admin/webhooks/{webhook_id}/retry" in registered_paths
     assert "/api/app/admin/webhooks/{webhook_id}/dismiss" in registered_paths
+
+
+def _make_v2_topology_node(
+    node_id: int,
+    role: str,
+    ip: str,
+    domain: str,
+    bridge_uuid: str,
+    *,
+    lifecycle_status: ServerLifecycleStatus = ServerLifecycleStatus.ACTIVE,
+    extra_overrides: dict | None = None,
+):
+    extra = {
+        "role": role,
+        "ip": ip,
+        "domain": domain,
+        "bridge_uuid": bridge_uuid,
+    }
+    if extra_overrides:
+        extra.update(extra_overrides)
+    return SimpleNamespace(
+        id=node_id,
+        name=f"{role}-{node_id}",
+        role=role,
+        capabilities=[role],
+        protocol="xray",
+        api_url=f"https://{domain}",
+        api_key="k",
+        is_active=True,
+        health_state=ServerHealthState.ONLINE,
+        lifecycle_status=lifecycle_status,
+        extra_data=extra,
+    )
+
+
+def test_p0_1_build_v2_topology_links_decommissioning_ru_vs_eu():
+    import uuid
+    from services.topology_sync_service import build_v2_topology_links
+
+    ru_active = _make_v2_topology_node(
+        1, "ru_hub", "10.0.0.1", "ru1.example", str(uuid.UUID(int=1)),
+        lifecycle_status=ServerLifecycleStatus.ACTIVE,
+    )
+    ru_decomm = _make_v2_topology_node(
+        2, "ru_hub", "10.0.0.2", "ru2.example", str(uuid.UUID(int=2)),
+        lifecycle_status=ServerLifecycleStatus.DECOMMISSIONING,
+    )
+    eu_active = _make_v2_topology_node(
+        10, "eu_hub", "20.0.0.10", "eu10.example", str(uuid.UUID(int=10)),
+        lifecycle_status=ServerLifecycleStatus.ACTIVE,
+    )
+    eu_decomm = _make_v2_topology_node(
+        11, "eu_hub", "20.0.0.11", "eu11.example", str(uuid.UUID(int=11)),
+        lifecycle_status=ServerLifecycleStatus.DECOMMISSIONING,
+    )
+    exit_1 = _make_v2_topology_node(
+        20, "exit_node", "30.0.0.20", "ex20.example", str(uuid.UUID(int=20)),
+        lifecycle_status=ServerLifecycleStatus.ACTIVE,
+        extra_overrides={"location_code": "nl", "in_standard": True, "in_white_internet": True},
+    )
+
+    payloads = build_v2_topology_links([ru_active, ru_decomm, eu_active, eu_decomm, exit_1])
+
+    # DECOMMISSIONING ru_hub stays eligible for its own links.json and eu_hub allowlist
+    assert ru_active.id in payloads
+    assert ru_decomm.id in payloads
+    assert eu_active.id in payloads
+    assert eu_decomm.id not in payloads
+
+    eu_payload = payloads[eu_active.id]
+    assert set(eu_payload["allowed_ru_ips"]) == {"10.0.0.1", "10.0.0.2"}
+    assert {h["code"] for h in eu_payload["incoming_ru_hubs"]} == {"ru1", "ru2"}
+
+    # DECOMMISSIONING eu_hub is excluded from exit_node and ru_hub bridges
+    exit_payload = payloads[exit_1.id]
+    assert exit_payload["allowed_hub_ips"] == ["20.0.0.10"]
+    assert [h["code"] for h in exit_payload["incoming_hubs"]] == ["eu10"]
+    for rh_id in (ru_active.id, ru_decomm.id):
+        assert [b["ip"] for b in payloads[rh_id]["standard"]["bridges"]] == ["20.0.0.10"]
+        assert [b["ip"] for b in payloads[rh_id]["bi"]["bridges"]] == ["20.0.0.10"]
+
+
+def test_p1_3_miniapp_auth_non_ascii_hash_and_sig_return_false_none():
+    import time
+    from urllib.parse import urlencode
+    from services import miniapp_auth_service
+
+    now_ts = int(time.time())
+    init_data = urlencode({
+        "auth_date": str(now_ts),
+        "user": json.dumps({"id": 123456, "first_name": "Test"}),
+        "hash": "неаски_хэш_🔥",
+    })
+    assert miniapp_auth_service.validate_telegram_init_data(init_data, "123456:BOT_TOKEN") is None
+
+    future_exp = now_ts + 600
+    bad_tok = f"{future_exp}.deadbeef.1.подпись🔥"
+    with (
+        patch.object(miniapp_auth_service, "is_admin", return_value=True),
+        patch.object(
+            miniapp_auth_service,
+            "_derive_signing_key",
+            return_value=b"test-admin-session-signing-key-32b",
+        ),
+    ):
+        assert miniapp_auth_service.verify_admin_session_token(bad_tok, 1001, expected_epoch="1") is False
+
+
+def test_p1_5_p1_6_build_v2_topology_links_bridge_code_and_blocked_eu_failsafe():
+    import uuid
+    from services.topology_sync_service import build_v2_topology_links
+
+    long_loc = "a" * 32
+    eu_1 = _make_v2_topology_node(12, "eu_hub", "20.0.0.12", "eu12.example", str(uuid.UUID(int=12)))
+    eu_2 = _make_v2_topology_node(13, "eu_hub", "20.0.0.13", "eu13.example", str(uuid.UUID(int=13)))
+
+    ex_1 = _make_v2_topology_node(
+        21, "exit_node", "30.0.0.21", "ex21.example", str(uuid.UUID(int=21)),
+        extra_overrides={"location_code": long_loc, "in_standard": True, "in_white_internet": True},
+    )
+    ex_2 = _make_v2_topology_node(
+        22, "exit_node", "30.0.0.22", "ex22.example", str(uuid.UUID(int=22)),
+        extra_overrides={"location_code": "de", "in_standard": True, "in_white_internet": True},
+    )
+    ex_3 = _make_v2_topology_node(
+        23, "exit_node", "30.0.0.23", "ex23.example", str(uuid.UUID(int=23)),
+        extra_overrides={"location_code": "fi", "in_standard": True, "in_white_internet": True},
+    )
+
+    ru_normal = _make_v2_topology_node(1, "ru_hub", "10.0.0.1", "ru1.example", str(uuid.UUID(int=1)))
+    ru_blocked_one = _make_v2_topology_node(
+        2, "ru_hub", "10.0.0.2", "ru2.example", str(uuid.UUID(int=2)),
+        extra_overrides={"blocked_eu_ids": [eu_1.id]},
+    )
+    ru_blocked_all = _make_v2_topology_node(
+        3, "ru_hub", "10.0.0.3", "ru3.example", str(uuid.UUID(int=3)),
+        extra_overrides={"blocked_eu_ids": [eu_1.id, eu_2.id]},
+    )
+
+    payloads = build_v2_topology_links([ru_normal, ru_blocked_one, ru_blocked_all, eu_1, eu_2, ex_1, ex_2, ex_3])
+
+    # P1-5: 32-char location_code produces code <= 32 chars ending with -eu{id}
+    long_loc_bridges = [
+        b for b in payloads[ru_normal.id]["standard"]["bridges"] if b["location_code"] == long_loc
+    ]
+    assert len(long_loc_bridges) == 2
+    for b in long_loc_bridges:
+        assert len(b["code"]) <= 32
+        assert b["code"].endswith(("-eu12", "-eu13"))
+
+    # P1-6: blocked_eu_ids excludes blocked eu_hub from standard/bi into probe_bridges (up to 2 exits)
+    one_payload = payloads[ru_blocked_one.id]
+    assert {b["ip"] for b in one_payload["standard"]["bridges"]} == {"20.0.0.13"}
+    assert {b["ip"] for b in one_payload["bi"]["bridges"]} == {"20.0.0.13"}
+    assert len(one_payload["probe_bridges"]) == 2
+    assert all(pb["ip"] == "20.0.0.12" and pb["is_default"] is False for pb in one_payload["probe_bridges"])
+    assert one_payload["probe_bridges"][0]["code"].endswith("-eu12")
+    assert len(one_payload["probe_bridges"][0]["code"]) <= 32
+
+    # P1-6 fail-safe: when all eu_hubs are blocked, keep routed_eu = valid_eu and omit probe_bridges
+    all_payload = payloads[ru_blocked_all.id]
+    assert {b["ip"] for b in all_payload["standard"]["bridges"]} == {"20.0.0.12", "20.0.0.13"}
+    assert {b["ip"] for b in all_payload["bi"]["bridges"]} == {"20.0.0.12", "20.0.0.13"}
+    assert len(all_payload["standard"]["bridges"]) == 6
+    assert "probe_bridges" not in all_payload
+
+
+@pytest.mark.asyncio
+async def test_p1_10_quote_standard_change_four_hour_grace_period():
+    from services.order_service import OrderService
+
+    now = now_utc()
+    session = AsyncMock()
+    session.get = AsyncMock(return_value=None)
+
+    # Within 4h grace period (expires_at = now - 2h): renew and downgrade both report in_grace=True
+    grace_sub = SimpleNamespace(
+        expires_at=now - timedelta(hours=2),
+        device_limit=3,
+        downgrade_cooldown_until=None,
+    )
+    with (
+        patch("services.order_service.now_utc", return_value=now),
+        patch(
+            "database.repositories.vless_subscription_repo.get_subscription_by_user_id",
+            AsyncMock(return_value=grace_sub),
+        ),
+        patch("services.order_service.count_active_user_devices", AsyncMock(return_value=1)),
+        patch.object(
+            OrderService,
+            "_get_standard_downgrade_cap",
+            AsyncMock(return_value=(100, Decimal("1"))),
+        ),
+    ):
+        renew_quote = await OrderService.quote_standard_change(
+            session, user_id=1, target_device_limit=3, target_duration_days=30, operation="renew"
+        )
+        downgrade_quote = await OrderService.quote_standard_change(
+            session, user_id=1, target_device_limit=2, target_duration_days=30
+        )
+
+    assert renew_quote["operation"] == "renew"
+    assert renew_quote["in_grace"] is True
+    assert renew_quote["days_left"] == 0
+
+    assert downgrade_quote["operation"] == "downgrade"
+    assert downgrade_quote["in_grace"] is True
+    assert downgrade_quote["can_downgrade"] is True
+    assert downgrade_quote["days_left"] == 0
+    assert downgrade_quote["bonus_credit_rub"] == 0
+
+    # Past 4h grace period (expires_at = now - 5h): downgrade falls back to purchase with in_grace=False
+    expired_sub = SimpleNamespace(
+        expires_at=now - timedelta(hours=5),
+        device_limit=3,
+        downgrade_cooldown_until=None,
+    )
+    with (
+        patch("services.order_service.now_utc", return_value=now),
+        patch(
+            "database.repositories.vless_subscription_repo.get_subscription_by_user_id",
+            AsyncMock(return_value=expired_sub),
+        ),
+        patch("services.order_service.count_active_user_devices", AsyncMock(return_value=1)),
+        patch("services.order_service.is_eligible_for_referral_first_discount", AsyncMock(return_value=False)),
+    ):
+        past_grace_downgrade = await OrderService.quote_standard_change(
+            session, user_id=1, target_device_limit=2, target_duration_days=30
+        )
+
+    assert past_grace_downgrade["operation"] == "purchase"
+    assert past_grace_downgrade["in_grace"] is False
+
+
+@pytest.mark.asyncio
+async def test_p2_2_node_monitor_bridge_health_blocking_dedup_and_recovery():
+    from services.workers import node_monitor
+
+    ru_hub = SimpleNamespace(
+        id=1,
+        name="RU Hub 1",
+        role="ru_hub",
+        protocol="xray",
+        api_url="https://ru1.example",
+        api_key="k1",
+        is_active=True,
+        health_state=ServerHealthState.ONLINE,
+        lifecycle_status=ServerLifecycleStatus.ACTIVE,
+        consecutive_fails=0,
+        consecutive_successes=0,
+        last_alert_sent_state=None,
+        problem_started_at=None,
+        next_check_at=None,
+        disabled_reason=None,
+        last_successful_check=None,
+        capabilities=["ru_hub"],
+        extra_data={"role": "ru_hub", "ip": "1.1.1.1"},
+        xray_instance_epoch=None,
+        xray_instance_boot_id=None,
+        xray_instance_starttime=None,
+    )
+    eu_hub = SimpleNamespace(
+        id=2,
+        name="EU Hub 2",
+        role="eu_hub",
+        protocol="xray",
+        api_url="https://eu2.example",
+        api_key="k2",
+        is_active=True,
+        health_state=ServerHealthState.ONLINE,
+        lifecycle_status=ServerLifecycleStatus.ACTIVE,
+        consecutive_fails=0,
+        consecutive_successes=0,
+        last_alert_sent_state=None,
+        problem_started_at=None,
+        next_check_at=None,
+        disabled_reason=None,
+        last_successful_check=None,
+        capabilities=["eu_hub"],
+        extra_data={"role": "eu_hub", "ip": "2.2.2.2", "domain": "eu2.example"},
+        xray_instance_epoch=None,
+        xray_instance_boot_id=None,
+        xray_instance_starttime=None,
+    )
+
+    async def _run_tick(bridge_probe: dict):
+        sess = AsyncMock()
+        nonblocking_mock = AsyncMock(return_value={1: True, 2: True})
+
+        async def _fake_check_health(url, _key):
+            if "ru1.example" in url:
+                return True, None, {"bridge_health": {"2.2.2.2": bridge_probe}}
+            return True, None, {}
+
+        fake_xray = SimpleNamespace(check_health=AsyncMock(side_effect=_fake_check_health))
+
+        @asynccontextmanager
+        async def _xray_ctx(*_a, **_kw):
+            yield fake_xray
+
+        async def _fake_get_by_id(_sess, sid, **_kw):
+            return ru_hub if sid == 1 else eu_hub
+
+        async def _fake_update_server(_sess, srv, **kwargs):
+            for k, v in kwargs.items():
+                setattr(srv, k, v)
+            return srv
+
+        async def _fake_health_snap(_sess, sid, **_kw):
+            return (ru_hub if sid == 1 else eu_hub), True
+
+        with (
+            patch.object(node_monitor, "session_scope", _make_session_scope(sess)),
+            patch.object(node_monitor, "get_all_servers", AsyncMock(return_value=[ru_hub, eu_hub])),
+            patch.object(node_monitor, "get_server_by_id", AsyncMock(side_effect=_fake_get_by_id)),
+            patch.object(node_monitor, "update_server", AsyncMock(side_effect=_fake_update_server)),
+            patch.object(node_monitor, "update_server_health_snapshot", AsyncMock(side_effect=_fake_health_snap)),
+            patch.object(node_monitor, "_send_admin_alert_msg", AsyncMock(return_value=True)),
+            patch("services.xray_node_client.XrayNodeClient", _xray_ctx),
+            patch("services.topology_sync_service.sync_v2_topology_to_nodes_nonblocking", nonblocking_mock),
+        ):
+            await node_monitor.check_node_resources_and_alerts(bot=None)
+        return nonblocking_mock
+
+    node_monitor._server_states.clear()
+    try:
+        # Tick 1: 1st failure -> not blocked yet, no topology sync
+        nb1 = await _run_tick({"ok": False, "error": "timeout", "checked_at": 1000.0})
+        assert ru_hub.extra_data["bridge_health_state"]["2"]["fails"] == 1
+        assert "blocked_eu_ids" not in ru_hub.extra_data
+        nb1.assert_not_awaited()
+
+        # Tick 2: duplicate checked_at sample must not be double-counted
+        nb2 = await _run_tick({"ok": False, "error": "timeout", "checked_at": 1000.0})
+        assert ru_hub.extra_data["bridge_health_state"]["2"]["fails"] == 1
+        assert "blocked_eu_ids" not in ru_hub.extra_data
+        nb2.assert_not_awaited()
+
+        # Tick 3: 2nd distinct failure -> blocks eu_hub=2 and triggers topology sync
+        nb3 = await _run_tick({"ok": False, "error": "timeout", "checked_at": 1060.0})
+        assert ru_hub.extra_data["blocked_eu_ids"] == [2]
+        assert ru_hub.extra_data["bridge_health_state"]["2"]["blocked"] is True
+        nb3.assert_awaited_once()
+
+        # Tick 4: 1st success -> remains blocked until 2 consecutive successes
+        nb4 = await _run_tick({"ok": True, "checked_at": 1120.0})
+        assert ru_hub.extra_data["blocked_eu_ids"] == [2]
+        assert ru_hub.extra_data["bridge_health_state"]["2"]["successes"] == 1
+        nb4.assert_not_awaited()
+
+        # Tick 5: 2nd distinct success -> unblocks eu_hub=2 and triggers topology sync
+        nb5 = await _run_tick({"ok": True, "checked_at": 1180.0})
+        assert "blocked_eu_ids" not in ru_hub.extra_data
+        assert ru_hub.extra_data["bridge_health_state"]["2"]["blocked"] is False
+        nb5.assert_awaited_once()
+    finally:
+        node_monitor._server_states.clear()
