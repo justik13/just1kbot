@@ -1,5 +1,6 @@
 import { api } from "../api.js?v=2.8.0";
 import {
+    animateViewSwap,
     copyText,
     escapeHtml,
     formatBytesGb,
@@ -113,15 +114,94 @@ function _wiHasActivePeriod(wi) {
     );
 }
 
+export function getCabinetTab() {
+    return _state.tab;
+}
+
+export function syncTopbarProfilePreview(d = _state.data) {
+    const pill = document.getElementById("profilePillBtn");
+    const avatarEl = document.getElementById("profileAvatar");
+    const balEl = document.getElementById("profileBalanceText");
+    if (!pill) return;
+
+    const meta = _getProfileMeta();
+    const avatarKey = meta.photoUrl && !_state.avatarFailed ? meta.photoUrl : meta.initial;
+    if (avatarEl && avatarEl.dataset.renderedKey !== avatarKey) {
+        avatarEl.dataset.renderedKey = avatarKey;
+        avatarEl.innerHTML = _renderAvatarInner(meta);
+        _bindAvatarImg(avatarEl, meta.initial);
+    }
+    if (balEl) {
+        if (d && d.balance) {
+            balEl.textContent = `${d.balance.total ?? 0} ₽`;
+        } else if (!_state.data) {
+            balEl.textContent = "···";
+        }
+    }
+    pill.setAttribute("aria-label", `Профиль: ${meta.displayName}`);
+}
+
+export async function prefetchCabinetBalance() {
+    if (_state.data) {
+        syncTopbarProfilePreview(_state.data);
+        return;
+    }
+    try {
+        const [data] = await Promise.all([
+            api.getUserDashboard(),
+            loadGuidesData().catch(() => null),
+        ]);
+        if (!data) return;
+        _state.data = data;
+        _syncServerClock(data);
+        syncTopbarProfilePreview(data);
+    } catch {
+        // Non-critical background prefetch when opening directly in admin mode
+    }
+}
+
 export async function loadAndRenderUserCabinet(root, options = {}) {
     _state.loadOptions = options;
     if (options.tab) {
+        if (options.tab === "profile" && ["connect", "tariffs", "more"].includes(_state.tab)) {
+            _state.profileReturnTab = _state.tab;
+        }
         _state.tab = options.tab;
     } else if (options.resetTab) {
         _state.tab = null;
     }
     const isActive = () => (typeof options.isActive === "function" ? options.isActive() : true);
     const reqId = ++_dashReqId;
+
+    const resolveDefaultTab = (d) => {
+        if (_state.tab) return;
+        const stdActive = Boolean(d.standard && d.standard.active);
+        const wiActive = _wiHasActivePeriod(d.wi);
+        const urlParams = new URLSearchParams(window.location.search);
+        const requestedTab = urlParams.get("tab");
+        if (requestedTab && ["connect", "tariffs", "profile"].includes(requestedTab)) {
+            _state.tab = requestedTab;
+        } else {
+            _state.tab = (stdActive || wiActive) ? "connect" : "tariffs";
+        }
+    };
+
+    const hasCached = Boolean(_state.data && !options.forceFetch);
+    if (hasCached) {
+        resolveDefaultTab(_state.data);
+        _render(root, {
+            loadOptions: options,
+            preserveScroll: false,
+            animate: Boolean(options.animate),
+            direction: options.direction || "neutral",
+        });
+    } else {
+        root.innerHTML = `<section class="card card-center"><div class="muted">Загрузка кабинета...</div></section>`;
+        if (options.animate) {
+            animateViewSwap(root, { direction: options.direction || "neutral" });
+        }
+    }
+
     try {
         const [data] = await Promise.all([
             api.getUserDashboard(),
@@ -130,21 +210,30 @@ export async function loadAndRenderUserCabinet(root, options = {}) {
         if (reqId !== _dashReqId || !isActive() || !root.isConnected) return;
         _state.data = data;
         _syncServerClock(data);
-        const stdActive = Boolean(data.standard && data.standard.active);
-        const wiActive = _wiHasActivePeriod(data.wi);
-        if (!_state.tab) {
-            const urlParams = new URLSearchParams(window.location.search);
-            const requestedTab = urlParams.get("tab");
-            if (requestedTab && ["connect", "tariffs", "profile"].includes(requestedTab)) {
-                _state.tab = requestedTab;
-            } else {
-                _state.tab = (stdActive || wiActive) ? "connect" : "tariffs";
+        resolveDefaultTab(data);
+
+        if (hasCached) {
+            const hasPlayingVideo = Array.from(root.querySelectorAll("video")).some((v) => !v.paused);
+            if (hasPlayingVideo) {
+                syncTopbarProfilePreview(data);
+                return;
             }
+            _render(root, { loadOptions: options, preserveScroll: true, animate: false });
+        } else {
+            _render(root, {
+                loadOptions: options,
+                preserveScroll: false,
+                animate: Boolean(options.animate),
+                direction: options.direction || "neutral",
+            });
         }
-        _render(root, { loadOptions: options });
     } catch (err) {
         if (reqId !== _dashReqId || !isActive() || !root.isConnected) return;
         if (err && err.code === "init_data_expired") return;
+        if (hasCached) {
+            showToast(err.message || "Не удалось обновить данные кабинета", "error");
+            return;
+        }
         root.innerHTML = `
             <section class="card card-center">
                 <div class="card-title">Не удалось загрузить кабинет</div>
@@ -192,40 +281,20 @@ function _bindAvatarImg(container, key) {
     });
 }
 
-function _syncTopbarProfile(d, root) {
+function _syncTopbarProfile(d) {
     const pill = document.getElementById("profilePillBtn");
-    const avatarEl = document.getElementById("profileAvatar");
-    const balEl = document.getElementById("profileBalanceText");
     if (!pill) return;
-
-    const bal = d.balance || { total: 0 };
-    const meta = _getProfileMeta();
-    const avatarKey = meta.photoUrl && !_state.avatarFailed ? meta.photoUrl : meta.initial;
-    if (avatarEl && avatarEl.dataset.renderedKey !== avatarKey) {
-        avatarEl.dataset.renderedKey = avatarKey;
-        avatarEl.innerHTML = _renderAvatarInner(meta);
-        _bindAvatarImg(avatarEl, meta.initial);
-    }
-    if (balEl) balEl.textContent = `${bal.total ?? 0} ₽`;
+    syncTopbarProfilePreview(d);
     pill.classList.toggle("active", _state.tab === "profile");
-    pill.setAttribute("aria-label", `Профиль: ${meta.displayName}`);
     if (_state.tab === "profile") pill.setAttribute("aria-current", "page");
     else pill.removeAttribute("aria-current");
-
-    pill.onclick = () => {
-        if (_state.tab === "profile") return;
-        _state.profileReturnTab = ["connect", "tariffs", "more"].includes(_state.tab) ? _state.tab : "connect";
-        _state.tab = "profile";
-        _render(root, { preserveScroll: false });
-        _scrollTopSmooth();
-    };
 }
 
 function _setCabinetBackButton(onBack) {
     setPageBackButton(onBack);
 }
 
-function _render(root, { preserveScroll = true, loadOptions = _state.loadOptions } = {}) {
+function _render(root, { preserveScroll = true, loadOptions = _state.loadOptions, animate = false, direction = "neutral" } = {}) {
     const d = _state.data;
     if (!d) return;
     const prevGuideOpen = Boolean(root.querySelector("#connectGuide")?.open);
@@ -253,30 +322,48 @@ function _render(root, { preserveScroll = true, loadOptions = _state.loadOptions
         _state.tab = hasAny ? "connect" : "tariffs";
     }
 
-    _syncTopbarProfile(d, root);
+    _syncTopbarProfile(d);
 
-    root.innerHTML = `
-        <div id="userTabBody" class="app-main"></div>
-        <nav class="bottom-nav" aria-label="Разделы кабинета">
-            ${navTabs.map((t) => `
-                <button type="button" class="nav-item ${_state.tab === t.id ? "active" : ""}" ${_state.tab === t.id ? 'aria-current="page"' : ""} data-utab="${t.id}">
-                    ${t.icon}
-                    <span>${escapeHtml(t.label)}</span>
-                </button>
-            `).join("")}
-        </nav>
-    `;
-
-    root.querySelectorAll("[data-utab]").forEach((b) => {
-        b.addEventListener("click", () => {
-            if (_state.tab === b.dataset.utab) return;
-            _state.tab = b.dataset.utab;
-            _render(root, { preserveScroll: false });
-            _scrollTopSmooth();
+    let body = root.querySelector("#userTabBody");
+    let nav = root.querySelector("#cabinetNav");
+    const isFreshShell = !body || !nav;
+    if (isFreshShell) {
+        root.innerHTML = `
+            <div id="userTabBody" class="app-main"></div>
+            <nav id="cabinetNav" class="bottom-nav" aria-label="Разделы кабинета">
+                ${navTabs.map((t) => `
+                    <button type="button" class="nav-item" data-utab="${t.id}">
+                        ${t.icon}
+                        <span>${escapeHtml(t.label)}</span>
+                    </button>
+                `).join("")}
+            </nav>
+        `;
+        body = root.querySelector("#userTabBody");
+        nav = root.querySelector("#cabinetNav");
+        nav.querySelectorAll("[data-utab]").forEach((b) => {
+            b.addEventListener("click", () => {
+                const nextTab = b.dataset.utab;
+                if (!nextTab || _state.tab === nextTab) return;
+                const prevIdx = navTabs.findIndex((t) => t.id === _state.tab);
+                const nextIdx = navTabs.findIndex((t) => t.id === nextTab);
+                const dir = prevIdx !== -1 && nextIdx !== -1
+                    ? (nextIdx > prevIdx ? "forward" : "backward")
+                    : "neutral";
+                _state.tab = nextTab;
+                _render(root, { preserveScroll: false, animate: true, direction: dir });
+                _scrollTopSmooth();
+            });
         });
+    }
+
+    nav.querySelectorAll("[data-utab]").forEach((b) => {
+        const isCurrent = _state.tab === b.dataset.utab;
+        b.classList.toggle("active", isCurrent);
+        if (isCurrent) b.setAttribute("aria-current", "page");
+        else b.removeAttribute("aria-current");
     });
 
-    const body = root.querySelector("#userTabBody");
     const reload = (extraOpts = {}) => loadAndRenderUserCabinet(root, {
         ...(loadOptions || {}),
         resetTab: false,
@@ -303,7 +390,7 @@ function _render(root, { preserveScroll = true, loadOptions = _state.loadOptions
             });
             _setCabinetBackButton(null);
             _state.tab = _state.guidesReturnTab || "connect";
-            _render(root, { preserveScroll: false });
+            _render(root, { preserveScroll: false, animate: true, direction: "backward" });
             requestAnimationFrame(() => window.scrollTo(0, _state.guidesReturnScrollY || 0));
         };
         _setCabinetBackButton(goBack);
@@ -312,10 +399,14 @@ function _render(root, { preserveScroll = true, loadOptions = _state.loadOptions
         const goBackProfile = () => {
             _setCabinetBackButton(null);
             _state.tab = _state.profileReturnTab || "connect";
-            _render(root, { preserveScroll: false });
+            _render(root, { preserveScroll: false, animate: true, direction: "backward" });
         };
         _setCabinetBackButton(goBackProfile);
         _renderProfileTab(body, d, reload, goBackProfile);
+    }
+
+    if (animate) {
+        animateViewSwap(isFreshShell ? root : body, { direction });
     }
 
     if (prevGuideOpen) {
@@ -327,7 +418,7 @@ function _render(root, { preserveScroll = true, loadOptions = _state.loadOptions
     }
 }
 
-function _buildGuideHtml(subUrl, backupSubUrl, isActive) {
+function _buildGuideHtml() {
     const platformLabels = { ios: "iOS", android: "Android", windows: "Windows", macos: "macOS" };
     const platformIcons = {
         ios: `<svg class="pill-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="2.5"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>`,
@@ -360,25 +451,6 @@ function _buildGuideHtml(subUrl, backupSubUrl, isActive) {
                         </div>
                     `).join("")}
                 </div>
-                ${isActive && subUrl ? `
-                    <div class="field">
-                        <div style="display:flex; justify-content:space-between; align-items:center;">
-                            <span style="font-size:12px; color:var(--text-secondary);">Основная ссылка подключения</span>
-                            <button id="copyInlineSubBtn" type="button" class="btn btn-sm" style="padding:4px 10px; font-size:12px;">Скопировать</button>
-                        </div>
-                        <div class="sub-url-box">${escapeHtml(subUrl)}</div>
-                    </div>
-                ` : ""}
-                ${isActive && backupSubUrl ? `
-                    <div class="field" style="margin-top:8px;">
-                        <div style="display:flex; justify-content:space-between; align-items:center;">
-                            <span style="font-size:12px; color:var(--text-secondary);">Резервная ссылка (прямая)</span>
-                            <button id="copyBackupSubBtn" type="button" class="btn btn-sm" style="padding:4px 10px; font-size:12px;">Скопировать</button>
-                        </div>
-                        <div class="sub-url-box" style="font-size:12px;">${escapeHtml(backupSubUrl)}</div>
-                        <span class="muted" style="font-size:12px; margin-top:4px;">Используйте прямое подключение, если по основной ссылке есть задержки</span>
-                    </div>
-                ` : ""}
             </div>
         </details>
     `;
@@ -442,7 +514,7 @@ function _renderConnectTab(body, d, reload, root) {
                     <p class="hero-sub">Оформите «Стандарт» или «Белый интернет»: ссылка подключения активируется сразу после оплаты</p>
                 </div>
                 <button id="goTariffsBtn" type="button" class="btn btn-primary btn-lg">Перейти к тарифам</button>
-                ${_buildGuideHtml(subUrl, backupSubUrl, false)}
+                ${_buildGuideHtml()}
                 <button id="openGuidesFromInactiveBtn" type="button" class="guides-trigger-card">
                     <span class="settings-left">
                         <span class="guides-trigger-icon" aria-hidden="true">${_ICONS.book}</span>
@@ -597,7 +669,7 @@ function _renderConnectTab(body, d, reload, root) {
                 </div>
                 <p class="connect-step-sub">Скачайте клиент для вашего устройства или откройте пошаговую видеоинструкцию</p>
 
-                ${_buildGuideHtml(subUrl, backupSubUrl, true)}
+                ${_buildGuideHtml()}
 
                 <button id="openGuidesFromConnectBtn" type="button" class="guides-trigger-card">
                     <span class="settings-left">
@@ -626,11 +698,29 @@ function _renderConnectTab(body, d, reload, root) {
                         <button type="button" data-open-client="incy" class="btn btn-primary btn-lg">${_ICONS.globe} Подключить в INCY</button>
                         <button type="button" data-open-client="happ" class="btn btn-secondary" style="width:100%;">${_ICONS.bolt} Подключить в Happ</button>
                     `}
-                    ${subUrl ? `
-                        <button id="copyUrlStripBtn" type="button" class="sub-link-strip" title="Нажмите, чтобы скопировать">
-                            <span class="sub-link-text">${escapeHtml(subUrl)}</span>
-                            <span style="display:inline-flex; align-items:center; gap:6px; flex-shrink:0; color:var(--text-primary); font-size:12px; font-weight:500;">${_ICONS.copy}<span id="copyUrlStripLabel">Копировать</span></span>
-                        </button>
+                    ${(subUrl || backupSubUrl) ? `
+                        <div class="connect-dock-divider" aria-hidden="true"></div>
+                        <div class="sub-links-group">
+                            ${subUrl ? `
+                                <button type="button" class="sub-link-row" data-copy-link="${escapeHtml(subUrl)}" data-copy-toast="Основная ссылка скопирована" title="Нажмите, чтобы скопировать основную ссылку">
+                                    <span class="sub-link-info">
+                                        <span class="sub-link-label">Основная ссылка</span>
+                                        <span class="sub-link-text">${escapeHtml(subUrl)}</span>
+                                    </span>
+                                    <span class="sub-link-action">${_ICONS.copy}<span data-copy-label>Копировать</span></span>
+                                </button>
+                            ` : ""}
+                            ${backupSubUrl ? `
+                                <button type="button" class="sub-link-row" data-copy-link="${escapeHtml(backupSubUrl)}" data-copy-toast="Резервная ссылка скопирована" title="Нажмите, чтобы скопировать резервную ссылку">
+                                    <span class="sub-link-info">
+                                        <span class="sub-link-label">Резервная (прямая)</span>
+                                        <span class="sub-link-text">${escapeHtml(backupSubUrl)}</span>
+                                    </span>
+                                    <span class="sub-link-action">${_ICONS.copy}<span data-copy-label>Копировать</span></span>
+                                </button>
+                            ` : ""}
+                        </div>
+                        ${backupSubUrl ? `<div class="sub-links-hint">Используйте резервную ссылку, если по основной наблюдаются задержки</div>` : ""}
                     ` : ""}
                 </div>
             </div>
@@ -666,25 +756,24 @@ function _renderConnectTab(body, d, reload, root) {
             openExternalLink(targetUrl);
         });
     });
-    const stripBtn = body.querySelector("#copyUrlStripBtn");
-    if (stripBtn) {
-        stripBtn.addEventListener("click", () => {
-            copyText(subUrl, "Ссылка скопирована");
-            const lbl = stripBtn.querySelector("#copyUrlStripLabel");
-            if (lbl) {
-                lbl.textContent = "Скопировано";
-                setTimeout(() => { lbl.textContent = "Копировать"; }, 1800);
-            }
+    body.querySelectorAll("[data-copy-link]").forEach((row) => {
+        let resetTimer = null;
+        row.addEventListener("click", () => {
+            const url = row.dataset.copyLink || "";
+            if (!url) return;
+            copyText(url, row.dataset.copyToast || "Ссылка скопирована");
+            const action = row.querySelector(".sub-link-action");
+            const lbl = row.querySelector("[data-copy-label]");
+            if (action) action.classList.add("is-copied");
+            if (lbl) lbl.textContent = "Скопировано";
+            if (resetTimer) clearTimeout(resetTimer);
+            resetTimer = setTimeout(() => {
+                if (action) action.classList.remove("is-copied");
+                if (lbl) lbl.textContent = "Копировать";
+                resetTimer = null;
+            }, 1800);
         });
-    }
-    const copyInlineBtn = body.querySelector("#copyInlineSubBtn");
-    if (copyInlineBtn) {
-        copyInlineBtn.addEventListener("click", () => copyText(subUrl, "Основная ссылка скопирована"));
-    }
-    const copyBackupBtn = body.querySelector("#copyBackupSubBtn");
-    if (copyBackupBtn) {
-        copyBackupBtn.addEventListener("click", () => copyText(backupSubUrl, "Резервная ссылка скопирована"));
-    }
+    });
     const graceBtn = body.querySelector("#graceRenewBtn");
     if (graceBtn) {
         graceBtn.addEventListener("click", () => {
@@ -894,56 +983,14 @@ function _renderTariffsTab(body, d, reload) {
         if (checkCanPay()) _openStandardDevicesModal(d, reload, modalHelpers);
     });
 
-    const stdAuto = body.querySelector("#stdAutoRenewChk");
-    if (stdAuto) {
-        stdAuto.addEventListener("change", async () => {
-            const nextVal = stdAuto.checked;
-            stdAuto.disabled = true;
-            try {
-                await api.setAutoRenew("standard", nextVal);
-                if (_state.data && _state.data.standard) {
-                    _state.data.standard.auto_renew_enabled = nextVal;
-                }
-                showToast(nextVal ? "Автопродление включено" : "Автопродление выключено");
-            } catch (err) {
-                stdAuto.checked = !nextVal;
-                if (_state.data && _state.data.standard) {
-                    _state.data.standard.auto_renew_enabled = !nextVal;
-                }
-                showToast(err.message || "Ошибка настройки автопродления", "error");
-            } finally {
-                stdAuto.disabled = false;
-            }
-        });
-    }
+    _bindAutoRenewToggle(body.querySelector("#stdAutoRenewChk"), "standard", "standard");
 
     const wiBuyBtn = body.querySelector("#wiBuyBtn");
     if (wiBuyBtn) wiBuyBtn.addEventListener("click", () => {
         if (checkCanPay()) _openWiPurchaseModal(d, "buy", reload, modalHelpers);
     });
 
-    const wiAuto = body.querySelector("#wiAutoRenewChk");
-    if (wiAuto) {
-        wiAuto.addEventListener("change", async () => {
-            const nextVal = wiAuto.checked;
-            wiAuto.disabled = true;
-            try {
-                await api.setAutoRenew("wi", nextVal);
-                if (_state.data && _state.data.wi) {
-                    _state.data.wi.auto_renew_enabled = nextVal;
-                }
-                showToast(nextVal ? "Автопродление включено" : "Автопродление выключено");
-            } catch (err) {
-                wiAuto.checked = !nextVal;
-                if (_state.data && _state.data.wi) {
-                    _state.data.wi.auto_renew_enabled = !nextVal;
-                }
-                showToast(err.message || "Ошибка настройки автопродления", "error");
-            } finally {
-                wiAuto.disabled = false;
-            }
-        });
-    }
+    _bindAutoRenewToggle(body.querySelector("#wiAutoRenewChk"), "wi", "wi");
 
     const wiRenewBtn = body.querySelector("#wiRenewBtn");
     if (wiRenewBtn && !wiPending) {
@@ -958,6 +1005,36 @@ function _renderTariffsTab(body, d, reload) {
             if (checkCanPay()) _openWiManageModal(d, reload, modalHelpers);
         });
     }
+}
+
+/** Привязать переключатель автопродления с защитой от двойного нажатия. */
+function _bindAutoRenewToggle(chk, scope, stateKey) {
+    if (!chk) return;
+    let inFlight = false;
+    chk.addEventListener("change", async () => {
+        if (inFlight) return;
+        const nextVal = chk.checked;
+        inFlight = true;
+        chk.disabled = true;
+        chk.setAttribute("aria-busy", "true");
+        try {
+            await api.setAutoRenew(scope, nextVal);
+            if (_state.data && _state.data[stateKey]) {
+                _state.data[stateKey].auto_renew_enabled = nextVal;
+            }
+            showToast(nextVal ? "Автопродление включено" : "Автопродление выключено");
+        } catch (err) {
+            chk.checked = !nextVal;
+            if (_state.data && _state.data[stateKey]) {
+                _state.data[stateKey].auto_renew_enabled = !nextVal;
+            }
+            showToast(err.message || "Ошибка настройки автопродления", "error");
+        } finally {
+            inFlight = false;
+            chk.disabled = false;
+            chk.removeAttribute("aria-busy");
+        }
+    });
 }
 
 function _buildDevicesSectionHtml(d) {
@@ -1127,10 +1204,19 @@ function _bindDevicesEvents(container, d, reload) {
 
     const refreshBtn = container.querySelector("#refreshDevicesBtn");
     if (refreshBtn) {
+        let refreshInFlight = false;
         refreshBtn.addEventListener("click", async () => {
+            if (refreshInFlight) return;
+            refreshInFlight = true;
             refreshBtn.disabled = true;
-            refreshBtn.style.opacity = "0.5";
-            await reload();
+            refreshBtn.setAttribute("aria-busy", "true");
+            try {
+                await reload();
+            } finally {
+                refreshInFlight = false;
+                refreshBtn.disabled = false;
+                refreshBtn.removeAttribute("aria-busy");
+            }
         });
     }
 
@@ -1176,7 +1262,9 @@ function _bindDevicesEvents(container, d, reload) {
         chipClass,
     }) => {
         container.querySelectorAll(selector).forEach((chk) => {
+            let inFlight = false;
             chk.addEventListener("change", async () => {
+                if (inFlight) return;
                 const hwid = chk.dataset[dataAttr];
                 const wantEnable = chk.checked;
                 const targetDev = devices.find((dev) => dev.hwid === hwid) || { hwid, device_name: chk.dataset.name };
@@ -1193,7 +1281,9 @@ function _bindDevicesEvents(container, d, reload) {
                             confirmText: "Перенести слот",
                             cancelText: "Отмена",
                             onConfirm: async () => {
+                                inFlight = true;
                                 chk.disabled = true;
+                                chk.setAttribute("aria-busy", "true");
                                 try {
                                     await applyFn(hwid, 10, fromDev.hwid);
                                     showToast("Слот перенесён. Обновите список в приложении");
@@ -1201,7 +1291,9 @@ function _bindDevicesEvents(container, d, reload) {
                                 } catch (err) {
                                     throw new Error((err && err.message) || "Не удалось перенести слот");
                                 } finally {
+                                    inFlight = false;
                                     chk.disabled = false;
+                                    chk.removeAttribute("aria-busy");
                                 }
                             },
                         });
@@ -1211,7 +1303,9 @@ function _bindDevicesEvents(container, d, reload) {
                     return;
                 }
 
+                inFlight = true;
                 chk.disabled = true;
+                chk.setAttribute("aria-busy", "true");
                 try {
                     await applyFn(hwid, wantEnable ? 10 : -1);
                     showToast(
@@ -1224,7 +1318,9 @@ function _bindDevicesEvents(container, d, reload) {
                     chk.checked = !wantEnable;
                     showToast(err.message || "Не удалось изменить статус слота", "error");
                 } finally {
+                    inFlight = false;
                     chk.disabled = false;
+                    chk.removeAttribute("aria-busy");
                 }
             });
         });
@@ -1507,7 +1603,7 @@ function _renderProfileTab(body, d, reload, onBack) {
             row.className = "device-item";
             const amt = Number(op.amount_rub ?? op.amount ?? 0);
             const sign = amt > 0 ? "+" : "";
-            const cls = amt > 0 ? "amount-pos" : "amount-neg";
+            const cls = amt > 0 ? "amount-pos" : amt < 0 ? "amount-err" : "amount-neg";
             row.innerHTML = `
                 <div class="row">
                     <span style="font-weight:500;">${escapeHtml(op.description)}</span>

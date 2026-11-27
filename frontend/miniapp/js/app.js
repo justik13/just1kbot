@@ -1,12 +1,17 @@
 import { api, setOnInitDataExpired } from "./api.js?v=2.8.0";
-import { closeAllModals, escapeHtml, setPageBackButton, showToast } from "./ui.js?v=2.8.0";
+import { animateViewSwap, closeAllModals, escapeHtml, setPageBackButton, showToast } from "./ui.js?v=2.8.0";
 import { clearBroadcastPollTimer, renderAdminBroadcastsView } from "./views/admin_broadcasts.js?v=2.8.0";
 import { renderAdminFinancesView } from "./views/admin_finances.js?v=2.8.0";
 import { renderAdminOverviewView } from "./views/admin_overview.js?v=2.8.0";
 import { renderAdminUsersView } from "./views/admin_users.js?v=2.8.0";
 import { renderNodeDetailView } from "./views/node_detail.js?v=2.8.0";
 import { renderNodesView, renderSubscriptionSettingsView } from "./views/nodes.js?v=2.8.0";
-import { loadAndRenderUserCabinet } from "./views/user_cabinet.js?v=2.8.0";
+import {
+    getCabinetTab,
+    loadAndRenderUserCabinet,
+    prefetchCabinetBalance,
+    syncTopbarProfilePreview,
+} from "./views/user_cabinet.js?v=2.8.0";
 import { renderUserDetailView } from "./views/user_detail.js?v=2.8.0";
 
 const _ADMIN_TABS = [
@@ -101,7 +106,7 @@ const appState = {
         appState.adminTab = "users";
         appState.selectedNodeId = null;
         appState.selectedUserId = id;
-        _renderAdminView();
+        _renderAdminView({ animate: true, direction: "forward" });
     },
     onOpenNode: (nodeId) => {
         const id = nodeId == null ? null : _parsePositiveInt(nodeId);
@@ -114,7 +119,7 @@ const appState = {
         if (id != null && (!appState.nodesLoaded || !appState.nodes.some((n) => n.id === id))) {
             appState.nodesLoaded = false;
         }
-        _renderAdminView();
+        _renderAdminView({ animate: true, direction: "forward" });
     },
     onOpenFinances: (query = "", attentionOnly = false, subTab = "orders") => {
         closeAllModals();
@@ -132,7 +137,8 @@ const appState = {
         }
         appState.selectedNodeId = null;
         appState.selectedUserId = null;
-        _renderAdminView();
+        window.scrollTo(0, 0);
+        _renderAdminView({ animate: true, direction: "forward" });
     },
     onOpenAudit: (query = "") => {
         closeAllModals();
@@ -144,7 +150,8 @@ const appState = {
         appState.auditLoadAttempted = false;
         appState.selectedNodeId = null;
         appState.selectedUserId = null;
-        _renderAdminView();
+        window.scrollTo(0, 0);
+        _renderAdminView({ animate: true, direction: "forward" });
     },
     onOpenUsersFilter: (filter = "all", query = "") => {
         closeAllModals();
@@ -156,7 +163,8 @@ const appState = {
         appState.usersData = null;
         appState.selectedNodeId = null;
         appState.selectedUserId = null;
-        _renderAdminView();
+        window.scrollTo(0, 0);
+        _renderAdminView({ animate: true, direction: "forward" });
     },
     onOpenBroadcasts: () => {
         closeAllModals();
@@ -164,7 +172,8 @@ const appState = {
         appState.adminTab = "broadcasts";
         appState.selectedNodeId = null;
         appState.selectedUserId = null;
-        _renderAdminView();
+        window.scrollTo(0, 0);
+        _renderAdminView({ animate: true, direction: "forward" });
     },
 };
 
@@ -219,29 +228,33 @@ function _renderTabErrorCard(container, title, message, onRetry) {
 function _syncModeSwitch() {
     const modeSwitch = document.getElementById("modeSwitch");
     const profilePill = document.getElementById("profilePillBtn");
-    const userChip = document.getElementById("userChip");
     const shell = document.querySelector(".app-shell");
     const isAdmin = Boolean(appState.user && appState.user.is_admin);
     const inAdminMode = isAdmin && appState.mode === "admin";
-    const inCabinet = !inAdminMode;
     if (shell) shell.classList.toggle("mode-admin", inAdminMode);
-    if (profilePill) profilePill.hidden = !inCabinet;
-    if (userChip) userChip.hidden = inCabinet;
+    if (inAdminMode) {
+        delete document.body.dataset.tier;
+    }
+    if (profilePill) {
+        profilePill.hidden = !appState.user;
+        if (inAdminMode) {
+            profilePill.classList.remove("active");
+            profilePill.removeAttribute("aria-current");
+        }
+    }
     if (!modeSwitch) return;
     modeSwitch.hidden = !isAdmin;
     if (!isAdmin) return;
+    modeSwitch.dataset.activeMode = inAdminMode ? "admin" : "cabinet";
     modeSwitch.querySelectorAll("[data-mode]").forEach((btn) => {
         const isCurrent = btn.dataset.mode === appState.mode;
         btn.classList.toggle("active", isCurrent);
-        if (isCurrent) {
-            btn.setAttribute("aria-current", "page");
-        } else {
-            btn.removeAttribute("aria-current");
-        }
+        btn.setAttribute("aria-pressed", isCurrent ? "true" : "false");
     });
 }
 
-async function _renderAdminView() {
+async function _renderAdminView(options = {}) {
+    const { animate = false, direction = "neutral", cabinetTab = null } = options;
     const root = document.getElementById("appRoot");
     if (!root) return;
     const seq = ++_tabSwitchSeq;
@@ -254,7 +267,9 @@ async function _renderAdminView() {
         _updateTelegramBackButton(null);
         await loadAndRenderUserCabinet(root, {
             isActive: () => seq === _tabSwitchSeq && appState.mode === "cabinet",
-            resetTab: true,
+            tab: cabinetTab,
+            animate,
+            direction,
         });
         return;
     }
@@ -269,6 +284,7 @@ async function _renderAdminView() {
     if (appState.adminTab === "nodes" && appState.selectedNodeId != null) {
         if (!appState.nodesLoaded) {
             root.innerHTML = `<section class="card card-center"><div class="muted">Загрузка ноды...</div></section>`;
+            if (animate) animateViewSwap(root, { direction });
             nodesFetchedThisRender = true;
             try {
                 const res = await api.listNodes();
@@ -285,7 +301,8 @@ async function _renderAdminView() {
             const onBack = () => {
                 appState.selectedNodeId = null;
                 _updateTelegramBackButton(null);
-                _renderAdminView();
+                window.scrollTo(0, 0);
+                _renderAdminView({ animate: true, direction: "backward" });
             };
             _updateTelegramBackButton(onBack);
             root.innerHTML = `
@@ -308,11 +325,13 @@ async function _renderAdminView() {
             const onBack = () => {
                 appState.selectedNodeId = null;
                 _updateTelegramBackButton(null);
-                _renderAdminView();
+                window.scrollTo(0, 0);
+                _renderAdminView({ animate: true, direction: "backward" });
             };
             _updateTelegramBackButton(onBack);
             renderNodeDetailView(root, node, onBack, _reloadNodesAndRender, appState.nodes || []);
             window.scrollTo(0, 0);
+            if (animate) animateViewSwap(root, { direction });
             return;
         }
         appState.selectedNodeId = null;
@@ -327,7 +346,8 @@ async function _renderAdminView() {
         const onBack = () => {
             appState.selectedUserId = null;
             _updateTelegramBackButton(null);
-            _renderAdminView();
+            window.scrollTo(0, 0);
+            _renderAdminView({ animate: true, direction: "backward" });
         };
         const onReloadUser = async () => {
             const q = appState.usersQuery || "";
@@ -353,55 +373,93 @@ async function _renderAdminView() {
         };
         _updateTelegramBackButton(onBack);
         window.scrollTo(0, 0);
-        await renderUserDetailView(root, userSummary, onBack, onReloadUser, appState);
+        const detailPromise = renderUserDetailView(root, userSummary, onBack, onReloadUser, appState, {
+            isActive: () => seq === _tabSwitchSeq && appState.mode === "admin",
+        });
+        if (animate) animateViewSwap(root, { direction });
+        await detailPromise;
         return;
     }
 
     _updateTelegramBackButton(null);
     const activeTabMeta = _ADMIN_TABS.find((t) => t.id === appState.adminTab) || _ADMIN_TABS[0];
-    const tabsHtml = _ADMIN_TABS
-        .map((t) => {
-            const isActive = appState.adminTab === t.id;
-            return `<button type="button" class="tab-btn ${isActive ? "active" : ""}" data-atab="${t.id}"${isActive ? ' aria-current="page"' : ""}>${t.label}</button>`;
-        })
-        .join("");
+    let tabsBar = root.querySelector("#adminTabsBar");
+    let pageTitleEl = root.querySelector("#adminPageTitle");
+    let body = root.querySelector("#adminTabBody");
+    const isFreshShell = !tabsBar || !pageTitleEl || !body;
 
-    root.innerHTML = `
-        <nav class="tabs-bar" aria-label="Разделы админки">${tabsHtml}</nav>
-        <div class="admin-page-head">
-            <h1 class="admin-page-title">${escapeHtml(activeTabMeta.label)}</h1>
-        </div>
-        <div id="adminTabBody" class="app-main">
-            <section class="card card-center"><div class="muted">Загрузка...</div></section>
-        </div>
-    `;
+    if (isFreshShell) {
+        const tabsHtml = _ADMIN_TABS
+            .map((t) => `<button type="button" class="tab-btn" data-atab="${t.id}">${t.label}</button>`)
+            .join("");
+        root.innerHTML = `
+            <nav id="adminTabsBar" class="tabs-bar" aria-label="Разделы админки">${tabsHtml}</nav>
+            <div class="admin-page-head">
+                <h1 id="adminPageTitle" class="admin-page-title"></h1>
+            </div>
+            <div id="adminTabBody" class="app-main"></div>
+        `;
+        tabsBar = root.querySelector("#adminTabsBar");
+        pageTitleEl = root.querySelector("#adminPageTitle");
+        body = root.querySelector("#adminTabBody");
 
-    const activeBtn = root.querySelector(".tabs-bar .tab-btn.active");
-    activeBtn?.scrollIntoView({ inline: "center", block: "nearest", behavior: "instant" });
-
-    root.querySelectorAll("[data-atab]").forEach((btn) => {
-        btn.addEventListener("click", () => {
-            const nextTab = btn.dataset.atab;
-            if (!nextTab || nextTab === appState.adminTab) return;
-            closeAllModals();
-            if (appState.adminTab === "broadcasts" && nextTab !== "broadcasts") {
-                clearBroadcastPollTimer();
-            }
-            appState.adminTab = nextTab;
-            appState.selectedNodeId = null;
-            appState.selectedUserId = null;
-            _renderAdminView();
+        tabsBar.querySelectorAll("[data-atab]").forEach((btn) => {
+            btn.addEventListener("click", () => {
+                const nextTab = btn.dataset.atab;
+                if (!nextTab || nextTab === appState.adminTab) return;
+                closeAllModals();
+                if (appState.adminTab === "broadcasts" && nextTab !== "broadcasts") {
+                    clearBroadcastPollTimer();
+                }
+                const prevIdx = _ADMIN_TABS.findIndex((t) => t.id === appState.adminTab);
+                const nextIdx = _ADMIN_TABS.findIndex((t) => t.id === nextTab);
+                const dir = prevIdx !== -1 && nextIdx !== -1
+                    ? (nextIdx > prevIdx ? "forward" : "backward")
+                    : "neutral";
+                appState.adminTab = nextTab;
+                appState.selectedNodeId = null;
+                appState.selectedUserId = null;
+                _renderAdminView({ animate: true, direction: dir });
+            });
         });
+    }
+
+    pageTitleEl.textContent = activeTabMeta.label;
+    tabsBar.querySelectorAll("[data-atab]").forEach((btn) => {
+        const isActive = appState.adminTab === btn.dataset.atab;
+        btn.classList.toggle("active", isActive);
+        if (isActive) {
+            btn.setAttribute("aria-current", "page");
+        } else {
+            btn.removeAttribute("aria-current");
+        }
     });
 
-    const body = root.querySelector("#adminTabBody");
-    if (!body) return;
+    const activeBtn = tabsBar.querySelector(".tab-btn.active");
+    if (activeBtn) {
+        const reduced =
+            window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        activeBtn.scrollIntoView({
+            inline: "nearest",
+            block: "nearest",
+            behavior: reduced ? "auto" : "smooth",
+        });
+    }
+
+    if (animate) {
+        animateViewSwap(isFreshShell ? root : body, { direction });
+    }
+
+    const renderLoadingCard = (label = "Загрузка...") => {
+        body.innerHTML = `<section class="card card-center"><div class="muted">${escapeHtml(label)}</div></section>`;
+    };
 
     try {
         if (appState.adminTab === "overview") {
             await renderAdminOverviewView(body, appState);
         } else if (appState.adminTab === "nodes") {
             if (!appState.nodesLoaded && !nodesFetchedThisRender) {
+                renderLoadingCard("Загрузка нод...");
                 try {
                     const res = await api.listNodes();
                     if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
@@ -425,11 +483,12 @@ async function _renderAdminView() {
             }
             renderNodesView(body, appState, _reloadNodesAndRender, (id) => {
                 appState.selectedNodeId = id;
-                _renderAdminView();
+                _renderAdminView({ animate: true, direction: "forward" });
             });
         } else if (appState.adminTab === "subscription") {
             let subNodesErr = null;
             if (!appState.nodesLoaded) {
+                renderLoadingCard("Загрузка нод...");
                 try {
                     const res = await api.listNodes();
                     if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
@@ -455,6 +514,7 @@ async function _renderAdminView() {
         } else if (appState.adminTab === "users") {
             let usersErr = null;
             if (!appState.usersData) {
+                renderLoadingCard("Загрузка пользователей...");
                 try {
                     const res = await api.listUsers(
                         appState.usersQuery || "",
@@ -482,11 +542,12 @@ async function _renderAdminView() {
             }
             renderAdminUsersView(body, appState, (u) => {
                 appState.selectedUserId = u.id;
-                _renderAdminView();
+                _renderAdminView({ animate: true, direction: "forward" });
             });
         } else if (appState.adminTab === "broadcasts") {
             let bcErr = null;
             if (!appState.broadcastsData) {
+                renderLoadingCard("Загрузка рассылок...");
                 try {
                     const res = await api.listBroadcasts();
                     if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
@@ -515,6 +576,7 @@ async function _renderAdminView() {
             const subTab = appState.finSubTab || "orders";
             if (subTab === "audit") {
                 if (appState.auditLogsData == null && !appState.auditLoadAttempted) {
+                    renderLoadingCard("Загрузка аудит-лога...");
                     try {
                         const res = await api.listAuditLogs(
                             "",
@@ -533,6 +595,7 @@ async function _renderAdminView() {
                     }
                 }
             } else if (appState.financesData == null && !appState.financesLoadAttempted) {
+                renderLoadingCard("Загрузка финансов...");
                 const kind = ["orders", "gateway", "topups"].includes(subTab) ? subTab : "orders";
                 try {
                     const res = await api.listFinances(
@@ -616,18 +679,39 @@ async function bootstrap() {
     _initTelegramChrome();
 
     const root = document.getElementById("appRoot");
-    const userChip = document.getElementById("userChip");
     const modeSwitch = document.getElementById("modeSwitch");
+    const profilePill = document.getElementById("profilePillBtn");
 
     if (modeSwitch && !modeSwitch.dataset.bound) {
         modeSwitch.dataset.bound = "1";
         modeSwitch.querySelectorAll("[data-mode]").forEach((btn) => {
-            btn.addEventListener("click", async () => {
+            btn.addEventListener("click", () => {
                 const nextMode = btn.dataset.mode;
-                if (nextMode === appState.mode) return;
+                if (!nextMode || nextMode === appState.mode) return;
                 closeAllModals();
                 appState.mode = nextMode;
-                _renderAdminView();
+                window.scrollTo(0, 0);
+                _renderAdminView({
+                    animate: true,
+                    direction: nextMode === "admin" ? "forward" : "backward",
+                });
+            });
+        });
+    }
+
+    if (profilePill && !profilePill.dataset.bound) {
+        profilePill.dataset.bound = "1";
+        profilePill.addEventListener("click", () => {
+            if (!appState.user) return;
+            if (appState.mode === "cabinet" && getCabinetTab() === "profile") return;
+            closeAllModals();
+            const switchingMode = appState.mode !== "cabinet";
+            appState.mode = "cabinet";
+            window.scrollTo(0, 0);
+            _renderAdminView({
+                animate: true,
+                direction: switchingMode ? "backward" : "forward",
+                cabinetTab: "profile",
             });
         });
     }
@@ -635,12 +719,14 @@ async function bootstrap() {
     try {
         const me = await api.getMe();
         appState.user = me.user;
-        userChip.textContent = me.user.name || "";
+        syncTopbarProfilePreview(null);
 
         if (!me.user.is_admin) {
             if (modeSwitch) modeSwitch.hidden = true;
             _syncModeSwitch();
-            await loadAndRenderUserCabinet(root);
+            await loadAndRenderUserCabinet(root, {
+                isActive: () => appState.mode === "cabinet",
+            });
             return;
         }
 
@@ -648,6 +734,7 @@ async function bootstrap() {
             appState.mode = "admin";
             _applyDeepLink(appState.pendingDeepLink);
             appState.pendingDeepLink = null;
+            void prefetchCabinetBalance();
             await _renderAdminView();
             return;
         }

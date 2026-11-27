@@ -386,7 +386,9 @@ function _renderOverviewContent(root, state, data) {
 
 export async function renderAdminOverviewView(root, state) {
     const reqId = ++_overviewReqId;
-    if (!state.overviewData) {
+    if (state.overviewData) {
+        _renderOverviewContent(root, state, state.overviewData);
+    } else {
         root.innerHTML = `
             <section class="card card-center">
                 <div class="muted">Загрузка обзора...</div>
@@ -410,11 +412,26 @@ export async function renderAdminOverviewView(root, state) {
         } else {
             state.incySettingsLoaded = false;
         }
+        const activeId = document.activeElement && root.contains(document.activeElement) ? document.activeElement.id : "";
+        const searchDraft = root.querySelector("#overviewQuickSearchInput")?.value ?? "";
+        const mtprotoDraft = root.querySelector("#overviewMtprotoProxyInput")?.value ?? "";
         _renderOverviewContent(root, state, data);
+        if (searchDraft) {
+            const nextSearch = root.querySelector("#overviewQuickSearchInput");
+            if (nextSearch) nextSearch.value = searchDraft;
+        }
+        if (activeId === "overviewMtprotoProxyInput") {
+            const nextMtproto = root.querySelector("#overviewMtprotoProxyInput");
+            if (nextMtproto) nextMtproto.value = mtprotoDraft;
+        }
+        if (activeId) {
+            root.querySelector(`#${CSS.escape(activeId)}`)?.focus({ preventScroll: true });
+        }
     } catch (err) {
         if (reqId !== _overviewReqId || !root.isConnected || state.adminTab !== "overview" || state.mode !== "admin") return;
         if (err && err.code === "init_data_expired") return;
         showToast(err.message || "Не удалось загрузить обзор", "error");
+        if (state.overviewData) return;
         root.innerHTML = `
             <section class="card card-center">
                 <h2 class="card-title">Не удалось загрузить обзор</h2>

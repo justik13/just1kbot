@@ -16,16 +16,15 @@
                 <span class="brand-title">Just1k</span>
             </div>
             <div class="topbar-right">
-                <div id="modeSwitch" class="mode-switch" hidden>
-                    <button type="button" class="mode-btn" data-mode="cabinet">Кабинет</button>
-                    <button type="button" class="mode-btn active" data-mode="admin">Админка</button>
+                <div id="modeSwitch" class="mode-switch" role="group" aria-label="Режим интерфейса" hidden>
+                    <button type="button" class="mode-btn" data-mode="cabinet" aria-pressed="false">Кабинет</button>
+                    <button type="button" class="mode-btn" data-mode="admin" aria-pressed="false">Админка</button>
                 </div>
                 <button type="button" id="profilePillBtn" class="profile-pill" aria-label="Открыть профиль и историю операций" hidden>
-                    <span id="profileAvatar" class="avatar-circle">J</span>
-                    <span id="profileBalanceText">0 ₽</span>
+                    <span id="profileAvatar" class="avatar-circle">·</span>
+                    <span id="profileBalanceText">···</span>
                     <svg class="profile-pill-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
                 </button>
-                <div id="userChip" class="user-meta" hidden></div>
             </div>
         </header>
 
