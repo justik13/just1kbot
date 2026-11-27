@@ -373,7 +373,68 @@ function _openEditModal(node, onDone) {
     });
 }
 
-export function renderNodeDetailView(root, node, onBack, onReload) {
+function _renderBridgeHealthCard(node, allNodes = []) {
+    if (node.role !== "ru_hub") return "";
+    const bh = node.bridge_health_state && typeof node.bridge_health_state === "object" ? node.bridge_health_state : {};
+    const blockedIds = new Set((node.blocked_eu_ids || []).map((x) => Number(x)).filter(Number.isFinite));
+    const euMap = new Map();
+    (allNodes || []).forEach((n) => {
+        if (n && n.role === "eu_hub") euMap.set(Number(n.id), n);
+    });
+    const allIds = new Set([...euMap.keys(), ...blockedIds]);
+    Object.keys(bh).forEach((k) => {
+        const n = Number(k);
+        if (Number.isFinite(n)) allIds.add(n);
+    });
+    if (!allIds.size) return "";
+
+    let hasIssues = blockedIds.size > 0;
+    const rowsHtml = [...allIds]
+        .sort((a, b) => a - b)
+        .map((eid) => {
+            const entry = bh[String(eid)] && typeof bh[String(eid)] === "object" ? bh[String(eid)] : null;
+            const euNode = euMap.get(eid);
+            const euLabel = euNode ? `${euNode.name} (#${eid})` : `Внешний шлюз #${eid}`;
+            const isBlocked = blockedIds.has(eid) || Boolean(entry && entry.blocked);
+            const fails = Number(entry?.consecutive_fails || 0);
+            if (isBlocked || fails > 0) hasIssues = true;
+            let badgeHtml = `<span class="chip chip-muted">Нет данных</span>`;
+            if (isBlocked) {
+                badgeHtml = `<span class="chip chip-err">ТСПУ-блокировка</span>`;
+            } else if (fails > 0) {
+                badgeHtml = `<span class="chip chip-warn">Сбои (${fails})</span>`;
+            } else if (entry && entry.last_checked_at != null) {
+                badgeHtml = `<span class="chip chip-ok">Доступен</span>`;
+            }
+            const errNote = entry && entry.last_error && (isBlocked || fails > 0)
+                ? `<div class="meta-text" style="margin-top:2px;">${escapeHtml(String(entry.last_error).slice(0, 140))}</div>`
+                : "";
+            return `
+                <div class="detail-item" style="grid-column: 1 / -1;">
+                    <div class="row" style="gap:8px;">
+                        <span>${escapeHtml(euLabel)}</span>
+                        ${badgeHtml}
+                    </div>
+                    ${errNote}
+                </div>
+            `;
+        })
+        .join("");
+
+    return `
+        <section class="card">
+            <div class="row">
+                <h2 class="card-title">Маршруты к внешним шлюзам</h2>
+                ${hasIssues ? `<button type="button" id="detailResetBridgesBtn" class="btn btn-sm btn-secondary">Сбросить ТСПУ-блокировку</button>` : ""}
+            </div>
+            <div class="detail-grid">
+                ${rowsHtml}
+            </div>
+        </section>
+    `;
+}
+
+export function renderNodeDetailView(root, node, onBack, onReload, allNodes = []) {
     const health = healthChipInfo(node);
     const isDecommissioning = String(node.lifecycle_status || "").toUpperCase() === "DECOMMISSIONING";
 
@@ -413,6 +474,8 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
         ${_renderModuleErrors(node)}
 
         ${_renderTelemetryCard(node)}
+
+        ${_renderBridgeHealthCard(node, allNodes)}
 
         <section class="card">
             <h2 class="card-title">Сетевые параметры</h2>
@@ -558,6 +621,22 @@ export function renderNodeDetailView(root, node, onBack, onReload) {
     if (subLocBtn) {
         subLocBtn.addEventListener("click", () => {
             openLocationSubModal(node, onReload);
+        });
+    }
+
+    const resetBridgesBtn = root.querySelector("#detailResetBridgesBtn");
+    if (resetBridgesBtn) {
+        resetBridgesBtn.addEventListener("click", (e) => {
+            const b = e.currentTarget;
+            withButtonLoading(b, "Сброс...", async () => {
+                try {
+                    await api.resetNodeBridges(node.id);
+                    showToast("ТСПУ-блокировки сброшены");
+                    await onReload();
+                } catch (err) {
+                    showToast(err.message || "Не удалось сбросить блокировки", "error");
+                }
+            });
         });
     }
 

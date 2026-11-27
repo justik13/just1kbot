@@ -24,6 +24,7 @@ class TopupPayload(BaseModel):
 class StandardQuotePayload(BaseModel):
     device_limit: int = Field(..., ge=2, le=10)
     duration_days: int = Field(..., ge=7, le=90)
+    operation: Literal["purchase", "renew", "upgrade"] | None = None
 
     @field_validator("duration_days")
     @classmethod

@@ -338,7 +338,7 @@ async function _renderAdminView() {
                 _renderAdminView();
             };
             _updateTelegramBackButton(onBack);
-            renderNodeDetailView(root, node, onBack, _reloadNodesAndRender);
+            renderNodeDetailView(root, node, onBack, _reloadNodesAndRender, appState.nodes || []);
             window.scrollTo(0, 0);
             return;
         }
@@ -356,20 +356,25 @@ async function _renderAdminView() {
             _updateTelegramBackButton(null);
             _renderAdminView();
         };
-        const reloadSeq = seq;
         const onReloadUser = async () => {
+            const q = appState.usersQuery || "";
+            const off = appState.usersOffset || 0;
+            const flt = appState.usersFilter || "all";
+            appState.usersData = null;
             try {
-                const nextUsers = await api.listUsers(
-                    appState.usersQuery || "",
-                    appState.usersOffset || 0,
-                    25,
-                    appState.usersFilter || "all"
-                );
-                if (reloadSeq !== _tabSwitchSeq || appState.mode !== "admin") return;
+                const nextUsers = await api.listUsers(q, off, 25, flt);
+                if (
+                    appState.mode !== "admin" ||
+                    (appState.usersQuery || "") !== q ||
+                    (appState.usersOffset || 0) !== off ||
+                    (appState.usersFilter || "all") !== flt
+                ) {
+                    return;
+                }
                 appState.usersData = nextUsers;
             } catch (err) {
-                if (reloadSeq !== _tabSwitchSeq || appState.mode !== "admin") return;
-                if (err && err.code === "2fa_required") return;
+                if (appState.mode !== "admin") return;
+                if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) return;
                 showToast(err.message || "Не удалось обновить список пользователей", "error");
             }
         };
@@ -431,7 +436,7 @@ async function _renderAdminView() {
                     appState.nodesLoaded = true;
                 } catch (err) {
                     if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
-                    if (err && err.code === "2fa_required") return;
+                    if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) return;
                     nodesFetchError = err;
                     showToast(err.message || "Не удалось загрузить ноды", "error");
                 }
@@ -458,7 +463,7 @@ async function _renderAdminView() {
                     appState.nodes = res.nodes || [];
                     appState.nodesLoaded = true;
                 } catch (err) {
-                    if (err && err.code === "2fa_required") throw err;
+                    if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) throw err;
                     subNodesErr = err;
                 }
             }
@@ -487,7 +492,7 @@ async function _renderAdminView() {
                     if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
                     appState.usersData = res;
                 } catch (err) {
-                    if (err && err.code === "2fa_required") throw err;
+                    if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) throw err;
                     usersErr = err;
                 }
             }
@@ -517,7 +522,7 @@ async function _renderAdminView() {
                     appState.broadcastsOffset = res.offset ?? 0;
                     appState.broadcastsLimit = res.limit ?? 15;
                 } catch (err) {
-                    if (err && err.code === "2fa_required") throw err;
+                    if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) throw err;
                     bcErr = err;
                 }
             }
@@ -549,7 +554,7 @@ async function _renderAdminView() {
                         appState.auditLogsData = res;
                         appState.auditLoadAttempted = true;
                     } catch (err) {
-                        if (err && err.code === "2fa_required") throw err;
+                        if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) throw err;
                         appState.auditLoadAttempted = true;
                         showToast(err.message || "Не удалось загрузить аудит-лог", "error");
                     }
@@ -562,7 +567,7 @@ async function _renderAdminView() {
                         appState.webhooksData = res.webhooks || [];
                         appState.webhooksLoadAttempted = true;
                     } catch (err) {
-                        if (err && err.code === "2fa_required") throw err;
+                        if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) throw err;
                         appState.webhooksLoadAttempted = true;
                         showToast(err.message || "Не удалось загрузить вебхуки", "error");
                     }
@@ -582,7 +587,7 @@ async function _renderAdminView() {
                     appState.financesData = res;
                     appState.financesLoadAttempted = true;
                 } catch (err) {
-                    if (err && err.code === "2fa_required") throw err;
+                    if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) throw err;
                     appState.financesLoadAttempted = true;
                     showToast(err.message || "Не удалось загрузить финансы", "error");
                 }
@@ -592,7 +597,7 @@ async function _renderAdminView() {
         }
     } catch (err) {
         if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
-        if (err && err.code === "2fa_required") return;
+        if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) return;
         showToast(err.message || "Ошибка загрузки раздела", "error");
         _renderTabErrorCard(
             body,
@@ -614,9 +619,10 @@ async function _reloadNodesAndRender({ skipRender = false, removeNodeId = null }
         appState.nodes = res.nodes || [];
         appState.nodesLoaded = true;
     } catch (err) {
-        if (err && err.code === "2fa_required") return false;
+        if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) return false;
         if (seq !== _tabSwitchSeq || appState.mode !== "admin") return false;
         showToast(err.message || "Не удалось загрузить ноды", "error");
+        return false;
     }
     if (
         !skipRender &&
@@ -676,9 +682,12 @@ setOn2FARequired(() => {
 setOnInitDataExpired(() => {
     clearBroadcastPollTimer();
     closeAllModals();
-    showToast("Сессия Telegram устарела. Закройте и откройте Mini App заново.", "error");
+    if (!appState.initDataExpiredShown) {
+        appState.initDataExpiredShown = true;
+        showToast("Сессия Telegram устарела. Закройте и откройте Mini App заново.", "error");
+    }
     const root = document.getElementById("appRoot");
-    if (root && !appState.user) {
+    if (root) {
         _renderErrorCard(
             root,
             "Сессия устарела",

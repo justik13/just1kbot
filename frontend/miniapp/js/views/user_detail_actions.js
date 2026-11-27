@@ -36,19 +36,6 @@ export function bindUserDetailActions({
     refreshAll,
     schedulePostModalFocus,
 }) {
-    const resyncBtn = root.querySelector("#detResyncUserBtn");
-    resyncBtn.addEventListener("click", () => {
-        withButtonLoading(resyncBtn, "Синхронизация...", async () => {
-            try {
-                const res = await api.resyncUser(details.id);
-                showToast(res.message || "Синхронизация запущена");
-                await refreshAll({ focusSelector: "#detResyncUserBtn" });
-            } catch (err) {
-                showToast(err.message || "Ошибка пересинхронизации", "error");
-            }
-        });
-    });
-
     const forgiveDebtBtn = root.querySelector("#detForgiveDebtBtn");
     if (forgiveDebtBtn) {
         forgiveDebtBtn.addEventListener("click", () => {

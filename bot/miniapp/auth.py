@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from aiohttp import web
 
-from database.connection import session_scope
 from services.miniapp_auth_service import (
     InitDataExpiredError,
     MiniAppUserContext,
     authenticate_miniapp_request,
-    get_admin_session_epoch,
+    resolve_admin_session_epoch,
     verify_admin_session_token,
 )
 from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
@@ -99,8 +98,7 @@ async def require_admin_user(
 
     if require_2fa:
         session_token = request.headers.get("X-Admin-Session")
-        async with session_scope() as session:
-            expected_epoch = await get_admin_session_epoch(session)
+        expected_epoch = await resolve_admin_session_epoch()
         if not verify_admin_session_token(
             session_token,
             ctx.telegram_id,

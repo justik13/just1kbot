@@ -2,6 +2,7 @@ import { api } from "../api.js?v=2.8.0";
 import {
     escapeHtml,
     formatDate,
+    parseDate,
     renderPagination,
     showToast,
     withButtonLoading,
@@ -17,13 +18,8 @@ const _SHORT_DATE_FMT = new Intl.DateTimeFormat("ru-RU", {
 });
 
 function _formatShortDate(iso) {
-    if (!iso) return "";
-    let raw = String(iso).trim();
-    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(raw)) {
-        raw += "Z";
-    }
-    const d = new Date(raw);
-    if (!Number.isFinite(d.getTime())) return "";
+    const d = parseDate(iso);
+    if (!d) return "";
     return _SHORT_DATE_FMT.format(d);
 }
 
@@ -237,7 +233,7 @@ export function renderAdminUsersView(root, state, onOpenUser) {
             updateDynamicSections(nextData);
         } catch (err) {
             if (!isStillActive(reqId)) return;
-            if (err && err.code === "2fa_required") return;
+            if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) return;
             showToast(err.message || "Не удалось загрузить пользователей", "error");
             pagerTopEl.innerHTML = "";
             pagerBottomEl.innerHTML = "";

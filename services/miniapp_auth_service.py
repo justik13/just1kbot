@@ -35,7 +35,7 @@ LOCKOUT_SECONDS = 300
 TOTP_REPLAY_TTL_SECONDS = 90
 ADMIN_SESSION_EPOCH_KEY = "miniapp_admin_session_epoch"
 
-_cached_admin_session_epoch: str = "1"
+_cached_admin_session_epoch: str | None = None
 
 
 class InitDataExpiredError(Exception):
@@ -172,6 +172,16 @@ async def get_admin_session_epoch(session: AsyncSession) -> str:
     epoch = (raw or "1").strip() or "1"
     _cached_admin_session_epoch = epoch
     return epoch
+
+
+async def resolve_admin_session_epoch() -> str:
+    """Return cached admin session epoch, lazily reading DB only once if cache is cold."""
+    if _cached_admin_session_epoch is not None:
+        return _cached_admin_session_epoch
+    from database.connection import session_scope
+
+    async with session_scope() as session:
+        return await get_admin_session_epoch(session)
 
 
 async def revoke_all_admin_sessions(

@@ -11,6 +11,7 @@ import {
     formatBytesGb,
     formatDate,
     formatRelativeTime,
+    parseDate,
     showToast,
 } from "../ui.js?v=2.8.0";
 
@@ -157,7 +158,7 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         if (reqId !== _detailReqId) return;
         if (state && state.selectedUserId !== userSummary.id) return;
         if (!root.isConnected || (sentinelBtn && !root.contains(sentinelBtn))) return;
-        if (err && err.code === "2fa_required") return;
+        if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) return;
         if (preserveScroll && hadExistingProfile) {
             showToast(err.message || "Не удалось обновить профиль", "error");
             return;
@@ -199,11 +200,11 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
     const stdLimit = details.standard_device_limit ?? userSummary.standard_device_limit ?? 2;
     const wiLimit = (wi && wi.device_limit) ?? userSummary.wi_device_limit ?? 1;
 
-    const parsedServerNow = serverNow ? new Date(serverNow).getTime() : NaN;
+    const parsedServerNow = parseDate(serverNow)?.getTime() ?? NaN;
     const nowMs = Number.isFinite(parsedServerNow) ? parsedServerNow : Date.now();
 
     const stdInfo = details.standard || null;
-    const stdEndTs = details.standard_end ? new Date(details.standard_end).getTime() : 0;
+    const stdEndTs = parseDate(details.standard_end)?.getTime() ?? 0;
     const graceHours = Number(details.standard_grace_hours || 4);
     const stdInGrace = Boolean(
         stdInfo && stdInfo.is_active && details.standard_end && stdEndTs <= nowMs && (stdEndTs + graceHours * 3600 * 1000) > nowMs
@@ -223,7 +224,7 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         revoked: "Отозван",
     };
     const wiStatusKey = wi && wi.status ? String(wi.status).toLowerCase() : "";
-    const wiIsExpiredByDate = Boolean(wi && wi.expires_at && new Date(wi.expires_at).getTime() <= nowMs);
+    const wiIsExpiredByDate = Boolean(wi && wi.expires_at && (parseDate(wi.expires_at)?.getTime() ?? Infinity) <= nowMs);
     const wiStatusLabel = wi
         ? (wiStatusMap[wiStatusKey] || (wiIsExpiredByDate ? "Истёк" : (wi.status ? String(wi.status) : "")))
         : "";
@@ -289,10 +290,7 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         }
 
         <section class="card">
-            <div class="row">
-                <h2 class="card-title">Подписки</h2>
-                <button id="detResyncUserBtn" type="button" class="btn btn-sm">Пересинхронизировать узлы</button>
-            </div>
+            <h2 class="card-title">Подписки</h2>
 
             <div class="user-sub-box">
                 <div class="row">

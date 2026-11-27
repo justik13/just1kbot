@@ -318,7 +318,7 @@ export function renderAdminFinancesView(root, state, { forceRefresh = false } = 
             return true;
         } catch (err) {
             if (!isStillActive(reqId)) return false;
-            if (err && err.code === "2fa_required") return false;
+            if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) return false;
             state.financesLoadAttempted = true;
             showToast(err.message || "Ошибка загрузки финансов", "error");
             renderRetryList(err.message || "Не удалось загрузить финансы", () =>
@@ -344,7 +344,7 @@ export function renderAdminFinancesView(root, state, { forceRefresh = false } = 
             syncDynamicAudit();
         } catch (err) {
             if (!isStillActive(reqId)) return;
-            if (err && err.code === "2fa_required") return;
+            if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) return;
             state.auditLoadAttempted = true;
             showToast(err.message || "Ошибка загрузки аудит-лога", "error");
             renderRetryList(err.message || "Не удалось загрузить аудит-лог", () => loadAudit(offset));
@@ -361,7 +361,7 @@ export function renderAdminFinancesView(root, state, { forceRefresh = false } = 
             syncDynamicWebhooks();
         } catch (err) {
             if (!isStillActive(reqId)) return;
-            if (err && err.code === "2fa_required") return;
+            if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) return;
             state.webhooksLoadAttempted = true;
             showToast(err.message || "Ошибка загрузки вебхуков", "error");
             renderRetryList(err.message || "Не удалось загрузить вебхуки", () => loadWebhooks());
@@ -377,26 +377,28 @@ export function renderAdminFinancesView(root, state, { forceRefresh = false } = 
     };
 
     const loadPaymentsMaintenance = () => {
-        if (_maintInFlight) return _maintInFlight;
         state.paymentsMaintenanceError = false;
-        _maintInFlight = api
-            .getPaymentsMaintenance()
-            .then((res) => {
-                state.paymentsMaintenance = Boolean(res.enabled);
-                state.paymentsMaintenanceError = false;
-            })
-            .catch((err) => {
-                if (err && err.code === "2fa_required") return;
-                state.paymentsMaintenanceError = true;
-                showToast(err.message || "Ошибка загрузки статуса техработ", "error");
-            })
-            .finally(() => {
-                _maintInFlight = null;
-                if (root.isConnected && state.adminTab === "finances" && state.mode === "admin") {
-                    syncMaintenanceCard();
-                }
-            });
-        return _maintInFlight;
+        if (!_maintInFlight) {
+            _maintInFlight = api
+                .getPaymentsMaintenance()
+                .then((res) => {
+                    state.paymentsMaintenance = Boolean(res.enabled);
+                    state.paymentsMaintenanceError = false;
+                })
+                .catch((err) => {
+                    if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) return;
+                    state.paymentsMaintenanceError = true;
+                    showToast(err.message || "Ошибка загрузки статуса техработ", "error");
+                })
+                .finally(() => {
+                    _maintInFlight = null;
+                });
+        }
+        return _maintInFlight.finally(() => {
+            if (root.isConnected && state.adminTab === "finances" && state.mode === "admin") {
+                syncMaintenanceCard();
+            }
+        });
     };
 
     function bindMaintenanceToggle(scopeEl = root) {
@@ -575,7 +577,7 @@ export function renderAdminFinancesView(root, state, { forceRefresh = false } = 
                 renderRetryList("Не удалось загрузить финансы", () => loadFinances(0));
             }
         } else {
-            _renderFinanceRows(listContainer, finData.items || [], state);
+            _renderFinanceRows(listContainer, finData.items || [], state, () => loadFinances(finData.offset || 0));
             _renderPager(root, finData, loadFinances, "заказов");
         }
     }
@@ -591,7 +593,7 @@ function _renderFlagChips(flags) {
         .join("");
 }
 
-function _renderFinanceRows(container, items, state) {
+function _renderFinanceRows(container, items, state, onReload = null) {
     if (!items.length) {
         container.innerHTML = `<div class="muted" style="text-align:center; padding:12px;">Записи не найдены</div>`;
         return;
@@ -654,7 +656,14 @@ function _renderFinanceRows(container, items, state) {
                             : ""
                     }
                 </div>
-                ${_financeStatusChip(item.status)}
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                    ${
+                        Array.isArray(item.metadata_flags) && item.metadata_flags.includes("requires_manual_review")
+                            ? `<button type="button" class="btn btn-sm btn-secondary" data-ack-review="${escapeHtml(item.id)}">Проверено</button>`
+                            : ""
+                    }
+                    ${_financeStatusChip(item.status)}
+                </div>
             </div>
         `;
 
@@ -669,6 +678,20 @@ function _renderFinanceRows(container, items, state) {
         const copyExtBtn = row.querySelector("[data-copy-ext]");
         if (copyExtBtn) {
             copyExtBtn.addEventListener("click", () => copyText(item.external_id, "Внешний ID скопирован"));
+        }
+        const ackBtn = row.querySelector("[data-ack-review]");
+        if (ackBtn) {
+            ackBtn.addEventListener("click", () => {
+                withButtonLoading(ackBtn, "...", async () => {
+                    try {
+                        const res = await api.ackOrderReview(item.id);
+                        showToast(res.message || "Проверка подтверждена");
+                        if (onReload) await onReload();
+                    } catch (err) {
+                        showToast(err.message || "Не удалось подтвердить проверку", "error");
+                    }
+                });
+            });
         }
         container.appendChild(row);
     });

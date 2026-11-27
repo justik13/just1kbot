@@ -267,9 +267,10 @@ sync_trusted_proxies_env() {
     fi
     [[ "$db_running" == "true" ]] || return 0
 
-    local api_urls psql_rc=0
+    local api_urls inactive_urls psql_rc=0
     api_urls="$(docker exec just1kbot_db sh -c 'psql -U "${POSTGRES_USER:-just1kbot}" -d "${POSTGRES_DB:-just1kbot_bot}" -Atc "SELECT api_url FROM servers WHERE is_active = true AND lifecycle_status IN ('\''ACTIVE'\'', '\''DECOMMISSIONING'\'') AND (role = '\''ru_hub'\'' OR capabilities @> '\''[\"ru_hub\"]'\''::jsonb) ORDER BY id;"' 2>/dev/null)" || psql_rc=$?
     [[ $psql_rc -eq 0 ]] || return 0
+    inactive_urls="$(docker exec just1kbot_db sh -c 'psql -U "${POSTGRES_USER:-just1kbot}" -d "${POSTGRES_DB:-just1kbot_bot}" -Atc "SELECT api_url FROM servers WHERE (is_active = false OR lifecycle_status NOT IN ('\''ACTIVE'\'', '\''DECOMMISSIONING'\'')) AND (role = '\''ru_hub'\'' OR capabilities @> '\''[\"ru_hub\"]'\''::jsonb) ORDER BY id;"' 2>/dev/null || true)"
 
     local py_bin=""
     if command -v python3 >/dev/null 2>&1; then
@@ -283,54 +284,74 @@ sync_trusted_proxies_env() {
     cur_caddy="$(get_env_var "CADDY_TRUSTED_PROXIES" "")"
     cur_bot="$(get_env_var "TRUSTED_PROXIES" "")"
 
-    resolved_pair="$("$py_bin" - "$api_urls" "$cur_caddy" "$cur_bot" <<'PYEOF'
+    resolved_pair="$("$py_bin" - "$api_urls" "$inactive_urls" "$cur_caddy" "$cur_bot" <<'PYEOF'
 import ipaddress
 import socket
 import sys
 from urllib.parse import urlsplit
 
 socket.setdefaulttimeout(3.0)
-urls_raw, cur_caddy, cur_bot = sys.argv[1:4]
+urls_raw, inactive_raw, cur_caddy, cur_bot = sys.argv[1:5]
 url_lines = [line.strip() for line in urls_raw.splitlines() if line.strip()]
-hub_ips = []
-seen = set()
-for u in url_lines:
-    host = urlsplit(u).hostname
-    if not host:
-        continue
-    try:
-        ip_str = str(ipaddress.ip_address(host))
-        if ip_str not in seen:
-            seen.add(ip_str)
-            hub_ips.append(ip_str)
-        continue
-    except ValueError:
-        pass
-    try:
-        for info in socket.getaddrinfo(host, None, socket.AF_INET, socket.SOCK_STREAM):
-            addr = info[4][0] if info and len(info) >= 5 and info[4] else ""
-            if not addr:
-                continue
-            try:
-                ip_str = str(ipaddress.ip_address(addr))
-                if ip_str not in seen:
-                    seen.add(ip_str)
-                    hub_ips.append(ip_str)
-            except ValueError:
-                continue
-    except Exception:
-        continue
+inactive_lines = [line.strip() for line in inactive_raw.splitlines() if line.strip()]
+
+def resolve_urls(lines):
+    out = []
+    seen = set()
+    for u in lines:
+        host = urlsplit(u).hostname
+        if not host:
+            continue
+        try:
+            ip_str = str(ipaddress.ip_address(host))
+            if ip_str not in seen:
+                seen.add(ip_str)
+                out.append(ip_str)
+            continue
+        except ValueError:
+            pass
+        try:
+            for info in socket.getaddrinfo(host, None, socket.AF_INET, socket.SOCK_STREAM):
+                addr = info[4][0] if info and len(info) >= 5 and info[4] else ""
+                if not addr:
+                    continue
+                try:
+                    ip_str = str(ipaddress.ip_address(addr))
+                    if ip_str not in seen:
+                        seen.add(ip_str)
+                        out.append(ip_str)
+                except ValueError:
+                    continue
+        except Exception:
+            continue
+    return out
+
+hub_ips = resolve_urls(url_lines)
+inactive_ips = set(resolve_urls(inactive_lines)) - set(hub_ips)
 
 if url_lines and not hub_ips:
     print("\t")
     sys.exit(0)
 
+def _is_valid_proxy_token(val):
+    if val == "private_ranges":
+        return True
+    try:
+        ipaddress.ip_network(val, strict=False)
+        return True
+    except ValueError:
+        return False
+
 def merge_tokens(existing_raw, base_tokens, sep):
     tokens = []
     token_set = set()
     raw_items = existing_raw.replace(",", " ").split() if existing_raw else []
-    preserved_cidrs = [item.strip() for item in raw_items if "/" in item or item.strip() in ("private_ranges",)]
-    for item in list(base_tokens) + preserved_cidrs + hub_ips:
+    preserved = [
+        item.strip()
+        for item in raw_items
+        if item.strip() and _is_valid_proxy_token(item.strip()) and item.strip() not in inactive_ips
+    ]
+    for item in list(base_tokens) + preserved + hub_ips:
         val = item.strip()
         if val and val not in token_set:
             token_set.add(val)

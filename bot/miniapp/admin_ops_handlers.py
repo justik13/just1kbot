@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from uuid import UUID
 
 from aiohttp import web
 from sqlalchemy import func, select
+from sqlalchemy.orm.attributes import flag_modified
 
 import bot.miniapp.handlers_admin as _ha
 from bot.miniapp.schemas import (
@@ -17,7 +19,8 @@ from bot.miniapp.schemas import (
     PaymentsMaintenancePayload,
 )
 from config.enums import AdminAuditAction, ServerHealthState, WebhookInboxStatus
-from database.models import BroadcastProgress, WebhookInbox
+from database.models import BroadcastProgress, Order, WebhookInbox
+from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger(__name__)
 
@@ -585,3 +588,51 @@ async def api_admin_webhook_dismiss_handler(request: web.Request) -> web.Respons
         audit_action=AdminAuditAction.PAYMENT_DISPUTE_RESOLVED,
         message="Вебхук скрыт",
     )
+
+
+async def api_admin_order_ack_review_handler(request: web.Request) -> web.Response:
+    """Clear requires_manual_review flag on an order after admin review."""
+    ctx, err_resp = await _ha.require_admin_user(request)
+    if err_resp is not None or ctx is None:
+        return err_resp  # type: ignore[return-value]
+
+    raw_order_id = (request.match_info.get("order_id") or "").strip()
+    try:
+        order_uuid = UUID(raw_order_id)
+    except ValueError:
+        return web.json_response({"ok": False, "error": "Некорректный ID заказа"}, status=400)
+
+    async with _ha.session_scope() as session:
+        order = await session.scalar(
+            select(Order).where(Order.id == order_uuid).with_for_update()
+        )
+        if order is None:
+            return web.json_response({"ok": False, "error": "Заказ не найден"}, status=404)
+
+        meta = dict(order.metadata_ or {})
+        was_flagged = bool(meta.get("requires_manual_review") or meta.get("manual_review"))
+        meta.pop("requires_manual_review", None)
+        meta.pop("manual_review", None)
+        meta["manual_review_acked_by"] = ctx.telegram_id
+        meta["manual_review_acked_at"] = now_utc().isoformat()
+        order.metadata_ = meta
+        flag_modified(order, "metadata_")
+
+        await _ha.AuditService.log_action(
+            session,
+            admin_id=ctx.telegram_id,
+            action=AdminAuditAction.PAYMENT_DISPUTE_RESOLVED,
+            target_type="order",
+            target_id=order.user_id,
+            details={
+                "order_id": str(order.id),
+                "action": "ack_manual_review",
+                "was_flagged": was_flagged,
+            },
+        )
+
+    return web.json_response({
+        "ok": True,
+        "order_id": str(order_uuid),
+        "message": "Проверка подтверждена",
+    })

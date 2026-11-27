@@ -62,12 +62,6 @@ class User(Base):
             postgresql_ops={"username": "gin_trgm_ops"},
         ),
         Index(
-            "ix_users_first_name_trgm",
-            "first_name",
-            postgresql_using="gin",
-            postgresql_ops={"first_name": "gin_trgm_ops"},
-        ),
-        Index(
             "ix_users_username_lower",
             text("lower(username)"),
             postgresql_where=text("username IS NOT NULL AND is_deleted = false"),
@@ -423,12 +417,6 @@ class AuditLog(Base):
         ),
         Index("ix_audit_logs_admin_id_id_desc", "admin_id", "id", postgresql_ops={"id": "DESC"}),
         Index("ix_audit_logs_action_id_desc", "action", "id", postgresql_ops={"id": "DESC"}),
-        Index(
-            "ix_audit_logs_details_trgm",
-            "details",
-            postgresql_using="gin",
-            postgresql_ops={"details": "gin_trgm_ops"},
-        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -728,12 +716,6 @@ class UserDevice(Base):
         UniqueConstraint("user_id", "hwid", name="uq_user_devices_user_hwid"),
         Index("ix_user_devices_user_priority", "user_id", "bi_priority", "first_seen_at"),
         Index("ix_user_devices_user_std_priority", "user_id", "std_priority", "first_seen_at"),
-        Index(
-            "ix_user_devices_hwid_trgm",
-            "hwid",
-            postgresql_using="gin",
-            postgresql_ops={"hwid": "gin_trgm_ops"},
-        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

@@ -231,7 +231,7 @@ const _DATE_FMT = new Intl.DateTimeFormat("ru-RU", {
     minute: "2-digit",
 });
 
-function _parseDate(value) {
+export function parseDate(value) {
     if (value instanceof Date) {
         return Number.isFinite(value.getTime()) ? value : null;
     }
@@ -258,7 +258,9 @@ function _parseDate(value) {
 export function formatRelativeTime(iso) {
     if (!iso) return "—";
     const d = _parseDate(iso);
-    if (!d) return "—";
+    const _parseDate = parseDate;
+
+if (!d) return "—";
     const diffSec = Math.floor((Date.now() - d.getTime()) / 1000);
     if (diffSec < 0) return formatDate(iso);
     if (diffSec < 60) return "только что";
@@ -329,7 +331,9 @@ export function openExternalLink(url) {
 export function formatDate(iso) {
     if (iso == null || iso === "") return "—";
     const d = _parseDate(iso);
-    if (!d) return "—";
+    const _parseDate = parseDate;
+
+if (!d) return "—";
     try {
         return _DATE_FMT.format(d);
     } catch {

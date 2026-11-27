@@ -150,6 +150,18 @@ ALERT_BRIDGE_TSPU_RESTORED = """✅ <b>Связность между шлюза�
 🇪🇺 Внешний шлюз: <b>{eu_name}</b> (ID: {eu_id}, <code>{eu_ip}</code>)
 Маршрут снова стабильно пропускает трафик и возвращён в рабочую топологию."""
 
+ALERT_SERVER_LAST_APPLY_FAILED = """⚠️ <b>Ошибка применения конфигурации на сервере</b>
+
+🖥 <b>Сервер:</b> {server_name} (ID: {server_id})
+⏰ <b>Когда:</b> {applied_at}
+📄 <b>Детали:</b> {error_text}"""
+
+ALERT_SERVER_SSL_CERT_EXPIRING = """⚠️ <b>Скоро истекает TLS-сертификат сервера</b>
+
+🖥 <b>Сервер:</b> {server_name} (ID: {server_id})
+📅 <b>Осталось дней:</b> {days_left}
+⏳ <b>Действует до:</b> {expires_at}"""
+
 
 
 

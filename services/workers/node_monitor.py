@@ -34,9 +34,11 @@ from bot.texts.runtime.alerts import (
     ALERT_SERVER_HOSTING_TRAFFIC_CRITICAL,
     ALERT_SERVER_HOSTING_TRAFFIC_RESTORED,
     ALERT_SERVER_HOSTING_TRAFFIC_WARN,
+    ALERT_SERVER_LAST_APPLY_FAILED,
     ALERT_SERVER_OUTAGE_REMINDER,
     ALERT_SERVER_PROBLEM,
     ALERT_SERVER_RESTORED,
+    ALERT_SERVER_SSL_CERT_EXPIRING,
 )
 from bot.texts.runtime.notifications import (
     TIME_HOURS_MINUTES_FORMAT,
@@ -1578,6 +1580,111 @@ async def check_node_resources_and_alerts(bot: Bot):
                         "Failed to deliver core node monitor alert for server %d; state flag not advanced.",
                         server.id,
                     )
+
+        # Telemetry alerts: last_apply failures & TLS cert expiry (<= 7 days)
+        if is_healthy and is_xray_node and isinstance(server.extra_data, dict):
+            tel_extra = dict(server.extra_data or {})
+            tel_extra_patch: dict[str, Any] = {}
+            tel_alerts_to_send: list[tuple[str, str, Any]] = []
+
+            last_apply = tel_extra.get("last_apply")
+            if isinstance(last_apply, dict):
+                apply_status_raw = str(last_apply.get("status") or "").strip().lower()
+                apply_failed = (
+                    last_apply.get("ok") is False
+                    or apply_status_raw in ("failed", "error", "rollback")
+                    or bool(
+                        last_apply.get("rollback_error")
+                        or last_apply.get("error")
+                        or last_apply.get("rolled_back")
+                    )
+                )
+                if apply_failed:
+                    err_text = str(
+                        last_apply.get("rollback_error")
+                        or last_apply.get("error")
+                        or last_apply.get("status")
+                        or "rollback"
+                    ).strip()[:300]
+                    applied_at_raw = str(
+                        last_apply.get("applied_at")
+                        or last_apply.get("timestamp")
+                        or last_apply.get("ts")
+                        or last_apply.get("at")
+                        or ""
+                    ).strip()
+                    apply_key = applied_at_raw or f"{apply_status_raw}:{err_text[:60]}"
+                    if str(tel_extra.get("last_apply_alert_ts") or "").strip() != apply_key:
+                        tel_alerts_to_send.append((
+                            "last_apply_alert_ts",
+                            ALERT_SERVER_LAST_APPLY_FAILED.format(
+                                server_name=safe(server.name),
+                                server_id=server.id,
+                                applied_at=safe(applied_at_raw or "неизвестно"),
+                                error_text=safe(err_text),
+                            ),
+                            apply_key,
+                        ))
+                elif "last_apply_alert_ts" in tel_extra:
+                    tel_extra_patch["last_apply_alert_ts"] = None
+            elif "last_apply_alert_ts" in tel_extra:
+                tel_extra_patch["last_apply_alert_ts"] = None
+
+            ssl_cert = tel_extra.get("ssl_cert")
+            if isinstance(ssl_cert, dict):
+                raw_days = ssl_cert.get("days_left")
+                if isinstance(raw_days, (int, float)) and not isinstance(raw_days, bool):
+                    days_left = int(raw_days)
+                    now_wall = time.time()
+                    if days_left <= 7:
+                        last_ssl_sent = tel_extra.get("ssl_alert_last_sent_at")
+                        if not isinstance(last_ssl_sent, (int, float)) or (now_wall - float(last_ssl_sent)) >= 86400.0:
+                            exp_str = str(ssl_cert.get("expires_at") or "—").strip()
+                            tel_alerts_to_send.append((
+                                "ssl_alert_last_sent_at",
+                                ALERT_SERVER_SSL_CERT_EXPIRING.format(
+                                    server_name=safe(server.name),
+                                    server_id=server.id,
+                                    days_left=days_left,
+                                    expires_at=safe(exp_str),
+                                ),
+                                now_wall,
+                            ))
+                    elif days_left > 14 and "ssl_alert_last_sent_at" in tel_extra:
+                        tel_extra_patch["ssl_alert_last_sent_at"] = None
+
+            for meta_key, alert_text, meta_val in tel_alerts_to_send:
+                try:
+                    sent_ok = await _send_admin_alert_msg(
+                        bot,
+                        alert_text,
+                        reply_markup=get_admin_node_keyboard(server.id),
+                    )
+                    if sent_ok:
+                        tel_extra_patch[meta_key] = meta_val
+                except Exception as exc:
+                    logger.error(
+                        "Failed to deliver telemetry alert (%s) for server %d: %s",
+                        meta_key,
+                        server.id,
+                        exc,
+                    )
+
+            if tel_extra_patch:
+                try:
+                    async with session_scope() as session:
+                        fresh_tel = await get_server_by_id(session, server.id, for_update=True)
+                        if fresh_tel is not None:
+                            fresh_extra = dict(fresh_tel.extra_data or {})
+                            for k, v in tel_extra_patch.items():
+                                if v is None:
+                                    fresh_extra.pop(k, None)
+                                else:
+                                    fresh_extra[k] = v
+                            await update_server(session, fresh_tel, extra_data=fresh_extra)
+                            server.extra_data = fresh_extra
+                except Exception as exc:
+                    logger.warning("Failed to persist telemetry alert state for server %d: %s", server.id, exc)
 
     # Bounded parallel fan-out: one hung node must not freeze monitoring of
     # the remaining nodes in this cycle.

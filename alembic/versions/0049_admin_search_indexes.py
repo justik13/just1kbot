@@ -32,24 +32,6 @@ def _drop_invalid_index_concurrently(conn, index_name: str) -> None:
 
 _PG_INDEXES: tuple[tuple[str, str, str], ...] = (
     (
-        "ix_users_first_name_trgm",
-        "users",
-        "CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_users_first_name_trgm "
-        "ON users USING gin (first_name gin_trgm_ops);",
-    ),
-    (
-        "ix_user_devices_hwid_trgm",
-        "user_devices",
-        "CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_user_devices_hwid_trgm "
-        "ON user_devices USING gin (hwid gin_trgm_ops);",
-    ),
-    (
-        "ix_audit_logs_details_trgm",
-        "audit_logs",
-        "CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_audit_logs_details_trgm "
-        "ON audit_logs USING gin (details gin_trgm_ops);",
-    ),
-    (
         "ix_audit_logs_admin_id_id_desc",
         "audit_logs",
         "CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_audit_logs_admin_id_id_desc "
@@ -90,7 +72,6 @@ def upgrade() -> None:
     bind = op.get_bind()
     if bind and bind.dialect.name == "postgresql":
         with op.get_context().autocommit_block():
-            op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
             for idx_name, _table, ddl in _PG_INDEXES:
                 _drop_invalid_index_concurrently(bind, idx_name)
                 op.execute(ddl)

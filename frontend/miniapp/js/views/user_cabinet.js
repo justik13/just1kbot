@@ -374,6 +374,8 @@ function _openStandardPlanModal(d, mode, onReload) {
         ? Object.keys(d.standard_tariff_prices).map(Number).filter(Number.isFinite).sort((a, b) => a - b)
         : [];
     const durations = pricing.standard_durations || (tariffDurations.length ? tariffDurations : [7, 30, 90]);
+    const isGraceRenew = mode === "renew" && _getStdGraceInfo(d, std).inGrace;
+    const allowDeviceChoice = mode === "buy" || isGraceRenew;
 
     let devices = mode === "renew" ? Math.max(2, Number(std.device_limit || 2)) : 2;
     let duration = 30;
@@ -419,9 +421,23 @@ function _openStandardPlanModal(d, mode, onReload) {
         );
         const blockedReason = quote && quote.blocked_reason ? quote.blocked_reason : null;
         if (blockedReason) {
-            lines.push(`<div class="notice-box notice-warn" style="margin-top:6px;"><span>${escapeHtml(blockedReason)}</span></div>`);
+            const tooManyDevices = Boolean(quote && quote.blocked_by_devices);
+            lines.push(`
+                <div class="notice-box notice-warn" style="margin-top:6px; flex-direction:column; align-items:flex-start; gap:8px;">
+                    <span>${escapeHtml(blockedReason)}</span>
+                    ${tooManyDevices ? `<button id="stdRenewGoDevicesBtn" type="button" class="btn btn-sm">Управлять устройствами</button>` : ""}
+                </div>
+            `);
         }
         summaryEl.innerHTML = lines.join("");
+        const goDevBtn = summaryEl.querySelector("#stdRenewGoDevicesBtn");
+        if (goDevBtn) {
+            goDevBtn.addEventListener("click", () => {
+                close();
+                _state.tab = "connect";
+                onReload({ tab: "connect" });
+            });
+        }
         submitBtn.textContent = getCheckoutText(price, split.cardDue, split.balUsed);
         submitBtn.disabled = Boolean(blockedReason);
     };
@@ -455,7 +471,7 @@ function _openStandardPlanModal(d, mode, onReload) {
         const reqDev = devices;
         const reqDur = duration;
         try {
-            const q = await api.quoteStandard(reqDev, reqDur);
+            const q = await api.quoteStandard(reqDev, reqDur, isGraceRenew ? "renew" : null);
             if (!wrap.isConnected || reqDev !== devices || reqDur !== duration) return;
             quote = q;
             updateSummary();
@@ -474,7 +490,8 @@ function _openStandardPlanModal(d, mode, onReload) {
     };
 
     wrap.innerHTML = `
-        ${mode === "buy" ? `
+        ${allowDeviceChoice ? `
+            ${isGraceRenew ? `<div class="notice-box notice-warn"><span>Льготный период: при продлении можно сразу выбрать нужное число устройств.</span></div>` : ""}
             <div class="field">
                 <span id="stdPresetsLabel" style="font-size:12px; color:var(--text-secondary);">Готовые конфигурации</span>
                 <div class="filter-pills" role="group" aria-labelledby="stdPresetsLabel">
@@ -578,7 +595,7 @@ function _openStandardPlanModal(d, mode, onReload) {
     payBtn.addEventListener("click", async () => {
         payBtn.disabled = true;
         try {
-            const res = await api.checkoutStandard(devices, duration, useBalance, idemKey);
+            const res = await api.checkoutStandard(devices, duration, useBalance, idemKey, isGraceRenew ? "renew" : null);
             close();
             _handlePaymentResponse(res, "Подписка «Стандарт» оформлена", onReload);
         } catch (err) {
@@ -1898,10 +1915,14 @@ function _renderTariffsTab(body, d, reload) {
                         <span class="switch-track"></span>
                     </span>
                 </label>
-                <div class="connect-pair">
-                    <button id="stdRenewBtn" type="button" class="btn btn-primary">Продлить</button>
-                    <button id="stdDevicesBtn" type="button" class="btn">Устройств: ${stdLimit} · Изменить</button>
-                </div>
+                ${isStdGrace ? `
+                    <button id="stdRenewBtn" type="button" class="btn btn-primary btn-lg">Продлить подписку</button>
+                ` : `
+                    <div class="connect-pair">
+                        <button id="stdRenewBtn" type="button" class="btn btn-primary">Продлить</button>
+                        <button id="stdDevicesBtn" type="button" class="btn">Устройств: ${stdLimit} · Изменить</button>
+                    </div>
+                `}
             ` : `
                 <div class="plan-meta-row">
                     <span class="plan-price-tag">от ${stdMin7} ₽ / 7 дн. · от ${stdMin30} ₽ / 30 дн.</span>

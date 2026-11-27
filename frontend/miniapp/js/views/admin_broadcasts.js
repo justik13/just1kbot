@@ -242,7 +242,7 @@ export function renderAdminBroadcastsView(root, state) {
                 clearBroadcastPollTimer();
             }
         } catch (err) {
-            if (err && err.code === "2fa_required") {
+            if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) {
                 clearBroadcastPollTimer();
                 return;
             }

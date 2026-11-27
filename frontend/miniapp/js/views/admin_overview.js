@@ -1,4 +1,4 @@
-import { api, setAdminSessionToken } from "../api.js?v=2.8.0";
+import { api } from "../api.js?v=2.8.0";
 import { formatNodeDisabledReason, formatNodeHealthState } from "../admin_labels.js?v=2.8.0";
 import {
     escapeHtml,
@@ -318,7 +318,6 @@ function _renderOverviewContent(root, state, data) {
 
             <div class="row">
                 <button id="overviewRefreshBtn" type="button" class="btn btn-sm">Обновить</button>
-                <button id="overviewLogoutAllBtn" type="button" class="btn btn-sm btn-danger">Выйти со всех устройств</button>
             </div>
         </div>
     `;
@@ -400,24 +399,6 @@ function _renderOverviewContent(root, state, data) {
             withButtonLoading(refreshBtn, "Обновление...", () => renderAdminOverviewView(root, state));
         });
     }
-
-    const logoutAllBtn = root.querySelector("#overviewLogoutAllBtn");
-    if (logoutAllBtn) {
-        logoutAllBtn.addEventListener("click", () => {
-            showConfirmModal({
-                title: "Выйти со всех устройств?",
-                message: "Все активные админ-сессии 2FA будут завершены. Потребуется повторный ввод кода.",
-                confirmText: "Выйти",
-                isDestructive: true,
-                onConfirm: async () => {
-                    await api.adminLogout();
-                    setAdminSessionToken("");
-                    showToast("Все админ-сессии завершены");
-                    state.onRequire2FA?.();
-                },
-            });
-        });
-    }
 }
 
 export async function renderAdminOverviewView(root, state) {
@@ -449,7 +430,7 @@ export async function renderAdminOverviewView(root, state) {
         _renderOverviewContent(root, state, data);
     } catch (err) {
         if (reqId !== _overviewReqId || !root.isConnected || state.adminTab !== "overview" || state.mode !== "admin") return;
-        if (err && err.code === "2fa_required") return;
+        if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) return;
         showToast(err.message || "Не удалось загрузить обзор", "error");
         root.innerHTML = `
             <section class="card card-center">

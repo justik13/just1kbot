@@ -466,6 +466,7 @@ from bot.miniapp.admin_nodes_handlers import (  # noqa: E402, F401
     api_admin_nodes_list_handler,
     api_admin_nodes_patch_handler,
     api_admin_nodes_refresh_handler,
+    api_admin_nodes_reset_bridges_handler,
     api_admin_nodes_toggle_handler,
 )
 from bot.miniapp.admin_ops_handlers import (  # noqa: E402, F401
@@ -477,6 +478,7 @@ from bot.miniapp.admin_ops_handlers import (  # noqa: E402, F401
     api_admin_finances_handler,
     api_admin_mass_bonus_handler,
     api_admin_mass_extend_handler,
+    api_admin_order_ack_review_handler,
     api_admin_overview_handler,
     api_admin_payments_maintenance_get_handler,
     api_admin_payments_maintenance_post_handler,
@@ -490,7 +492,6 @@ from bot.miniapp.admin_users_handlers import (  # noqa: E402, F401
     api_admin_user_device_delete_handler,
     api_admin_user_devices_reset_handler,
     api_admin_user_message_handler,
-    api_admin_user_resync_handler,
     api_admin_user_token_rotate_handler,
     api_admin_users_handler,
 )

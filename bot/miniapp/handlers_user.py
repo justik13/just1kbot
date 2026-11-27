@@ -467,7 +467,11 @@ async def api_user_standard_quote_handler(request: web.Request) -> web.Response:
         user = await _ensure_user(session, ctx)
         bal = await get_account_balance(session, user_id=user.id)
         quote = await OrderService.quote_standard_change(
-            session, user.id, payload.device_limit, payload.duration_days
+            session,
+            user.id,
+            payload.device_limit,
+            payload.duration_days,
+            operation=payload.operation,
         )
         amount_rub = int(quote.get("due_rub") or 0)
         split = _calc_payment_split(amount_rub, int(bal.real_available), int(bal.bonus_available), True)
@@ -504,6 +508,7 @@ async def api_user_standard_checkout_handler(request: web.Request) -> web.Respon
                     session,
                     user_id=user.id,
                     service_type="standard",
+                    operation=payload.operation,
                     device_limit=payload.device_limit,
                     duration_days=payload.duration_days,
                     use_balance=payload.use_balance,

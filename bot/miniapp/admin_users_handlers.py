@@ -621,64 +621,6 @@ async def api_admin_user_device_delete_handler(request: web.Request) -> web.Resp
     return web.json_response({"ok": True, "hwid": hwid, "message": "Устройство удалено"})
 
 
-async def api_admin_user_resync_handler(request: web.Request) -> web.Response:
-    """Manually trigger background/inline sync for user's Standard and WI subscriptions."""
-    ctx, err_resp = await _ha.require_admin_user(request)
-    if err_resp is not None or ctx is None:
-        return err_resp  # type: ignore[return-value]
-
-    target_user_id, id_err = _ha._parse_positive_int(request, "user_id", label="user id")
-    if id_err is not None or target_user_id is None:
-        return id_err  # type: ignore[return-value]
-
-    async with _ha.session_scope() as session:
-        await _ha.acquire_user_account_lock(session, target_user_id)
-        user = await session.scalar(
-            select(User).where(User.id == target_user_id).with_for_update()
-        )
-        if user is None or getattr(user, "is_deleted", False):
-            return web.json_response({"ok": False, "error": "Пользователь не найден"}, status=404)
-
-        vless_sub = await _ha.vless_subscription_repo.get_subscription_by_user_id(session, user.id)
-        wi_sub = await _ha.get_subscription_by_user_id(session, user.id)
-        synced_standard = False
-        synced_wi = False
-
-        if vless_sub is not None:
-            _ha.VlessSubscriptionService.ensure_synced_background(user.id, session=session)
-            synced_standard = True
-        if wi_sub is not None and wi_sub.status in (
-            WhiteInternetStatus.ACTIVE,
-            WhiteInternetStatus.PENDING,
-        ):
-            locked_wi = await _ha.white_internet_repo.get_subscription_with_lock(session, wi_sub.id)
-            if locked_wi is not None and locked_wi.status in (
-                WhiteInternetStatus.ACTIVE,
-                WhiteInternetStatus.PENDING,
-            ):
-                locked_wi.desired_version = (locked_wi.desired_version or 1) + 1
-                locked_wi.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
-                await session.flush()
-                await _ha._queue_wi_inline_sync(session, locked_wi, "manual_resync")
-                synced_wi = True
-
-        await _ha.AuditService.log_action(
-            session,
-            admin_id=ctx.telegram_id,
-            action=AdminAuditAction.ADMIN_SUB_CHANGE,
-            target_type="user",
-            target_id=user.id,
-            details={"action": "manual_resync", "standard": synced_standard, "wi": synced_wi},
-        )
-
-    return web.json_response({
-        "ok": True,
-        "synced_standard": synced_standard,
-        "synced_wi": synced_wi,
-        "message": "Синхронизация запущена",
-    })
-
-
 async def api_admin_user_token_rotate_handler(request: web.Request) -> web.Response:
     ctx, err_resp = await _ha.require_admin_user(request)
     if err_resp is not None or ctx is None:

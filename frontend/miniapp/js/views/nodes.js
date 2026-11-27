@@ -218,7 +218,7 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
         if (reqId !== _subSettingsReqId || !body.isConnected || (state && (state.adminTab !== "subscription" || state.mode !== "admin"))) {
             return;
         }
-        if (err && err.code === "2fa_required") return;
+        if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) return;
         showToast(err.message || "Не удалось загрузить настройки подписки", "error");
         body.innerHTML = `
             <section class="card card-center">
@@ -289,138 +289,24 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                     </div>
                 </div>
 
-                <details class="guide-details">
-                    <summary class="guide-summary">
-                        <span>Поведение и сортировка</span>
-                        <span id="subSortSummaryBadge" class="meta-text">${escapeHtml(current.sort_order || "none")} · ${escapeHtml(current.no_limit_mode || "all")}</span>
-                    </summary>
-                    <div class="guide-body">
-                        <div class="meta-text">Порядок серверов, лимит памяти iOS для XHTTP и скрытие элементов (автоматически применяются только в INCY; Happ без Provider ID их игнорирует).</div>
-                        <div class="grid-2">
-                            <div class="field">
-                                <label for="subSortOrder">Сортировка серверов</label>
-                                <select id="subSortOrder" name="sort_order" class="input">
-                                    <option value="none" ${(current.sort_order || "none") === "none" ? "selected" : ""}>Как отдал сервер (none)</option>
-                                    <option value="ping" ${current.sort_order === "ping" ? "selected" : ""}>По пингу (ping)</option>
-                                    <option value="name" ${current.sort_order === "name" ? "selected" : ""}>По имени (name)</option>
-                                </select>
-                            </div>
-                            <div class="field">
-                                <label for="subNoLimitMode">No-Limit режим (память iOS)</label>
-                                <select id="subNoLimitMode" name="no_limit_mode" class="input">
-                                    <option value="all" ${(current.no_limit_mode || "all") === "all" ? "selected" : ""}>No-Limit-Enabled (INCY iOS)</option>
-                                    <option value="xhttp" ${current.no_limit_mode === "xhttp" ? "selected" : ""}>no-limit-xhttp-enabled (Happ с Provider ID)</option>
-                                    <option value="off" ${current.no_limit_mode === "off" ? "selected" : ""}>Выключено</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="grid-2">
-                            <label for="subHideUrl" class="checkbox-row">
-                                <input id="subHideUrl" name="hide_url" type="checkbox" ${current.hide_url !== false ? "checked" : ""}>
-                                <span>Hide-Url (скрыть URL и QR)</span>
-                            </label>
-                            <label for="subHideCheck" class="checkbox-row">
-                                <input id="subHideCheck" name="hide_check" type="checkbox" ${current.hide_check ? "checked" : ""}>
-                                <span>Hide-Check (INCY: скрыть пинг)</span>
-                            </label>
-                        </div>
-                        <div class="grid-3">
-                            <div class="field">
-                                <label for="subCdnLabelMode">Подписи маршрутов</label>
-                                <select id="subCdnLabelMode" name="cdn_label_mode" class="input">
-                                    <option value="name" ${(current.cdn_label_mode || "name") === "name" ? "selected" : ""}>В названии (name)</option>
-                                    <option value="badge" ${current.cdn_label_mode === "badge" ? "selected" : ""}>В бейдже (badge)</option>
-                                    <option value="none" ${current.cdn_label_mode === "none" ? "selected" : ""}>Скрыть (none)</option>
-                                </select>
-                            </div>
-                            <div class="field">
-                                <label for="subCdnYandexLabel">Метка канала Y</label>
-                                <input id="subCdnYandexLabel" name="cdn_yandex_label" class="input" maxlength="32" value="${escapeHtml(current.cdn_yandex_label || "Yandex")}" placeholder="Yandex">
-                            </div>
-                            <div class="field">
-                                <label for="subCdnTurboflareLabel">Метка канала T</label>
-                                <input id="subCdnTurboflareLabel" name="cdn_turboflare_label" class="input" maxlength="32" value="${escapeHtml(current.cdn_turboflare_label || "Turboflare")}" placeholder="Turboflare">
-                            </div>
-                        </div>
+                <div class="grid-3">
+                    <div class="field">
+                        <label for="subCdnLabelMode">Подписи маршрутов</label>
+                        <select id="subCdnLabelMode" name="cdn_label_mode" class="input">
+                            <option value="name" ${(current.cdn_label_mode || "name") === "name" ? "selected" : ""}>В названии (name)</option>
+                            <option value="badge" ${current.cdn_label_mode === "badge" ? "selected" : ""}>В бейдже (badge)</option>
+                            <option value="none" ${current.cdn_label_mode === "none" ? "selected" : ""}>Скрыть (none)</option>
+                        </select>
                     </div>
-                </details>
-
-                <details class="guide-details">
-                    <summary class="guide-summary">
-                        <span>Фрагментация TLS</span>
-                        <span id="subFragSummaryBadge" class="chip ${current.fragmentation_enabled === true ? "chip-ok" : "chip-muted"}">${current.fragmentation_enabled === true ? "Вкл" : "Выкл"}</span>
-                    </summary>
-                    <div class="guide-body">
-                        <div class="meta-text">Дробит TLS ClientHello только в INCY (для CDN XHTTP не требуется, держите выключенным без необходимости).</div>
-                        <label for="subFragEnabled" class="checkbox-row">
-                            <input id="subFragEnabled" name="fragmentation_enabled" type="checkbox" ${current.fragmentation_enabled === true ? "checked" : ""}>
-                            <span>Включить fragmentation-enable</span>
-                        </label>
-                        <div class="grid-2">
-                            <div class="field">
-                                <label for="subFragPackets">Packets</label>
-                                <input id="subFragPackets" name="fragmentation_packets" class="input" maxlength="64" value="${escapeHtml(current.fragmentation_packets || "tlshello")}" placeholder="tlshello">
-                            </div>
-                            <div class="field">
-                                <label for="subFragLength">Length</label>
-                                <input id="subFragLength" name="fragmentation_length" class="input" maxlength="32" value="${escapeHtml(current.fragmentation_length || "10-30")}" placeholder="10-30">
-                            </div>
-                        </div>
-                        <div class="field">
-                            <label for="subFragInterval">Interval</label>
-                            <input id="subFragInterval" name="fragmentation_interval" class="input" maxlength="32" value="${escapeHtml(current.fragmentation_interval || "10-30")}" placeholder="10-30">
-                        </div>
+                    <div class="field">
+                        <label for="subCdnYandexLabel">Метка канала Y</label>
+                        <input id="subCdnYandexLabel" name="cdn_yandex_label" class="input" maxlength="32" value="${escapeHtml(current.cdn_yandex_label || "Yandex")}" placeholder="Yandex">
                     </div>
-                </details>
-
-                <details class="guide-details">
-                    <summary class="guide-summary">
-                        <span>DoH Pre-resolve (INCY / Happ)</span>
-                        <span id="subDnsSummaryBadge" class="chip ${current.dns_resolve_enabled ? "chip-ok" : "chip-muted"}">${current.dns_resolve_enabled ? "Вкл" : "Выкл"}</span>
-                    </summary>
-                    <div class="guide-body">
-                        <div class="meta-text">Резолвит домен сервера через DoH до старта туннеля (защита от DNS-подмены; пример: dns.google + 8.8.8.8).</div>
-                        <label for="subDnsEnabled" class="checkbox-row">
-                            <input id="subDnsEnabled" name="dns_resolve_enabled" type="checkbox" ${current.dns_resolve_enabled ? "checked" : ""}>
-                            <span>Включить Server-Address-Resolve-Enable</span>
-                        </label>
-                        <div class="grid-2">
-                            <div class="field">
-                                <label for="subDnsDomain">DoH Домен</label>
-                                <input id="subDnsDomain" name="dns_resolve_domain" class="input" maxlength="253" value="${escapeHtml(current.dns_resolve_domain || "")}" placeholder="dns.google">
-                            </div>
-                            <div class="field">
-                                <label for="subDnsIp">Bootstrap DNS IP</label>
-                                <input id="subDnsIp" name="dns_resolve_ip" class="input" maxlength="64" value="${escapeHtml(current.dns_resolve_ip || "")}" placeholder="8.8.8.8">
-                            </div>
-                        </div>
+                    <div class="field">
+                        <label for="subCdnTurboflareLabel">Метка канала T</label>
+                        <input id="subCdnTurboflareLabel" name="cdn_turboflare_label" class="input" maxlength="32" value="${escapeHtml(current.cdn_turboflare_label || "Turboflare")}" placeholder="Turboflare">
                     </div>
-                </details>
-
-                <details class="guide-details">
-                    <summary class="guide-summary">
-                        <span>Раздельное туннелирование (Android)</span>
-                        <span id="subPerAppSummaryBadge" class="chip ${current.per_app_proxy_enabled ? "chip-ok" : "chip-muted"}">${current.per_app_proxy_enabled ? "Вкл" : "Выкл"}</span>
-                    </summary>
-                    <div class="guide-body">
-                        <div class="meta-text">Исключает выбранные приложения (bypass, напр. банки) или пускает только их (proxy). Список через запятую или с новой строки.</div>
-                        <label for="subPerAppEnabled" class="checkbox-row">
-                            <input id="subPerAppEnabled" name="per_app_proxy_enabled" type="checkbox" ${current.per_app_proxy_enabled ? "checked" : ""}>
-                            <span>Включить Per-App-Proxy-Enable</span>
-                        </label>
-                        <div class="field">
-                            <label for="subPerAppMode">Режим</label>
-                            <select id="subPerAppMode" name="per_app_proxy_mode" class="input">
-                                <option value="bypass" ${(current.per_app_proxy_mode || "bypass") === "bypass" ? "selected" : ""}>Исключить (bypass)</option>
-                                <option value="proxy" ${current.per_app_proxy_mode === "proxy" ? "selected" : ""}>Только выбранные (proxy)</option>
-                            </select>
-                        </div>
-                        <div class="field">
-                            <label for="subPerAppList">Список приложений (package names)</label>
-                            <textarea id="subPerAppList" name="per_app_proxy_list" class="textarea" maxlength="2000" style="min-height:64px;" placeholder="ru.sberbankmobile,com.whatsapp">${escapeHtml(current.per_app_proxy_list || "")}</textarea>
-                        </div>
-                    </div>
-                </details>
+                </div>
 
                 <button type="submit" class="btn btn-primary">Сохранить настройки</button>
             </form>
@@ -472,11 +358,6 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
         const btn = form.querySelector("button[type='submit']");
         await withButtonLoading(btn, "Сохранение...", async () => {
             try {
-                const sortOrder = String(fd.get("sort_order") || "none");
-                const noLimitMode = String(fd.get("no_limit_mode") || "all");
-                const fragEnabled = Boolean(fd.get("fragmentation_enabled"));
-                const dnsEnabled = Boolean(fd.get("dns_resolve_enabled"));
-                const perAppEnabled = Boolean(fd.get("per_app_proxy_enabled"));
                 await api.updateIncySettings({
                     profile_title: String(fd.get("profile_title") || "").trim(),
                     profile_update_interval: intervalVal,
@@ -485,35 +366,10 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                     announce_url: String(fd.get("announce_url") || "").trim(),
                     support_url: String(fd.get("support_url") || "").trim(),
                     web_page_url: String(fd.get("web_page_url") || "").trim(),
-                    sort_order: sortOrder,
-                    no_limit_mode: noLimitMode,
-                    hide_url: Boolean(fd.get("hide_url")),
-                    hide_check: Boolean(fd.get("hide_check")),
                     cdn_label_mode: String(fd.get("cdn_label_mode") || "name"),
                     cdn_yandex_label: String(fd.get("cdn_yandex_label") || "").trim(),
                     cdn_turboflare_label: String(fd.get("cdn_turboflare_label") || "").trim(),
-                    fragmentation_enabled: fragEnabled,
-                    fragmentation_packets: String(fd.get("fragmentation_packets") || "").trim(),
-                    fragmentation_length: String(fd.get("fragmentation_length") || "").trim(),
-                    fragmentation_interval: String(fd.get("fragmentation_interval") || "").trim(),
-                    dns_resolve_enabled: dnsEnabled,
-                    dns_resolve_domain: String(fd.get("dns_resolve_domain") || "").trim(),
-                    dns_resolve_ip: String(fd.get("dns_resolve_ip") || "").trim(),
-                    per_app_proxy_enabled: perAppEnabled,
-                    per_app_proxy_mode: String(fd.get("per_app_proxy_mode") || "bypass"),
-                    per_app_proxy_list: String(fd.get("per_app_proxy_list") || "").trim(),
                 });
-                const sortBadge = form.querySelector("#subSortSummaryBadge");
-                if (sortBadge) sortBadge.textContent = `${sortOrder} · ${noLimitMode}`;
-                const updateChip = (selector, on) => {
-                    const el = form.querySelector(selector);
-                    if (!el) return;
-                    el.className = `chip ${on ? "chip-ok" : "chip-muted"}`;
-                    el.textContent = on ? "Вкл" : "Выкл";
-                };
-                updateChip("#subFragSummaryBadge", fragEnabled);
-                updateChip("#subDnsSummaryBadge", dnsEnabled);
-                updateChip("#subPerAppSummaryBadge", perAppEnabled);
                 showToast("Настройки подписки сохранены");
             } catch (err) {
                 showToast(err.message || "Ошибка сохранения", "error");
@@ -685,8 +541,10 @@ export function renderNodesView(root, state, onReload, onSelectNode) {
         const btn = e.currentTarget;
         await withButtonLoading(btn, "Обновление...", async () => {
             try {
-                lastReloadedAt = new Date();
-                await onReload();
+                const reloaded = await onReload();
+                if (reloaded !== false) {
+                    lastReloadedAt = new Date();
+                }
             } catch (err) {
                 showToast(err.message || "Не удалось обновить список", "error");
             }

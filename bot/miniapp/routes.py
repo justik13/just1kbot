@@ -30,7 +30,9 @@ from bot.miniapp.handlers_admin import (
     api_admin_nodes_list_handler,
     api_admin_nodes_patch_handler,
     api_admin_nodes_refresh_handler,
+    api_admin_nodes_reset_bridges_handler,
     api_admin_nodes_toggle_handler,
+    api_admin_order_ack_review_handler,
     api_admin_overview_handler,
     api_admin_payments_maintenance_get_handler,
     api_admin_payments_maintenance_post_handler,
@@ -39,7 +41,6 @@ from bot.miniapp.handlers_admin import (
     api_admin_user_device_delete_handler,
     api_admin_user_devices_reset_handler,
     api_admin_user_message_handler,
-    api_admin_user_resync_handler,
     api_admin_user_token_rotate_handler,
     api_admin_users_handler,
     api_admin_webhook_dismiss_handler,
@@ -221,6 +222,7 @@ def setup_miniapp_routes(app: web.Application) -> None:
     app.router.add_post("/api/app/admin/nodes/add", api_admin_nodes_add_handler)
     app.router.add_post("/api/app/admin/nodes/{server_id}/refresh", api_admin_nodes_refresh_handler)
     app.router.add_post("/api/app/admin/nodes/{server_id}/lifecycle", api_admin_nodes_lifecycle_handler)
+    app.router.add_post("/api/app/admin/nodes/{server_id}/reset-bridges", api_admin_nodes_reset_bridges_handler)
     app.router.add_patch("/api/app/admin/nodes/{server_id}", api_admin_nodes_patch_handler)
     app.router.add_post("/api/app/admin/nodes/{server_id}/toggle", api_admin_nodes_toggle_handler)
     app.router.add_delete("/api/app/admin/nodes/{server_id}", api_admin_nodes_delete_handler)
@@ -228,7 +230,6 @@ def setup_miniapp_routes(app: web.Application) -> None:
     app.router.add_get("/api/app/admin/users/{user_id}/details", api_admin_user_details_handler)
     app.router.add_delete("/api/app/admin/users/{user_id}/devices/{hwid}", api_admin_user_device_delete_handler)
     app.router.add_post("/api/app/admin/users/{user_id}/devices/reset", api_admin_user_devices_reset_handler)
-    app.router.add_post("/api/app/admin/users/{user_id}/resync", api_admin_user_resync_handler)
     app.router.add_post("/api/app/admin/users/{user_id}/token/rotate", api_admin_user_token_rotate_handler)
     app.router.add_post("/api/app/admin/users/{user_id}/adjust", api_admin_user_adjust_handler)
     app.router.add_post("/api/app/admin/users/{user_id}/message", api_admin_user_message_handler)
@@ -246,6 +247,7 @@ def setup_miniapp_routes(app: web.Application) -> None:
     app.router.add_post("/api/app/admin/mass/bonus", api_admin_mass_bonus_handler)
     app.router.add_post("/api/app/admin/mass/extend", api_admin_mass_extend_handler)
     app.router.add_get("/api/app/admin/finances", api_admin_finances_handler)
+    app.router.add_post("/api/app/admin/orders/{order_id}/ack-review", api_admin_order_ack_review_handler)
     app.router.add_get("/api/app/admin/audit-logs", api_admin_audit_logs_handler)
 
     # User cabinet APIs

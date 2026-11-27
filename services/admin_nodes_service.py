@@ -272,6 +272,14 @@ def serialize_server_node(server: Server) -> dict[str, Any]:
         ),
         "last_apply": extra.get("last_apply") if isinstance(extra.get("last_apply"), dict) else None,
         "ssl_cert": extra.get("ssl_cert") if isinstance(extra.get("ssl_cert"), dict) else None,
+        "bridge_health_state": (
+            extra.get("bridge_health_state")
+            if isinstance(extra.get("bridge_health_state"), dict)
+            else {}
+        ),
+        "blocked_eu_ids": [
+            int(x) for x in (extra.get("blocked_eu_ids") or []) if str(x).isdigit()
+        ],
         "last_successful_check": (
             server.last_successful_check.isoformat() if server.last_successful_check else None
         ),
@@ -951,5 +959,61 @@ async def set_node_lifecycle(
             target_type="server",
             target_id=updated.id,
             details={"lifecycle_status": normalized},
+        )
+        return serialize_server_node(updated)
+
+
+async def reset_ru_hub_bridge_blocks(
+    server_id: int,
+    admin_telegram_id: int,
+) -> dict[str, Any]:
+    """Manually clear TSPU bridge block flags on a ru_hub and queue topology sync."""
+    async with session_scope() as session:
+        server = await get_server_by_id(session, server_id, for_update=True)
+        if server is None:
+            raise AdminNodeServiceError("Сервер не найден", status_code=404)
+        if get_server_role(server) != "ru_hub":
+            raise AdminNodeServiceError(
+                "Сброс ТСПУ-блокировок доступен только для узла с ролью ru_hub.",
+                status_code=400,
+            )
+
+        extra = dict(server.extra_data or {})
+        prev_blocked = [int(x) for x in (extra.get("blocked_eu_ids") or []) if str(x).isdigit()]
+        extra.pop("blocked_eu_ids", None)
+        bh_state = extra.get("bridge_health_state")
+        if isinstance(bh_state, dict):
+            cleaned_bh: dict[str, Any] = {}
+            for k, entry in bh_state.items():
+                if isinstance(entry, dict):
+                    updated_entry = dict(entry)
+                    updated_entry["blocked"] = False
+                    updated_entry["consecutive_fails"] = 0
+                    updated_entry["consecutive_successes"] = 0
+                    updated_entry["blocked_at"] = None
+                    updated_entry["problem_alert_sent"] = False
+                    updated_entry["last_reminder_at"] = None
+                    cleaned_bh[k] = updated_entry
+            extra["bridge_health_state"] = cleaned_bh
+
+        updated = await update_server(session, server, extra_data=extra)
+        if prev_blocked:
+            from services.vless_subscription_service import VlessSubscriptionService
+
+            _queue_topology_sync(session)
+            sid = updated.id
+
+            async def _spawn_ru_sync(sid: int = sid) -> None:
+                VlessSubscriptionService.sync_all_active_to_server_background(sid)
+
+            queue_post_commit_task(session, _spawn_ru_sync)
+
+        await AuditService.log_action(
+            session,
+            admin_id=admin_telegram_id,
+            action=AdminAuditAction.EDIT_SERVER,
+            target_type="server",
+            target_id=updated.id,
+            details={"action": "reset_bridge_blocks", "cleared_eu_ids": prev_blocked},
         )
         return serialize_server_node(updated)

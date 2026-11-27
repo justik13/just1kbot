@@ -922,17 +922,37 @@ class OrderService:
                 "active_hwid_count": active_hwid_count,
             }
 
-        if target_device_limit == current_limit:
+        if target_device_limit == current_limit or (is_in_grace and operation == "renew"):
+            blocked_by_devices = False
+            renew_blocked_reason: str | None = None
+            if is_in_grace and target_device_limit < current_limit:
+                if getattr(user_obj, "financial_hold", False):
+                    renew_blocked_reason = "На аккаунте действует финансовое ограничение. Обратитесь в поддержку."
+                elif slot_usage is not None:
+                    from services.subscription import SubscriptionService
+
+                    fits, limit_reason = SubscriptionService.check_standard_limit_fits(
+                        slot_usage, target_device_limit
+                    )
+                    if not fits:
+                        renew_blocked_reason = limit_reason
+                        blocked_by_devices = True
+                elif active_hwid_count > target_device_limit:
+                    renew_blocked_reason = (
+                        f"Активных устройств ({active_hwid_count}) больше нового лимита ({target_device_limit}). "
+                        "Удалите лишние устройства."
+                    )
+                    blocked_by_devices = True
+
             due = Decimal(calculate_standard_price(target_device_limit, target_duration_days))
             max_expiry = now + timedelta(days=STANDARD_MAX_EXPIRY_DAYS)
             horizon_exceeded = not is_permanent_subscription(sub_end) and (
                 sub_end + timedelta(days=target_duration_days) > max_expiry
             )
-            renew_blocked_reason = (
-                f"Максимальный срок продления — {STANDARD_MAX_EXPIRY_DAYS} дн. вперёд."
-                if horizon_exceeded
-                else None
-            )
+            if renew_blocked_reason is None and horizon_exceeded:
+                renew_blocked_reason = (
+                    f"Максимальный срок продления — {STANDARD_MAX_EXPIRY_DAYS} дн. вперёд."
+                )
             return {
                 "operation": "renew",
                 "due_rub": int(due),
@@ -943,8 +963,10 @@ class OrderService:
                 "in_grace": is_in_grace,
                 "can_downgrade": False,
                 "blocked_reason": renew_blocked_reason,
+                "blocked_by_devices": blocked_by_devices,
                 "cooldown_until": cooldown_until.isoformat() if cooldown_until else None,
                 "active_hwid_count": active_hwid_count,
+                "std_assigned_count": std_assigned_count,
             }
 
         if target_device_limit > current_limit:

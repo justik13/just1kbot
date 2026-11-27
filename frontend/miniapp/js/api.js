@@ -164,6 +164,10 @@ export const api = {
             method: "POST",
             body: JSON.stringify({ lifecycle_status: lifecycleStatus }),
         }),
+    resetNodeBridges: (serverId) =>
+        requestJson(`/api/app/admin/nodes/${serverId}/reset-bridges`, {
+            method: "POST",
+        }),
     toggleNode: (id, isActive = null) =>
         requestJson(`/api/app/admin/nodes/${id}/toggle`, {
             method: "POST",
@@ -182,10 +186,6 @@ export const api = {
     deleteUserDevice: (userId, hwid) =>
         requestJson(`/api/app/admin/users/${userId}/devices/${encodeURIComponent(hwid)}`, {
             method: "DELETE",
-        }),
-    resyncUser: (userId) =>
-        requestJson(`/api/app/admin/users/${userId}/resync`, {
-            method: "POST",
         }),
     resetUserDevices: (userId, payload = {}) =>
         requestJson(`/api/app/admin/users/${userId}/devices/reset`, {
@@ -238,6 +238,10 @@ export const api = {
                 status
             )}&q=${encodeURIComponent(q)}&offset=${offset}&limit=${limit}${attentionOnly ? "&attention_only=1" : ""}`
         ),
+    ackOrderReview: (orderId) =>
+        requestJson(`/api/app/admin/orders/${encodeURIComponent(orderId)}/ack-review`, {
+            method: "POST",
+        }),
     listAuditLogs: (action = "", q = "", offset = 0, limit = 40, targetType = "") =>
         requestJson(
             `/api/app/admin/audit-logs?action=${encodeURIComponent(action)}&q=${encodeURIComponent(
@@ -253,12 +257,22 @@ export const api = {
 
     // User cabinet
     getUserDashboard: () => requestJson("/api/app/user/dashboard"),
-    quoteStandard: (deviceLimit, durationDays) =>
+    quoteStandard: (deviceLimit, durationDays, operation = null) =>
         requestJson("/api/app/user/standard/quote", {
             method: "POST",
-            body: JSON.stringify({ device_limit: deviceLimit, duration_days: durationDays }),
+            body: JSON.stringify({
+                device_limit: deviceLimit,
+                duration_days: durationDays,
+                ...(operation ? { operation } : {}),
+            }),
         }),
-    checkoutStandard: (deviceLimit, durationDays, useBalance = true, idempotencyKey = null) =>
+    checkoutStandard: (
+        deviceLimit,
+        durationDays,
+        useBalance = true,
+        idempotencyKey = null,
+        operation = null
+    ) =>
         requestJson("/api/app/user/standard/checkout", {
             method: "POST",
             body: JSON.stringify({
@@ -266,6 +280,7 @@ export const api = {
                 duration_days: durationDays,
                 use_balance: useBalance,
                 ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
+                ...(operation ? { operation } : {}),
             }),
         }),
     downgradeStandard: (targetDeviceLimit) =>
