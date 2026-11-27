@@ -466,7 +466,6 @@ from bot.miniapp.admin_nodes_handlers import (  # noqa: E402, F401
     api_admin_nodes_list_handler,
     api_admin_nodes_patch_handler,
     api_admin_nodes_refresh_handler,
-    api_admin_nodes_reset_bridges_handler,
     api_admin_nodes_toggle_handler,
 )
 from bot.miniapp.admin_ops_handlers import (  # noqa: E402, F401

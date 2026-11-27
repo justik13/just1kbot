@@ -164,10 +164,6 @@ export const api = {
             method: "POST",
             body: JSON.stringify({ lifecycle_status: lifecycleStatus }),
         }),
-    resetNodeBridges: (serverId) =>
-        requestJson(`/api/app/admin/nodes/${serverId}/reset-bridges`, {
-            method: "POST",
-        }),
     toggleNode: (id, isActive = null) =>
         requestJson(`/api/app/admin/nodes/${id}/toggle`, {
             method: "POST",

@@ -30,7 +30,6 @@ from bot.miniapp.handlers_admin import (
     api_admin_nodes_list_handler,
     api_admin_nodes_patch_handler,
     api_admin_nodes_refresh_handler,
-    api_admin_nodes_reset_bridges_handler,
     api_admin_nodes_toggle_handler,
     api_admin_order_ack_review_handler,
     api_admin_overview_handler,
@@ -222,7 +221,6 @@ def setup_miniapp_routes(app: web.Application) -> None:
     app.router.add_post("/api/app/admin/nodes/add", api_admin_nodes_add_handler)
     app.router.add_post("/api/app/admin/nodes/{server_id}/refresh", api_admin_nodes_refresh_handler)
     app.router.add_post("/api/app/admin/nodes/{server_id}/lifecycle", api_admin_nodes_lifecycle_handler)
-    app.router.add_post("/api/app/admin/nodes/{server_id}/reset-bridges", api_admin_nodes_reset_bridges_handler)
     app.router.add_patch("/api/app/admin/nodes/{server_id}", api_admin_nodes_patch_handler)
     app.router.add_post("/api/app/admin/nodes/{server_id}/toggle", api_admin_nodes_toggle_handler)
     app.router.add_delete("/api/app/admin/nodes/{server_id}", api_admin_nodes_delete_handler)
