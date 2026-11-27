@@ -392,6 +392,7 @@ export function openStandardPlanModal(d, mode, onReload, helpers) {
             }
         }
     };
+    const debouncedQuote = _createDebouncedTask(fetchQuote, 150);
 
     wrap.innerHTML = `
         ${allowDeviceChoice ? `
@@ -449,7 +450,7 @@ export function openStandardPlanModal(d, mode, onReload, helpers) {
             quote = null;
             idemKey = _newIdempotencyKey();
             updateControls();
-            fetchQuote();
+            debouncedQuote.schedule();
         });
     });
 
@@ -462,7 +463,7 @@ export function openStandardPlanModal(d, mode, onReload, helpers) {
                 quote = null;
                 idemKey = _newIdempotencyKey();
                 updateControls();
-                fetchQuote();
+                debouncedQuote.schedule();
             }
         });
     }
@@ -473,7 +474,7 @@ export function openStandardPlanModal(d, mode, onReload, helpers) {
                 quote = null;
                 idemKey = _newIdempotencyKey();
                 updateControls();
-                fetchQuote();
+                debouncedQuote.schedule();
             }
         });
     }
@@ -484,7 +485,7 @@ export function openStandardPlanModal(d, mode, onReload, helpers) {
             quote = null;
             idemKey = _newIdempotencyKey();
             updateControls();
-            fetchQuote();
+            debouncedQuote.schedule();
         });
     });
 
@@ -497,6 +498,7 @@ export function openStandardPlanModal(d, mode, onReload, helpers) {
 
     const payBtn = wrap.querySelector("#modalStdPayBtn");
     payBtn.addEventListener("click", async () => {
+        debouncedQuote.cancel();
         payBtn.disabled = true;
         try {
             const res = await api.checkoutStandard(devices, duration, useBalance, idemKey, isGraceRenew ? "renew" : null);
@@ -511,6 +513,26 @@ export function openStandardPlanModal(d, mode, onReload, helpers) {
 
     updateSummary();
     fetchQuote();
+}
+
+/** Создаёт отложенный вызов с отменой предыдущего таймера при быстрых кликах. */
+function _createDebouncedTask(fn, delayMs = 150) {
+    let timer = null;
+    return {
+        schedule() {
+            if (timer) clearTimeout(timer);
+            timer = setTimeout(() => {
+                timer = null;
+                fn();
+            }, delayMs);
+        },
+        cancel() {
+            if (timer) {
+                clearTimeout(timer);
+                timer = null;
+            }
+        },
+    };
 }
 
 export function openStandardDevicesModal(d, onReload, helpers) {
@@ -667,19 +689,28 @@ export function openStandardDevicesModal(d, onReload, helpers) {
             updateView();
         }
     };
+    const debouncedQuote = _createDebouncedTask(fetchQuote, 150);
 
     devMinus.addEventListener("click", () => {
         if (targetLimit > 2) {
             targetLimit -= 1;
             idemKey = _newIdempotencyKey();
-            fetchQuote();
+            quote = null;
+            quoteError = null;
+            updateView();
+            if (targetLimit === currentLimit) debouncedQuote.cancel();
+            else debouncedQuote.schedule();
         }
     });
     devPlus.addEventListener("click", () => {
         if (targetLimit < 10) {
             targetLimit += 1;
             idemKey = _newIdempotencyKey();
-            fetchQuote();
+            quote = null;
+            quoteError = null;
+            updateView();
+            if (targetLimit === currentLimit) debouncedQuote.cancel();
+            else debouncedQuote.schedule();
         }
     });
     devBalChk.addEventListener("change", () => {

@@ -267,20 +267,23 @@ export function renderAdminBroadcastsView(root, state) {
 
     root.querySelector("#reloadBcBtn").addEventListener("click", () => reloadBroadcasts(false, state.broadcastsOffset || 0));
 
-    root.querySelector("#bcPreviewBtn").addEventListener("click", async () => {
+    const bcPreviewBtn = root.querySelector("#bcPreviewBtn");
+    bcPreviewBtn.addEventListener("click", async () => {
         const reqId = ++_previewReqId;
         const audience = root.querySelector("#bcAudienceSelect").value;
         const hintEl = root.querySelector("#bcPreviewHint");
         hintEl.textContent = "Подсчёт...";
-        try {
-            const res = await api.previewBroadcast(audience);
-            if (reqId !== _previewReqId || !root.isConnected || state.adminTab !== "broadcasts" || state.mode !== "admin") return;
-            hintEl.textContent = `Аудитория «${res.label}»: получат ${res.reachable_count} (всего в сегменте ${res.total_count})`;
-        } catch (err) {
-            if (reqId !== _previewReqId || !root.isConnected || state.adminTab !== "broadcasts" || state.mode !== "admin") return;
-            hintEl.textContent = "";
-            showToast(err.message || "Ошибка предпросмотра", "error");
-        }
+        await withButtonLoading(bcPreviewBtn, "Подсчёт...", async () => {
+            try {
+                const res = await api.previewBroadcast(audience);
+                if (reqId !== _previewReqId || !root.isConnected || state.adminTab !== "broadcasts" || state.mode !== "admin") return;
+                hintEl.textContent = `Аудитория «${res.label}»: получат ${res.reachable_count} (всего в сегменте ${res.total_count})`;
+            } catch (err) {
+                if (reqId !== _previewReqId || !root.isConnected || state.adminTab !== "broadcasts" || state.mode !== "admin") return;
+                hintEl.textContent = "";
+                showToast(err.message || "Ошибка предпросмотра", "error");
+            }
+        });
     });
 
     root.querySelector("#broadcastForm").addEventListener("submit", async (e) => {

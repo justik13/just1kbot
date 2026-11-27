@@ -292,10 +292,19 @@ export async function withButtonLoading(btn, loadingText, fn) {
     }
 }
 
+let _lastExternalUrl = "";
+let _lastExternalAt = 0;
+
 export function openExternalLink(url) {
     if (!url) return;
     let target = String(url).trim();
     if (!/^(https?:|tg:)/i.test(target)) return;
+    const now = Date.now();
+    if (target === _lastExternalUrl && now - _lastExternalAt < 500) {
+        return;
+    }
+    _lastExternalUrl = target;
+    _lastExternalAt = now;
     if (/^tg:\/\/resolve\?domain=/i.test(target)) {
         const m = target.match(/domain=([^&]+)/i);
         if (m && m[1]) {
@@ -491,6 +500,12 @@ export function openModal(
     const modalRoot = document.getElementById("modalRoot");
     if (!modalRoot) return () => {};
 
+    const normalizedTitle = String(title || "");
+    const existingTop = _modalStack[_modalStack.length - 1];
+    if (existingTop && existingTop.title === normalizedTitle && existingTop.dialog?.open) {
+        return existingTop.closeFn;
+    }
+
     const prevTrigger = document.activeElement;
     const dialog = document.createElement("dialog");
     dialog.className = "modal-dialog";
@@ -592,6 +607,7 @@ export function openModal(
     dialog.appendChild(card);
 
     _modalStack.push({
+        title: normalizedTitle,
         dialog,
         card,
         closeFn: close,
