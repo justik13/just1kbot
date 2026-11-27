@@ -6,7 +6,7 @@ let _guidesDataPromise = null;
 export async function loadGuidesData() {
     if (_guidesDataCache) return _guidesDataCache;
     if (!_guidesDataPromise) {
-        _guidesDataPromise = fetch("./assets/guides_data.json?v=2.8.0", { cache: "no-cache" })
+        _guidesDataPromise = fetch("/app/assets/guides_data.json?v=2.8.0", { cache: "no-cache" })
             .then((resp) => {
                 if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                 return resp.json();

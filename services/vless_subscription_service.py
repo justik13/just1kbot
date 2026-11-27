@@ -967,10 +967,17 @@ class VlessSubscriptionService:
                             return srv_id, "fallback", list(sync_items)
                         if not failed and expected_uuids.issubset(succeeded):
                             return srv_id, "ok", []
-                        # If the batch HTTP request itself failed at transport/5xx level, do not
-                        # multiply timeouts by running per-UUID fallback against an unreachable node.
+                        # If the batch HTTP request itself failed at transport/5xx/node-unavailable level,
+                        # do not multiply timeouts or 503s by running per-UUID fallback against the node.
                         if not succeeded and failed and all(
-                            err.startswith(("Network failure:", "Unexpected failure:", "HTTP 5"))
+                            err.startswith((
+                                "Network failure:",
+                                "Unexpected failure:",
+                                "HTTP 5",
+                                "Node epoch is unavailable",
+                                "No managed Xray inbounds",
+                                "Client store corrupted",
+                            ))
                             for err in failed.values()
                         ):
                             return srv_id, "unreachable", []
@@ -1087,12 +1094,13 @@ class VlessSubscriptionService:
                 from services.xray_node_client import XrayNodeClient
 
                 async with XrayNodeClient(timeout=3.0, max_retries=1) as client:
-                    is_healthy, err, _ = await client.check_health(srv_tuple[1], srv_tuple[2])
+                    is_healthy, node_epoch, health_data = await client.check_health(srv_tuple[1], srv_tuple[2])
                     if not is_healthy:
                         logger.warning(
-                            "Server %s is unhealthy during bootstrap pre-flight (%s); deferring sweep",
+                            "Server %s is unhealthy during bootstrap pre-flight (epoch=%s, health=%s); deferring sweep",
                             srv_id,
-                            err,
+                            node_epoch,
+                            (health_data or {}).get("status") if isinstance(health_data, dict) else None,
                         )
                         return 0
             except Exception as e:
@@ -1202,6 +1210,22 @@ class VlessSubscriptionService:
                         target[0][1], target[0][2], batch_payload
                     )
 
+                node_wide_failure = (
+                    batch_supported
+                    and not batch_succeeded
+                    and bool(batch_failed)
+                    and all(
+                        str(err).startswith((
+                            "Network failure:",
+                            "Unexpected failure:",
+                            "HTTP 5",
+                            "Node epoch is unavailable",
+                            "No managed Xray inbounds",
+                            "Client store corrupted",
+                        ))
+                        for err in batch_failed.values()
+                    )
+                )
                 if batch_supported and batch_succeeded:
                     for target_uuid, _target_email, _s_ver, _u_id, s_id in sub_tasks:
                         norm_uuid = str(target_uuid).lower()
@@ -1209,6 +1233,14 @@ class VlessSubscriptionService:
                             succeeded_by_sub.setdefault(s_id, set()).add(target_uuid)
                         else:
                             has_failures = True
+                elif node_wide_failure:
+                    has_failures = True
+                    sample_err = next(iter(batch_failed.values()))
+                    logger.warning(
+                        "Batch sync aborted for server %s due to node-level failure (%s); skipping per-UUID fallback",
+                        srv_id,
+                        sample_err,
+                    )
                 else:
                     sem = asyncio.Semaphore(20)
 
@@ -1269,7 +1301,13 @@ class VlessSubscriptionService:
         finally:
             cls._ACTIVE_SERVER_SYNCS.discard(srv_id)
 
-        logger.info("Provisioned %d active VLESS subscriptions on new server %s", synced_count, srv_id)
+        if synced_count > 0 or not has_failures:
+            logger.info(
+                "Provisioned %d/%d active VLESS subscriptions on server %s",
+                synced_count,
+                total_eligible,
+                srv_id,
+            )
         return synced_count
 
     @classmethod

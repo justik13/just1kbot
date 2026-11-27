@@ -377,6 +377,8 @@ class FulfillmentService:
 
             if meta_op == "renew" or (order.duration_days and order.duration_days > 0):
                 from database.repositories.white_internet_repo import (
+                    add_pending_revocation_uuids,
+                    collect_displaced_wi_device_uuids,
                     get_subscription_by_user_id,
                 )
 
@@ -392,10 +394,11 @@ class FulfillmentService:
                             target_subscription_id=target_sub_id,
                         )
                     else:
+                        before_limit = int(sub.device_limit or 1)
                         sub.expires_at = new_expires
                         if "previous_device_limit" in meta:
                             try:
-                                sub.device_limit = int(meta["previous_device_limit"])
+                                sub.device_limit = max(1, int(meta["previous_device_limit"]))
                             except (ValueError, TypeError):
                                 pass
                         if "previous_base_traffic_bytes" in meta:
@@ -403,6 +406,12 @@ class FulfillmentService:
                                 sub.base_traffic_bytes = max(0, int(meta["previous_base_traffic_bytes"]))
                             except (ValueError, TypeError):
                                 pass
+                        if (sub.device_limit or 1) < before_limit:
+                            displaced_uuids = await collect_displaced_wi_device_uuids(
+                                session, user.id, int(sub.device_limit or 1)
+                            )
+                            if displaced_uuids:
+                                await add_pending_revocation_uuids(session, sub.id, displaced_uuids)
                         _sync_wi_revoke_quota_state(sub)
                         sub.desired_version = (sub.desired_version or 0) + 1
                         await session.flush()

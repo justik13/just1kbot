@@ -1004,6 +1004,25 @@ cmd_update() {
         fi
     fi
 
+    PROJECT_DIR="$PROJECT_DIR" bash "${PROJECT_DIR}/scripts/cli.sh" _update-post "${rollback_commit:-}" "${pre_update_backup:-}" "${did_stash:-false}"
+}
+
+_warn_if_stashed() {
+    local did_stash="${1:-false}"
+    if [ "$did_stash" = "true" ]; then
+        echo ""
+        warn "⚠️ ВНИМАНИЕ: Ваши локальные изменения сохранены в git stash (stash@{0}) и НЕ были восстановлены автоматически."
+        info "Для просмотра сохранённых изменений: git stash show -p"
+        info "Для применения изменений поверх новой версии: git stash pop"
+    fi
+}
+
+cmd_update_post() {
+    local rollback_commit="${1:-}"
+    local pre_update_backup="${2:-}"
+    local did_stash="${3:-false}"
+    local migrations_applied=false
+
     info "Шаг 4/6. Сборка образов, валидация конфигурации и применение миграций..."
     if ! docker compose build || ! docker compose --profile tools build backup; then
         error "Ошибка при сборке Docker-образов новой версии!"
@@ -1011,6 +1030,7 @@ cmd_update() {
             warn "🚨 Выполняем автоматический откат исходного кода к коммиту $rollback_commit..."
             git reset --hard "$rollback_commit"
         fi
+        _warn_if_stashed "$did_stash"
         return 1
     fi
 
@@ -1023,6 +1043,7 @@ cmd_update() {
             warn "🚨 Отменяем обновление и возвращаем исходный код к коммиту $rollback_commit..."
             git reset --hard "$rollback_commit"
         fi
+        _warn_if_stashed "$did_stash"
         return 1
     fi
 
@@ -1034,6 +1055,7 @@ cmd_update() {
             git reset --hard "$rollback_commit"
             dc_up
         fi
+        _warn_if_stashed "$did_stash"
         return 1
     fi
 
@@ -1041,6 +1063,7 @@ cmd_update() {
     if ! docker compose run --rm migrate; then
         error "Ошибка при применении миграций базы данных! Запуск новых контейнеров отменён."
         _rollback_services_after_db_failure "$rollback_commit" "$pre_update_backup"
+        _warn_if_stashed "$did_stash"
         return 1
     fi
     migrations_applied=true
@@ -1159,6 +1182,7 @@ cmd_update() {
             info "Обновлён список CADDY_TRUSTED_PROXIES — пересоздаю caddy..."
             if ! dc_up caddy; then
                 error "Не удалось пересоздать caddy после обновления CADDY_TRUSTED_PROXIES!"
+                _warn_if_stashed "$did_stash"
                 return 1
             fi
         elif docker inspect --format='{{.State.Status}}' just1kbot_caddy 2>/dev/null | grep -q "^running$"; then
@@ -1200,6 +1224,7 @@ cmd_update() {
                 "Автоматический откат кода заблокирован (защита от рассинхронизации схемы БД)" \
                 "$bot_err_logs" \
                 "1. Проверьте логи сервисов: just1kbot logs bot\n2. Исправьте ошибку запуска или выполните полный откат с восстановлением БД: just1kbot restore $pre_update_backup"
+            _warn_if_stashed "$did_stash"
             return 1
         fi
         if [[ -n "$rollback_commit" ]]; then
@@ -1265,15 +1290,11 @@ cmd_update() {
                     "1. Немедленно восстановите рабочую базу данных: just1kbot restore $pre_update_backup\n2. Проверьте логи: just1kbot logs bot"
             fi
         fi
+        _warn_if_stashed "$did_stash"
         return 1
     fi
 
-    if [ "$did_stash" = "true" ]; then
-        echo ""
-        warn "⚠️ ВНИМАНИЕ: Ваши локальные изменения сохранены в git stash (stash@{0}) и НЕ были восстановлены автоматически."
-        info "Для просмотра сохранённых изменений: git stash show -p"
-        info "Для применения изменений поверх новой версии: git stash pop"
-    fi
+    _warn_if_stashed "$did_stash"
 
     if [[ -t 0 ]]; then
         info "Просмотр последних логов бота:"
@@ -1883,6 +1904,7 @@ cmd_restart() {
 
 cmd_start() {
     echo -e "\n${BOLD}${BLUE}=== 🚀 ЗАПУСК ВСЕХ СЕРВИСОВ ===${NC}\n"
+    ensure_subscription_domains_caddy
     dc_up
     log "Сервисы запущены."
 }
@@ -2722,6 +2744,9 @@ main() {
                 ;;
             update|pull)
                 cmd_update
+                ;;
+            _update-post)
+                cmd_update_post "${2:-}" "${3:-}" "${4:-false}"
                 ;;
             backup)
                 if [[ "${2:-}" == "gdrive" || "${2:-}" == "setup-gdrive" ]]; then

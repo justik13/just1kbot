@@ -130,7 +130,11 @@ def derive_v2_capabilities(
             _add("vless")
             _add("xray_vless")
         xhttp_mod = modules.get("vless_xhttp")
-        if isinstance(xhttp_mod, dict) and xhttp_mod.get("enabled"):
+        has_cdn_mod = any(
+            str(mod_name).startswith("cdn_") and isinstance(mod_cfg, dict) and mod_cfg.get("enabled")
+            for mod_name, mod_cfg in modules.items()
+        )
+        if isinstance(xhttp_mod, dict) and xhttp_mod.get("enabled") and has_cdn_mod:
             _add(WHITE_INTERNET_CAPABILITY)
 
     if role == "eu_hub":

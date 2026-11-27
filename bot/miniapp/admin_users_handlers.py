@@ -322,7 +322,7 @@ async def api_admin_user_details_handler(request: web.Request) -> web.Response:
             await session.scalars(
                 select(AuditLog)
                 .where(
-                    func.lower(AuditLog.target_type) == "user",
+                    func.lower(AuditLog.target_type).in_(("user", "order")),
                     or_(AuditLog.target_id == user.id, AuditLog.target_id == user.telegram_id),
                 )
                 .order_by(AuditLog.id.desc())

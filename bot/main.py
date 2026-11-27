@@ -300,9 +300,8 @@ async def _http_rate_limit_middleware(request: web.Request, handler):
     raw_wi_prefix = (os.getenv("WHITE_INTERNET_SUB_PATH_PREFIX") or WHITE_INTERNET_SUB_PATH_PREFIX).strip().strip("/")
     wi_prefix = f"/{raw_wi_prefix}/" if raw_wi_prefix else None
     if (
-        path in {"/health", "/webhook/yookassa", "/yookassa/webhook"}
-        or path == "/app"
-        or path.startswith(("/app/", "/api/app/", "/sub/"))
+        path in {"/health", "/webhook/yookassa", "/yookassa/webhook", "/app", "/app/"}
+        or path.startswith(("/app/assets/", "/api/app/", "/sub/"))
         or (wi_prefix is not None and path.startswith(wi_prefix))
     ):
         return await handler(request)

@@ -93,7 +93,7 @@ async def get_session() -> AsyncSession:
     return _sessionmaker()
 
 
-_POST_COMMIT_TIMEOUT = 30.0
+_POST_COMMIT_TIMEOUT = 45.0
 
 
 async def _safe_run_post_commit(

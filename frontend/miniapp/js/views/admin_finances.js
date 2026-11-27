@@ -220,7 +220,10 @@ export function renderAdminFinancesView(root, state, { forceRefresh = false } = 
             attBtn.setAttribute("aria-pressed", state.finAttentionOnly ? "true" : "false");
         }
         listContainer.innerHTML = "";
-        _renderFinanceRows(listContainer, curFin.items || [], state);
+        _renderFinanceRows(listContainer, curFin.items || [], state, () => {
+            state.overviewData = null;
+            return loadFinances(curFin.offset || 0);
+        });
         _renderPager(root, curFin, loadFinances, "заказов");
     };
 
@@ -463,7 +466,10 @@ export function renderAdminFinancesView(root, state, { forceRefresh = false } = 
                 renderRetryList("Не удалось загрузить финансы", () => loadFinances(0));
             }
         } else {
-            _renderFinanceRows(listContainer, finData.items || [], state, () => loadFinances(finData.offset || 0));
+            _renderFinanceRows(listContainer, finData.items || [], state, () => {
+                state.overviewData = null;
+                return loadFinances(finData.offset || 0);
+            });
             _renderPager(root, finData, loadFinances, "заказов");
         }
     }
@@ -617,7 +623,7 @@ function _renderAuditRows(container, items, state) {
         const targetType = String(item.target_type || "").toLowerCase();
         const hasTargetId = item.target_id !== null && item.target_id !== undefined && item.target_id !== "";
         const targetText = formatAuditTarget(item.target_type, item.target_id);
-        const isClickableTarget = hasTargetId && (targetType === "user" || targetType === "server");
+        const isClickableTarget = hasTargetId && (targetType === "user" || targetType === "order" || targetType === "server");
 
         const targetHtml = isClickableTarget
             ? `<button type="button" class="btn btn-sm btn-ghost-inline" data-open-target>${escapeHtml(targetText)}</button>`
@@ -639,7 +645,7 @@ function _renderAuditRows(container, items, state) {
             const targetBtn = row.querySelector("[data-open-target]");
             if (targetBtn) {
                 targetBtn.addEventListener("click", () => {
-                    if (targetType === "user") {
+                    if (targetType === "user" || targetType === "order") {
                         state.onOpenUser?.(item.target_id);
                     } else if (targetType === "server") {
                         state.onOpenNode?.(item.target_id);
