@@ -680,27 +680,42 @@ async def toggle_node(
         updated.id,
         new_state=updated.health_state or (ServerHealthState.ONLINE if target_active else ServerHealthState.MANUAL_DISABLED),
     )
-    _queue_topology_sync(session)
     if target_active:
         role = get_server_role(updated)
         if role == "ru_hub":
             from services.vless_subscription_service import VlessSubscriptionService
             sid = updated.id
 
-            async def _spawn_ru_sync(sid: int = sid) -> None:
+            async def _sync_topology_then_ru(sid: int = sid) -> None:
+                from services.topology_sync_service import sync_v2_topology_to_nodes_nonblocking
+
+                try:
+                    await sync_v2_topology_to_nodes_nonblocking()
+                except Exception as exc:
+                    logger.warning("Pre-provision v2 topology sync failed (%s); continuing.", exc)
                 VlessSubscriptionService.sync_all_active_to_server_background(sid)
 
-            queue_post_commit_task(session, _spawn_ru_sync)
+            queue_post_commit_task(session, _sync_topology_then_ru)
         elif role == "exit_node":
             from services.vless_subscription_service import VlessSubscriptionService
             ru_hubs = await VlessSubscriptionService.get_configured_vless_servers(session)
-            for hub in ru_hubs:
-                hid = hub.id
+            hub_ids = [hub.id for hub in ru_hubs]
 
-                async def _spawn_hub_sync(hid: int = hid) -> None:
+            async def _sync_topology_then_hubs(hids: list[int] = hub_ids) -> None:
+                from services.topology_sync_service import sync_v2_topology_to_nodes_nonblocking
+
+                try:
+                    await sync_v2_topology_to_nodes_nonblocking()
+                except Exception as exc:
+                    logger.warning("Pre-provision v2 topology sync failed (%s); continuing.", exc)
+                for hid in hids:
                     VlessSubscriptionService.sync_all_active_to_server_background(hid)
 
-                queue_post_commit_task(session, _spawn_hub_sync)
+            queue_post_commit_task(session, _sync_topology_then_hubs)
+        else:
+            _queue_topology_sync(session)
+    else:
+        _queue_topology_sync(session)
     await AuditService.log_action(
         session,
         admin_id=admin_id,
@@ -859,7 +874,6 @@ async def set_node_lifecycle(
 
         prev_lifecycle = server.lifecycle_status
         updated = await update_server(session, server, **update_kwargs)
-        _queue_topology_sync(session)
         if (
             str(prev_lifecycle or "").upper() == ServerLifecycleStatus.DECOMMISSIONING.value
             and normalized == ServerLifecycleStatus.ACTIVE.value
@@ -870,10 +884,18 @@ async def set_node_lifecycle(
 
             sid = updated.id
 
-            async def _spawn_ru_sync(sid: int = sid) -> None:
+            async def _sync_topology_then_ru(sid: int = sid) -> None:
+                from services.topology_sync_service import sync_v2_topology_to_nodes_nonblocking
+
+                try:
+                    await sync_v2_topology_to_nodes_nonblocking()
+                except Exception as exc:
+                    logger.warning("Pre-provision v2 topology sync failed (%s); continuing.", exc)
                 VlessSubscriptionService.sync_all_active_to_server_background(sid)
 
-            queue_post_commit_task(session, _spawn_ru_sync)
+            queue_post_commit_task(session, _sync_topology_then_ru)
+        else:
+            _queue_topology_sync(session)
         await AuditService.log_action(
             session,
             admin_id=admin_telegram_id,

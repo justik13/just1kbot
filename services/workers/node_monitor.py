@@ -1697,15 +1697,18 @@ async def check_node_resources_and_alerts(bot: Bot):
                 except Exception as exc:
                     logger.warning("Failed to persist telemetry alert state for server %d: %s", server.id, exc)
 
-    # Bounded parallel fan-out: one hung node must not freeze monitoring of
-    # the remaining nodes in this cycle.
+    # Bounded parallel fan-out: evaluate non-ru_hub nodes (including eu_hubs) first so
+    # ru_hub bridge health evaluation always sees settled eu_hub states in the same cycle.
+    non_ru_servers = [s for s in servers if get_server_role(s) != "ru_hub"]
+    ru_servers = [s for s in servers if get_server_role(s) == "ru_hub"]
     try:
-        for batch_start in range(0, len(servers), CHECK_PARALLELISM):
-            batch = servers[batch_start:batch_start + CHECK_PARALLELISM]
-            batch_results = await asyncio.gather(*(_check_one(s) for s in batch), return_exceptions=True)
-            for res in batch_results:
-                if isinstance(res, Exception):
-                    logger.error("Error in node_monitor batch check: %s", res)
+        for group in (non_ru_servers, ru_servers):
+            for batch_start in range(0, len(group), CHECK_PARALLELISM):
+                batch = group[batch_start:batch_start + CHECK_PARALLELISM]
+                batch_results = await asyncio.gather(*(_check_one(s) for s in batch), return_exceptions=True)
+                for res in batch_results:
+                    if isinstance(res, Exception):
+                        logger.error("Error in node_monitor batch check: %s", res)
     finally:
         await shared_probe_sess.close()
 

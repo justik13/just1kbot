@@ -415,12 +415,17 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
             from config.enums import WebhookInboxStatus
 
             existing_event = await session.scalar(
-                select(WebhookInbox).where(
+                select(WebhookInbox)
+                .where(
                     WebhookInbox.provider == "yookassa",
                     WebhookInbox.event_key == event_key,
                 )
+                .with_for_update()
             )
-            if existing_event and existing_event.status != WebhookInboxStatus.PENDING.value:
+            if existing_event and existing_event.status not in (
+                WebhookInboxStatus.PENDING.value,
+                WebhookInboxStatus.RETRY.value,
+            ):
                 logger.info(
                     "[%s] YooKassa webhook event %s already processed (inbox_id=%s, status=%s), skipping",
                     request_id,

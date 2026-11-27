@@ -144,6 +144,7 @@ export async function loadAndRenderUserCabinet(root, options = {}) {
         _render(root, { loadOptions: options });
     } catch (err) {
         if (reqId !== _dashReqId || !isActive() || !root.isConnected) return;
+        if (err && err.code === "init_data_expired") return;
         root.innerHTML = `
             <section class="card card-center">
                 <div class="card-title">Не удалось загрузить кабинет</div>
