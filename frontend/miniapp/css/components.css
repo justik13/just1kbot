@@ -824,8 +824,8 @@ label:not(.switch):has(> input[type="checkbox"]) > input[type="checkbox"] {
     gap: 12px;
     padding: 12px 16px;
     border-radius: var(--radius-control);
-    background: var(--accent-emerald-soft);
-    border: 1px solid rgba(52, 211, 153, 0.34);
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
     color: var(--text-primary);
     font-family: inherit;
     text-align: left;
@@ -833,28 +833,17 @@ label:not(.switch):has(> input[type="checkbox"]) > input[type="checkbox"] {
     transition: border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
 }
 
-body[data-tier="white_internet"] .guides-trigger-card {
-    background: var(--bg-elevated);
-    border-color: rgba(255, 255, 255, 0.32);
-}
-
 .guides-trigger-icon {
     width: 36px;
     height: 36px;
     border-radius: 10px;
-    background: var(--accent-emerald-soft);
-    border: 1px solid rgba(52, 211, 153, 0.34);
-    color: var(--accent-emerald);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-strong);
+    color: var(--text-secondary);
     display: inline-flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-}
-
-body[data-tier="white_internet"] .guides-trigger-icon {
-    background: rgba(255, 255, 255, 0.14);
-    border-color: rgba(255, 255, 255, 0.35);
-    color: #ffffff;
 }
 
 .guide-step-card {
@@ -1771,7 +1760,7 @@ details[open] > summary .disclosure-pill svg {
 
 .plan-card.plan-wi {
     border-color: rgba(255, 255, 255, 0.24);
-    background: #18181f;
+    background: var(--bg-elevated);
 }
 
 .plan-wi .progress-fill {
@@ -1963,7 +1952,7 @@ details[open] > summary .disclosure-pill svg {
 
 .channel-tile.is-wi {
     border-color: rgba(255, 255, 255, 0.22);
-    background: #18181f;
+    background: var(--bg-elevated);
 }
 
 .channel-tile.is-inactive {
@@ -2052,6 +2041,11 @@ details[open] > summary .disclosure-pill svg {
     gap: 8px;
 }
 
+.connect-dock > .btn,
+.connect-dock > .sub-link-strip {
+    border-radius: 10px;
+}
+
 .sub-link-strip {
     display: flex;
     align-items: center;
@@ -2060,7 +2054,7 @@ details[open] > summary .disclosure-pill svg {
     padding: 8px 12px;
     background: var(--bg-canvas);
     border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm);
+    border-radius: 10px;
     cursor: pointer;
     width: 100%;
     text-align: left;
@@ -2235,6 +2229,10 @@ details[open] > summary .disclosure-pill svg {
         border-radius: 14px;
         border: 1px solid var(--border-strong);
         padding: 8px 12px;
+    }
+
+    .bottom-nav .nav-item {
+        border-radius: 6px;
     }
 }
 
@@ -2578,13 +2576,8 @@ button.pulse-card {
     }
 
     .guides-trigger-card:hover {
-        border-color: rgba(52, 211, 153, 0.55);
-        background: rgba(52, 211, 153, 0.16);
-    }
-
-    body[data-tier="white_internet"] .guides-trigger-card:hover {
-        border-color: rgba(255, 255, 255, 0.48);
-        background: var(--bg-hover);
+        border-color: var(--border-strong);
+        background: var(--bg-elevated);
     }
 
     .btn.btn-ghost:hover:not(:disabled) {

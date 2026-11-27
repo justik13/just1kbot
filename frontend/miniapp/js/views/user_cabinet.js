@@ -374,8 +374,8 @@ function _buildGuideHtml(subUrl, backupSubUrl, isActive) {
                             <span style="font-size:12px; color:var(--text-secondary);">Резервная ссылка (прямая)</span>
                             <button id="copyBackupSubBtn" type="button" class="btn btn-sm" style="padding:4px 10px; font-size:12px;">Скопировать</button>
                         </div>
-                        <div class="sub-url-box" style="font-size:11px; opacity:0.85;">${escapeHtml(backupSubUrl)}</div>
-                        <span class="muted" style="font-size:10px; margin-top:2px;">Используйте прямое подключение, если по основной ссылке есть задержки</span>
+                        <div class="sub-url-box" style="font-size:12px;">${escapeHtml(backupSubUrl)}</div>
+                        <span class="muted" style="font-size:12px; margin-top:4px;">Используйте прямое подключение, если по основной ссылке есть задержки</span>
                     </div>
                 ` : ""}
             </div>
@@ -438,16 +438,16 @@ function _renderConnectTab(body, d, reload, root) {
                 <div class="hero-title-group">
                     <span class="hero-status muted">Не подключено</span>
                     <h1 class="hero-headline-lg">Нет активных подписок</h1>
-                    <p class="hero-sub">Оформите «Стандарт» или «Белый интернет»: ссылка подключения активируется сразу после оплаты.</p>
+                    <p class="hero-sub">Оформите «Стандарт» или «Белый интернет»: ссылка подключения активируется сразу после оплаты</p>
                 </div>
                 <button id="goTariffsBtn" type="button" class="btn btn-primary btn-lg">Перейти к тарифам</button>
                 ${_buildGuideHtml(subUrl, backupSubUrl, false)}
                 <button id="openGuidesFromInactiveBtn" type="button" class="guides-trigger-card">
                     <span class="settings-left">
-                        ${_ICONS.book}
+                        <span class="guides-trigger-icon" aria-hidden="true">${_ICONS.book}</span>
                         <span>
-                            <span style="display:block; font-weight:600; font-size:13px;">Пошаговая инструкция и видео</span>
-                            <span class="muted" style="font-size:12px;">iOS, Android, ПК / Mac и частые вопросы</span>
+                            <span style="display:block; font-weight:600; font-size:14px; color:var(--text-primary);">Пошаговая инструкция</span>
+                            <span class="muted" style="font-size:12px;">iOS, Android, ПК / Mac, видео и частые вопросы</span>
                         </span>
                     </span>
                     <span class="node-chevron" style="display:inline-flex;">${_ICONS.chevronRight}</span>
@@ -506,7 +506,7 @@ function _renderConnectTab(body, d, reload, root) {
                         <span style="white-space:nowrap;">${Number(std.device_limit || 2)} устр.</span>
                         <span style="white-space:nowrap;">${isStdGrace ? `~${graceHoursLeft} ч.` : (stdShortDate ? `до ${stdShortDate}` : "")}</span>
                     </div>
-                    <span class="channel-action">Тарифы ›</span>
+                    <span class="channel-action">Тарифы →</span>
                 </div>
             </button>
         `
@@ -533,7 +533,7 @@ function _renderConnectTab(body, d, reload, root) {
                     <span class="channel-name">Белый интернет</span>
                     <span class="channel-indicator"></span>
                 </div>
-                <div class="channel-metric">${wiPending ? `<span style="font-size:16px;">Активация...</span>` : `${wiExhausted ? "0" : wiRemainingGb} <span class="channel-metric-unit">ГБ осталось</span>`}</div>
+                <div class="channel-metric">${wiPending ? `<span style="font-size:16px;">Настраивается</span>` : `${wiExhausted ? "0" : wiRemainingGb} <span class="channel-metric-unit">ГБ осталось</span>`}</div>
                 <div class="channel-foot">
                     <div class="progress-track">
                         <div class="progress-fill" style="background:var(--accent-white); transform:scaleX(${wiExhausted || wiPending ? 0 : (Number(wiRemainingPct || 0) / 100).toFixed(3)});"></div>
@@ -542,7 +542,7 @@ function _renderConnectTab(body, d, reload, root) {
                         <span style="white-space:nowrap;">${Number(wi.device_limit || 1)} устр.</span>
                         <span style="white-space:nowrap;">${wiPending ? "Настраивается" : (wiShortDate ? `до ${wiShortDate}` : "")}</span>
                     </div>
-                    <span class="channel-action">Тарифы ›</span>
+                    <span class="channel-action">Тарифы →</span>
                 </div>
             </button>
         `
@@ -570,7 +570,7 @@ function _renderConnectTab(body, d, reload, root) {
         <section class="hero-section">
             <div class="hero-title-group">
                 <span class="hero-status ${isStdGrace || isWiOnlyExhausted ? "warn" : (isWiOnlyPending ? "muted" : "")}">${isStdGrace ? `Льготный период · ~${graceHoursLeft} ч.` : (isWiOnlyExhausted ? "Белый интернет" : (isWiOnlyPending ? "Белый интернет" : "Подписка активна"))}</span>
-                <h1 class="hero-headline-lg">${isStdGrace ? "Подписка закончилась" : (isWiOnlyExhausted ? "Трафик закончился" : (isWiOnlyPending ? "Активация..." : "Подключение готово"))}</h1>
+                <h1 class="hero-headline-lg">${isStdGrace ? "Подписка закончилась" : (isWiOnlyExhausted ? "Трафик закончился" : (isWiOnlyPending ? "Настраивается" : "Подключение готово"))}</h1>
                 <p class="hero-sub">${isStdGrace
                     ? `Основной срок подписки закончился, но доступ сохранён ещё на ~${graceHoursLeft} ч., чтобы вы успели продлить подписку без отключения.`
                     : (isWiOnlyExhausted
@@ -602,8 +602,8 @@ function _renderConnectTab(body, d, reload, root) {
                     <span class="settings-left">
                         <span class="guides-trigger-icon" aria-hidden="true">${_ICONS.book}</span>
                         <span>
-                            <span style="display:block; font-weight:600; font-size:14px; color:var(--text-primary);">Пошаговая инструкция и видео</span>
-                            <span style="display:block; font-size:12px; color:var(--text-secondary);">iOS, Android, ПК / Mac и частые вопросы</span>
+                            <span style="display:block; font-weight:600; font-size:14px; color:var(--text-primary);">Пошаговая инструкция</span>
+                            <span style="display:block; font-size:12px; color:var(--text-secondary);">iOS, Android, ПК / Mac, видео и частые вопросы</span>
                         </span>
                     </span>
                     <span class="node-chevron" style="display:inline-flex; flex-shrink:0;">${_ICONS.chevronRight}</span>
@@ -734,7 +734,7 @@ function _renderTariffsTab(body, d, reload) {
     body.innerHTML = `
         <section class="hero-title-group">
             <h1 class="hero-headline-lg">Тарифы</h1>
-            <p class="hero-sub">Две независимые подписки на одну ссылку: выберите нужную или подключите обе.</p>
+            <p class="hero-sub">Две независимые подписки на одну ссылку: выберите нужную или подключите обе</p>
         </section>
 
         ${d.financial_hold ? `
@@ -990,7 +990,7 @@ function _buildDevicesSectionHtml(d) {
                 <div style="color:var(--text-secondary);">${_ICONS.phone}</div>
                 <div style="font-weight:600; font-size:14px;">Устройств пока нет</div>
                 <p class="muted" style="font-size:12px;">
-                    Нажмите «Подключить в INCY» или «Подключить в Happ» выше, чтобы привязать устройство.
+                    Нажмите «Подключить в INCY» или «Подключить в Happ» выше, чтобы привязать устройство
                 </p>
             </div>
         `
@@ -1437,7 +1437,7 @@ function _renderProfileTab(body, d, reload, onBack) {
             <div style="display:flex; align-items:center; gap:12px;">
                 <span id="profileLargeAvatar" class="avatar-circle avatar-lg">${_renderAvatarInner(meta)}</span>
                 <div>
-                    <h1 class="hero-headline-lg" style="font-size:20px;">${escapeHtml(meta.displayName)}</h1>
+                    <h1 class="admin-page-title">${escapeHtml(meta.displayName)}</h1>
                     ${subBadge ? `<span class="mono-badge">${escapeHtml(subBadge)}</span>` : ""}
                 </div>
             </div>

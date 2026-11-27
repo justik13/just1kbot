@@ -60,13 +60,13 @@ ADMIN_ALERT_ORDER_REQUIRES_MANUAL_REVIEW = (
 ADMIN_WI_SUB_NOT_FOUND = "❌ Подписка Белый интернет не найдена"
 ADMIN_ALERT_EMERGENCY_SUPPORT = (
     "🆘 <b>Экстренное обращение с веб-страницы</b>\n\n"
-    "👤 <b>Пользователь:</b> {user_info}\n"
-    "📋 <b>Категория:</b> {category}\n"
-    "📊 <b>Статус доступа:</b> <code>{sub_status}</code>\n"
-    "📱 <b>Устройства:</b> {devices_info}\n"
-    "🌐 <b>IP:</b> <code>{client_ip}</code>\n\n"
-    "📞 <b>Контакт для связи:</b>\n<code>{contact}</code>\n\n"
-    "💬 <b>Сообщение:</b>\n{message}"
+    "<b>Пользователь:</b> {user_info}\n"
+    "<b>Категория:</b> {category}\n"
+    "<b>Статус доступа:</b> <code>{sub_status}</code>\n"
+    "<b>Устройства:</b> {devices_info}\n"
+    "<b>IP:</b> <code>{client_ip}</code>\n\n"
+    "<b>Контакт для связи:</b>\n<code>{contact}</code>\n\n"
+    "<b>Сообщение:</b>\n{message}"
 )
 
 # Subscription feeds & web landing pages
@@ -79,21 +79,21 @@ VLESS_FEED_CHURN_LIMIT_NOTICE = "⚠️ Превышен суточный лим
 
 LANDING_INACTIVE_BADGE_PAUSED = "Доступ приостановлен"
 LANDING_INACTIVE_TITLE_DEFAULT = "Подписка не активна"
-LANDING_INACTIVE_DESC_DEFAULT = "Срок действия доступа истек или подписка приостановлена. Для возобновления перейдите в бота."
+LANDING_INACTIVE_DESC_DEFAULT = "Срок действия доступа истёк или подписка приостановлена. Для возобновления перейдите в бота."
 LANDING_INACTIVE_BADGE_DISABLED = "Отключено"
 LANDING_INACTIVE_TITLE_DISABLED = "Доступ отключен"
-LANDING_INACTIVE_DESC_DISABLED = "Доступ отключен администратором. Для уточнения обратитесь в поддержку в боте."
-LANDING_INACTIVE_BADGE_EXPIRED = "Срок истек"
-LANDING_INACTIVE_TITLE_EXPIRED = "Срок действия истек"
-LANDING_INACTIVE_DESC_EXPIRED = "Срок действия доступа подошел к концу. Для продления перейдите в бота."
+LANDING_INACTIVE_DESC_DISABLED = "Доступ отключён администратором. Для уточнения обратитесь в поддержку в боте."
+LANDING_INACTIVE_BADGE_EXPIRED = "Срок истёк"
+LANDING_INACTIVE_TITLE_EXPIRED = "Срок действия истёк"
+LANDING_INACTIVE_DESC_EXPIRED = "Срок действия доступа подошёл к концу. Для продления перейдите в бота."
 LANDING_INACTIVE_BADGE_EXHAUSTED = "Лимит исчерпан"
 LANDING_INACTIVE_TITLE_EXHAUSTED = "Трафик исчерпан"
-LANDING_INACTIVE_DESC_EXHAUSTED = "Включенный пакет трафика закончился. Для продолжения работы перейдите в бота."
+LANDING_INACTIVE_DESC_EXHAUSTED = "Включённый пакет трафика закончился. Для продолжения работы перейдите в бота."
 
 LANDING_VLESS_PAGE_TITLE = "Стандартная подписка"
 LANDING_WHITE_INTERNET_PAGE_TITLE = "Белый интернет"
-LANDING_SPECIAL_ACCESS_BADGE = "СПЕЦИАЛЬНЫЙ ДОСТУП"
-LANDING_DEVICE_FORMS_LABELS = ("УСТРОЙСТВО", "УСТРОЙСТВА", "УСТРОЙСТВ")
+LANDING_SPECIAL_ACCESS_BADGE = "Специальный доступ"
+LANDING_DEVICE_FORMS_LABELS = ("устройство", "устройства", "устройств")
 
 LANDING_REPORT_TOO_MANY_REQUESTS = "Слишком много запросов. Пожалуйста, подождите."
 LANDING_REPORT_INVALID_LINK = "Неверная ссылка."
@@ -105,7 +105,7 @@ LANDING_REPORT_DELIVERY_FAILED = "Не удалось доставить соо�
 
 # White Internet backend, feeds & traffic notifications
 WL_RENEWAL_HORIZON_EXCEEDED = "Подписка уже продлена на максимальный срок (до 2 месяцев вперед)."
-WL_ADMIN_ONLY_ALERT = "🔒 Данная операция доступна только администраторам бота."
+WL_ADMIN_ONLY_ALERT = "Операция доступна только администраторам."
 WL_DEVICE_LIMIT_MAX_REACHED = "Достигнут максимум устройств (3 устройства)."
 WL_ADD_DEVICE_SUCCESS = "Устройство добавлено. Доступно слотов: {limit}."
 WL_INSUFFICIENT_BALANCE_BUY = (
@@ -131,16 +131,16 @@ WL_USER_NOT_FOUND = "Пользователь не найден."
 WL_SUB_NOT_FOUND = "Подписка «Белый интернет» не найдена."
 WL_ALREADY_ACTIVE = "У вас уже есть активная подписка «Белый интернет». Вы можете продлить ее или докупить трафик."
 WL_NO_SUB = "У вас нет подписки «Белый интернет». Сначала оформите подписку."
-WL_SUB_EXPIRED = "Срок действия вашей подписки истек. Сначала продлите подписку, чтобы докупить трафик."
+WL_SUB_EXPIRED = "Срок действия вашей подписки истёк. Сначала продлите подписку, чтобы докупить трафик."
 WL_SUB_DISABLED = "Подписка отключена администратором. Обратитесь в поддержку."
-WL_SUB_NOT_READY = "Подписка еще настраивается. Повторите попытку через несколько секунд."
+WL_SUB_NOT_READY = "Подписка ещё настраивается. Повторите попытку через несколько секунд."
 WL_BUY_SUCCESS = "Подписка оформлена."
 WL_RENEW_SUCCESS = "Подписка продлена на 30 дней."
 WL_TOPUP_SUCCESS = "Пакет +{gb} ГБ добавлен к вашей подписке."
 WL_CAP_EXCEEDED = "Докупка {gb} ГБ превысит максимальный лимит накопления (150 ГБ). У вас доступно {available} ГБ."
 WL_INVALID_TOPUP_PACK = "Недопустимый пакет трафика: {gb} ГБ."
 WL_DEBIT_FAILED = "Ошибка списания средств."
-WL_NO_SERVERS_AVAILABLE = "К сожалению, сейчас нет доступных свободных шлюзов для подключения. Пожалуйста, обратитесь в поддержку или повторите попытку позже."
+WL_NO_SERVERS_AVAILABLE = "Сейчас нет свободных шлюзов для подключения. Напишите в поддержку или попробуйте позже."
 WL_DEACTIVATION_PENDING = "Ожидается завершение деактивации предыдущей подписки на узле."
 WL_AUTO_PUSH_READY = (
     "<b>Белый интернет готов к работе</b>\n\n"
@@ -149,13 +149,13 @@ WL_AUTO_PUSH_READY = (
 
 WL_TRAFFIC_EXHAUSTED_ALERT = (
     "<b>Белый интернет: Лимит трафика исчерпан</b>\n\n"
-    "Включенный пакет трафика закончился. Для продолжения работы вы можете "
-    "докупить дополнительный пакет (+10, +25 или +50 ГБ) в разделе «Тарифы» личного кабинета."
+    "Включённый пакет трафика закончился. Докупите дополнительный пакет "
+    "(+10, +25 или +50 ГБ) в разделе «Тарифы» личного кабинета."
 )
 WL_TRAFFIC_90P_ALERT = (
     "<b>Белый интернет: Осталось 10% трафика</b>\n\n"
     "Вы израсходовали 90% пакета трафика. "
-    "Рекомендуем заранее докупить пакет в разделе «Тарифы» личного кабинета, чтобы доступ не прерывался."
+    "Чтобы доступ не прерывался, докупите пакет в разделе «Тарифы» личного кабинета."
 )
 
 WL_WEB_PENDING = "Шлюз настраивается, повторите через несколько секунд."
@@ -182,13 +182,12 @@ WL_DEFAULT_TARIFF_NAME = "Белый интернет 50 ГБ"
 # Onboarding & Mini App entry
 TOS_AGREEMENT_URL = "https://telegra.ph/Polzovatelskoe-soglashenie-07-23-48"
 PRIVACY_POLICY_URL = "https://telegra.ph/Politika-konfidencialnosti-07-23-84"
-USER_HUB_START = "друг"
 BTN_MINIAPP_CONNECT = "Подключить"
 START_REFERRAL_DISCOUNT_LINE = (
     "\n<b>Приветственная скидка {discount_pct}%</b> по приглашению активна для вашего первого заказа.\n"
 )
 START_HUB_MESSAGE = (
-    "Привет, <b>{name}</b>.\n"
+    "{greeting_line}\n"
     "{discount_line}\n"
     "{profile_block}\n\n"
     "{referral_block}\n\n"
@@ -199,8 +198,8 @@ START_HUB_MESSAGE = (
 )
 START_TECHNICAL_ERROR = "⚠️ Произошла техническая ошибка. Попробуйте позже."
 START_FALLBACK_MESSAGE = (
-    "Управление доступом, тарифами и инструкциями находится в личном кабинете.\n"
-    "Если нужна помощь оператора — откройте кабинет, раздел «Ещё» → «Написать в поддержку»."
+    "Откройте личный кабинет для управления доступом, тарифами и инструкциями.\n"
+    "Вопросы по настройке: кабинет → «Ещё» → «Написать в поддержку»."
 )
 
 

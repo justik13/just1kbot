@@ -45,7 +45,7 @@
         let activePlatform = "ios";
 
         const _TRIGGER_COPY = {
-            ios: "Смена региона App Store за 2 минуты и видеоинструкция",
+            ios: "Видео и шаги смены региона App Store за 2 минуты",
             android: "Установка из Google Play или прямой APK без сервисов",
             windows: "Установка клиента для Windows и выбор режима работы",
             macos: "Установка образа .dmg или App Store на macOS",
@@ -244,7 +244,7 @@
 
                 const data = await response.json().catch(() => ({}));
                 if (response.ok && data.ok) {
-                    statusMsg.innerHTML = '<span>Контакты отправлены. Оператор скоро свяжется с вами</span><br><button type="button" class="support-reset-btn" onclick="resetSupportForm()">Отправить ещё сообщение</button>';
+                    statusMsg.innerHTML = '<span>Обращение отправлено. Оператор ответит по указанному контакту</span><br><button type="button" class="support-reset-btn" onclick="resetSupportForm()">Отправить ещё сообщение</button>';
                     statusMsg.className = "support-status-msg success";
                     statusMsg.style.display = "block";
                     contactInput.disabled = true;

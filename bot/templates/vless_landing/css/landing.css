@@ -43,7 +43,7 @@
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Inter', 'Segoe UI', Roboto, sans-serif;
+            font-family: var(--font-sans);
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
             background-color: var(--bg-page);
@@ -66,8 +66,8 @@
             position: relative;
             width: 100%;
             max-width: 440px;
-            background-color: #0c0c10;
-            border: 1px solid var(--border-subtle); /* taste-skill-ignore */
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-subtle);
             border-radius: var(--radius-card);
             padding: 20px;
             text-align: left;
@@ -397,7 +397,7 @@
             text-overflow: ellipsis;
         }
 
-        /* Guides Trigger Button — distinct highlighted card so it stands out from download tiles */
+        /* Guides Trigger Button */
         .guides-trigger-card {
             width: 100%;
             display: flex;
@@ -406,8 +406,8 @@
             margin-top: 16px;
             padding: 12px 16px;
             min-height: 56px;
-            background: var(--tier-tint);
-            border: 1px solid var(--tier-border); /* taste-skill-ignore */
+            background: var(--bg-tile);
+            border: 1px solid var(--border-subtle);
             border-radius: var(--radius-panel);
             color: var(--text-primary);
             font-family: inherit;
@@ -418,7 +418,7 @@
 
         .guides-trigger-card:hover {
             background-color: var(--bg-raised);
-            border-color: var(--tier-highlight-line);
+            border-color: var(--border-strong);
         }
 
         .guides-trigger-card:active {
@@ -429,8 +429,8 @@
             width: 38px;
             height: 38px;
             border-radius: var(--radius-control);
-            background-color: var(--tier-tint);
-            color: var(--tier-accent);
+            background-color: var(--bg-raised);
+            color: var(--text-secondary);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -540,7 +540,7 @@
             align-items: center;
             justify-content: space-between;
             background-color: var(--bg-input);
-            border: 1px solid var(--border-subtle); /* taste-skill-ignore */
+            border: 1px solid var(--border-subtle);
             border-radius: var(--radius-control);
             padding: 4px 4px 4px 12px;
             gap: 8px;
@@ -553,7 +553,7 @@
         }
 
         code.sub-bar-text {
-            font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+            font-family: var(--font-mono);
             font-size: 12px;
             color: var(--text-muted);
             white-space: nowrap;
@@ -671,7 +671,7 @@
 
         .support-form-inner {
             padding: 12px 14px 14px;
-            background-color: #111116;
+            background-color: var(--bg-input);
             text-align: left;
         }
 
@@ -699,7 +699,7 @@
             width: 100%;
             min-height: 40px;
             background-color: var(--bg-input);
-            border: 1px solid var(--border-subtle); /* taste-skill-ignore */
+            border: 1px solid var(--border-subtle);
             border-radius: var(--radius-control);
             padding: 8px 12px;
             font-size: 14px;
@@ -849,7 +849,7 @@
             position: sticky;
             top: 0;
             z-index: 25;
-            background-color: #0c0c10;
+            background-color: var(--bg-card);
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -1057,7 +1057,7 @@
         }
 
         .guide-method-sub {
-            font-size: 11.5px;
+            font-size: 12px;
             color: var(--text-muted);
             line-height: 1.3;
         }
@@ -1425,7 +1425,7 @@
 
         .guide-step-desc code,
         .guide-tip-desc code {
-            font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+            font-family: var(--font-mono);
             font-size: 12px;
             background-color: var(--bg-input);
             border-radius: 4px;
@@ -1435,7 +1435,7 @@
 
         /* Tip Box */
         .guide-tip-box {
-            background-color: #111116;
+            background-color: var(--bg-input);
             border-radius: var(--radius-control);
             padding: 12px 14px;
             margin-top: 12px;
@@ -1698,7 +1698,7 @@
 
         /* Address Data Table Card */
         .guide-data-card {
-            background-color: #111116;
+            background-color: var(--bg-input);
             border-radius: var(--radius-control);
             padding: 12px 14px;
             margin-top: 12px;
@@ -1825,7 +1825,7 @@
             font-size: 13px;
             color: var(--text-secondary);
             line-height: 1.55;
-            background-color: #111116;
+            background-color: var(--bg-input);
         }
 
         .guide-faq-item.open .guide-faq-a {
@@ -1898,7 +1898,7 @@
                 flex-direction: column;
                 gap: 4px;
                 padding: 8px 2px;
-                font-size: 11.5px;
+                font-size: 12px;
             }
             .btn-row {
                 grid-template-columns: 1fr;

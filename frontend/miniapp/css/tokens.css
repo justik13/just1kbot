@@ -23,8 +23,6 @@
     --accent-white-soft: rgba(255, 255, 255, 0.07);
     --accent-emerald: #34d399;
     --accent-emerald-soft: rgba(52, 211, 153, 0.12);
-    --accent-sky: #38bdf8;
-    --accent-sky-soft: rgba(56, 189, 248, 0.12);
     --accent-amber: #fbbf24;
     --accent-amber-soft: rgba(251, 191, 36, 0.12);
     --accent-amber-ink: #fde68a;
@@ -39,7 +37,6 @@
     --radius-sm: 8px;
     --radius-pill: 999px;
 
-    --glass-blur: blur(20px) saturate(180%);
     --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
     --dur-fast: 150ms;
     --dur-mid: 220ms;

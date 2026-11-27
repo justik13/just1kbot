@@ -270,7 +270,8 @@ async def cmd_start(message: Message) -> None:
         f"&text={quote(share_text, safe='')}"
     )
 
-    safe_name = safe(db_user.first_name or tg_user.first_name or texts.USER_HUB_START)
+    raw_name = db_user.first_name or tg_user.first_name
+    greeting_line = f"Привет, <b>{safe(raw_name)}</b>." if raw_name else "Привет."
     discount_line = (
         texts.START_REFERRAL_DISCOUNT_LINE.format(
             discount_pct=profile_ctx["welcome_discount_pct"]
@@ -288,7 +289,7 @@ async def cmd_start(message: Message) -> None:
         admin_url=admin_url,
     )
     msg_text = texts.START_HUB_MESSAGE.format(
-        name=safe_name,
+        greeting_line=greeting_line,
         discount_line=discount_line,
         **profile_ctx,
     )

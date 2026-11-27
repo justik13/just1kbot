@@ -767,9 +767,9 @@ async def serve_unified_subscription_feed(
                         tier = "family"
                     else:
                         tier = "basic"
-                    prefix = tariff_clean.upper() if tariff_clean else tier.upper()
+                    prefix = tariff_clean if tariff_clean else tier.capitalize()
                     device_str = format_plural(landing_std_limit, texts.LANDING_DEVICE_FORMS_LABELS)
-                    tariff_badge = f"{prefix} • {device_str}"
+                    tariff_badge = f"{prefix} · {device_str}"
                     page_title = texts.LANDING_VLESS_PAGE_TITLE
                 else:
                     tier = "white_internet"
