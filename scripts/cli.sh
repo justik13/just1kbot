@@ -158,10 +158,46 @@ set_env_var() {
     local env_file="${PROJECT_DIR}/.env"
     [[ ! -f "$env_file" ]] && return 1
 
+    if command -v python3 >/dev/null 2>&1; then
+        python3 - "$env_file" "$key" "$val" <<'PYEOF'
+import os
+import sys
+
+path, key, val = sys.argv[1:4]
+with open(path, "r", encoding="utf-8", errors="replace") as f:
+    lines = f.read().splitlines(keepends=True)
+
+new_line = f"{key}={val}\n"
+prefix = f"{key}="
+found = False
+out = []
+for line in lines:
+    if line.startswith(prefix):
+        out.append(new_line)
+        found = True
+    else:
+        out.append(line)
+if not found:
+    if out and not out[-1].endswith("\n"):
+        out[-1] = out[-1] + "\n"
+    out.append(new_line)
+
+tmp_path = f"{path}.tmp.{os.getpid()}"
+with open(tmp_path, "w", encoding="utf-8") as f:
+    f.writelines(out)
+os.chmod(tmp_path, 0o600)
+os.replace(tmp_path, path)
+PYEOF
+        return $?
+    fi
+
+    local escaped_val="${val//\\/\\\\}"
+    escaped_val="${escaped_val//&/\\&}"
+    escaped_val="${escaped_val//|/\\|}"
     if grep -Eq "^${key}=" "$env_file" 2>/dev/null; then
-        sed -i -E "s|^${key}=.*|${key}=${val}|" "$env_file"
+        sed -i -E "s|^${key}=.*|${key}=${escaped_val}|" "$env_file"
     else
-        echo "${key}=${val}" >> "$env_file"
+        printf '%s=%s\n' "$key" "$val" >> "$env_file"
     fi
 }
 
@@ -236,7 +272,7 @@ sync_trusted_proxies_env() {
     [[ "$db_running" == "true" ]] || return 0
 
     local api_urls
-    api_urls="$(docker exec just1kbot_db sh -c 'psql -U "${POSTGRES_USER:-just1kbot}" -d "${POSTGRES_DB:-just1kbot_bot}" -Atc "SELECT api_url FROM servers WHERE is_active = true AND role = '\''ru_hub'\'' ORDER BY id;"' 2>/dev/null || true)"
+    api_urls="$(docker exec just1kbot_db sh -c 'psql -U "${POSTGRES_USER:-just1kbot}" -d "${POSTGRES_DB:-just1kbot_bot}" -Atc "SELECT api_url FROM servers WHERE is_active = true AND lifecycle_status IN ('\''ACTIVE'\'', '\''DECOMMISSIONING'\'') AND (role = '\''ru_hub'\'' OR capabilities @> '\''[\"ru_hub\"]'\''::jsonb) ORDER BY id;"' 2>/dev/null || true)"
     [[ -n "${api_urls// }" ]] || return 0
 
     local py_bin=""
@@ -257,6 +293,7 @@ import socket
 import sys
 from urllib.parse import urlsplit
 
+socket.setdefaulttimeout(3.0)
 urls_raw, cur_caddy, cur_bot = sys.argv[1:4]
 hub_ips = []
 seen = set()
@@ -268,7 +305,10 @@ for line in urls_raw.splitlines():
     if not host:
         continue
     try:
-        ip_str = str(ipaddress.ip_address(host))
+        ip_obj = ipaddress.ip_address(host)
+        if isinstance(ip_obj, ipaddress.IPv6Address) and ip_obj.ipv4_mapped:
+            ip_obj = ip_obj.ipv4_mapped
+        ip_str = str(ip_obj)
         if ip_str not in seen:
             seen.add(ip_str)
             hub_ips.append(ip_str)
@@ -276,19 +316,33 @@ for line in urls_raw.splitlines():
     except ValueError:
         pass
     try:
-        for info in socket.getaddrinfo(host, None, socket.AF_INET, socket.SOCK_STREAM):
-            addr = info[4][0]
-            if addr not in seen:
-                seen.add(addr)
-                hub_ips.append(addr)
+        for info in socket.getaddrinfo(host, None, socket.AF_UNSPEC, socket.SOCK_STREAM):
+            addr = info[4][0] if info and len(info) >= 5 and info[4] else ""
+            if not addr:
+                continue
+            try:
+                ip_obj = ipaddress.ip_address(addr)
+                if isinstance(ip_obj, ipaddress.IPv6Address) and ip_obj.ipv4_mapped:
+                    ip_obj = ip_obj.ipv4_mapped
+                ip_str = str(ip_obj)
+                if ip_str not in seen:
+                    seen.add(ip_str)
+                    hub_ips.append(ip_str)
+            except ValueError:
+                continue
     except Exception:
         continue
+
+if not hub_ips:
+    print("\t")
+    sys.exit(0)
 
 def merge_tokens(existing_raw, base_tokens, sep):
     tokens = []
     token_set = set()
     raw_items = existing_raw.replace(",", " ").split() if existing_raw else []
-    for item in list(base_tokens) + raw_items + hub_ips:
+    preserved_cidrs = [item.strip() for item in raw_items if "/" in item or item.strip() in ("private_ranges",)]
+    for item in list(base_tokens) + preserved_cidrs + hub_ips:
         val = item.strip()
         if val and val not in token_set:
             token_set.add(val)
@@ -860,7 +914,13 @@ cmd_update() {
         if [[ ! "$force_rebuild" =~ ^[Yy]$ ]]; then
             apply_sysctl_hardening
             ensure_subscription_domains_caddy
-            if docker inspect --format='{{.State.Status}}' just1kbot_caddy 2>/dev/null | grep -q "^running$"; then
+            if [[ "${TRUSTED_PROXIES_ENV_CHANGED:-0}" == "1" ]]; then
+                info "Обновлён список TRUSTED_PROXIES / CADDY_TRUSTED_PROXIES — применяю переменные окружения в контейнерах..."
+                if ! dc_up caddy bot; then
+                    error "Не удалось пересоздать caddy/bot для применения TRUSTED_PROXIES!"
+                    return 1
+                fi
+            elif docker inspect --format='{{.State.Status}}' just1kbot_caddy 2>/dev/null | grep -q "^running$"; then
                 docker exec just1kbot_caddy caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
             fi
             log "Обновление завершено (код уже актуален)."
@@ -1035,6 +1095,7 @@ cmd_update() {
     fi
 
     info "Шаг 5/6. Запуск обновлённых сервисов..."
+    ensure_subscription_domains_caddy
     if [[ "$need_network_recreate" == "true" ]]; then
         warn "Обновление изменило параметры docker-сетей — пересоздаю сети (краткий даунтайм ~1 мин, данные в volumes сохраняются)..."
         docker compose down
@@ -1094,8 +1155,11 @@ cmd_update() {
         apply_sysctl_hardening
         ensure_subscription_domains_caddy
         if [[ "${TRUSTED_PROXIES_ENV_CHANGED:-0}" == "1" ]]; then
-            info "Обновлён список TRUSTED_PROXIES / CADDY_TRUSTED_PROXIES — применяю переменные окружения в контейнерах..."
-            dc_up caddy bot >/dev/null 2>&1 || true
+            info "Обновлён список TRUSTED_PROXIES / CADDY_TRUSTED_PROXIES — пересоздаю caddy и bot..."
+            if ! dc_up caddy bot; then
+                error "Не удалось пересоздать caddy/bot после обновления TRUSTED_PROXIES!"
+                return 1
+            fi
         elif docker inspect --format='{{.State.Status}}' just1kbot_caddy 2>/dev/null | grep -q "^running$"; then
             info "Применение актуальной конфигурации Caddy (reload)..."
             if ! docker exec just1kbot_caddy caddy reload --config /etc/caddy/Caddyfile 2>/dev/null; then
@@ -1784,6 +1848,13 @@ cmd_restart() {
     local service="${1:-bot}"
     echo -e "\n${BOLD}${BLUE}=== ⚡ ПЕРЕЗАПУСК СЕРВИСА: ${service} ===${NC}\n"
     ensure_subscription_domains_caddy
+    if [[ "${TRUSTED_PROXIES_ENV_CHANGED:-0}" == "1" ]]; then
+        info "Обновлён список TRUSTED_PROXIES / CADDY_TRUSTED_PROXIES — пересоздаю caddy и bot..."
+        if ! dc_up caddy bot; then
+            error "Не удалось пересоздать caddy/bot!"
+            return 1
+        fi
+    fi
     if [[ "$service" == "all" ]]; then
         docker compose restart
     else

@@ -248,6 +248,7 @@ async def _send_wi_90p_alerts(bot: Bot | None, warn_users: list[tuple[int, int, 
 
     try:
         for sub_id, uid, expected_version in unique_items:
+            handled = False
             try:
                 async with session_scope() as session:
                     user = await session.scalar(select(User).where(User.id == uid))
@@ -263,6 +264,7 @@ async def _send_wi_90p_alerts(bot: Bot | None, warn_users: list[tuple[int, int, 
                             )
                             .values(notified_90p=True)
                         )
+                    handled = True
                     continue
 
                 try:
@@ -285,6 +287,7 @@ async def _send_wi_90p_alerts(bot: Bot | None, warn_users: list[tuple[int, int, 
                             )
                             .values(notified_90p=True)
                         )
+                    handled = True
                 except Exception as exc:
                     if is_terminal_telegram_error(exc):
                         logger.info("User %d blocked bot or terminal error (%s); marking blocked in database", uid, exc)
@@ -300,6 +303,7 @@ async def _send_wi_90p_alerts(bot: Bot | None, warn_users: list[tuple[int, int, 
                                 )
                                 .values(notified_90p=True)
                             )
+                        handled = True
                     else:
                         logger.warning("Failed to send 90%% traffic warning alert to user %d: %s", uid, exc)
                         async with session_scope() as session:
@@ -311,6 +315,7 @@ async def _send_wi_90p_alerts(bot: Bot | None, warn_users: list[tuple[int, int, 
                                 )
                                 .values(notified_90p=False)
                             )
+                        handled = True
             except Exception as exc:
                 logger.warning(
                     "Failed to process 90%% traffic warning alert for sub %d (user %d): %s",
@@ -319,6 +324,19 @@ async def _send_wi_90p_alerts(bot: Bot | None, warn_users: list[tuple[int, int, 
                     exc,
                 )
             finally:
+                if not handled:
+                    try:
+                        async with session_scope() as session:
+                            await session.execute(
+                                update(WhiteInternetSubscription)
+                                .where(
+                                    WhiteInternetSubscription.id == sub_id,
+                                    WhiteInternetSubscription.desired_version == expected_version,
+                                )
+                                .values(notified_90p=False)
+                            )
+                    except Exception:
+                        pass
                 _in_flight_90p_subs.discard(sub_id)
     finally:
         for sub_id, _uid, _expected_version in unique_items:

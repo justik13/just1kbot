@@ -561,7 +561,7 @@ async def serve_unified_subscription_feed(
     token_source: str = "vless",
 ) -> web.Response:
     """Serve unified Base64 subscription feed (Standard + White Internet) with HWID accounting."""
-    client_ip = get_trusted_client_ip(request)
+    client_ip = get_trusted_client_ip(request, allow_yandex_header=True)
     allowed_ip, retry_after_ip = _ip_rate_limiter.check(client_ip)
     if not allowed_ip:
         return web.Response(
@@ -1235,7 +1235,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
 
 async def vless_report_handler(request: web.Request) -> web.Response:
     """Handle emergency contact reports from standard VLESS landing pages."""
-    client_ip = get_trusted_client_ip(request)
+    client_ip = get_trusted_client_ip(request, allow_yandex_header=True)
     allowed_ip, retry_after_ip = _report_ip_limiter.check(client_ip)
     if not allowed_ip:
         return web.json_response(
@@ -1412,7 +1412,7 @@ async def vless_report_handler(request: web.Request) -> web.Response:
 
 async def vless_guide_video_handler(request: web.Request) -> web.Response:
     """Serve the iOS region-change video guide with HTTP Range support and long cache."""
-    client_ip = get_trusted_client_ip(request)
+    client_ip = get_trusted_client_ip(request, allow_yandex_header=True)
     allowed, retry_after = _asset_rate_limiter.check(client_ip)
     if not allowed:
         return web.Response(

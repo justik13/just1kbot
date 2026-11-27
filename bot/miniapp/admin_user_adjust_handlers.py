@@ -741,7 +741,11 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                 wi_sub.status_reason = "quota_exhausted"
                 wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_DELETE
                 transitioned_to_exhausted = True
-            elif wi_sub.status == WhiteInternetStatus.EXHAUSTED and total_quota > used_quota:
+            elif (
+                wi_sub.status == WhiteInternetStatus.EXHAUSTED
+                and total_quota > used_quota
+                and (wi_sub.expires_at is None or wi_sub.expires_at > now)
+            ):
                 wi_sub.status = WhiteInternetStatus.ACTIVE
                 wi_sub.status_reason = None
                 wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
