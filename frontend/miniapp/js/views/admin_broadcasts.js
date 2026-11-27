@@ -397,7 +397,12 @@ export function renderAdminBroadcastsView(root, state) {
                 return;
             }
             try {
-                const preview = await withButtonLoading(submitBtn, "Подсчёт…", () => api.previewBroadcast(audience));
+                const preview = await withButtonLoading(submitBtn, "Подсчёт…", () =>
+                    api.previewBroadcast(audience, {
+                        service_scope: scope,
+                        include_bot_blocked: true,
+                    })
+                );
                 if (!root.isConnected || state.adminTab !== "broadcasts" || state.mode !== "admin") return;
                 const totalCount = Number(preview.total_count ?? preview.reachable_count ?? 0);
                 const reachableCount = Number(preview.reachable_count ?? 0);
@@ -433,7 +438,12 @@ export function renderAdminBroadcastsView(root, state) {
             }
             const scopeLabel = scope === "white_internet" ? "Белый интернет" : "Стандарт";
             try {
-                const preview = await withButtonLoading(submitBtn, "Подсчёт…", () => api.previewBroadcast(audience));
+                const preview = await withButtonLoading(submitBtn, "Подсчёт…", () =>
+                    api.previewBroadcast(audience, {
+                        service_scope: scope,
+                        include_bot_blocked: true,
+                    })
+                );
                 if (!root.isConnected || state.adminTab !== "broadcasts" || state.mode !== "admin") return;
                 const totalCount = Number(preview.total_count ?? preview.reachable_count ?? 0);
                 const reachableCount = Number(preview.reachable_count ?? 0);

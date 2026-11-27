@@ -280,6 +280,7 @@ async function _renderAdminView() {
         _updateTelegramBackButton(null);
         await loadAndRenderUserCabinet(root, {
             isActive: () => seq === _tabSwitchSeq && appState.mode === "cabinet",
+            resetTab: true,
         });
         return;
     }

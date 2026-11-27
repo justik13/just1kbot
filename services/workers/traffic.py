@@ -648,8 +648,6 @@ async def _traffic_sync_once(bot: Bot | None = None):
                                         and total_quota > 0
                                         and used >= (0.90 * total_quota)
                                     ):
-                                        sub.notified_90p = True
-                                        await session.flush()
                                         warn_90p_entry = (
                                             sub.id,
                                             sub.user_id,

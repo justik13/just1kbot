@@ -126,6 +126,7 @@ async def count_broadcast_audience(
     *,
     admin_id: int | None = None,
     include_bot_blocked: bool = False,
+    service_scope: str | None = None,
 ) -> int:
     stmt = select(func.count(User.id))
     stmt = await apply_audience_filter(
@@ -135,6 +136,17 @@ async def count_broadcast_audience(
         admin_id=admin_id,
         include_bot_blocked=include_bot_blocked,
     )
+    if service_scope == "white_internet":
+        from config.enums import WhiteInternetStatus
+        from database.models import WhiteInternetSubscription
+
+        stmt = stmt.where(
+            User.id.in_(
+                select(WhiteInternetSubscription.user_id).where(
+                    WhiteInternetSubscription.status != WhiteInternetStatus.DISABLED,
+                )
+            )
+        )
     return int((await session.scalar(stmt)) or 0)
 
 

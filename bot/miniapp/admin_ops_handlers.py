@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 async def api_admin_broadcasts_list_handler(request: web.Request) -> web.Response:
-    ctx, err_resp = _ha.require_admin_user(request)
+    ctx, err_resp = await _ha.require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
@@ -42,7 +42,7 @@ async def api_admin_broadcasts_list_handler(request: web.Request) -> web.Respons
 
 
 async def api_admin_broadcast_preview_handler(request: web.Request) -> web.Response:
-    ctx, err_resp = _ha.require_admin_user(request)
+    ctx, err_resp = await _ha.require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
@@ -57,12 +57,14 @@ async def api_admin_broadcast_preview_handler(request: web.Request) -> web.Respo
                 payload.target_audience,
                 admin_id=ctx.telegram_id,
                 include_bot_blocked=False,
+                service_scope=payload.service_scope,
             )
             total_with_blocked = await _ha.broadcast_service.count_broadcast_audience(
                 session,
                 payload.target_audience,
                 admin_id=ctx.telegram_id,
                 include_bot_blocked=True,
+                service_scope=payload.service_scope,
             )
             label = await _ha.broadcast_service.resolve_audience_label(
                 session, payload.target_audience
@@ -80,7 +82,7 @@ async def api_admin_broadcast_preview_handler(request: web.Request) -> web.Respo
 
 
 async def api_admin_broadcast_start_handler(request: web.Request) -> web.Response:
-    ctx, err_resp = _ha.require_admin_user(request)
+    ctx, err_resp = await _ha.require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
@@ -105,7 +107,7 @@ async def api_admin_broadcast_start_handler(request: web.Request) -> web.Respons
 
 
 async def api_admin_broadcast_cancel_handler(request: web.Request) -> web.Response:
-    ctx, err_resp = _ha.require_admin_user(request)
+    ctx, err_resp = await _ha.require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
@@ -122,7 +124,7 @@ async def api_admin_broadcast_cancel_handler(request: web.Request) -> web.Respon
 
 
 async def api_admin_mass_bonus_handler(request: web.Request) -> web.Response:
-    ctx, err_resp = _ha.require_admin_user(request)
+    ctx, err_resp = await _ha.require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
@@ -150,7 +152,7 @@ async def api_admin_mass_bonus_handler(request: web.Request) -> web.Response:
 
 
 async def api_admin_mass_extend_handler(request: web.Request) -> web.Response:
-    ctx, err_resp = _ha.require_admin_user(request)
+    ctx, err_resp = await _ha.require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
@@ -179,7 +181,7 @@ async def api_admin_mass_extend_handler(request: web.Request) -> web.Response:
 
 
 async def api_admin_finances_handler(request: web.Request) -> web.Response:
-    ctx, err_resp = _ha.require_admin_user(request)
+    ctx, err_resp = await _ha.require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
@@ -206,7 +208,7 @@ async def api_admin_finances_handler(request: web.Request) -> web.Response:
 
 
 async def api_admin_audit_logs_handler(request: web.Request) -> web.Response:
-    ctx, err_resp = _ha.require_admin_user(request)
+    ctx, err_resp = await _ha.require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
@@ -230,7 +232,7 @@ async def api_admin_audit_logs_handler(request: web.Request) -> web.Response:
 
 async def api_admin_payments_maintenance_get_handler(request: web.Request) -> web.Response:
     """Get status of payments maintenance mode."""
-    ctx, err_resp = _ha.require_admin_user(request)
+    ctx, err_resp = await _ha.require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
@@ -243,7 +245,7 @@ async def api_admin_payments_maintenance_get_handler(request: web.Request) -> we
 
 async def api_admin_payments_maintenance_post_handler(request: web.Request) -> web.Response:
     """Toggle payments maintenance mode."""
-    ctx, err_resp = _ha.require_admin_user(request)
+    ctx, err_resp = await _ha.require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
@@ -274,7 +276,7 @@ async def api_admin_payments_maintenance_post_handler(request: web.Request) -> w
 
 async def api_admin_overview_handler(request: web.Request) -> web.Response:
     """Return compact system pulse for admin overview dashboard."""
-    ctx, err_resp = _ha.require_admin_user(request)
+    ctx, err_resp = await _ha.require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
@@ -388,7 +390,7 @@ async def api_admin_overview_handler(request: web.Request) -> web.Response:
 
 async def api_admin_webhooks_handler(request: web.Request) -> web.Response:
     """Return latest 30 pending/retry/dead rows from WebhookInbox."""
-    ctx, err_resp = _ha.require_admin_user(request)
+    ctx, err_resp = await _ha.require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
@@ -432,7 +434,7 @@ async def _transition_webhook_status(
     audit_action: AdminAuditAction,
     message: str,
 ) -> web.Response:
-    ctx, err_resp = _ha.require_admin_user(request)
+    ctx, err_resp = await _ha.require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
@@ -478,7 +480,7 @@ async def _transition_webhook_status(
 
 async def api_admin_webhook_retry_handler(request: web.Request) -> web.Response:
     """Synchronously reprocess a dead/retry WebhookInbox event."""
-    ctx, err_resp = _ha.require_admin_user(request)
+    ctx, err_resp = await _ha.require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
@@ -525,7 +527,7 @@ async def api_admin_webhook_retry_handler(request: web.Request) -> web.Response:
             "provider": row.provider,
             "from_status": prev_status,
             "to_status": final_status,
-            "outcome": "succeeded" if succeeded else "dead",
+            "outcome": "succeeded" if succeeded else final_status,
         }
         if error_reason:
             audit_details["error"] = error_reason[:300]
@@ -552,7 +554,7 @@ async def api_admin_webhook_retry_handler(request: web.Request) -> web.Response:
             err_msg = (
                 "Обнаружено расхождение суммы платежа; вебхук оставлен в статусе dead"
                 if error_reason == "amount_mismatch"
-                else "Заказ для вебхука не найден или не готов к обработке"
+                else f"Заказ для вебхука не найден или не готов к обработке (статус: {final_status})"
             )
             response_payload = {
                 "ok": False,

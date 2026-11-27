@@ -337,7 +337,7 @@ async def api_me_handler(request: web.Request) -> web.Response:
 
 async def api_admin_2fa_setup_handler(request: web.Request) -> web.Response:
     """Generate a temporary TOTP secret & otpauth URI for initial admin 2FA setup."""
-    ctx, err_resp = require_admin_user(request, require_2fa=False)
+    ctx, err_resp = await require_admin_user(request, require_2fa=False)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
@@ -362,7 +362,7 @@ async def api_admin_2fa_setup_handler(request: web.Request) -> web.Response:
 
 async def api_admin_2fa_verify_handler(request: web.Request) -> web.Response:
     """Verify TOTP code and issue signed X-Admin-Session token."""
-    ctx, err_resp = require_admin_user(request, require_2fa=False)
+    ctx, err_resp = await require_admin_user(request, require_2fa=False)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
@@ -441,7 +441,7 @@ async def api_admin_2fa_verify_handler(request: web.Request) -> web.Response:
 
 async def api_admin_2fa_logout_handler(request: web.Request) -> web.Response:
     """Revoke all active admin 2FA sessions and write audit log."""
-    ctx, err_resp = require_admin_user(request)
+    ctx, err_resp = await require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
@@ -458,8 +458,6 @@ async def api_admin_2fa_logout_handler(request: web.Request) -> web.Response:
 
 
 from bot.miniapp.admin_nodes_handlers import (  # noqa: E402, F401
-    _as_bool_setting,
-    _read_incy_settings_dict,
     api_admin_incy_get_handler,
     api_admin_incy_put_handler,
     api_admin_nodes_add_handler,
@@ -487,8 +485,6 @@ from bot.miniapp.admin_ops_handlers import (  # noqa: E402, F401
     api_admin_webhooks_handler,
 )
 from bot.miniapp.admin_users_handlers import (  # noqa: E402, F401
-    _is_pre_reactivation_held_order,
-    _serialize_admin_ledger_entry,
     api_admin_user_adjust_handler,
     api_admin_user_details_handler,
     api_admin_user_device_delete_handler,

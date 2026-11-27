@@ -139,11 +139,14 @@ export function renderHistoryTabContent(tab, details) {
                           : a.details
                             ? JSON.stringify(a.details)
                             : "";
+                  const adminMeta = a.admin_telegram_id
+                      ? `Админ ${escapeHtml(String(a.admin_telegram_id))} · `
+                      : "";
                   return `
                 <div class="item-row">
                     <div class="row">
                         <span class="chip chip-muted">${escapeHtml(actionLabel)}</span>
-                        <span class="meta-text">${formatDate(a.created_at)}</span>
+                        <span class="meta-text">${adminMeta}${formatDate(a.created_at)}</span>
                     </div>
                     ${
                         detailsStr

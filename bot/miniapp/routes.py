@@ -109,7 +109,7 @@ def _compute_miniapp_asset_version() -> str:
 
 
 _MINIAPP_ASSET_VERSION = _compute_miniapp_asset_version()
-_ASSET_VERSION_RE = re.compile(r"\?v=2\.\d+\.\d+")
+_ASSET_VERSION_RE = re.compile(r"\?v=\d+\.\d+\.\d+")
 _REWRITTEN_TEXT_ASSET_CACHE: dict[Path, str] = {}
 
 
@@ -178,7 +178,14 @@ async def miniapp_asset_handler(request: web.Request) -> web.Response:
     )
     if not rel_path.startswith("guides/") and target.suffix.lower() in {".js", ".css", ".html"}:
         rewritten = _get_rewritten_text_asset(target)
-        resp_headers = _NO_CACHE_HEADERS if target.suffix.lower() == ".html" else headers
+        is_html = target.suffix.lower() == ".html"
+        resp_headers = dict(_NO_CACHE_HEADERS if is_html else headers)
+        if not is_html:
+            etag = f'"{_MINIAPP_ASSET_VERSION}"'
+            resp_headers["ETag"] = etag
+            if_none_match = (request.headers.get("If-None-Match") or "").strip()
+            if if_none_match and (etag in if_none_match or f"W/{etag}" in if_none_match):
+                return web.Response(status=304, headers=resp_headers)
         return web.Response(
             text=rewritten,
             content_type=content_type,

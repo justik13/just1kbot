@@ -250,6 +250,7 @@ class WhiteInternetService:
             sub.traffic_overage_bytes = 0
             sub.desired_version = (existing.desired_version or 1) + 1
             sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+            await white_internet_repo.clear_active_pending_revocations(session, sub)
         else:
             sub = await white_internet_repo.create_white_internet_subscription(
                 session,

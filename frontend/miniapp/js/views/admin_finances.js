@@ -478,7 +478,7 @@ export function renderAdminFinancesView(root, state, { forceRefresh = false } = 
 
     bindMaintenanceToggle();
 
-    if (typeof state.paymentsMaintenance === "undefined" && !state.paymentsMaintenanceError) {
+    if (typeof state.paymentsMaintenance === "undefined" || state.paymentsMaintenanceError) {
         loadPaymentsMaintenance();
     }
 

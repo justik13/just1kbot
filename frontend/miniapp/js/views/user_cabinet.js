@@ -176,6 +176,9 @@ function _handlePaymentResponse(res, successMsg, onReload) {
             showToast("Платёж не был завершён. Попробуйте оформить заново.", "error");
             return;
         }
+        if (res.service_type && res.service_type !== "topup") {
+            _state.tab = "connect";
+        }
         showToast(successMsg);
         onReload();
         return;
@@ -457,7 +460,16 @@ function _openStandardPlanModal(d, mode, onReload) {
             quote = q;
             updateSummary();
         } catch {
-            // Instant local fallback stays shown
+            if (!wrap.isConnected || reqDev !== devices || reqDur !== duration) return;
+            updateSummary();
+            const sumEl = wrap.querySelector("#modalStdSummary");
+            if (sumEl && !sumEl.querySelector(".std-quote-warn")) {
+                const warn = document.createElement("div");
+                warn.className = "meta-text std-quote-warn";
+                warn.style.cssText = "color:var(--accent-amber); font-size:11px; margin-top:4px;";
+                warn.textContent = "Не удалось обновить расчёт с сервера — показана базовая оценка";
+                sumEl.appendChild(warn);
+            }
         }
     };
 
@@ -701,8 +713,8 @@ function _openStandardDevicesModal(d, onReload) {
         if (goDevBtn) {
             goDevBtn.addEventListener("click", () => {
                 close();
-                const connectTab = document.querySelector('[data-utab="connect"]');
-                if (connectTab) connectTab.click();
+                _state.tab = "connect";
+                onReload({ tab: "connect" });
             });
         }
     };
@@ -818,13 +830,19 @@ function _openWiPurchaseModal(d, mode, onReload) {
     let idemKey = _newIdempotencyKey();
 
     const wiStatus = String(wi.status || "").toUpperCase();
+    const isExpiredRebuy = !isRenew && wiStatus === "EXPIRED";
     const welcomeDiscountEligible = Boolean(!isRenew && wiStatus !== "EXPIRED" && ref.welcome_discount_eligible);
     const welcomeDiscountPct = Number(ref.welcome_discount_pct || 25);
 
     const wrap = document.createElement("div");
     wrap.className = "field";
     wrap.style.gap = "12px";
-    const close = openModal(isRenew ? "Продление · Белый интернет" : "Подключение · Белый интернет", wrap);
+    const modalTitle = isRenew
+        ? "Продление · Белый интернет"
+        : isExpiredRebuy
+            ? "Возобновление · Белый интернет"
+            : "Подключение · Белый интернет";
+    const close = openModal(modalTitle, wrap);
 
     const wiExpStr = _safeFormatDate(wi.expires_at);
     const wiPendStr = _safeFormatDate(wi.pending_from || wi.expires_at);
@@ -845,7 +863,9 @@ function _openWiPurchaseModal(d, mode, onReload) {
             ` : ""}
         ` : `
             <div class="muted" style="font-size:12px;">
-                Независимая подписка на 30 дней для мобильной сети при жёстких ограничениях. Работает как отдельно, так и в дополнение к «Стандарту».
+                ${isExpiredRebuy
+                    ? "Срок предыдущего периода завершился. Выберите количество слотов на новый период (+30 дн.) для возобновления доступа."
+                    : "Независимая подписка на 30 дней для мобильной сети при жёстких ограничениях. Работает как отдельно, так и в дополнение к «Стандарту»."}
             </div>
             ${d.devices && d.devices.length > 1 ? (() => {
                 const sortedDevs = [...d.devices].sort((a, b) => (a.id || 0) - (b.id || 0));
@@ -1218,6 +1238,11 @@ function _wiHasActivePeriod(wi) {
 
 export async function loadAndRenderUserCabinet(root, options = {}) {
     _state.loadOptions = options;
+    if (options.tab) {
+        _state.tab = options.tab;
+    } else if (options.resetTab) {
+        _state.tab = null;
+    }
     const isActive = () => (typeof options.isActive === "function" ? options.isActive() : true);
     const reqId = ++_dashReqId;
     try {
@@ -1251,9 +1276,9 @@ export async function loadAndRenderUserCabinet(root, options = {}) {
     }
 }
 
-function _getProfileMeta(d) {
+function _getProfileMeta() {
     const tgUser = (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initDataUnsafe && window.Telegram.WebApp.initDataUnsafe.user) || {};
-    const rawName = (d.user && d.user.name) || [tgUser.first_name, tgUser.last_name].filter(Boolean).join(" ") || (tgUser.username ? `@${tgUser.username}` : "");
+    const rawName = [tgUser.first_name, tgUser.last_name].filter(Boolean).join(" ") || (tgUser.username ? `@${tgUser.username}` : "");
     const displayName = rawName || "Профиль";
     const initial = String(displayName.replace(/^@/, "").trim().charAt(0) || "П").toUpperCase();
     const photoUrl = tgUser.photo_url || "";
@@ -1261,7 +1286,7 @@ function _getProfileMeta(d) {
         displayName,
         hasName: Boolean(rawName),
         username: tgUser.username ? `@${tgUser.username}` : "",
-        userId: (d.user && d.user.telegram_id) || tgUser.id || "",
+        userId: tgUser.id || "",
         initial,
         photoUrl,
     };
@@ -1371,7 +1396,11 @@ function _render(root, { preserveScroll = true, loadOptions = _state.loadOptions
     });
 
     const body = root.querySelector("#userTabBody");
-    const reload = () => loadAndRenderUserCabinet(root, loadOptions || {});
+    const reload = (extraOpts = {}) => loadAndRenderUserCabinet(root, {
+        ...(loadOptions || {}),
+        resetTab: false,
+        ...extraOpts,
+    });
 
     if (_state.tab === "connect") {
         _setCabinetBackButton(null);
@@ -1977,6 +2006,7 @@ function _renderTariffsTab(body, d, reload) {
     if (stdAuto) {
         stdAuto.addEventListener("change", async () => {
             const nextVal = stdAuto.checked;
+            stdAuto.disabled = true;
             try {
                 await api.setAutoRenew("standard", nextVal);
                 if (_state.data && _state.data.standard) {
@@ -1989,6 +2019,8 @@ function _renderTariffsTab(body, d, reload) {
                     _state.data.standard.auto_renew_enabled = !nextVal;
                 }
                 showToast(err.message || "Ошибка настройки автопродления", "error");
+            } finally {
+                stdAuto.disabled = false;
             }
         });
     }
@@ -2002,6 +2034,7 @@ function _renderTariffsTab(body, d, reload) {
     if (wiAuto) {
         wiAuto.addEventListener("change", async () => {
             const nextVal = wiAuto.checked;
+            wiAuto.disabled = true;
             try {
                 await api.setAutoRenew("wi", nextVal);
                 if (_state.data && _state.data.wi) {
@@ -2014,6 +2047,8 @@ function _renderTariffsTab(body, d, reload) {
                     _state.data.wi.auto_renew_enabled = !nextVal;
                 }
                 showToast(err.message || "Ошибка настройки автопродления", "error");
+            } finally {
+                wiAuto.disabled = false;
             }
         });
     }
@@ -2234,7 +2269,7 @@ function _bindDevicesEvents(container, d, reload) {
                     try {
                         await api.deleteDevice(btn.dataset.del);
                         showToast("Устройство удалено");
-                        reload();
+                        await reload();
                     } catch (err) {
                         throw new Error((err && err.message) || "Не удалось удалить устройство");
                     } finally {
@@ -2269,7 +2304,7 @@ function _bindDevicesEvents(container, d, reload) {
                     try {
                         await api.resetAllDevices();
                         showToast("Все устройства отвязаны");
-                        reload();
+                        await reload();
                     } catch (err) {
                         throw new Error((err && err.message) || "Не удалось сбросить устройства");
                     } finally {
@@ -2317,7 +2352,7 @@ function _bindDevicesEvents(container, d, reload) {
                                 try {
                                     await applyFn(hwid, 10, fromDev.hwid);
                                     showToast("Слот перенесён. Обновите список в приложении");
-                                    reload();
+                                    await reload();
                                 } catch (err) {
                                     throw new Error((err && err.message) || "Не удалось перенести слот");
                                 } finally {
@@ -2339,7 +2374,7 @@ function _bindDevicesEvents(container, d, reload) {
                             ? `${slotTitle} включён. Обновите список в приложении`
                             : `${slotTitle} отключён на устройстве`
                     );
-                    reload();
+                    await reload();
                 } catch (err) {
                     chk.checked = !wantEnable;
                     showToast(err.message || "Не удалось изменить статус слота", "error");

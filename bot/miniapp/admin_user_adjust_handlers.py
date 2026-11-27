@@ -51,7 +51,7 @@ def _is_pre_reactivation_held_order(order: Order) -> bool:
 
 async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
     """Admin action: adjust user balance or grant/extend Standard or White Internet access."""
-    ctx, err_resp = _ha.require_admin_user(request)
+    ctx, err_resp = await _ha.require_admin_user(request)
     if err_resp is not None:
         return err_resp
     if ctx is None:
@@ -157,10 +157,16 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
             forgive_amount = bal_before.debt.quantize(Decimal("1.00"))
             if payload.amount_rub is not None:
                 forgive_amount = min(forgive_amount, Decimal(payload.amount_rub).quantize(Decimal("1.00")))
+            forgive_rub = int(forgive_amount)
+            if forgive_rub < 1:
+                return web.json_response(
+                    {"ok": False, "error": "Минимальная сумма списания долга — 1 ₽"},
+                    status=400,
+                )
             await forgive_real_debt(
                 session,
                 user_id=user.id,
-                amount_rub=int(forgive_amount),
+                amount_rub=forgive_rub,
                 admin_telegram_id=ctx.telegram_id,
                 note=note or None,
             )
@@ -572,6 +578,9 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                                     WhiteInternetProvisioningStatus.PENDING_UPDATE
                                 )
                                 locked_wi.desired_version = (locked_wi.desired_version or 1) + 1
+                                await _ha.white_internet_repo.clear_active_pending_revocations(
+                                    session, locked_wi
+                                )
                                 await session.flush()
                                 await _ha._queue_wi_inline_sync(
                                     session, locked_wi, "restrictions_reactivate_wi"
@@ -723,6 +732,7 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
 
         devlimit_changed = False
         transitioned_to_exhausted = False
+        displaced_wi_uuids: list[str] = []
         if payload.device_limit is not None and payload.device_limit != wi_sub.device_limit:
             devlimit_changed = True
             wi_sub.device_limit = payload.device_limit
@@ -730,6 +740,14 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
             wi_sub.pending_device_limit = None
             wi_sub.pending_from = None
             wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
+            if payload.device_limit < before_wi_limit:
+                displaced_wi_uuids = await _ha.white_internet_repo.collect_displaced_wi_device_uuids(
+                    session, user.id, payload.device_limit
+                )
+                if displaced_wi_uuids:
+                    await _ha.white_internet_repo.add_pending_revocation_uuids(
+                        session, wi_sub.id, displaced_wi_uuids
+                    )
             total_quota = (wi_sub.base_traffic_bytes or 0) + (wi_sub.extra_traffic_bytes or 0)
             used_quota = max(0, (wi_sub.traffic_used_bytes or 0) - (wi_sub.traffic_overage_bytes or 0))
             if (
@@ -749,6 +767,7 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                 wi_sub.status = WhiteInternetStatus.ACTIVE
                 wi_sub.status_reason = None
                 wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+                await _ha.white_internet_repo.clear_active_pending_revocations(session, wi_sub)
             elif wi_sub.status == WhiteInternetStatus.ACTIVE:
                 wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
             await session.flush()
@@ -771,7 +790,12 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                     session, user.id, wi_sub, context="admin_devlimit_exhausted"
                 )
             elif devlimit_changed:
-                await _ha._queue_wi_inline_sync(session, wi_sub, "grant_wi_devlimit")
+                await _ha._queue_wi_inline_sync(
+                    session,
+                    wi_sub,
+                    "grant_wi_devlimit",
+                    displaced_dev_uuids=displaced_wi_uuids or None,
+                )
             if payload.notify_user is True:
                 _ha._queue_user_notification(
                     session,

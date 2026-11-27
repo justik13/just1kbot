@@ -185,17 +185,17 @@ function _renderSubLocationsList(locListEl, exitNodes, onLocationSaved) {
         row.type = "button";
         row.className = "node-card node-card-compact card-btn";
         row.innerHTML = `
-            <div class="row" style="align-items:center;">
-                <div class="node-compact-title">
+            <span class="row" style="align-items:center;">
+                <span class="node-compact-title">
                     ${renderFlagHtml(node.country_flag || node.location_code || "", 20)}
                     <span style="font-weight:600; font-size:14px;">${escapeHtml(node.vless_name || node.name)}</span>
-                </div>
+                </span>
                 <span class="btn btn-sm" aria-hidden="true">Настроить</span>
-            </div>
-            <div class="filter-pills">
+            </span>
+            <span class="filter-pills">
                 <span class="chip ${inStd ? "chip-ok" : "chip-muted"}">Стандарт: ${inStd ? "да" : "нет"}</span>
                 <span class="chip ${inWi ? "chip-wi" : "chip-muted"}">БИ: ${inWi ? "да" : "нет"}</span>
-            </div>
+            </span>
         `;
         row.addEventListener("click", () => {
             openLocationSubModal(node, onLocationSaved);
@@ -323,6 +323,24 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                                 <input id="subHideCheck" name="hide_check" type="checkbox" ${current.hide_check ? "checked" : ""}>
                                 <span>Hide-Check (INCY: скрыть пинг)</span>
                             </label>
+                        </div>
+                        <div class="grid-3">
+                            <div class="field">
+                                <label for="subCdnLabelMode">Подписи маршрутов</label>
+                                <select id="subCdnLabelMode" name="cdn_label_mode" class="input">
+                                    <option value="name" ${(current.cdn_label_mode || "name") === "name" ? "selected" : ""}>В названии (name)</option>
+                                    <option value="badge" ${current.cdn_label_mode === "badge" ? "selected" : ""}>В бейдже (badge)</option>
+                                    <option value="none" ${current.cdn_label_mode === "none" ? "selected" : ""}>Скрыть (none)</option>
+                                </select>
+                            </div>
+                            <div class="field">
+                                <label for="subCdnYandexLabel">Метка канала Y</label>
+                                <input id="subCdnYandexLabel" name="cdn_yandex_label" class="input" maxlength="32" value="${escapeHtml(current.cdn_yandex_label || "Yandex")}" placeholder="Yandex">
+                            </div>
+                            <div class="field">
+                                <label for="subCdnTurboflareLabel">Метка канала T</label>
+                                <input id="subCdnTurboflareLabel" name="cdn_turboflare_label" class="input" maxlength="32" value="${escapeHtml(current.cdn_turboflare_label || "Turboflare")}" placeholder="Turboflare">
+                            </div>
                         </div>
                     </div>
                 </details>
@@ -471,6 +489,9 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                     no_limit_mode: noLimitMode,
                     hide_url: Boolean(fd.get("hide_url")),
                     hide_check: Boolean(fd.get("hide_check")),
+                    cdn_label_mode: String(fd.get("cdn_label_mode") || "name"),
+                    cdn_yandex_label: String(fd.get("cdn_yandex_label") || "").trim(),
+                    cdn_turboflare_label: String(fd.get("cdn_turboflare_label") || "").trim(),
                     fragmentation_enabled: fragEnabled,
                     fragmentation_packets: String(fd.get("fragmentation_packets") || "").trim(),
                     fragmentation_length: String(fd.get("fragmentation_length") || "").trim(),
@@ -694,23 +715,23 @@ export function renderNodesView(root, state, onReload, onSelectNode) {
         card.type = "button";
         card.className = "node-card node-card-compact card-btn";
         card.innerHTML = `
-            <div class="row" style="align-items:center;">
-                <div class="node-compact-title">
+            <span class="row" style="align-items:center;">
+                <span class="node-compact-title">
                     ${renderFlagHtml(node.country_flag || node.location_code || "", 20)}
                     <span style="font-weight:600; font-size:14px;">${escapeHtml(node.name)}</span>
                     <span class="meta-text">#${node.id}</span>
-                </div>
-                <div class="row" style="gap:8px; align-items:center;">
+                </span>
+                <span class="row" style="gap:8px; align-items:center;">
                     <span class="chip chip-muted">${escapeHtml(roleLabel(node.role))}</span>
                     <span class="chip ${health.cls}">${escapeHtml(health.text)}</span>
                     <span class="node-chevron" aria-hidden="true">›</span>
-                </div>
-            </div>
-            <div class="row meta-text">
+                </span>
+            </span>
+            <span class="row meta-text">
                 <span class="mono">${escapeHtml(node.domain || node.api_url)}</span>
                 <span>${health.text === "Отключена" ? escapeHtml(checkText) : `${node.is_active ? "● " : ""}${escapeHtml(checkText)}`}</span>
-            </div>
-            ${scopeBadges || diagBadges ? `<div class="filter-pills">${scopeBadges}${diagBadges}</div>` : ""}
+            </span>
+            ${scopeBadges || diagBadges ? `<span class="filter-pills">${scopeBadges}${diagBadges}</span>` : ""}
         `;
 
         card.addEventListener("click", () => {

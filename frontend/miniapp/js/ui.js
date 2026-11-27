@@ -7,7 +7,7 @@ export function escapeHtml(value) {
         .replace(/'/g, "&#39;");
 }
 
-export function triggerHaptic(type = "light") {
+function triggerHaptic(type = "light") {
     try {
         const tg = window.Telegram && window.Telegram.WebApp;
         if (tg && tg.HapticFeedback) {
@@ -730,7 +730,7 @@ export function healthChipInfo(node) {
     return { text: "Проблема", cls: "chip-err" };
 }
 
-export const COUNTRY_OPTIONS = [
+const COUNTRY_OPTIONS = [
     { code: "AT", name: "Австрия" },
     { code: "GB", name: "Великобритания" },
     { code: "DE", name: "Германия" },
@@ -761,7 +761,7 @@ export const COUNTRY_OPTIONS = [
 
 const _COUNTRY_CODE_SET = new Set(COUNTRY_OPTIONS.map((c) => c.code));
 
-export function countryCodeToEmoji(code) {
+function countryCodeToEmoji(code) {
     const clean = String(code || "").trim().toUpperCase();
     if (!/^[A-Z]{2}$/.test(clean)) return "";
     return String.fromCodePoint(

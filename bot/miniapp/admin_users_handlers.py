@@ -39,6 +39,7 @@ from database.repositories.account_ledger_repo import (
     get_account_balances_batch,
     get_account_history,
 )
+from config.constants import VPN_ACCESS_GRACE_HOURS
 from utils.datetime_helpers import now_utc
 
 
@@ -64,7 +65,7 @@ def _serialize_admin_ledger_entry(entry: AccountLedgerEntry) -> dict[str, Any]:
 
 async def api_admin_users_handler(request: web.Request) -> web.Response:
     """Return user statistics and paginated user list with balances and subscriptions."""
-    ctx, err_resp = _ha.require_admin_user(request)
+    ctx, err_resp = await _ha.require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
@@ -231,7 +232,7 @@ async def api_admin_users_handler(request: web.Request) -> web.Response:
 
 
 async def api_admin_user_details_handler(request: web.Request) -> web.Response:
-    ctx, err_resp = _ha.require_admin_user(request)
+    ctx, err_resp = await _ha.require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
@@ -333,6 +334,7 @@ async def api_admin_user_details_handler(request: web.Request) -> web.Response:
                 "real_position": int(bal.real_position),
                 "standard_end": vless_sub.expires_at.isoformat() if vless_sub and vless_sub.expires_at else None,
                 "standard_device_limit": int(vless_sub.device_limit or 0) if vless_sub else 0,
+                "standard_grace_hours": VPN_ACCESS_GRACE_HOURS,
                 "standard": (
                     {
                         "is_active": bool(vless_sub.is_active),
@@ -434,7 +436,7 @@ async def api_admin_user_details_handler(request: web.Request) -> web.Response:
 
 
 async def api_admin_user_devices_reset_handler(request: web.Request) -> web.Response:
-    ctx, err_resp = _ha.require_admin_user(request)
+    ctx, err_resp = await _ha.require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
@@ -545,7 +547,7 @@ async def api_admin_user_devices_reset_handler(request: web.Request) -> web.Resp
 
 async def api_admin_user_device_delete_handler(request: web.Request) -> web.Response:
     """Delete a single bound HWID device for a user and queue deprovisioning/sync."""
-    ctx, err_resp = _ha.require_admin_user(request)
+    ctx, err_resp = await _ha.require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
@@ -621,7 +623,7 @@ async def api_admin_user_device_delete_handler(request: web.Request) -> web.Resp
 
 async def api_admin_user_resync_handler(request: web.Request) -> web.Response:
     """Manually trigger background/inline sync for user's Standard and WI subscriptions."""
-    ctx, err_resp = _ha.require_admin_user(request)
+    ctx, err_resp = await _ha.require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
@@ -678,7 +680,7 @@ async def api_admin_user_resync_handler(request: web.Request) -> web.Response:
 
 
 async def api_admin_user_token_rotate_handler(request: web.Request) -> web.Response:
-    ctx, err_resp = _ha.require_admin_user(request)
+    ctx, err_resp = await _ha.require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
@@ -796,7 +798,7 @@ async def api_admin_user_token_rotate_handler(request: web.Request) -> web.Respo
 
 
 async def api_admin_user_message_handler(request: web.Request) -> web.Response:
-    ctx, err_resp = _ha.require_admin_user(request)
+    ctx, err_resp = await _ha.require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 

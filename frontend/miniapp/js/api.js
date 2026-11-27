@@ -16,7 +16,7 @@ function getInitData() {
     return tg && tg.initData ? tg.initData : "";
 }
 
-export function getAdminSessionToken() {
+function getAdminSessionToken() {
     try {
         const val = localStorage.getItem(ADMIN_SESSION_KEY);
         if (val) return val;
@@ -208,10 +208,10 @@ export const api = {
             body: JSON.stringify({ text }),
         }),
     listBroadcasts: (offset = 0, limit = 15) => requestJson(`/api/app/admin/broadcasts?offset=${encodeURIComponent(offset)}&limit=${encodeURIComponent(limit)}`),
-    previewBroadcast: (targetAudience) =>
+    previewBroadcast: (targetAudience, extra = {}) =>
         requestJson("/api/app/admin/broadcasts/preview", {
             method: "POST",
-            body: JSON.stringify({ target_audience: targetAudience }),
+            body: JSON.stringify({ target_audience: targetAudience, ...extra }),
         }),
     startBroadcast: (payload) =>
         requestJson("/api/app/admin/broadcasts", {

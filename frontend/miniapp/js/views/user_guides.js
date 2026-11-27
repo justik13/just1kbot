@@ -175,7 +175,7 @@ function _renderDesktopContent(method) {
         return `
             <div class="guide-step-card">
                 <div class="guide-step-head"><span class="guide-step-num">1</span><span>Скачайте и запустите Happ для Linux</span></div>
-                <p class="muted">Доступны пакеты AppImage, .deb и .rpm на GitHub.</p>
+                <p class="muted">Команда ниже подходит для x64 Linux; для ARM или пакетов .deb / .rpm откройте страницу релизов GitHub.</p>
                 <div class="sub-url-box" style="font-size:12px;">${escapeHtml(cmd)}</div>
                 <div class="connect-pair">
                     <button type="button" class="btn btn-sm" data-copy="${escapeHtml(cmd)}">Копировать команду</button>
@@ -220,7 +220,7 @@ function _renderFaqContent(deviceLimit) {
         },
         {
             q: "Что делать, если пропал доступ или страницы не грузятся?",
-            a: "1. Потяните список вниз на главном экране Happ или INCY, чтобы обновить серверы. 2. Выключите и снова включите тумблер. 3. Выберите другую локацию. 4. Проверьте срок подписки на вкладке «Доступ».",
+            a: "1. Потяните список вниз на главном экране Happ или INCY, чтобы обновить серверы. 2. Выключите и снова включите тумблер. 3. Выберите другую локацию. 4. На iPhone в Happ при обрывах в фоне откройте настройки приложения и включите режим No Limit (в INCY он включается автоматически). 5. Проверьте срок подписки на вкладке «Доступ».",
         },
         {
             q: "Что делать, если на Android не включается соединение?",

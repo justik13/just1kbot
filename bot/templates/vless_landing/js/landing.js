@@ -32,7 +32,13 @@
         if (openClientParam === "happ" || openClientParam === "incy") {
             updateActiveClient(openClientParam);
             setTimeout(function() {
-                window.location.href = openClientParam + "://add/" + subUrl;
+                const deepLink = openClientParam + "://add/" + subUrl;
+                const a = document.createElement("a");
+                a.href = deepLink;
+                a.style.display = "none";
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
             }, 250);
         }
 

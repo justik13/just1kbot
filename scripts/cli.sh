@@ -158,8 +158,15 @@ set_env_var() {
     local env_file="${PROJECT_DIR}/.env"
     [[ ! -f "$env_file" ]] && return 1
 
+    local py_bin=""
     if command -v python3 >/dev/null 2>&1; then
-        python3 - "$env_file" "$key" "$val" <<'PYEOF'
+        py_bin="python3"
+    elif command -v python >/dev/null 2>&1; then
+        py_bin="python"
+    fi
+    [[ -n "$py_bin" ]] || return 1
+
+    "$py_bin" - "$env_file" "$key" "$val" <<'PYEOF'
 import os
 import sys
 
@@ -188,17 +195,6 @@ with open(tmp_path, "w", encoding="utf-8") as f:
 os.chmod(tmp_path, 0o600)
 os.replace(tmp_path, path)
 PYEOF
-        return $?
-    fi
-
-    local escaped_val="${val//\\/\\\\}"
-    escaped_val="${escaped_val//&/\\&}"
-    escaped_val="${escaped_val//|/\\|}"
-    if grep -Eq "^${key}=" "$env_file" 2>/dev/null; then
-        sed -i -E "s|^${key}=.*|${key}=${escaped_val}|" "$env_file"
-    else
-        printf '%s=%s\n' "$key" "$val" >> "$env_file"
-    fi
 }
 
 # --- Версия панели и проверка обновлений ---
@@ -271,9 +267,9 @@ sync_trusted_proxies_env() {
     fi
     [[ "$db_running" == "true" ]] || return 0
 
-    local api_urls
-    api_urls="$(docker exec just1kbot_db sh -c 'psql -U "${POSTGRES_USER:-just1kbot}" -d "${POSTGRES_DB:-just1kbot_bot}" -Atc "SELECT api_url FROM servers WHERE is_active = true AND lifecycle_status IN ('\''ACTIVE'\'', '\''DECOMMISSIONING'\'') AND (role = '\''ru_hub'\'' OR capabilities @> '\''[\"ru_hub\"]'\''::jsonb) ORDER BY id;"' 2>/dev/null || true)"
-    [[ -n "${api_urls// }" ]] || return 0
+    local api_urls psql_rc=0
+    api_urls="$(docker exec just1kbot_db sh -c 'psql -U "${POSTGRES_USER:-just1kbot}" -d "${POSTGRES_DB:-just1kbot_bot}" -Atc "SELECT api_url FROM servers WHERE is_active = true AND lifecycle_status IN ('\''ACTIVE'\'', '\''DECOMMISSIONING'\'') AND (role = '\''ru_hub'\'' OR capabilities @> '\''[\"ru_hub\"]'\''::jsonb) ORDER BY id;"' 2>/dev/null)" || psql_rc=$?
+    [[ $psql_rc -eq 0 ]] || return 0
 
     local py_bin=""
     if command -v python3 >/dev/null 2>&1; then
@@ -295,20 +291,15 @@ from urllib.parse import urlsplit
 
 socket.setdefaulttimeout(3.0)
 urls_raw, cur_caddy, cur_bot = sys.argv[1:4]
+url_lines = [line.strip() for line in urls_raw.splitlines() if line.strip()]
 hub_ips = []
 seen = set()
-for line in urls_raw.splitlines():
-    u = line.strip()
-    if not u:
-        continue
+for u in url_lines:
     host = urlsplit(u).hostname
     if not host:
         continue
     try:
-        ip_obj = ipaddress.ip_address(host)
-        if isinstance(ip_obj, ipaddress.IPv6Address) and ip_obj.ipv4_mapped:
-            ip_obj = ip_obj.ipv4_mapped
-        ip_str = str(ip_obj)
+        ip_str = str(ipaddress.ip_address(host))
         if ip_str not in seen:
             seen.add(ip_str)
             hub_ips.append(ip_str)
@@ -316,15 +307,12 @@ for line in urls_raw.splitlines():
     except ValueError:
         pass
     try:
-        for info in socket.getaddrinfo(host, None, socket.AF_UNSPEC, socket.SOCK_STREAM):
+        for info in socket.getaddrinfo(host, None, socket.AF_INET, socket.SOCK_STREAM):
             addr = info[4][0] if info and len(info) >= 5 and info[4] else ""
             if not addr:
                 continue
             try:
-                ip_obj = ipaddress.ip_address(addr)
-                if isinstance(ip_obj, ipaddress.IPv6Address) and ip_obj.ipv4_mapped:
-                    ip_obj = ip_obj.ipv4_mapped
-                ip_str = str(ip_obj)
+                ip_str = str(ipaddress.ip_address(addr))
                 if ip_str not in seen:
                     seen.add(ip_str)
                     hub_ips.append(ip_str)
@@ -333,7 +321,7 @@ for line in urls_raw.splitlines():
     except Exception:
         continue
 
-if not hub_ips:
+if url_lines and not hub_ips:
     print("\t")
     sys.exit(0)
 
@@ -1848,12 +1836,18 @@ cmd_restart() {
     local service="${1:-bot}"
     echo -e "\n${BOLD}${BLUE}=== ⚡ ПЕРЕЗАПУСК СЕРВИСА: ${service} ===${NC}\n"
     ensure_subscription_domains_caddy
+    local _recreated_proxies=0
     if [[ "${TRUSTED_PROXIES_ENV_CHANGED:-0}" == "1" ]]; then
         info "Обновлён список TRUSTED_PROXIES / CADDY_TRUSTED_PROXIES — пересоздаю caddy и bot..."
         if ! dc_up caddy bot; then
             error "Не удалось пересоздать caddy/bot!"
             return 1
         fi
+        _recreated_proxies=1
+    fi
+    if [[ $_recreated_proxies -eq 1 && ( "$service" == "bot" || "$service" == "caddy" ) ]]; then
+        log "Сервис $service пересоздан с актуальным .env."
+        return 0
     fi
     if [[ "$service" == "all" ]]; then
         docker compose restart

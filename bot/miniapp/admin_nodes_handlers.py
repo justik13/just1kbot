@@ -22,7 +22,7 @@ from services.admin_nodes_service import AdminNodeServiceError
 
 
 async def api_admin_nodes_list_handler(request: web.Request) -> web.Response:
-    ctx, err_resp = _ha.require_admin_user(request)
+    ctx, err_resp = await _ha.require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
@@ -32,7 +32,7 @@ async def api_admin_nodes_list_handler(request: web.Request) -> web.Response:
 
 
 async def api_admin_nodes_add_handler(request: web.Request) -> web.Response:
-    ctx, err_resp = _ha.require_admin_user(request)
+    ctx, err_resp = await _ha.require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
@@ -54,7 +54,7 @@ async def api_admin_nodes_add_handler(request: web.Request) -> web.Response:
 
 
 async def api_admin_nodes_refresh_handler(request: web.Request) -> web.Response:
-    ctx, err_resp = _ha.require_admin_user(request)
+    ctx, err_resp = await _ha.require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
@@ -73,7 +73,7 @@ async def api_admin_nodes_refresh_handler(request: web.Request) -> web.Response:
 
 
 async def api_admin_nodes_patch_handler(request: web.Request) -> web.Response:
-    ctx, err_resp = _ha.require_admin_user(request)
+    ctx, err_resp = await _ha.require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
@@ -108,7 +108,7 @@ async def api_admin_nodes_patch_handler(request: web.Request) -> web.Response:
 
 
 async def api_admin_nodes_toggle_handler(request: web.Request) -> web.Response:
-    ctx, err_resp = _ha.require_admin_user(request)
+    ctx, err_resp = await _ha.require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
@@ -138,7 +138,7 @@ async def api_admin_nodes_toggle_handler(request: web.Request) -> web.Response:
 
 
 async def api_admin_nodes_delete_handler(request: web.Request) -> web.Response:
-    ctx, err_resp = _ha.require_admin_user(request)
+    ctx, err_resp = await _ha.require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
@@ -238,7 +238,7 @@ async def _read_incy_settings_dict(session: AsyncSession) -> dict[str, Any]:
 
 
 async def api_admin_incy_get_handler(request: web.Request) -> web.Response:
-    ctx, err_resp = _ha.require_admin_user(request)
+    ctx, err_resp = await _ha.require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
@@ -248,7 +248,7 @@ async def api_admin_incy_get_handler(request: web.Request) -> web.Response:
 
 
 async def api_admin_incy_put_handler(request: web.Request) -> web.Response:
-    ctx, err_resp = _ha.require_admin_user(request)
+    ctx, err_resp = await _ha.require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 
@@ -332,7 +332,7 @@ async def api_admin_incy_put_handler(request: web.Request) -> web.Response:
 
 async def api_admin_nodes_lifecycle_handler(request: web.Request) -> web.Response:
     """Set node lifecycle_status (active | decommissioning)."""
-    ctx, err_resp = _ha.require_admin_user(request)
+    ctx, err_resp = await _ha.require_admin_user(request)
     if err_resp is not None or ctx is None:
         return err_resp  # type: ignore[return-value]
 

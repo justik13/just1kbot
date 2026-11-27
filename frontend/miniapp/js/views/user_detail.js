@@ -204,7 +204,11 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
 
     const stdInfo = details.standard || null;
     const stdEndTs = details.standard_end ? new Date(details.standard_end).getTime() : 0;
-    const stdExpired = Boolean(details.standard_end && stdEndTs <= nowMs);
+    const graceHours = Number(details.standard_grace_hours || 4);
+    const stdInGrace = Boolean(
+        stdInfo && stdInfo.is_active && details.standard_end && stdEndTs <= nowMs && (stdEndTs + graceHours * 3600 * 1000) > nowMs
+    );
+    const stdExpired = Boolean(details.standard_end && stdEndTs <= nowMs && !stdInGrace);
     const stdSummary = details.standard_end
         ? `До ${formatDate(details.standard_end)} · ${stdLimit} устр.${stdInfo ? ` · автопродл.: ${stdInfo.auto_renew_enabled ? "вкл" : "выкл"}` : ""}`
         : "Не подключён";
@@ -295,7 +299,7 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
                     <div style="min-width:0; flex:1;">
                         <div style="font-weight:600; font-size:13px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                             <span>Стандарт</span>
-                            ${stdExpired ? `<span class="chip chip-err">Истекла</span>` : stdInfo && !stdInfo.is_active ? `<span class="chip chip-warn">Отключена</span>` : ""}
+                            ${stdInGrace ? `<span class="chip chip-warn">Льготный период</span>` : stdExpired ? `<span class="chip chip-err">Истекла</span>` : stdInfo && !stdInfo.is_active ? `<span class="chip chip-warn">Отключена</span>` : ""}
                         </div>
                         <div class="muted" style="font-size:12px;">${escapeHtml(stdSummary)}</div>
                         <div class="meta-text tabular" style="margin-top:2px;">Трафик: ${formatBytesGb(details.monthly_vless_bytes)} ГБ за мес · ${formatBytesGb(details.total_traffic_bytes)} ГБ всего</div>
@@ -494,6 +498,17 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
                         <span class="switch-track"></span>
                     </span>
                 </label>
+                ${
+                    wi && ["disabled", "revoked", "suspended"].includes(wiStatusKey)
+                        ? `<label for="restrReactivateWiInput" class="toggle-row">
+                               <span class="toggle-label">Восстановить доступ Белого интернета</span>
+                               <span class="switch">
+                                   <input id="restrReactivateWiInput" name="reactivate_wi" type="checkbox">
+                                   <span class="switch-track"></span>
+                               </span>
+                           </label>`
+                        : ""
+                }
                 <label for="restrNoteInput" class="visually-hidden">Причина или комментарий к ограничениям</label>
                 <input id="restrNoteInput" name="note" class="input" type="text" maxlength="120" placeholder="Причина / комментарий (необязательно)">
                 <button type="submit" class="btn btn-sm">Сохранить ограничения</button>
@@ -603,6 +618,8 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
 
     const refreshAll = async ({ focusSelector = null } = {}) => {
         const currentScrollY = window.scrollY;
+        const draftDmText = root.querySelector("#userDmTextInput")?.value || "";
+        const draftBonusNote = root.querySelector("#userBonusNote")?.value || "";
         void onReloadUser?.();
         await renderUserDetailView(root, userSummary, onBack, onReloadUser, state, {
             preserveScroll: true,
@@ -610,6 +627,14 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
             activeHistoryTab,
             focusSelector,
         });
+        if (draftDmText) {
+            const nextDm = root.querySelector("#userDmTextInput");
+            if (nextDm) nextDm.value = draftDmText;
+        }
+        if (draftBonusNote) {
+            const nextNote = root.querySelector("#userBonusNote");
+            if (nextNote) nextNote.value = draftBonusNote;
+        }
     };
 
     bindUserDetailActions({

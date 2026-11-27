@@ -393,22 +393,30 @@ def _render_vless_landing_html(
         badge = status_badge or texts.LANDING_INACTIVE_BADGE_PAUSED
         title = status_title or texts.LANDING_INACTIVE_TITLE_DEFAULT
         desc = status_description or texts.LANDING_INACTIVE_DESC_DEFAULT
-        return (
-            get_vless_landing_inactive_html()
-            .replace("{clean_bot}", clean_bot)
-            .replace("{bot_link}", bot_link)
-            .replace("{status_badge}", html.escape(badge))
-            .replace("{status_title}", html.escape(title))
-            .replace("{status_description}", html.escape(desc))
+        repls = {
+            "{clean_bot}": clean_bot,
+            "{bot_link}": bot_link,
+            "{status_badge}": html.escape(badge),
+            "{status_title}": html.escape(title),
+            "{status_description}": html.escape(desc),
+        }
+        return re.sub(
+            r"\{(?:clean_bot|bot_link|status_badge|status_title|status_description)\}",
+            lambda m: repls[m.group(0)],
+            get_vless_landing_inactive_html(),
         )
     badge_html = f'<div class="tier-badge">{html.escape(tariff_badge)}</div>' if tariff_badge else ""
     effective_title = page_title or texts.LANDING_VLESS_PAGE_TITLE
-    return (
-        get_vless_landing_active_html()
-        .replace("{page_title}", html.escape(effective_title))
-        .replace("{tier}", html.escape(tier))
-        .replace("{tariff_badge_html}", badge_html)
-        .replace("{device_limit}", str(device_limit or 1))
+    repls_active = {
+        "{page_title}": html.escape(effective_title),
+        "{tier}": html.escape(tier),
+        "{tariff_badge_html}": badge_html,
+        "{device_limit}": str(device_limit or 1),
+    }
+    return re.sub(
+        r"\{(?:page_title|tier|tariff_badge_html|device_limit)\}",
+        lambda m: repls_active[m.group(0)],
+        get_vless_landing_active_html(),
     )
 
 

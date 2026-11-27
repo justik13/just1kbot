@@ -467,17 +467,29 @@ class SubscriptionService:
         user.notification_retry_count = 0
         user.last_notification_attempt = None
 
+        limit_changed = (
+            new_device_limit is not None
+            and int(getattr(vless_sub, "device_limit", 0) or 0) != int(new_device_limit)
+        )
         if new_device_limit is not None:
             vless_sub.device_limit = new_device_limit
 
         await session.flush()
 
-        await SubscriptionService._sync_access_state(session, user, vless_sub=vless_sub)
+        await SubscriptionService._sync_access_state(
+            session, user, vless_sub=vless_sub, force_sync=limit_changed
+        )
 
         return user
 
     @staticmethod
-    async def _sync_access_state(session: AsyncSession, user: User, vless_sub: Any = None) -> None:
+    async def _sync_access_state(
+        session: AsyncSession,
+        user: User,
+        vless_sub: Any = None,
+        *,
+        force_sync: bool = False,
+    ) -> None:
         from database.repositories import vless_subscription_repo
         from services.vless_subscription_service import VlessSubscriptionService
 
@@ -490,6 +502,10 @@ class SubscriptionService:
                 vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1
                 session.add(vless_sub)
                 VlessSubscriptionService.ensure_synced_background(user.id, is_active=vless_target_active, session=session)
+            elif force_sync and vless_target_active:
+                vless_sub.version = (getattr(vless_sub, "version", 1) or 1) + 1
+                session.add(vless_sub)
+                VlessSubscriptionService.ensure_synced_background(user.id, session=session)
 
         if user and (user.is_deleted or user.financial_hold):
             from services.white_internet_service import WhiteInternetService

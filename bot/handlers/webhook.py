@@ -302,6 +302,7 @@ async def reprocess_webhook_inbox_row(
     payload = getattr(row, "payload", None)
     event, obj, _provider_obj_id, _pay_ext_id = _validate_webhook_payload(payload)
     request_id = f"retry-{getattr(row, 'id', '0')}"
+    was_retry_status = str(getattr(row, "status", "")) == WebhookInboxStatus.RETRY.value
 
     try:
         async with session.begin_nested():
@@ -328,13 +329,15 @@ async def reprocess_webhook_inbox_row(
         return False, WebhookInboxStatus.DEAD.value, f"{type(exc).__name__}: {exc}", None
 
     if inbox_status != WebhookInboxStatus.SUCCEEDED.value:
-        row.status = WebhookInboxStatus.DEAD.value
-        reason = (
-            "amount_mismatch"
-            if order is not None and getattr(order, "_webhook_amount_mismatch", False)
-            else "order_not_found"
+        is_amount_mismatch = order is not None and getattr(order, "_webhook_amount_mismatch", False)
+        reason = "amount_mismatch" if is_amount_mismatch else "order_not_found"
+        target_status = (
+            WebhookInboxStatus.RETRY.value
+            if (was_retry_status and not is_amount_mismatch)
+            else WebhookInboxStatus.DEAD.value
         )
-        return False, WebhookInboxStatus.DEAD.value, reason, None
+        row.status = target_status
+        return False, target_status, reason, None
 
     row.status = WebhookInboxStatus.SUCCEEDED.value
     metadata = obj.get("metadata") or {}

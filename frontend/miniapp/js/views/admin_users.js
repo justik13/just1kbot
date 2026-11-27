@@ -96,25 +96,25 @@ function _renderUsersListContent(listEl, users, onOpenUser) {
               : "";
 
         card.innerHTML = `
-            <div class="row">
-                <div>
+            <span class="row">
+                <span>
                     <span style="font-weight:600;">${_formatUserTitle(u)}</span>
                     <span class="mono muted" style="margin-left:8px; word-break:normal;">${escapeHtml(u.telegram_id)}</span>
-                </div>
-                <div style="display:flex; align-items:center; gap:8px;">
+                </span>
+                <span style="display:flex; align-items:center; gap:8px;">
                     <span class="tabular" style="font-weight:600;">${u.total_balance} ₽</span>
                     <span class="node-chevron" aria-hidden="true">›</span>
-                </div>
-            </div>
-            <div class="row meta-text">
+                </span>
+            </span>
+            <span class="row meta-text">
                 <span>Осн.: ${u.real_balance} ₽ · Бонусы: ${u.bonus_balance} ₽</span>
                 <span>Рег.: ${formatDate(u.created_at)}</span>
-            </div>
-            <div class="filter-pills">
+            </span>
+            <span class="filter-pills">
                 ${stdBadge}
                 ${wiBadge}
                 ${holdBadge}
-            </div>
+            </span>
         `;
 
         card.addEventListener("click", () => {

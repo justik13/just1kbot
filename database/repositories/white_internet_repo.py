@@ -448,6 +448,7 @@ async def topup_quota_atomic(
         sub.status_reason = None
         sub.desired_version += 1
         sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+        await clear_active_pending_revocations(session, sub)
 
     total_quota = (sub.base_traffic_bytes or 0) + (sub.extra_traffic_bytes or 0)
     used = max(0, (sub.traffic_used_bytes or 0) - (sub.traffic_overage_bytes or 0))
@@ -504,6 +505,73 @@ async def pop_pending_revoked_uuid(
         sub.pending_revoked_uuids = new_pending
         flag_modified(sub, "pending_revoked_uuids")
         await session.flush()
+
+
+async def clear_active_pending_revocations(
+    session: AsyncSession,
+    sub: WhiteInternetSubscription,
+) -> None:
+    """Remove sub.uuid and assigned WI device UUIDs from pending_revoked_uuids on reactivation."""
+    pending = list(getattr(sub, "pending_revoked_uuids", None) or [])
+    if not pending:
+        return
+    live_uuids: set[str] = set()
+    if getattr(sub, "uuid", None):
+        live_uuids.add(str(sub.uuid).strip().lower())
+    if getattr(sub, "user_id", None) is not None:
+        from database.models import UserDevice
+
+        dev_uuids = (
+            await session.scalars(
+                select(UserDevice.device_uuid).where(
+                    UserDevice.user_id == sub.user_id,
+                    UserDevice.is_wi_assigned.is_(True),
+                )
+            )
+        ).all()
+        for du in dev_uuids:
+            if du:
+                live_uuids.add(str(du).strip().lower())
+    if not live_uuids:
+        return
+    new_pending = [u for u in pending if str(u).strip().lower() not in live_uuids]
+    if len(new_pending) != len(pending):
+        sub.pending_revoked_uuids = new_pending
+        flag_modified(sub, "pending_revoked_uuids")
+        await session.flush()
+
+
+async def collect_displaced_wi_device_uuids(
+    session: AsyncSession,
+    user_id: int,
+    new_device_limit: int,
+) -> list[str]:
+    """Unassign excess WI device slots beyond new_device_limit and return displaced UUIDs."""
+    from database.models import UserDevice
+
+    keep_limit = max(0, int(new_device_limit))
+    assigned = list(
+        (
+            await session.scalars(
+                select(UserDevice)
+                .where(
+                    UserDevice.user_id == user_id,
+                    UserDevice.is_wi_assigned.is_(True),
+                )
+                .order_by(UserDevice.created_at.asc(), UserDevice.id.asc())
+            )
+        ).all()
+    )
+    if len(assigned) <= keep_limit:
+        return []
+    displaced_devs = assigned[keep_limit:]
+    displaced_uuids: list[str] = []
+    for dev in displaced_devs:
+        dev.is_wi_assigned = False
+        if dev.device_uuid:
+            displaced_uuids.append(str(dev.device_uuid).strip().lower())
+    await session.flush()
+    return displaced_uuids
 
 
 async def record_wi_traffic_atomic(
@@ -656,6 +724,7 @@ async def reset_traffic_used_atomic(
         sub.status_reason = None
         sub.desired_version += 1
         sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+        await clear_active_pending_revocations(session, sub)
 
     await session.flush()
     return sub
@@ -697,6 +766,7 @@ async def add_extra_traffic_atomic(
         sub.status_reason = None
         sub.desired_version += 1
         sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+        await clear_active_pending_revocations(session, sub)
     elif sub.status == WhiteInternetStatus.ACTIVE and total_quota > 0 and used >= total_quota:
         sub.status = WhiteInternetStatus.EXHAUSTED
         sub.status_reason = "quota_exhausted"
@@ -747,6 +817,7 @@ async def set_base_traffic_quota_atomic(
         sub.status_reason = None
         sub.desired_version += 1
         sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+        await clear_active_pending_revocations(session, sub)
     elif sub.status == WhiteInternetStatus.ACTIVE and total_quota > 0 and used >= total_quota:
         sub.status = WhiteInternetStatus.EXHAUSTED
         sub.status_reason = "quota_exhausted"
@@ -810,6 +881,7 @@ async def extend_subscription_atomic(
     sub.desired_version = (sub.desired_version or 1) + 1
     sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
     if is_new_cycle:
+        await clear_active_pending_revocations(session, sub)
         if is_expired_cycle or sub.status == WhiteInternetStatus.EXHAUSTED:
             effective_devices = _effective_device_limit(sub)
             used_quota = max(0, (sub.traffic_used_bytes or 0) - (sub.traffic_overage_bytes or 0))

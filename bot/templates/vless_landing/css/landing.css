@@ -437,18 +437,6 @@
             flex-shrink: 0;
         }
 
-        .guides-trigger-badge {
-            display: inline-flex;
-            align-items: center;
-            padding: 3px 8px;
-            border-radius: 999px;
-            font-size: 11px;
-            font-weight: 600;
-            color: var(--tier-accent);
-            background: var(--tier-tint);
-            flex-shrink: 0;
-        }
-
         .guides-trigger-icon svg {
             width: 18px;
             height: 18px;

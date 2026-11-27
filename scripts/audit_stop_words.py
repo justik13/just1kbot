@@ -311,6 +311,7 @@ def run_audit() -> list[str]:
     if handlers_dir.exists():
         python_targets.extend(sorted(handlers_dir.glob("*.py")))
     for rel in (
+        "bot/miniapp/auth.py",
         "bot/miniapp/handlers_user.py",
         "bot/miniapp/handlers_admin.py",
         "bot/miniapp/admin_nodes_handlers.py",
@@ -320,6 +321,9 @@ def run_audit() -> list[str]:
         "services/broadcast_service.py",
         "services/order_service.py",
         "services/admin_tools_service.py",
+        "services/subscription.py",
+        "services/white_internet_service.py",
+        "services/fulfillment_service.py",
         "services/workers/traffic.py",
         "services/workers/notifications.py",
         "services/workers/credit_notifications.py",

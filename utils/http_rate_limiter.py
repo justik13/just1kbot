@@ -23,10 +23,7 @@ def set_dynamic_trusted_proxy_ips(ips: set[str] | list[str] | tuple[str, ...]) -
         if not cand:
             continue
         try:
-            ip_obj = ipaddress.ip_address(cand)
-            if isinstance(ip_obj, ipaddress.IPv6Address) and ip_obj.ipv4_mapped:
-                ip_obj = ip_obj.ipv4_mapped
-            normalized.add(str(ip_obj))
+            normalized.add(str(ipaddress.ip_address(cand)))
         except ValueError:
             continue
     _dynamic_trusted_proxy_ips.clear()
@@ -40,10 +37,7 @@ def get_dynamic_trusted_proxy_ips() -> set[str]:
 
 def _normalize_ip_obj(raw_ip: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
     try:
-        ip_obj = ipaddress.ip_address(raw_ip.strip())
-        if isinstance(ip_obj, ipaddress.IPv6Address) and ip_obj.ipv4_mapped:
-            return ip_obj.ipv4_mapped
-        return ip_obj
+        return ipaddress.ip_address(raw_ip.strip())
     except ValueError:
         return None
 
@@ -75,7 +69,7 @@ async def _resolve_host_ips(host: str) -> set[str] | None:
     try:
         loop = asyncio.get_running_loop()
         infos = await asyncio.wait_for(
-            loop.getaddrinfo(clean, None, type=socket.SOCK_STREAM),
+            loop.getaddrinfo(clean, None, family=socket.AF_INET, type=socket.SOCK_STREAM),
             timeout=3.0,
         )
         out: set[str] = set()
@@ -336,12 +330,6 @@ def get_trusted_client_ip(
             )
             if yff_ip is not None:
                 return yff_ip
-
-        if forwarded:
-            for raw_ip in (item.strip() for item in forwarded.split(",") if item.strip()):
-                ip_obj = _normalize_ip_obj(raw_ip)
-                if ip_obj is not None:
-                    return str(ip_obj)
 
         if valid_real_ip:
             return valid_real_ip

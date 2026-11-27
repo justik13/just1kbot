@@ -19,7 +19,7 @@ from config.enums import (
     WhiteInternetStatus,
 )
 from database.connection import session_scope
-from database.models import Server, User, WhiteInternetSubscription
+from database.models import Server, User, UserDevice, WhiteInternetSubscription
 from database.repositories import user_devices_repo, white_internet_repo
 from services.xray_node_client import SyncResult, XrayNodeClient
 from utils.datetime_helpers import now_utc
@@ -460,9 +460,28 @@ class WhiteInternetReconciliationWorker:
                 .limit(BATCH_SIZE)
             )
             subs = (await sess.execute(stmt)).scalars().all()
+            sub_user_ids = list({s.user_id for s in subs if getattr(s, "user_id", None) is not None})
+            active_devs_by_user: dict[int, set[str]] = {}
+            if sub_user_ids:
+                dev_rows = (
+                    await sess.execute(
+                        select(UserDevice.user_id, UserDevice.device_uuid).where(
+                            UserDevice.user_id.in_(sub_user_ids),
+                            UserDevice.is_wi_assigned.is_(True),
+                        )
+                    )
+                ).all()
+                for uid_val, dev_uuid in dev_rows:
+                    if dev_uuid:
+                        active_devs_by_user.setdefault(int(uid_val), set()).add(
+                            str(dev_uuid).strip().lower()
+                        )
             work = [
                 (
                     s.id,
+                    s.status,
+                    str(getattr(s, "uuid", "") or "").strip().lower(),
+                    active_devs_by_user.get(int(s.user_id), set()),
                     int(getattr(s, "desired_version", 1) or 1),
                     [u for u in (s.pending_revoked_uuids or []) if isinstance(u, str) and u.strip()],
                 )
@@ -470,9 +489,32 @@ class WhiteInternetReconciliationWorker:
                 if isinstance(s.pending_revoked_uuids, list) and s.pending_revoked_uuids
             ]
 
-        for sub_id, sub_ver, uuids in work:
+        for sub_id, sub_status, active_sub_uuid, active_dev_uuids, sub_ver, uuids in work:
             cur_ver = sub_ver
             for old_uuid in uuids:
+                clean_old = old_uuid.strip().lower()
+                is_still_live_uuid = (
+                    sub_status in (
+                        WhiteInternetStatus.PENDING,
+                        WhiteInternetStatus.ACTIVE,
+                        WhiteInternetStatus.EXHAUSTED,
+                    )
+                    and clean_old == active_sub_uuid
+                ) or (
+                    sub_status in (WhiteInternetStatus.PENDING, WhiteInternetStatus.ACTIVE)
+                    and clean_old in active_dev_uuids
+                )
+                if is_still_live_uuid:
+                    logger.info(
+                        "Skipping stale pending revocation of active WI UUID %s on sub %d (status=%s)",
+                        clean_old[:8],
+                        sub_id,
+                        sub_status,
+                    )
+                    async with sf() as sess:
+                        await white_internet_repo.pop_pending_revoked_uuid(sess, sub_id, old_uuid)
+                        await sess.commit()
+                    continue
                 results = []
                 bump_version_to: int | None = None
                 for _sid, api_url, api_key, target_epoch, _ in active_servers:

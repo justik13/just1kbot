@@ -225,6 +225,8 @@ class AdminDirectMessagePayload(BaseModel):
 
 class BroadcastPreviewPayload(BaseModel):
     target_audience: str = Field(..., min_length=1, max_length=64)
+    service_scope: Literal["standard", "white_internet"] | None = None
+    include_bot_blocked: bool = False
 
     @field_validator("target_audience")
     @classmethod

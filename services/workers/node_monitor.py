@@ -887,6 +887,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 if _health_key not in db_extra:
                                     merged_extra.pop(_health_key, None)
                             await update_server(session, fresh_server, extra_data=merged_extra)
+                            server.extra_data = merged_extra
 
             # Decoupled alert dispatch outside DB transaction and advisory lock (notifications only)
             for alert_kind, alert_text, is_problem, reminder_ts in ingress_alerts_to_send:
@@ -1274,6 +1275,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                     hosting_alert_to_send = None
                     new_alert_level = alert_level
                     should_disable = False
+                    hosting_auto_disabled = False
 
                     if pct >= 90.0 and alert_level < 90:
                         should_disable = True
@@ -1349,6 +1351,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                                         last_alert_sent_state=None,
                                         extra_data=fresh_extra,
                                     )
+                                    hosting_auto_disabled = True
                                     topology_dirty = True
                                 else:
                                     await update_server(session, fresh, extra_data=fresh_extra)
@@ -1503,6 +1506,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                             flag_modified(updated_srv, "extra_data")
                             server.extra_data = extra
                             await session.flush()
+                        update_kwargs.pop("extra_data", None)
 
                     # Trigger VLESS re-provisioning only if epoch changed or is unsynced on a VLESS sync target server (ru_hub)
                     if is_vless_sync_target_server(updated_srv):
@@ -1511,31 +1515,33 @@ async def check_node_resources_and_alerts(bot: Bot):
                             from services.vless_subscription_service import VlessSubscriptionService
                             VlessSubscriptionService.sync_all_active_to_server_background(updated_srv.id)
 
-            db_server, applied = await update_server_health_snapshot(
-                session,
-                server.id,
-                expected_health_state=expected_health_state,
-                expected_consecutive_fails=expected_consecutive_fails,
-                expected_consecutive_successes=expected_consecutive_successes,
-                new_health_state=st.health_state,
-                **update_kwargs,
-            )
-            if applied and db_server is not None:
-                server.health_state = db_server.health_state
-                server.is_active = db_server.is_active
-            if applied and expected_health_state != st.health_state:
-                topology_states = (ServerHealthState.PROBLEM, ServerHealthState.MANUAL_DISABLED)
-                if (
-                    expected_health_state in topology_states
-                    or st.health_state in topology_states
-                    or (
-                        expected_health_state == ServerHealthState.WAITING_CONFIRMATION
-                        and st.health_state == ServerHealthState.ONLINE
-                    )
-                ):
-                    topology_dirty = True
-            if db_server and not applied:
-                st.sync_from_db_server(db_server)
+            applied = False
+            if not hosting_auto_disabled:
+                db_server, applied = await update_server_health_snapshot(
+                    session,
+                    server.id,
+                    expected_health_state=expected_health_state,
+                    expected_consecutive_fails=expected_consecutive_fails,
+                    expected_consecutive_successes=expected_consecutive_successes,
+                    new_health_state=st.health_state,
+                    **update_kwargs,
+                )
+                if applied and db_server is not None:
+                    server.health_state = db_server.health_state
+                    server.is_active = db_server.is_active
+                if applied and expected_health_state != st.health_state:
+                    topology_states = (ServerHealthState.PROBLEM, ServerHealthState.MANUAL_DISABLED)
+                    if (
+                        expected_health_state in topology_states
+                        or st.health_state in topology_states
+                        or (
+                            expected_health_state == ServerHealthState.WAITING_CONFIRMATION
+                            and st.health_state == ServerHealthState.ONLINE
+                        )
+                    ):
+                        topology_dirty = True
+                if db_server and not applied:
+                    st.sync_from_db_server(db_server)
 
         # 6. ВНЕШНИЕ ПОБОЧНЫЕ ЭФФЕКТЫ (TELEGRAM ALERT) ВЫПОЛНЯЮТСЯ СТРОГО ПОСЛЕ УСПЕШНОГО CAS
         if applied and alerts_to_send:
