@@ -794,7 +794,6 @@ async def api_admin_user_adjust_handler(request: web.Request) -> web.Response:
                     session,
                     wi_sub,
                     "grant_wi_devlimit",
-                    displaced_dev_uuids=displaced_wi_uuids or None,
                 )
             if payload.notify_user is True:
                 _ha._queue_user_notification(

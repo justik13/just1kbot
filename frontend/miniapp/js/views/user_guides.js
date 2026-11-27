@@ -81,6 +81,11 @@ function _renderIosContent(method) {
                     <button type="button" class="btn btn-sm" data-ext="https://apps.apple.com/app/happ-proxy-utility/id6504287215">App Store: Happ</button>
                 </div>
             </div>
+            <div class="guide-step-card">
+                <div class="guide-step-head"><span class="guide-step-num">5</span><span>Добавьте подписку и включите доступ</span></div>
+                <p class="muted">Вернитесь на вкладку «Доступ», нажмите <b>Подключить в INCY</b> (или <b>Happ</b>) и разрешите добавление конфигурации по Face ID или код-паролю.</p>
+                <p class="muted">Если в <b>Happ</b> на iPhone соединение обрывается в фоне, откройте настройки приложения и включите <b>No Limit</b> (в <b>INCY</b> он включается автоматически).</p>
+            </div>
         `;
     }
     return `
@@ -102,6 +107,11 @@ function _renderIosContent(method) {
                 <button type="button" class="btn btn-sm" data-ext="https://apps.apple.com/app/incy/id6756943388">App Store: INCY</button>
                 <button type="button" class="btn btn-sm" data-ext="https://apps.apple.com/app/happ-proxy-utility/id6504287215">App Store: Happ</button>
             </div>
+        </div>
+        <div class="guide-step-card">
+            <div class="guide-step-head"><span class="guide-step-num">4</span><span>Добавьте подписку и включите доступ</span></div>
+            <p class="muted">Вернитесь на вкладку «Доступ», нажмите <b>Подключить в INCY</b> (или <b>Happ</b>) и подтвердите системный запрос iOS.</p>
+            <p class="muted">Если в <b>Happ</b> на iPhone соединение обрывается в фоне, откройте настройки приложения и включите <b>No Limit</b> (в <b>INCY</b> он включается автоматически).</p>
         </div>
     `;
 }

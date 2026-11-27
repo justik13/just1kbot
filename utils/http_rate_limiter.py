@@ -23,7 +23,10 @@ def set_dynamic_trusted_proxy_ips(ips: set[str] | list[str] | tuple[str, ...]) -
         if not cand:
             continue
         try:
-            normalized.add(str(ipaddress.ip_address(cand)))
+            ip_obj = ipaddress.ip_address(cand)
+            if isinstance(ip_obj, ipaddress.IPv6Address) and ip_obj.ipv4_mapped:
+                ip_obj = ip_obj.ipv4_mapped
+            normalized.add(str(ip_obj))
         except ValueError:
             continue
     _dynamic_trusted_proxy_ips.clear()
@@ -37,7 +40,10 @@ def get_dynamic_trusted_proxy_ips() -> set[str]:
 
 def _normalize_ip_obj(raw_ip: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
     try:
-        return ipaddress.ip_address(raw_ip.strip())
+        ip_obj = ipaddress.ip_address(raw_ip.strip())
+        if isinstance(ip_obj, ipaddress.IPv6Address) and ip_obj.ipv4_mapped:
+            return ip_obj.ipv4_mapped
+        return ip_obj
     except ValueError:
         return None
 

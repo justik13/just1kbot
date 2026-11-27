@@ -1198,6 +1198,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                         ack_exc,
                     )
 
+        hosting_auto_disabled = False
         if is_healthy:
             if st.health_state == ServerHealthState.WAITING_CONFIRMATION:
                 # Восстановление после кратковременной ошибки (FAIL #1)
@@ -1275,7 +1276,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                     hosting_alert_to_send = None
                     new_alert_level = alert_level
                     should_disable = False
-                    hosting_auto_disabled = False
 
                     if pct >= 90.0 and alert_level < 90:
                         should_disable = True

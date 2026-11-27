@@ -11,7 +11,7 @@
         /* {{SHARED_TOKENS_CSS}} */
         :root {
             --bg-color: var(--bg-canvas);
-            --card-bg: #0c0c10;
+            --card-bg: var(--bg-card);
             --surface-elevated: var(--bg-tile);
             --surface-hover: rgba(255, 255, 255, 0.09);
             --text-main: var(--text-primary);
@@ -31,7 +31,7 @@
             padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
         }
         :where(a, button, summary, input, textarea, [tabindex]):focus-visible {
-            outline: 2px solid #ffffff;
+            outline: 2px solid var(--accent-white);
             outline-offset: 2px;
         }
         .card {
@@ -42,16 +42,16 @@
             border-radius: var(--radius-card);
             padding: 24px 16px 16px;
             text-align: center;
-            animation: cardEnter 280ms var(--ease-out) both;
+            animation: cardEnter 220ms var(--ease-out) both;
         }
         @keyframes cardEnter {
             from {
                 opacity: 0;
-                transform: translateY(8px) scale(0.98);
+                transform: translateY(6px);
             }
             to {
                 opacity: 1;
-                transform: translateY(0) scale(1);
+                transform: translateY(0);
             }
         }
         .header-top {

@@ -1107,6 +1107,7 @@ class OrderService:
         if existing_order.payment_method == "wallet":
             resp = {
                 "order_id": str(existing_order.id),
+                "service_type": existing_order.service_type,
                 "status": existing_order.status,
                 "confirmation_url": None,
                 "charged_balance": int(existing_order.amount_rub),
@@ -1118,6 +1119,7 @@ class OrderService:
         else:
             resp = {
                 "order_id": str(existing_order.id),
+                "service_type": existing_order.service_type,
                 "status": existing_order.status,
                 "confirmation_url": existing_order.payment_url,
                 "charged_balance": int(meta.get("wallet_debit_rub", 0)),
@@ -1441,6 +1443,7 @@ class OrderService:
                     meta = recent_paid_order.metadata_ or {}
                     return {
                         "order_id": str(recent_paid_order.id),
+                        "service_type": recent_paid_order.service_type,
                         "status": recent_paid_order.status,
                         "confirmation_url": None,
                         "charged_balance": int(recent_paid_order.amount_rub),
@@ -1498,6 +1501,7 @@ class OrderService:
             order_meta_after = order.metadata_ or {}
             resp = {
                 "order_id": str(order.id),
+                "service_type": service_type,
                 "status": order.status,
                 "confirmation_url": None,
                 "charged_balance": int(total_cost),
@@ -1548,6 +1552,7 @@ class OrderService:
         )
         return {
             "order_id": str(order.id),
+            "service_type": service_type,
             "status": order.status,
             "confirmation_url": order.payment_url,
             "charged_balance": int(wallet_debit),

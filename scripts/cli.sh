@@ -1850,7 +1850,18 @@ cmd_restart() {
         return 0
     fi
     if [[ "$service" == "all" ]]; then
-        docker compose restart
+        if [[ $_recreated_proxies -eq 1 ]]; then
+            local -a other_services=()
+            local svc
+            while IFS= read -r svc; do
+                [[ -n "$svc" && "$svc" != "bot" && "$svc" != "caddy" ]] && other_services+=("$svc")
+            done < <(docker compose ps --services 2>/dev/null || true)
+            if [[ ${#other_services[@]} -gt 0 ]]; then
+                docker compose restart "${other_services[@]}"
+            fi
+        else
+            docker compose restart
+        fi
     else
         docker compose restart "$service"
     fi

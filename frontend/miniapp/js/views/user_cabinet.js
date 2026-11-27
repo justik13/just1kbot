@@ -1318,7 +1318,7 @@ function _syncTopbarProfile(d, root) {
     if (!pill) return;
 
     const bal = d.balance || { total: 0 };
-    const meta = _getProfileMeta(d);
+    const meta = _getProfileMeta();
     const avatarKey = meta.photoUrl && !_state.avatarFailed ? meta.photoUrl : meta.initial;
     if (avatarEl && avatarEl.dataset.renderedKey !== avatarKey) {
         avatarEl.dataset.renderedKey = avatarKey;
@@ -2580,7 +2580,7 @@ function _renderProfileTab(body, d, reload, onBack) {
     const bal = d.balance || { real: 0, bonus: 0, total: 0 };
     const minTopup = (d.pricing && d.pricing.min_topup_rub) || 20;
     const items = d.history || [];
-    const meta = _getProfileMeta(d);
+    const meta = _getProfileMeta();
     const subBadge = [meta.username, meta.userId ? `ID ${meta.userId}` : ""].filter(Boolean).join(" · ");
 
     body.innerHTML = `

@@ -497,7 +497,6 @@ class WhiteInternetReconciliationWorker:
                     sub_status in (
                         WhiteInternetStatus.PENDING,
                         WhiteInternetStatus.ACTIVE,
-                        WhiteInternetStatus.EXHAUSTED,
                     )
                     and clean_old == active_sub_uuid
                 ) or (

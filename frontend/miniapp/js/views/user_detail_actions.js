@@ -107,6 +107,7 @@ export function bindUserDetailActions({
                     send_note_to_user: sendNoteToUser,
                 });
                 showToast(res.message || "Баланс обновлён");
+                bonusForm.reset();
                 await refreshAll();
                 schedulePostModalFocus("#userBonusAmount");
             },
