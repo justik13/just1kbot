@@ -1,4 +1,4 @@
-"""Admin HTTP handlers for overview, webhooks, broadcasts, mass operations, finances, and audit logs."""
+"""Admin HTTP handlers for overview, broadcasts, mass operations, finances, and audit logs."""
 
 from __future__ import annotations
 

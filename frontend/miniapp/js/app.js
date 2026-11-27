@@ -557,7 +557,7 @@ async function _renderAdminView() {
         }
     } catch (err) {
         if (seq !== _tabSwitchSeq || appState.mode !== "admin") return;
-        if (err && (err.code === "2fa_required" || err.code === "init_data_expired")) return;
+        if (err && err.code === "init_data_expired") return;
         showToast(err.message || "Ошибка загрузки раздела", "error");
         _renderTabErrorCard(
             body,

@@ -123,11 +123,12 @@ function _renderPlatformGuideContent(sectionData, selectedMethodId, guideData) {
         const cls = c.tone === "warn" ? "notice-box notice-warn" : "notice-box";
         parts.push(`<div class="${cls}"><span>${c.html}</span></div>`);
     }
-    for (const st of (method.steps || [])) {
+    const methodSteps = method.steps || [];
+    for (const st of methodSteps) {
         parts.push(_renderStepCard(st, guideData));
     }
-    for (const st of (sectionData.common_steps || [])) {
-        parts.push(_renderStepCard(st, guideData));
+    for (const [idx, st] of (sectionData.common_steps || []).entries()) {
+        parts.push(_renderStepCard({ ...st, num: methodSteps.length + idx + 1 }, guideData));
     }
     return parts.join("");
 }

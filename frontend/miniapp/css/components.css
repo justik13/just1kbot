@@ -2317,6 +2317,10 @@ details[open] > summary .disclosure-pill svg {
     gap: 8px;
 }
 
+.overview-grid > :last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+}
+
 @media (max-width: 360px) {
     .overview-grid {
         grid-template-columns: 1fr;

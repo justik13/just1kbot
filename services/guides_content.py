@@ -81,7 +81,7 @@ def _render_callout(callout: dict[str, Any]) -> str:
 def _render_kz_address(kz: dict[str, Any]) -> str:
     rows_html = []
     for row in kz["rows"]:
-        copy_val = row["copy"].replace("'", "\\'")
+        copy_val = html.escape(row["copy"].replace("\\", "\\\\").replace("'", "\\'"), quote=True)
         rows_html.append(
             '<div class="guide-data-row">'
             f'<span class="guide-data-label">{html.escape(row["label"])}</span>'

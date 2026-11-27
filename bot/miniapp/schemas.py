@@ -183,12 +183,8 @@ class AdminUserAdjustPayload(BaseModel):
             if self.traffic_action in ("add_gb", "set_base_gb") and (self.gb is None or self.gb < 1):
                 raise ValueError("gb (>= 1) is required for add_gb/set_base_gb")
         elif self.action == "restrictions":
-            if (
-                self.financial_hold is None
-                and self.topup_blocked is None
-                and not self.reactivate_wi
-            ):
-                raise ValueError("financial_hold, topup_blocked or reactivate_wi is required for restrictions")
+            if self.financial_hold is None and self.topup_blocked is None:
+                raise ValueError("financial_hold or topup_blocked is required for restrictions")
         return self
 
 
