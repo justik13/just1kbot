@@ -249,7 +249,7 @@ async def _load_subscription_ui_settings(session) -> dict[str, object]:
         "sort_order": sort_order,
         "hide_url": _as_bool_setting(await get_system_setting(session, "vless_hide_url", "true"), True),
         "hide_check": _as_bool_setting(await get_system_setting(session, "vless_hide_check", "false"), False),
-        "fragmentation_enabled": _as_bool_setting(await get_system_setting(session, "vless_fragmentation_enabled", "true"), True),
+        "fragmentation_enabled": _as_bool_setting(await get_system_setting(session, "vless_fragmentation_enabled", "false"), False),
         "fragmentation_packets": str(await get_system_setting(session, "vless_fragmentation_packets", "tlshello") or "tlshello").strip(),
         "fragmentation_length": str(await get_system_setting(session, "vless_fragmentation_length", "10-30") or "10-30").strip(),
         "fragmentation_interval": str(await get_system_setting(session, "vless_fragmentation_interval", "10-30") or "10-30").strip(),
@@ -1146,7 +1146,7 @@ async def serve_unified_subscription_feed(
             response_headers["Hide-Check"] = "1"
         _apply_no_limit_headers(response_headers, str(ui_settings.get("no_limit_mode") or "all"), is_happ=is_happ)
 
-        if ui_settings.get("fragmentation_enabled", True):
+        if ui_settings.get("fragmentation_enabled", False):
             response_headers["fragmentation-enable"] = "1"
             response_headers["fragmentation-packets"] = _sanitize_ascii_header(
                 str(ui_settings.get("fragmentation_packets") or ""), "tlshello", max_len=64

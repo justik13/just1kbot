@@ -224,7 +224,97 @@ check_bot_update_on_entry() {
     return 0
 }
 
+sync_trusted_proxies_env() {
+    local env_file="${PROJECT_DIR}/.env"
+    [[ -f "$env_file" ]] || return 0
+    TRUSTED_PROXIES_ENV_CHANGED=0
+
+    local db_running="false"
+    if docker inspect --format='{{.State.Running}}' just1kbot_db 2>/dev/null | grep -q "^true$"; then
+        db_running="true"
+    fi
+    [[ "$db_running" == "true" ]] || return 0
+
+    local api_urls
+    api_urls="$(docker exec just1kbot_db sh -c 'psql -U "${POSTGRES_USER:-just1kbot}" -d "${POSTGRES_DB:-just1kbot_bot}" -Atc "SELECT api_url FROM servers WHERE is_active = true AND role = '\''ru_hub'\'' ORDER BY id;"' 2>/dev/null || true)"
+    [[ -n "${api_urls// }" ]] || return 0
+
+    local py_bin=""
+    if command -v python3 >/dev/null 2>&1; then
+        py_bin="python3"
+    elif command -v python >/dev/null 2>&1; then
+        py_bin="python"
+    fi
+    [[ -n "$py_bin" ]] || return 0
+
+    local cur_caddy cur_bot resolved_pair new_caddy new_bot
+    cur_caddy="$(get_env_var "CADDY_TRUSTED_PROXIES" "")"
+    cur_bot="$(get_env_var "TRUSTED_PROXIES" "")"
+
+    resolved_pair="$("$py_bin" - "$api_urls" "$cur_caddy" "$cur_bot" <<'PYEOF'
+import ipaddress
+import socket
+import sys
+from urllib.parse import urlsplit
+
+urls_raw, cur_caddy, cur_bot = sys.argv[1:4]
+hub_ips = []
+seen = set()
+for line in urls_raw.splitlines():
+    u = line.strip()
+    if not u:
+        continue
+    host = urlsplit(u).hostname
+    if not host:
+        continue
+    try:
+        ip_str = str(ipaddress.ip_address(host))
+        if ip_str not in seen:
+            seen.add(ip_str)
+            hub_ips.append(ip_str)
+        continue
+    except ValueError:
+        pass
+    try:
+        for info in socket.getaddrinfo(host, None, socket.AF_INET, socket.SOCK_STREAM):
+            addr = info[4][0]
+            if addr not in seen:
+                seen.add(addr)
+                hub_ips.append(addr)
+    except Exception:
+        continue
+
+def merge_tokens(existing_raw, base_tokens, sep):
+    tokens = []
+    token_set = set()
+    raw_items = existing_raw.replace(",", " ").split() if existing_raw else []
+    for item in list(base_tokens) + raw_items + hub_ips:
+        val = item.strip()
+        if val and val not in token_set:
+            token_set.add(val)
+            tokens.append(val)
+    return sep.join(tokens)
+
+new_caddy = merge_tokens(cur_caddy, ["private_ranges"], " ")
+new_bot = merge_tokens(cur_bot, ["127.0.0.1", "::1", "172.16.0.0/12"], ",")
+print(f"{new_caddy}\t{new_bot}")
+PYEOF
+)" || return 0
+
+    IFS=$'\t' read -r new_caddy new_bot <<< "$resolved_pair"
+    if [[ -n "$new_caddy" && "$new_caddy" != "$cur_caddy" ]]; then
+        set_env_var "CADDY_TRUSTED_PROXIES" "'${new_caddy}'"
+        TRUSTED_PROXIES_ENV_CHANGED=1
+    fi
+    if [[ -n "$new_bot" && "$new_bot" != "$cur_bot" ]]; then
+        set_env_var "TRUSTED_PROXIES" "'${new_bot}'"
+        TRUSTED_PROXIES_ENV_CHANGED=1
+    fi
+    return 0
+}
+
 ensure_subscription_domains_caddy() {
+    sync_trusted_proxies_env || true
     local env_file="${PROJECT_DIR}/.env"
     local conf_dir="${PROJECT_DIR}/caddy_conf.d"
     local sub_caddy="${conf_dir}/subscriptions.caddy"
@@ -1003,7 +1093,10 @@ cmd_update() {
         chmod 700 "${PROJECT_DIR}/backups" 2>/dev/null || true
         apply_sysctl_hardening
         ensure_subscription_domains_caddy
-        if docker inspect --format='{{.State.Status}}' just1kbot_caddy 2>/dev/null | grep -q "^running$"; then
+        if [[ "${TRUSTED_PROXIES_ENV_CHANGED:-0}" == "1" ]]; then
+            info "Обновлён список TRUSTED_PROXIES / CADDY_TRUSTED_PROXIES — применяю переменные окружения в контейнерах..."
+            dc_up caddy bot >/dev/null 2>&1 || true
+        elif docker inspect --format='{{.State.Status}}' just1kbot_caddy 2>/dev/null | grep -q "^running$"; then
             info "Применение актуальной конфигурации Caddy (reload)..."
             if ! docker exec just1kbot_caddy caddy reload --config /etc/caddy/Caddyfile 2>/dev/null; then
                 warn "Не удалось применить новую конфигурацию Caddy (активная конфигурация сохранена без простоя сервиса)."

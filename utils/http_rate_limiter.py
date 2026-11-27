@@ -1,11 +1,108 @@
+import asyncio
 import collections
 import ipaddress
 import math
+import socket
 import time
+from urllib.parse import urlsplit
 
 from aiohttp import web
 
 from config.constants import RATE_LIMIT_BURST, RATE_LIMIT_REQUESTS_PER_MINUTE
+
+_dynamic_trusted_proxy_ips: set[str] = set()
+
+
+def set_dynamic_trusted_proxy_ips(ips: set[str] | list[str] | tuple[str, ...]) -> None:
+    """Replace runtime set of auto-discovered trusted proxy IPs (e.g. active ru_hub hosts)."""
+    normalized: set[str] = set()
+    for raw in ips:
+        cand = str(raw or "").strip()
+        if not cand:
+            continue
+        try:
+            normalized.add(str(ipaddress.ip_address(cand)))
+        except ValueError:
+            continue
+    _dynamic_trusted_proxy_ips.clear()
+    _dynamic_trusted_proxy_ips.update(normalized)
+
+
+def get_dynamic_trusted_proxy_ips() -> set[str]:
+    """Return a copy of runtime auto-discovered trusted proxy IPs."""
+    return set(_dynamic_trusted_proxy_ips)
+
+
+async def _resolve_host_ips(host: str) -> set[str]:
+    clean = str(host or "").strip().strip("[]")
+    if not clean:
+        return set()
+    try:
+        return {str(ipaddress.ip_address(clean))}
+    except ValueError:
+        pass
+    try:
+        loop = asyncio.get_running_loop()
+        infos = await loop.getaddrinfo(clean, None, type=socket.SOCK_STREAM)
+        out: set[str] = set()
+        for info in infos:
+            addr = info[4][0] if info and len(info) >= 5 and info[4] else ""
+            if addr:
+                try:
+                    out.add(str(ipaddress.ip_address(addr)))
+                except ValueError:
+                    continue
+        return out
+    except Exception:
+        return set()
+
+
+async def refresh_dynamic_trusted_proxies(servers: list | tuple) -> set[str]:
+    """Resolve and cache IP addresses of active ru_hub servers for proxy IP unwrapping."""
+    hosts: set[str] = set()
+    direct_ips: set[str] = set()
+    for srv in servers:
+        role = str(getattr(srv, "role", "") or "").strip().lower()
+        caps = getattr(srv, "capabilities", None) or []
+        if role != "ru_hub" and "ru_hub" not in caps:
+            continue
+        api_url = str(getattr(srv, "api_url", "") or "").strip()
+        if api_url:
+            parsed = urlsplit(api_url)
+            if parsed.hostname:
+                hosts.add(parsed.hostname)
+        extra = getattr(srv, "extra_data", None)
+        if isinstance(extra, dict):
+            dom = str(extra.get("domain") or "").strip()
+            if dom:
+                hosts.add(dom)
+            ip_val = str(extra.get("ip") or extra.get("public_ip") or "").strip()
+            if ip_val:
+                direct_ips.add(ip_val)
+
+    resolved: set[str] = set()
+    if hosts:
+        results = await asyncio.gather(*(_resolve_host_ips(h) for h in hosts), return_exceptions=True)
+        for res in results:
+            if isinstance(res, set):
+                resolved.update(res)
+    for raw_ip in direct_ips:
+        try:
+            resolved.add(str(ipaddress.ip_address(raw_ip)))
+        except ValueError:
+            continue
+    set_dynamic_trusted_proxy_ips(resolved)
+    return resolved
+
+
+async def refresh_dynamic_trusted_proxies_from_db() -> set[str]:
+    """Load active ru_hub servers from DB and refresh runtime trusted proxy IPs."""
+    from database.connection import session_scope
+    from database.repositories import servers_repo
+
+    async with session_scope() as session:
+        servers = await servers_repo.get_all_servers(session, active_only=True)
+    return await refresh_dynamic_trusted_proxies(servers)
 
 
 class HttpRateLimiter:
@@ -93,6 +190,8 @@ def _is_trusted_proxy_peer(
 
     try:
         ip = ipaddress.ip_address(peer_ip)
+        if str(ip) in _dynamic_trusted_proxy_ips:
+            return True
         for item in trusted_items:
             try:
                 if "/" in item:
@@ -161,11 +260,31 @@ def get_trusted_client_ip(request: web.Request) -> str:
                         return raw_ip
                 except ValueError:
                     continue
+            # Check Yandex CDN client IP header when proxied through a trusted ru_hub hop
+            yff = request.headers.get("X-Forwarded-For-Y")
+            if yff:
+                for raw_ip in reversed([item.strip() for item in yff.split(",") if item.strip()]):
+                    try:
+                        ipaddress.ip_address(raw_ip)
+                        if not _is_trusted_proxy_peer(raw_ip, trusted_proxies):
+                            return raw_ip
+                    except ValueError:
+                        continue
             # If all forwarded IPs are trusted proxies, fall back to first valid IP
             for raw_ip in ips:
                 try:
                     ipaddress.ip_address(raw_ip)
                     return raw_ip
+                except ValueError:
+                    continue
+
+        yff = request.headers.get("X-Forwarded-For-Y")
+        if yff and (valid_real_ip is None or _is_trusted_proxy_peer(valid_real_ip, trusted_proxies)):
+            for raw_ip in reversed([item.strip() for item in yff.split(",") if item.strip()]):
+                try:
+                    ipaddress.ip_address(raw_ip)
+                    if not _is_trusted_proxy_peer(raw_ip, trusted_proxies):
+                        return raw_ip
                 except ValueError:
                     continue
 

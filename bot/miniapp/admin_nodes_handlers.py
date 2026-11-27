@@ -189,7 +189,7 @@ async def _read_incy_settings_dict(session: AsyncSession) -> dict[str, Any]:
     sort_order = await _ha.get_system_setting(session, "vless_sort_order", "none")
     hide_url_raw = await _ha.get_system_setting(session, "vless_hide_url", "true")
     hide_check_raw = await _ha.get_system_setting(session, "vless_hide_check", "false")
-    frag_raw = await _ha.get_system_setting(session, "vless_fragmentation_enabled", "true")
+    frag_raw = await _ha.get_system_setting(session, "vless_fragmentation_enabled", "false")
     frag_packets = await _ha.get_system_setting(session, "vless_fragmentation_packets", "tlshello")
     frag_length = await _ha.get_system_setting(session, "vless_fragmentation_length", "10-30")
     frag_interval = await _ha.get_system_setting(session, "vless_fragmentation_interval", "10-30")
@@ -219,7 +219,7 @@ async def _read_incy_settings_dict(session: AsyncSession) -> dict[str, Any]:
         "sort_order": str(sort_order or "none"),
         "hide_url": _as_bool_setting(hide_url_raw, True),
         "hide_check": _as_bool_setting(hide_check_raw, False),
-        "fragmentation_enabled": _as_bool_setting(frag_raw, True),
+        "fragmentation_enabled": _as_bool_setting(frag_raw, False),
         "fragmentation_packets": str(frag_packets or "tlshello"),
         "fragmentation_length": str(frag_length or "10-30"),
         "fragmentation_interval": str(frag_interval or "10-30"),

@@ -1588,6 +1588,13 @@ async def check_node_resources_and_alerts(bot: Bot):
     if topology_dirty or is_topology_retry_pending():
         await _run_topology_sync_with_retry_tracking("monitor_cycle")
 
+    try:
+        from utils.http_rate_limiter import refresh_dynamic_trusted_proxies
+
+        await refresh_dynamic_trusted_proxies(servers)
+    except Exception as proxy_sync_exc:
+        logger.debug("Dynamic trusted proxies refresh skipped in monitor cycle: %s", proxy_sync_exc)
+
 
 async def node_monitor_loop(bot: Bot, shutdown_event: asyncio.Event):
     from services.topology_sync_service import is_topology_retry_pending

@@ -15,6 +15,7 @@
 > 🔄 **АКТУАЛИЗАЦИЯ ПРОДАКШЕН-АРХИТЕКТУРЫ (25.11.2026):**
 > - В актуальном коде (`just1kbot/services/topology_sync_service.py`, `just1knode/scripts/config_builder.py`) используется **3-звенная** схема **`ru_hub -> eu_hub (443/TCP) -> exit_node (443/TCP)`** (упоминания 2-Hop `Origin -> Exit` на порту `10443` и `alpn: ["h2", "http/1.1"]` в примерах ниже являются историческим контекстом; в продакшене для `xtls-rprx-vision` используется строго `alpn: ["http/1.1"]`).
 > - Связность `ru_hub -> eu_hub` контролируется фоновым последовательным зондом (`just1k-probe-socks`, прокачка `>= 36 КБ` payload для отлова 25-пакетного silent stall ТСПУ) с автоматическим переключением маршрута и Telegram-алертом при недоступности `eu_hub` из РФ.
+> - **Обновления продакшен-контура (27.11.2026):** на узлах Nginx переведён на `LimitNOFILE=65535` + `worker_rlimit_nofile 65535` (под нагрузку `packet-up`), в `cdn_yandex.sh` синхронизированы все 118 подсетей `yc.json`, `/sub/` на `ru_hub` переведён на HTTP/1.1 с пробросом клиентского IP из `X-Forwarded-For-Y` в `TRUSTED_PROXIES` / `CADDY_TRUSTED_PROXIES`, добавлено еженедельное обновление `geoip.dat`/`geosite.dat` на `ru_hub`, а `vless_fragmentation_enabled` по умолчанию выключен (`false`).
 
 ---
 

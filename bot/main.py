@@ -374,6 +374,13 @@ async def main():
         logger.info("Инициализация БД...")
         await init_db()
 
+        try:
+            from utils.http_rate_limiter import refresh_dynamic_trusted_proxies_from_db
+
+            await refresh_dynamic_trusted_proxies_from_db()
+        except Exception as proxy_sync_exc:
+            logger.warning("Initial dynamic trusted proxies refresh skipped: %s", proxy_sync_exc)
+
         async with session_scope() as session:
             await get_admin_session_epoch(session)
 

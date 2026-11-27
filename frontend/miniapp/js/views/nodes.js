@@ -295,7 +295,7 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                         <span id="subSortSummaryBadge" class="meta-text">${escapeHtml(current.sort_order || "none")} · ${escapeHtml(current.no_limit_mode || "all")}</span>
                     </summary>
                     <div class="guide-body">
-                        <div class="meta-text">Порядок серверов, лимит памяти iOS для XHTTP и скрытие элементов интерфейса в клиенте.</div>
+                        <div class="meta-text">Порядок серверов, лимит памяти iOS для XHTTP и скрытие элементов (автоматически применяются только в INCY; Happ без Provider ID их игнорирует).</div>
                         <div class="grid-2">
                             <div class="field">
                                 <label for="subSortOrder">Сортировка серверов</label>
@@ -308,8 +308,8 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                             <div class="field">
                                 <label for="subNoLimitMode">No-Limit режим (память iOS)</label>
                                 <select id="subNoLimitMode" name="no_limit_mode" class="input">
-                                    <option value="all" ${(current.no_limit_mode || "all") === "all" ? "selected" : ""}>No-Limit-Enabled (все)</option>
-                                    <option value="xhttp" ${current.no_limit_mode === "xhttp" ? "selected" : ""}>no-limit-xhttp-enabled (Happ)</option>
+                                    <option value="all" ${(current.no_limit_mode || "all") === "all" ? "selected" : ""}>No-Limit-Enabled (INCY iOS)</option>
+                                    <option value="xhttp" ${current.no_limit_mode === "xhttp" ? "selected" : ""}>no-limit-xhttp-enabled (Happ с Provider ID)</option>
                                     <option value="off" ${current.no_limit_mode === "off" ? "selected" : ""}>Выключено</option>
                                 </select>
                             </div>
@@ -330,12 +330,12 @@ export async function renderSubscriptionSettingsView(body, state = null, onReloa
                 <details class="guide-details">
                     <summary class="guide-summary">
                         <span>Фрагментация TLS</span>
-                        <span id="subFragSummaryBadge" class="chip ${current.fragmentation_enabled !== false ? "chip-ok" : "chip-muted"}">${current.fragmentation_enabled !== false ? "Вкл" : "Выкл"}</span>
+                        <span id="subFragSummaryBadge" class="chip ${current.fragmentation_enabled === true ? "chip-ok" : "chip-muted"}">${current.fragmentation_enabled === true ? "Вкл" : "Выкл"}</span>
                     </summary>
                     <div class="guide-body">
-                        <div class="meta-text">Дробит TLS ClientHello (напр. tlshello, 10-30 байт каждые 10-30 мс) от DPI. Выключайте, если тормозит хендшейк.</div>
+                        <div class="meta-text">Дробит TLS ClientHello только в INCY (для CDN XHTTP не требуется, держите выключенным без необходимости).</div>
                         <label for="subFragEnabled" class="checkbox-row">
-                            <input id="subFragEnabled" name="fragmentation_enabled" type="checkbox" ${current.fragmentation_enabled !== false ? "checked" : ""}>
+                            <input id="subFragEnabled" name="fragmentation_enabled" type="checkbox" ${current.fragmentation_enabled === true ? "checked" : ""}>
                             <span>Включить fragmentation-enable</span>
                         </label>
                         <div class="grid-2">
