@@ -257,10 +257,8 @@ export function parseDate(value) {
 
 export function formatRelativeTime(iso) {
     if (!iso) return "—";
-    const d = _parseDate(iso);
-    const _parseDate = parseDate;
-
-if (!d) return "—";
+    const d = parseDate(iso);
+    if (!d) return "—";
     const diffSec = Math.floor((Date.now() - d.getTime()) / 1000);
     if (diffSec < 0) return formatDate(iso);
     if (diffSec < 60) return "только что";
@@ -330,10 +328,8 @@ export function openExternalLink(url) {
 
 export function formatDate(iso) {
     if (iso == null || iso === "") return "—";
-    const d = _parseDate(iso);
-    const _parseDate = parseDate;
-
-if (!d) return "—";
+    const d = parseDate(iso);
+    if (!d) return "—";
     try {
         return _DATE_FMT.format(d);
     } catch {

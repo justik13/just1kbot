@@ -117,7 +117,12 @@ class FulfillmentService:
             vless_sub.notified_expired = False
             user.notification_retry_count = 0
             user.last_notification_attempt = None
-            await SubscriptionService._sync_access_state(session, user, vless_sub=vless_sub)
+            await SubscriptionService._sync_access_state(
+                session,
+                user,
+                vless_sub=vless_sub,
+                force_sync=(meta.get("previous_device_limit") != vless_sub.device_limit),
+            )
             logger.info(
                 "Fulfilled standard order %s for user %s: +%s days (until %s, op=%s)",
                 order.id,
@@ -236,6 +241,7 @@ class FulfillmentService:
                 return
             meta = dict(order.metadata_ or {})
             op = meta.get("operation")
+            prev_limit_before_revoke = getattr(vless_sub, "device_limit", None)
             if op == "upgrade":
                 if "previous_device_limit" in meta:
                     try:
@@ -256,7 +262,15 @@ class FulfillmentService:
                             vless_sub.device_limit = int(meta["previous_device_limit"])
                         except (ValueError, TypeError):
                             pass
-            await SubscriptionService._sync_access_state(session, user, vless_sub=vless_sub)
+            await SubscriptionService._sync_access_state(
+                session,
+                user,
+                vless_sub=vless_sub,
+                force_sync=(
+                    op != "upgrade"
+                    and prev_limit_before_revoke != getattr(vless_sub, "device_limit", None)
+                ),
+            )
             if op == "upgrade":
                 from services.vless_subscription_service import VlessSubscriptionService
 

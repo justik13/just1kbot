@@ -980,8 +980,12 @@ async def reset_ru_hub_bridge_blocks(
 
         extra = dict(server.extra_data or {})
         prev_blocked = [int(x) for x in (extra.get("blocked_eu_ids") or []) if str(x).isdigit()]
-        extra.pop("blocked_eu_ids", None)
         bh_state = extra.get("bridge_health_state")
+        had_any_block = bool(prev_blocked) or (
+            isinstance(bh_state, dict)
+            and any(isinstance(e, dict) and e.get("blocked") for e in bh_state.values())
+        )
+        extra.pop("blocked_eu_ids", None)
         if isinstance(bh_state, dict):
             cleaned_bh: dict[str, Any] = {}
             for k, entry in bh_state.items():
@@ -997,7 +1001,7 @@ async def reset_ru_hub_bridge_blocks(
             extra["bridge_health_state"] = cleaned_bh
 
         updated = await update_server(session, server, extra_data=extra)
-        if prev_blocked:
+        if had_any_block:
             from services.vless_subscription_service import VlessSubscriptionService
 
             _queue_topology_sync(session)
