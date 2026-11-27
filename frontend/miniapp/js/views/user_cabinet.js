@@ -1210,14 +1210,12 @@ function _bindDevicesEvents(container, d, reload) {
             refreshInFlight = true;
             refreshBtn.disabled = true;
             refreshBtn.setAttribute("aria-busy", "true");
-            refreshBtn.style.opacity = "0.5";
             try {
                 await reload();
             } finally {
                 refreshInFlight = false;
                 refreshBtn.disabled = false;
                 refreshBtn.removeAttribute("aria-busy");
-                refreshBtn.style.opacity = "";
             }
         });
     }

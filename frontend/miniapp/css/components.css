@@ -1318,18 +1318,24 @@ dialog.modal-dialog::backdrop {
     color: var(--accent-emerald);
     font-weight: 600;
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .amount-neg {
     color: var(--text-primary);
     font-weight: 600;
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .amount-err {
     color: var(--accent-red);
     font-weight: 600;
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 /* MVP Product Cabinet Additions */
