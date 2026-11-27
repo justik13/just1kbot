@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from datetime import timedelta
 from decimal import Decimal
 import html
@@ -12,16 +13,17 @@ from uuid import UUID, uuid4
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
-from sqlalchemy import String, cast, desc, func, or_, select, update
+from sqlalchemy import String, and_, cast, desc, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.keyboards.notifications import (
     get_action_notification_keyboard,
     get_bonus_credited_keyboard,
 )
-from config.enums import AdminAuditAction, OrderServiceType, OrderStatus
+from config.enums import AccountLedgerEntryType, AdminAuditAction, OrderServiceType, OrderStatus
 from database.connection import session_scope
 from database.models import (
+    AccountLedgerEntry,
     AuditLog,
     Order,
     User,
@@ -40,6 +42,7 @@ from utils.telegram import safe_send_message
 logger = logging.getLogger(__name__)
 
 _active_bulk_tasks: set[asyncio.Task] = set()
+_bulk_task_lock = asyncio.Lock()
 
 
 def _track_bulk_task(coro: Any, *, name: str) -> asyncio.Task:
@@ -84,7 +87,7 @@ async def send_direct_message(
             bot,
             tg_id,
             clean_text,
-            reply_markup=get_action_notification_keyboard("⚡ Открыть приложение", tab="connect"),
+            reply_markup=get_action_notification_keyboard("Открыть приложение", tab="connect"),
             parse_mode="HTML",
             raise_forbidden=True,
         )
@@ -123,7 +126,7 @@ async def _run_mass_bonus_worker(
     failed = 0
     reason_safe = html.escape(reason) if reason else "Начисление от администратора"
     notify_text = (
-        f"🎁 <b>Вам начислен бонус +{amount_rub} ₽</b>\n\n"
+        f"<b>Вам начислен бонус +{amount_rub} ₽</b>\n\n"
         f"Комментарий: {reason_safe}"
     )
 
@@ -204,47 +207,49 @@ async def start_mass_bonus(
 ) -> dict[str, Any]:
     if not (1 <= amount_rub <= 50000):
         raise ValueError("Сумма должна быть от 1 до 50000 ₽")
-    if any(not t.done() for t in _active_bulk_tasks):
-        raise ValueError("Массовая операция уже выполняется. Дождитесь завершения.")
 
-    batch_id = uuid4().hex[:12]
-    async with session_scope() as session:
-        targets = await get_audience_targets(
-            session,
-            target_audience,
-            admin_id=admin_id,
-            include_bot_blocked=True,
+    async with _bulk_task_lock:
+        if any(not t.done() for t in _active_bulk_tasks):
+            raise ValueError("Массовая операция уже выполняется. Дождитесь завершения.")
+
+        batch_id = uuid4().hex[:12]
+        async with session_scope() as session:
+            targets = await get_audience_targets(
+                session,
+                target_audience,
+                admin_id=admin_id,
+                include_bot_blocked=True,
+            )
+            if not targets:
+                raise ValueError("Нет пользователей для выбранной аудитории")
+
+            await AuditService.log_action(
+                session,
+                admin_id=admin_id,
+                action=AdminAuditAction.MASS_BONUS_GRANTED,
+                target_type="mass_bonus",
+                details={
+                    "batch_id": batch_id,
+                    "audience": target_audience,
+                    "amount_rub": amount_rub,
+                    "target_count": len(targets),
+                    "notify_users": notify_users,
+                    "reason": reason,
+                },
+            )
+
+        _track_bulk_task(
+            _run_mass_bonus_worker(
+                bot,
+                admin_id=admin_id,
+                batch_id=batch_id,
+                targets=targets,
+                amount_rub=amount_rub,
+                reason=reason,
+                notify_users=notify_users,
+            ),
+            name=f"mass_bonus:{batch_id}",
         )
-        if not targets:
-            raise ValueError("Нет пользователей для выбранной аудитории")
-
-        await AuditService.log_action(
-            session,
-            admin_id=admin_id,
-            action=AdminAuditAction.MASS_BONUS_GRANTED,
-            target_type="mass_bonus",
-            details={
-                "batch_id": batch_id,
-                "audience": target_audience,
-                "amount_rub": amount_rub,
-                "target_count": len(targets),
-                "notify_users": notify_users,
-                "reason": reason,
-            },
-        )
-
-    _track_bulk_task(
-        _run_mass_bonus_worker(
-            bot,
-            admin_id=admin_id,
-            batch_id=batch_id,
-            targets=targets,
-            amount_rub=amount_rub,
-            reason=reason,
-            notify_users=notify_users,
-        ),
-        name=f"mass_bonus:{batch_id}",
-    )
     return {
         "batch_id": batch_id,
         "target_count": len(targets),
@@ -269,13 +274,11 @@ async def _run_mass_extend_worker(
     notified = 0
     failed = 0
     scope_label = (
-        "Все подписки"
-        if service_scope == "all"
-        else ("Белый Интернет" if service_scope == "white_internet" else "Стандартный доступ")
+        "Белый Интернет" if service_scope == "white_internet" else "Стандартный доступ"
     )
     reason_safe = html.escape(reason) if reason else "Продление от администратора"
     notify_text = (
-        f"🎁 <b>Ваша подписка ({scope_label}) продлена на +{days} дн.</b>\n\n"
+        f"<b>Ваша подписка ({scope_label}) продлена на +{days} дн.</b>\n\n"
         f"Комментарий: {reason_safe}"
     )
 
@@ -283,7 +286,7 @@ async def _run_mass_extend_worker(
         did_extend = False
         try:
             async with session_scope() as session:
-                if service_scope in ("standard", "all"):
+                if service_scope == "standard":
                     user_row = await session.get(User, uid)
                     if user_row is not None and not user_row.is_deleted:
                         vless_sub = await get_or_create_subscription(session, uid)
@@ -299,7 +302,7 @@ async def _run_mass_extend_worker(
                         if updated is not None:
                             did_extend = True
 
-                if service_scope in ("white_internet", "all"):
+                if service_scope == "white_internet":
                     wi_sub = await session.scalar(
                         select(WhiteInternetSubscription).where(
                             WhiteInternetSubscription.user_id == uid
@@ -330,7 +333,7 @@ async def _run_mass_extend_worker(
                     bot,
                     tg_id,
                     notify_text,
-                    reply_markup=get_action_notification_keyboard("⚡ Открыть кабинет", tab="connect"),
+                    reply_markup=get_action_notification_keyboard("Открыть кабинет", tab="connect"),
                     parse_mode="HTML",
                     raise_forbidden=True,
                 )
@@ -380,64 +383,66 @@ async def start_mass_extend(
         raise ValueError("Укажите сервис: standard или white_internet")
     if not (1 <= days <= 365):
         raise ValueError("Срок продления должен быть от 1 до 365 дней")
-    if any(not t.done() for t in _active_bulk_tasks):
-        raise ValueError("Массовая операция уже выполняется. Дождитесь завершения.")
 
-    batch_id = uuid4().hex[:12]
-    async with session_scope() as session:
-        targets = await get_audience_targets(
-            session,
-            target_audience,
-            admin_id=admin_id,
-            include_bot_blocked=True,
-        )
-        if service_scope == "white_internet" and targets:
-            from config.enums import WhiteInternetStatus
+    async with _bulk_task_lock:
+        if any(not t.done() for t in _active_bulk_tasks):
+            raise ValueError("Массовая операция уже выполняется. Дождитесь завершения.")
 
-            eligible_ids = set(
-                (
-                    await session.scalars(
-                        select(WhiteInternetSubscription.user_id).where(
-                            WhiteInternetSubscription.user_id.in_([t[0] for t in targets]),
-                            WhiteInternetSubscription.status != WhiteInternetStatus.DISABLED,
-                        )
-                    )
-                ).all()
+        batch_id = uuid4().hex[:12]
+        async with session_scope() as session:
+            targets = await get_audience_targets(
+                session,
+                target_audience,
+                admin_id=admin_id,
+                include_bot_blocked=True,
             )
-            targets = [t for t in targets if t[0] in eligible_ids]
+            if service_scope == "white_internet" and targets:
+                from config.enums import WhiteInternetStatus
 
-        if not targets:
-            raise ValueError("Нет подходящих пользователей для продления")
+                eligible_ids = set(
+                    (
+                        await session.scalars(
+                            select(WhiteInternetSubscription.user_id).where(
+                                WhiteInternetSubscription.user_id.in_([t[0] for t in targets]),
+                                WhiteInternetSubscription.status != WhiteInternetStatus.DISABLED,
+                            )
+                        )
+                    ).all()
+                )
+                targets = [t for t in targets if t[0] in eligible_ids]
 
-        await AuditService.log_action(
-            session,
-            admin_id=admin_id,
-            action=AdminAuditAction.MASS_SUB_EXTEND,
-            target_type="mass_extend",
-            details={
-                "batch_id": batch_id,
-                "service_scope": service_scope,
-                "audience": target_audience,
-                "days": days,
-                "target_count": len(targets),
-                "notify_users": notify_users,
-                "reason": reason,
-            },
+            if not targets:
+                raise ValueError("Нет подходящих пользователей для продления")
+
+            await AuditService.log_action(
+                session,
+                admin_id=admin_id,
+                action=AdminAuditAction.MASS_SUB_EXTEND,
+                target_type="mass_extend",
+                details={
+                    "batch_id": batch_id,
+                    "service_scope": service_scope,
+                    "audience": target_audience,
+                    "days": days,
+                    "target_count": len(targets),
+                    "notify_users": notify_users,
+                    "reason": reason,
+                },
+            )
+
+        _track_bulk_task(
+            _run_mass_extend_worker(
+                bot,
+                admin_id=admin_id,
+                batch_id=batch_id,
+                service_scope=service_scope,
+                targets=targets,
+                days=days,
+                reason=reason,
+                notify_users=notify_users,
+            ),
+            name=f"mass_extend:{batch_id}",
         )
-
-    _track_bulk_task(
-        _run_mass_extend_worker(
-            bot,
-            admin_id=admin_id,
-            batch_id=batch_id,
-            service_scope=service_scope,
-            targets=targets,
-            days=days,
-            reason=reason,
-            notify_users=notify_users,
-        ),
-        name=f"mass_extend:{batch_id}",
-    )
     return {
         "batch_id": batch_id,
         "service_scope": service_scope,
@@ -445,6 +450,32 @@ async def start_mass_extend(
         "days": days,
         "status": "started",
     }
+
+
+_MAX_INT32 = 2_147_483_647
+_MAX_INT64 = 9_223_372_036_854_775_807
+
+_ANOMALY_METADATA_KEYS: tuple[str, ...] = (
+    "requires_manual_review",
+    "settlement_held",
+    "payment_amount_mismatch",
+    "refund_amount_mismatch",
+    "payment_id_mismatch",
+    "refund_payment_id_mismatch",
+    "late_payment_after_refund_on_canceled",
+    "underpaid",
+    "mixed_fallback_credited",
+    "fulfillment_error",
+    "negative_balance_rub",
+    "partial_refund_amount_rub",
+)
+
+
+def extract_order_metadata_flags(metadata: object) -> list[str]:
+    """Extract truthy anomaly/attention flag names from Order.metadata_."""
+    if not isinstance(metadata, dict):
+        return []
+    return [key for key in _ANOMALY_METADATA_KEYS if bool(metadata.get(key))]
 
 
 async def _revenue_for_period(session: AsyncSession, since: Any) -> Decimal:
@@ -459,12 +490,106 @@ async def _revenue_for_period(session: AsyncSession, since: Any) -> Decimal:
     return Decimal(str(external_orders_sum or 0))
 
 
+async def get_overview_finances_summary(session: AsyncSession) -> dict[str, Any]:
+    """Return compact revenue and attention-order counts for admin overview."""
+    now = now_utc()
+    rev_24h = await _revenue_for_period(session, now - timedelta(hours=24))
+    rev_7d = await _revenue_for_period(session, now - timedelta(days=7))
+    attention_count = int(
+        (
+            await session.scalar(
+                select(func.count(Order.id)).where(
+                    or_(
+                        Order.metadata_["requires_manual_review"].astext == "true",
+                        Order.metadata_["settlement_held"].astext == "true",
+                    )
+                )
+            )
+        )
+        or 0
+    )
+    return {
+        "revenue_24h": float(rev_24h),
+        "revenue_7d": float(rev_7d),
+        "attention_orders_count": attention_count,
+    }
+
+
+async def build_orders_payment_breakdown(
+    session: AsyncSession,
+    orders: Sequence[Order],
+) -> dict[UUID, dict[str, Any]]:
+    """Compute per-order external/bonus/real-balance payment breakdown in a single batch query."""
+    if not orders:
+        return {}
+
+    order_ids = [order.id for order in orders]
+    ledger_rows = (
+        await session.execute(
+            select(
+                AccountLedgerEntry.order_id,
+                AccountLedgerEntry.bucket,
+                func.coalesce(func.sum(func.abs(AccountLedgerEntry.amount)), 0),
+            )
+            .where(
+                AccountLedgerEntry.order_id.in_(order_ids),
+                AccountLedgerEntry.entry_type == AccountLedgerEntryType.PURCHASE_DEBIT,
+            )
+            .group_by(AccountLedgerEntry.order_id, AccountLedgerEntry.bucket)
+        )
+    ).all()
+
+    ledger_by_order: dict[UUID, dict[str, float]] = {}
+    for oid, bucket, amount_sum in ledger_rows:
+        if oid is None:
+            continue
+        buckets = ledger_by_order.setdefault(oid, {})
+        buckets[str(bucket)] = float(amount_sum or 0)
+
+    result: dict[UUID, dict[str, Any]] = {}
+    for order in orders:
+        payment_method = order.payment_method
+        is_wallet = payment_method == "wallet"
+        external_paid_rub = 0.0 if is_wallet else float(order.amount_rub or 0)
+
+        buckets = ledger_by_order.get(order.id)
+        if buckets is not None:
+            bonus_paid_rub = float(buckets.get("bonus", 0.0))
+            real_balance_paid_rub = float(buckets.get("real", 0.0))
+            wallet_debit_rub = bonus_paid_rub + real_balance_paid_rub
+        else:
+            bonus_paid_rub = 0.0
+            real_balance_paid_rub = 0.0
+            meta = order.metadata_ if isinstance(order.metadata_, dict) else {}
+            raw_wallet_debit = (
+                None if meta.get("mixed_fallback_credited") else meta.get("wallet_debit_rub")
+            )
+            if raw_wallet_debit is not None:
+                try:
+                    wallet_debit_rub = max(0.0, float(raw_wallet_debit))
+                except (TypeError, ValueError):
+                    wallet_debit_rub = 0.0
+            else:
+                wallet_debit_rub = float(order.amount_rub or 0) if is_wallet else 0.0
+
+        result[order.id] = {
+            "payment_method": payment_method,
+            "external_paid_rub": external_paid_rub,
+            "bonus_paid_rub": bonus_paid_rub,
+            "real_balance_paid_rub": real_balance_paid_rub,
+            "wallet_debit_rub": wallet_debit_rub,
+            "total_rub": external_paid_rub + wallet_debit_rub,
+        }
+    return result
+
+
 async def list_finances(
     session: AsyncSession,
     *,
     kind: str = "orders",
     status: str = "",
     q: str = "",
+    attention_only: bool = False,
     offset: int = 0,
     limit: int = 25,
 ) -> dict[str, Any]:
@@ -496,25 +621,43 @@ async def list_finances(
         sub_types = [OrderServiceType.STANDARD, OrderServiceType.WHITE_INTERNET]
         stmt = stmt.where(Order.service_type.in_(sub_types))
         count_stmt = count_stmt.where(Order.service_type.in_(sub_types))
+    elif kind == "gateway":
+        stmt = stmt.where(Order.payment_method != "wallet")
+        count_stmt = count_stmt.where(Order.payment_method != "wallet")
 
     if clean_status:
         stmt = stmt.where(Order.status == clean_status)
         count_stmt = count_stmt.where(Order.status == clean_status)
+    if attention_only:
+        attn_cond = or_(
+            Order.metadata_["requires_manual_review"].astext == "true",
+            Order.metadata_["settlement_held"].astext == "true",
+        )
+        stmt = stmt.where(attn_cond)
+        count_stmt = count_stmt.where(attn_cond)
     if clean_q:
+        escaped_q = clean_q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        clean_user_q = clean_q.lstrip("@")
         conds = [
-            cast(Order.id, String).ilike(f"%{clean_q}%"),
-            Order.external_id.ilike(f"%{clean_q}%"),
-            Order.description.ilike(f"%{clean_q}%"),
-            User.username.ilike(f"%{clean_q}%"),
+            cast(Order.id, String).ilike(f"%{escaped_q}%", escape="\\"),
+            Order.external_id.ilike(f"%{escaped_q}%", escape="\\"),
+            Order.description.ilike(f"%{escaped_q}%", escape="\\"),
         ]
+        if clean_user_q:
+            escaped_user_q = clean_user_q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            conds.extend([
+                User.username.ilike(f"%{escaped_user_q}%", escape="\\"),
+                User.first_name.ilike(f"%{escaped_user_q}%", escape="\\"),
+            ])
         try:
             conds.append(Order.id == UUID(clean_q))
         except ValueError:
             pass
         if clean_q.isdigit():
             num = int(clean_q)
-            conds.append(User.telegram_id == num)
-            if 0 < num <= 2_147_483_647:
+            if 0 < num <= _MAX_INT64:
+                conds.append(User.telegram_id == num)
+            if 0 < num <= _MAX_INT32:
                 conds.append(Order.user_id == num)
         stmt = stmt.where(or_(*conds))
         count_stmt = count_stmt.where(or_(*conds))
@@ -527,6 +670,9 @@ async def list_finances(
             .limit(safe_limit)
         )
     ).all()
+    breakdown_map = await build_orders_payment_breakdown(
+        session, [order for order, _usr in rows]
+    )
     items = [
         {
             "kind": "order",
@@ -539,10 +685,14 @@ async def list_finances(
             "service_type": order.service_type,
             "duration_days": order.duration_days,
             "device_limit": order.device_limit,
-            "payment_method": order.payment_method,
+            **breakdown_map[order.id],
+            "external_id": order.external_id,
             "reference": order.external_id or order.description or "",
+            "metadata_flags": extract_order_metadata_flags(order.metadata_),
             "created_at": order.created_at.isoformat() if order.created_at else None,
             "paid_at": order.paid_at.isoformat() if order.paid_at else None,
+            "refunded_at": order.refunded_at.isoformat() if order.refunded_at else None,
+            "expires_at": order.expires_at.isoformat() if order.expires_at else None,
         }
         for order, usr in rows
     ]
@@ -565,6 +715,7 @@ async def list_audit_logs(
     session: AsyncSession,
     *,
     action: str = "",
+    target_type: str = "",
     q: str = "",
     offset: int = 0,
     limit: int = 40,
@@ -572,17 +723,35 @@ async def list_audit_logs(
     stmt = select(AuditLog)
     count_stmt = select(func.count(AuditLog.id))
     clean_action = (action or "").strip()
+    clean_target_type = (target_type or "").strip()
     clean_q = (q or "").strip()
 
     if clean_action:
         stmt = stmt.where(AuditLog.action == clean_action)
         count_stmt = count_stmt.where(AuditLog.action == clean_action)
+    if clean_target_type:
+        stmt = stmt.where(func.lower(AuditLog.target_type) == clean_target_type.lower())
+        count_stmt = count_stmt.where(func.lower(AuditLog.target_type) == clean_target_type.lower())
     if clean_q:
-        conds = [AuditLog.details.ilike(f"%{clean_q}%"), AuditLog.action.ilike(f"%{clean_q}%")]
+        escaped_q = clean_q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        conds = [
+            AuditLog.details.ilike(f"%{escaped_q}%", escape="\\"),
+            AuditLog.action.ilike(f"%{escaped_q}%", escape="\\"),
+        ]
         if clean_q.isdigit():
             num = int(clean_q)
-            conds.extend([AuditLog.admin_id == num, AuditLog.target_id == num])
-            if 0 < num <= 2_147_483_647:
+            if 0 <= num <= _MAX_INT64:
+                conds.extend([AuditLog.admin_id == num, AuditLog.target_id == num])
+            if 0 < num <= _MAX_INT64:
+                conds.append(
+                    and_(
+                        func.lower(AuditLog.target_type) == "user",
+                        AuditLog.target_id.in_(
+                            select(User.id).where(User.telegram_id == num)
+                        ),
+                    )
+                )
+            if 0 < num <= _MAX_INT32:
                 conds.append(AuditLog.id == num)
         stmt = stmt.where(or_(*conds))
         count_stmt = count_stmt.where(or_(*conds))

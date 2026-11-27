@@ -32,11 +32,25 @@
         if (openClientParam === "happ" || openClientParam === "incy") {
             updateActiveClient(openClientParam);
             setTimeout(function() {
-                window.location.href = openClientParam + "://add/" + subUrl;
+                const deepLink = openClientParam + "://add/" + subUrl;
+                const a = document.createElement("a");
+                a.href = deepLink;
+                a.style.display = "none";
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
             }, 250);
         }
 
         let activePlatform = "ios";
+
+        const _TRIGGER_COPY = {
+            ios: "Видео и шаги смены региона App Store за 2 минуты",
+            android: "Установка из Google Play или прямой APK без сервисов",
+            windows: "Установка клиента для Windows и выбор режима работы",
+            macos: "Установка образа .dmg или App Store на macOS",
+            github: "Сборка и запуск AppImage / deb / rpm для Linux"
+        };
 
         function switchPlatformTab(platform) {
             activePlatform = platform;
@@ -50,8 +64,13 @@
                     const isSelected = (p === platform);
                     btn.classList.toggle("active", isSelected);
                     btn.setAttribute("aria-selected", isSelected ? "true" : "false");
+                    btn.setAttribute("tabindex", isSelected ? "0" : "-1");
                 }
             });
+            const triggerSub = document.getElementById("guidesTriggerSub");
+            if (triggerSub && _TRIGGER_COPY[platform]) {
+                triggerSub.textContent = _TRIGGER_COPY[platform];
+            }
             if (platform === "windows" || platform === "macos") {
                 updateActiveClient("happ");
             } else if (platform === "ios" || platform === "android") {
@@ -225,7 +244,7 @@
 
                 const data = await response.json().catch(() => ({}));
                 if (response.ok && data.ok) {
-                    statusMsg.innerHTML = '<span>Контакты отправлены. Оператор скоро свяжется с вами</span><br><button type="button" class="support-reset-btn" onclick="resetSupportForm()">Отправить ещё сообщение</button>';
+                    statusMsg.innerHTML = '<span>Обращение отправлено. Оператор ответит по указанному контакту</span><br><button type="button" class="support-reset-btn" onclick="resetSupportForm()">Отправить ещё сообщение</button>';
                     statusMsg.className = "support-status-msg success";
                     statusMsg.style.display = "block";
                     contactInput.disabled = true;
@@ -273,6 +292,11 @@
             if (contactInput) contactInput.focus();
         }
     
+        function _scrollTopSmooth() {
+            const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+            window.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
+        }
+
         function openGuidesTab(platform) {
             const main = document.getElementById("mainView");
             const guides = document.getElementById("guidesView");
@@ -280,7 +304,7 @@
             if (guides) guides.classList.remove("view-hidden");
             if (platform) switchGuideTab(platform);
             window.location.hash = "guides";
-            window.scrollTo({ top: 0, behavior: "smooth" });
+            _scrollTopSmooth();
         }
 
         function openGuidesCurrentTab() {
@@ -320,7 +344,7 @@
             if (window.location.hash === "#guides") {
                 history.replaceState(null, document.title, window.location.pathname + window.location.search);
             }
-            window.scrollTo({ top: 0, behavior: "smooth" });
+            _scrollTopSmooth();
         }
 
         function switchGuideTab(tab) {
@@ -333,6 +357,7 @@
                 if (btn) {
                     btn.classList.toggle("active", isActive);
                     btn.setAttribute("aria-selected", isActive ? "true" : "false");
+                    btn.setAttribute("tabindex", isActive ? "0" : "-1");
                 }
                 if (sec) sec.style.display = isActive ? "block" : "none";
             });
@@ -341,7 +366,6 @@
         function switchIosMethod(method) {
             pauseGuideVideos();
             const methods = {
-                "tf": { btn: "tabBtnIosTf", sec: "iosSubGuideTf" },
                 "region": { btn: "tabBtnIosRegion", sec: "iosSubGuideRegion" },
                 "newid": { btn: "tabBtnIosNewId", sec: "iosSubGuideNewId" }
             };
@@ -352,6 +376,7 @@
                 if (b) {
                     b.classList.toggle("active", isActive);
                     b.setAttribute("aria-selected", isActive ? "true" : "false");
+                    b.setAttribute("tabindex", isActive ? "0" : "-1");
                 }
                 if (s) s.style.display = isActive ? "block" : "none";
             });
@@ -377,10 +402,12 @@
             if (btnPlay) {
                 btnPlay.classList.toggle("active", isPlay);
                 btnPlay.setAttribute("aria-selected", isPlay ? "true" : "false");
+                btnPlay.setAttribute("tabindex", isPlay ? "0" : "-1");
             }
             if (btnApk) {
                 btnApk.classList.toggle("active", !isPlay);
                 btnApk.setAttribute("aria-selected", !isPlay ? "true" : "false");
+                btnApk.setAttribute("tabindex", !isPlay ? "0" : "-1");
             }
             if (secPlay) secPlay.style.display = isPlay ? "block" : "none";
             if (secApk) secApk.style.display = !isPlay ? "block" : "none";
@@ -399,19 +426,41 @@
             if (btnWin) {
                 btnWin.classList.toggle("active", isWin);
                 btnWin.setAttribute("aria-selected", isWin ? "true" : "false");
+                btnWin.setAttribute("tabindex", isWin ? "0" : "-1");
             }
             if (btnMac) {
                 btnMac.classList.toggle("active", isMac);
                 btnMac.setAttribute("aria-selected", isMac ? "true" : "false");
+                btnMac.setAttribute("tabindex", isMac ? "0" : "-1");
             }
             if (btnLinux) {
                 btnLinux.classList.toggle("active", isLinux);
                 btnLinux.setAttribute("aria-selected", isLinux ? "true" : "false");
+                btnLinux.setAttribute("tabindex", isLinux ? "0" : "-1");
             }
             if (secWin) secWin.style.display = isWin ? "block" : "none";
             if (secMac) secMac.style.display = isMac ? "block" : "none";
             if (secLinux) secLinux.style.display = isLinux ? "block" : "none";
         }
+
+        document.querySelectorAll('[role="tablist"]').forEach(function(tablist) {
+            tablist.addEventListener("keydown", function(e) {
+                const tabs = Array.from(tablist.querySelectorAll('[role="tab"]'));
+                if (!tabs.length) return;
+                const idx = tabs.indexOf(document.activeElement);
+                if (idx === -1) return;
+                let next = -1;
+                if (e.key === "ArrowRight") next = (idx + 1) % tabs.length;
+                else if (e.key === "ArrowLeft") next = (idx - 1 + tabs.length) % tabs.length;
+                else if (e.key === "Home") next = 0;
+                else if (e.key === "End") next = tabs.length - 1;
+                if (next !== -1) {
+                    e.preventDefault();
+                    tabs[next].focus();
+                    tabs[next].click();
+                }
+            });
+        });
 
         function copyGuideField(text, btn) {
             if (!btn || btn.classList.contains("copied") || btn.classList.contains("copy-failed")) return;
@@ -431,7 +480,7 @@
             function onFail() {
                 btn.classList.remove("copied");
                 btn.classList.add("copy-failed");
-                btn.innerHTML = '<span class="copy-lbl" style="color:var(--error);">Ошибка</span>';
+                btn.innerHTML = '<span class="copy-lbl" style="color:var(--negative);">Ошибка</span>';
                 setTimeout(function() {
                     btn.classList.remove("copy-failed");
                     btn.innerHTML = btn.getAttribute("data-original-html") || originalHtml;
@@ -492,7 +541,7 @@
             img.classList.remove("zoomed");
             if (caption) caption.textContent = imgAlt || "Скриншот настройки";
             if (typeof lightbox.showModal === "function") {
-                lightbox.showModal();
+                if (!lightbox.open) lightbox.showModal();
             } else {
                 lightbox.setAttribute("open", "");
             }
@@ -504,14 +553,18 @@
         function closeImageLightbox() {
             const lightbox = document.getElementById("imageLightbox");
             if (!lightbox) return;
+            const isOpen = lightbox.open || lightbox.hasAttribute("open");
+            if (!isOpen) return;
+            const prevFocus = lastFocusedElementBeforeLightbox;
+            lastFocusedElementBeforeLightbox = null;
             if (typeof lightbox.close === "function") {
                 lightbox.close();
             } else {
                 lightbox.removeAttribute("open");
             }
             document.body.style.overflow = "";
-            if (lastFocusedElementBeforeLightbox && typeof lastFocusedElementBeforeLightbox.focus === "function") {
-                lastFocusedElementBeforeLightbox.focus();
+            if (prevFocus && typeof prevFocus.focus === "function") {
+                prevFocus.focus();
             }
         }
 
@@ -540,13 +593,34 @@
                 document.body.style.overflow = "";
                 const img = document.getElementById("lightboxImg");
                 if (img) img.classList.remove("zoomed");
+                const prevFocus = lastFocusedElementBeforeLightbox;
+                lastFocusedElementBeforeLightbox = null;
+                if (prevFocus && typeof prevFocus.focus === "function") {
+                    prevFocus.focus();
+                }
             };
             lightboxModal.addEventListener("close", onLightboxDismiss);
             lightboxModal.addEventListener("cancel", onLightboxDismiss);
         }
 
         document.addEventListener("keydown", function(e) {
-            if (e.key === "Escape") closeImageLightbox();
+            if (e.key === "Escape") {
+                const lightbox = document.getElementById("imageLightbox");
+                if (lightbox && (lightbox.open || lightbox.hasAttribute("open"))) {
+                    closeImageLightbox();
+                }
+                return;
+            }
+            if (e.key === "Enter" || e.key === " ") {
+                const wrapper = e.target.closest && e.target.closest(".guide-screenshot-wrapper");
+                if (wrapper) {
+                    e.preventDefault();
+                    const img = wrapper.querySelector("img");
+                    if (img && img.src) {
+                        openImageLightbox(img.src, img.alt);
+                    }
+                }
+            }
         });
 
         document.addEventListener("click", function(e) {
@@ -557,10 +631,15 @@
         });
 
         window.addEventListener("hashchange", function() {
+            const guides = document.getElementById("guidesView");
             if (window.location.hash === "#guides") {
-                openGuidesCurrentTab();
+                if (guides && guides.classList.contains("view-hidden")) {
+                    openGuidesCurrentTab();
+                }
             } else if (!window.location.hash) {
-                closeGuidesTab();
+                if (guides && !guides.classList.contains("view-hidden")) {
+                    closeGuidesTab();
+                }
             }
         });
 

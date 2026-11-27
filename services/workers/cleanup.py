@@ -36,6 +36,7 @@ WEBHOOK_INBOX_RETENTION_DAYS = 30
 _last_heavy_cleanup: float | None = None
 _last_old_cleanup: float = 0.0
 _pending_order_backoff_cache: TTLCache[Any, float] = TTLCache(maxsize=2000, ttl=300.0)
+_pending_webhook_backoff_cache: TTLCache[Any, float] = TTLCache(maxsize=2000, ttl=300.0)
 
 
 async def cleanup_expired_subscriptions_loop(
@@ -65,6 +66,7 @@ async def cleanup_expired_subscriptions_loop(
                 _last_heavy_cleanup = now
 
             await _reconcile_stale_pending_orders()
+            await _retry_pending_webhooks()
 
             if now - _last_old_cleanup > OLD_RECORDS_INTERVAL:
                 await _cleanup_old_records()
@@ -370,6 +372,162 @@ async def _cleanup_old_records():
         )
 
 
+async def _retry_pending_webhooks() -> None:
+    """Auto-retry pending/retry WebhookInbox rows before escalating stale failures to dead."""
+    from bot.handlers.webhook import (
+        _dispatch_yookassa_notifications,
+        _process_yookassa_payload_in_session,
+        _validate_webhook_payload,
+    )
+    from config.enums import WebhookInboxStatus
+    from config.settings import get_settings
+
+    now_dt = now_utc()
+    min_age_cutoff = now_dt - timedelta(minutes=2)
+    dead_age_cutoff = now_dt - timedelta(minutes=30)
+
+    try:
+        async with session_scope() as session:
+            stmt = (
+                select(WebhookInbox.id)
+                .where(
+                    WebhookInbox.provider == "yookassa",
+                    WebhookInbox.status.in_(
+                        [WebhookInboxStatus.PENDING.value, WebhookInboxStatus.RETRY.value]
+                    ),
+                    WebhookInbox.received_at <= min_age_cutoff,
+                )
+                .order_by(WebhookInbox.received_at.asc(), WebhookInbox.id.asc())
+                .limit(20)
+            )
+            candidate_ids = [
+                int(row_id)
+                for row_id in (await session.scalars(stmt)).all()
+                if int(row_id) not in _pending_webhook_backoff_cache
+            ]
+    except Exception as exc:
+        logger.warning("Failed to query pending/retry WebhookInbox rows: %s", exc)
+        return
+
+    if not candidate_ids:
+        return
+
+    notify_contexts: list[dict[str, Any]] = []
+    for wh_id in candidate_ids:
+        try:
+            async with session_scope() as session:
+                row = await session.scalar(
+                    select(WebhookInbox)
+                    .where(
+                        WebhookInbox.id == wh_id,
+                        WebhookInbox.status.in_(
+                            [WebhookInboxStatus.PENDING.value, WebhookInboxStatus.RETRY.value]
+                        ),
+                    )
+                    .with_for_update(skip_locked=True)
+                )
+                if row is None:
+                    continue
+
+                prev_status = str(row.status)
+                request_id = f"auto-retry-{wh_id}"
+                try:
+                    event, obj, _provider_obj_id, _pay_ext_id = _validate_webhook_payload(row.payload)
+                except ValueError:
+                    row.status = WebhookInboxStatus.DEAD.value
+                    continue
+
+                try:
+                    async with session.begin_nested():
+                        (
+                            order,
+                            inbox_status,
+                            notify_order_info,
+                            admin_alert_info,
+                            refund_alert_info,
+                        ) = await _process_yookassa_payload_in_session(
+                            session,
+                            row.payload,
+                            event=event,
+                            request_id=request_id,
+                            is_existing_event=True,
+                        )
+                except Exception as proc_exc:
+                    logger.warning(
+                        "[%s] Auto-retry of WebhookInbox id=%s raised: %s",
+                        request_id,
+                        wh_id,
+                        proc_exc,
+                    )
+                    is_old_retry = (
+                        prev_status == WebhookInboxStatus.RETRY.value
+                        and row.received_at is not None
+                        and row.received_at <= dead_age_cutoff
+                    )
+                    row.status = (
+                        WebhookInboxStatus.DEAD.value
+                        if is_old_retry
+                        else WebhookInboxStatus.RETRY.value
+                    )
+                    _pending_webhook_backoff_cache[wh_id] = time.monotonic()
+                    continue
+
+                if inbox_status == WebhookInboxStatus.SUCCEEDED.value:
+                    row.status = WebhookInboxStatus.SUCCEEDED.value
+                    metadata = obj.get("metadata") or {}
+                    pub_id = metadata.get("order_id")
+                    if pub_id and not getattr(row, "public_order_id", None):
+                        row.public_order_id = str(pub_id)
+                    if order is not None:
+                        notify_contexts.append({
+                            "request_id": request_id,
+                            "order": order,
+                            "notify_order_info": notify_order_info,
+                            "admin_alert_info": admin_alert_info,
+                            "refund_alert_info": refund_alert_info,
+                        })
+                    logger.info("[%s] Auto-recovered WebhookInbox id=%s", request_id, wh_id)
+                elif order is not None and getattr(order, "_webhook_amount_mismatch", False):
+                    row.status = WebhookInboxStatus.DEAD.value
+                else:
+                    is_old_retry = (
+                        prev_status == WebhookInboxStatus.RETRY.value
+                        and row.received_at is not None
+                        and row.received_at <= dead_age_cutoff
+                    )
+                    if is_old_retry:
+                        row.status = WebhookInboxStatus.DEAD.value
+                    else:
+                        row.status = WebhookInboxStatus.RETRY.value
+                        _pending_webhook_backoff_cache[wh_id] = time.monotonic()
+        except Exception as row_exc:
+            logger.warning("Failed to auto-retry WebhookInbox id=%s: %s", wh_id, row_exc)
+            _pending_webhook_backoff_cache[wh_id] = time.monotonic()
+
+    if notify_contexts:
+        settings = get_settings()
+        bot_token = getattr(settings, "BOT_TOKEN", None)
+        if bot_token:
+            from aiogram import Bot
+
+            bot = Bot(token=bot_token)
+            try:
+                for ctx in notify_contexts:
+                    try:
+                        await _dispatch_yookassa_notifications(bot, **ctx)
+                    except Exception as notify_exc:
+                        logger.warning(
+                            "Post-retry webhook notification failed (%s): %s",
+                            ctx.get("request_id"),
+                            notify_exc,
+                        )
+            finally:
+                try:
+                    await bot.session.close()
+                except Exception:
+                    pass
+
+
 async def _send_reconciliation_admin_alert(
     order_id: Any,
     user_id: int | None,
@@ -380,6 +538,7 @@ async def _send_reconciliation_admin_alert(
     """Send a one-time admin alert for a payment mismatch or partial refund."""
     try:
         from aiogram import Bot
+        from bot.keyboards.notifications import get_admin_finances_keyboard
         from config.settings import get_settings
         from utils.telegram import safe, safe_send_message
 
@@ -401,10 +560,17 @@ async def _send_reconciliation_admin_alert(
             f"Платеж: <code>{safe(external_id)}</code>\n"
             f"Причина: <code>{safe(reason)}</code>"
         )
+        reply_markup = get_admin_finances_keyboard(str(order_id))
         async with Bot(token=bot_token) as alert_bot:
             for aid in admin_ids:
                 try:
-                    await safe_send_message(alert_bot, aid, text, parse_mode="HTML")
+                    await safe_send_message(
+                        alert_bot,
+                        aid,
+                        text,
+                        reply_markup=reply_markup,
+                        parse_mode="HTML",
+                    )
                 except Exception as exc:
                     logger.warning(
                         "Failed to send reconciliation alert to admin %s for order %s: %s",

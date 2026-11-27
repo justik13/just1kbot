@@ -33,6 +33,7 @@ from config.constants import (
     REFERRAL_ACTIVE_MIN_TOPUP_RUB,
     REFERRAL_WELCOME_DISCOUNT_PERCENT,
     STANDARD_PLANS,
+    VPN_ACCESS_GRACE_HOURS,
     WHITE_INTERNET_BASE_PRICE_RUB,
     WHITE_INTERNET_EXTRA_DEVICE_PRICE_RUB,
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
@@ -280,6 +281,8 @@ def _serialize_ledger_entry(entry) -> dict[str, Any]:
         description = raw_desc
     elif source == "referral_bonus":
         description = "Реферальный бонус"
+    elif entry.entry_type == "payment_credit" and source == "admin_debt_forgiveness":
+        description = "Погашение долга"
     elif entry.entry_type == "admin_adjustment":
         description = "Бонусное начисление" if Decimal(entry.amount) > 0 else "Коррекция баланса"
     else:
@@ -379,6 +382,12 @@ async def api_user_dashboard_handler(request: web.Request) -> web.Response:
 
         return web.json_response({
             "ok": True,
+            "server_now": now.isoformat(),
+            "grace_hours": VPN_ACCESS_GRACE_HOURS,
+            "standard_tariff_prices": {
+                str(days): {"base_rub": int(base), "step_rub": int(step)}
+                for days, (base, step) in sorted(STANDARD_PLANS.items())
+            },
             "financial_hold": bool(getattr(user, "financial_hold", False)),
             "payments_maintenance": payments_maintenance,
             "support": {
@@ -396,6 +405,12 @@ async def api_user_dashboard_handler(request: web.Request) -> web.Response:
             "subscription_backup_url": _build_backup_sub_url(effective_sub_token),
             "standard": {
                 "active": std_active,
+                "in_grace": bool(
+                    std_active
+                    and vless_sub
+                    and vless_sub.expires_at
+                    and vless_sub.expires_at <= now
+                ),
                 "expires_at": vless_sub.expires_at.isoformat() if vless_sub and vless_sub.expires_at else None,
                 "device_limit": int(std_limit),
                 "auto_renew_enabled": bool(getattr(vless_sub, "auto_renew_enabled", False)) if vless_sub else False,
@@ -452,7 +467,11 @@ async def api_user_standard_quote_handler(request: web.Request) -> web.Response:
         user = await _ensure_user(session, ctx)
         bal = await get_account_balance(session, user_id=user.id)
         quote = await OrderService.quote_standard_change(
-            session, user.id, payload.device_limit, payload.duration_days
+            session,
+            user.id,
+            payload.device_limit,
+            payload.duration_days,
+            operation=payload.operation,
         )
         amount_rub = int(quote.get("due_rub") or 0)
         split = _calc_payment_split(amount_rub, int(bal.real_available), int(bal.bonus_available), True)
@@ -489,6 +508,7 @@ async def api_user_standard_checkout_handler(request: web.Request) -> web.Respon
                     session,
                     user_id=user.id,
                     service_type="standard",
+                    operation=payload.operation,
                     device_limit=payload.device_limit,
                     duration_days=payload.duration_days,
                     use_balance=payload.use_balance,

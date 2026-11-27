@@ -6,7 +6,6 @@ import logging
 import re
 import traceback
 from typing import Any
-from urllib.parse import urlsplit
 
 REDACTED = "[REDACTED]"
 
@@ -88,16 +87,6 @@ def sanitize_text(value: Any) -> str:
 def sanitize_short(value: Any, limit: int = 200) -> str:
     sanitized = sanitize_text(value)
     return sanitized if len(sanitized) <= limit else sanitized[:limit] + "..."
-
-
-def safe_url_target(value: Any) -> str:
-    """Return only a URL hostname and optional port for logs/alerts."""
-    try:
-        parsed = urlsplit(str(value))
-        host = parsed.hostname or "<invalid-host>"
-        return f"{host}:{parsed.port}" if parsed.port is not None else host
-    except (TypeError, ValueError):
-        return "<invalid-host>"
 
 
 _STANDARD_LOG_RECORD_ATTRS = frozenset({

@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+from uuid import uuid4
 
 from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config.enums import AccountLedgerEntryType
 from database.models import AccountLedgerEntry, User
 
 ZERO = Decimal(0)
@@ -534,6 +536,39 @@ async def create_admin_adjustment(
         values=values,
         economic_lookup=AccountLedgerEntry.idempotency_key == idempotency_key,
     )
+
+
+async def forgive_real_debt(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    amount_rub: int,
+    admin_telegram_id: int,
+    note: str | None = None,
+) -> AccountLedgerEntry:
+    """Credit the 'real' bucket to forgive user debt without an order."""
+    amount = abs(whole_rubles(amount_rub))
+    idempotency_key = f"miniapp:admin:forgive_debt:{admin_telegram_id}:{user_id}:{uuid4().hex}"
+    values = {
+        "user_id": user_id,
+        "entry_type": AccountLedgerEntryType.PAYMENT_CREDIT,
+        "bucket": "real",
+        "amount": amount,
+        "currency": "RUB",
+        "order_id": None,
+        "idempotency_key": idempotency_key,
+        "metadata_": {
+            "source": "admin_debt_forgiveness",
+            "admin_telegram_id": admin_telegram_id,
+            "note": note,
+        },
+    }
+    entry, _ = await _insert_or_get_entry(
+        session,
+        values=values,
+        economic_lookup=AccountLedgerEntry.idempotency_key == idempotency_key,
+    )
+    return entry
 
 
 async def get_account_history(

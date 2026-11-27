@@ -1,5 +1,31 @@
-import { api } from "../api.js?v=2.7.8";
-import { copyText, escapeHtml, formatDate, showConfirmModal, showToast } from "../ui.js?v=2.7.8";
+import { api } from "../api.js?v=2.8.0";
+import {
+    formatWiNodeSyncStatus,
+    formatWiProvisioningStatus,
+} from "../admin_labels.js?v=2.8.0";
+import { bindUserDetailActions } from "./user_detail_actions.js?v=2.8.0";
+import { renderHistoryTabContent } from "./user_detail_history.js?v=2.8.0";
+import {
+    copyText,
+    escapeHtml,
+    formatBytesGb,
+    formatDate,
+    formatRelativeTime,
+    parseDate,
+    showToast,
+} from "../ui.js?v=2.8.0";
+
+let _detailReqId = 0;
+
+function _formatDisplayName(u) {
+    if (u.first_name && u.username) {
+        return `${u.first_name} (@${u.username})`;
+    }
+    if (u.username) return `@${u.username}`;
+    if (u.first_name) return u.first_name;
+    if (u.telegram_id) return `ID ${u.telegram_id}`;
+    return `Пользователь #${u.id}`;
+}
 
 function _renderDevicesHtml(devices) {
     if (!devices.length) {
@@ -14,63 +40,152 @@ function _renderDevicesHtml(devices) {
             if (d.is_bi_assigned) {
                 slotChips.push(`<span class="chip chip-wi">Белый интернет</span>`);
             }
+            if (d.is_std_priority) {
+                slotChips.push(`<span class="chip chip-ok">Приоритет Стандарт</span>`);
+            }
+            if (d.is_bi_priority) {
+                slotChips.push(`<span class="chip chip-wi">Приоритет БИ</span>`);
+            }
             if (!slotChips.length) {
                 slotChips.push(`<span class="chip chip-muted">Без слота</span>`);
             }
+            const metaParts = [d.platform, d.app_version ? `v${d.app_version}` : ""].filter(Boolean);
+            const metaText = metaParts.join(" · ");
             return `
-                <div class="item-row" style="padding:8px 12px;">
+                <div class="item-row" style="padding:12px;">
                     <div class="row">
                         <span style="font-weight:600; font-size:13px;">${escapeHtml(d.device_model || d.platform || "Устройство")}</span>
-                        <span class="muted" style="font-size:12px;">${d.last_seen_at ? formatDate(d.last_seen_at) : "—"}</span>
+                        <span class="meta-text">${d.last_seen_at ? formatRelativeTime(d.last_seen_at) : "—"}</span>
                     </div>
-                    <div class="mono muted" style="font-size:12px; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(d.hwid)}</div>
-                    <div class="row" style="gap:8px; justify-content:flex-start; margin-top:4px;">${slotChips.join("")}</div>
+                    ${metaText ? `<div class="meta-text">${escapeHtml(metaText)}</div>` : ""}
+                    <div class="row" style="gap:8px; margin-top:4px; flex-wrap:nowrap;">
+                        <button type="button" class="mono-copy" style="min-width:0; flex:1 1 auto; text-align:left;" data-copy-hwid="${escapeHtml(d.hwid)}" title="Копировать HWID">${escapeHtml(d.hwid)}</button>
+                        <button type="button" class="btn btn-sm btn-danger" data-del-hwid="${escapeHtml(d.hwid)}" style="flex-shrink:0;">Удалить</button>
+                    </div>
+                    <div class="filter-pills" style="margin-top:4px;">${slotChips.join("")}</div>
                 </div>
             `;
         })
         .join("");
 }
 
-export async function renderUserDetailView(root, userSummary, onBack, onReloadUser) {
-    const fallbackName = userSummary.username
-        ? `@${userSummary.username}`
-        : (userSummary.first_name || `ID ${userSummary.telegram_id}`);
+function _renderWiDiagnosticsHtml(wi) {
+    if (!wi) return "";
+    const provStatus = formatWiProvisioningStatus(wi.provisioning_status);
+    const syncStateEntries =
+        wi.node_sync_state && typeof wi.node_sync_state === "object"
+            ? Object.entries(wi.node_sync_state)
+            : [];
+    const syncNodesHtml = syncStateEntries.length
+        ? syncStateEntries
+              .map(([nodeId, st]) => {
+                  let stText = "";
+                  let chipCls = "chip-muted";
+                  if (typeof st === "object" && st !== null) {
+                      if (st.status) {
+                          const rawStatus = String(st.status).toLowerCase();
+                          stText = formatWiNodeSyncStatus(st.status);
+                          if (rawStatus === "active" || rawStatus === "synced" || rawStatus === "synced_active") {
+                              chipCls = "chip-ok";
+                          } else if (rawStatus === "error" || rawStatus === "failed") {
+                              chipCls = "chip-err";
+                          }
+                      } else if ("active" in st) {
+                          stText = st.active ? "активен" : "отключён";
+                          if (st.version != null) stText += ` · v${st.version}`;
+                          chipCls = st.active ? "chip-ok" : "chip-muted";
+                      } else {
+                          stText = JSON.stringify(st);
+                      }
+                  } else {
+                      stText = formatWiNodeSyncStatus(st);
+                  }
+                  return `<span class="chip ${chipCls}">Нода #${escapeHtml(nodeId)}: ${escapeHtml(stText)}</span>`;
+              })
+              .join("")
+        : `<span class="muted">Нет данных по нодам</span>`;
 
-    root.innerHTML = `
-        <div class="detail-header-nav">
-            <button id="userDetailBackBtn" type="button" class="btn btn-sm btn-ghost">← Все пользователи</button>
-            <span class="detail-sticky-meta">${escapeHtml(fallbackName)}</span>
+    return `
+        <div class="detail-grid" style="margin-top:4px;">
+            <div class="detail-item"><span class="detail-label">Провижининг</span><span>${escapeHtml(provStatus)}</span></div>
+            <div class="detail-item"><span class="detail-label">Автопродление</span><span>${wi.auto_renew_enabled ? "Включено" : "Выключено"}</span></div>
+            <div class="detail-item"><span class="detail-label">Версия конфига</span><span class="mono tabular">${wi.actual_version ?? 0} / ${wi.desired_version ?? 1}</span></div>
+            <div class="detail-item"><span class="detail-label">Синхронизация</span><span>${wi.last_synced_at ? formatRelativeTime(wi.last_synced_at) : "—"}</span></div>
+            ${
+                wi.status_reason
+                    ? `<div class="detail-item" style="grid-column:1 / -1;"><span class="detail-label">Причина статуса</span><span>${escapeHtml(wi.status_reason)}</span></div>`
+                    : ""
+            }
         </div>
-        <section class="card card-center">
-            <div class="muted">Загрузка профиля...</div>
-        </section>
+        <div class="filter-pills" style="margin-top:4px;">${syncNodesHtml}</div>
+        ${
+            wi.last_sync_error
+                ? `<div class="text-err" style="margin-top:8px; padding:8px 12px; border-radius:8px; background:var(--accent-red-soft); border:1px solid rgba(248,113,113,0.32); font-size:12px; white-space:pre-wrap;">${escapeHtml(wi.last_sync_error)}</div>`
+                : ""
+        }
     `;
-    root.querySelector("#userDetailBackBtn").addEventListener("click", onBack);
+}
 
-    let details;
-    try {
-        const res = await api.getUserDetails(userSummary.id);
-        details = res.user;
-    } catch (err) {
+export async function renderUserDetailView(root, userSummary, onBack, onReloadUser, state = null, options = {}) {
+    const reqId = ++_detailReqId;
+    const preserveScroll = Boolean(options && options.preserveScroll);
+    const savedScrollY = options && Number.isFinite(options.scrollY) ? options.scrollY : null;
+    const fallbackName = _formatDisplayName(userSummary);
+    const hadExistingProfile = Boolean(root.querySelector("#userDetailBackBtn"));
+
+    if (!preserveScroll || !hadExistingProfile) {
         root.innerHTML = `
             <div class="detail-header-nav">
-                <button id="userDetailBackBtn" type="button" class="btn btn-sm btn-ghost">← Все пользователи</button>
+                <button id="userDetailBackBtn" type="button" class="btn btn-sm btn-ghost" style="white-space:nowrap; flex-shrink:0;">← Все пользователи</button>
                 <span class="detail-sticky-meta">${escapeHtml(fallbackName)}</span>
             </div>
             <section class="card card-center">
-                <div class="card-title">Не удалось загрузить профиль</div>
+                <div class="muted">Загрузка профиля...</div>
+            </section>
+        `;
+        root.querySelector("#userDetailBackBtn").addEventListener("click", onBack);
+    }
+
+    const sentinelBtn = root.querySelector("#userDetailBackBtn");
+
+    let details;
+    let serverNow = null;
+    try {
+        const res = await api.getUserDetails(userSummary.id);
+        details = res.user;
+        serverNow = res.server_now || details.server_now || null;
+    } catch (err) {
+        if (reqId !== _detailReqId) return;
+        if (state && state.selectedUserId !== userSummary.id) return;
+        if (!root.isConnected || (sentinelBtn && !root.contains(sentinelBtn))) return;
+        if (err && err.code === "init_data_expired") return;
+        if (preserveScroll && hadExistingProfile) {
+            showToast(err.message || "Не удалось обновить профиль", "error");
+            return;
+        }
+        root.innerHTML = `
+            <div class="detail-header-nav">
+                <button id="userDetailBackBtn" type="button" class="btn btn-sm btn-ghost" style="white-space:nowrap; flex-shrink:0;">← Все пользователи</button>
+                <span class="detail-sticky-meta">${escapeHtml(fallbackName)}</span>
+            </div>
+            <section class="card card-center">
+                <h1 class="card-title">Не удалось загрузить профиль</h1>
                 <div class="muted">${escapeHtml(err.message || "Ошибка запроса")}</div>
-                <button id="userRetryBtn" type="button" class="btn btn-sm">Повторить</button>
+                <button id="userRetryBtn" type="button" class="btn btn-primary btn-sm">Повторить</button>
             </section>
         `;
         root.querySelector("#userDetailBackBtn").addEventListener("click", onBack);
         root.querySelector("#userRetryBtn").addEventListener("click", () => {
-            renderUserDetailView(root, userSummary, onBack, onReloadUser);
+            renderUserDetailView(root, userSummary, onBack, onReloadUser, state);
         });
         return;
     }
 
-    const uname = details.username ? `@${details.username}` : (details.first_name || `ID ${details.telegram_id}`);
+    if (reqId !== _detailReqId) return;
+    if (state && state.selectedUserId !== userSummary.id) return;
+    if (!root.isConnected || (sentinelBtn && !root.contains(sentinelBtn))) return;
+
+    const uname = _formatDisplayName(details);
     const inviterStr = details.inviter
         ? (details.inviter.username ? `@${details.inviter.username}` : `ID ${details.inviter.telegram_id}`)
         : "—";
@@ -81,13 +196,26 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
     const totalBal = details.total_balance ?? userSummary.total_balance ?? 0;
     const realBal = details.real_balance ?? userSummary.real_balance ?? 0;
     const bonusBal = details.bonus_balance ?? userSummary.bonus_balance ?? 0;
+    const debt = Number(details.debt || 0);
     const stdLimit = details.standard_device_limit ?? userSummary.standard_device_limit ?? 2;
     const wiLimit = (wi && wi.device_limit) ?? userSummary.wi_device_limit ?? 1;
 
+    const parsedServerNow = parseDate(serverNow)?.getTime() ?? NaN;
+    const nowMs = Number.isFinite(parsedServerNow) ? parsedServerNow : Date.now();
+
+    const stdInfo = details.standard || null;
+    const stdEndTs = parseDate(details.standard_end)?.getTime() ?? 0;
+    const graceHours = Number(details.standard_grace_hours || 4);
+    const stdInGrace = Boolean(
+        stdInfo && stdInfo.is_active && details.standard_end && stdEndTs <= nowMs && (stdEndTs + graceHours * 3600 * 1000) > nowMs
+    );
+    const stdExpired = Boolean(details.standard_end && stdEndTs <= nowMs && !stdInGrace);
     const stdSummary = details.standard_end
-        ? `До ${formatDate(details.standard_end)} · ${stdLimit} устр.`
+        ? `До ${formatDate(details.standard_end)} · ${stdLimit} устр.${stdInfo ? ` · автопродл.: ${stdInfo.auto_renew_enabled ? "вкл" : "выкл"}` : ""}`
         : "Не подключён";
+
     const wiStatusMap = {
+        pending: "Настраивается",
         active: "Активен",
         expired: "Истёк",
         exhausted: "Трафик исчерпан",
@@ -96,7 +224,7 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         revoked: "Отозван",
     };
     const wiStatusKey = wi && wi.status ? String(wi.status).toLowerCase() : "";
-    const wiIsExpiredByDate = Boolean(wi && wi.expires_at && new Date(wi.expires_at).getTime() <= Date.now());
+    const wiIsExpiredByDate = Boolean(wi && wi.expires_at && (parseDate(wi.expires_at)?.getTime() ?? Infinity) <= nowMs);
     const wiStatusLabel = wi
         ? (wiStatusMap[wiStatusKey] || (wiIsExpiredByDate ? "Истёк" : (wi.status ? String(wi.status) : "")))
         : "";
@@ -105,71 +233,86 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         ? `${wiEffectiveStatus ? `${wiEffectiveStatus} · ` : ""}До ${formatDate(wi.expires_at)} · ${wiUsedGb} / ${wiTotalGb} ГБ · ${wiLimit} сл.`
         : (wi && wiEffectiveStatus ? `${wiEffectiveStatus} · ${wiUsedGb} / ${wiTotalGb} ГБ · ${wiLimit} сл.` : "Не подключён");
 
+    let activeHistoryTab = (options && options.activeHistoryTab) || "orders";
+    if (!["orders", "ledger", "devices", "audit"].includes(activeHistoryTab)) {
+        activeHistoryTab = "orders";
+    }
+
     root.innerHTML = `
         <div class="detail-header-nav">
-            <button id="userDetailBackBtn" type="button" class="btn btn-sm btn-ghost">← Все пользователи</button>
+            <button id="userDetailBackBtn" type="button" class="btn btn-sm btn-ghost" style="white-space:nowrap; flex-shrink:0;">← Все пользователи</button>
             <span class="detail-sticky-meta">${escapeHtml(uname)}</span>
         </div>
 
         <section class="card">
             <div class="row" style="align-items:flex-start;">
-                <div>
-                    <div style="font-size:16px; font-weight:600;">${escapeHtml(uname)}</div>
-                    <button id="copyTgIdBtn" type="button" class="btn-ghost" style="border:none; padding:0; margin-top:4px; font-size:12px; color:var(--text-secondary); cursor:pointer; font-family:var(--font-mono);">
+                <div style="min-width:0; flex:1;">
+                    <h1 class="detail-hero-title">${escapeHtml(uname)}</h1>
+                    <button id="copyTgIdBtn" type="button" class="mono-copy" style="margin-top:8px;">
                         ID ${details.telegram_id} · Копировать
                     </button>
+                    <div class="filter-pills" style="margin-top:8px;">
+                        ${details.is_bot_blocked ? `<span class="chip chip-err">Бот заблокирован</span>` : ""}
+                        ${Number(details.churn_events_24h || 0) > 0 ? `<span class="chip chip-warn">Смены устр. 24ч: ${details.churn_events_24h}</span>` : ""}
+                        ${details.financial_hold ? `<span class="chip chip-err">Финансовая блокировка</span>` : ""}
+                        ${details.topup_blocked ? `<span class="chip chip-warn">Блок пополнений</span>` : ""}
+                    </div>
                 </div>
-                <div style="text-align:right;">
+                <div class="user-balance-box">
                     <div class="tabular" style="font-size:18px; font-weight:600;">${totalBal} ₽</div>
                     <div class="muted" style="font-size:12px;">Осн. ${realBal} ₽ · Бонусы ${bonusBal} ₽</div>
                 </div>
             </div>
-            <div class="detail-grid" style="padding-top:8px; border-top:1px solid var(--border-subtle);">
+            <div class="detail-grid" style="margin-top:4px;">
                 <div class="detail-item"><span class="detail-label">Регистрация</span><span>${formatDate(details.created_at || userSummary.created_at)}</span></div>
+                <div class="detail-item"><span class="detail-label">Последняя оплата</span><span>${details.last_payment_at ? formatDate(details.last_payment_at) : "—"}</span></div>
                 <div class="detail-item"><span class="detail-label">Пригласил</span><span>${escapeHtml(inviterStr)}</span></div>
             </div>
         </section>
 
-        <section class="card">
+        ${
+            debt > 0
+                ? `
+        <section class="danger-card">
             <div class="row">
-                <div class="card-title">Бонусный баланс</div>
-                <span class="muted">Коррекция</span>
+                <div>
+                    <h2 class="danger-card-title">Долг: ${debt} ₽</h2>
+                    ${
+                        details.financial_block_reason
+                            ? `<div class="meta-text" style="margin-top:4px;">${escapeHtml(details.financial_block_reason)}</div>`
+                            : ""
+                    }
+                </div>
+                <button id="detForgiveDebtBtn" type="button" class="btn btn-sm btn-danger-filled" style="flex-shrink:0;">Погасить долг</button>
             </div>
-            <form id="userBonusForm" class="field" style="gap:8px;">
-                <div class="filter-pills">
-                    <button type="button" class="pill-btn" data-add="100">+100 ₽</button>
-                    <button type="button" class="pill-btn" data-add="500">+500 ₽</button>
-                    <button type="button" class="pill-btn" data-add="1000">+1000 ₽</button>
-                    <button type="button" class="pill-btn" data-add="-100">-100 ₽</button>
-                </div>
-                <div class="row" style="flex-wrap:nowrap;">
-                    <input name="amount_rub" class="input tabular" type="number" min="-100000" max="100000" step="1" value="500" aria-label="Сумма коррекции в рублях">
-                    <button type="submit" class="btn btn-primary btn-sm" style="flex-shrink:0;">Применить</button>
-                </div>
-                <input name="note" class="input" type="text" maxlength="120" placeholder="Комментарий (необязательно)">
-            </form>
-        </section>
+        </section>`
+                : ""
+        }
 
         <section class="card">
-            <div class="card-title">Подписки</div>
+            <h2 class="card-title">Подписки</h2>
 
             <div class="user-sub-box">
                 <div class="row">
-                    <div>
-                        <div style="font-weight:600; font-size:13px;">Стандарт</div>
+                    <div style="min-width:0; flex:1;">
+                        <div style="font-weight:600; font-size:13px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                            <span>Стандарт</span>
+                            ${stdInGrace ? `<span class="chip chip-warn">Льготный период</span>` : stdExpired ? `<span class="chip chip-err">Истекла</span>` : stdInfo && !stdInfo.is_active ? `<span class="chip chip-warn">Отключена</span>` : ""}
+                        </div>
                         <div class="muted" style="font-size:12px;">${escapeHtml(stdSummary)}</div>
+                        <div class="meta-text tabular" style="margin-top:2px;">Трафик: ${formatBytesGb(details.monthly_vless_bytes)} ГБ за мес · ${formatBytesGb(details.total_traffic_bytes)} ГБ всего</div>
                     </div>
-                    <button id="toggleStdEditBtn" type="button" class="btn btn-sm">Изменить</button>
+                    <button id="toggleStdEditBtn" type="button" class="btn btn-sm" aria-expanded="false" aria-controls="stdEditForm">Изменить</button>
                 </div>
-                <form id="stdEditForm" class="field" style="gap:8px; padding-top:8px; border-top:1px solid var(--border-subtle);" hidden>
+                <form id="stdEditForm" class="field" style="gap:8px; margin-top:4px;" hidden>
                     <div class="grid-2">
                         <div class="field">
-                            <label>Срок (дней, 0 = лимит)</label>
-                            <input name="days" class="input tabular" type="number" min="-3650" max="3650" step="1" value="30">
+                            <label for="stdDaysInput">Срок (дней, 0 = лимит)</label>
+                            <input id="stdDaysInput" name="days" class="input tabular" type="number" min="-3650" max="3650" step="1" value="30">
                         </div>
                         <div class="field">
-                            <label>Устройств (2..10)</label>
-                            <input name="device_limit" class="input tabular" type="number" min="2" max="10" step="1" value="${Math.min(10, Math.max(2, stdLimit))}">
+                            <label for="stdLimitInput">Устройств (2..10)</label>
+                            <input id="stdLimitInput" name="device_limit" class="input tabular" type="number" min="2" max="10" step="1" value="${Math.min(10, Math.max(2, stdLimit))}">
                         </div>
                     </div>
                     <div class="filter-pills">
@@ -179,31 +322,39 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
                         <button type="button" class="pill-btn" data-std-days="90">+90 дн.</button>
                         <button type="button" class="pill-btn" data-std-days="-7">-7 дн.</button>
                     </div>
+                    <label for="stdNotifyInput" class="toggle-row">
+                        <span class="toggle-label">Уведомить пользователя</span>
+                        <span class="switch">
+                            <input id="stdNotifyInput" name="notify_user" type="checkbox">
+                            <span class="switch-track"></span>
+                        </span>
+                    </label>
                     <button type="submit" class="btn btn-primary btn-sm">Сохранить Стандарт</button>
                 </form>
             </div>
 
             <div class="user-sub-box">
                 <div class="row">
-                    <div>
+                    <div style="min-width:0; flex:1;">
                         <div style="font-weight:600; font-size:13px;">Белый интернет</div>
                         <div class="muted" style="font-size:12px;">${escapeHtml(wiSummary)}</div>
                     </div>
                     <div class="btn-group">
-                        <button id="toggleWiEditBtn" type="button" class="btn btn-sm">Срок</button>
-                        <button id="toggleWiTrafficBtn" type="button" class="btn btn-sm">Трафик</button>
+                        <button id="toggleWiEditBtn" type="button" class="btn btn-sm" aria-expanded="false" aria-controls="wiEditForm">Срок</button>
+                        <button id="toggleWiTrafficBtn" type="button" class="btn btn-sm" aria-expanded="false" aria-controls="wiTrafficForm">Трафик</button>
                     </div>
                 </div>
+                ${_renderWiDiagnosticsHtml(wi)}
 
-                <form id="wiEditForm" class="field" style="gap:8px; padding-top:8px; border-top:1px solid var(--border-subtle);" hidden>
+                <form id="wiEditForm" class="field" style="gap:8px; margin-top:4px;" hidden>
                     <div class="grid-2">
                         <div class="field">
-                            <label>Срок (дней, 0 = слоты)</label>
-                            <input name="days" class="input tabular" type="number" min="-3650" max="3650" step="1" value="30">
+                            <label for="wiDaysInput">Срок (дней, 0 = слоты)</label>
+                            <input id="wiDaysInput" name="days" class="input tabular" type="number" min="-3650" max="3650" step="1" value="30">
                         </div>
                         <div class="field">
-                            <label>Слотов (1..3)</label>
-                            <input name="device_limit" class="input tabular" type="number" min="1" max="3" step="1" value="${Math.min(3, Math.max(1, wiLimit))}">
+                            <label for="wiLimitInput">Слотов (1..3)</label>
+                            <input id="wiLimitInput" name="device_limit" class="input tabular" type="number" min="1" max="3" step="1" value="${Math.min(3, Math.max(1, wiLimit))}">
                         </div>
                     </div>
                     <div class="filter-pills">
@@ -212,51 +363,103 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
                         <button type="button" class="pill-btn" data-wi-days="30">+30 дн.</button>
                         <button type="button" class="pill-btn" data-wi-days="-7">-7 дн.</button>
                     </div>
+                    <label for="wiNotifyInput" class="toggle-row">
+                        <span class="toggle-label">Уведомить пользователя</span>
+                        <span class="switch">
+                            <input id="wiNotifyInput" name="notify_user" type="checkbox">
+                            <span class="switch-track"></span>
+                        </span>
+                    </label>
                     <button type="submit" class="btn btn-primary btn-sm">Сохранить Белый интернет</button>
                 </form>
 
-                <form id="wiTrafficForm" class="field" style="gap:8px; padding-top:8px; border-top:1px solid var(--border-subtle);" hidden>
+                <form id="wiTrafficForm" class="field" style="gap:8px; margin-top:4px;" hidden>
                     <div class="field">
-                        <label>Операция с трафиком</label>
-                        <select name="traffic_action" class="select">
+                        <label for="wiTrafficActionSelect">Операция с трафиком</label>
+                        <select id="wiTrafficActionSelect" name="traffic_action" class="select">
                             <option value="add_gb">Добавить дополнительный трафик (+ГБ)</option>
                             <option value="reset_used">Сбросить использованный трафик</option>
                             <option value="set_base_gb">Установить базовую квоту (ГБ)</option>
                         </select>
                     </div>
                     <div class="field" id="wiGbField">
-                        <label>Объём (ГБ)</label>
-                        <input name="gb" class="input tabular" type="number" min="1" max="5000" step="1" value="50">
+                        <label for="wiGbInput">Объём (ГБ)</label>
+                        <input id="wiGbInput" name="gb" class="input tabular" type="number" min="1" max="5000" step="1" value="50">
                     </div>
+                    <label for="wiTrafficNotifyInput" class="toggle-row">
+                        <span class="toggle-label">Уведомить пользователя</span>
+                        <span class="switch">
+                            <input id="wiTrafficNotifyInput" name="notify_user" type="checkbox">
+                            <span class="switch-track"></span>
+                        </span>
+                    </label>
                     <button type="submit" class="btn btn-primary btn-sm">Применить трафик</button>
                 </form>
             </div>
         </section>
 
         <section class="card">
-            <div class="card-title">Написать в бот</div>
+            <div class="row">
+                <h2 class="card-title">Бонусный баланс</h2>
+                <span class="muted">Коррекция</span>
+            </div>
+            <form id="userBonusForm" class="field" style="gap:8px;">
+                <div class="filter-pills">
+                    <button type="button" class="pill-btn" data-add="100">+100 ₽</button>
+                    <button type="button" class="pill-btn" data-add="500">+500 ₽</button>
+                    <button type="button" class="pill-btn" data-add="1000">+1000 ₽</button>
+                    <button type="button" class="pill-btn" data-add="-100">-100 ₽</button>
+                </div>
+                <div class="row-nowrap">
+                    <label for="userBonusAmount" class="visually-hidden">Сумма коррекции в рублях</label>
+                    <input id="userBonusAmount" name="amount_rub" class="input tabular" type="number" min="-100000" max="100000" step="1" required value="" placeholder="Сумма ₽ (напр. 100 или -100)">
+                    <button type="submit" class="btn btn-primary btn-sm" style="flex-shrink:0;">Применить</button>
+                </div>
+                <label for="userBonusNote" class="visually-hidden">Комментарий к коррекции</label>
+                <input id="userBonusNote" name="note" class="input" type="text" maxlength="120" placeholder="Комментарий (необязательно)">
+                <label for="userBonusNotify" class="toggle-row">
+                    <span class="toggle-label">Уведомить в Telegram</span>
+                    <span class="switch">
+                        <input id="userBonusNotify" name="notify_user" type="checkbox" checked>
+                        <span class="switch-track"></span>
+                    </span>
+                </label>
+                <label id="userBonusSendNoteRow" for="userBonusSendNote" class="toggle-row">
+                    <span class="toggle-label">Отправить комментарий пользователю</span>
+                    <span class="switch">
+                        <input id="userBonusSendNote" name="send_note_to_user" type="checkbox">
+                        <span class="switch-track"></span>
+                    </span>
+                </label>
+                <div class="meta-text">Если переключатель выключен, комментарий сохранится только в аудит-логе.</div>
+            </form>
+        </section>
+
+        <section class="card">
+            <h2 class="card-title">Написать в бот</h2>
             <form id="userDmForm" class="field" style="gap:8px;">
-                <textarea name="text" class="textarea" rows="3" maxlength="4096" required style="min-height:84px; font-family:inherit; font-size:13px;" placeholder="Сообщение пользователю (поддерживается HTML)"></textarea>
+                <label for="userDmTextInput" class="visually-hidden">Сообщение пользователю</label>
+                <textarea id="userDmTextInput" name="text" class="textarea" rows="3" maxlength="4096" required style="min-height:84px; font-family:inherit; font-size:13px;" placeholder="Сообщение пользователю (поддерживается HTML)"></textarea>
                 <button type="submit" class="btn btn-primary btn-sm">Отправить в бот</button>
             </form>
         </section>
 
         ${details.subscription_url || details.subscription_backup_url ? `
         <section class="card">
-            <div class="card-title">Ссылки подключения</div>
+            <h2 class="card-title">Ссылки подключения</h2>
             ${details.subscription_url ? `
-            <div class="field">
-                <label>Основная (CDN)</label>
-                <div class="row" style="gap:8px; flex-wrap:nowrap;">
-                    <input class="input mono" readonly value="${escapeHtml(details.subscription_url)}">
+            <div class="field" style="min-width:0;">
+                <label for="detMainSubInput">Основная (CDN)</label>
+                <div class="row-nowrap" style="min-width:0;">
+                    <input id="detMainSubInput" class="input mono" style="min-width:0; text-overflow:ellipsis;" readonly value="${escapeHtml(details.subscription_url)}">
                     <button id="detCopySubBtn" type="button" class="btn btn-sm" style="flex-shrink:0;">Копировать</button>
                 </div>
             </div>` : ""}
             ${details.subscription_backup_url ? `
-            <div class="field">
-                <label>Резервная (Прямая)</label>
-                <div class="row" style="gap:8px; flex-wrap:nowrap;">
-                    <input class="input mono" readonly value="${escapeHtml(details.subscription_backup_url)}">
+            <div class="field" style="min-width:0;">
+                <label for="detBackupSubInput">Резервная (Прямая)</label>
+                <div class="row-nowrap" style="min-width:0;">
+                    <input id="detBackupSubInput" class="input mono" style="min-width:0; text-overflow:ellipsis;" readonly value="${escapeHtml(details.subscription_backup_url)}">
                     <button id="detCopyBackupSubBtn" type="button" class="btn btn-sm" style="flex-shrink:0;">Копировать</button>
                 </div>
             </div>` : ""}
@@ -264,36 +467,117 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
 
         <section class="card">
             <div class="row">
-                <div class="card-title">Устройства (${devices.length})</div>
+                <h2 class="card-title">Устройства (${devices.length})</h2>
             </div>
-            <div class="field" style="gap:8px;">
+            <div id="detDevicesList" class="field" style="gap:8px;">
                 ${_renderDevicesHtml(devices)}
             </div>
+        </section>
 
-            <form id="userRestrictionsForm" class="field" style="gap:8px; padding-top:8px; border-top:1px solid var(--border-subtle);">
-                <label class="toggle-row">
-                    <span class="toggle-label">Заморозка доступа и оплат (financial_hold)</span>
+        <section class="card">
+            <h2 class="card-title">Ограничения</h2>
+            ${
+                details.financial_block_reason
+                    ? `<div class="text-err" style="font-size:12px; padding:8px 12px; border-radius:8px; background:var(--accent-red-soft); border:1px solid rgba(248,113,113,0.28);">Причина блокировки: ${escapeHtml(details.financial_block_reason)}</div>`
+                    : ""
+            }
+            <form id="userRestrictionsForm" class="field" style="gap:8px;">
+                <label for="restrHoldInput" class="toggle-row">
+                    <span class="toggle-label">Финансовая блокировка</span>
                     <span class="switch">
-                        <input name="financial_hold" type="checkbox" ${details.financial_hold ? "checked" : ""}>
+                        <input id="restrHoldInput" name="financial_hold" type="checkbox" ${details.financial_hold ? "checked" : ""}>
                         <span class="switch-track"></span>
                     </span>
                 </label>
-                <label class="toggle-row">
-                    <span class="toggle-label">Блокировка внешних пополнений (topup_blocked)</span>
+                <label for="restrTopupInput" class="toggle-row">
+                    <span class="toggle-label">Блокировка пополнений</span>
                     <span class="switch">
-                        <input name="topup_blocked" type="checkbox" ${details.topup_blocked ? "checked" : ""}>
+                        <input id="restrTopupInput" name="topup_blocked" type="checkbox" ${details.topup_blocked ? "checked" : ""}>
                         <span class="switch-track"></span>
                     </span>
                 </label>
+                <label for="restrNoteInput" class="visually-hidden">Причина или комментарий к ограничениям</label>
+                <input id="restrNoteInput" name="note" class="input" type="text" maxlength="120" placeholder="Причина / комментарий (необязательно)">
                 <button type="submit" class="btn btn-sm">Сохранить ограничения</button>
             </form>
+        </section>
 
-            <div class="actions-row" style="padding-top:8px; border-top:1px solid var(--border-subtle);">
-                <button id="detResetHwidBtn" type="button" class="btn btn-sm">Сбросить HWID</button>
+        <section class="card">
+            <div class="row">
+                <h2 class="card-title">История</h2>
+            </div>
+            <div class="seg-group" id="userHistoryTabs" role="tablist" aria-label="История операций">
+                <button type="button" id="htab-orders" role="tab" aria-selected="${activeHistoryTab === "orders" ? "true" : "false"}" aria-controls="userHistoryList" tabindex="${activeHistoryTab === "orders" ? "0" : "-1"}" class="seg-btn ${activeHistoryTab === "orders" ? "active" : ""}" data-htab="orders">Заказы</button>
+                <button type="button" id="htab-ledger" role="tab" aria-selected="${activeHistoryTab === "ledger" ? "true" : "false"}" aria-controls="userHistoryList" tabindex="${activeHistoryTab === "ledger" ? "0" : "-1"}" class="seg-btn ${activeHistoryTab === "ledger" ? "active" : ""}" data-htab="ledger">Баланс</button>
+                <button type="button" id="htab-devices" role="tab" aria-selected="${activeHistoryTab === "devices" ? "true" : "false"}" aria-controls="userHistoryList" tabindex="${activeHistoryTab === "devices" ? "0" : "-1"}" class="seg-btn ${activeHistoryTab === "devices" ? "active" : ""}" data-htab="devices">Устройства</button>
+                <button type="button" id="htab-audit" role="tab" aria-selected="${activeHistoryTab === "audit" ? "true" : "false"}" aria-controls="userHistoryList" tabindex="${activeHistoryTab === "audit" ? "0" : "-1"}" class="seg-btn ${activeHistoryTab === "audit" ? "active" : ""}" data-htab="audit">Админ-лог</button>
+            </div>
+            <div id="userHistoryList" role="tabpanel" aria-labelledby="htab-${activeHistoryTab}" class="field" style="gap:8px;">
+                ${renderHistoryTabContent(activeHistoryTab, details)}
+            </div>
+        </section>
+
+        <section class="danger-card">
+            <h2 class="danger-card-title">Опасная зона</h2>
+            <label for="dangerNotifyUser" class="toggle-row">
+                <span class="toggle-label">Уведомить пользователя</span>
+                <span class="switch">
+                    <input id="dangerNotifyUser" type="checkbox">
+                    <span class="switch-track"></span>
+                </span>
+            </label>
+            <div class="actions-row">
+                <button id="detResetHwidBtn" type="button" class="btn btn-sm" ${devices.length === 0 ? "disabled" : ""}>Сбросить все HWID</button>
                 <button id="detRotateTokenBtn" type="button" class="btn btn-sm btn-danger">Перевыпустить токен</button>
             </div>
         </section>
     `;
+
+    const bonusForm = root.querySelector("#userBonusForm");
+    const stdForm = root.querySelector("#stdEditForm");
+    const wiForm = root.querySelector("#wiEditForm");
+    const wiTrafficForm = root.querySelector("#wiTrafficForm");
+    const trafficSelect = wiTrafficForm.querySelector("select[name='traffic_action']");
+    const wiGbField = wiTrafficForm.querySelector("#wiGbField");
+    const dmForm = root.querySelector("#userDmForm");
+    const restrForm = root.querySelector("#userRestrictionsForm");
+    const origFinancialHold = Boolean(details.financial_hold);
+    const origTopupBlocked = Boolean(details.topup_blocked);
+
+    const bonusNotifyInput = bonusForm.querySelector("input[name='notify_user']");
+    const bonusSendNoteInput = bonusForm.querySelector("input[name='send_note_to_user']");
+    const bonusSendNoteRow = bonusForm.querySelector("#userBonusSendNoteRow");
+    const syncBonusSendNoteState = () => {
+        if (!bonusNotifyInput || !bonusSendNoteInput) return;
+        const notifyOn = Boolean(bonusNotifyInput.checked);
+        bonusSendNoteInput.disabled = !notifyOn;
+        if (!notifyOn) {
+            bonusSendNoteInput.checked = false;
+        }
+        if (bonusSendNoteRow) {
+            bonusSendNoteRow.style.opacity = notifyOn ? "" : "0.5";
+            bonusSendNoteRow.style.pointerEvents = notifyOn ? "" : "none";
+        }
+    };
+
+    syncBonusSendNoteState();
+    bonusNotifyInput?.addEventListener("change", syncBonusSendNoteState);
+
+    root.querySelector("#toggleStdEditBtn")?.setAttribute("aria-expanded", String(!stdForm.hidden));
+    root.querySelector("#toggleWiEditBtn")?.setAttribute("aria-expanded", String(!wiForm.hidden));
+    root.querySelector("#toggleWiTrafficBtn")?.setAttribute("aria-expanded", String(!wiTrafficForm.hidden));
+
+    if (preserveScroll && savedScrollY !== null) {
+        requestAnimationFrame(() => window.scrollTo(0, savedScrollY));
+    }
+
+    if (options && options.focusSelector) {
+        const modalOpen = Boolean(document.querySelector("dialog.modal-dialog[open], .modal-backdrop:not([hidden])"));
+        if (!modalOpen) {
+            const target = root.querySelector(options.focusSelector) || root.querySelector("#userDetailBackBtn");
+            target?.focus({ preventScroll: true });
+        }
+    }
 
     root.querySelector("#userDetailBackBtn").addEventListener("click", onBack);
     root.querySelector("#copyTgIdBtn").addEventListener("click", () => {
@@ -309,225 +593,60 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         copyBackupBtn.addEventListener("click", () => copyText(details.subscription_backup_url, "Резервная ссылка скопирована"));
     }
 
-    const refreshAll = async () => {
-        await onReloadUser();
-        await renderUserDetailView(root, userSummary, onBack, onReloadUser);
+    const schedulePostModalFocus = (selector) => {
+        setTimeout(() => {
+            if (document.querySelector("dialog.modal-dialog[open], .modal-backdrop:not([hidden])")) return;
+            if (!document.activeElement || document.activeElement === document.body || !root.contains(document.activeElement)) {
+                const target = (selector && root.querySelector(selector)) || root.querySelector("#userDetailBackBtn");
+                target?.focus({ preventScroll: true });
+            }
+        }, 0);
     };
 
-    const bonusForm = root.querySelector("#userBonusForm");
-    bonusForm.querySelectorAll("[data-add]").forEach((b) => {
-        b.addEventListener("click", () => {
-            bonusForm.querySelector("input[name='amount_rub']").value = b.dataset.add;
+    const refreshAll = async ({ focusSelector = null } = {}) => {
+        const currentScrollY = window.scrollY;
+        const draftDmText = root.querySelector("#userDmTextInput")?.value || "";
+        const draftBonusNote = root.querySelector("#userBonusNote")?.value || "";
+        void onReloadUser?.();
+        await renderUserDetailView(root, userSummary, onBack, onReloadUser, state, {
+            preserveScroll: true,
+            scrollY: currentScrollY,
+            activeHistoryTab,
+            focusSelector,
         });
-    });
-    bonusForm.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const amount = Number(bonusForm.querySelector("input[name='amount_rub']").value);
-        if (!Number.isInteger(amount) || amount === 0) {
-            showToast("Укажите ненулевую целую сумму в рублях");
-            return;
+        if (draftDmText) {
+            const nextDm = root.querySelector("#userDmTextInput");
+            if (nextDm) nextDm.value = draftDmText;
         }
-        const note = bonusForm.querySelector("input[name='note']").value.trim() || null;
-        const btn = bonusForm.querySelector("button[type='submit']");
-        btn.disabled = true;
-        try {
-            const res = await api.adjustUser(details.id, { action: "balance", amount_rub: amount, note });
-            showToast(res.message || "Баланс обновлён");
-            await refreshAll();
-        } catch (err) {
-            showToast(err.message || "Ошибка обновления баланса");
-        } finally {
-            btn.disabled = false;
+        if (draftBonusNote) {
+            const nextNote = root.querySelector("#userBonusNote");
+            if (nextNote) nextNote.value = draftBonusNote;
         }
-    });
+    };
 
-    const stdForm = root.querySelector("#stdEditForm");
-    root.querySelector("#toggleStdEditBtn").addEventListener("click", () => {
-        stdForm.hidden = !stdForm.hidden;
-    });
-    stdForm.querySelectorAll("[data-std-days]").forEach((b) => {
-        b.addEventListener("click", () => {
-            stdForm.querySelector("input[name='days']").value = b.dataset.stdDays;
-        });
-    });
-    stdForm.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const days = Number(stdForm.querySelector("input[name='days']").value);
-        const deviceLimit = Number(stdForm.querySelector("input[name='device_limit']").value);
-        if (!Number.isInteger(days) || days < -3650 || days > 3650) {
-            showToast("Укажите корректное количество дней");
-            return;
-        }
-        const payload = { action: "grant_standard", days };
-        if (days >= 0 || deviceLimit !== Number(stdLimit)) {
-            payload.device_limit = deviceLimit;
-        }
-        const btn = stdForm.querySelector("button[type='submit']");
-        btn.disabled = true;
-        try {
-            const res = await api.adjustUser(details.id, payload);
-            showToast(res.message || "Подписка Стандарт обновлена");
-            await refreshAll();
-        } catch (err) {
-            showToast(err.message || "Ошибка обновления подписки");
-        } finally {
-            btn.disabled = false;
-        }
-    });
-
-    const wiForm = root.querySelector("#wiEditForm");
-    const wiTrafficForm = root.querySelector("#wiTrafficForm");
-    root.querySelector("#toggleWiEditBtn").addEventListener("click", () => {
-        wiForm.hidden = !wiForm.hidden;
-        if (!wiForm.hidden) wiTrafficForm.hidden = true;
-    });
-    root.querySelector("#toggleWiTrafficBtn").addEventListener("click", () => {
-        wiTrafficForm.hidden = !wiTrafficForm.hidden;
-        if (!wiTrafficForm.hidden) wiForm.hidden = true;
-    });
-    wiForm.querySelectorAll("[data-wi-days]").forEach((b) => {
-        b.addEventListener("click", () => {
-            wiForm.querySelector("input[name='days']").value = b.dataset.wiDays;
-        });
-    });
-    wiForm.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const days = Number(wiForm.querySelector("input[name='days']").value);
-        const deviceLimit = Number(wiForm.querySelector("input[name='device_limit']").value);
-        if (!Number.isInteger(days) || days < -3650 || days > 3650) {
-            showToast("Укажите корректное количество дней");
-            return;
-        }
-        const payload = { action: "grant_wi", days };
-        if (days >= 0 || deviceLimit !== Number(wiLimit)) {
-            payload.device_limit = deviceLimit;
-        }
-        const btn = wiForm.querySelector("button[type='submit']");
-        btn.disabled = true;
-        try {
-            const res = await api.adjustUser(details.id, payload);
-            showToast(res.message || "Белый интернет обновлён");
-            await refreshAll();
-        } catch (err) {
-            showToast(err.message || "Ошибка обновления подписки");
-        } finally {
-            btn.disabled = false;
-        }
-    });
-
-    const trafficSelect = wiTrafficForm.querySelector("select[name='traffic_action']");
-    const wiGbField = wiTrafficForm.querySelector("#wiGbField");
-    trafficSelect.addEventListener("change", () => {
-        wiGbField.hidden = trafficSelect.value === "reset_used";
-    });
-    wiTrafficForm.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const payload = { action: "wi_traffic", traffic_action: trafficSelect.value };
-        if (payload.traffic_action !== "reset_used") {
-            const gb = Number(wiTrafficForm.querySelector("input[name='gb']").value);
-            if (!Number.isInteger(gb) || gb < 1) {
-                showToast("Укажите объём в ГБ (>= 1)");
-                return;
-            }
-            payload.gb = gb;
-        }
-        const btn = wiTrafficForm.querySelector("button[type='submit']");
-        btn.disabled = true;
-        try {
-            const res = await api.adjustUser(details.id, payload);
-            showToast(res.message || "Трафик обновлён");
-            await refreshAll();
-        } catch (err) {
-            showToast(err.message || "Ошибка обновления трафика");
-        } finally {
-            btn.disabled = false;
-        }
-    });
-
-    const dmForm = root.querySelector("#userDmForm");
-    dmForm.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const text = dmForm.querySelector("textarea[name='text']").value.trim();
-        if (!text) {
-            showToast("Введите текст сообщения");
-            return;
-        }
-        const btn = dmForm.querySelector("button[type='submit']");
-        btn.disabled = true;
-        try {
-            const res = await api.sendUserMessage(details.id, text);
-            dmForm.reset();
-            showToast(res.message || "Сообщение отправлено");
-        } catch (err) {
-            showToast(err.message || "Ошибка отправки сообщения");
-        } finally {
-            btn.disabled = false;
-        }
-    });
-
-    const restrForm = root.querySelector("#userRestrictionsForm");
-    restrForm.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const btn = restrForm.querySelector("button[type='submit']");
-        btn.disabled = true;
-        try {
-            const res = await api.adjustUser(details.id, {
-                action: "restrictions",
-                financial_hold: Boolean(restrForm.querySelector("input[name='financial_hold']")?.checked),
-                topup_blocked: Boolean(restrForm.querySelector("input[name='topup_blocked']")?.checked),
-            });
-            showToast(res.message || "Ограничения сохранены");
-            await refreshAll();
-        } catch (err) {
-            showToast(err.message || "Ошибка сохранения ограничений");
-        } finally {
-            btn.disabled = false;
-        }
-    });
-
-    root.querySelector("#detResetHwidBtn").addEventListener("click", (e) => {
-        const b = e.currentTarget;
-        showConfirmModal({
-            title: "Сбросить привязку устройств?",
-            message: `Все привязанные устройства пользователя ${uname} будут отвязаны. Ему потребуется заново обновить подписку в приложении.`,
-            confirmText: "Сбросить HWID",
-            cancelText: "Отмена",
-            isDestructive: true,
-            onConfirm: async () => {
-                b.disabled = true;
-                try {
-                    const res = await api.resetUserDevices(details.id);
-                    showToast(res.message || "Устройства сброшены");
-                    await refreshAll();
-                } catch (err) {
-                    showToast(err.message || "Ошибка сброса");
-                } finally {
-                    b.disabled = false;
-                }
-            },
-        });
-    });
-
-    root.querySelector("#detRotateTokenBtn").addEventListener("click", (e) => {
-        const b = e.currentTarget;
-        showConfirmModal({
-            title: "Перевыпустить токен подписки?",
-            message: "Старая ссылка подключения перестанет работать. Пользователю нужно будет заново добавить подписку.",
-            confirmText: "Перевыпустить",
-            cancelText: "Отмена",
-            isDestructive: true,
-            onConfirm: async () => {
-                b.disabled = true;
-                try {
-                    const res = await api.rotateUserToken(details.id);
-                    showToast(res.message || "Токен перевыпущен");
-                    await refreshAll();
-                } catch (err) {
-                    showToast(err.message || "Ошибка перевыпуска");
-                } finally {
-                    b.disabled = false;
-                }
-            },
-        });
+    bindUserDetailActions({
+        root,
+        details,
+        state,
+        uname,
+        debt,
+        stdLimit,
+        wiLimit,
+        origFinancialHold,
+        origTopupBlocked,
+        bonusForm,
+        stdForm,
+        wiForm,
+        wiTrafficForm,
+        trafficSelect,
+        wiGbField,
+        dmForm,
+        restrForm,
+        getActiveHistoryTab: () => activeHistoryTab,
+        setActiveHistoryTab: (nextTab) => {
+            activeHistoryTab = nextTab;
+        },
+        refreshAll,
+        schedulePostModalFocus,
     });
 }

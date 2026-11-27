@@ -1,5 +1,24 @@
-import { api } from "../api.js?v=2.7.8";
-import { escapeHtml, formatDate, renderPagination, showConfirmModal, showToast } from "../ui.js?v=2.7.8";
+import { api } from "../api.js?v=2.8.0";
+import {
+    formatAuditAction,
+    formatAuditTarget,
+    formatMetadataFlag,
+    formatOrderAmountLabel,
+    formatOrderPaymentBreakdown,
+} from "../admin_labels.js?v=2.8.0";
+import {
+    copyText,
+    escapeHtml,
+    formatDate,
+    formatRelativeTime,
+    renderPagination,
+    showConfirmModal,
+    showToast,
+    withButtonLoading,
+} from "../ui.js?v=2.8.0";
+
+let _finViewReqId = 0;
+let _maintInFlight = null;
 
 function _financeStatusChip(status) {
     if (status === "paid") {
@@ -27,13 +46,67 @@ function _formatServiceType(serviceType) {
     return serviceType || "";
 }
 
-function _formatPaymentMethod(method) {
-    if (method === "yookassa") return "ЮKassa";
-    if (method === "wallet") return "Баланс";
-    return method || "";
+function _cleanQuery(val) {
+    return String(val || "").trim().replace(/^@+/, "");
 }
 
-export function renderAdminFinancesView(root, state) {
+function _renderMaintenanceCardInner(state) {
+    const isLoading = typeof state.paymentsMaintenance === "undefined" && !state.paymentsMaintenanceError;
+    const isError = Boolean(state.paymentsMaintenanceError);
+    const enabled = Boolean(state.paymentsMaintenance);
+
+    let badgeCls = enabled ? "chip-warn" : "chip-ok";
+    let badgeText = enabled ? "Включены (оплата заблокирована)" : "Выключены (оплата активна)";
+    let btnCls = enabled ? "btn-secondary" : "btn-danger";
+    let btnText = enabled ? "Включить приём платежей" : "Приостановить платежи";
+    let btnDisabled = "";
+
+    if (isLoading) {
+        badgeCls = "chip-muted";
+        badgeText = "Загрузка…";
+        btnCls = "btn-secondary";
+        btnText = "Загрузка…";
+        btnDisabled = "disabled";
+    } else if (isError) {
+        badgeCls = "chip-err";
+        badgeText = "Ошибка загрузки";
+        btnCls = "btn-secondary";
+        btnText = "Повторить";
+    }
+
+    return `
+        <div class="row" style="align-items:center; justify-content:space-between; gap:12px;">
+            <div>
+                <h2 class="card-title" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                    <span>Техработы платежей</span>
+                    <span id="paymentsMaintBadge" class="chip ${badgeCls}">${escapeHtml(badgeText)}</span>
+                </h2>
+                <div class="meta-text" style="margin-top:4px;">
+                    Блокирует создание новых заказов и пополнение баланса. Действующие подписки продолжают работать.
+                </div>
+            </div>
+            <button type="button" id="togglePaymentsMaintBtn" class="btn ${btnCls}" style="white-space:nowrap;" ${btnDisabled}>
+                ${escapeHtml(btnText)}
+            </button>
+        </div>
+    `;
+}
+
+function _renderMaintenanceCard(state) {
+    return `<section id="paymentsMaintCard" class="card">${_renderMaintenanceCardInner(state)}</section>`;
+}
+
+function _renderFinStatsInner(summary) {
+    return `
+        <div class="stat-box"><div class="stat-val tabular">${Math.round(summary.revenue_24h ?? 0)} ₽</div><div class="stat-lbl">Внеш. оплаты 24ч</div></div>
+        <div class="stat-box"><div class="stat-val tabular">${Math.round(summary.revenue_7d ?? 0)} ₽</div><div class="stat-lbl">Внеш. оплаты 7д</div></div>
+        <div class="stat-box"><div class="stat-val tabular">${Math.round(summary.revenue_30d ?? 0)} ₽</div><div class="stat-lbl">Внеш. оплаты 30д</div></div>
+        <div class="stat-box"><div class="stat-val tabular">${summary.paid_orders_count ?? 0}</div><div class="stat-lbl">Всего оплачено</div></div>
+    `;
+}
+
+export function renderAdminFinancesView(root, state, { forceRefresh = false } = {}) {
+    ++_finViewReqId;
     const subTab = state.finSubTab || "orders";
     const finData = state.financesData || {
         summary: { revenue_24h: 0, revenue_7d: 0, revenue_30d: 0, paid_orders_count: 0 },
@@ -42,227 +115,371 @@ export function renderAdminFinancesView(root, state) {
         offset: 0,
         limit: 25,
     };
-    const auditData = state.auditLogsData || { items: [], actions: [], total: 0, offset: 0, limit: 40 };
+    const auditData = state.auditLogsData || { items: [], total: 0, offset: 0, limit: 40 };
     const summary = finData.summary || {};
 
     root.innerHTML = `
-        <section class="stats-strip">
-            <div class="stat-box"><div class="stat-val tabular">${Math.round(summary.revenue_24h ?? 0)} ₽</div><div class="stat-lbl">За 24 ч</div></div>
-            <div class="stat-box"><div class="stat-val tabular">${Math.round(summary.revenue_7d ?? 0)} ₽</div><div class="stat-lbl">За 7 дн.</div></div>
-            <div class="stat-box"><div class="stat-val tabular">${Math.round(summary.revenue_30d ?? 0)} ₽</div><div class="stat-lbl">За 30 дн.</div></div>
-            <div class="stat-box"><div class="stat-val tabular">${summary.paid_orders_count ?? 0}</div><div class="stat-lbl">Заказов</div></div>
-        </section>
+        <section id="finStatsStrip" class="stats-strip">${_renderFinStatsInner(summary)}</section>
 
-        <section class="card" style="margin-bottom:12px;">
-            <div class="row" style="align-items:center; justify-content:space-between; gap:12px;">
-                <div>
-                    <div style="font-weight:600; display:flex; align-items:center; gap:8px;">
-                        <span>Техработы платежей</span>
-                        <span id="paymentsMaintBadge" class="chip ${state.paymentsMaintenance ? "chip-warn" : "chip-ok"}">
-                            ${state.paymentsMaintenance ? "Включены (оплата заблокирована)" : "Выключены (оплата активна)"}
-                        </span>
-                    </div>
-                    <div class="muted" style="font-size:12px; margin-top:4px;">
-                        Блокирует создание новых заказов и пополнение баланса. Действующие подписки продолжают работать.
-                    </div>
-                </div>
-                <button type="button" id="togglePaymentsMaintBtn" class="btn ${state.paymentsMaintenance ? "btn-secondary" : "btn-danger"}" style="white-space:nowrap;">
-                    ${state.paymentsMaintenance ? "Включить приём платежей" : "Приостановить платежи"}
-                </button>
-            </div>
-        </section>
+        ${_renderMaintenanceCard(state)}
 
         <section class="card">
-            <div class="row">
-                <div class="seg-group">
-                    <button type="button" class="seg-btn ${subTab === "orders" ? "active" : ""}" data-fintab="orders">Все</button>
-                    <button type="button" class="seg-btn ${subTab === "subscriptions" ? "active" : ""}" data-fintab="subscriptions">Подписки</button>
-                    <button type="button" class="seg-btn ${subTab === "topups" ? "active" : ""}" data-fintab="topups">Пополнения</button>
-                    <button type="button" class="seg-btn ${subTab === "audit" ? "active" : ""}" data-fintab="audit">Аудит</button>
-                </div>
+            <div class="row" style="gap:8px; align-items:center; justify-content:space-between;">
+                <h2 class="card-title">Операции и логи</h2>
+                <button type="button" id="finRefreshBtn" class="btn btn-sm">Обновить</button>
+            </div>
+            <div class="seg-group" style="overflow-x:auto; flex-wrap:nowrap; scrollbar-width:none; -webkit-overflow-scrolling:touch; gap:6px;">
+                <button type="button" class="seg-btn ${subTab === "orders" ? "active" : ""}" style="flex:1 0 auto; min-width:max-content; white-space:nowrap; padding:8px 10px;" data-fintab="orders" aria-pressed="${subTab === "orders" ? "true" : "false"}">Все заказы</button>
+                <button type="button" class="seg-btn ${subTab === "gateway" ? "active" : ""}" style="flex:1 0 auto; min-width:max-content; white-space:nowrap; padding:8px 10px;" data-fintab="gateway" aria-pressed="${subTab === "gateway" ? "true" : "false"}">Платёжка (ЮKassa)</button>
+                <button type="button" class="seg-btn ${subTab === "topups" ? "active" : ""}" style="flex:1 0 auto; min-width:max-content; white-space:nowrap; padding:8px 10px;" data-fintab="topups" aria-pressed="${subTab === "topups" ? "true" : "false"}">Пополнения</button>
+                <button type="button" class="seg-btn ${subTab === "audit" ? "active" : ""}" style="flex:1 0 auto; min-width:max-content; white-space:nowrap; padding:8px 10px;" data-fintab="audit" aria-pressed="${subTab === "audit" ? "true" : "false"}">Аудит</button>
             </div>
 
             ${
                 subTab === "audit"
                     ? `
                 <form id="auditFilterForm" class="field" style="gap:8px;">
-                    <div class="grid-2">
-                        <select id="auditActionSelect" class="select">
-                            <option value="">Все действия</option>
-                            ${(auditData.actions || [])
-                                .map(
-                                    (act) =>
-                                        `<option value="${escapeHtml(act)}" ${
-                                            state.auditAction === act ? "selected" : ""
-                                        }>${escapeHtml(act)}</option>`
-                                )
-                                .join("")}
-                        </select>
-                        <div class="row" style="flex-wrap:nowrap;">
-                            <input id="auditQueryInput" class="input" type="search" value="${escapeHtml(
-                                state.auditQuery || ""
-                            )}" placeholder="ID, детали...">
-                            <button type="submit" class="btn btn-primary btn-sm">Найти</button>
-                        </div>
+                    <div class="row-nowrap">
+                        <label for="auditQueryInput" class="visually-hidden">Поиск в аудите</label>
+                        <input id="auditQueryInput" class="input" type="search" value="${escapeHtml(
+                            state.auditQuery || ""
+                        )}" placeholder="ID или детали">
+                        <button type="submit" class="btn btn-primary btn-sm">Найти</button>
                     </div>
                 </form>
                 <div id="finPagerTop"></div>
-                <div id="finListContainer" style="display:flex; flex-direction:column; gap:8px;"></div>
+                <div id="finListContainer" class="stack-sm"></div>
                 <div id="finPagerBottom"></div>
             `
                     : `
-                <form id="finFilterForm" class="row" style="flex-wrap:nowrap;">
-                    <input id="finQueryInput" class="input" type="search" value="${escapeHtml(
-                        state.finQuery || ""
-                    )}" placeholder="Telegram ID, @username, ID заказа">
-                    <select id="finStatusSelect" class="select" style="max-width:130px;">
-                        <option value="">Все статусы</option>
-                        <option value="paid" ${state.finStatus === "paid" ? "selected" : ""}>Оплачен</option>
-                        <option value="pending" ${state.finStatus === "pending" ? "selected" : ""}>Ожидает</option>
-                        <option value="canceled" ${state.finStatus === "canceled" ? "selected" : ""}>Отменён</option>
-                        <option value="refunded" ${state.finStatus === "refunded" ? "selected" : ""}>Возврат</option>
-                        <option value="partially_refunded" ${state.finStatus === "partially_refunded" ? "selected" : ""}>Част. возврат</option>
-                    </select>
-                    <button type="submit" class="btn btn-primary btn-sm">Найти</button>
+                <form id="finFilterForm" class="field" style="gap:8px;">
+                    <div class="row">
+                        <label for="finQueryInput" class="visually-hidden">Поиск заказа или пользователя</label>
+                        <input id="finQueryInput" class="input" type="search" value="${escapeHtml(
+                            state.finQuery || ""
+                        )}" placeholder="Telegram ID, username, ID заказа">
+                        <label for="finStatusSelect" class="visually-hidden">Статус заказа</label>
+                        <select id="finStatusSelect" class="select" style="max-width:140px;">
+                            <option value="">Все статусы</option>
+                            <option value="paid" ${state.finStatus === "paid" ? "selected" : ""}>Оплачен</option>
+                            <option value="pending" ${state.finStatus === "pending" ? "selected" : ""}>Ожидает</option>
+                            <option value="canceled" ${state.finStatus === "canceled" ? "selected" : ""}>Отменён</option>
+                            <option value="refunded" ${state.finStatus === "refunded" ? "selected" : ""}>Возврат</option>
+                            <option value="partially_refunded" ${state.finStatus === "partially_refunded" ? "selected" : ""}>Част. возврат</option>
+                        </select>
+                        <button type="submit" class="btn btn-primary btn-sm">Найти</button>
+                    </div>
+                    <div class="row row-start">
+                        <button type="button" id="finAttentionToggleBtn" class="btn btn-sm ${
+                            state.finAttentionOnly ? "btn-primary" : ""
+                        }" aria-pressed="${state.finAttentionOnly ? "true" : "false"}">
+                            Требуют внимания
+                        </button>
+                    </div>
                 </form>
                 <div id="finPagerTop"></div>
-                <div id="finListContainer" style="display:flex; flex-direction:column; gap:8px;"></div>
+                <div id="finListContainer" class="stack-sm"></div>
                 <div id="finPagerBottom"></div>
             `
             }
         </section>
     `;
 
-    const loadFinances = async (offset = 0) => {
+    const isStillActive = (reqId) =>
+        reqId === _finViewReqId &&
+        root.isConnected &&
+        state.adminTab === "finances" &&
+        state.mode === "admin";
+
+    const listContainer = root.querySelector("#finListContainer");
+
+    const renderRetryList = (message, onRetry) => {
+        const pagerTop = root.querySelector("#finPagerTop");
+        const pagerBottom = root.querySelector("#finPagerBottom");
+        if (pagerTop) pagerTop.innerHTML = "";
+        if (pagerBottom) pagerBottom.innerHTML = "";
+        if (!listContainer) return;
+        listContainer.innerHTML = `
+            <div class="card card-center">
+                <div class="muted">${escapeHtml(message)}</div>
+                <button id="finListRetryBtn" type="button" class="btn btn-primary btn-sm">Повторить</button>
+            </div>
+        `;
+        listContainer.querySelector("#finListRetryBtn")?.addEventListener("click", onRetry);
+    };
+
+    const syncDynamicFinances = () => {
+        const curFin = state.financesData || { summary: {}, items: [], total: 0, offset: 0, limit: 25 };
+        const statsStrip = root.querySelector("#finStatsStrip");
+        if (statsStrip) {
+            statsStrip.innerHTML = _renderFinStatsInner(curFin.summary || {});
+        }
+        const attBtn = root.querySelector("#finAttentionToggleBtn");
+        if (attBtn) {
+            attBtn.classList.toggle("btn-primary", Boolean(state.finAttentionOnly));
+            attBtn.setAttribute("aria-pressed", state.finAttentionOnly ? "true" : "false");
+        }
+        listContainer.innerHTML = "";
+        _renderFinanceRows(listContainer, curFin.items || [], state);
+        _renderPager(root, curFin, loadFinances, "заказов");
+    };
+
+    const syncDynamicAudit = () => {
+        const curAudit = state.auditLogsData || { items: [], total: 0, offset: 0, limit: 40 };
+        listContainer.innerHTML = "";
+        _renderAuditRows(listContainer, curAudit.items || [], state);
+        _renderPager(root, curAudit, loadAudit, "событий");
+    };
+
+    const loadFinances = async (offset = 0, { attentionOnly = state.finAttentionOnly } = {}) => {
+        const reqId = ++_finViewReqId;
         try {
-            const kind = ["orders", "subscriptions", "topups"].includes(state.finSubTab)
+            const kind = ["orders", "gateway", "topups"].includes(state.finSubTab)
                 ? state.finSubTab
                 : "orders";
-            state.financesData = await api.listFinances(
+            const data = await api.listFinances(
                 kind,
                 state.finStatus || "",
                 state.finQuery || "",
                 offset,
-                25
+                25,
+                Boolean(attentionOnly)
             );
-            renderAdminFinancesView(root, state);
+            if (!isStillActive(reqId)) return false;
+            state.finAttentionOnly = Boolean(attentionOnly);
+            state.financesData = data;
+            state.financesLoadAttempted = true;
+            syncDynamicFinances();
+            return true;
         } catch (err) {
-            showToast(err.message || "Ошибка загрузки финансов");
+            if (!isStillActive(reqId)) return false;
+            if (err && err.code === "init_data_expired") return false;
+            state.financesLoadAttempted = true;
+            showToast(err.message || "Ошибка загрузки финансов", "error");
+            renderRetryList(err.message || "Не удалось загрузить финансы", () =>
+                loadFinances(offset, { attentionOnly })
+            );
+            return false;
         }
     };
 
     const loadAudit = async (offset = 0) => {
+        const reqId = ++_finViewReqId;
         try {
-            state.auditLogsData = await api.listAuditLogs(
-                state.auditAction || "",
+            const data = await api.listAuditLogs(
+                "",
                 state.auditQuery || "",
                 offset,
-                40
+                40,
+                ""
             );
-            renderAdminFinancesView(root, state);
+            if (!isStillActive(reqId)) return;
+            state.auditLogsData = data;
+            state.auditLoadAttempted = true;
+            syncDynamicAudit();
         } catch (err) {
-            showToast(err.message || "Ошибка загрузки аудит-лога");
+            if (!isStillActive(reqId)) return;
+            if (err && err.code === "init_data_expired") return;
+            state.auditLoadAttempted = true;
+            showToast(err.message || "Ошибка загрузки аудит-лога", "error");
+            renderRetryList(err.message || "Не удалось загрузить аудит-лог", () => loadAudit(offset));
         }
     };
 
-    root.querySelectorAll("[data-fintab]").forEach((btn) => {
-        btn.addEventListener("click", async () => {
-            state.finSubTab = btn.dataset.fintab;
-            if (state.finSubTab === "audit") {
-                await loadAudit(0);
-            } else {
-                state.finStatus = "";
-                await loadFinances(0);
+    const syncMaintenanceCard = () => {
+        if (!root.isConnected) return;
+        const maintCard = root.querySelector("#paymentsMaintCard");
+        if (!maintCard) return;
+        maintCard.innerHTML = _renderMaintenanceCardInner(state);
+        bindMaintenanceToggle(maintCard);
+    };
+
+    const loadPaymentsMaintenance = () => {
+        state.paymentsMaintenanceError = false;
+        if (!_maintInFlight) {
+            _maintInFlight = api
+                .getPaymentsMaintenance()
+                .then((res) => {
+                    state.paymentsMaintenance = Boolean(res.enabled);
+                    state.paymentsMaintenanceError = false;
+                })
+                .catch((err) => {
+                    if (err && err.code === "init_data_expired") return;
+                    state.paymentsMaintenanceError = true;
+                    showToast(err.message || "Ошибка загрузки статуса техработ", "error");
+                })
+                .finally(() => {
+                    _maintInFlight = null;
+                });
+        }
+        return _maintInFlight.finally(() => {
+            if (root.isConnected && state.adminTab === "finances" && state.mode === "admin") {
+                syncMaintenanceCard();
             }
         });
-    });
+    };
 
-    const toggleMaintBtn = root.querySelector("#togglePaymentsMaintBtn");
-    if (toggleMaintBtn) {
+    function bindMaintenanceToggle(scopeEl = root) {
+        const toggleMaintBtn = scopeEl.querySelector("#togglePaymentsMaintBtn");
+        if (!toggleMaintBtn) return;
         toggleMaintBtn.addEventListener("click", () => {
+            if (state.paymentsMaintenanceError) {
+                state.paymentsMaintenance = undefined;
+                state.paymentsMaintenanceError = false;
+                syncMaintenanceCard();
+                loadPaymentsMaintenance();
+                return;
+            }
             const nextVal = !state.paymentsMaintenance;
             showConfirmModal({
                 title: nextVal ? "Приостановить приём платежей?" : "Возобновить приём платежей?",
                 message: nextVal
-                    ? "Создание новых заказов и пополнение баланса будет временно заблокировано для всех пользователей. Действующие подписки продолжат работать."
+                    ? "Создание новых заказов и пополнение баланса будет временно заблокировано для всех пользователей. Действующие подписки продолжают работать."
                     : "Пользователи снова смогут оформлять подписки и пополнять баланс.",
                 confirmText: nextVal ? "Приостановить" : "Возобновить",
                 cancelText: "Отмена",
                 isDestructive: nextVal,
+                restoreFocusSelector: "#togglePaymentsMaintBtn",
                 onConfirm: async () => {
-                    toggleMaintBtn.disabled = true;
-                    try {
-                        const res = await api.setPaymentsMaintenance(nextVal);
-                        state.paymentsMaintenance = !!res.enabled;
-                        showToast(res.enabled ? "Техработы платежей включены" : "Приём платежей возобновлён");
-                        renderAdminFinancesView(root, state);
-                    } catch (err) {
-                        showToast(err.message || "Ошибка переключения техработ");
-                        toggleMaintBtn.disabled = false;
-                    }
+                    const res = await api.setPaymentsMaintenance(nextVal);
+                    state.paymentsMaintenance = Boolean(res.enabled);
+                    state.paymentsMaintenanceError = false;
+                    showToast(res.enabled ? "Техработы платежей включены" : "Приём платежей возобновлён");
+                    syncMaintenanceCard();
                 },
             });
         });
     }
 
-    if (typeof state.paymentsMaintenance === "undefined") {
-        const initBtn = root.querySelector("#togglePaymentsMaintBtn");
-        if (initBtn) initBtn.disabled = true;
-        api.getPaymentsMaintenance().then((res) => {
-            state.paymentsMaintenance = !!res.enabled;
-            const badge = root.querySelector("#paymentsMaintBadge");
-            const btn = root.querySelector("#togglePaymentsMaintBtn");
-            if (badge && btn) {
-                badge.className = `chip ${state.paymentsMaintenance ? "chip-warn" : "chip-ok"}`;
-                badge.textContent = state.paymentsMaintenance ? "ВКЛЮЧЕНЫ (оплата заблокирована)" : "ВЫКЛЮЧЕНЫ (оплата активна)";
-                btn.className = `btn ${state.paymentsMaintenance ? "btn-secondary" : "btn-danger"}`;
-                btn.textContent = state.paymentsMaintenance ? "Включить приём платежей" : "Приостановить платежи";
-                btn.disabled = false;
-            }
-        }).catch(() => {
-            const badge = root.querySelector("#paymentsMaintBadge");
-            const btn = root.querySelector("#togglePaymentsMaintBtn");
-            if (badge) {
-                badge.className = "chip chip-warn";
-                badge.textContent = "Ошибка загрузки";
-            }
-            if (btn) {
-                btn.disabled = true;
-                btn.textContent = "Недоступно";
+    root.querySelectorAll("[data-fintab]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            const nextSubTab = btn.dataset.fintab;
+            if (!nextSubTab || nextSubTab === state.finSubTab) return;
+            state.finSubTab = nextSubTab;
+            if (nextSubTab === "audit") {
+                const hadData = state.auditLogsData != null;
+                if (!hadData) {
+                    state.auditLoadAttempted = false;
+                }
+                renderAdminFinancesView(root, state, { forceRefresh: hadData });
+            } else {
+                state.financesData = null;
+                state.financesLoadAttempted = false;
+                state.finStatus = "";
+                renderAdminFinancesView(root, state);
             }
         });
+    });
+
+    const refreshBtn = root.querySelector("#finRefreshBtn");
+    if (refreshBtn) {
+        refreshBtn.addEventListener("click", async () => {
+            await withButtonLoading(refreshBtn, "Обновление…", async () => {
+                if (subTab === "audit") {
+                    const qInput = root.querySelector("#auditQueryInput");
+                    if (qInput) state.auditQuery = _cleanQuery(qInput.value);
+                    await loadAudit((state.auditLogsData && state.auditLogsData.offset) || 0);
+                } else {
+                    const qInput = root.querySelector("#finQueryInput");
+                    if (qInput) state.finQuery = _cleanQuery(qInput.value);
+                    await loadFinances((state.financesData && state.financesData.offset) || 0);
+                }
+            });
+        });
+    }
+
+    bindMaintenanceToggle();
+
+    if (typeof state.paymentsMaintenance === "undefined" || state.paymentsMaintenanceError) {
+        loadPaymentsMaintenance();
     }
 
     if (subTab === "audit") {
+        const auditQueryInput = root.querySelector("#auditQueryInput");
+        const syncAuditFilters = () => {
+            state.auditQuery = _cleanQuery(auditQueryInput.value);
+        };
+        auditQueryInput.addEventListener("input", () => {
+            state.auditQuery = _cleanQuery(auditQueryInput.value);
+        });
         root.querySelector("#auditFilterForm").addEventListener("submit", async (e) => {
             e.preventDefault();
-            state.auditAction = root.querySelector("#auditActionSelect").value;
-            state.auditQuery = root.querySelector("#auditQueryInput").value.trim();
+            syncAuditFilters();
             await loadAudit(0);
         });
-        root.querySelector("#auditActionSelect").addEventListener("change", async () => {
-            state.auditAction = root.querySelector("#auditActionSelect").value;
-            await loadAudit(0);
+        auditQueryInput.addEventListener("search", async () => {
+            if (auditQueryInput.value === "") {
+                syncAuditFilters();
+                await loadAudit(0);
+            }
         });
-        _renderAuditRows(root.querySelector("#finListContainer"), auditData.items || []);
-        _renderPager(root, auditData, loadAudit, "событий");
+        if (state.auditLogsData == null) {
+            if (!state.auditLoadAttempted) {
+                listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:16px;">Загрузка...</div>`;
+                loadAudit(0);
+            } else {
+                renderRetryList("Не удалось загрузить аудит-лог", () => loadAudit(0));
+            }
+        } else {
+            _renderAuditRows(listContainer, auditData.items || [], state);
+            _renderPager(root, auditData, loadAudit, "событий");
+            if (forceRefresh) {
+                loadAudit(0);
+            }
+        }
     } else {
+        const finQueryInput = root.querySelector("#finQueryInput");
+        const syncFinFilters = () => {
+            state.finQuery = _cleanQuery(finQueryInput.value);
+            state.finStatus = root.querySelector("#finStatusSelect").value;
+        };
+        finQueryInput.addEventListener("input", () => {
+            state.finQuery = _cleanQuery(finQueryInput.value);
+        });
         root.querySelector("#finFilterForm").addEventListener("submit", async (e) => {
             e.preventDefault();
-            state.finQuery = root.querySelector("#finQueryInput").value.trim();
-            state.finStatus = root.querySelector("#finStatusSelect").value;
+            syncFinFilters();
             await loadFinances(0);
+        });
+        finQueryInput.addEventListener("search", async () => {
+            if (finQueryInput.value === "") {
+                syncFinFilters();
+                await loadFinances(0);
+            }
         });
         root.querySelector("#finStatusSelect").addEventListener("change", async () => {
-            state.finStatus = root.querySelector("#finStatusSelect").value;
+            syncFinFilters();
             await loadFinances(0);
         });
-        _renderFinanceRows(root.querySelector("#finListContainer"), finData.items || []);
-        _renderPager(root, finData, loadFinances, "заказов");
+        root.querySelector("#finAttentionToggleBtn").addEventListener("click", async () => {
+            syncFinFilters();
+            await loadFinances(0, { attentionOnly: !state.finAttentionOnly });
+        });
+        if (state.financesData == null) {
+            if (!state.financesLoadAttempted) {
+                listContainer.innerHTML = `<div class="muted" style="text-align:center; padding:16px;">Загрузка...</div>`;
+                loadFinances(0);
+            } else {
+                renderRetryList("Не удалось загрузить финансы", () => loadFinances(0));
+            }
+        } else {
+            _renderFinanceRows(listContainer, finData.items || [], state, () => loadFinances(finData.offset || 0));
+            _renderPager(root, finData, loadFinances, "заказов");
+        }
     }
 }
 
-function _renderFinanceRows(container, items) {
+function _renderFlagChips(flags) {
+    if (!Array.isArray(flags) || !flags.length) return "";
+    return flags
+        .map((flag) => {
+            const info = formatMetadataFlag(flag);
+            return `<span class="chip ${info.cls}">${escapeHtml(info.text)}</span>`;
+        })
+        .join("");
+}
+
+function _renderFinanceRows(container, items, state, onReload = null) {
     if (!items.length) {
         container.innerHTML = `<div class="muted" style="text-align:center; padding:12px;">Записи не найдены</div>`;
         return;
@@ -272,59 +489,164 @@ function _renderFinanceRows(container, items) {
         row.className = "item-row";
         const uname = item.username ? `@${item.username}` : `TG ${item.telegram_id}`;
         const shortId = String(item.id || "").slice(0, 8);
-        const metaParts = [_formatServiceType(item.service_type), _formatPaymentMethod(item.payment_method)];
+        const paymentBreakdown = formatOrderPaymentBreakdown(item);
+        const amountLabel = formatOrderAmountLabel(item);
+        const metaParts = [_formatServiceType(item.service_type), paymentBreakdown];
         if (item.duration_days) metaParts.push(`${item.duration_days} дн.`);
         if (item.device_limit) metaParts.push(`${item.device_limit} устр.`);
+        const flagsHtml = _renderFlagChips(item.metadata_flags);
+
+        const timeDetails = [];
+        if (item.paid_at) timeDetails.push(`Оплачен: ${formatDate(item.paid_at)}`);
+        if (item.refunded_at) timeDetails.push(`Возврат: ${formatDate(item.refunded_at)}`);
+
         row.innerHTML = `
-            <div class="row">
-                <div>
-                    <span class="mono" style="font-weight:600;">#${escapeHtml(shortId)}</span>
-                    <span style="font-weight:600;"> · ${escapeHtml(uname)}</span>
-                    <span class="mono muted" style="margin-left:6px;">${item.telegram_id}</span>
+            <div class="row" style="align-items:flex-start; flex-wrap:nowrap; gap:8px;">
+                <div style="display:flex; align-items:center; flex-wrap:wrap; gap:6px; min-width:0; flex:1;">
+                    <span class="mono" style="font-weight:600; word-break:normal; white-space:nowrap;">#${escapeHtml(shortId)}</span>
+                    <button type="button" class="btn btn-sm btn-ghost-inline" style="min-width:0; max-width:100%; text-align:left;" data-open-user="${item.user_id}">
+                        <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(uname)}</span> · <span class="mono" style="word-break:normal; white-space:nowrap;">${escapeHtml(item.telegram_id)}</span>
+                    </button>
                 </div>
-                <span class="tabular" style="font-weight:600;">${item.amount_rub} ₽</span>
+                <span class="tabular" style="font-weight:600; flex-shrink:0; white-space:nowrap;">${escapeHtml(amountLabel)}</span>
             </div>
-            <div class="row muted" style="font-size:11px;">
+            <div class="row meta-text">
                 <span>${escapeHtml(metaParts.filter(Boolean).join(" · "))}</span>
                 <span>${formatDate(item.created_at)}</span>
             </div>
-            <div class="row">
-                <span class="mono muted" style="font-size:11px;">${escapeHtml(item.reference || "")}</span>
-                ${_financeStatusChip(item.status)}
+            ${
+                timeDetails.length
+                    ? `<div class="meta-text">${escapeHtml(timeDetails.join(" · "))}</div>`
+                    : ""
+            }
+            ${
+                flagsHtml
+                    ? `<div style="display:flex; flex-wrap:wrap; gap:4px;">${flagsHtml}</div>`
+                    : ""
+            }
+            <div class="row" style="gap:8px; flex-wrap:wrap;">
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; min-width:0;">
+                    <button type="button" class="mono-copy" data-copy-id="${escapeHtml(item.id)}">
+                        Копировать ID
+                    </button>
+                    ${
+                        item.external_id
+                            ? `<button type="button" class="mono-copy" data-copy-ext="${escapeHtml(item.external_id)}">
+                                Копировать внешний ID
+                            </button>`
+                            : ""
+                    }
+                    ${
+                        item.reference
+                            ? `<span class="mono meta-text" style="word-break:break-all;">${escapeHtml(item.reference)}</span>`
+                            : ""
+                    }
+                </div>
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                    ${
+                        Array.isArray(item.metadata_flags) && item.metadata_flags.includes("requires_manual_review")
+                            ? `<button type="button" class="btn btn-sm btn-secondary" data-ack-review="${escapeHtml(item.id)}">Проверено</button>`
+                            : ""
+                    }
+                    ${_financeStatusChip(item.status)}
+                </div>
             </div>
         `;
+
+        const userBtn = row.querySelector("[data-open-user]");
+        if (userBtn) {
+            userBtn.addEventListener("click", () => state.onOpenUser?.(item.user_id));
+        }
+        const copyIdBtn = row.querySelector("[data-copy-id]");
+        if (copyIdBtn) {
+            copyIdBtn.addEventListener("click", () => copyText(item.id, "ID заказа скопирован"));
+        }
+        const copyExtBtn = row.querySelector("[data-copy-ext]");
+        if (copyExtBtn) {
+            copyExtBtn.addEventListener("click", () => copyText(item.external_id, "Внешний ID скопирован"));
+        }
+        const ackBtn = row.querySelector("[data-ack-review]");
+        if (ackBtn) {
+            ackBtn.addEventListener("click", () => {
+                withButtonLoading(ackBtn, "...", async () => {
+                    try {
+                        const res = await api.ackOrderReview(item.id);
+                        showToast(res.message || "Проверка подтверждена");
+                        if (onReload) await onReload();
+                    } catch (err) {
+                        showToast(err.message || "Не удалось подтвердить проверку", "error");
+                    }
+                });
+            });
+        }
         container.appendChild(row);
     });
 }
 
-function _renderAuditRows(container, items) {
+function _formatAuditDetails(details) {
+    if (!details) return "";
+    let formatted = String(details);
+    const trimmed = formatted.trim();
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+        try {
+            formatted = JSON.stringify(JSON.parse(trimmed), null, 2);
+        } catch {
+            // Keep raw text if not valid JSON
+        }
+    }
+    const isLong = formatted.length > 120 || formatted.includes("\n");
+    if (isLong) {
+        return `
+            <details style="margin-top:4px;">
+                <summary class="meta-text" style="cursor:pointer;">Детали (${formatted.length} симв.)</summary>
+                <pre class="mono meta-text" style="white-space:pre-wrap; word-break:break-word; margin:4px 0 0;">${escapeHtml(formatted)}</pre>
+            </details>
+        `;
+    }
+    return `<div class="mono meta-text" style="white-space:pre-wrap; word-break:break-word;">${escapeHtml(formatted)}</div>`;
+}
+
+function _renderAuditRows(container, items, state) {
     if (!items.length) {
-        container.innerHTML = `<div class="muted" style="text-align:center; padding:12px;">События не найдены</div>`;
+        container.innerHTML = `<div class="muted" style="text-align:center; padding:16px;">События не найдены</div>`;
         return;
     }
     items.forEach((item) => {
         const row = document.createElement("div");
         row.className = "item-row";
-        const targetText = item.target_type
-            ? `${item.target_type}${item.target_id != null ? `#${item.target_id}` : ""}`
-            : "—";
+        const targetType = String(item.target_type || "").toLowerCase();
+        const hasTargetId = item.target_id !== null && item.target_id !== undefined && item.target_id !== "";
+        const targetText = formatAuditTarget(item.target_type, item.target_id);
+        const isClickableTarget = hasTargetId && (targetType === "user" || targetType === "server");
+
+        const targetHtml = isClickableTarget
+            ? `<button type="button" class="btn btn-sm btn-ghost-inline" data-open-target>${escapeHtml(targetText)}</button>`
+            : `<span>${escapeHtml(targetText)}</span>`;
+
         row.innerHTML = `
             <div class="row">
-                <span class="chip chip-muted">${escapeHtml(item.action)}</span>
-                <span class="muted" style="font-size:11px;">${formatDate(item.created_at)}</span>
+                <span class="chip chip-muted" title="${escapeHtml(item.action)}">${escapeHtml(formatAuditAction(item.action))}</span>
+                <span class="meta-text">${formatDate(item.created_at)}</span>
             </div>
-            <div class="row muted" style="font-size:11px;">
-                <span>Админ: <span class="mono">${item.admin_id}</span></span>
-                <span>Цель: <span class="mono">${escapeHtml(targetText)}</span></span>
+            <div class="row meta-text" style="align-items:center;">
+                <span>Админ: <span class="mono" style="word-break:normal; white-space:nowrap;">${escapeHtml(item.admin_id)}</span></span>
+                <span>Цель: ${targetHtml}</span>
             </div>
-            ${
-                item.details
-                    ? `<div class="mono muted" style="font-size:11px; white-space:pre-wrap;">${escapeHtml(
-                          item.details
-                      )}</div>`
-                    : ""
-            }
+            ${_formatAuditDetails(item.details)}
         `;
+
+        if (isClickableTarget) {
+            const targetBtn = row.querySelector("[data-open-target]");
+            if (targetBtn) {
+                targetBtn.addEventListener("click", () => {
+                    if (targetType === "user") {
+                        state.onOpenUser?.(item.target_id);
+                    } else if (targetType === "server") {
+                        state.onOpenNode?.(item.target_id);
+                    }
+                });
+            }
+        }
         container.appendChild(row);
     });
 }

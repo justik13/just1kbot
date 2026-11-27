@@ -131,53 +131,6 @@ def calculate_referral_bonus(
     )
 
 
-async def is_first_topup_eligible(
-    session: AsyncSession,
-    *,
-    user_id: int,
-) -> bool:
-    """Return True if user was referred by someone and has no completed qualifying top-ups yet.
-
-    Only top-ups ≥ REFERRAL_ACTIVE_MIN_TOPUP_RUB burn eligibility: dust
-    top-ups neither activate the referral nor hide the bonus preview.
-    """
-    purchaser = await session.scalar(
-        select(User).where(
-            User.id == user_id,
-            User.is_deleted.is_(False),
-        )
-    )
-    if (
-        purchaser is None
-        or not hasattr(purchaser, "referred_by")
-        or purchaser.referred_by is None
-    ):
-        return False
-    if purchaser.referred_by == getattr(purchaser, "telegram_id", None):
-        return False
-
-    from sqlalchemy import func
-
-    from database.models import Order
-
-    order_count = await session.scalar(
-        select(func.count(Order.id)).where(
-            Order.user_id == user_id,
-            Order.status == "paid",
-            Order.amount_rub >= REFERRAL_ACTIVE_MIN_TOPUP_RUB,
-            or_(
-                Order.metadata_.is_(None),
-                Order.metadata_["settlement_held"].astext.is_distinct_from("true"),
-            ),
-            or_(
-                Order.service_type == "topup",
-                Order.payment_method != "wallet",
-            ),
-        )
-    )
-    return (order_count or 0) == 0
-
-
 async def _has_other_qualifying_topup(
     session: AsyncSession,
     *,

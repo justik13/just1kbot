@@ -283,9 +283,9 @@ attrs==26.1.0 \
     --hash=sha256:c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309 \
     --hash=sha256:d03ceb89cb322a8fd706d4fb91940737b6642aa36998fe130a9bc96c985eff32
     # via aiohttp
-cachetools==7.3.3 \
-    --hash=sha256:32305addec0581cae6d4f7952d01d078dbc521f922650eba395b9d25b7481843 \
-    --hash=sha256:46e92905f580cb137c499b9ec6acd73d569c2c3542ddfeb286618685e55cb340
+cachetools==7.3.4 \
+    --hash=sha256:1b7ea8e1b13d9890de5330a85a38afa5e7b04844420a669f707e2cf8033e0519 \
+    --hash=sha256:26d4d07baf0866a6249702352145b423d9d771e4c58eb8ad9edd420ce8c7afdf
     # via -r requirements.txt
 certifi==2026.11.20 \
     --hash=sha256:7422df25243767b9877031a2248cb14d09ddac9beee846f4cef3d5c9191d488f \

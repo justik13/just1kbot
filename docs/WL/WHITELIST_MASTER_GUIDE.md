@@ -10,7 +10,12 @@
 >
 > *Актуальность: 31 октября 2026 года. Официальный baseline апстрима: Xray-core v26.10.31 (31.10.2026, экстренное обновление безопасности: закрытие уязвимости Linux kernel IPv4 MPTCP; v26.10.29 отозван; PR #5067 VLESS Native Encryption ML-KEM-768 постквантовое 0-RTT шифрование полезной нагрузки; v26.10.21 релиз безопасности с очисткой RootCA на Go 1.27.3) с поддержкой XDRIVE (network: "xdrive", PR #5645, PR #6748, PR #6754, PR #7231 S3, PR #7187 HTTP/3), XHTTP с downlinkGzipMs (PR #7211), каноническим профилем Bodiless GET Uplink (uplinkDataPlacement: "header") для парирования инцидента 413 Yandex Cloud CDN от 28–29.09.2026, PR #6632 (Request.GetBody() retry при HTTP/2 GOAWAY), PR #6307 (чистые пути без трейлинг-слэшей), PR #5414 (кастомные uplinkHTTPMethod).*
 >
-> ℹ️ **ПРИМЕЧАНИЕ О ВЕРСИИ В ПРОДАКШЕНЕ:** Боевые узлы проекта `just1knode` зафиксированы на актуальной версии безопасности `XRAY_VERSION_PINNED="26.10.31"` (`modules/xray/core.sh:6`) с защитой от уязвимостей Linux kernel MPTCP и постквантовым шифрованием VLESS (PR #5067).
+> ℹ️ **ПРИМЕЧАНИЕ О ВЕРСИИ В ПРОДАКШЕНЕ:** Боевые узлы проекта `just1knode` зафиксированы на актуальной версии `XRAY_VERSION_PINNED="26.11.9"` (`modules/xray/core.sh:6`) с защитой от уязвимостей Linux kernel MPTCP, обновленным сетевым стеком Go `x/net v0.62.0` и постквантовым шифрованием VLESS (PR #5067).
+>
+> 🔄 **АКТУАЛИЗАЦИЯ ПРОДАКШЕН-АРХИТЕКТУРЫ (25.11.2026):**
+> - В актуальном коде (`just1kbot/services/topology_sync_service.py`, `just1knode/scripts/config_builder.py`) используется **3-звенная** схема **`ru_hub -> eu_hub (443/TCP) -> exit_node (443/TCP)`** (упоминания 2-Hop `Origin -> Exit` на порту `10443` и `alpn: ["h2", "http/1.1"]` в примерах ниже являются историческим контекстом; в продакшене для `xtls-rprx-vision` используется строго `alpn: ["http/1.1"]`).
+> - Связность `ru_hub -> eu_hub` контролируется фоновым последовательным зондом (`just1k-probe-socks`, прокачка `>= 36 КБ` payload для отлова 25-пакетного silent stall ТСПУ) с автоматическим переключением маршрута и Telegram-алертом при недоступности `eu_hub` из РФ.
+> - **Обновления продакшен-контура (27.11.2026):** на узлах Nginx переведён на `LimitNOFILE=65535` + `worker_rlimit_nofile 65535` (под нагрузку `packet-up`), в `cdn_yandex.sh` синхронизированы все 118 подсетей `yc.json`, `/sub/` на `ru_hub` переведён на HTTP/1.1 с пробросом клиентского IP из `X-Forwarded-For-Y` в `TRUSTED_PROXIES` / `CADDY_TRUSTED_PROXIES`, добавлено еженедельное обновление `geoip.dat`/`geosite.dat` на `ru_hub`, а `vless_fragmentation_enabled` по умолчанию выключен (`false`).
 
 ---
 

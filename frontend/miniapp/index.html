@@ -2,11 +2,11 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Just1k</title>
-    <script src="/app/assets/js/telegram-web-app.js?v=2.7.5"></script>
-    <link rel="stylesheet" href="/app/assets/css/tokens.css?v=2.7.8">
-    <link rel="stylesheet" href="/app/assets/css/components.css?v=2.7.8">
+    <script src="/app/assets/js/telegram-web-app.js?v=2.8.0"></script>
+    <link rel="stylesheet" href="/app/assets/css/tokens.css?v=2.8.0">
+    <link rel="stylesheet" href="/app/assets/css/components.css?v=2.8.0">
 </head>
 <body>
     <div class="app-shell">
@@ -14,7 +14,6 @@
             <div class="brand">
                 <div class="brand-mark"><span class="brand-dot"></span></div>
                 <span class="brand-title">Just1k</span>
-                <span id="roleChip" class="chip chip-muted" hidden></span>
             </div>
             <div class="topbar-right">
                 <div id="modeSwitch" class="mode-switch" hidden>
@@ -38,8 +37,12 @@
     </div>
 
     <div id="modalRoot" class="modal-backdrop" hidden></div>
-    <div id="toastRoot" class="toast" role="status" aria-live="polite" hidden></div>
+    <div id="toastLiveRegion" class="visually-hidden">
+        <div id="toastLivePolite" role="status" aria-live="polite" aria-atomic="true"></div>
+        <div id="toastLiveAssertive" role="alert" aria-live="assertive" aria-atomic="true"></div>
+    </div>
+    <div id="toastRoot" class="toast" popover="manual" hidden></div>
 
-    <script type="module" src="/app/assets/js/app.js?v=2.7.8"></script>
+    <script type="module" src="/app/assets/js/app.js?v=2.8.0"></script>
 </body>
 </html>

@@ -373,6 +373,13 @@ async def main():
         logger.info("Инициализация БД...")
         await init_db()
 
+        try:
+            from utils.http_rate_limiter import refresh_dynamic_trusted_proxies_from_db
+
+            await refresh_dynamic_trusted_proxies_from_db()
+        except Exception as proxy_sync_exc:
+            logger.warning("Initial dynamic trusted proxies refresh skipped: %s", proxy_sync_exc)
+
         bot, dp = await setup_bot()
 
         webhook_runner = await start_webhook_server(
@@ -488,6 +495,13 @@ async def main():
                 await webhook_runner.cleanup()
             except Exception as e:
                 logger.error("Failed to clean up webhook server: %s", e)
+
+        try:
+            from bot.miniapp.admin_common import cancel_admin_background_tasks
+
+            await cancel_admin_background_tasks()
+        except Exception as e:
+            logger.error("Error cancelling admin background tasks: %s", e)
 
         if dp is not None:
             try:

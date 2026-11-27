@@ -1,6 +1,9 @@
 :root {
+    color-scheme: dark;
     --bg-black: #000000;
     --bg-canvas: #000000;
+    --bg-card: #121216;
+    --bg-modal: #141419;
     --bg-surface: rgba(20, 20, 25, 0.74);
     --bg-tile: rgba(255, 255, 255, 0.045);
     --bg-elevated: rgba(30, 30, 38, 0.78);
@@ -20,18 +23,20 @@
     --accent-white-soft: rgba(255, 255, 255, 0.07);
     --accent-emerald: #34d399;
     --accent-emerald-soft: rgba(52, 211, 153, 0.12);
-    --accent-sky: #38bdf8;
-    --accent-sky-soft: rgba(56, 189, 248, 0.12);
     --accent-amber: #fbbf24;
+    --accent-amber-soft: rgba(251, 191, 36, 0.12);
+    --accent-amber-ink: #fde68a;
     --accent-warn: #fbbf24;
     --accent-red: #f87171;
+    --accent-red-hover: #fca5a5;
+    --accent-red-ink: #fecaca;
+    --accent-red-soft: rgba(248, 113, 113, 0.12);
 
     --radius-card: 20px;
     --radius-control: 12px;
     --radius-sm: 8px;
     --radius-pill: 999px;
 
-    --glass-blur: blur(20px) saturate(180%);
     --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
     --dur-fast: 150ms;
     --dur-mid: 220ms;

@@ -50,7 +50,9 @@ def get_shared_design_tokens_css() -> str:
 
 @functools.lru_cache(maxsize=1)
 def get_vless_landing_active_html() -> str:
-    """Assemble modular landing template with inline Base64 real screenshots into memory."""
+    """Assemble modular landing template from single-source guides data with inline Base64 screenshots."""
+    from services.guides_content import render_landing_connect_links, render_landing_guide_sections
+
     landing_dir = _TEMPLATES_DIR / "vless_landing"
     if not landing_dir.is_dir():
         raise FileNotFoundError(f"Landing directory not found: {landing_dir}")
@@ -58,13 +60,16 @@ def get_vless_landing_active_html() -> str:
     base = (landing_dir / "base.html").read_text(encoding="utf-8")
     css = (landing_dir / "css" / "landing.css").read_text(encoding="utf-8")
     js = (landing_dir / "js" / "landing.js").read_text(encoding="utf-8")
-    connect_view = (landing_dir / "views" / "connect_view.html").read_text(encoding="utf-8")
+    connect_view = render_landing_connect_links(
+        (landing_dir / "views" / "connect_view.html").read_text(encoding="utf-8")
+    )
     guides_view = (landing_dir / "views" / "guides_view.html").read_text(encoding="utf-8")
 
-    guide_ios = (landing_dir / "partials" / "guide_ios.html").read_text(encoding="utf-8")
-    guide_android = (landing_dir / "partials" / "guide_android.html").read_text(encoding="utf-8")
-    guide_desktop = (landing_dir / "partials" / "guide_desktop.html").read_text(encoding="utf-8")
-    guide_faq = (landing_dir / "partials" / "guide_faq.html").read_text(encoding="utf-8")
+    sections = render_landing_guide_sections()
+    guide_ios = sections["ios"]
+    guide_android = sections["android"]
+    guide_desktop = sections["desktop"]
+    guide_faq = sections["faq"]
 
     assets_dir = landing_dir / "assets"
     asset_placeholders = {
@@ -72,7 +77,6 @@ def get_vless_landing_active_html() -> str:
         "{{IMG_IOS_2}}": "ios_02_kazakhstan.jpg",
         "{{IMG_IOS_3}}": "ios_03_payment.jpg",
         "{{IMG_IOS_4}}": "ios_04_appstore.jpg",
-        "{{IMG_TESTFLIGHT}}": "ios_testflight.jpg",
         "{{IMG_ANDROID_APK}}": "android_apk_warning.jpg",
     }
     missing_assets = [fn for fn in asset_placeholders.values() if not (assets_dir / fn).is_file()]
@@ -134,28 +138,6 @@ _asset_rate_limiter = HttpRateLimiter(rate_per_minute=600.0, burst=150)
 HWID_PATTERN = re.compile(r"^[a-zA-Z0-9_\-:]{3,128}$")
 
 
-def _safe_format_vless_template(
-    template: str,
-    *,
-    tariff: str,
-    devices: int,
-    active: int,
-) -> str:
-    """Safely format {tariff}, {tariff_name}, {devices}, {limit}, {active}, {active_devices} placeholders."""
-    mapping = {
-        "tariff": str(tariff),
-        "tariff_name": str(tariff),
-        "devices": str(devices),
-        "device_limit": str(devices),
-        "limit": str(devices),
-        "active": str(active),
-        "active_devices": str(active),
-    }
-    pattern = re.compile(r"\{(" + "|".join(re.escape(k) for k in mapping.keys()) + r")\}")
-    return pattern.sub(lambda m: mapping.get(m.group(1), m.group(0)), template)
-
-
-
 _extract_device_metadata = extract_device_metadata
 
 
@@ -192,27 +174,6 @@ def _sanitize_ascii_header(val: str | None, fallback: str = "", *, max_len: int 
     return ""
 
 
-def _normalize_per_app_proxy_list(raw: str | None, *, max_len: int = 2000) -> str:
-    """Normalize newline/whitespace/comma-separated app entries into a clean ASCII CSV string."""
-    if not raw or not isinstance(raw, str) or max_len <= 0:
-        return ""
-    seen: set[str] = set()
-    selected: list[str] = []
-    total_len = 0
-    for item in re.split(r"[\s,]+", raw.strip()):
-        if not item or item in seen:
-            continue
-        if not (item.isascii() and all(32 < ord(c) < 127 for c in item)):
-            continue
-        added_len = len(item) + (1 if selected else 0)
-        if total_len + added_len > max_len:
-            break
-        seen.add(item)
-        selected.append(item)
-        total_len += added_len
-    return ",".join(selected)
-
-
 def _as_bool_setting(val: object, default: bool = False) -> bool:
     if val is None:
         return default
@@ -224,55 +185,18 @@ def _as_bool_setting(val: object, default: bool = False) -> bool:
 
 
 async def _load_subscription_ui_settings(session) -> dict[str, object]:
-    """Load global INCY & Happ subscription customization settings from SystemSetting."""
+    """Load global INCY & Happ visual customization settings from SystemSetting."""
     default_interval = _get_vless_update_interval()
     interval_raw = await get_system_setting(session, "vless_profile_update_interval", default_interval)
     interval_val = str(interval_raw).strip() if interval_raw is not None else default_interval
     if not (interval_val.isdigit() and 1 <= int(interval_val) <= 720):
         interval_val = default_interval
 
-    sort_order = str(await get_system_setting(session, "vless_sort_order", "none") or "none").strip().lower()
-    if sort_order not in {"none", "ping", "name"}:
-        sort_order = "none"
-
-    no_limit_mode = str(await get_system_setting(session, "vless_no_limit_mode", "all") or "all").strip().lower()
-    if no_limit_mode not in {"off", "all", "xhttp"}:
-        no_limit_mode = "all"
-
-    per_app_mode = str(await get_system_setting(session, "vless_per_app_proxy_mode", "bypass") or "bypass").strip().lower()
-    if per_app_mode not in {"bypass", "proxy"}:
-        per_app_mode = "bypass"
-
     return {
         "profile_update_interval": interval_val,
         "support_url": str(await get_system_setting(session, "vless_support_url", "") or "").strip(),
         "web_page_url": str(await get_system_setting(session, "vless_web_page_url", "") or "").strip(),
-        "sort_order": sort_order,
-        "hide_url": _as_bool_setting(await get_system_setting(session, "vless_hide_url", "true"), True),
-        "hide_check": _as_bool_setting(await get_system_setting(session, "vless_hide_check", "false"), False),
-        "fragmentation_enabled": _as_bool_setting(await get_system_setting(session, "vless_fragmentation_enabled", "true"), True),
-        "fragmentation_packets": str(await get_system_setting(session, "vless_fragmentation_packets", "tlshello") or "tlshello").strip(),
-        "fragmentation_length": str(await get_system_setting(session, "vless_fragmentation_length", "10-30") or "10-30").strip(),
-        "fragmentation_interval": str(await get_system_setting(session, "vless_fragmentation_interval", "10-30") or "10-30").strip(),
-        "no_limit_mode": no_limit_mode,
-        "dns_resolve_enabled": _as_bool_setting(await get_system_setting(session, "vless_dns_resolve_enabled", "true"), True),
-        "dns_resolve_domain": str(await get_system_setting(session, "vless_dns_resolve_domain", "https://common.dot.dns.yandex.net/dns-query") or "https://common.dot.dns.yandex.net/dns-query").strip(),
-        "dns_resolve_ip": str(await get_system_setting(session, "vless_dns_resolve_ip", "77.88.8.8") or "77.88.8.8").strip(),
-        "per_app_proxy_enabled": _as_bool_setting(await get_system_setting(session, "vless_per_app_proxy_enabled", "false"), False),
-        "per_app_proxy_mode": per_app_mode,
-        "per_app_proxy_list": str(await get_system_setting(session, "vless_per_app_proxy_list", "") or "").strip(),
     }
-
-
-def _apply_no_limit_headers(headers: dict[str, str], no_limit_mode: str, *, is_happ: bool) -> None:
-    """Apply No-Limit-Enabled / no-limit-xhttp-enabled without ever sending both simultaneously."""
-    if no_limit_mode == "all":
-        headers["No-Limit-Enabled"] = "1"
-    elif no_limit_mode == "xhttp":
-        if is_happ:
-            headers["no-limit-xhttp-enabled"] = "1"
-        else:
-            headers["No-Limit-Enabled"] = "1"
 
 
 def _is_browser_request(request: web.Request) -> bool:
@@ -394,22 +318,30 @@ def _render_vless_landing_html(
         badge = status_badge or texts.LANDING_INACTIVE_BADGE_PAUSED
         title = status_title or texts.LANDING_INACTIVE_TITLE_DEFAULT
         desc = status_description or texts.LANDING_INACTIVE_DESC_DEFAULT
-        return (
-            get_vless_landing_inactive_html()
-            .replace("{clean_bot}", clean_bot)
-            .replace("{bot_link}", bot_link)
-            .replace("{status_badge}", html.escape(badge))
-            .replace("{status_title}", html.escape(title))
-            .replace("{status_description}", html.escape(desc))
+        repls = {
+            "{clean_bot}": clean_bot,
+            "{bot_link}": bot_link,
+            "{status_badge}": html.escape(badge),
+            "{status_title}": html.escape(title),
+            "{status_description}": html.escape(desc),
+        }
+        return re.sub(
+            r"\{(?:clean_bot|bot_link|status_badge|status_title|status_description)\}",
+            lambda m: repls[m.group(0)],
+            get_vless_landing_inactive_html(),
         )
     badge_html = f'<div class="tier-badge">{html.escape(tariff_badge)}</div>' if tariff_badge else ""
     effective_title = page_title or texts.LANDING_VLESS_PAGE_TITLE
-    return (
-        get_vless_landing_active_html()
-        .replace("{page_title}", html.escape(effective_title))
-        .replace("{tier}", html.escape(tier))
-        .replace("{tariff_badge_html}", badge_html)
-        .replace("{device_limit}", str(device_limit or 1))
+    repls_active = {
+        "{page_title}": html.escape(effective_title),
+        "{tier}": html.escape(tier),
+        "{tariff_badge_html}": badge_html,
+        "{device_limit}": str(device_limit or 1),
+    }
+    return re.sub(
+        r"\{(?:page_title|tier|tariff_badge_html|device_limit)\}",
+        lambda m: repls_active[m.group(0)],
+        get_vless_landing_active_html(),
     )
 
 
@@ -504,7 +436,6 @@ def _build_unified_notice_response(
 
     cfg = ui_settings or {}
     interval_val = str(cfg.get("profile_update_interval") or _get_vless_update_interval())
-    hide_url_val = "1" if cfg.get("hide_url", True) else "0"
 
     headers = {
         **common_headers,
@@ -513,9 +444,9 @@ def _build_unified_notice_response(
         "Subscription-Userinfo": f"upload={upload_bytes}; download={download_bytes}; total=0; expire={expire_ts}",
         "Profile-Title": f"base64:{b64_title}",
         "Announce": f"base64:{b64_announce}",
-        "Hide-Url": hide_url_val,
+        "Hide-Url": "1",
+        "No-Limit-Enabled": "1",
     }
-    _apply_no_limit_headers(headers, str(cfg.get("no_limit_mode") or "all"), is_happ=is_happ)
 
     sanitized_support = _sanitize_header_url(support_url)
     sanitized_channel = _sanitize_header_url(channel_url)
@@ -562,7 +493,7 @@ async def serve_unified_subscription_feed(
     token_source: str = "vless",
 ) -> web.Response:
     """Serve unified Base64 subscription feed (Standard + White Internet) with HWID accounting."""
-    client_ip = get_trusted_client_ip(request)
+    client_ip = get_trusted_client_ip(request, allow_yandex_header=True)
     allowed_ip, retry_after_ip = _ip_rate_limiter.check(client_ip)
     if not allowed_ip:
         return web.Response(
@@ -726,7 +657,7 @@ async def serve_unified_subscription_feed(
                     landing_headers = {
                         **common_headers,
                         "Content-Type": "text/html; charset=utf-8",
-                        "Content-Security-Policy": "default-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self';",
+                        "Content-Security-Policy": "default-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:;",
                     }
                     return web.Response(status=200, text=html_body, headers=landing_headers)
                 return _build_unified_notice_response(
@@ -772,7 +703,7 @@ async def serve_unified_subscription_feed(
                 landing_headers = {
                     **common_headers,
                     "Content-Type": "text/html; charset=utf-8",
-                    "Content-Security-Policy": "default-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self';",
+                    "Content-Security-Policy": "default-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:;",
                 }
                 return web.Response(status=200, text=html_body, headers=landing_headers)
 
@@ -836,9 +767,9 @@ async def serve_unified_subscription_feed(
                         tier = "family"
                     else:
                         tier = "basic"
-                    prefix = tariff_clean.upper() if tariff_clean else tier.upper()
+                    prefix = tariff_clean if tariff_clean else tier.capitalize()
                     device_str = format_plural(landing_std_limit, texts.LANDING_DEVICE_FORMS_LABELS)
-                    tariff_badge = f"{prefix} • {device_str}"
+                    tariff_badge = f"{prefix} · {device_str}"
                     page_title = texts.LANDING_VLESS_PAGE_TITLE
                 else:
                     tier = "white_internet"
@@ -856,7 +787,7 @@ async def serve_unified_subscription_feed(
                 landing_headers = {
                     **common_headers,
                     "Content-Type": "text/html; charset=utf-8",
-                    "Content-Security-Policy": "default-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self';",
+                    "Content-Security-Policy": "default-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:;",
                 }
                 return web.Response(status=200, text=html_body, headers=landing_headers)
 
@@ -1127,8 +1058,6 @@ async def serve_unified_subscription_feed(
 
         userinfo_total = wi_total_quota if (not std_active and wi_active and wi_total_quota > 0) else 0
         b64_title = base64.b64encode(full_title.encode("utf-8")).decode("ascii")
-        sort_order = str(ui_settings.get("sort_order") or "none")
-        happ_sort_map = {"none": "without", "ping": "ping", "name": "alphabet"}
 
         response_headers = {
             **common_headers,
@@ -1139,48 +1068,18 @@ async def serve_unified_subscription_feed(
             "Device-Limit": str(effective_limit),
             "Device-Active-Count": str(active_hwid_count),
             "Profile-Title": f"base64:{b64_title}",
-            "Sort-Order": sort_order,
+            "Sort-Order": "none",
             "x-hwid-active": "true",
-            "Hide-Url": "1" if ui_settings.get("hide_url", True) else "0",
+            "Hide-Url": "1",
+            "No-Limit-Enabled": "1",
+            "Server-Address-Resolve-Enable": "1",
+            "Server-Address-Resolve-Dns-Domain": "https://common.dot.dns.yandex.net/dns-query",
+            "Server-Address-Resolve-Dns-Ip": "77.88.8.8",
+            "Routing": "off",
         }
-        if ui_settings.get("hide_check"):
-            response_headers["Hide-Check"] = "1"
-        _apply_no_limit_headers(response_headers, str(ui_settings.get("no_limit_mode") or "all"), is_happ=is_happ)
-
-        if ui_settings.get("fragmentation_enabled", True):
-            response_headers["fragmentation-enable"] = "1"
-            response_headers["fragmentation-packets"] = _sanitize_ascii_header(
-                str(ui_settings.get("fragmentation_packets") or ""), "tlshello", max_len=64
-            )
-            response_headers["fragmentation-length"] = _sanitize_ascii_header(
-                str(ui_settings.get("fragmentation_length") or ""), "10-30", max_len=32
-            )
-            response_headers["fragmentation-interval"] = _sanitize_ascii_header(
-                str(ui_settings.get("fragmentation_interval") or ""), "10-30", max_len=32
-            )
-
-        if ui_settings.get("dns_resolve_enabled"):
-            dns_dom = _sanitize_ascii_header(str(ui_settings.get("dns_resolve_domain") or ""), max_len=253)
-            dns_ip = _sanitize_ascii_header(str(ui_settings.get("dns_resolve_ip") or ""), max_len=64)
-            if dns_dom and dns_ip:
-                response_headers["Server-Address-Resolve-Enable"] = "1"
-                response_headers["Server-Address-Resolve-Dns-Domain"] = dns_dom
-                response_headers["Server-Address-Resolve-Dns-Ip"] = dns_ip
-
-        if ui_settings.get("per_app_proxy_enabled"):
-            response_headers["Per-App-Proxy-Enable"] = "1"
-            response_headers["Per-App-Proxy-Mode"] = str(ui_settings.get("per_app_proxy_mode") or "bypass")
-            normalized_app_list = _normalize_per_app_proxy_list(
-                str(ui_settings.get("per_app_proxy_list") or "")
-            )
-            app_list = _sanitize_ascii_header(normalized_app_list, max_len=2000)
-            if app_list:
-                response_headers["Per-App-Proxy-List"] = app_list
-
-        response_headers["Routing"] = "off"
         if is_happ:
             response_headers["Routing-Enable"] = "0"
-            response_headers["subscriptions-sort-type"] = happ_sort_map.get(sort_order, "without")
+            response_headers["subscriptions-sort-type"] = "without"
 
         sanitized_support = _sanitize_header_url(str(ui_settings.get("support_url") or ""), fallback=support_url)
         sanitized_channel = _sanitize_header_url(channel_url)
@@ -1236,7 +1135,7 @@ async def vless_subscription_feed_handler(request: web.Request) -> web.Response:
 
 async def vless_report_handler(request: web.Request) -> web.Response:
     """Handle emergency contact reports from standard VLESS landing pages."""
-    client_ip = get_trusted_client_ip(request)
+    client_ip = get_trusted_client_ip(request, allow_yandex_header=True)
     allowed_ip, retry_after_ip = _report_ip_limiter.check(client_ip)
     if not allowed_ip:
         return web.json_response(
@@ -1328,6 +1227,7 @@ async def vless_report_handler(request: web.Request) -> web.Response:
                     status=404,
                     headers={"Cache-Control": "no-store"},
                 )
+            target_user_id = user.id
 
             user_tag = f"@{html.escape(user.username)}" if user.username else "—"
             user_info = f"ID: <code>{user.telegram_id}</code> ({user_tag})"
@@ -1378,14 +1278,20 @@ async def vless_report_handler(request: web.Request) -> web.Response:
     bot = request.app.get("bot")
     delivered = False
     if bot:
+        from bot.keyboards.notifications import get_admin_user_keyboard
         from config.settings import get_settings
         from utils.telegram import safe_send_message
 
         admin_ids = get_settings().ADMIN_IDS
+        reply_markup = get_admin_user_keyboard(target_user_id)
         for aid in admin_ids:
             try:
                 msg_id = await safe_send_message(
-                    bot, aid, admin_text, parse_mode="HTML"
+                    bot,
+                    aid,
+                    admin_text,
+                    reply_markup=reply_markup,
+                    parse_mode="HTML",
                 )
                 if msg_id is not None:
                     delivered = True
@@ -1406,7 +1312,7 @@ async def vless_report_handler(request: web.Request) -> web.Response:
 
 async def vless_guide_video_handler(request: web.Request) -> web.Response:
     """Serve the iOS region-change video guide with HTTP Range support and long cache."""
-    client_ip = get_trusted_client_ip(request)
+    client_ip = get_trusted_client_ip(request, allow_yandex_header=True)
     allowed, retry_after = _asset_rate_limiter.check(client_ip)
     if not allowed:
         return web.Response(

@@ -19,7 +19,7 @@ from config.enums import (
     WhiteInternetStatus,
 )
 from database.connection import session_scope
-from database.models import Server, User, WhiteInternetSubscription
+from database.models import Server, User, UserDevice, WhiteInternetSubscription
 from database.repositories import user_devices_repo, white_internet_repo
 from services.xray_node_client import SyncResult, XrayNodeClient
 from utils.datetime_helpers import now_utc
@@ -441,9 +441,13 @@ class WhiteInternetReconciliationWorker:
         self,
         active_servers: list[tuple[int, str, str, str, list]],
         sf,
+        expected_hub_count: int | None = None,
     ) -> int:
         if not active_servers:
             return 0
+        required_hub_count = (
+            expected_hub_count if expected_hub_count is not None else len(active_servers)
+        )
         revoked_count = 0
         async with sf() as sess:
             stmt = (
@@ -456,9 +460,28 @@ class WhiteInternetReconciliationWorker:
                 .limit(BATCH_SIZE)
             )
             subs = (await sess.execute(stmt)).scalars().all()
+            sub_user_ids = list({s.user_id for s in subs if getattr(s, "user_id", None) is not None})
+            active_devs_by_user: dict[int, set[str]] = {}
+            if sub_user_ids:
+                dev_rows = (
+                    await sess.execute(
+                        select(UserDevice.user_id, UserDevice.device_uuid).where(
+                            UserDevice.user_id.in_(sub_user_ids),
+                            UserDevice.is_wi_assigned.is_(True),
+                        )
+                    )
+                ).all()
+                for uid_val, dev_uuid in dev_rows:
+                    if dev_uuid:
+                        active_devs_by_user.setdefault(int(uid_val), set()).add(
+                            str(dev_uuid).strip().lower()
+                        )
             work = [
                 (
                     s.id,
+                    s.status,
+                    str(getattr(s, "uuid", "") or "").strip().lower(),
+                    active_devs_by_user.get(int(s.user_id), set()),
                     int(getattr(s, "desired_version", 1) or 1),
                     [u for u in (s.pending_revoked_uuids or []) if isinstance(u, str) and u.strip()],
                 )
@@ -466,9 +489,31 @@ class WhiteInternetReconciliationWorker:
                 if isinstance(s.pending_revoked_uuids, list) and s.pending_revoked_uuids
             ]
 
-        for sub_id, sub_ver, uuids in work:
+        for sub_id, sub_status, active_sub_uuid, active_dev_uuids, sub_ver, uuids in work:
             cur_ver = sub_ver
             for old_uuid in uuids:
+                clean_old = old_uuid.strip().lower()
+                is_still_live_uuid = (
+                    sub_status in (
+                        WhiteInternetStatus.PENDING,
+                        WhiteInternetStatus.ACTIVE,
+                    )
+                    and clean_old == active_sub_uuid
+                ) or (
+                    sub_status in (WhiteInternetStatus.PENDING, WhiteInternetStatus.ACTIVE)
+                    and clean_old in active_dev_uuids
+                )
+                if is_still_live_uuid:
+                    logger.info(
+                        "Skipping stale pending revocation of active WI UUID %s on sub %d (status=%s)",
+                        clean_old[:8],
+                        sub_id,
+                        sub_status,
+                    )
+                    async with sf() as sess:
+                        await white_internet_repo.pop_pending_revoked_uuid(sess, sub_id, old_uuid)
+                        await sess.commit()
+                    continue
                 results = []
                 bump_version_to: int | None = None
                 for _sid, api_url, api_key, target_epoch, _ in active_servers:
@@ -531,7 +576,7 @@ class WhiteInternetReconciliationWorker:
                             sub.desired_version = bump_version_to
                             await sess.commit()
                     cur_ver = max(cur_ver, bump_version_to)
-                if len(results) == len(active_servers) and all(results):
+                if required_hub_count > 0 and len(results) == required_hub_count and all(results):
                     async with sf() as sess:
                         await white_internet_repo.pop_pending_revoked_uuid(sess, sub_id, old_uuid)
                         await sess.commit()
@@ -573,15 +618,20 @@ class WhiteInternetReconciliationWorker:
                         ServerLifecycleStatus.ACTIVE,
                         ServerLifecycleStatus.DECOMMISSIONING,
                     ]),
-                    Server.health_state.in_([ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION]),
                 )
                 .order_by(Server.id.asc())
             )
             servers = (await sess.execute(stmt_servers)).scalars().all()
 
             active_server_targets: list[tuple[int, str, str, str, list]] = []
+            decommissioning_server_ids: set[int] = set()
+            total_active_wi_hubs = 0
             for s in servers:
                 if WHITE_INTERNET_CAPABILITY not in (s.capabilities or []):
+                    continue
+                total_active_wi_hubs += 1
+                health_state = getattr(s, "health_state", None) or ServerHealthState.ONLINE
+                if health_state not in (ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION):
                     continue
                 epoch = s.xray_instance_epoch
                 if not epoch:
@@ -597,6 +647,8 @@ class WhiteInternetReconciliationWorker:
                     except Exception as e:
                         logger.debug("Failed initializing epoch for WI server %d: %s", s.id, e)
                 if epoch:
+                    if str(getattr(s, "lifecycle_status", "") or "").upper() == ServerLifecycleStatus.DECOMMISSIONING.value:
+                        decommissioning_server_ids.add(s.id)
                     active_server_targets.append((
                         s.id,
                         s.api_url,
@@ -609,6 +661,7 @@ class WhiteInternetReconciliationWorker:
             return 0
 
         all_server_ids = {t[0] for t in active_server_targets}
+        active_only_server_ids = all_server_ids - decommissioning_server_ids
         server_epochs = {t[0]: t[3] for t in active_server_targets}
 
         async with sf() as sess:
@@ -693,7 +746,11 @@ class WhiteInternetReconciliationWorker:
         synced_count = 0
         for server_id, api_url, api_key, target_epoch, xhttp_locs in active_server_targets:
             per_server_tasks = []
+            is_decommissioning = server_id in decommissioning_server_ids
             for task in sub_tasks:
+                if is_decommissioning and task["desired_active"]:
+                    continue
+                task_server_ids = active_only_server_ids if task["desired_active"] else all_server_ids
                 n_state = task["node_sync_state"].get(str(server_id)) or {}
                 if (
                     n_state.get("version") != task["target_version"]
@@ -709,7 +766,7 @@ class WhiteInternetReconciliationWorker:
                             target_epoch,
                             xhttp_locs,
                             task,
-                            all_server_ids,
+                            task_server_ids,
                             sf,
                             server_epochs=server_epochs,
                         )
@@ -722,7 +779,11 @@ class WhiteInternetReconciliationWorker:
                     elif r is True:
                         synced_count += 1
 
-        synced_count += await self._reconcile_pending_revocations(active_server_targets, sf)
+        synced_count += await self._reconcile_pending_revocations(
+            active_server_targets,
+            sf,
+            expected_hub_count=total_active_wi_hubs,
+        )
         return synced_count
 
 

@@ -128,6 +128,8 @@ jobs:
           test "$(python -c 'import sys; print("%s.%s" % sys.version_info[:2])')" = 3.12
       - name: ShellCheck repository scripts
         run: find . -type f -name '*.sh' -print0 | xargs -0 shellcheck --severity=error
+      - name: Check frontend JavaScript syntax
+        run: find frontend/miniapp/js bot/templates/vless_landing/js -type f -name '*.js' -print0 | xargs -0 -n1 node --check
       - run: alembic upgrade head
       - name: Legal compliance stop-word audit
         run: python scripts/audit_stop_words.py

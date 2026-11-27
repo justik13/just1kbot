@@ -21,11 +21,11 @@ ALERT_SERVER_RESTORED = """✅ <b>Связь с сервером восстан�
 🌍 Сервер: <b>{server_name}</b> (ID: {server_id})
 API снова стабильно доступен."""
 
-ALERT_SERVER_DISK_CRITICAL = """⚠️ <b>ВНИМАНИЕ: Диск сервера забит > 85%!</b>
+ALERT_SERVER_DISK_CRITICAL = """⚠️ <b>Диск сервера заполнен более чем на 85%</b>
 
 Сервер: <b>{server_name}</b> (ID: {server_id})
 Использование диска: <b>{disk_percent:.1f}%</b>
-Рекомендуется очистить логи или расширить диск."""
+Очистите логи или расширьте диск."""
 
 ALERT_SERVER_HOSTING_TRAFFIC_WARN = "⚠️ Сервер {server_name} израсходовал 80% лимита хостинга ({used_gb} / {limit_gb} ГБ)"
 ALERT_SERVER_HOSTING_TRAFFIC_CRITICAL = "🚨 Сервер {server_name} достиг 90% лимита хостинга ({used_gb} / {limit_gb} ГБ) и автоматически отключён в боте"
@@ -35,7 +35,7 @@ ALERT_TITLE_CRITICAL_STOP = "Критическая остановка фоно�
 
 ALERT_TITLE_WORKER_FAILED = "Фоновый воркер упал"
 
-ALERT_TRAFFIC_OVERUSAGE = """⚠️ <b>Fair Usage Policy: Превышение 1 TiB за месяц!</b>
+ALERT_TRAFFIC_OVERUSAGE = """⚠️ <b>Fair Usage Policy: превышение 1 TiB за месяц</b>
 ━━━━━━━━━━━━━━━━━━━━
 👤 <b>Пользователь:</b> <code>{telegram_id}</code>
 📅 <b>Период:</b> {cycle}
@@ -105,7 +105,7 @@ ALERT_CDN_INGRESS_PROBLEM_REMINDER = """⚠️ <b>Напоминание: Сбо
 🔍 <i>Проверьте Яндекс Облако (баланс, сертификат и статус CDN).</i>"""
 
 
-ALERT_WHITE_INTERNET_HUB_EXHAUSTED = """🚨 <b>Внимание: Нет доступных шлюзов (ru_hub)!</b>
+ALERT_WHITE_INTERNET_HUB_EXHAUSTED = """🚨 <b>Нет доступных шлюзов (ru_hub)</b>
 
 Не удалось выделить шлюз (ru_hub) для подписки ID: <code>{sub_id}</code>.
 Все шлюзы либо недоступны (сбой связи / отключены), либо недоступны для выдачи.
@@ -128,6 +128,39 @@ ALERT_WORKER_COOLDOWN = """🚨 <b>{title}</b>
 ⚠️ <b>Последняя ошибка:</b> <code>{error_type}</code>
 
 Фоновая задача приостановлена на 15 минут для предотвращения лавины ошибок."""
+
+ALERT_BRIDGE_TSPU_PROBLEM = """⚠️ <b>Нарушена связность между шлюзами (РФ ↔ ЕС)</b>
+
+🇷🇺 Входной шлюз: <b>{ru_name}</b> (ID: {ru_id})
+🇪🇺 Внешний шлюз: <b>{eu_name}</b> (ID: {eu_id}, <code>{eu_ip}</code>)
+Причина: <code>{error_detail}</code>
+
+ℹ️ <i>Внешний шлюз доступен со стороны бота, но с российского шлюза не проходит контрольная передача данных (вероятна сетевая фильтрация на маршруте или ограничение IP).</i>
+🔀 {action_text}"""
+
+ALERT_BRIDGE_TSPU_PROBLEM_REMINDER = """⚠️ <b>Напоминание: Сбой маршрута {ru_name} → {eu_name} продолжается ({hours_text})</b>
+
+🇷🇺 Входной шлюз: <b>{ru_name}</b> (ID: {ru_id})
+🇪🇺 Внешний шлюз: <b>{eu_name}</b> (ID: {eu_id}, <code>{eu_ip}</code>)
+Причина: <code>{error_detail}</code>"""
+
+ALERT_BRIDGE_TSPU_RESTORED = """✅ <b>Связность между шлюзами восстановлена</b>
+
+🇷🇺 Входной шлюз: <b>{ru_name}</b> (ID: {ru_id})
+🇪🇺 Внешний шлюз: <b>{eu_name}</b> (ID: {eu_id}, <code>{eu_ip}</code>)
+Маршрут снова стабильно пропускает трафик и возвращён в рабочую топологию."""
+
+ALERT_SERVER_LAST_APPLY_FAILED = """⚠️ <b>Ошибка применения конфигурации на сервере</b>
+
+🖥 <b>Сервер:</b> {server_name} (ID: {server_id})
+⏰ <b>Когда:</b> {applied_at}
+📄 <b>Детали:</b> {error_text}"""
+
+ALERT_SERVER_SSL_CERT_EXPIRING = """⚠️ <b>Скоро истекает TLS-сертификат сервера</b>
+
+🖥 <b>Сервер:</b> {server_name} (ID: {server_id})
+📅 <b>Осталось дней:</b> {days_left}
+⏳ <b>Действует до:</b> {expires_at}"""
 
 
 

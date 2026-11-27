@@ -7,7 +7,7 @@ export function escapeHtml(value) {
         .replace(/'/g, "&#39;");
 }
 
-export function triggerHaptic(type = "light") {
+function triggerHaptic(type = "light") {
     try {
         const tg = window.Telegram && window.Telegram.WebApp;
         if (tg && tg.HapticFeedback) {
@@ -25,56 +25,286 @@ export function triggerHaptic(type = "light") {
 }
 
 let _toastTimer = null;
+let _toastRemainingMs = 0;
+let _toastShownAt = 0;
+let _toastEscapeBound = false;
+
+function _announceToast(msg, isAssertive) {
+    const politeEl = document.getElementById("toastLivePolite");
+    const assertiveEl = document.getElementById("toastLiveAssertive");
+    const fallbackEl = document.getElementById("toastLiveRegion");
+    if (politeEl) politeEl.textContent = "";
+    if (assertiveEl) assertiveEl.textContent = "";
+    if (!politeEl && !assertiveEl && fallbackEl) {
+        fallbackEl.setAttribute("aria-live", isAssertive ? "assertive" : "polite");
+        fallbackEl.textContent = "";
+    }
+    const target = isAssertive ? assertiveEl : politeEl;
+    const apply = () => {
+        if (target) {
+            target.textContent = msg;
+        } else if (fallbackEl) {
+            fallbackEl.textContent = msg;
+        }
+    };
+    if (typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(apply);
+    } else {
+        setTimeout(apply, 0);
+    }
+}
+
+function _getTopOpenDialog() {
+    const topItem = _modalStack[_modalStack.length - 1];
+    if (topItem && topItem.dialog && topItem.dialog.open) {
+        return topItem.dialog;
+    }
+    const openDialogs = document.querySelectorAll("dialog[open]");
+    return openDialogs.length ? openDialogs[openDialogs.length - 1] : null;
+}
+
+function _placeToastInTopLayer(toast) {
+    if (!toast) return;
+    if (typeof toast.showPopover === "function" && toast.hasAttribute("popover")) {
+        if (document.body && toast.parentElement !== document.body) {
+            document.body.appendChild(toast);
+        }
+        try {
+            if (toast.matches(":popover-open")) toast.hidePopover();
+            toast.showPopover();
+            return;
+        } catch {
+            // Fallback to dialog reparenting or fixed positioning
+        }
+    }
+    const topDialog = _getTopOpenDialog();
+    const targetParent = topDialog || document.body;
+    if (targetParent && toast.parentElement !== targetParent) {
+        targetParent.appendChild(toast);
+    }
+}
+
+function _hideToast() {
+    const toast = document.getElementById("toastRoot");
+    if (_toastTimer) {
+        clearTimeout(_toastTimer);
+        _toastTimer = null;
+    }
+    _toastRemainingMs = 0;
+    if (toast) {
+        if (typeof toast.hidePopover === "function" && toast.hasAttribute("popover")) {
+            try {
+                if (toast.matches(":popover-open")) toast.hidePopover();
+            } catch {
+                // ignore popover fallback
+            }
+        }
+        toast.hidden = true;
+        if (document.body && toast.parentElement !== document.body) {
+            document.body.appendChild(toast);
+        }
+    }
+}
+
+function _startToastTimer(ms) {
+    if (_toastTimer) {
+        clearTimeout(_toastTimer);
+        _toastTimer = null;
+    }
+    const delay = Math.max(800, Number(ms) || 3200);
+    _toastRemainingMs = delay;
+    _toastShownAt = Date.now();
+    _toastTimer = setTimeout(_hideToast, delay);
+}
+
+function _pauseToastTimer() {
+    if (!_toastTimer) return;
+    clearTimeout(_toastTimer);
+    _toastTimer = null;
+    const elapsed = Date.now() - _toastShownAt;
+    _toastRemainingMs = Math.max(800, _toastRemainingMs - elapsed);
+}
 
 export function showToast(message, type = "success") {
     const toast = document.getElementById("toastRoot");
     if (!toast) return;
-    toast.textContent = String(message || "");
+    const normalized = type === "error" ? "error" : type === "warn" || type === "warning" ? "warn" : "success";
+    const msgText = String(message || "");
+
+    toast.innerHTML = "";
+    const msgSpan = document.createElement("span");
+    msgSpan.className = "toast-msg";
+    msgSpan.textContent = msgText;
+
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "toast-close";
+    closeBtn.setAttribute("aria-label", "Закрыть уведомление");
+    closeBtn.textContent = "×";
+    closeBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        _hideToast();
+    });
+
+    toast.append(msgSpan, closeBtn);
+    toast.className = `toast toast-${normalized}`;
     toast.hidden = false;
-    triggerHaptic(type);
-    if (_toastTimer) clearTimeout(_toastTimer);
-    _toastTimer = setTimeout(() => {
-        toast.hidden = true;
-    }, 3200);
+    _placeToastInTopLayer(toast);
+    toast.onclick = _hideToast;
+    toast.onmouseenter = _pauseToastTimer;
+    toast.onmouseleave = () => {
+        if (!toast.hidden && !toast.contains(document.activeElement)) {
+            _startToastTimer(_toastRemainingMs);
+        }
+    };
+    toast.onfocusin = _pauseToastTimer;
+    toast.onfocusout = (e) => {
+        if (!toast.hidden && !toast.contains(e.relatedTarget)) {
+            _startToastTimer(_toastRemainingMs);
+        }
+    };
+
+    if (!_toastEscapeBound) {
+        _toastEscapeBound = true;
+        document.addEventListener("keydown", (e) => {
+            if (e.key !== "Escape") return;
+            const curToast = document.getElementById("toastRoot");
+            if (!curToast || curToast.hidden) return;
+            if (curToast.contains(document.activeElement)) {
+                e.preventDefault();
+                e.stopPropagation();
+                _hideToast();
+            } else if (!_hasOpenModal()) {
+                _hideToast();
+            }
+        }, true);
+    }
+
+    _announceToast(msgText, normalized === "error");
+
+    const hapticType = normalized === "error" ? "error" : normalized === "warn" ? "warning" : "success";
+    triggerHaptic(hapticType);
+    const duration = normalized === "error" ? 4500 : 3200;
+    _startToastTimer(duration);
 }
 
 export async function copyText(text, successMsg = "Скопировано") {
     const val = String(text || "");
-    if (!val) return;
+    if (!val) return false;
     try {
         if (navigator.clipboard && navigator.clipboard.writeText) {
             await navigator.clipboard.writeText(val);
             showToast(successMsg);
-            return;
+            return true;
         }
     } catch {
         // Fallback below
     }
     const ta = document.createElement("textarea");
     ta.value = val;
+    ta.readOnly = true;
     ta.style.position = "fixed";
     ta.style.opacity = "0";
     document.body.appendChild(ta);
     ta.select();
     try {
-        document.execCommand("copy");
-        showToast(successMsg);
+        const ok = document.execCommand("copy");
+        if (ok) {
+            showToast(successMsg);
+            return true;
+        }
+        showToast("Не удалось скопировать", "error");
+        return false;
     } catch {
-        showToast("Не удалось скопировать");
+        showToast("Не удалось скопировать", "error");
+        return false;
     } finally {
         document.body.removeChild(ta);
+    }
+}
+
+const _DATE_FMT = new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+});
+
+export function parseDate(value) {
+    if (value instanceof Date) {
+        return Number.isFinite(value.getTime()) ? value : null;
+    }
+    if (typeof value === "number") {
+        if (!Number.isFinite(value) || value <= 0) return null;
+        const d = new Date(value < 1e12 ? value * 1000 : value);
+        return Number.isFinite(d.getTime()) ? d : null;
+    }
+    let raw = String(value || "").trim();
+    if (!raw) return null;
+    if (/^\d+(\.\d+)?$/.test(raw)) {
+        const num = Number(raw);
+        if (!Number.isFinite(num) || num <= 0) return null;
+        const d = new Date(num < 1e12 ? num * 1000 : num);
+        return Number.isFinite(d.getTime()) ? d : null;
+    }
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(raw)) {
+        raw += "Z";
+    }
+    const d = new Date(raw);
+    return Number.isFinite(d.getTime()) ? d : null;
+}
+
+export function formatRelativeTime(iso) {
+    if (!iso) return "—";
+    const d = parseDate(iso);
+    if (!d) return "—";
+    const diffSec = Math.floor((Date.now() - d.getTime()) / 1000);
+    if (diffSec < 0) return formatDate(iso);
+    if (diffSec < 60) return "только что";
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin} мин назад`;
+    const diffHours = Math.floor(diffMin / 60);
+    if (diffHours < 24) return `${diffHours} ч назад`;
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays < 30) return `${diffDays} дн назад`;
+    return formatDate(iso);
+}
+
+export async function withButtonLoading(btn, loadingText, fn) {
+    if (!btn) return fn();
+    const prevDisabled = btn.disabled;
+    const prevText = btn.textContent;
+    const prevAriaBusy = btn.getAttribute("aria-busy");
+    btn.disabled = true;
+    btn.setAttribute("aria-busy", "true");
+    if (loadingText) btn.textContent = loadingText;
+    try {
+        return await fn();
+    } finally {
+        btn.disabled = prevDisabled;
+        if (prevAriaBusy === null) {
+            btn.removeAttribute("aria-busy");
+        } else {
+            btn.setAttribute("aria-busy", prevAriaBusy);
+        }
+        btn.textContent = prevText;
     }
 }
 
 export function openExternalLink(url) {
     if (!url) return;
     let target = String(url).trim();
+    if (!/^(https?:|tg:)/i.test(target)) return;
     if (/^tg:\/\/resolve\?domain=/i.test(target)) {
         const m = target.match(/domain=([^&]+)/i);
         if (m && m[1]) {
             target = `https://t.me/${m[1].replace(/^@/, "")}`;
         }
+    } else if (/^tg:\/\/proxy\?/i.test(target)) {
+        target = target.replace(/^tg:\/\/proxy\?/i, "https://t.me/proxy?");
     }
+    if (!/^(https?:\/\/|tg:)/i.test(target)) return;
     const tg = window.Telegram && window.Telegram.WebApp;
     const isTgLink = /^https?:\/\/t\.me\//i.test(target);
     if (isTgLink && tg && typeof tg.openTelegramLink === "function") {
@@ -97,17 +327,13 @@ export function openExternalLink(url) {
 }
 
 export function formatDate(iso) {
-    if (!iso) return "—";
+    if (iso == null || iso === "") return "—";
+    const d = parseDate(iso);
+    if (!d) return "—";
     try {
-        return new Date(iso).toLocaleString("ru-RU", {
-            day: "2-digit",
-            month: "2-digit",
-            year: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-        });
+        return _DATE_FMT.format(d);
     } catch {
-        return String(iso);
+        return "—";
     }
 }
 
@@ -118,9 +344,52 @@ export function formatBytesGb(bytes) {
 
 let _modalStack = [];
 let _modalTitleSeq = 0;
+let _fieldIdSeq = 0;
+let _pageBackHandler = null;
+let _globalBackListenerBound = false;
+
+function _hasOpenModal() {
+    return _modalStack.length > 0;
+}
+
+function _handleGlobalBackButton() {
+    if (_hasOpenModal()) {
+        const top = _modalStack[_modalStack.length - 1];
+        if (top && typeof top.closeFn === "function") {
+            top.closeFn();
+        }
+        return;
+    }
+    if (typeof _pageBackHandler === "function") {
+        _pageBackHandler();
+    }
+}
+
+function _syncTelegramBackButton() {
+    const tg = window.Telegram && window.Telegram.WebApp;
+    if (!tg || !tg.BackButton) return;
+    try {
+        if (!_globalBackListenerBound) {
+            tg.BackButton.onClick(_handleGlobalBackButton);
+            _globalBackListenerBound = true;
+        }
+        if (_hasOpenModal() || Boolean(_pageBackHandler)) {
+            tg.BackButton.show();
+        } else {
+            tg.BackButton.hide();
+        }
+    } catch {
+        // Safe fallback if BackButton API is unsupported
+    }
+}
+
+export function setPageBackButton(fn) {
+    _pageBackHandler = typeof fn === "function" ? fn : null;
+    _syncTelegramBackButton();
+}
 
 const _FOCUSABLE_SELECTOR =
-    "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
+    "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex='-1'])";
 
 function _getModalFocusable(card) {
     return Array.from(card.querySelectorAll(_FOCUSABLE_SELECTOR)).filter(
@@ -129,109 +398,184 @@ function _getModalFocusable(card) {
 }
 
 function _focusFirstInModal(card) {
-    const focusable = _getModalFocusable(card)[0];
-    if (focusable && typeof focusable.focus === "function") {
-        focusable.focus({ preventScroll: true });
+    const focusables = _getModalFocusable(card);
+    const preferred =
+        focusables.find((el) => el.hasAttribute("autofocus") || el.autofocus) ||
+        focusables[0];
+    if (preferred && typeof preferred.focus === "function") {
+        preferred.focus({ preventScroll: true });
     } else if (typeof card.focus === "function") {
         card.focus({ preventScroll: true });
     }
 }
 
-export function openModal(title, bodyNode, { showCloseBtn = true } = {}) {
-    const backdrop = document.getElementById("modalRoot");
-    if (!backdrop) return () => {};
-
-    const prevCard = backdrop.querySelector(".modal-card");
-    const prevKeyDown = backdrop._activeKeyDown || null;
-    const prevTrigger = document.activeElement;
-    if (prevCard && !backdrop.hidden) {
-        if (prevKeyDown) {
-            document.removeEventListener("keydown", prevKeyDown);
-        }
-        _modalStack.push({ card: prevCard, onKeyDown: prevKeyDown, trigger: prevTrigger });
-    } else {
-        _modalStack = [];
+function _focusElementSafe(el) {
+    if (!el || typeof el.focus !== "function") return false;
+    if (!el.hasAttribute("tabindex") && el.tabIndex < 0) {
+        el.tabIndex = -1;
     }
+    el.focus({ preventScroll: true });
+    return true;
+}
 
-    backdrop.innerHTML = "";
+function _restoreModalFocus(prevTrigger, restoreFocusSelector) {
+    if (
+        prevTrigger &&
+        prevTrigger.isConnected &&
+        !prevTrigger.disabled &&
+        typeof prevTrigger.focus === "function"
+    ) {
+        prevTrigger.focus({ preventScroll: true });
+        return;
+    }
+    if (restoreFocusSelector) {
+        const target = document.querySelector(restoreFocusSelector);
+        if (target && !target.disabled && _focusElementSafe(target)) return;
+    }
+    const fallback = document.querySelector("#appRoot h1, #appRoot button:not([disabled])");
+    _focusElementSafe(fallback);
+}
+
+function _closeDialogElement(dialog) {
+    if (!dialog) return;
+    const toast = document.getElementById("toastRoot");
+    if (toast && dialog.contains(toast) && document.body) {
+        document.body.appendChild(toast);
+    }
+    if (typeof dialog.close === "function" && dialog.open) {
+        dialog.close();
+    } else {
+        dialog.removeAttribute("open");
+    }
+    if (dialog.parentNode) {
+        dialog.parentNode.removeChild(dialog);
+    }
+}
+
+function _promoteVisibleToast() {
+    const toast = document.getElementById("toastRoot");
+    if (!toast || toast.hidden) return;
+    _placeToastInTopLayer(toast);
+}
+
+export function closeAllModals() {
+    const modalRoot = document.getElementById("modalRoot");
+    const items = _modalStack.slice().reverse();
+    _modalStack = [];
+    for (const item of items) {
+        if (typeof item.markClosed === "function") {
+            item.markClosed();
+        }
+        if (typeof item.onCleanup === "function") {
+            try {
+                item.onCleanup();
+            } catch {
+                // ignore cleanup errors on forced teardown
+            }
+        }
+        _closeDialogElement(item.dialog);
+    }
+    document.body.style.overflow = "";
+    if (modalRoot) {
+        modalRoot.hidden = true;
+        modalRoot.innerHTML = "";
+    }
+    _syncTelegramBackButton();
+}
+
+export function openModal(
+    title,
+    bodyNode,
+    { showCloseBtn = true, canClose = null, onClose = null, restoreFocusSelector = null } = {}
+) {
+    const modalRoot = document.getElementById("modalRoot");
+    if (!modalRoot) return () => {};
+
+    const prevTrigger = document.activeElement;
+    const dialog = document.createElement("dialog");
+    dialog.className = "modal-dialog";
+
     const card = document.createElement("div");
     card.className = "modal-card";
     card.tabIndex = -1;
-    card.setAttribute("role", "dialog");
-    card.setAttribute("aria-modal", "true");
 
     _modalTitleSeq += 1;
     const titleId = `modalDialogTitle_${_modalTitleSeq}`;
     const header = document.createElement("div");
     header.className = "row";
-    const h = document.createElement("div");
+    const h = document.createElement("h1");
     h.className = "card-title";
     h.id = titleId;
     h.textContent = title;
-    card.setAttribute("aria-labelledby", titleId);
+    dialog.setAttribute("aria-labelledby", titleId);
 
     let closed = false;
-    const onKeyDown = (e) => {
-        if (e.key === "Escape") {
-            close();
-            return;
-        }
-        if (e.key !== "Tab") return;
-        const focusables = _getModalFocusable(card);
-        if (focusables.length === 0) {
-            e.preventDefault();
-            card.focus({ preventScroll: true });
-            return;
-        }
-        const first = focusables[0];
-        const last = focusables[focusables.length - 1];
-        const active = document.activeElement;
-        if (e.shiftKey) {
-            if (active === first || !card.contains(active)) {
-                e.preventDefault();
-                last.focus({ preventScroll: true });
+    const runCleanup = () => {
+        if (typeof onClose === "function") {
+            try {
+                onClose();
+            } catch {
+                // ignore user cleanup errors
             }
-        } else if (active === last || !card.contains(active)) {
-            e.preventDefault();
-            first.focus({ preventScroll: true });
         }
     };
 
-    const close = () => {
+    const close = ({ force = false } = {}) => {
         if (closed) return;
+        if (!force && canClose && !canClose()) return;
         closed = true;
-        document.removeEventListener("keydown", onKeyDown);
 
-        if (_modalStack.length > 0 && backdrop.contains(card)) {
-            const parent = _modalStack.pop();
-            backdrop.innerHTML = "";
-            backdrop.appendChild(parent.card);
-            backdrop._activeKeyDown = parent.onKeyDown;
-            if (parent.onKeyDown) {
-                document.addEventListener("keydown", parent.onKeyDown);
-            }
-            backdrop.onclick = (e) => {
-                if (e.target === backdrop && parent.onKeyDown) {
-                    parent.onKeyDown({ key: "Escape" });
+        const idx = _modalStack.findIndex((item) => item.dialog === dialog);
+        const wasTop = idx !== -1 && idx === _modalStack.length - 1;
+        if (idx !== -1) {
+            _modalStack.splice(idx, 1);
+        }
+
+        runCleanup();
+        _closeDialogElement(dialog);
+
+        if (_modalStack.length > 0) {
+            modalRoot.hidden = false;
+            _promoteVisibleToast();
+            _syncTelegramBackButton();
+            if (wasTop) {
+                if (
+                    prevTrigger &&
+                    prevTrigger.isConnected &&
+                    !prevTrigger.disabled &&
+                    typeof prevTrigger.focus === "function"
+                ) {
+                    prevTrigger.focus({ preventScroll: true });
+                } else {
+                    const top = _modalStack[_modalStack.length - 1];
+                    if (top && top.card) _focusFirstInModal(top.card);
                 }
-            };
-            if (parent.trigger && parent.card.contains(parent.trigger) && typeof parent.trigger.focus === "function") {
-                parent.trigger.focus({ preventScroll: true });
-            } else {
-                _focusFirstInModal(parent.card);
             }
             return;
         }
 
-        _modalStack = [];
-        backdrop._activeKeyDown = null;
         document.body.style.overflow = "";
-        backdrop.hidden = true;
-        backdrop.innerHTML = "";
-        if (prevTrigger && document.contains(prevTrigger) && typeof prevTrigger.focus === "function") {
-            prevTrigger.focus({ preventScroll: true });
-        }
+        modalRoot.hidden = true;
+        _promoteVisibleToast();
+        _syncTelegramBackButton();
+        _restoreModalFocus(prevTrigger, restoreFocusSelector);
     };
+
+    dialog.addEventListener("cancel", (e) => {
+        e.preventDefault();
+        close();
+    });
+
+    let pointerDownOnBackdrop = false;
+    dialog.addEventListener("pointerdown", (e) => {
+        pointerDownOnBackdrop = e.target === dialog;
+    });
+    dialog.addEventListener("click", (e) => {
+        if (e.target === dialog && pointerDownOnBackdrop) {
+            close();
+        }
+        pointerDownOnBackdrop = false;
+    });
 
     header.appendChild(h);
 
@@ -240,20 +584,37 @@ export function openModal(title, bodyNode, { showCloseBtn = true } = {}) {
         closeBtn.type = "button";
         closeBtn.className = "btn btn-sm";
         closeBtn.textContent = "Закрыть";
-        closeBtn.addEventListener("click", close);
+        closeBtn.addEventListener("click", () => close());
         header.appendChild(closeBtn);
     }
 
-    backdrop.onclick = (e) => {
-        if (e.target === backdrop) close();
-    };
-
     card.append(header, bodyNode);
-    backdrop.appendChild(card);
-    backdrop.hidden = false;
-    backdrop._activeKeyDown = onKeyDown;
+    dialog.appendChild(card);
+
+    _modalStack.push({
+        dialog,
+        card,
+        closeFn: close,
+        onCleanup: runCleanup,
+        restoreFocusSelector,
+        trigger: prevTrigger,
+        markClosed: () => {
+            closed = true;
+        },
+    });
+
+    modalRoot.hidden = false;
+    modalRoot.appendChild(dialog);
     document.body.style.overflow = "hidden";
-    document.addEventListener("keydown", onKeyDown);
+
+    if (typeof dialog.showModal === "function") {
+        dialog.showModal();
+    } else {
+        dialog.setAttribute("open", "");
+    }
+
+    _promoteVisibleToast();
+    _syncTelegramBackButton();
     _focusFirstInModal(card);
     return close;
 }
@@ -265,6 +626,8 @@ export function showConfirmModal({
     cancelText = "Отмена",
     isDestructive = false,
     onConfirm,
+    onClose = null,
+    restoreFocusSelector = null,
 }) {
     const box = document.createElement("div");
     box.className = "confirm-modal-box";
@@ -289,7 +652,10 @@ export function showConfirmModal({
     cancelBtn.type = "button";
     cancelBtn.className = "btn";
     cancelBtn.textContent = cancelText;
-    if (isDestructive) cancelBtn.autofocus = true;
+    if (isDestructive) {
+        cancelBtn.autofocus = true;
+        cancelBtn.setAttribute("autofocus", "");
+    }
 
     const okBtn = document.createElement("button");
     okBtn.type = "button";
@@ -299,20 +665,33 @@ export function showConfirmModal({
     btnGroup.append(cancelBtn, okBtn);
     box.append(p, btnGroup);
 
-    const close = openModal(title, box, { showCloseBtn: false });
-    cancelBtn.addEventListener("click", close);
+    let busy = false;
+    const close = openModal(title, box, {
+        showCloseBtn: false,
+        canClose: () => !busy,
+        onClose,
+        restoreFocusSelector,
+    });
+    cancelBtn.addEventListener("click", () => {
+        if (!busy) close();
+    });
 
     okBtn.addEventListener("click", async () => {
+        if (busy) return;
+        busy = true;
         okBtn.disabled = true;
         cancelBtn.disabled = true;
+        okBtn.textContent = "Выполнение...";
         try {
-            close();
             if (onConfirm) await onConfirm();
+            busy = false;
+            close({ force: true });
         } catch (err) {
-            console.error("Modal confirmation error:", err);
-        } finally {
+            busy = false;
             okBtn.disabled = false;
             cancelBtn.disabled = false;
+            okBtn.textContent = confirmText;
+            showToast((err && err.message) || "Ошибка", "error");
         }
     });
 
@@ -330,8 +709,17 @@ export function roleLabel(role) {
 }
 
 export function healthChipInfo(node) {
+    if (String(node.lifecycle_status || "").toUpperCase() === "DECOMMISSIONING") {
+        return { text: "Выводится", cls: "chip-warn" };
+    }
     if (!node.is_active || node.health_state === "MANUAL_DISABLED") {
         return { text: "Отключена", cls: "chip-muted" };
+    }
+    if (node.disabled_reason === "HOSTING_TRAFFIC_LIMIT") {
+        return { text: "Лимит трафика", cls: "chip-err" };
+    }
+    if (node.ingress_problem || node.cdn_problem) {
+        return { text: "Проблема CDN/Ingress", cls: "chip-warn" };
     }
     if (node.health_state === "ONLINE") {
         return { text: "Онлайн", cls: "chip-ok" };
@@ -342,7 +730,7 @@ export function healthChipInfo(node) {
     return { text: "Проблема", cls: "chip-err" };
 }
 
-export const COUNTRY_OPTIONS = [
+const COUNTRY_OPTIONS = [
     { code: "AT", name: "Австрия" },
     { code: "GB", name: "Великобритания" },
     { code: "DE", name: "Германия" },
@@ -373,7 +761,7 @@ export const COUNTRY_OPTIONS = [
 
 const _COUNTRY_CODE_SET = new Set(COUNTRY_OPTIONS.map((c) => c.code));
 
-export function countryCodeToEmoji(code) {
+function countryCodeToEmoji(code) {
     const clean = String(code || "").trim().toUpperCase();
     if (!/^[A-Z]{2}$/.test(clean)) return "";
     return String.fromCodePoint(
@@ -392,9 +780,11 @@ export function renderCountryFlagField({
     const raw = String(value || "").trim();
     const code = _extractCountryCode(raw);
     const isKnown = Boolean(code && _COUNTRY_CODE_SET.has(code));
-    const isCustom = Boolean(raw && raw !== "🌐" && !isKnown);
+    const isCustom = Boolean(raw && raw !== "\u{1F310}" && !isKnown);
     const selectVal = isKnown ? code : isCustom ? "__custom__" : "";
     const effectiveVal = isKnown ? countryCodeToEmoji(code) : isCustom ? raw : "";
+    _fieldIdSeq += 1;
+    const selectId = id ? `${id}_select` : `flagSelect_${_fieldIdSeq}`;
 
     const optionsHtml = COUNTRY_OPTIONS.map(
         (c) =>
@@ -403,17 +793,17 @@ export function renderCountryFlagField({
 
     return `
         <div class="field" data-flag-field>
-            <label>${escapeHtml(label)}</label>
+            <label for="${escapeHtml(selectId)}">${escapeHtml(label)}</label>
             <div class="flag-picker">
                 <span class="flag-picker-preview" data-flag-preview>${renderFlagHtml(effectiveVal, 22)}</span>
-                <select class="select flag-picker-select" data-flag-select>
+                <select id="${escapeHtml(selectId)}" class="select flag-picker-select" data-flag-select>
                     <option value="" ${selectVal === "" ? "selected" : ""}>${escapeHtml(emptyLabel)}</option>
                     ${optionsHtml}
-                    <option value="__custom__" ${selectVal === "__custom__" ? "selected" : ""}>Другая (код или флаг)…</option>
+                    <option value="__custom__" ${selectVal === "__custom__" ? "selected" : ""}>Другая (код или флаг)</option>
                 </select>
                 <input type="hidden" name="${escapeHtml(name)}" ${id ? `id="${escapeHtml(id)}"` : ""} value="${escapeHtml(effectiveVal)}" data-flag-value>
             </div>
-            <input type="text" class="input" data-flag-custom maxlength="10" value="${escapeHtml(isCustom ? raw : "")}" placeholder="Код (напр. AU) или эмодзи" ${isCustom ? "" : "hidden"}>
+            <input type="text" class="input" data-flag-custom maxlength="10" value="${escapeHtml(isCustom ? raw : "")}" placeholder="Код (напр. AU) или эмодзи" aria-label="Свой код или символ страны" ${isCustom ? "" : "hidden"}>
         </div>
     `;
 }
@@ -487,8 +877,10 @@ function _extractCountryCode(flagOrCode) {
 export function renderFlagHtml(flagOrCode, width = 20) {
     const code = _extractCountryCode(flagOrCode);
     const height = Math.round((width * 15) / 21);
-    const wrap = (inner) =>
-        `<svg width="${width}" height="${height}" viewBox="0 0 21 15" aria-label="${escapeHtml(code)}" style="display:inline-block; vertical-align:-2px; border-radius:2px; flex-shrink:0; outline:1px solid rgba(255,255,255,0.12);">${inner}</svg>`;
+    const wrap = (inner) => {
+        const a11yAttr = code ? `role="img" aria-label="${escapeHtml(code)}"` : `aria-hidden="true"`;
+        return `<svg width="${width}" height="${height}" viewBox="0 0 21 15" ${a11yAttr} style="display:inline-block; vertical-align:-2px; border-radius:2px; flex-shrink:0; outline:1px solid rgba(255,255,255,0.12);">${inner}</svg>`;
+    };
     const hStripes = (c1, c2, c3) =>
         wrap(
             `<rect width="21" height="5" fill="${c1}"/><rect y="5" width="21" height="5" fill="${c2}"/><rect y="10" width="21" height="5" fill="${c3}"/>`
@@ -528,7 +920,7 @@ export function renderFlagHtml(flagOrCode, width = 20) {
     if (code && svgs[code]) {
         return svgs[code]();
     }
-    if (flagOrCode && flagOrCode !== "🌐") {
+    if (flagOrCode && flagOrCode !== "\u{1F310}") {
         return `<span style="font-size:${Math.max(14, width - 2)}px; line-height:1;">${escapeHtml(flagOrCode)}</span>`;
     }
     return `<svg class="icon-svg" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`;
@@ -569,13 +961,24 @@ export function renderPagination({
         </div>
     `;
 
+    const scrollBehavior = () => {
+        try {
+            if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+                return "auto";
+            }
+        } catch {
+            // ignore
+        }
+        return "smooth";
+    };
+
     const prevBtn = container.querySelector('[data-pg="prev"]');
     if (prevBtn && hasPrev) {
         prevBtn.addEventListener("click", () => {
             const nextOffset = Math.max(0, curOffset - curLimit);
             onPage(nextOffset);
             if (scrollTarget) {
-                scrollTarget.scrollIntoView({ behavior: "smooth", block: "start" });
+                scrollTarget.scrollIntoView({ behavior: scrollBehavior(), block: "start" });
             }
         });
     }
@@ -586,7 +989,7 @@ export function renderPagination({
             const nextOffset = curOffset + curLimit;
             onPage(nextOffset);
             if (scrollTarget) {
-                scrollTarget.scrollIntoView({ behavior: "smooth", block: "start" });
+                scrollTarget.scrollIntoView({ behavior: scrollBehavior(), block: "start" });
             }
         });
     }

@@ -1,5 +1,7 @@
 """Unit tests for Alembic migration sequence and SQLAlchemy models."""
 
+from pathlib import Path
+
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 
@@ -19,13 +21,15 @@ from database.models import (
 
 
 def test_alembic_single_head_and_migration_parent():
-    cfg = Config("alembic.ini")
+    repo_root = Path(__file__).resolve().parents[1]
+    cfg = Config(str(repo_root / "alembic.ini"))
+    cfg.set_main_option("script_location", str(repo_root / "alembic"))
     script = ScriptDirectory.from_config(cfg)
     heads = script.get_heads()
     assert len(heads) == 1, f"Expected exactly 1 Alembic head, found {heads}"
     head_rev = script.get_revision(heads[0])
-    assert head_rev.revision == "0048_wi_constraints"
-    assert head_rev.down_revision == "0047_device_std_priority"
+    assert head_rev.revision == "0049_admin_search_indexes"
+    assert head_rev.down_revision == "0048_wi_constraints"
 
 
 def test_models_orm_columns_and_defaults():

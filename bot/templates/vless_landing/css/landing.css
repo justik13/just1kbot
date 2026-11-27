@@ -43,12 +43,11 @@
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Inter', 'Segoe UI', Roboto, sans-serif;
+            font-family: var(--font-sans);
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
             background-color: var(--bg-page);
             color: var(--text-primary);
-            min-height: 100vh;
             min-height: 100dvh;
             display: flex;
             align-items: flex-start;
@@ -68,28 +67,12 @@
             width: 100%;
             max-width: 440px;
             background-color: var(--bg-card);
-            backdrop-filter: blur(20px) saturate(180%);
-            -webkit-backdrop-filter: blur(20px) saturate(180%);
             border: 1px solid var(--border-subtle);
             border-radius: var(--radius-card);
             padding: 20px;
             text-align: left;
             margin: auto 0;
             overflow: clip;
-            box-shadow:
-                0 24px 60px rgba(0, 0, 0, 0.92),
-                inset 0 1px 0 rgba(255, 255, 255, 0.12);
-        }
-
-        .card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 12%;
-            right: 12%;
-            height: 1px;
-            background: linear-gradient(90deg, transparent, var(--tier-highlight-line), transparent);
-            pointer-events: none;
         }
 
         /* Header */
@@ -109,7 +92,6 @@
             padding: 4px 10px;
             border-radius: var(--radius-badge);
             background-color: var(--bg-tile);
-            border: 1px solid var(--border-subtle);
             color: var(--text-primary);
             font-size: 12px;
             font-weight: 500;
@@ -121,7 +103,6 @@
             height: 6px;
             border-radius: 50%;
             background-color: var(--tier-accent);
-            box-shadow: 0 0 10px var(--tier-accent);
             flex-shrink: 0;
         }
 
@@ -131,7 +112,6 @@
             padding: 4px 10px;
             border-radius: var(--radius-badge);
             background-color: var(--bg-tile);
-            border: 1px solid var(--border-subtle);
             color: var(--text-secondary);
             font-size: 12px;
             font-weight: 500;
@@ -177,7 +157,6 @@
             height: 24px;
             border-radius: var(--radius-badge);
             background-color: var(--bg-raised);
-            border: 1px solid var(--border-subtle);
             color: var(--text-primary);
             font-size: 12px;
             font-weight: 600;
@@ -200,9 +179,8 @@
         }
 
         .divider {
-            height: 1px;
-            background-color: var(--border-subtle);
-            margin: 20px 0;
+            height: 0;
+            margin: 24px 0;
         }
 
         /* 5-Platform Tabs: iOS, Android, Win, Mac, Linux/GitHub */
@@ -213,7 +191,6 @@
             padding: 4px;
             border-radius: var(--radius-panel);
             margin-bottom: 12px;
-            border: 1px solid var(--border-subtle);
             overflow-x: auto;
             scrollbar-width: none;
         }
@@ -252,7 +229,6 @@
         .app-tab.active {
             background-color: var(--bg-raised);
             color: var(--text-primary);
-            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
         }
 
         .app-tab[aria-selected="true"]::after,
@@ -326,14 +302,12 @@
             padding: 2px 8px;
             border-radius: var(--radius-badge);
             background-color: var(--bg-tile);
-            border: 1px solid var(--border-subtle);
             color: var(--text-muted);
             line-height: 1.4;
         }
 
         .pc-badge-recommended {
             background-color: var(--bg-raised);
-            border-color: var(--border-strong);
             color: var(--text-primary);
         }
 
@@ -357,18 +331,16 @@
             padding: 10px 12px;
             border-radius: var(--radius-panel);
             background-color: var(--bg-tile);
-            border: 1px solid var(--border-subtle);
             color: var(--text-primary);
             text-decoration: none;
             user-select: none;
             text-align: left;
-            transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+            transition: background-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
         }
 
         .store-card:hover,
         .platform-card:hover {
             background-color: var(--bg-raised);
-            border-color: var(--border-strong);
         }
 
         .store-card:active,
@@ -382,7 +354,6 @@
             height: 32px;
             border-radius: var(--radius-control);
             background-color: var(--bg-raised);
-            border: 1px solid var(--border-subtle);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -426,7 +397,7 @@
             text-overflow: ellipsis;
         }
 
-        /* Guides Trigger Button — distinct highlighted card so it stands out from download tiles */
+        /* Guides Trigger Button */
         .guides-trigger-card {
             width: 100%;
             display: flex;
@@ -435,20 +406,19 @@
             margin-top: 16px;
             padding: 12px 16px;
             min-height: 56px;
-            background: var(--tier-tint);
-            border: 1px solid var(--tier-border);
-            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+            background: var(--bg-tile);
+            border: 1px solid var(--border-subtle);
             border-radius: var(--radius-panel);
             color: var(--text-primary);
             font-family: inherit;
             cursor: pointer;
             text-align: left;
-            transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+            transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
         }
 
         .guides-trigger-card:hover {
-            background: linear-gradient(135deg, rgba(255, 255, 255, 0.13) 0%, var(--tier-tint) 100%);
-            border-color: var(--tier-highlight-line);
+            background-color: var(--bg-raised);
+            border-color: var(--border-strong);
         }
 
         .guides-trigger-card:active {
@@ -459,25 +429,11 @@
             width: 38px;
             height: 38px;
             border-radius: var(--radius-control);
-            background-color: var(--tier-tint);
-            border: 1px solid var(--tier-border);
-            color: var(--tier-accent);
+            background-color: var(--bg-raised);
+            color: var(--text-secondary);
             display: flex;
             align-items: center;
             justify-content: center;
-            flex-shrink: 0;
-        }
-
-        .guides-trigger-badge {
-            display: inline-flex;
-            align-items: center;
-            padding: 3px 8px;
-            border-radius: 999px;
-            font-size: 11px;
-            font-weight: 600;
-            color: var(--tier-accent);
-            background: var(--tier-tint);
-            border: 1px solid var(--tier-border);
             flex-shrink: 0;
         }
 
@@ -546,7 +502,7 @@
             text-decoration: none;
             cursor: pointer;
             user-select: none;
-            border: 1px solid transparent;
+            border: none;
             transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
         }
 
@@ -557,7 +513,6 @@
         .btn-primary {
             background-color: var(--cta-bg);
             color: var(--cta-text);
-            box-shadow: inset 0 1px 0 #ffffff;
         }
 
         .btn-primary:hover {
@@ -567,13 +522,10 @@
         .btn-secondary {
             background-color: var(--bg-tile);
             color: var(--text-primary);
-            border-color: var(--border-subtle);
-            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
         }
 
         .btn-secondary:hover {
             background-color: var(--bg-raised);
-            border-color: var(--border-strong);
         }
 
         .btn svg {
@@ -600,8 +552,8 @@
             border-color: var(--border-strong);
         }
 
-        .sub-bar-text {
-            font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+        code.sub-bar-text {
+            font-family: var(--font-mono);
             font-size: 12px;
             color: var(--text-muted);
             white-space: nowrap;
@@ -618,7 +570,7 @@
             gap: 6px;
             min-height: 44px;
             background-color: var(--bg-tile);
-            border: 1px solid var(--border-subtle);
+            border: none;
             border-radius: var(--radius-badge);
             color: var(--text-primary);
             font-family: inherit;
@@ -627,12 +579,11 @@
             padding: 6px 12px;
             cursor: pointer;
             flex-shrink: 0;
-            transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+            transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
         }
 
         .sub-copy-btn:hover {
             background-color: var(--bg-raised);
-            border-color: var(--border-strong);
         }
 
         .sub-copy-btn:active {
@@ -641,7 +592,6 @@
 
         .sub-copy-btn.copied {
             background-color: var(--tier-tint);
-            border-color: var(--tier-border);
             color: var(--tier-accent);
         }
 
@@ -659,14 +609,8 @@
         /* Support Accordion (footer of card) */
         .support-accordion {
             background-color: var(--bg-tile);
-            border: 1px solid var(--border-subtle);
             border-radius: var(--radius-panel);
             overflow: hidden;
-            transition: border-color var(--dur-fast) var(--ease-out);
-        }
-
-        .support-accordion:hover {
-            border-color: var(--border-strong);
         }
 
         .support-accordion-header {
@@ -727,7 +671,7 @@
 
         .support-form-inner {
             padding: 12px 14px 14px;
-            border-top: 1px solid var(--border-subtle);
+            background-color: var(--bg-input);
             text-align: left;
         }
 
@@ -827,13 +771,11 @@
 
         .support-status-msg.error {
             background-color: var(--negative-tint);
-            border: 1px solid var(--negative-border);
             color: #fca5a5;
         }
 
         .support-status-msg.success {
             background-color: var(--positive-tint);
-            border: 1px solid var(--positive-border);
             color: var(--positive);
         }
 
@@ -871,8 +813,7 @@
             padding: 10px 16px;
             border-radius: var(--radius-control);
             background-color: var(--bg-raised);
-            border: 1px solid var(--tier-border);
-            box-shadow: 0 12px 28px rgba(0, 0, 0, 0.6);
+            outline: 1px solid var(--tier-border);
             font-size: 13px;
             color: var(--text-primary);
             font-weight: 500;
@@ -889,7 +830,7 @@
 
         .copy-toast.error {
             background-color: #241315;
-            border-color: var(--negative-border);
+            outline-color: var(--negative-border);
             color: #fca5a5;
         }
 
@@ -915,7 +856,6 @@
             gap: 8px;
             margin: -4px 0 16px;
             padding: 8px 0 12px;
-            border-bottom: 1px solid var(--border-subtle);
         }
 
         .guides-back-btn {
@@ -923,7 +863,7 @@
             align-items: center;
             gap: 6px;
             background-color: var(--bg-tile);
-            border: 1px solid var(--border-subtle);
+            border: none;
             border-radius: var(--radius-control);
             padding: 8px 12px;
             min-height: 44px;
@@ -932,12 +872,11 @@
             font-size: 13px;
             font-weight: 500;
             cursor: pointer;
-            transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+            transition: background-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
         }
 
         .guides-back-btn:hover {
             background-color: var(--bg-raised);
-            border-color: var(--border-strong);
         }
 
         .guides-back-btn:active {
@@ -973,7 +912,7 @@
             line-height: 1.45;
         }
 
-        .guide-section-label {
+        .guide-step-prompt {
             font-size: 13px;
             font-weight: 500;
             color: var(--text-secondary);
@@ -986,7 +925,6 @@
             grid-template-columns: repeat(4, 1fr);
             gap: 4px;
             background-color: var(--bg-tile);
-            border: 1px solid var(--border-subtle);
             border-radius: var(--radius-panel);
             padding: 4px;
             margin-bottom: 16px;
@@ -1028,7 +966,6 @@
         .guide-nav-btn.active {
             background-color: var(--bg-raised);
             color: var(--text-primary);
-            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
         }
 
         .guide-nav-btn[aria-selected="true"] svg,
@@ -1060,7 +997,7 @@
 
         .guide-method-btn {
             background-color: var(--bg-tile);
-            border: 1px solid var(--border-subtle);
+            border: none;
             border-radius: var(--radius-panel);
             padding: 12px 8px;
             min-height: 72px;
@@ -1072,12 +1009,11 @@
             align-items: center;
             justify-content: center;
             gap: 4px;
-            transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+            transition: background-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
         }
 
         .guide-method-btn:hover {
             background-color: var(--bg-raised);
-            border-color: var(--border-strong);
         }
 
         .guide-method-btn:active {
@@ -1087,8 +1023,8 @@
         .guide-method-btn[aria-selected="true"],
         .guide-method-btn.active {
             background-color: var(--bg-raised);
-            border-color: var(--border-strong);
-            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+            outline: 1px solid var(--border-strong);
+            outline-offset: -1px;
         }
 
         .guide-method-badge {
@@ -1134,17 +1070,10 @@
         /* Priority Video Instruction Card */
         .guide-video-details {
             background-color: var(--bg-raised);
-            border: 1px solid var(--border-strong);
-            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
             border-radius: var(--radius-panel);
             margin-bottom: 16px;
             overflow: hidden;
-            transition: border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
-        }
-
-        .guide-video-details:hover,
-        .guide-video-details[open] {
-            border-color: rgba(255, 255, 255, 0.28);
+            transition: background-color var(--dur-fast) var(--ease-out);
         }
 
         .guide-video-summary {
@@ -1212,8 +1141,7 @@
             font-weight: 500;
             padding: 2px 8px;
             border-radius: var(--radius-badge);
-            background-color: var(--bg-raised);
-            border: 1px solid var(--border-subtle);
+            background-color: var(--bg-tile);
             color: var(--text-primary);
             line-height: 1.3;
             white-space: nowrap;
@@ -1245,7 +1173,6 @@
             padding: 4px 10px;
             border-radius: var(--radius-control);
             background: rgba(255, 255, 255, 0.08);
-            border: 1px solid var(--border-strong);
             color: var(--text-primary);
             font-size: 12px;
             font-weight: 500;
@@ -1261,9 +1188,7 @@
         }
 
         .guide-video-wrap {
-            padding: 0 14px 14px;
-            border-top: 1px solid var(--border-subtle);
-            padding-top: 12px;
+            padding: 4px 14px 14px;
         }
 
         .guide-video {
@@ -1291,7 +1216,6 @@
             gap: 10px;
             align-items: flex-start;
             background-color: var(--bg-tile);
-            border: 1px solid var(--border-subtle);
             border-left: 2px solid var(--border-strong);
             border-radius: var(--radius-panel);
             padding: 12px 14px;
@@ -1341,17 +1265,16 @@
             justify-content: space-between;
             gap: 12px;
             background-color: var(--bg-raised);
-            border: 1px solid var(--border-subtle);
             border-radius: var(--radius-control);
             padding: 12px 14px;
             text-decoration: none;
             color: var(--text-primary);
             min-height: 56px;
-            transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+            transition: background-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
         }
 
         .guide-store-card:hover {
-            border-color: var(--border-strong);
+            background-color: #24242b;
         }
 
         .guide-store-card:active {
@@ -1371,7 +1294,6 @@
             height: 32px;
             border-radius: var(--radius-badge);
             background-color: var(--bg-tile);
-            border: 1px solid var(--border-subtle);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -1417,7 +1339,8 @@
             font-size: 12px;
             color: var(--text-muted);
             line-height: 1.35;
-            word-break: break-word;
+            word-break: normal;
+            overflow-wrap: break-word;
         }
 
         .guide-store-badge {
@@ -1425,7 +1348,6 @@
             font-weight: 500;
             color: var(--text-primary);
             background-color: var(--bg-tile);
-            border: 1px solid var(--border-subtle);
             padding: 8px 12px;
             border-radius: var(--radius-badge);
             display: inline-flex;
@@ -1433,8 +1355,9 @@
             justify-content: center;
             gap: 6px;
             flex-shrink: 0;
-            min-height: 36px;
-            transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+            min-height: 44px;
+            white-space: nowrap;
+            transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
         }
 
         .guide-store-badge svg {
@@ -1445,13 +1368,11 @@
         .guide-store-card:hover .guide-store-badge {
             background-color: var(--cta-bg);
             color: var(--cta-text);
-            border-color: var(--cta-bg);
         }
 
         /* Step Cards */
         .guide-step-card {
             background-color: var(--bg-tile);
-            border: 1px solid var(--border-subtle);
             border-radius: var(--radius-panel);
             padding: 16px;
             margin-bottom: 12px;
@@ -1469,7 +1390,6 @@
             height: 24px;
             border-radius: var(--radius-badge);
             background-color: var(--bg-raised);
-            border: 1px solid var(--border-subtle);
             color: var(--text-primary);
             font-size: 12px;
             font-weight: 600;
@@ -1505,10 +1425,9 @@
 
         .guide-step-desc code,
         .guide-tip-desc code {
-            font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+            font-family: var(--font-mono);
             font-size: 12px;
             background-color: var(--bg-input);
-            border: 1px solid var(--border-subtle);
             border-radius: 4px;
             padding: 2px 6px;
             color: var(--text-primary);
@@ -1516,8 +1435,7 @@
 
         /* Tip Box */
         .guide-tip-box {
-            background-color: var(--bg-card);
-            border: 1px solid var(--border-subtle);
+            background-color: var(--bg-input);
             border-radius: var(--radius-control);
             padding: 12px 14px;
             margin-top: 12px;
@@ -1553,8 +1471,6 @@
 
         .guide-tip-link-wrap {
             margin-top: 12px;
-            padding-top: 12px;
-            border-top: 1px solid var(--border-subtle);
         }
 
         .guide-sub-link {
@@ -1565,17 +1481,15 @@
             gap: 6px;
             padding: 8px 12px;
             background-color: var(--bg-tile);
-            border: 1px solid var(--border-subtle);
             border-radius: var(--radius-control);
             font-size: 12px;
             font-weight: 500;
-            min-height: 36px;
-            transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+            min-height: 44px;
+            transition: background-color var(--dur-fast) var(--ease-out);
         }
 
         .guide-sub-link:hover {
             background-color: var(--bg-raised);
-            border-color: var(--border-strong);
         }
 
         .guide-sub-link svg {
@@ -1619,10 +1533,8 @@
             margin: 12px auto 4px;
             border-radius: var(--radius-control);
             overflow: hidden;
-            border: 1px solid var(--border-subtle);
             background-color: var(--bg-input);
             cursor: zoom-in;
-            transition: border-color var(--dur-fast) var(--ease-out);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -1642,22 +1554,17 @@
             max-height: 230px;
         }
 
-        .guide-screenshot-wrapper:hover {
-            border-color: var(--border-strong);
-        }
-
         .guide-screenshot-wrapper::after {
             content: "Увеличить";
             position: absolute;
             bottom: 8px;
             right: 8px;
-            background-color: rgba(15, 15, 16, 0.86);
+            background-color: rgba(15, 15, 16, 0.88);
             color: var(--text-primary);
             font-size: 12px;
             font-weight: 500;
             padding: 4px 10px;
             border-radius: var(--radius-badge);
-            border: 1px solid var(--border-strong);
             pointer-events: none;
             z-index: 2;
         }
@@ -1685,7 +1592,7 @@
             border: none;
             background: transparent;
             max-width: 100vw;
-            max-height: 100vh;
+            max-height: 100dvh;
             width: 100%;
             height: 100%;
             display: none;
@@ -1733,7 +1640,6 @@
             height: auto;
             object-fit: contain;
             border-radius: var(--radius-control);
-            border: 1px solid var(--border-strong);
             cursor: zoom-in;
             touch-action: pan-x pan-y pinch-zoom;
         }
@@ -1752,7 +1658,7 @@
             height: 44px;
             border-radius: var(--radius-control);
             background-color: var(--bg-raised);
-            border: 1px solid var(--border-strong);
+            border: none;
             color: var(--text-primary);
             display: flex;
             align-items: center;
@@ -1780,7 +1686,6 @@
             background-color: var(--bg-tile);
             padding: 6px 14px;
             border-radius: var(--radius-control);
-            border: 1px solid var(--border-subtle);
             max-width: 90vw;
         }
 
@@ -1793,8 +1698,7 @@
 
         /* Address Data Table Card */
         .guide-data-card {
-            background-color: var(--bg-card);
-            border: 1px solid var(--border-subtle);
+            background-color: var(--bg-input);
             border-radius: var(--radius-control);
             padding: 12px 14px;
             margin-top: 12px;
@@ -1811,15 +1715,17 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            gap: 8px;
-            padding: 8px 0;
-            border-bottom: 1px solid var(--border-subtle);
+            flex-wrap: wrap;
+            gap: 6px 10px;
+            padding: 8px 10px;
+            background-color: var(--bg-tile);
+            border-radius: var(--radius-badge);
+            margin-bottom: 6px;
             font-size: 13px;
         }
 
         .guide-data-row:last-child {
-            border-bottom: none;
-            padding-bottom: 0;
+            margin-bottom: 0;
         }
 
         .guide-data-label {
@@ -1829,23 +1735,26 @@
         .guide-data-val-group {
             display: inline-flex;
             align-items: center;
+            flex-wrap: wrap;
             gap: 8px;
+            max-width: 100%;
         }
 
         .guide-data-value {
             color: var(--text-primary);
             font-weight: 500;
-            font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+            font-family: inherit;
             font-size: 13px;
             font-variant-numeric: tabular-nums;
+            white-space: nowrap;
         }
 
         .mini-copy-btn {
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            background-color: var(--bg-tile);
-            border: 1px solid var(--border-subtle);
+            background-color: var(--bg-raised);
+            border: none;
             border-radius: var(--radius-badge);
             padding: 6px 10px;
             color: var(--text-primary);
@@ -1853,8 +1762,8 @@
             font-size: 12px;
             font-weight: 500;
             cursor: pointer;
-            min-height: 36px;
-            transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+            min-height: 44px;
+            transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
         }
 
         .mini-copy-btn svg {
@@ -1863,28 +1772,20 @@
         }
 
         .mini-copy-btn:hover {
-            background-color: var(--bg-raised);
-            border-color: var(--border-strong);
+            background-color: #26262f;
         }
 
         .mini-copy-btn.copied {
             background-color: var(--tier-tint);
-            border-color: var(--tier-border);
             color: var(--tier-accent);
         }
 
         /* FAQ Accordion */
         .guide-faq-item {
             background-color: var(--bg-tile);
-            border: 1px solid var(--border-subtle);
             border-radius: var(--radius-panel);
             margin-bottom: 8px;
             overflow: hidden;
-            transition: border-color var(--dur-fast) var(--ease-out);
-        }
-
-        .guide-faq-item:hover {
-            border-color: var(--border-strong);
         }
 
         .guide-faq-q {
@@ -1924,7 +1825,7 @@
             font-size: 13px;
             color: var(--text-secondary);
             line-height: 1.55;
-            border-top: 1px solid var(--border-subtle);
+            background-color: var(--bg-input);
         }
 
         .guide-faq-item.open .guide-faq-a {
@@ -1934,8 +1835,6 @@
         /* Bottom return bar */
         .guides-bottom-bar {
             margin-top: 20px;
-            padding-top: 16px;
-            border-top: 1px solid var(--border-subtle);
         }
 
         .guides-return-btn {
@@ -1944,7 +1843,7 @@
             padding: 10px 16px;
             border-radius: var(--radius-control);
             background-color: var(--bg-tile);
-            border: 1px solid var(--border-subtle);
+            border: none;
             color: var(--text-primary);
             font-family: inherit;
             font-size: 14px;
@@ -1954,12 +1853,11 @@
             align-items: center;
             justify-content: center;
             gap: 8px;
-            transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+            transition: background-color var(--dur-fast) var(--ease-out);
         }
 
         .guides-return-btn:hover {
             background-color: var(--bg-raised);
-            border-color: var(--border-strong);
         }
 
         .guides-return-btn svg {
@@ -2000,13 +1898,22 @@
                 flex-direction: column;
                 gap: 4px;
                 padding: 8px 2px;
-                font-size: 11.5px;
+                font-size: 12px;
             }
             .btn-row {
                 grid-template-columns: 1fr;
             }
             .guide-store-grid {
                 grid-template-columns: 1fr;
+            }
+            .guide-store-card {
+                flex-wrap: wrap;
+            }
+            .guide-store-left {
+                min-width: 180px;
+            }
+            .guide-store-badge {
+                margin-left: auto;
             }
             .guide-nav-btn {
                 flex-direction: column;

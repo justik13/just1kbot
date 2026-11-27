@@ -51,6 +51,13 @@ class FulfillmentService:
     @staticmethod
     async def fulfill_order(session: AsyncSession, order: Order) -> None:
         """Fulfill paid order linearly based on service_type."""
+        if (order.metadata_ or {}).get("benefits_fulfilled"):
+            logger.warning(
+                "Order %s already fulfilled (benefits_fulfilled=True); skipping duplicate fulfillment",
+                order.id,
+            )
+            return
+
         user = await session.get(User, order.user_id, with_for_update=True)
         if not user:
             logger.error(
@@ -110,7 +117,12 @@ class FulfillmentService:
             vless_sub.notified_expired = False
             user.notification_retry_count = 0
             user.last_notification_attempt = None
-            await SubscriptionService._sync_access_state(session, user, vless_sub=vless_sub)
+            await SubscriptionService._sync_access_state(
+                session,
+                user,
+                vless_sub=vless_sub,
+                force_sync=(meta.get("previous_device_limit") != vless_sub.device_limit),
+            )
             logger.info(
                 "Fulfilled standard order %s for user %s: +%s days (until %s, op=%s)",
                 order.id,
@@ -198,6 +210,21 @@ class FulfillmentService:
                 user.id,
                 order.amount_rub,
             )
+        else:
+            logger.warning(
+                "Unknown service_type=%r for order %s; skipping fulfillment",
+                order.service_type,
+                order.id,
+            )
+            return
+
+        final_meta = dict(order.metadata_ or {})
+        final_meta["benefits_fulfilled"] = True
+        order.metadata_ = final_meta
+        if hasattr(order, "_sa_instance_state"):
+            from sqlalchemy.orm.attributes import flag_modified
+
+            flag_modified(order, "metadata_")
 
     @staticmethod
     async def revoke_order(session: AsyncSession, order: Order) -> None:
@@ -214,6 +241,7 @@ class FulfillmentService:
                 return
             meta = dict(order.metadata_ or {})
             op = meta.get("operation")
+            prev_limit_before_revoke = getattr(vless_sub, "device_limit", None)
             if op == "upgrade":
                 if "previous_device_limit" in meta:
                     try:
@@ -234,7 +262,15 @@ class FulfillmentService:
                             vless_sub.device_limit = int(meta["previous_device_limit"])
                         except (ValueError, TypeError):
                             pass
-            await SubscriptionService._sync_access_state(session, user, vless_sub=vless_sub)
+            await SubscriptionService._sync_access_state(
+                session,
+                user,
+                vless_sub=vless_sub,
+                force_sync=(
+                    op != "upgrade"
+                    and prev_limit_before_revoke != getattr(vless_sub, "device_limit", None)
+                ),
+            )
             if op == "upgrade":
                 from services.vless_subscription_service import VlessSubscriptionService
 

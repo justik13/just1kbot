@@ -11,7 +11,7 @@
         /* {{SHARED_TOKENS_CSS}} */
         :root {
             --bg-color: var(--bg-canvas);
-            --card-bg: var(--bg-surface);
+            --card-bg: var(--bg-card);
             --surface-elevated: var(--bg-tile);
             --surface-hover: rgba(255, 255, 255, 0.09);
             --text-main: var(--text-primary);
@@ -24,7 +24,6 @@
         body {
             background-color: var(--bg-color);
             color: var(--text-main);
-            min-height: 100vh;
             min-height: 100dvh;
             display: flex;
             align-items: center;
@@ -32,32 +31,27 @@
             padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
         }
         :where(a, button, summary, input, textarea, [tabindex]):focus-visible {
-            outline: 2px solid #ffffff;
+            outline: 2px solid var(--accent-white);
             outline-offset: 2px;
         }
         .card {
             width: 100%;
             max-width: 440px;
             background-color: var(--card-bg);
-            backdrop-filter: var(--glass-blur);
-            -webkit-backdrop-filter: var(--glass-blur);
             border: 1px solid var(--border-subtle);
             border-radius: var(--radius-card);
             padding: 24px 16px 16px;
             text-align: center;
-            box-shadow:
-                0 24px 48px -12px rgba(0, 0, 0, 0.9),
-                inset 0 1px 0 rgba(255, 255, 255, 0.08);
-            animation: cardEnter 280ms var(--ease-out) both;
+            animation: cardEnter 220ms var(--ease-out) both;
         }
         @keyframes cardEnter {
             from {
                 opacity: 0;
-                transform: translateY(8px) scale(0.98);
+                transform: translateY(6px);
             }
             to {
                 opacity: 1;
-                transform: translateY(0) scale(1);
+                transform: translateY(0);
             }
         }
         .header-top {
@@ -74,7 +68,6 @@
             padding: 4px 12px;
             border-radius: var(--radius-sm);
             background: rgba(245, 158, 11, 0.1);
-            border: 1px solid rgba(245, 158, 11, 0.28);
             color: #fbbf24;
             font-size: 12px;
             font-weight: 500;
@@ -90,8 +83,6 @@
             height: 52px;
             border-radius: var(--radius-control);
             background: var(--surface-elevated);
-            border: 1px solid var(--border-subtle);
-            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -131,7 +122,6 @@
             -webkit-tap-highlight-color: transparent;
             background-color: var(--cta-bg);
             color: var(--cta-text);
-            box-shadow: inset 0 1px 0 #ffffff;
             transition: transform 160ms var(--ease-out), background-color 150ms ease;
         }
         .btn:active {
@@ -147,14 +137,13 @@
         }
         .support-accordion {
             background-color: var(--surface-elevated);
-            border: 1px solid var(--border-subtle);
             border-radius: var(--radius-control);
             overflow: hidden;
             margin-top: 12px;
-            transition: background-color 150ms ease, border-color 200ms ease;
+            transition: background-color 150ms ease;
         }
-        .support-accordion:hover {
-            border-color: var(--border-strong);
+        .support-accordion:not(.open):hover {
+            background-color: var(--surface-hover);
         }
         .support-accordion-header {
             width: 100%;
@@ -221,13 +210,12 @@
             transform: translateY(-4px);
             transition: opacity 180ms ease, transform 200ms ease, padding 260ms ease;
             text-align: left;
-            border-top: 1px solid transparent;
+            background-color: var(--card-bg);
         }
         .support-accordion.open .support-form-inner {
-            padding: 8px 16px 16px;
+            padding: 12px 16px 16px;
             opacity: 1;
             transform: translateY(0);
-            border-top-color: rgba(255, 255, 255, 0.06);
         }
         .support-intro {
             font-size: 13px;
@@ -254,9 +242,8 @@
             padding: 12px;
             font-size: 14px;
             color: var(--text-main);
-            outline: none;
             font-family: inherit;
-            transition: border-color 150ms ease, box-shadow 150ms ease;
+            transition: border-color 150ms ease;
             box-sizing: border-box;
         }
         .support-input::placeholder, .support-textarea::placeholder {
@@ -265,7 +252,12 @@
         }
         .support-input:focus, .support-textarea:focus {
             border-color: var(--border-strong);
-            box-shadow: 0 0 0 1px var(--border-strong);
+            outline: 1px solid var(--border-strong);
+            outline-offset: 0;
+        }
+        .support-input:focus-visible, .support-textarea:focus-visible {
+            outline: 2px solid #ffffff;
+            outline-offset: 2px;
         }
         .support-input:disabled, .support-textarea:disabled {
             opacity: 0.55;
@@ -428,11 +420,11 @@
             </button>
             <div id="supportFormContainer" class="support-form-container" role="region" aria-label="Форма связи с поддержкой" aria-hidden="true">
                 <div class="support-form-inner">
-                    <p class="support-intro">Оставьте контакты для связи — мы напишем вам в удобное приложение и поможем с настройкой.</p>
+                    <p class="support-intro">Оставьте контакты для связи: мы напишем вам в удобное приложение и поможем с настройкой.</p>
                     <form id="emergencySupportForm" onsubmit="submitSupportReport(event)">
                         <div class="support-field">
                             <label for="supportContact" class="support-label">Куда вам написать?</label>
-                            <input type="text" id="supportContact" class="support-input" placeholder="Telegram @username, WhatsApp, телефон или другой контакт" maxlength="120" required>
+                            <input type="text" id="supportContact" class="support-input" placeholder="Telegram @username, телефон или другой контакт" maxlength="120" required>
                         </div>
                         <div class="support-field">
                             <label for="supportMessage" class="support-label">Что произошло?</label>
@@ -441,7 +433,7 @@
                         <button type="submit" id="supportSubmitBtn" class="support-submit-btn">
                             <span id="supportSubmitBtnText">Отправить контакты</span>
                         </button>
-                        <div id="supportStatusMsg" class="support-status-msg" aria-live="polite"></div>
+                        <div id="supportStatusMsg" class="support-status-msg" role="status" aria-live="polite"></div>
                     </form>
                 </div>
             </div>

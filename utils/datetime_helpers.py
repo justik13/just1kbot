@@ -50,20 +50,6 @@ def is_permanent_subscription(dt: datetime | date | None) -> bool:
     return (dt - now_utc()).days >= 36500
 
 
-def is_expired(dt: datetime | date | None) -> bool:
-    if dt is None:
-        return True
-    if isinstance(dt, date) and not isinstance(dt, datetime):
-        dt = datetime.combine(dt, time.min, tzinfo=timezone.utc)
-    elif not isinstance(dt, datetime):
-        return True
-
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-
-    return dt < now_utc()
-
-
 def is_vpn_access_expired(dt: datetime | None, grace_hours: int = 4) -> bool:
     if dt is None:
         return True

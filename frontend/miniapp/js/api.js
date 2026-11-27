@@ -1,42 +1,46 @@
-const ADMIN_SESSION_KEY = "just1k_admin_session";
+let _onInitDataExpired = null;
+
+export function setOnInitDataExpired(cb) {
+    _onInitDataExpired = typeof cb === "function" ? cb : null;
+}
 
 function getInitData() {
     const tg = window.Telegram && window.Telegram.WebApp;
     return tg && tg.initData ? tg.initData : "";
 }
 
-export function getAdminSessionToken() {
-    try {
-        return sessionStorage.getItem(ADMIN_SESSION_KEY) || "";
-    } catch {
-        return "";
-    }
-}
-
-export function setAdminSessionToken(token) {
-    try {
-        if (token) {
-            sessionStorage.setItem(ADMIN_SESSION_KEY, token);
-        } else {
-            sessionStorage.removeItem(ADMIN_SESSION_KEY);
-        }
-    } catch {
-        // Ignore storage errors
-    }
-}
-
 async function requestJson(path, options = {}) {
-    const adminToken = getAdminSessionToken();
+    const { timeoutMs = 15000, ...fetchOptions } = options;
     const headers = {
         "Content-Type": "application/json",
         "X-Telegram-Init-Data": getInitData(),
-        ...(adminToken ? { "X-Admin-Session": adminToken } : {}),
-        ...(options.headers || {}),
+        ...(fetchOptions.headers || {}),
     };
-    const resp = await fetch(path, {
-        ...options,
-        headers,
-    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let resp;
+    try {
+        resp = await fetch(path, {
+            ...fetchOptions,
+            headers,
+            signal: controller.signal,
+        });
+    } catch (err) {
+        if (err && err.name === "AbortError") {
+            const timeoutErr = new Error("Превышено время ожидания ответа сервера");
+            timeoutErr.code = "timeout";
+            throw timeoutErr;
+        }
+        if (err instanceof TypeError) {
+            const netErr = new Error("Нет связи с сервером");
+            netErr.code = "network_error";
+            throw netErr;
+        }
+        throw err;
+    } finally {
+        clearTimeout(timer);
+    }
+
     let data = {};
     try {
         data = await resp.json();
@@ -44,14 +48,15 @@ async function requestJson(path, options = {}) {
         data = { ok: false, error: `HTTP ${resp.status}` };
     }
     if (!resp.ok || data.ok === false) {
-        if (resp.status === 403 && data.code === "2fa_required") {
-            setAdminSessionToken("");
-        }
         const msg = data.error || `HTTP ${resp.status}`;
         const err = new Error(msg);
         err.status = resp.status;
         err.code = data.code || "";
+        err.data = data;
         err.payload = data;
+        if (resp.status === 401 && data.code === "init_data_expired") {
+            if (_onInitDataExpired) _onInitDataExpired(err);
+        }
         throw err;
     }
     return data;
@@ -60,15 +65,8 @@ async function requestJson(path, options = {}) {
 export const api = {
     getMe: () => requestJson("/api/app/me"),
 
-    // Admin 2FA
-    setup2FA: () => requestJson("/api/app/admin/2fa/setup", { method: "POST" }),
-    verify2FA: (code, setupToken = null) =>
-        requestJson("/api/app/admin/2fa/verify", {
-            method: "POST",
-            body: JSON.stringify(setupToken ? { code, setup_token: setupToken } : { code }),
-        }),
-
-    // Admin nodes & users
+    // Admin overview, nodes & users
+    getAdminOverview: () => requestJson("/api/app/admin/overview"),
     getIncySettings: () => requestJson("/api/app/admin/incy-settings"),
     updateIncySettings: (payload) =>
         requestJson("/api/app/admin/incy-settings", {
@@ -80,15 +78,18 @@ export const api = {
         requestJson("/api/app/admin/nodes/add", {
             method: "POST",
             body: JSON.stringify(payload),
-        }),
-    refreshNode: (id) =>
-        requestJson(`/api/app/admin/nodes/${id}/refresh`, {
-            method: "POST",
+            timeoutMs: 25000,
         }),
     patchNode: (id, payload) =>
         requestJson(`/api/app/admin/nodes/${id}`, {
             method: "PATCH",
             body: JSON.stringify(payload),
+            timeoutMs: 25000,
+        }),
+    setNodeLifecycle: (serverId, lifecycleStatus) =>
+        requestJson(`/api/app/admin/nodes/${serverId}/lifecycle`, {
+            method: "POST",
+            body: JSON.stringify({ lifecycle_status: lifecycleStatus }),
         }),
     toggleNode: (id, isActive = null) =>
         requestJson(`/api/app/admin/nodes/${id}/toggle`, {
@@ -105,13 +106,19 @@ export const api = {
         ),
     getUserDetails: (userId) =>
         requestJson(`/api/app/admin/users/${userId}/details`),
-    resetUserDevices: (userId) =>
+    deleteUserDevice: (userId, hwid) =>
+        requestJson(`/api/app/admin/users/${userId}/devices/${encodeURIComponent(hwid)}`, {
+            method: "DELETE",
+        }),
+    resetUserDevices: (userId, payload = {}) =>
         requestJson(`/api/app/admin/users/${userId}/devices/reset`, {
             method: "POST",
+            body: JSON.stringify(payload),
         }),
-    rotateUserToken: (userId) =>
+    rotateUserToken: (userId, payload = {}) =>
         requestJson(`/api/app/admin/users/${userId}/token/rotate`, {
             method: "POST",
+            body: JSON.stringify(payload),
         }),
     adjustUser: (userId, payload) =>
         requestJson(`/api/app/admin/users/${userId}/adjust`, {
@@ -124,10 +131,10 @@ export const api = {
             body: JSON.stringify({ text }),
         }),
     listBroadcasts: (offset = 0, limit = 15) => requestJson(`/api/app/admin/broadcasts?offset=${encodeURIComponent(offset)}&limit=${encodeURIComponent(limit)}`),
-    previewBroadcast: (targetAudience) =>
+    previewBroadcast: (targetAudience, extra = {}) =>
         requestJson("/api/app/admin/broadcasts/preview", {
             method: "POST",
-            body: JSON.stringify({ target_audience: targetAudience }),
+            body: JSON.stringify({ target_audience: targetAudience, ...extra }),
         }),
     startBroadcast: (payload) =>
         requestJson("/api/app/admin/broadcasts", {
@@ -148,17 +155,21 @@ export const api = {
             method: "POST",
             body: JSON.stringify(payload),
         }),
-    listFinances: (kind = "orders", status = "", q = "", offset = 0, limit = 25) =>
+    listFinances: (kind = "orders", status = "", q = "", offset = 0, limit = 25, attentionOnly = false) =>
         requestJson(
             `/api/app/admin/finances?kind=${encodeURIComponent(kind)}&status=${encodeURIComponent(
                 status
-            )}&q=${encodeURIComponent(q)}&offset=${offset}&limit=${limit}`
+            )}&q=${encodeURIComponent(q)}&offset=${offset}&limit=${limit}${attentionOnly ? "&attention_only=1" : ""}`
         ),
-    listAuditLogs: (action = "", q = "", offset = 0, limit = 40) =>
+    ackOrderReview: (orderId) =>
+        requestJson(`/api/app/admin/orders/${encodeURIComponent(orderId)}/ack-review`, {
+            method: "POST",
+        }),
+    listAuditLogs: (action = "", q = "", offset = 0, limit = 40, targetType = "") =>
         requestJson(
             `/api/app/admin/audit-logs?action=${encodeURIComponent(action)}&q=${encodeURIComponent(
                 q
-            )}&offset=${offset}&limit=${limit}`
+            )}&offset=${offset}&limit=${limit}${targetType ? `&target_type=${encodeURIComponent(targetType)}` : ""}`
         ),
     getPaymentsMaintenance: () => requestJson("/api/app/admin/settings/payments-maintenance"),
     setPaymentsMaintenance: (enabled) =>
@@ -169,12 +180,22 @@ export const api = {
 
     // User cabinet
     getUserDashboard: () => requestJson("/api/app/user/dashboard"),
-    quoteStandard: (deviceLimit, durationDays) =>
+    quoteStandard: (deviceLimit, durationDays, operation = null) =>
         requestJson("/api/app/user/standard/quote", {
             method: "POST",
-            body: JSON.stringify({ device_limit: deviceLimit, duration_days: durationDays }),
+            body: JSON.stringify({
+                device_limit: deviceLimit,
+                duration_days: durationDays,
+                ...(operation ? { operation } : {}),
+            }),
         }),
-    checkoutStandard: (deviceLimit, durationDays, useBalance = true, idempotencyKey = null) =>
+    checkoutStandard: (
+        deviceLimit,
+        durationDays,
+        useBalance = true,
+        idempotencyKey = null,
+        operation = null
+    ) =>
         requestJson("/api/app/user/standard/checkout", {
             method: "POST",
             body: JSON.stringify({
@@ -182,6 +203,7 @@ export const api = {
                 duration_days: durationDays,
                 use_balance: useBalance,
                 ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
+                ...(operation ? { operation } : {}),
             }),
         }),
     downgradeStandard: (targetDeviceLimit) =>

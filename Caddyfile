@@ -15,6 +15,7 @@ http:// {
 }
 
 {$DOMAIN} {
+	encode zstd gzip
 	log {
 		output stdout
 		format console
@@ -51,9 +52,9 @@ http:// {
 
 	@app_allowed path /app /app/* /api/app/*
 	handle @app_allowed {
-		header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self' https://web.telegram.org https://*.telegram.org telegram:;"
+		header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; media-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self' https://web.telegram.org https://*.telegram.org telegram:;"
 		reverse_proxy bot:8080 {
-			header_up X-Real-IP {remote_host}
+			header_up X-Real-IP {client_ip}
 		}
 	}
 

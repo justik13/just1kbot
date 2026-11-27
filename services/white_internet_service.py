@@ -11,6 +11,7 @@ import urllib.parse
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -134,15 +135,6 @@ class WhiteInternetService:
     """Service managing the White Internet product lifecycle."""
 
     @staticmethod
-    async def select_hub_node(session: AsyncSession) -> Server:
-        hubs = await servers_repo.get_wi_capable_ru_hubs(session)
-        if not hubs:
-            raise RuntimeError(
-                "No healthy server with white_internet capability and available capacity is available."
-            )
-        return hubs[0]
-
-    @staticmethod
     async def get_hub_nodes(session: AsyncSession) -> list[Server]:
         return await servers_repo.get_wi_capable_ru_hubs(session)
 
@@ -162,14 +154,6 @@ class WhiteInternetService:
         if days_left > 0 and gb_added == 0:
             gb_added = 1
         return Decimal(50 + gb_added * 4), gb_added
-
-    @staticmethod
-    def calculate_wi_add_slot_price(
-        expires_at: datetime | None, now: datetime | None = None
-    ) -> Decimal:
-        """Calculate mid-term device slot add-on price: 50 + round(50 * days_left / 30) * 4."""
-        price, _ = WhiteInternetService.calculate_wi_add_slot_quote(expires_at, now=now)
-        return price
 
     @classmethod
     async def purchase_subscription(
@@ -250,6 +234,7 @@ class WhiteInternetService:
             sub.traffic_overage_bytes = 0
             sub.desired_version = (existing.desired_version or 1) + 1
             sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+            await white_internet_repo.clear_active_pending_revocations(session, sub)
         else:
             sub = await white_internet_repo.create_white_internet_subscription(
                 session,
@@ -534,119 +519,6 @@ class WhiteInternetService:
         return await white_internet_repo.apply_due_downgrades(session, now=now)
 
     @classmethod
-    async def _try_inline_sync(
-        cls,
-        session: AsyncSession,
-        sub: WhiteInternetSubscription,
-        hub_node: Server,
-        idempotency_key: str,
-    ) -> bool:
-        """Attempt best-effort synchronous activation on hub node (timeout=4.0s).
-
-        Fail-closed like the reconciliation worker: mark ACTIVE only when the
-        node confirms the expected epoch and full inbound coverage; verify
-        ALREADY_NEWER against runtime inventory. Anything unconfirmed stays
-        PENDING_CREATE for the background worker to converge.
-        """
-        expected_inbound_tags: set[str] = set()
-        extra_data = hub_node.extra_data or {}
-        endpoint_entries = extra_data.get("xhttp_locations") or []
-        for entry in endpoint_entries:
-            if isinstance(entry, dict):
-                inbound_tag = entry.get("inbound_tag")
-                if inbound_tag:
-                    expected_inbound_tags.add(str(inbound_tag))
-                    continue
-                code = entry.get("location_code") or entry.get("code")
-            elif isinstance(entry, str):
-                code = entry
-            else:
-                code = None
-            if code:
-                expected_inbound_tags.add(f"just1k-wl-inbound-{code}")
-        if not expected_inbound_tags:
-            expected_inbound_tags.add("just1k-wl-default")
-        target_version = sub.desired_version or 1
-        try:
-            async with XrayNodeClient(timeout=4.0) as xray_client:
-                resp = await xray_client.sync_client(
-                    hub_node.api_url,
-                    hub_node.api_key,
-                    client_uuid=sub.uuid,
-                    is_active=True,
-                    version=target_version,
-                    expected_node_epoch=hub_node.xray_instance_epoch,
-                    idempotency_key=idempotency_key,
-                    service="white_internet",
-                )
-                sync_res = resp.result if hasattr(resp, "result") else resp[0]
-                verified_epoch = (
-                    getattr(resp, "verified_epoch", None) or hub_node.xray_instance_epoch
-                )
-                verified_inbounds = set(getattr(resp, "verified_inbounds", None) or [])
-                epoch_ok = verified_epoch == hub_node.xray_instance_epoch
-                inbounds_ok = (
-                    not verified_inbounds
-                    or expected_inbound_tags.issubset(verified_inbounds)
-                )
-                confirmed = False
-                if sync_res == SyncResult.APPLIED and epoch_ok and inbounds_ok:
-                    confirmed = True
-                elif sync_res == SyncResult.ALREADY_NEWER and epoch_ok:
-                    inv_ok, inv_data, _ = await xray_client.get_inventory(
-                        hub_node.api_url,
-                        hub_node.api_key,
-                        client_ids=[sub.uuid],
-                        service="white_internet",
-                    )
-                    observed = None
-                    if inv_ok and inv_data and "inventory" in inv_data:
-                        observed = (inv_data["inventory"].get(sub.uuid) or {}).get(
-                            "observed_state"
-                        )
-                    confirmed = inv_ok and observed == "active" and inbounds_ok
-                if confirmed:
-                    from database.repositories import user_devices_repo
-
-                    dev_uuids = await user_devices_repo.get_active_device_uuids(session, sub.user_id)
-                    for d_uuid in dev_uuids:
-                        if d_uuid and d_uuid != sub.uuid:
-                            try:
-                                await xray_client.sync_client(
-                                    hub_node.api_url,
-                                    hub_node.api_key,
-                                    client_uuid=d_uuid,
-                                    is_active=True,
-                                    version=target_version,
-                                    expected_node_epoch=hub_node.xray_instance_epoch,
-                                    service="white_internet",
-                                )
-                            except Exception as dev_exc:
-                                logger.warning("Inline WI device sync failed for %s: %s", d_uuid, dev_exc)
-                    sub.actual_version = target_version
-                    if (sub.desired_version or 1) == target_version:
-                        sub.status = WhiteInternetStatus.ACTIVE
-                        sub.provisioning_status = WhiteInternetProvisioningStatus.ACTIVE
-                    sub.last_reconciled_node_epoch = verified_epoch
-                    sub.last_synced_at = now_utc()
-                    await session.flush()
-                    return True
-                else:
-                    logger.warning(
-                        "Inline sync unconfirmed (result=%s epoch_ok=%s inbounds_ok=%s), "
-                        "leaving subscription %d PENDING_CREATE for worker",
-                        sync_res,
-                        epoch_ok,
-                        inbounds_ok,
-                        sub.id,
-                    )
-        except Exception as exc:
-            logger.warning(
-                "Synchronous activation fallback to background worker: %s", exc
-            )
-        return False
-
-    @classmethod
     async def _try_inline_sync_multi(
         cls,
         session: AsyncSession,
@@ -851,6 +723,145 @@ class WhiteInternetService:
             queue_post_commit_task(session, _post_extend_sync)
 
         return True, "ok", sub
+
+    @classmethod
+    async def reactivate_after_hold_cleared(
+        cls,
+        session: AsyncSession,
+        user_id: int,
+    ) -> tuple[WhiteInternetSubscription | None, bool]:
+        """Restore a financial-hold disabled WI subscription when hold is cleared.
+
+        Returns (locked_sub_if_updated, reactivated_as_active). Caller handles post-commit sync.
+        """
+        now = now_utc()
+        wi_sub = await white_internet_repo.get_subscription_by_user_id(session, user_id)
+        if (
+            wi_sub is None
+            or wi_sub.status != WhiteInternetStatus.DISABLED
+            or not wi_sub.expires_at
+            or wi_sub.expires_at <= now
+            or wi_sub.status_reason not in (None, "", "financial_hold")
+        ):
+            return None, False
+
+        other_live_wi_id = await session.scalar(
+            select(WhiteInternetSubscription.id)
+            .where(
+                WhiteInternetSubscription.user_id == user_id,
+                WhiteInternetSubscription.id != wi_sub.id,
+                WhiteInternetSubscription.status.in_([
+                    WhiteInternetStatus.PENDING,
+                    WhiteInternetStatus.ACTIVE,
+                    WhiteInternetStatus.EXHAUSTED,
+                ]),
+            )
+            .limit(1)
+        )
+        if other_live_wi_id is not None:
+            return None, False
+
+        locked_wi = await white_internet_repo.get_subscription_with_lock(session, wi_sub.id)
+        if (
+            locked_wi is None
+            or locked_wi.status != WhiteInternetStatus.DISABLED
+            or not locked_wi.expires_at
+            or locked_wi.expires_at <= now
+            or locked_wi.status_reason not in (None, "", "financial_hold")
+        ):
+            return None, False
+
+        total_quota = (locked_wi.base_traffic_bytes or 0) + (locked_wi.extra_traffic_bytes or 0)
+        used_quota = max(
+            0,
+            (locked_wi.traffic_used_bytes or 0) - (locked_wi.traffic_overage_bytes or 0),
+        )
+        if total_quota > 0 and used_quota < total_quota:
+            locked_wi.status = WhiteInternetStatus.ACTIVE
+            locked_wi.status_reason = None
+            locked_wi.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+            locked_wi.desired_version = (locked_wi.desired_version or 1) + 1
+            await white_internet_repo.clear_active_pending_revocations(session, locked_wi)
+            await session.flush()
+            return locked_wi, True
+
+        if total_quota > 0 and used_quota >= total_quota:
+            locked_wi.status = WhiteInternetStatus.EXHAUSTED
+            locked_wi.status_reason = "quota_exhausted"
+            locked_wi.provisioning_status = WhiteInternetProvisioningStatus.SYNCED_INACTIVE
+            await session.flush()
+            return locked_wi, False
+
+        return None, False
+
+    @classmethod
+    async def adjust_admin_device_limit_and_quota(
+        cls,
+        session: AsyncSession,
+        user_id: int,
+        wi_sub: WhiteInternetSubscription,
+        new_device_limit: int,
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Apply immediate admin device_limit change, displacement revocations, and ACTIVE/EXHAUSTED transition."""
+        now = now or now_utc()
+        before_limit = int(wi_sub.device_limit or 0)
+        if new_device_limit == before_limit:
+            return {
+                "changed": False,
+                "before_limit": before_limit,
+                "transitioned_to_exhausted": False,
+                "displaced_uuids": [],
+            }
+
+        wi_sub.device_limit = new_device_limit
+        wi_sub.base_traffic_bytes = new_device_limit * WHITE_INTERNET_BASE_TRAFFIC_BYTES
+        wi_sub.pending_device_limit = None
+        wi_sub.pending_from = None
+        wi_sub.desired_version = (wi_sub.desired_version or 1) + 1
+
+        displaced_uuids: list[str] = []
+        if new_device_limit < before_limit:
+            displaced_uuids = await white_internet_repo.collect_displaced_wi_device_uuids(
+                session, user_id, new_device_limit
+            )
+            if displaced_uuids:
+                await white_internet_repo.add_pending_revocation_uuids(
+                    session, wi_sub.id, displaced_uuids
+                )
+
+        total_quota = (wi_sub.base_traffic_bytes or 0) + (wi_sub.extra_traffic_bytes or 0)
+        used_quota = max(0, (wi_sub.traffic_used_bytes or 0) - (wi_sub.traffic_overage_bytes or 0))
+        transitioned_to_exhausted = False
+        if (
+            wi_sub.status == WhiteInternetStatus.ACTIVE
+            and total_quota > 0
+            and used_quota >= total_quota
+        ):
+            wi_sub.status = WhiteInternetStatus.EXHAUSTED
+            wi_sub.status_reason = "quota_exhausted"
+            wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_DELETE
+            transitioned_to_exhausted = True
+        elif (
+            wi_sub.status == WhiteInternetStatus.EXHAUSTED
+            and total_quota > used_quota
+            and (wi_sub.expires_at is None or wi_sub.expires_at > now)
+        ):
+            wi_sub.status = WhiteInternetStatus.ACTIVE
+            wi_sub.status_reason = None
+            wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+            await white_internet_repo.clear_active_pending_revocations(session, wi_sub)
+        elif wi_sub.status == WhiteInternetStatus.ACTIVE:
+            wi_sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+
+        await session.flush()
+        return {
+            "changed": True,
+            "before_limit": before_limit,
+            "transitioned_to_exhausted": transitioned_to_exhausted,
+            "displaced_uuids": displaced_uuids,
+        }
 
     @staticmethod
     def _ensure_country_flag(name: str, code: str = "") -> str:

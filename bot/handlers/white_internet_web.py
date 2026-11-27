@@ -6,6 +6,7 @@ import functools
 import html
 import logging
 import os
+import re
 from pathlib import Path
 
 from aiohttp import web
@@ -46,7 +47,10 @@ def get_white_internet_pending_html() -> str:
             "{status_description}",
             "Идёт подготовка защищённого шлюза. Обычно это занимает несколько секунд. Страница проверяет статус каждые 5 секунд.",
         )
-        .replace("{extra_hint}", "")
+        .replace(
+            "{extra_hint}",
+            '<p class="hint-note">Если Telegram не открывается, напишите нам через форму поддержки ниже</p>',
+        )
         .replace("{extra_script}", _PENDING_REFRESH_SCRIPT)
     )
 
@@ -59,7 +63,12 @@ def _render_white_internet_pending_landing_html(bot_username: str = "") -> str:
         else constants.DEFAULT_FALLBACK_BOT_USERNAME
     )
     bot_link = f"https://t.me/{clean_bot}"
-    return get_white_internet_pending_html().replace("{clean_bot}", clean_bot).replace("{bot_link}", bot_link)
+    repls = {"{clean_bot}": clean_bot, "{bot_link}": bot_link}
+    return re.sub(
+        r"\{(?:clean_bot|bot_link)\}",
+        lambda m: repls[m.group(0)],
+        get_white_internet_pending_html(),
+    )
 
 
 async def white_internet_subscription_feed_handler(request: web.Request) -> web.Response:

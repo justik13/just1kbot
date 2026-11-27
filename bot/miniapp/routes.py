@@ -2,41 +2,49 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from pathlib import Path
+import re
 
 from aiohttp import web
 
-from bot.miniapp.auth import check_miniapp_asset_rate_limit, check_miniapp_rate_limit
-from bot.miniapp.handlers_admin import (
-    api_admin_2fa_setup_handler,
-    api_admin_2fa_verify_handler,
+from bot.miniapp.admin_nodes_handlers import (
+    api_admin_incy_get_handler,
+    api_admin_incy_put_handler,
+    api_admin_nodes_add_handler,
+    api_admin_nodes_delete_handler,
+    api_admin_nodes_lifecycle_handler,
+    api_admin_nodes_list_handler,
+    api_admin_nodes_patch_handler,
+    api_admin_nodes_toggle_handler,
+)
+from bot.miniapp.admin_ops_handlers import (
     api_admin_audit_logs_handler,
     api_admin_broadcast_cancel_handler,
     api_admin_broadcast_preview_handler,
     api_admin_broadcast_start_handler,
     api_admin_broadcasts_list_handler,
     api_admin_finances_handler,
-    api_admin_incy_get_handler,
-    api_admin_incy_put_handler,
     api_admin_mass_bonus_handler,
     api_admin_mass_extend_handler,
-    api_admin_nodes_add_handler,
-    api_admin_nodes_delete_handler,
-    api_admin_nodes_list_handler,
-    api_admin_nodes_patch_handler,
-    api_admin_nodes_refresh_handler,
-    api_admin_nodes_toggle_handler,
+    api_admin_order_ack_review_handler,
+    api_admin_overview_handler,
     api_admin_payments_maintenance_get_handler,
     api_admin_payments_maintenance_post_handler,
-    api_admin_user_adjust_handler,
+)
+from bot.miniapp.admin_user_adjust_handlers import api_admin_user_adjust_handler
+from bot.miniapp.admin_users_handlers import (
     api_admin_user_details_handler,
+    api_admin_user_device_delete_handler,
     api_admin_user_devices_reset_handler,
     api_admin_user_message_handler,
     api_admin_user_token_rotate_handler,
     api_admin_users_handler,
-    api_me_handler,
 )
+from bot.miniapp.auth import check_miniapp_asset_rate_limit, check_miniapp_rate_limit
+from bot.miniapp.handlers_admin import api_me_handler
+from services.guides_content import GUIDES_DATA_PATH
 from bot.miniapp.handlers_user import (
     api_user_auto_renew_handler,
     api_user_dashboard_handler,
@@ -84,6 +92,42 @@ _ASSET_CACHE_HEADERS = {
 }
 
 
+def _compute_miniapp_asset_version() -> str:
+    """Compute startup content hash across Mini App frontend assets for cache-busting."""
+    if not FRONTEND_DIR.is_dir():
+        return "2.8.0"
+    digest = hashlib.sha256()
+    for path in sorted(FRONTEND_DIR.rglob("*")):
+        if path.is_file() and path.suffix.lower() in {".html", ".css", ".js"}:
+            digest.update(path.relative_to(FRONTEND_DIR).as_posix().encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
+    if GUIDES_DATA_PATH.is_file():
+        digest.update(b"guides_data.json\0")
+        digest.update(GUIDES_DATA_PATH.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()[:10]
+
+
+_MINIAPP_ASSET_VERSION = _compute_miniapp_asset_version()
+_ASSET_VERSION_RE = re.compile(r"\?v=\d+\.\d+\.\d+")
+_REWRITTEN_TEXT_ASSET_CACHE: dict[Path, str] = {}
+
+
+def _rewrite_asset_version(text: str) -> str:
+    return _ASSET_VERSION_RE.sub(f"?v={_MINIAPP_ASSET_VERSION}", text)
+
+
+def _get_rewritten_text_asset(target: Path) -> str:
+    cached = _REWRITTEN_TEXT_ASSET_CACHE.get(target)
+    if cached is not None:
+        return cached
+    rewritten = _rewrite_asset_version(target.read_text(encoding="utf-8"))
+    _REWRITTEN_TEXT_ASSET_CACHE[target] = rewritten
+    return rewritten
+
+
 async def miniapp_index_handler(request: web.Request) -> web.Response:
     """Serve Mini App HTML entrypoint."""
     rate_err = check_miniapp_rate_limit(request)
@@ -94,7 +138,7 @@ async def miniapp_index_handler(request: web.Request) -> web.Response:
     if not index_path.is_file():
         return web.Response(status=404, text="Mini App frontend not found")
 
-    content = index_path.read_text(encoding="utf-8")
+    content = _get_rewritten_text_asset(index_path)
     return web.Response(
         text=content,
         content_type="text/html",
@@ -113,7 +157,11 @@ async def miniapp_asset_handler(request: web.Request) -> web.Response:
     if not rel_path or ".." in rel_path.split("/"):
         return web.Response(status=404, text="Not Found")
 
-    if rel_path.startswith("guides/"):
+    if rel_path == "guides_data.json":
+        target = GUIDES_DATA_PATH
+        if not target.is_file():
+            return web.Response(status=404, text="Not Found")
+    elif rel_path.startswith("guides/"):
         guide_rel = rel_path[len("guides/"):]
         if not guide_rel or "/" in guide_rel:
             return web.Response(status=404, text="Not Found")
@@ -134,6 +182,22 @@ async def miniapp_asset_handler(request: web.Request) -> web.Response:
         if rel_path.startswith("guides/")
         else _ASSET_CACHE_HEADERS
     )
+    if not rel_path.startswith("guides/") and target.suffix.lower() in {".js", ".css", ".html"}:
+        rewritten = _get_rewritten_text_asset(target)
+        is_html = target.suffix.lower() == ".html"
+        resp_headers = dict(_NO_CACHE_HEADERS if is_html else headers)
+        if not is_html:
+            etag = f'"{_MINIAPP_ASSET_VERSION}"'
+            resp_headers["ETag"] = etag
+            if_none_match = (request.headers.get("If-None-Match") or "").strip()
+            if if_none_match and (etag in if_none_match or f"W/{etag}" in if_none_match):
+                return web.Response(status=304, headers=resp_headers)
+        return web.Response(
+            text=rewritten,
+            content_type=content_type,
+            charset="utf-8",
+            headers=resp_headers,
+        )
     return web.FileResponse(target, headers=headers)
 
 
@@ -145,21 +209,21 @@ def setup_miniapp_routes(app: web.Application) -> None:
 
     app.router.add_get("/api/app/me", api_me_handler)
 
-    # Admin 2FA & session
-    app.router.add_post("/api/app/admin/2fa/setup", api_admin_2fa_setup_handler)
-    app.router.add_post("/api/app/admin/2fa/verify", api_admin_2fa_verify_handler)
+    # Admin overview
+    app.router.add_get("/api/app/admin/overview", api_admin_overview_handler)
 
     # Admin nodes & users
     app.router.add_get("/api/app/admin/nodes", api_admin_nodes_list_handler)
     app.router.add_get("/api/app/admin/incy-settings", api_admin_incy_get_handler)
     app.router.add_put("/api/app/admin/incy-settings", api_admin_incy_put_handler)
     app.router.add_post("/api/app/admin/nodes/add", api_admin_nodes_add_handler)
-    app.router.add_post("/api/app/admin/nodes/{server_id}/refresh", api_admin_nodes_refresh_handler)
+    app.router.add_post("/api/app/admin/nodes/{server_id}/lifecycle", api_admin_nodes_lifecycle_handler)
     app.router.add_patch("/api/app/admin/nodes/{server_id}", api_admin_nodes_patch_handler)
     app.router.add_post("/api/app/admin/nodes/{server_id}/toggle", api_admin_nodes_toggle_handler)
     app.router.add_delete("/api/app/admin/nodes/{server_id}", api_admin_nodes_delete_handler)
     app.router.add_get("/api/app/admin/users", api_admin_users_handler)
     app.router.add_get("/api/app/admin/users/{user_id}/details", api_admin_user_details_handler)
+    app.router.add_delete("/api/app/admin/users/{user_id}/devices/{hwid}", api_admin_user_device_delete_handler)
     app.router.add_post("/api/app/admin/users/{user_id}/devices/reset", api_admin_user_devices_reset_handler)
     app.router.add_post("/api/app/admin/users/{user_id}/token/rotate", api_admin_user_token_rotate_handler)
     app.router.add_post("/api/app/admin/users/{user_id}/adjust", api_admin_user_adjust_handler)
@@ -178,6 +242,7 @@ def setup_miniapp_routes(app: web.Application) -> None:
     app.router.add_post("/api/app/admin/mass/bonus", api_admin_mass_bonus_handler)
     app.router.add_post("/api/app/admin/mass/extend", api_admin_mass_extend_handler)
     app.router.add_get("/api/app/admin/finances", api_admin_finances_handler)
+    app.router.add_post("/api/app/admin/orders/{order_id}/ack-review", api_admin_order_ack_review_handler)
     app.router.add_get("/api/app/admin/audit-logs", api_admin_audit_logs_handler)
 
     # User cabinet APIs

@@ -21,6 +21,7 @@ from config.constants import (
     STANDARD_MAX_EXPIRY_DAYS,
     STANDARD_MIN_DEVICES,
     STANDARD_PLANS,
+    VPN_ACCESS_GRACE_HOURS,
     WHITE_INTERNET_BASE_DURATION_DAYS,
     WHITE_INTERNET_MAX_DEVICE_LIMIT,
     WHITE_INTERNET_MAX_EXPIRY_DAYS,
@@ -675,8 +676,8 @@ class OrderService:
                 )
             return order
 
-        if order.status == "refunded":
-            logger.warning("Cannot mark refunded order %s as paid", order.id)
+        if order.status in ("refunded", "partially_refunded"):
+            logger.warning("Cannot mark %s order %s as paid", order.status, order.id)
             order._newly_paid = False
             return order
 
@@ -880,11 +881,18 @@ class OrderService:
             active_hwid_count = await count_active_user_devices(session, user_id)
             std_assigned_count = active_hwid_count
 
-        is_active = bool(
+        is_strictly_active = bool(
             sub_end is not None
             and sub_end > now
             and current_limit > 0
         )
+        is_in_grace = bool(
+            sub_end is not None
+            and current_limit > 0
+            and sub_end <= now
+            and (now - sub_end) <= timedelta(hours=VPN_ACCESS_GRACE_HOURS)
+        )
+        is_active = is_strictly_active or is_in_grace
         is_grace_autorenew = bool(
             operation == "renew"
             and sub_end is not None
@@ -907,23 +915,44 @@ class OrderService:
                 "discount_rub": int(discount),
                 "bonus_credit_rub": 0,
                 "days_left": 0,
+                "in_grace": False,
                 "can_downgrade": False,
                 "blocked_reason": None,
                 "cooldown_until": cooldown_until.isoformat() if cooldown_until else None,
                 "active_hwid_count": active_hwid_count,
             }
 
-        if target_device_limit == current_limit:
+        if target_device_limit == current_limit or (is_in_grace and operation == "renew"):
+            blocked_by_devices = False
+            renew_blocked_reason: str | None = None
+            if is_in_grace and target_device_limit < current_limit:
+                if getattr(user_obj, "financial_hold", False):
+                    renew_blocked_reason = "На аккаунте действует финансовое ограничение. Обратитесь в поддержку."
+                elif slot_usage is not None:
+                    from services.subscription import SubscriptionService
+
+                    fits, limit_reason = SubscriptionService.check_standard_limit_fits(
+                        slot_usage, target_device_limit
+                    )
+                    if not fits:
+                        renew_blocked_reason = limit_reason
+                        blocked_by_devices = True
+                elif active_hwid_count > target_device_limit:
+                    renew_blocked_reason = (
+                        f"Активных устройств ({active_hwid_count}) больше нового лимита ({target_device_limit}). "
+                        "Удалите лишние устройства."
+                    )
+                    blocked_by_devices = True
+
             due = Decimal(calculate_standard_price(target_device_limit, target_duration_days))
             max_expiry = now + timedelta(days=STANDARD_MAX_EXPIRY_DAYS)
             horizon_exceeded = not is_permanent_subscription(sub_end) and (
                 sub_end + timedelta(days=target_duration_days) > max_expiry
             )
-            renew_blocked_reason = (
-                f"Максимальный срок продления — {STANDARD_MAX_EXPIRY_DAYS} дн. вперёд."
-                if horizon_exceeded
-                else None
-            )
+            if renew_blocked_reason is None and horizon_exceeded:
+                renew_blocked_reason = (
+                    f"Максимальный срок продления — {STANDARD_MAX_EXPIRY_DAYS} дн. вперёд."
+                )
             return {
                 "operation": "renew",
                 "due_rub": int(due),
@@ -931,13 +960,33 @@ class OrderService:
                 "discount_rub": 0,
                 "bonus_credit_rub": 0,
                 "days_left": max(0, math.ceil((sub_end - now).total_seconds() / 86400.0)),
+                "in_grace": is_in_grace,
                 "can_downgrade": False,
                 "blocked_reason": renew_blocked_reason,
+                "blocked_by_devices": blocked_by_devices,
                 "cooldown_until": cooldown_until.isoformat() if cooldown_until else None,
                 "active_hwid_count": active_hwid_count,
+                "std_assigned_count": std_assigned_count,
             }
 
         if target_device_limit > current_limit:
+            if is_in_grace:
+                return {
+                    "operation": "upgrade",
+                    "due_rub": 0,
+                    "original_price_rub": 0,
+                    "discount_rub": 0,
+                    "bonus_credit_rub": 0,
+                    "days_left": 0,
+                    "in_grace": True,
+                    "can_downgrade": False,
+                    "blocked_reason": (
+                        "Срок действия подписки завершается (льготный период). "
+                        "Продлите подписку с нужным числом устройств."
+                    ),
+                    "cooldown_until": cooldown_until.isoformat() if cooldown_until else None,
+                    "active_hwid_count": active_hwid_count,
+                }
             raw_days = max(1, math.ceil((sub_end - now).total_seconds() / 86400.0))
             days_left = min(raw_days, 365) if is_permanent_subscription(sub_end) else raw_days
             diff_30 = calculate_standard_price(target_device_limit, 30) - calculate_standard_price(
@@ -951,6 +1000,7 @@ class OrderService:
                 "discount_rub": 0,
                 "bonus_credit_rub": 0,
                 "days_left": days_left,
+                "in_grace": False,
                 "can_downgrade": False,
                 "blocked_reason": None,
                 "cooldown_until": cooldown_until.isoformat() if cooldown_until else None,
@@ -1002,6 +1052,7 @@ class OrderService:
             "discount_rub": 0,
             "bonus_credit_rub": int(bonus_credit),
             "days_left": full_days_left,
+            "in_grace": is_in_grace,
             "can_downgrade": blocked_reason is None,
             "blocked_reason": blocked_reason,
             "blocked_by_devices": blocked_by_devices,
@@ -1078,6 +1129,7 @@ class OrderService:
         if existing_order.payment_method == "wallet":
             resp = {
                 "order_id": str(existing_order.id),
+                "service_type": existing_order.service_type,
                 "status": existing_order.status,
                 "confirmation_url": None,
                 "charged_balance": int(existing_order.amount_rub),
@@ -1089,6 +1141,7 @@ class OrderService:
         else:
             resp = {
                 "order_id": str(existing_order.id),
+                "service_type": existing_order.service_type,
                 "status": existing_order.status,
                 "confirmation_url": existing_order.payment_url,
                 "charged_balance": int(meta.get("wallet_debit_rub", 0)),
@@ -1194,7 +1247,7 @@ class OrderService:
             )
             if quote["operation"] == "downgrade":
                 raise ValueError("Use downgrade_standard_devices for device downgrade")
-            if quote["operation"] == "renew" and quote.get("blocked_reason"):
+            if quote["operation"] in ("renew", "upgrade") and quote.get("blocked_reason"):
                 raise ValueError(quote["blocked_reason"])
             total_cost = Decimal(quote["due_rub"])
             final_devices = d_limit
@@ -1412,6 +1465,7 @@ class OrderService:
                     meta = recent_paid_order.metadata_ or {}
                     return {
                         "order_id": str(recent_paid_order.id),
+                        "service_type": recent_paid_order.service_type,
                         "status": recent_paid_order.status,
                         "confirmation_url": None,
                         "charged_balance": int(recent_paid_order.amount_rub),
@@ -1469,6 +1523,7 @@ class OrderService:
             order_meta_after = order.metadata_ or {}
             resp = {
                 "order_id": str(order.id),
+                "service_type": service_type,
                 "status": order.status,
                 "confirmation_url": None,
                 "charged_balance": int(total_cost),
@@ -1519,6 +1574,7 @@ class OrderService:
         )
         return {
             "order_id": str(order.id),
+            "service_type": service_type,
             "status": order.status,
             "confirmation_url": order.payment_url,
             "charged_balance": int(wallet_debit),

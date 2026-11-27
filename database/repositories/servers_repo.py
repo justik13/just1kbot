@@ -173,10 +173,15 @@ def merge_v2_extra_data(
         "xhttp_locations",
         "inbounds",
         "traffic_limit",
+        "disk_usage",
+        "last_apply",
+        "ssl_cert",
     ):
         val = _pick(key)
         if val is not None:
             merged[key] = val
+        elif key in ("last_apply", "ssl_cert") and (key in status_d or key in health_d):
+            merged.pop(key, None)
 
     raw_loc_code = _pick("location_code")
     if isinstance(raw_loc_code, str) and raw_loc_code.strip():
@@ -325,6 +330,25 @@ async def get_wi_capable_ru_hubs(session: AsyncSession) -> list[Server]:
     return eligible
 
 
+async def get_wi_revocation_ru_hubs(session: AsyncSession) -> list[Server]:
+    """Return all WI-capable ru_hub servers (ACTIVE or DECOMMISSIONING), including disabled/degraded hubs, for UUID revocation."""
+    candidates = (
+        await session.scalars(
+            select(Server)
+            .where(
+                Server.protocol.in_([XRAY_PROTOCOL, VLESS_PROTOCOL]),
+                Server.lifecycle_status.in_(
+                    [ServerLifecycleStatus.ACTIVE, ServerLifecycleStatus.DECOMMISSIONING]
+                ),
+                Server.api_url.is_not(None),
+                Server.api_key.is_not(None),
+            )
+            .order_by(Server.id.asc())
+        )
+    ).all()
+    return [srv for srv in candidates if _is_wi_hub_eligible(srv)]
+
+
 async def has_available_service_capacity(
     session: AsyncSession,
     service_type: str,
@@ -379,7 +403,10 @@ async def create_server(
     effective_is_active = (
         is_active
         if is_active is not None
-        else (str(lifecycle_status) == ServerLifecycleStatus.ACTIVE)
+        else (
+            str(lifecycle_status)
+            in (ServerLifecycleStatus.ACTIVE, ServerLifecycleStatus.DECOMMISSIONING)
+        )
     )
     server = Server(
         name=name,
@@ -413,8 +440,11 @@ async def update_server(
             if key in ("extra_data", "capabilities"):
                 flag_modified(server, key)
 
-    if "lifecycle_status" in kwargs:
-        server.is_active = (str(server.lifecycle_status) == ServerLifecycleStatus.ACTIVE)
+    if "lifecycle_status" in kwargs and "is_active" not in kwargs:
+        server.is_active = str(server.lifecycle_status) in (
+            ServerLifecycleStatus.ACTIVE,
+            ServerLifecycleStatus.DECOMMISSIONING,
+        )
 
     await session.flush()
     await session.refresh(server)
@@ -470,7 +500,11 @@ async def update_server_health_snapshot(
             continue
         if key == "extra_data" and isinstance(value, dict):
             existing_extra = dict(current.extra_data or {})
-            existing_extra.update(value)
+            for ek, ev in value.items():
+                if ev is None and ek in ("last_apply", "ssl_cert"):
+                    existing_extra.pop(ek, None)
+                else:
+                    existing_extra[ek] = ev
             setattr(current, key, existing_extra)
             flag_modified(current, "extra_data")
         elif hasattr(current, key):

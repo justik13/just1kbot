@@ -13,7 +13,7 @@ from aiogram.exceptions import (
     TelegramForbiddenError,
     TelegramRetryAfter,
 )
-from sqlalchemy import desc, func, select, update
+from sqlalchemy import desc, func, select, text as sa_text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.keyboards.notifications import (
@@ -36,6 +36,11 @@ from utils.rate_limiter import broadcast_send_limiter
 from utils.telegram import safe_send_message
 
 logger = logging.getLogger(__name__)
+
+
+class BroadcastConflictError(ValueError):
+    """Raised when attempting to start a broadcast while another is in progress."""
+
 
 BROADCAST_BATCH_SIZE = 25
 MAX_BROADCAST_TEXT_LEN = 4096
@@ -121,6 +126,7 @@ async def count_broadcast_audience(
     *,
     admin_id: int | None = None,
     include_bot_blocked: bool = False,
+    service_scope: str | None = None,
 ) -> int:
     stmt = select(func.count(User.id))
     stmt = await apply_audience_filter(
@@ -130,6 +136,17 @@ async def count_broadcast_audience(
         admin_id=admin_id,
         include_bot_blocked=include_bot_blocked,
     )
+    if service_scope == "white_internet":
+        from config.enums import WhiteInternetStatus
+        from database.models import WhiteInternetSubscription
+
+        stmt = stmt.where(
+            User.id.in_(
+                select(WhiteInternetSubscription.user_id).where(
+                    WhiteInternetSubscription.status != WhiteInternetStatus.DISABLED,
+                )
+            )
+        )
     return int((await session.scalar(stmt)) or 0)
 
 
@@ -169,6 +186,8 @@ def serialize_broadcast(bp: BroadcastProgress) -> dict[str, Any]:
         "label": bp.label,
         "content_type": bp.content_type,
         "has_media": bool(bp.media_id),
+        "media_url": bp.media_id,
+        "text": bp.broadcast_text or "",
         "text_preview": (bp.broadcast_text or "")[:180],
         "status": bp.status,
         "total_count": total,
@@ -406,6 +425,20 @@ async def create_and_start_broadcast(
         raise ValueError("Bot instance is unavailable for broadcast")
 
     async with session_scope() as session:
+        bind = session.get_bind() if hasattr(session, "get_bind") else getattr(session, "bind", None)
+        if bind is None:
+            bind = getattr(session, "bind", None)
+        if bind and getattr(bind, "dialect", None) and bind.dialect.name == "postgresql":
+            await session.execute(sa_text("SELECT pg_advisory_xact_lock(7100001)"))
+
+        existing_id = await session.scalar(
+            select(BroadcastProgress.id)
+            .where(BroadcastProgress.status == "in_progress")
+            .limit(1)
+        )
+        if existing_id is not None:
+            raise BroadcastConflictError("Уже выполняется другая рассылка. Дождитесь завершения или остановите её.")
+
         total_count = await count_broadcast_audience(
             session,
             target_audience,
@@ -453,12 +486,23 @@ async def create_and_start_broadcast(
     return payload
 
 
+def cancel_broadcast_task(broadcast_id: int) -> None:
+    """Cancel an in-memory broadcast worker task if still running."""
+    task = _active_broadcast_tasks.pop(broadcast_id, None)
+    if task and not task.done():
+        task.cancel()
+
+
 async def cancel_broadcast(
     session: AsyncSession,
     broadcast_id: int,
     admin_id: int,
 ) -> dict[str, Any] | None:
-    bp = await session.get(BroadcastProgress, broadcast_id)
+    bp = await session.scalar(
+        select(BroadcastProgress)
+        .where(BroadcastProgress.id == broadcast_id)
+        .with_for_update()
+    )
     if bp is None:
         return None
     if bp.status == "in_progress":
@@ -477,9 +521,6 @@ async def cancel_broadcast(
                 "fail": bp.fail_count,
             },
         )
-    task = _active_broadcast_tasks.pop(broadcast_id, None)
-    if task and not task.done():
-        task.cancel()
     return serialize_broadcast(bp)
 
 

@@ -2,23 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from typing import Literal
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from utils.security import normalize_public_domain
-
-
-def _validate_fqdn(value: str) -> str:
-    cleaned = normalize_public_domain(value, require_fqdn=True)
-    if not cleaned:
-        raise ValueError("SNI domain must be a valid public FQDN")
-    return cleaned
-
-
-class Verify2FAPayload(BaseModel):
-    code: str = Field(..., min_length=1, max_length=32)
-    setup_token: str | None = Field(default=None, max_length=512)
+_TG_FILE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,256}$")
 
 
 class TopupPayload(BaseModel):
@@ -29,6 +19,7 @@ class TopupPayload(BaseModel):
 class StandardQuotePayload(BaseModel):
     device_limit: int = Field(..., ge=2, le=10)
     duration_days: int = Field(..., ge=7, le=90)
+    operation: Literal["purchase", "renew", "upgrade"] | None = None
 
     @field_validator("duration_days")
     @classmethod
@@ -84,24 +75,25 @@ class IncyGlobalSettingsPayload(BaseModel):
     profile_update_interval: int | None = Field(default=None, ge=1, le=720)
     support_url: str | None = Field(default=None, max_length=500)
     web_page_url: str | None = Field(default=None, max_length=500)
-    sort_order: Literal["none", "ping", "name"] | None = None
-    hide_url: bool | None = None
-    hide_check: bool | None = None
-    fragmentation_enabled: bool | None = None
-    fragmentation_packets: str | None = Field(default=None, max_length=64)
-    fragmentation_length: str | None = Field(default=None, max_length=32)
-    fragmentation_interval: str | None = Field(default=None, max_length=32)
-    no_limit_mode: Literal["off", "all", "xhttp"] | None = None
-    dns_resolve_enabled: bool | None = None
-    dns_resolve_domain: str | None = Field(default=None, max_length=253)
-    dns_resolve_ip: str | None = Field(default=None, max_length=64)
-    per_app_proxy_enabled: bool | None = None
-    per_app_proxy_mode: Literal["bypass", "proxy"] | None = None
-    per_app_proxy_list: str | None = Field(default=None, max_length=2000)
     cdn_label_mode: Literal["badge", "name", "none"] | None = None
     cdn_yandex_label: str | None = Field(default=None, max_length=32)
     cdn_turboflare_label: str | None = Field(default=None, max_length=32)
     mtproto_proxy_url: str | None = Field(default=None, max_length=500)
+
+    @field_validator("mtproto_proxy_url")
+    @classmethod
+    def check_mtproto_proxy_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        clean = value.strip()
+        if not clean:
+            return ""
+        lowered = clean.lower()
+        if not (lowered.startswith("https://t.me/proxy?") or lowered.startswith("tg://proxy?")):
+            raise ValueError(
+                "Ссылка прокси должна начинаться с https://t.me/proxy? или tg://proxy?"
+            )
+        return clean
 
 
 class UpdateNodePayload(BaseModel):
@@ -144,7 +136,14 @@ def _validate_audience(value: str) -> str:
 
 
 class AdminUserAdjustPayload(BaseModel):
-    action: Literal["balance", "grant_standard", "grant_wi", "wi_traffic", "restrictions"]
+    action: Literal[
+        "balance",
+        "forgive_debt",
+        "grant_standard",
+        "grant_wi",
+        "wi_traffic",
+        "restrictions",
+    ]
     amount_rub: int | None = Field(default=None, ge=-100000, le=100000)
     days: int | None = Field(default=None, ge=-3650, le=3650)
     device_limit: int | None = Field(default=None, ge=1, le=20)
@@ -152,6 +151,8 @@ class AdminUserAdjustPayload(BaseModel):
     gb: int | None = Field(default=None, ge=1, le=5000)
     financial_hold: bool | None = None
     topup_blocked: bool | None = None
+    notify_user: bool | None = None
+    send_note_to_user: bool = False
     note: str | None = Field(default=None, max_length=120)
 
     @model_validator(mode="after")
@@ -159,14 +160,21 @@ class AdminUserAdjustPayload(BaseModel):
         if self.action == "balance":
             if self.amount_rub is None or self.amount_rub == 0:
                 raise ValueError("amount_rub must be non-zero for balance adjustment")
+        elif self.action == "forgive_debt":
+            if self.amount_rub is not None and self.amount_rub <= 0:
+                raise ValueError("amount_rub must be positive for forgive_debt")
         elif self.action == "grant_standard":
             if self.days is None:
                 raise ValueError("days is required for grant_standard")
+            if self.days == 0 and self.device_limit is None:
+                raise ValueError("Укажите дни или лимит устройств")
             if self.device_limit is not None and not (2 <= self.device_limit <= 10):
                 raise ValueError("device_limit must be between 2 and 10 for standard")
         elif self.action == "grant_wi":
             if self.days is None:
                 raise ValueError("days is required for grant_wi")
+            if self.days == 0 and self.device_limit is None:
+                raise ValueError("Укажите дни или лимит устройств")
             if self.device_limit is not None and not (1 <= self.device_limit <= 3):
                 raise ValueError("device_limit must be between 1 and 3 for wi")
         elif self.action == "wi_traffic":
@@ -180,12 +188,21 @@ class AdminUserAdjustPayload(BaseModel):
         return self
 
 
+class NodeLifecyclePayload(BaseModel):
+    lifecycle_status: Literal["active", "decommissioning"]
+
+
+class AdminUserOptionalNotifyPayload(BaseModel):
+    notify_user: bool = False
+
+
 class AdminDirectMessagePayload(BaseModel):
     text: str = Field(..., min_length=1, max_length=4096)
 
 
 class BroadcastPreviewPayload(BaseModel):
     target_audience: str = Field(..., min_length=1, max_length=64)
+    service_scope: Literal["standard", "white_internet"] | None = None
 
     @field_validator("target_audience")
     @classmethod
@@ -211,9 +228,19 @@ class BroadcastStartPayload(BaseModel):
         clean = value.strip()
         if not clean:
             return None
-        if clean.lower().startswith("http://"):
+        lowered = clean.lower()
+        if lowered.startswith("http://"):
             raise ValueError("URL изображения должен использовать HTTPS")
-        return clean
+        if lowered.startswith("https://"):
+            if any(ch.isspace() for ch in clean):
+                raise ValueError("Некорректный HTTPS URL изображения")
+            parsed = urlparse(clean)
+            if parsed.scheme != "https" or not parsed.netloc:
+                raise ValueError("Некорректный HTTPS URL изображения")
+            return clean
+        if _TG_FILE_ID_RE.fullmatch(clean):
+            return clean
+        raise ValueError("Укажите корректный HTTPS URL или Telegram file_id изображения")
 
 
 class MassBonusPayload(BaseModel):

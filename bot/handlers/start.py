@@ -32,8 +32,9 @@ from database.repositories.vless_subscription_repo import (
 from database.repositories.white_internet_repo import get_subscription_by_user_id
 from services.referral_bonus import get_referral_tier
 from services.subscription import SubscriptionService
+from utils.admin import is_admin
 from utils.telegram import EFFECT_LIKE, resolve_bot_username, safe, safe_send_message
-from utils.datetime_helpers import now_utc
+from utils.datetime_helpers import is_permanent_subscription, now_utc
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -83,7 +84,10 @@ async def _build_start_profile_context(session, db_user) -> dict:
 
     std_active = SubscriptionService.check_vpn_access(db_user, vless_sub=vless_sub)
     if std_active and vless_sub and vless_sub.expires_at:
-        std_line = f"Стандарт: до <b>{vless_sub.expires_at.strftime('%d.%m.%Y')}</b> ({vless_sub.device_limit or 2} устр.)"
+        if is_permanent_subscription(vless_sub.expires_at):
+            std_line = f"Стандарт: <b>без срока</b> ({vless_sub.device_limit or 2} устр.)"
+        else:
+            std_line = f"Стандарт: до <b>{vless_sub.expires_at.strftime('%d.%m.%Y')}</b> ({vless_sub.device_limit or 2} устр.)"
     else:
         std_line = "Стандарт: <b>не подключён</b>"
 
@@ -115,7 +119,10 @@ async def _build_start_profile_context(session, db_user) -> dict:
         wi_line = f"Белый интернет: <b>настраивается</b> (до {wi_sub.expires_at.strftime('%d.%m.%Y')})"
     elif wi_has_period and wi_sub and wi_sub.expires_at:
         total_bytes = int(wi_sub.base_traffic_bytes or 0) + int(wi_sub.extra_traffic_bytes or 0)
-        used_bytes = int(wi_sub.traffic_used_bytes or 0)
+        used_bytes = max(
+            0,
+            int(wi_sub.traffic_used_bytes or 0) - int(getattr(wi_sub, "traffic_overage_bytes", 0) or 0),
+        )
         rem_gb = max(0.0, (total_bytes - used_bytes) / (1024 ** 3))
         wi_line = f"Белый интернет: до <b>{wi_sub.expires_at.strftime('%d.%m.%Y')}</b> (ост. <b>{rem_gb:.1f} ГБ</b>)"
     else:
@@ -254,6 +261,7 @@ async def cmd_start(message: Message) -> None:
 
     settings = get_settings()
     app_url = f"https://{settings.DOMAIN}/app"
+    admin_url = f"https://{settings.DOMAIN}/app?mode=admin" if is_admin(tg_user.id) else None
     bot_username = (await resolve_bot_username(message.bot) or DEFAULT_FALLBACK_BOT_USERNAME).lstrip("@")
     ref_link = f"https://t.me/{bot_username}?start=ref_{db_user.telegram_id}"
     share_text = f"Держи приглашение: скидка {profile_ctx['welcome_discount_pct']}% на первый заказ"
@@ -262,7 +270,8 @@ async def cmd_start(message: Message) -> None:
         f"&text={quote(share_text, safe='')}"
     )
 
-    safe_name = safe(db_user.first_name or tg_user.first_name or texts.USER_HUB_START)
+    raw_name = db_user.first_name or tg_user.first_name
+    greeting_line = f"Привет, <b>{safe(raw_name)}</b>." if raw_name else "Привет."
     discount_line = (
         texts.START_REFERRAL_DISCOUNT_LINE.format(
             discount_pct=profile_ctx["welcome_discount_pct"]
@@ -277,9 +286,10 @@ async def cmd_start(message: Message) -> None:
         connect_btn_text=(
             texts.BTN_MINIAPP_CONNECT if profile_ctx["has_active_sub"] else texts.BTN_OPEN_CABINET
         ),
+        admin_url=admin_url,
     )
     msg_text = texts.START_HUB_MESSAGE.format(
-        name=safe_name,
+        greeting_line=greeting_line,
         discount_line=discount_line,
         **profile_ctx,
     )
@@ -304,7 +314,8 @@ async def cmd_fallback(message: Message) -> None:
 
     settings = get_settings()
     app_url = f"https://{settings.DOMAIN}/app"
-    kb = build_start_inline_keyboard(app_url)
+    admin_url = f"https://{settings.DOMAIN}/app?mode=admin" if is_admin(message.from_user.id) else None
+    kb = build_start_inline_keyboard(app_url, admin_url=admin_url)
     await safe_send_message(
         message.bot,
         message.chat.id,
@@ -325,7 +336,12 @@ async def cb_legacy_fallback(callback: CallbackQuery) -> None:
         return
     settings = get_settings()
     app_url = f"https://{settings.DOMAIN}/app"
-    kb = build_start_inline_keyboard(app_url)
+    admin_url = (
+        f"https://{settings.DOMAIN}/app?mode=admin"
+        if (callback.from_user and is_admin(callback.from_user.id))
+        else None
+    )
+    kb = build_start_inline_keyboard(app_url, admin_url=admin_url)
     try:
         await callback.answer("Меню обновлено. Откройте кабинет.", show_alert=False)
     except Exception as exc:
