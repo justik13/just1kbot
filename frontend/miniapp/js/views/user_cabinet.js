@@ -1,5 +1,6 @@
 import { api } from "../api.js?v=2.8.0";
 import {
+    animateViewSwap,
     copyText,
     escapeHtml,
     formatBytesGb,
@@ -113,15 +114,94 @@ function _wiHasActivePeriod(wi) {
     );
 }
 
+export function getCabinetTab() {
+    return _state.tab;
+}
+
+export function syncTopbarProfilePreview(d = _state.data) {
+    const pill = document.getElementById("profilePillBtn");
+    const avatarEl = document.getElementById("profileAvatar");
+    const balEl = document.getElementById("profileBalanceText");
+    if (!pill) return;
+
+    const meta = _getProfileMeta();
+    const avatarKey = meta.photoUrl && !_state.avatarFailed ? meta.photoUrl : meta.initial;
+    if (avatarEl && avatarEl.dataset.renderedKey !== avatarKey) {
+        avatarEl.dataset.renderedKey = avatarKey;
+        avatarEl.innerHTML = _renderAvatarInner(meta);
+        _bindAvatarImg(avatarEl, meta.initial);
+    }
+    if (balEl) {
+        if (d && d.balance) {
+            balEl.textContent = `${d.balance.total ?? 0} ₽`;
+        } else if (!_state.data) {
+            balEl.textContent = "···";
+        }
+    }
+    pill.setAttribute("aria-label", `Профиль: ${meta.displayName}`);
+}
+
+export async function prefetchCabinetBalance() {
+    if (_state.data) {
+        syncTopbarProfilePreview(_state.data);
+        return;
+    }
+    try {
+        const [data] = await Promise.all([
+            api.getUserDashboard(),
+            loadGuidesData().catch(() => null),
+        ]);
+        if (!data) return;
+        _state.data = data;
+        _syncServerClock(data);
+        syncTopbarProfilePreview(data);
+    } catch {
+        // Non-critical background prefetch when opening directly in admin mode
+    }
+}
+
 export async function loadAndRenderUserCabinet(root, options = {}) {
     _state.loadOptions = options;
     if (options.tab) {
+        if (options.tab === "profile" && ["connect", "tariffs", "more"].includes(_state.tab)) {
+            _state.profileReturnTab = _state.tab;
+        }
         _state.tab = options.tab;
     } else if (options.resetTab) {
         _state.tab = null;
     }
     const isActive = () => (typeof options.isActive === "function" ? options.isActive() : true);
     const reqId = ++_dashReqId;
+
+    const resolveDefaultTab = (d) => {
+        if (_state.tab) return;
+        const stdActive = Boolean(d.standard && d.standard.active);
+        const wiActive = _wiHasActivePeriod(d.wi);
+        const urlParams = new URLSearchParams(window.location.search);
+        const requestedTab = urlParams.get("tab");
+        if (requestedTab && ["connect", "tariffs", "profile"].includes(requestedTab)) {
+            _state.tab = requestedTab;
+        } else {
+            _state.tab = (stdActive || wiActive) ? "connect" : "tariffs";
+        }
+    };
+
+    const hasCached = Boolean(_state.data && !options.forceFetch);
+    if (hasCached) {
+        resolveDefaultTab(_state.data);
+        _render(root, {
+            loadOptions: options,
+            preserveScroll: false,
+            animate: Boolean(options.animate),
+            direction: options.direction || "neutral",
+        });
+    } else {
+        root.innerHTML = `<section class="card card-center"><div class="muted">Загрузка кабинета...</div></section>`;
+        if (options.animate) {
+            animateViewSwap(root, { direction: options.direction || "neutral" });
+        }
+    }
+
     try {
         const [data] = await Promise.all([
             api.getUserDashboard(),
@@ -130,21 +210,30 @@ export async function loadAndRenderUserCabinet(root, options = {}) {
         if (reqId !== _dashReqId || !isActive() || !root.isConnected) return;
         _state.data = data;
         _syncServerClock(data);
-        const stdActive = Boolean(data.standard && data.standard.active);
-        const wiActive = _wiHasActivePeriod(data.wi);
-        if (!_state.tab) {
-            const urlParams = new URLSearchParams(window.location.search);
-            const requestedTab = urlParams.get("tab");
-            if (requestedTab && ["connect", "tariffs", "profile"].includes(requestedTab)) {
-                _state.tab = requestedTab;
-            } else {
-                _state.tab = (stdActive || wiActive) ? "connect" : "tariffs";
+        resolveDefaultTab(data);
+
+        if (hasCached) {
+            const hasPlayingVideo = Array.from(root.querySelectorAll("video")).some((v) => !v.paused);
+            if (hasPlayingVideo) {
+                syncTopbarProfilePreview(data);
+                return;
             }
+            _render(root, { loadOptions: options, preserveScroll: true, animate: false });
+        } else {
+            _render(root, {
+                loadOptions: options,
+                preserveScroll: false,
+                animate: Boolean(options.animate),
+                direction: options.direction || "neutral",
+            });
         }
-        _render(root, { loadOptions: options });
     } catch (err) {
         if (reqId !== _dashReqId || !isActive() || !root.isConnected) return;
         if (err && err.code === "init_data_expired") return;
+        if (hasCached) {
+            showToast(err.message || "Не удалось обновить данные кабинета", "error");
+            return;
+        }
         root.innerHTML = `
             <section class="card card-center">
                 <div class="card-title">Не удалось загрузить кабинет</div>
@@ -192,40 +281,20 @@ function _bindAvatarImg(container, key) {
     });
 }
 
-function _syncTopbarProfile(d, root) {
+function _syncTopbarProfile(d) {
     const pill = document.getElementById("profilePillBtn");
-    const avatarEl = document.getElementById("profileAvatar");
-    const balEl = document.getElementById("profileBalanceText");
     if (!pill) return;
-
-    const bal = d.balance || { total: 0 };
-    const meta = _getProfileMeta();
-    const avatarKey = meta.photoUrl && !_state.avatarFailed ? meta.photoUrl : meta.initial;
-    if (avatarEl && avatarEl.dataset.renderedKey !== avatarKey) {
-        avatarEl.dataset.renderedKey = avatarKey;
-        avatarEl.innerHTML = _renderAvatarInner(meta);
-        _bindAvatarImg(avatarEl, meta.initial);
-    }
-    if (balEl) balEl.textContent = `${bal.total ?? 0} ₽`;
+    syncTopbarProfilePreview(d);
     pill.classList.toggle("active", _state.tab === "profile");
-    pill.setAttribute("aria-label", `Профиль: ${meta.displayName}`);
     if (_state.tab === "profile") pill.setAttribute("aria-current", "page");
     else pill.removeAttribute("aria-current");
-
-    pill.onclick = () => {
-        if (_state.tab === "profile") return;
-        _state.profileReturnTab = ["connect", "tariffs", "more"].includes(_state.tab) ? _state.tab : "connect";
-        _state.tab = "profile";
-        _render(root, { preserveScroll: false });
-        _scrollTopSmooth();
-    };
 }
 
 function _setCabinetBackButton(onBack) {
     setPageBackButton(onBack);
 }
 
-function _render(root, { preserveScroll = true, loadOptions = _state.loadOptions } = {}) {
+function _render(root, { preserveScroll = true, loadOptions = _state.loadOptions, animate = false, direction = "neutral" } = {}) {
     const d = _state.data;
     if (!d) return;
     const prevGuideOpen = Boolean(root.querySelector("#connectGuide")?.open);
@@ -253,30 +322,48 @@ function _render(root, { preserveScroll = true, loadOptions = _state.loadOptions
         _state.tab = hasAny ? "connect" : "tariffs";
     }
 
-    _syncTopbarProfile(d, root);
+    _syncTopbarProfile(d);
 
-    root.innerHTML = `
-        <div id="userTabBody" class="app-main"></div>
-        <nav class="bottom-nav" aria-label="Разделы кабинета">
-            ${navTabs.map((t) => `
-                <button type="button" class="nav-item ${_state.tab === t.id ? "active" : ""}" ${_state.tab === t.id ? 'aria-current="page"' : ""} data-utab="${t.id}">
-                    ${t.icon}
-                    <span>${escapeHtml(t.label)}</span>
-                </button>
-            `).join("")}
-        </nav>
-    `;
-
-    root.querySelectorAll("[data-utab]").forEach((b) => {
-        b.addEventListener("click", () => {
-            if (_state.tab === b.dataset.utab) return;
-            _state.tab = b.dataset.utab;
-            _render(root, { preserveScroll: false });
-            _scrollTopSmooth();
+    let body = root.querySelector("#userTabBody");
+    let nav = root.querySelector("#cabinetNav");
+    const isFreshShell = !body || !nav;
+    if (isFreshShell) {
+        root.innerHTML = `
+            <div id="userTabBody" class="app-main"></div>
+            <nav id="cabinetNav" class="bottom-nav" aria-label="Разделы кабинета">
+                ${navTabs.map((t) => `
+                    <button type="button" class="nav-item" data-utab="${t.id}">
+                        ${t.icon}
+                        <span>${escapeHtml(t.label)}</span>
+                    </button>
+                `).join("")}
+            </nav>
+        `;
+        body = root.querySelector("#userTabBody");
+        nav = root.querySelector("#cabinetNav");
+        nav.querySelectorAll("[data-utab]").forEach((b) => {
+            b.addEventListener("click", () => {
+                const nextTab = b.dataset.utab;
+                if (!nextTab || _state.tab === nextTab) return;
+                const prevIdx = navTabs.findIndex((t) => t.id === _state.tab);
+                const nextIdx = navTabs.findIndex((t) => t.id === nextTab);
+                const dir = prevIdx !== -1 && nextIdx !== -1
+                    ? (nextIdx > prevIdx ? "forward" : "backward")
+                    : "neutral";
+                _state.tab = nextTab;
+                _render(root, { preserveScroll: false, animate: true, direction: dir });
+                _scrollTopSmooth();
+            });
         });
+    }
+
+    nav.querySelectorAll("[data-utab]").forEach((b) => {
+        const isCurrent = _state.tab === b.dataset.utab;
+        b.classList.toggle("active", isCurrent);
+        if (isCurrent) b.setAttribute("aria-current", "page");
+        else b.removeAttribute("aria-current");
     });
 
-    const body = root.querySelector("#userTabBody");
     const reload = (extraOpts = {}) => loadAndRenderUserCabinet(root, {
         ...(loadOptions || {}),
         resetTab: false,
@@ -303,7 +390,7 @@ function _render(root, { preserveScroll = true, loadOptions = _state.loadOptions
             });
             _setCabinetBackButton(null);
             _state.tab = _state.guidesReturnTab || "connect";
-            _render(root, { preserveScroll: false });
+            _render(root, { preserveScroll: false, animate: true, direction: "backward" });
             requestAnimationFrame(() => window.scrollTo(0, _state.guidesReturnScrollY || 0));
         };
         _setCabinetBackButton(goBack);
@@ -312,10 +399,14 @@ function _render(root, { preserveScroll = true, loadOptions = _state.loadOptions
         const goBackProfile = () => {
             _setCabinetBackButton(null);
             _state.tab = _state.profileReturnTab || "connect";
-            _render(root, { preserveScroll: false });
+            _render(root, { preserveScroll: false, animate: true, direction: "backward" });
         };
         _setCabinetBackButton(goBackProfile);
         _renderProfileTab(body, d, reload, goBackProfile);
+    }
+
+    if (animate) {
+        animateViewSwap(isFreshShell ? root : body, { direction });
     }
 
     if (prevGuideOpen) {

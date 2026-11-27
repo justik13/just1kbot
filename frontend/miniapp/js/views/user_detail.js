@@ -147,6 +147,12 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
     }
 
     const sentinelBtn = root.querySelector("#userDetailBackBtn");
+    const isStillCurrent = () =>
+        reqId === _detailReqId &&
+        (!options || typeof options.isActive !== "function" || options.isActive()) &&
+        (!state || state.selectedUserId === userSummary.id) &&
+        root.isConnected &&
+        (!sentinelBtn || root.contains(sentinelBtn));
 
     let details;
     let serverNow = null;
@@ -155,9 +161,7 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         details = res.user;
         serverNow = res.server_now || details.server_now || null;
     } catch (err) {
-        if (reqId !== _detailReqId) return;
-        if (state && state.selectedUserId !== userSummary.id) return;
-        if (!root.isConnected || (sentinelBtn && !root.contains(sentinelBtn))) return;
+        if (!isStillCurrent()) return;
         if (err && err.code === "init_data_expired") return;
         if (preserveScroll && hadExistingProfile) {
             showToast(err.message || "Не удалось обновить профиль", "error");
@@ -176,14 +180,12 @@ export async function renderUserDetailView(root, userSummary, onBack, onReloadUs
         `;
         root.querySelector("#userDetailBackBtn").addEventListener("click", onBack);
         root.querySelector("#userRetryBtn").addEventListener("click", () => {
-            renderUserDetailView(root, userSummary, onBack, onReloadUser, state);
+            renderUserDetailView(root, userSummary, onBack, onReloadUser, state, options);
         });
         return;
     }
 
-    if (reqId !== _detailReqId) return;
-    if (state && state.selectedUserId !== userSummary.id) return;
-    if (!root.isConnected || (sentinelBtn && !root.contains(sentinelBtn))) return;
+    if (!isStillCurrent()) return;
 
     const uname = _formatDisplayName(details);
     const inviterStr = details.inviter

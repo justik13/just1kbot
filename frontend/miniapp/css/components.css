@@ -12,13 +12,12 @@
 }
 
 @media (min-width: 768px) {
-    .app-shell:not(.mode-admin) {
-        max-width: 720px;
-        padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+    .app-shell {
+        max-width: 860px;
     }
 
-    .app-shell.mode-admin {
-        max-width: 920px;
+    .app-shell:not(.mode-admin) {
+        padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px));
     }
 }
 
@@ -44,12 +43,6 @@
     line-height: 1.25;
 }
 
-@media (max-width: 440px) {
-    .mode-admin #userChip {
-        display: none;
-    }
-}
-
 .topbar {
     display: flex;
     align-items: center;
@@ -66,16 +59,42 @@
 }
 
 .mode-switch {
-    display: inline-flex;
+    --sw-pad: 4px;
+    --sw-gap: 4px;
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     align-items: center;
-    padding: 4px;
+    padding: var(--sw-pad);
     border-radius: 12px;
     background: var(--bg-surface);
     border: 1px solid var(--border-subtle);
-    gap: 4px;
+    gap: var(--sw-gap);
+    flex-shrink: 0;
+}
+
+.mode-switch::before {
+    content: "";
+    position: absolute;
+    top: var(--sw-pad);
+    bottom: var(--sw-pad);
+    left: var(--sw-pad);
+    width: calc((100% - var(--sw-pad) * 2 - var(--sw-gap)) / 2);
+    border-radius: 8px;
+    background: var(--accent-white);
+    transform: translate3d(0, 0, 0);
+    transition: transform var(--dur-mid) var(--ease-out);
+    pointer-events: none;
+    z-index: 0;
+}
+
+.mode-switch[data-active-mode="admin"]::before {
+    transform: translate3d(calc(100% + var(--sw-gap)), 0, 0);
 }
 
 .mode-btn {
+    position: relative;
+    z-index: 1;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -90,13 +109,27 @@
     font-family: inherit;
     cursor: pointer;
     white-space: nowrap;
-    transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    transition: color var(--dur-mid) var(--ease-out), transform 140ms var(--ease-out);
+}
+
+.mode-btn:active:not(:disabled) {
+    transform: scale(0.97);
 }
 
 .mode-btn.active {
-    background: var(--accent-white);
     color: #050505;
-    font-weight: 600;
+}
+
+@media (forced-colors: active) {
+    .mode-switch::before {
+        display: none;
+    }
+
+    .mode-btn.active {
+        outline: 2px solid Highlight;
+    }
 }
 
 .brand {
@@ -133,10 +166,11 @@
     display: inline-flex;
     align-items: center;
     gap: 8px;
+    min-height: 40px;
     background: var(--bg-surface);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-pill);
-    padding: 4px 12px 4px 4px;
+    padding: 4px 12px 4px 8px;
     color: var(--text-primary);
     font-size: 13px;
     font-weight: 500;
@@ -145,7 +179,13 @@
     flex-shrink: 0;
     cursor: pointer;
     font-family: inherit;
-    transition: border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    transition: border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out), transform 140ms var(--ease-out);
+}
+
+.profile-pill:active:not(:disabled) {
+    transform: scale(0.97);
 }
 
 #profileBalanceText {
@@ -170,8 +210,8 @@
     }
 
     .mode-switch {
-        padding: 2px;
-        gap: 2px;
+        --sw-pad: 2px;
+        --sw-gap: 2px;
         border-radius: 10px;
     }
 
@@ -181,7 +221,8 @@
     }
 
     .profile-pill {
-        padding: 4px 8px 4px 4px;
+        min-height: 38px;
+        padding: 4px 8px 4px 6px;
         gap: 5px;
         font-size: 12px;
     }
@@ -257,14 +298,6 @@
 
 .avatar-img.is-loaded {
     opacity: 1;
-}
-
-.user-meta {
-    font-size: 12px;
-    color: var(--text-secondary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 
 .app-main {
@@ -559,7 +592,8 @@ label:not(.switch):has(> input[type="checkbox"]) > input[type="checkbox"] {
     background: var(--bg-elevated);
     color: var(--text-primary);
     text-decoration: none;
-    transition: opacity var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+    transition: opacity var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out), transform 140ms var(--ease-out);
+    touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
 }
 
@@ -586,7 +620,8 @@ label:not(.switch):has(> input[type="checkbox"]) > input[type="checkbox"] {
 }
 
 .btn:active:not(:disabled) {
-    opacity: 0.85;
+    opacity: 0.88;
+    transform: scale(0.97);
 }
 
 .btn:disabled {
@@ -695,15 +730,22 @@ label:not(.switch):has(> input[type="checkbox"]) > input[type="checkbox"] {
     border-radius: 8px;
     padding: 4px 12px;
     font-size: 12px;
+    font-weight: 500;
     font-family: inherit;
     cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), transform 140ms var(--ease-out);
+}
+
+.pill-btn:active:not(:disabled) {
+    transform: scale(0.97);
 }
 
 .pill-btn.active {
     background: var(--accent-white);
     color: #050505;
     border-color: var(--accent-white);
-    font-weight: 600;
 }
 
 .node-card {
@@ -1163,7 +1205,7 @@ dialog.modal-dialog::backdrop {
     gap: 4px;
     background: var(--bg-surface);
     border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-card);
+    border-radius: 16px;
     padding: 4px;
     overflow-x: auto;
     scrollbar-width: none;
@@ -1192,12 +1234,18 @@ dialog.modal-dialog::backdrop {
     font-family: inherit;
     cursor: pointer;
     white-space: nowrap;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), transform 140ms var(--ease-out);
+}
+
+.tab-btn:active:not(:disabled) {
+    transform: scale(0.97);
 }
 
 .tab-btn.active {
     background: var(--accent-white);
     color: #050505;
-    font-weight: 600;
 }
 
 .progress-track {
@@ -1366,7 +1414,13 @@ dialog.modal-dialog::backdrop {
     cursor: pointer;
     text-align: center;
     white-space: nowrap;
-    transition: border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    transition: border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), transform 140ms var(--ease-out);
+}
+
+.seg-btn:active:not(:disabled) {
+    transform: scale(0.97);
 }
 
 .btn-group {
@@ -1391,7 +1445,6 @@ dialog.modal-dialog::backdrop {
     background: var(--accent-white);
     color: #050505;
     border-color: var(--accent-white);
-    font-weight: 600;
 }
 
 .toggle-row {
@@ -2251,7 +2304,13 @@ details[open] > summary .disclosure-pill svg {
     font-weight: 500;
     cursor: pointer;
     border-radius: var(--radius-sm);
-    transition: color var(--dur-fast) var(--ease-out);
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    transition: color var(--dur-fast) var(--ease-out), transform 140ms var(--ease-out);
+}
+
+.nav-item:active:not(:disabled) {
+    transform: scale(0.96);
 }
 
 .nav-item.active {
@@ -2606,25 +2665,47 @@ button.pulse-card {
 }
 
 @media (prefers-reduced-motion: reduce) {
-    *,
-    *::before,
-    *::after {
-        animation-duration: 0.01ms !important;
-        animation-iteration-count: 1 !important;
-        scroll-behavior: auto !important;
+    html {
+        scroll-behavior: auto;
+    }
+
+    .mode-switch::before {
+        transition: none;
+    }
+
+    .mode-btn,
+    .profile-pill,
+    .btn,
+    .pill-btn,
+    .tab-btn,
+    .seg-btn,
+    .nav-item,
+    .node-card-compact,
+    .guides-trigger-card,
+    .guide-video-chevron,
+    .disclosure-pill svg,
+    .switch-track::after,
+    .progress-fill,
+    .metric-fill {
+        transition-property: color, background-color, border-color, opacity;
+        transition-duration: var(--dur-fast);
+    }
+
+    .mode-btn:active:not(:disabled),
+    .profile-pill:active:not(:disabled),
+    .btn:active:not(:disabled),
+    .pill-btn:active:not(:disabled),
+    .tab-btn:active:not(:disabled),
+    .seg-btn:active:not(:disabled),
+    .nav-item:active:not(:disabled),
+    .node-card-compact:active {
+        transform: none;
     }
 
     .modal-dialog,
     .modal-dialog::backdrop,
-    .modal-card,
-    .toast,
-    .progress-fill,
-    .metric-fill,
-    .guide-video-chevron,
-    .disclosure-pill svg,
-    .switch-track::after,
-    .node-card-compact,
-    .guides-trigger-card {
-        transition-duration: 0.01ms !important;
+    .toast {
+        transition-property: opacity;
+        transition-duration: 120ms;
     }
 }

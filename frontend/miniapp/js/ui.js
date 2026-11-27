@@ -994,3 +994,33 @@ export function renderPagination({
         });
     }
 }
+
+export function animateViewSwap(el, { direction = "neutral", distance = 8, duration = 180 } = {}) {
+    if (!el || typeof el.animate !== "function") return;
+    try {
+        el.getAnimations?.().forEach((anim) => anim.cancel());
+        const reduced =
+            window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        if (reduced) {
+            el.animate([{ opacity: 0.72 }, { opacity: 1 }], {
+                duration: 120,
+                easing: "ease-out",
+            });
+            return;
+        }
+        const dx = direction === "forward" ? distance : direction === "backward" ? -distance : 0;
+        const dy = dx === 0 ? 6 : 0;
+        el.animate(
+            [
+                { opacity: 0, transform: `translate3d(${dx}px, ${dy}px, 0)` },
+                { opacity: 1, transform: "translate3d(0, 0, 0)" },
+            ],
+            {
+                duration,
+                easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+            }
+        );
+    } catch {
+        // Safe fallback if WAAPI is unavailable
+    }
+}
